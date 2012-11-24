@@ -243,7 +243,7 @@ private:
     /*
      * Transaction state
      */
-    static status_t orientationToTransfrom(int orientation,
+    status_t orientationToTransfrom(int orientation,
             int w, int h, Transform* tr);
 
     // The identifier of the active layer stack for this display. Several displays
