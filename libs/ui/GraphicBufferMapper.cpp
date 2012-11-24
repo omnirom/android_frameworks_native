@@ -111,6 +111,7 @@ status_t GraphicBufferMapper::unlock(buffer_handle_t handle)
     return err;
 }
 
+<<<<<<< HEAD
 status_t GraphicBufferMapper::lockAsync(buffer_handle_t handle,
         int usage, const Rect& bounds, void** vaddr, int fenceFd)
 {
@@ -170,6 +171,19 @@ status_t GraphicBufferMapper::unlockAsync(buffer_handle_t handle, int *fenceFd)
     ALOGW_IF(err, "unlockAsync(...) failed %d (%s)", err, strerror(-err));
     return err;
 }
+
+#ifdef EXYNOS4_ENHANCEMENTS
+status_t GraphicBufferMapper::getphys(buffer_handle_t handle, void** paddr)
+{
+    status_t err;
+
+    err = mAllocMod->getphys(mAllocMod, handle, paddr);
+
+    ALOGW_IF(err, "getphys(%p) fail %d(%s)",
+    handle, err, strerror(-err));
+    return err;
+}
+#endif
 
 // ---------------------------------------------------------------------------
 }; // namespace android
