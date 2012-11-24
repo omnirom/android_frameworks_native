@@ -100,13 +100,21 @@ status_t GraphicBufferAllocator::alloc(uint32_t w, uint32_t h, PixelFormat forma
         w = h = 1;
 
     // we have a h/w allocator and h/w buffer is requested
-    status_t err; 
-    
+    status_t err;
+#ifdef EXYNOS4_ENHANCEMENTS
+    if ((format == 0x101) || (format == 0x105) || (format == 0x107)) {
+        // 0x101 = HAL_PIXEL_FORMAT_YCbCr_420_P (Samsung-specific pixel format)
+        // 0x105 = HAL_PIXEL_FORMAT_YCbCr_420_SP (Samsung-specific pixel format)
+        // 0x107 = HAL_PIXEL_FORMAT_YCbCr_420_SP_TILED (Samsung-specific pixel format)
+        usage |= GRALLOC_USAGE_HW_FIMC1; // Exynos HWC wants FIMC-friendly memory allocation
+    }
+#endif
+
     err = mAllocDev->alloc(mAllocDev, w, h, format, usage, handle, stride);
 
     ALOGW_IF(err, "alloc(%u, %u, %d, %08x, ...) failed %d (%s)",
             w, h, format, usage, err, strerror(-err));
-    
+
     if (err == NO_ERROR) {
         Mutex::Autolock _l(sLock);
         KeyedVector<buffer_handle_t, alloc_rec_t>& list(sAllocList);
