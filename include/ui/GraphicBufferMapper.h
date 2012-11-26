@@ -50,7 +50,7 @@ public:
 
     status_t unlock(buffer_handle_t handle);
     
-#ifdef EXYNOS4210_ENHANCEMENTS
+#ifdef EXYNOS4_ENHANCEMENTS
     status_t getphys(buffer_handle_t handle, void** paddr);
 #endif
 
