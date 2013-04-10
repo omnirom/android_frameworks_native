@@ -731,7 +731,12 @@ status_t Surface::lock(
             return err;
         }
         // we're intending to do software rendering from this point
+#ifdef QCOM_HARDWARE
+        setUsage(mReqUsage | GRALLOC_USAGE_SW_READ_OFTEN |
+                GRALLOC_USAGE_SW_WRITE_OFTEN);
+#else
         setUsage(GRALLOC_USAGE_SW_READ_OFTEN | GRALLOC_USAGE_SW_WRITE_OFTEN);
+#endif
     }
 
     ANativeWindowBuffer* out;
