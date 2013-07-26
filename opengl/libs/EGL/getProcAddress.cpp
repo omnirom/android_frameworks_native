@@ -38,11 +38,18 @@ namespace android {
 
     #if defined(__arm__)
 
-    #define GET_TLS(reg) "mrc p15, 0, " #reg ", c13, c0, 3 \n"
+      #ifdef HAVE_ARM_TLS_REGISTER
+        #define GET_TLS(reg) \
+            "mrc p15, 0, " #reg ", c13, c0, 3 \n"
+      #else
+        #define GET_TLS(reg) \
+            "mov   " #reg ", #0xFFFF0FFF      \n"  \
+            "ldr   " #reg ", [" #reg ", #-15] \n"
+      #endif
 
-    #define API_ENTRY(_api) __attribute__((naked)) _api
+      #define API_ENTRY(_api) __attribute__((naked)) _api
 
-    #define CALL_GL_EXTENSION_API(_api)                         \
+      #define CALL_GL_EXTENSION_API(_api)                         \
          asm volatile(                                          \
             GET_TLS(r12)                                        \
             "ldr   r12, [r12, %[tls]] \n"                       \
