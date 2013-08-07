@@ -2645,7 +2645,7 @@ status_t SurfaceFlinger::onTransact(
             const int pid = ipc->getCallingPid();
             const int uid = ipc->getCallingUid();
             if ((uid != AID_GRAPHICS) &&
-#ifdef BOARD_EGL_NEEDS_LEGACY_FB
+#if defined(BOARD_EGL_NEEDS_LEGACY_FB) || defined(USE_LEGACY_SCREENSHOT)
                  (uid != AID_SYSTEM) &&
 #endif
                     !PermissionCache::checkPermission(sAccessSurfaceFlinger, pid, uid)) {
@@ -2656,7 +2656,7 @@ status_t SurfaceFlinger::onTransact(
             break;
         }
         case CAPTURE_SCREEN:
-#ifdef BOARD_EGL_NEEDS_LEGACY_FB
+#if defined(BOARD_EGL_NEEDS_LEGACY_FB) || defined(USE_LEGACY_SCREENSHOT)
         case CAPTURE_SCREEN_DEPRECATED:
 #endif
         {
@@ -2874,7 +2874,7 @@ status_t SurfaceFlinger::captureScreen(const sp<IBinder>& display,
                 result = flinger->captureScreenImplLocked(hw,
                         producer, reqWidth, reqHeight, minLayerZ, maxLayerZ);
             } else {
-#ifdef BOARD_EGL_NEEDS_LEGACY_FB
+#if defined(BOARD_EGL_NEEDS_LEGACY_FB) || defined(USE_LEGACY_SCREENSHOT)
                 // Should never get here
                 return BAD_VALUE;
 #else
@@ -3054,7 +3054,7 @@ status_t SurfaceFlinger::captureScreenImplLocked(
 
 status_t SurfaceFlinger::captureScreenImplCpuConsumerLocked(
         const sp<const DisplayDevice>& hw,
-#ifdef BOARD_EGL_NEEDS_LEGACY_FB
+#if defined(BOARD_EGL_NEEDS_LEGACY_FB) || defined(USE_LEGACY_SCREENSHOT)
         sp<IMemoryHeap>* heap, uint32_t* w, uint32_t* h,
 #else
         const sp<IGraphicBufferProducer>& producer,
@@ -3112,7 +3112,7 @@ status_t SurfaceFlinger::captureScreenImplCpuConsumerLocked(
         // have to wrap it with a CPU->CPU path, which is what
         // glReadPixels essentially is.
 
-#ifdef BOARD_EGL_NEEDS_LEGACY_FB
+#if defined(BOARD_EGL_NEEDS_LEGACY_FB) || defined(USE_LEGACY_SCREENSHOT)
         size_t size = reqWidth * reqHeight * 4;
         // allocate shared memory large enough to hold the
         // screen capture
@@ -3173,7 +3173,7 @@ status_t SurfaceFlinger::captureScreenImplCpuConsumerLocked(
     return result;
 }
 
-#ifdef BOARD_EGL_NEEDS_LEGACY_FB
+#if defined(BOARD_EGL_NEEDS_LEGACY_FB) || defined(USE_LEGACY_SCREENSHOT)
 status_t SurfaceFlinger::captureScreen(const sp<IBinder>& display,
         sp<IMemoryHeap>* heap,
         uint32_t* outWidth, uint32_t* outHeight,

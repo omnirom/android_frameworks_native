@@ -118,7 +118,7 @@ public:
             uint32_t minLayerZ, uint32_t maxLayerZ,
             bool isCpuConsumer) = 0;
 
-#ifdef BOARD_EGL_NEEDS_LEGACY_FB
+#if defined(BOARD_EGL_NEEDS_LEGACY_FB) || defined(USE_LEGACY_SCREENSHOT)
     /* Capture the specified screen. requires READ_FRAME_BUFFER permission
      * This function will fail if there is a secure window on screen.
      */
@@ -144,7 +144,7 @@ public:
         GET_BUILT_IN_DISPLAY,
         SET_TRANSACTION_STATE,
         AUTHENTICATE_SURFACE,
-#ifdef BOARD_EGL_NEEDS_LEGACY_FB
+#if defined(BOARD_EGL_NEEDS_LEGACY_FB) || defined(USE_LEGACY_SCREENSHOT)
         CAPTURE_SCREEN_DEPRECATED,
 #endif
         BLANK,

@@ -39,7 +39,7 @@ namespace android {
 
 class DisplayInfo;
 class Composer;
-#ifdef BOARD_EGL_NEEDS_LEGACY_FB
+#if defined(BOARD_EGL_NEEDS_LEGACY_FB) || defined(USE_LEGACY_SCREENSHOT)
 class IMemoryHeap;
 #endif
 class ISurfaceComposerClient;
@@ -179,7 +179,7 @@ public:
             uint32_t minLayerZ, uint32_t maxLayerZ);
 
 private:
-#ifdef BOARD_EGL_NEEDS_LEGACY_FB
+#if defined(BOARD_EGL_NEEDS_LEGACY_FB) || defined(USE_LEGACY_SCREENSHOT)
     sp<IMemoryHeap> mHeap;
 #endif
     mutable sp<CpuConsumer> mCpuConsumer;
