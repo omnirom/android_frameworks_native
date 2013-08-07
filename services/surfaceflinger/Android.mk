@@ -54,6 +54,9 @@ endif
 
 ifeq ($(BOARD_EGL_NEEDS_LEGACY_FB),true)
 	LOCAL_CFLAGS += -DBOARD_EGL_NEEDS_LEGACY_FB
+        ifeq ($(TARGET_QCOM_DISPLAY_VARIANT), legacy)
+	    LOCAL_CFLAGS += -DEGL_NEEDS_FNW
+        endif
 endif
 
 ifneq ($(NUM_FRAMEBUFFER_SURFACE_BUFFERS),)
