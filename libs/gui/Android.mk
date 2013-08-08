@@ -55,6 +55,10 @@ ifeq ($(BOARD_EGL_NEEDS_LEGACY_FB),true)
     endif
 endif
 
+ifeq ($(BOARD_ADRENO_DECIDE_TEXTURE_TARGET),true)
+	LOCAL_CFLAGS += -DDECIDE_TEXTURE_TARGET
+endif
+
 LOCAL_MODULE:= libgui
 
 ifeq ($(TARGET_BOARD_PLATFORM), tegra)

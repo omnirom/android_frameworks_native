@@ -506,6 +506,9 @@ void Layer::onDraw(const sp<const DisplayDevice>& hw, const Region& clip) const
 
     bool blackOutLayer = isProtected() || (isSecure() && !hw->isSecure());
 
+#ifdef DECIDE_TEXTURE_TARGET
+    GLuint currentTextureTarget = mSurfaceFlingerConsumer->getCurrentTextureTarget();
+#endif
     if (!blackOutLayer) {
         // TODO: we could be more subtle with isFixedSize()
         const bool useFiltering = getFiltering() || needsFiltering(hw) || isFixedSize();
@@ -516,25 +519,46 @@ void Layer::onDraw(const sp<const DisplayDevice>& hw, const Region& clip) const
         mSurfaceFlingerConsumer->getTransformMatrix(textureMatrix);
 
         // Set things up for texturing.
+#ifdef DECIDE_TEXTURE_TARGET
+        glBindTexture(currentTextureTarget, mTextureName);
+#else
         glBindTexture(GL_TEXTURE_EXTERNAL_OES, mTextureName);
+#endif
         GLenum filter = GL_NEAREST;
         if (useFiltering) {
             filter = GL_LINEAR;
         }
+#ifdef DECIDE_TEXTURE_TARGET
+        glTexParameterx(currentTextureTarget, GL_TEXTURE_MAG_FILTER, filter);
+        glTexParameterx(currentTextureTarget, GL_TEXTURE_MIN_FILTER, filter);
+#else
         glTexParameterx(GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_MAG_FILTER, filter);
         glTexParameterx(GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_MIN_FILTER, filter);
+#endif
         glMatrixMode(GL_TEXTURE);
         glLoadMatrixf(textureMatrix);
         glMatrixMode(GL_MODELVIEW);
         glDisable(GL_TEXTURE_2D);
+#ifdef DECIDE_TEXTURE_TARGET
+        glEnable(currentTextureTarget);
+#else
         glEnable(GL_TEXTURE_EXTERNAL_OES);
+#endif
     } else {
+#ifdef DECIDE_TEXTURE_TARGET
+        glBindTexture(currentTextureTarget, mFlinger->getProtectedTexName());
+#else
         glBindTexture(GL_TEXTURE_2D, mFlinger->getProtectedTexName());
+#endif
         glMatrixMode(GL_TEXTURE);
         glLoadIdentity();
         glMatrixMode(GL_MODELVIEW);
+#ifdef DECIDE_TEXTURE_TARGET
+        glEnable(currentTextureTarget);
+#else
         glDisable(GL_TEXTURE_EXTERNAL_OES);
         glEnable(GL_TEXTURE_2D);
+#endif
     }
 
     drawWithOpenGL(hw, clip);
@@ -1116,7 +1140,14 @@ Region Layer::latchBuffer(bool& recomputeVisibleRegions)
 
         Reject r(mDrawingState, currentState(), recomputeVisibleRegions);
 
+#ifdef DECIDE_TEXTURE_TARGET
+        // While calling updateTexImage() from SurfaceFlinger, let it know
+        // by passing an extra parameter
+        // This will be true always.
+        if (mSurfaceFlingerConsumer->updateTexImage(&r, true) != NO_ERROR) {
+#else
         if (mSurfaceFlingerConsumer->updateTexImage(&r) != NO_ERROR) {
+#endif
             // something happened!
             recomputeVisibleRegions = true;
             return outDirtyRegion;

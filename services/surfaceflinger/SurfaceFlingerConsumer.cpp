@@ -28,7 +28,11 @@ namespace android {
 
 // ---------------------------------------------------------------------------
 
+#ifdef DECIDE_TEXTURE_TARGET
+status_t SurfaceFlingerConsumer::updateTexImage(BufferRejecter* rejecter, bool isComposition)
+#else
 status_t SurfaceFlingerConsumer::updateTexImage(BufferRejecter* rejecter)
+#endif
 {
     ATRACE_CALL();
     ALOGV("updateTexImage");
@@ -74,7 +78,11 @@ status_t SurfaceFlingerConsumer::updateTexImage(BufferRejecter* rejecter)
     }
 
     // Release the previous buffer.
+#ifdef DECIDE_TEXTURE_TARGET
+    err = releaseAndUpdateLocked(item, isComposition);
+#else
     err = releaseAndUpdateLocked(item);
+#endif
     if (err != NO_ERROR) {
         return err;
     }
