@@ -254,7 +254,11 @@ protected:
     // This releases the buffer in the slot referenced by mCurrentTexture,
     // then updates state to refer to the BufferItem, which must be a
     // newly-acquired buffer.
+#ifdef DECIDE_TEXTURE_TARGET
+    status_t releaseAndUpdateLocked(const BufferQueue::BufferItem& item, bool isComposition=false);
+#else
     status_t releaseAndUpdateLocked(const BufferQueue::BufferItem& item);
+#endif
 
     // Binds mTexName and the current buffer to mTexTarget.  Uses
     // mCurrentTexture if it's set, mCurrentTextureBuf if not.  If the
@@ -363,7 +367,11 @@ private:
     // glCopyTexSubImage to read from the texture.  This is a hack to work
     // around a GL driver limitation on the number of FBO attachments, which the
     // browser's tile cache exceeds.
+#ifdef DECIDE_TEXTURE_TARGET
+    GLenum mTexTarget;
+#else
     const GLenum mTexTarget;
+#endif
 
     // EGLSlot contains the information and object references that
     // GLConsumer maintains about a BufferQueue buffer slot.

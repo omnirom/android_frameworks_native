@@ -197,7 +197,11 @@ status_t GLConsumer::releaseBufferLocked(int buf, EGLDisplay display,
     return err;
 }
 
+#ifdef DECIDE_TEXTURE_TARGET
+status_t GLConsumer::releaseAndUpdateLocked(const BufferQueue::BufferItem& item, bool isComposition)
+#else
 status_t GLConsumer::releaseAndUpdateLocked(const BufferQueue::BufferItem& item)
+#endif
 {
     status_t err = NO_ERROR;
 
@@ -215,6 +219,27 @@ status_t GLConsumer::releaseAndUpdateLocked(const BufferQueue::BufferItem& item)
 
     int buf = item.mBuf;
 
+#ifdef DECIDE_TEXTURE_TARGET
+    // GPU is not efficient in handling GL_TEXTURE_EXTERNAL_OES
+    // texture target. Depending on the image format, decide
+    // the texture target to be used.
+    if (isComposition) {
+        switch (mSlots[buf].mGraphicBuffer->format) {
+            case HAL_PIXEL_FORMAT_RGBA_8888:
+            case HAL_PIXEL_FORMAT_RGBX_8888:
+            case HAL_PIXEL_FORMAT_RGB_888:
+            case HAL_PIXEL_FORMAT_RGB_565:
+            case HAL_PIXEL_FORMAT_BGRA_8888:
+            case HAL_PIXEL_FORMAT_RGBA_5551:
+            case HAL_PIXEL_FORMAT_RGBA_4444:
+                mTexTarget = GL_TEXTURE_2D;
+                break;
+            default:
+                mTexTarget = GL_TEXTURE_EXTERNAL_OES;
+                break;
+        }
+    }
+#endif
     // If the mEglSlot entry is empty, create an EGLImage for the gralloc
     // buffer currently in the slot in ConsumerBase.
     //
