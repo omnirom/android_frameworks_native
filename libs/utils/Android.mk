@@ -48,7 +48,8 @@ commonSources:= \
 	ZipFileCRO.cpp \
 	ZipFileRO.cpp \
 	ZipUtils.cpp \
-	misc.cpp
+	misc.cpp \
+	MediatekHacks.cpp
 
 host_commonCflags := -DLIBUTILS_NATIVE=1 $(TOOL_CFLAGS)
 
