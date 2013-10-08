@@ -57,13 +57,17 @@ public:
     status_t getphys(buffer_handle_t handle, void** paddr);
 #endif
 
+    status_t getIonFd(buffer_handle_t handle, int *idx, int *num);
+
     // dumps information about the mapping of this handle
     void dump(buffer_handle_t handle);
 
 private:
     friend class Singleton<GraphicBufferMapper>;
     GraphicBufferMapper();
+    ~GraphicBufferMapper();
     gralloc_module_t const *mAllocMod;
+    extra_device_t *mExtraDev;
 };
 
 // ---------------------------------------------------------------------------

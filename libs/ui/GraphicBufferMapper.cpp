@@ -46,6 +46,11 @@ GraphicBufferMapper::GraphicBufferMapper()
     }
 }
 
+GraphicBufferMapper::~GraphicBufferMapper()
+{
+    gralloc_extra_close(mExtraDev);
+}
+
 status_t GraphicBufferMapper::registerBuffer(buffer_handle_t handle)
 {
     ATRACE_CALL();
@@ -133,6 +138,23 @@ status_t GraphicBufferMapper::getphys(buffer_handle_t handle, void** paddr)
     return err;
 }
 #endif
+
+status_t GraphicBufferMapper::getIonFd(buffer_handle_t handle, int *idx, int *num)
+{
+    ATRACE_CALL();
+    status_t err;
+
+    if (!mExtraDev) {
+        ALOGE("gralloc extra device is not supported");
+        return INVALID_OPERATION;
+    }
+
+    err = mExtraDev->getIonFd(mExtraDev, handle, idx, num);
+
+    ALOGW_IF(err, "getIonFd(...) failed %d (%s)", err, strerror(-err));
+    return err;
+}
+
 
 // ---------------------------------------------------------------------------
 }; // namespace android
