@@ -57,6 +57,10 @@ public:
     status_t getphys(buffer_handle_t handle, void** paddr);
 #endif
 
+#ifdef MTK_MT6589
+    status_t getIonFd(buffer_handle_t handle, int *idx, int *num);
+#endif
+
     // dumps information about the mapping of this handle
     void dump(buffer_handle_t handle);
 
@@ -64,6 +68,11 @@ private:
     friend class Singleton<GraphicBufferMapper>;
     GraphicBufferMapper();
     gralloc_module_t const *mAllocMod;
+
+#ifdef MTK_MT6589
+    ~GraphicBufferMapper();
+    extra_device_t *mExtraDev;
+#endif
 };
 
 // ---------------------------------------------------------------------------
