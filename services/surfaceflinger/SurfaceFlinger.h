@@ -474,6 +474,7 @@ private:
     nsecs_t mLastTransactionTime;
     bool mBootFinished;
     int mUseDithering;
+    bool mPrefer16bpp;
 
     // these are thread safe
     mutable MessageQueue mEventQueue;
