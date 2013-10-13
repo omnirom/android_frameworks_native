@@ -1,0 +1,21 @@
+{
+  "comments": [
+    {
+      "key": {
+        "uuid": "fa0f191f_da50c560",
+        "filename": "libs/gui/Android.mk",
+        "patchSetId": 1
+      },
+      "lineNbr": 64,
+      "author": {
+        "id": 1000026
+      },
+      "writtenOn": "2013-10-13T18:11:41Z",
+      "side": 1,
+      "message": "-DUSE_LEGACY_SCREENSHOT is not used anywhere - right?\nso why add it here?",
+      "revId": "8bf389130f49038ed8cda34a9f6eb02561b22036",
+      "serverId": "56841c99-7c94-43d4-bf0b-cb4707e66d55",
+      "unresolved": false
+    }
+  ]
+}
