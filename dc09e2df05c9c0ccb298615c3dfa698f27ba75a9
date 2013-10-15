@@ -1,0 +1,38 @@
+{
+  "comments": [
+    {
+      "key": {
+        "uuid": "fa0f191f_1d407755",
+        "filename": "services/surfaceflinger/Layer.cpp",
+        "patchSetId": 4
+      },
+      "lineNbr": 208,
+      "author": {
+        "id": 1000022
+      },
+      "writtenOn": "2013-10-15T10:06:32Z",
+      "side": 1,
+      "message": "Is any of this code actually to do with 16bpp? If not it should be moved to a separate commit.",
+      "revId": "dc09e2df05c9c0ccb298615c3dfa698f27ba75a9",
+      "serverId": "56841c99-7c94-43d4-bf0b-cb4707e66d55",
+      "unresolved": false
+    },
+    {
+      "key": {
+        "uuid": "fa0f191f_3d3b3bed",
+        "filename": "services/surfaceflinger/SurfaceFlinger.cpp",
+        "patchSetId": 4
+      },
+      "lineNbr": 1,
+      "author": {
+        "id": 1000022
+      },
+      "writtenOn": "2013-10-15T10:06:32Z",
+      "side": 1,
+      "message": "Please remove this",
+      "revId": "dc09e2df05c9c0ccb298615c3dfa698f27ba75a9",
+      "serverId": "56841c99-7c94-43d4-bf0b-cb4707e66d55",
+      "unresolved": false
+    }
+  ]
+}
