@@ -42,6 +42,10 @@ ifeq ($(TARGET_USES_QCOM_BSP),true)
     LOCAL_CFLAGS += -DQCOM_BSP
 endif
 
+ifeq ($(BOARD_USES_LEGACY_OVERLAY), true)
+LOCAL_SRC_FILES += legacy/Overlay.cpp
+endif
+
 LOCAL_MODULE:= libui
 
 include $(BUILD_SHARED_LIBRARY)
