@@ -652,6 +652,12 @@ status_t SurfaceComposerClient::getDisplayInfo(
 
 // ----------------------------------------------------------------------------
 
+#ifndef FORCE_SCREENSHOT_CPU_PATH
+#define SS_CPU_CONSUMER false
+#else
+#define SS_CPU_CONSUMER true
+#endif
+
 status_t ScreenshotClient::capture(
         const sp<IBinder>& display,
         const sp<IGraphicBufferProducer>& producer,
@@ -661,7 +667,7 @@ status_t ScreenshotClient::capture(
     if (s == NULL) return NO_INIT;
     return s->captureScreen(display, producer,
             reqWidth, reqHeight, minLayerZ, maxLayerZ,
-            false);
+            SS_CPU_CONSUMER);
 }
 
 ScreenshotClient::ScreenshotClient()
