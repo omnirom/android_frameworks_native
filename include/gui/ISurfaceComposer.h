@@ -33,12 +33,6 @@
 #include <gui/IGraphicBufferAlloc.h>
 #include <gui/ISurfaceComposerClient.h>
 
-#ifndef FORCE_SCREENSHOT_CPU_PATH
-#define SS_CPU_CONSUMER false
-#else
-#define SS_CPU_CONSUMER true
-#endif
-
 namespace android {
 // ----------------------------------------------------------------------------
 
@@ -152,7 +146,11 @@ public:
             uint32_t minLayerZ, uint32_t maxLayerZ,
             bool useIdentityTransform,
             Rotation rotation = eRotateNone,
-            bool isCpuConsumer = SS_CPU_CONSUMER) = 0;
+#ifdef FORCE_SCREENSHOT_CPU_PATH
+            bool isCpuConsumer = true) = 0;
+#else
+            bool isCpuConsumer = eRotateNone) = 0;
+#endif
 
     /* Clears the frame statistics for animations.
      *
