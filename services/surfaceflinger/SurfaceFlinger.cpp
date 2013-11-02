@@ -432,11 +432,32 @@ status_t SurfaceFlinger::selectEGLConfig(EGLDisplay display, EGLint nativeVisual
 
     err = selectConfigForAttribute(display, attribs, wantedAttribute,
         wantedAttributeValue, config);
-    if (err == NO_ERROR) {
-        EGLint caveat;
-        if (eglGetConfigAttrib(display, *config, EGL_CONFIG_CAVEAT, &caveat))
-            ALOGW_IF(caveat == EGL_SLOW_CONFIG, "EGL_SLOW_CONFIG selected!");
-    }
+    if (err == NO_ERROR)
+        goto success;
+
+    // Try again without EGL_FRAMEBUFFER_TARGET_ANDROID
+    ALOGW("no suitable EGLConfig found, trying without EGL_FRAMEBUFFER_TARGET_ANDROID");
+    attribs.remove(EGL_FRAMEBUFFER_TARGET_ANDROID);
+    err = selectConfigForAttribute(display, attribs, wantedAttribute, wantedAttributeValue, config);
+    if (err == NO_ERROR)
+        goto success;
+
+    // Try again without EGL_RECORDABLE_ANDROID
+    ALOGW("no suitable EGLConfig found, trying without EGL_RECORDABLE_ANDROID");
+    attribs.remove(EGL_RECORDABLE_ANDROID);
+    err = selectConfigForAttribute(display, attribs, wantedAttribute, wantedAttributeValue, config);
+    if (err == NO_ERROR)
+        goto success;
+
+    // Failed to find a config
+    goto out;
+
+success:
+    EGLint caveat;
+    if (eglGetConfigAttrib(display, *config, EGL_CONFIG_CAVEAT, &caveat))
+        ALOGW_IF(caveat == EGL_SLOW_CONFIG, "EGL_SLOW_CONFIG selected!");
+
+out:
     return err;
 }
 
@@ -527,6 +548,7 @@ void SurfaceFlinger::init() {
 
     if (err != NO_ERROR) {
         // If ES2 fails, try ES1
+        ALOGW("no suitable EGLConfig found, trying OpenGL-ES 1.1");
         err = selectEGLConfig(mEGLDisplay, mHwc->getVisualID(),
                 EGL_OPENGL_ES_BIT, &mEGLConfig);
     }
