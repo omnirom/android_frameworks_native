@@ -3079,7 +3079,7 @@ status_t SurfaceFlinger::captureScreenImplCpuConsumerLocked(
         const sp<IGraphicBufferProducer>& producer,
 #endif
         uint32_t reqWidth, uint32_t reqHeight,
-        uint32_t minLayerZ, uint32_t maxLayerZ)
+        uint32_t minLayerZ, uint32_t maxLayerZ, bool useReadPixels)
 {
     ATRACE_CALL();
 
