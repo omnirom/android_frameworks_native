@@ -93,6 +93,15 @@ void GraphicBufferAllocator::dumpToSystemLog()
 status_t GraphicBufferAllocator::alloc(uint32_t w, uint32_t h, PixelFormat format,
         int usage, buffer_handle_t* handle, int32_t* stride)
 {
+    status_t err = alloc(w, h, format, usage, handle, stride, 0);
+    return err;
+}
+
+status_t GraphicBufferAllocator::alloc(uint32_t w, uint32_t h,
+                                       PixelFormat format, int usage,
+                                       buffer_handle_t* handle,
+                                       int32_t* stride, uint32_t bufferSize)
+{
     ATRACE_CALL();
     // make sure to not allocate a N x 0 or 0 x N buffer, since this is
     // allowed from an API stand-point allocate a 1x1 buffer instead.
