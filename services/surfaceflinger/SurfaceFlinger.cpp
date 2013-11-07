@@ -3293,7 +3293,7 @@ status_t SurfaceFlinger::captureScreen(const sp<IBinder>& display,
             sp<const DisplayDevice> hw(flinger->getDisplayDevice(display));
             result = flinger->captureScreenImplCpuConsumerLocked(hw, heap,
                     outWidth, outHeight,
-                    reqWidth, reqHeight, minLayerZ, maxLayerZ);
+                    reqWidth, reqHeight, minLayerZ, maxLayerZ, false);
             return true;
         }
     };
