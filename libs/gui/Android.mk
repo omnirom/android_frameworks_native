@@ -45,8 +45,13 @@ endif
 
 # Executed only on QCOM BSPs
 ifeq ($(TARGET_USES_QCOM_BSP),true)
-    LOCAL_C_INCLUDES        += hardware/qcom/display/libgralloc
-    LOCAL_C_INCLUDES        += $(TOP)/hardware/qcom/display/libqdutils
+ifneq ($(TARGET_QCOM_DISPLAY_VARIANT),)
+    LOCAL_C_INCLUDES        += hardware/qcom/display-$(TARGET_QCOM_DISPLAY_VARIANT)/libgralloc
+    LOCAL_C_INCLUDES        += $(TOP)/hardware/qcom/display-$(TARGET_QCOM_DISPLAY_VARIANT)/libqdutils
+else
+    LOCAL_C_INCLUDES        += hardware/qcom/display/$(TARGET_BOARD_PLATFORM)/libgralloc
+    LOCAL_C_INCLUDES        += $(TOP)/hardware/qcom/display/$(TARGET_BOARD_PLATFORM)/libqdutils
+endif
     LOCAL_C_INCLUDES        += $(TARGET_OUT_HEADERS)/vpu/
     LOCAL_CFLAGS            += -DQCOM_BSP
     LOCAL_SHARED_LIBRARIES  += libqdMetaData
