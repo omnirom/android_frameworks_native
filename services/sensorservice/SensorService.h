@@ -37,7 +37,7 @@
 
 // ---------------------------------------------------------------------------
 
-#define DEBUG_CONNECTIONS   false
+#define DEBUG_CONNECTIONS   true
 // Max size is 1 MB which is enough to accept a batch of about 10k events.
 #define MAX_SOCKET_BUFFER_SIZE_BATCHED 1024 * 1024
 #define SOCKET_BUFFER_SIZE_NON_BATCHED 4 * 1024
