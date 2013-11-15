@@ -29,6 +29,10 @@ LOCAL_SHARED_LIBRARIES := \
 	libui \
 	libgui
 
+ifeq ($(BOARD_IGNORE_DERIVED_HAL_SENSORS),true)
+    LOCAL_CFLAGS += -DIGNORE_DERIVED_HAL_SENSORS
+endif
+
 LOCAL_MODULE:= libsensorservice
 
 include $(BUILD_SHARED_LIBRARY)
