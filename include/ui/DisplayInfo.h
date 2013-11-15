@@ -36,6 +36,10 @@ struct DisplayInfo {
     bool secure;
     nsecs_t appVsyncOffset;
     nsecs_t presentationDeadline;
+#ifdef HAVE_PIXEL_FORMAT_INFO
+    // TODO: this needs to go away (currently needed only by webkit)
+    PixelFormatInfo pixelFormatInfo;
+#endif
 };
 
 /* Display orientations as defined in Surface.java and ISurfaceComposer.h. */
