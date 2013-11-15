@@ -88,6 +88,13 @@ void SensorService::onFirstRef()
 
             mLastEventSeen.setCapacity(count);
             for (ssize_t i=0 ; i<count ; i++) {
+#ifdef IGNORE_DERIVED_HAL_SENSORS
+                if (list[i].type == SENSOR_TYPE_GRAVITY
+                    || list[i].type == SENSOR_TYPE_LINEAR_ACCELERATION
+                    || list[i].type == SENSOR_TYPE_ROTATION_VECTOR){
+                    continue;
+                }
+#endif
                 registerSensor( new HardwareSensor(list[i]) );
                 switch (list[i].type) {
                     case SENSOR_TYPE_ORIENTATION:
