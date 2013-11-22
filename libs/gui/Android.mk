@@ -39,10 +39,17 @@ LOCAL_SHARED_LIBRARIES := \
 	libutils \
 	liblog
 
+ifeq ($(call is-board-platform-in-list, mpq8092), true)
+    LOCAL_CFLAGS            += -DVFM_AVAILABLE
+endif
+
 # Executed only on QCOM BSPs
 ifeq ($(TARGET_USES_QCOM_BSP),true)
-    LOCAL_C_INCLUDES += hardware/qcom/display/libgralloc
-    LOCAL_CFLAGS += -DQCOM_BSP
+    LOCAL_C_INCLUDES        += hardware/qcom/display/libgralloc
+    LOCAL_C_INCLUDES        += $(TOP)/hardware/qcom/display/libqdutils
+    LOCAL_C_INCLUDES        += $(TARGET_OUT_HEADERS)/vpu/
+    LOCAL_CFLAGS            += -DQCOM_BSP
+    LOCAL_SHARED_LIBRARIES  += libqdMetaData
 endif
 
 LOCAL_MODULE:= libgui
