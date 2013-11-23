@@ -16,6 +16,23 @@
       "revId": "5bcac7cf6970efb881d1347e0e9290aca67fb379",
       "serverId": "56841c99-7c94-43d4-bf0b-cb4707e66d55",
       "unresolved": false
+    },
+    {
+      "key": {
+        "uuid": "8b8ed5af_9ef9bd1a",
+        "filename": "services/sensorservice/SensorDevice.cpp",
+        "patchSetId": 1
+      },
+      "lineNbr": 236,
+      "author": {
+        "id": 1000008
+      },
+      "writtenOn": "2013-11-23T21:30:34Z",
+      "side": 1,
+      "message": "D\u0027HERP!  Bad logic is bad.",
+      "revId": "5bcac7cf6970efb881d1347e0e9290aca67fb379",
+      "serverId": "56841c99-7c94-43d4-bf0b-cb4707e66d55",
+      "unresolved": false
     }
   ]
 }
