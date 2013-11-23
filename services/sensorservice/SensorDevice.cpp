@@ -156,6 +156,7 @@ status_t SensorDevice::activate(void* ident, int handle, int enabled)
             if (info.batchParams.size() == 0) {
                 // This is the last connection, we need to de-activate the underlying h/w sensor.
                 actuateHardware = true;
+#ifndef LEGACY_SENSORS
             } else {
                 const int halVersion = getHalDeviceVersion();
                 if (halVersion >= SENSORS_DEVICE_API_VERSION_1_1) {
@@ -170,6 +171,7 @@ status_t SensorDevice::activate(void* ident, int handle, int enabled)
                                          info.bestBatchParams.batchDelay,
                                          info.bestBatchParams.batchTimeout);
                 }
+#endif
             }
         } else {
             // sensor wasn't enabled for this ident
@@ -190,13 +192,17 @@ status_t SensorDevice::activate(void* ident, int handle, int enabled)
     }
 
     // On older devices which do not support batch, call setDelay().
+#ifndef LEGACY_SENSORS
     if (getHalDeviceVersion() < SENSORS_DEVICE_API_VERSION_1_1 && info.batchParams.size() > 0) {
+#endif
         ALOGD_IF(DEBUG_CONNECTIONS, "\t>>> actuating h/w setDelay %d %lld ", handle,
                  info.bestBatchParams.batchDelay);
         mSensorDevice->setDelay(
                 reinterpret_cast<struct sensors_poll_device_t *>(mSensorDevice),
                 handle, info.bestBatchParams.batchDelay);
+#ifndef LEGACY_SENSORS
     }
+#endif
     return err;
 }
 
@@ -208,6 +214,7 @@ status_t SensorDevice::batch(void* ident, int handle, int flags, int64_t samplin
         samplingPeriodNs = MINIMUM_EVENTS_PERIOD;
     }
 
+#ifndef LEGACY_SENSORS
     const int halVersion = getHalDeviceVersion();
     if (halVersion >= SENSORS_DEVICE_API_VERSION_1_1) {
         if (flags & SENSORS_BATCH_DRY_RUN) {
@@ -226,10 +233,12 @@ status_t SensorDevice::batch(void* ident, int handle, int flags, int64_t samplin
             }
         }
     } else if (maxBatchReportLatencyNs != 0) {
+#endif
         // Batch is not supported on older devices.
         return INVALID_OPERATION;
+#ifndef LEGACY_SENSORS
     }
-
+#endif
     ALOGD_IF(DEBUG_CONNECTIONS,
              "SensorDevice::batch: ident=%p, handle=0x%08x, flags=%d, period_ns=%lld timeout=%lld",
              ident, handle, flags, samplingPeriodNs, maxBatchReportLatencyNs);
@@ -255,6 +264,7 @@ status_t SensorDevice::batch(void* ident, int handle, int flags, int64_t samplin
              prevBestBatchParams.batchTimeout, info.bestBatchParams.batchTimeout);
 
     status_t err(NO_ERROR);
+#ifndef LEGACY_SENSORS
     // If the min period or min timeout has changed since the last batch call, call batch.
     if (prevBestBatchParams != info.bestBatchParams) {
         if (halVersion >= SENSORS_DEVICE_API_VERSION_1_1) {
@@ -276,6 +286,7 @@ status_t SensorDevice::batch(void* ident, int handle, int flags, int64_t samplin
             info.removeBatchParamsForIdent(ident);
         }
     }
+#endif
     return err;
 }
 
@@ -310,11 +321,15 @@ int SensorDevice::getHalDeviceVersion() const {
 }
 
 status_t SensorDevice::flush(void* ident, int handle) {
+#ifndef LEGACY_SENSORS
     if (getHalDeviceVersion() < SENSORS_DEVICE_API_VERSION_1_1) {
         return INVALID_OPERATION;
     }
     ALOGD_IF(DEBUG_CONNECTIONS, "\t>>> actuating h/w flush %d", handle);
     return mSensorDevice->flush(mSensorDevice, handle);
+#else
+    return INVALID_OPERATION;
+#endif
 }
 
 // ---------------------------------------------------------------------------

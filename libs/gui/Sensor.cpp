@@ -50,13 +50,17 @@ Sensor::Sensor(struct sensor_t const* hwSensor, int halVersion)
     mMinDelay = hwSensor->minDelay;
     // Set fifo event count zero for older devices which do not support batching. Fused
     // sensors also have their fifo counts set to zero.
+#ifndef LEGACY_SENSORS
     if (halVersion >= SENSORS_DEVICE_API_VERSION_1_1) {
         mFifoReservedEventCount = hwSensor->fifoReservedEventCount;
         mFifoMaxEventCount = hwSensor->fifoMaxEventCount;
     } else {
+#endif
         mFifoReservedEventCount = 0;
         mFifoMaxEventCount = 0;
+#ifndef LEGACY_SENSORS
     }
+#endif
 }
 
 Sensor::~Sensor()

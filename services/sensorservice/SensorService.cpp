@@ -243,7 +243,9 @@ status_t SensorService::dump(int fd, const Vector<String16>& args)
 
             switch (s.getType()) {
                 case SENSOR_TYPE_ROTATION_VECTOR:
+#ifndef LEGACY_SENSORS
                 case SENSOR_TYPE_GEOMAGNETIC_ROTATION_VECTOR:
+#endif
                     result.appendFormat(
                             "last=<%5.1f,%5.1f,%5.1f,%5.1f,%5.1f>\n",
                             e.data[0], e.data[1], e.data[2], e.data[3], e.data[4]);
@@ -260,12 +262,16 @@ status_t SensorService::dump(int fd, const Vector<String16>& args)
                             e.data[0], e.data[1], e.data[2], e.data[3]);
                     break;
                 case SENSOR_TYPE_SIGNIFICANT_MOTION:
+#ifndef LEGACY_SENSORS
                 case SENSOR_TYPE_STEP_DETECTOR:
+#endif
                     result.appendFormat( "last=<%f>\n", e.data[0]);
                     break;
+#ifndef LEGACY_SENSORS
                 case SENSOR_TYPE_STEP_COUNTER:
                     result.appendFormat( "last=<%llu>\n", e.u64.step_counter);
                     break;
+#endif
                 default:
                     // default to 3 values
                     result.appendFormat(
@@ -736,12 +742,16 @@ SensorService::SensorEventConnection::SensorEventConnection(
     : mService(service), mUid(uid)
 {
     const SensorDevice& device(SensorDevice::getInstance());
+#ifndef LEGACY_SENSORS
     if (device.getHalDeviceVersion() >= SENSORS_DEVICE_API_VERSION_1_1) {
         // Increase socket buffer size to 1MB for batching capabilities.
         mChannel = new BitTube(service->mSocketBufferSize);
     } else {
+#endif
         mChannel = new BitTube(SOCKET_BUFFER_SIZE_NON_BATCHED);
+#ifndef LEGACY_SENSORS
     }
+#endif
 }
 
 SensorService::SensorEventConnection::~SensorEventConnection()
@@ -815,6 +825,7 @@ status_t SensorService::SensorEventConnection::sendEvents(
         size_t i=0;
         while (i<numEvents) {
             int32_t curr = buffer[i].sensor;
+#ifndef LEGACY_SENSORS
             if (buffer[i].type == SENSOR_TYPE_META_DATA) {
                 ALOGD_IF(DEBUG_CONNECTIONS, "flush complete event sensor==%d ",
                          buffer[i].meta_data.sensor);
@@ -822,7 +833,9 @@ status_t SensorService::SensorEventConnection::sendEvents(
                 // filtered correctly. buffer[i].sensor is zero for meta_data events.
                 curr = buffer[i].meta_data.sensor;
             }
+#endif
             ssize_t index = mSensorInfo.indexOfKey(curr);
+#ifndef LEGACY_SENSORS
             if (index >= 0 && mSensorInfo[index].mFirstFlushPending == true &&
                 buffer[i].type == SENSOR_TYPE_META_DATA) {
                 // This is the first flush before activate is called. Events can now be sent for
@@ -831,12 +844,17 @@ status_t SensorService::SensorEventConnection::sendEvents(
                          buffer[i].meta_data.sensor);
                 mSensorInfo.editValueAt(index).mFirstFlushPending = false;
             }
+#endif
             if (index >= 0 && mSensorInfo[index].mFirstFlushPending == false)  {
                 do {
                     scratch[count++] = buffer[i++];
+#ifndef LEGACY_SENSORS
                 } while ((i<numEvents) && ((buffer[i].sensor == curr) ||
                          (buffer[i].type == SENSOR_TYPE_META_DATA  &&
                           buffer[i].meta_data.sensor == curr)));
+#else
+                } while ((i<numEvents) && (buffer[i].sensor == curr));
+#endif
             } else {
                 i++;
             }
@@ -846,6 +864,7 @@ status_t SensorService::SensorEventConnection::sendEvents(
         count = numEvents;
     }
 
+#ifndef LEGACY_SENSORS
     // Send pending flush events (if any) before sending events from the cache.
     {
         ASensorEvent flushCompleteEvent;
@@ -870,6 +889,7 @@ status_t SensorService::SensorEventConnection::sendEvents(
             }
         }
     }
+#endif
 
     // NOTE: ASensorEvent and sensors_event_t are the same type
     ssize_t size = SensorEventQueue::write(mChannel,
@@ -889,6 +909,7 @@ status_t SensorService::SensorEventConnection::sendEvents(
 void SensorService::SensorEventConnection::countFlushCompleteEventsLocked(
                 sensors_event_t* scratch, const int numEventsDropped) {
     ALOGD_IF(DEBUG_CONNECTIONS, "dropping %d events ", numEventsDropped);
+#ifndef LEGACY_SENSORS
     // Count flushComplete events in the events that are about to the dropped. These will be sent
     // separately before the next batch of events.
     for (int j = 0; j < numEventsDropped; ++j) {
@@ -899,6 +920,7 @@ void SensorService::SensorEventConnection::countFlushCompleteEventsLocked(
                      flushInfo.mPendingFlushEventsToSend);
         }
     }
+#endif
     return;
 }
 
@@ -935,11 +957,14 @@ status_t  SensorService::SensorEventConnection::flush() {
     // Loop through all sensors for this connection and call flush on each of them.
     for (size_t i = 0; i < mSensorInfo.size(); ++i) {
         const int handle = mSensorInfo.keyAt(i);
+#ifndef LEGACY_SENSORS
         if (halVersion < SENSORS_DEVICE_API_VERSION_1_1) {
+#endif
             // For older devices just increment pending flush count which will send a trivial
             // flush complete event.
             FlushInfo& flushInfo = mSensorInfo.editValueFor(handle);
             flushInfo.mPendingFlushEventsToSend++;
+#ifndef LEGACY_SENSORS
         } else {
             status_t err_flush = mService->flushSensor(this, handle);
             if (err_flush != NO_ERROR) {
@@ -947,6 +972,7 @@ status_t  SensorService::SensorEventConnection::flush() {
             }
             err = (err_flush != NO_ERROR) ? err_flush : err;
         }
+#endif
     }
     return err;
 }
