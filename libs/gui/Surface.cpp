@@ -801,6 +801,9 @@ status_t Surface::lock(
         }
 
         // figure out if we can copy the frontbuffer back
+#ifdef QCOM_HARDWARE
+        int backBufferSlot(getSlotFromBufferLocked(backBuffer.get()));
+#endif
         const sp<GraphicBuffer>& frontBuffer(mPostedBuffer);
         const bool canCopyBack = (frontBuffer != 0 &&
                 backBuffer->width  == frontBuffer->width &&
@@ -808,15 +811,27 @@ status_t Surface::lock(
                 backBuffer->format == frontBuffer->format);
 
         if (canCopyBack) {
+#ifdef QCOM_HARDWARE
+            Mutex::Autolock lock(mMutex);
+            Region oldDirtyRegion;
+            for(int i = 0 ; i < NUM_BUFFER_SLOTS; i++ ) {
+                if(i != backBufferSlot && !mSlots[i].dirtyRegion.isEmpty())
+                    oldDirtyRegion.orSelf(mSlots[i].dirtyRegion);
+            }
+            const Region copyback(oldDirtyRegion.subtract(newDirtyRegion));
+#else
             // copy the area that is invalid and not repainted this round
             const Region copyback(mDirtyRegion.subtract(newDirtyRegion));
+#endif
             if (!copyback.isEmpty())
                 copyBlt(backBuffer, frontBuffer, copyback);
         } else {
             // if we can't copy-back anything, modify the user's dirty
             // region to make sure they redraw the whole buffer
             newDirtyRegion.set(bounds);
+#ifndef QCOM_HARDWARE
             mDirtyRegion.clear();
+#endif
             Mutex::Autolock lock(mMutex);
             for (size_t i=0 ; i<NUM_BUFFER_SLOTS ; i++) {
                 mSlots[i].dirtyRegion.clear();
@@ -826,15 +841,20 @@ status_t Surface::lock(
 
         { // scope for the lock
             Mutex::Autolock lock(mMutex);
+#ifndef QCOM_HARDWARE
             int backBufferSlot(getSlotFromBufferLocked(backBuffer.get()));
             if (backBufferSlot >= 0) {
                 Region& dirtyRegion(mSlots[backBufferSlot].dirtyRegion);
                 mDirtyRegion.subtract(dirtyRegion);
                 dirtyRegion = newDirtyRegion;
             }
+#else
+            mSlots[backBufferSlot].dirtyRegion = newDirtyRegion;
+#endif
         }
-
+#ifndef QCOM_HARDWARE
         mDirtyRegion.orSelf(newDirtyRegion);
+#endif
         if (inOutDirtyBounds) {
             *inOutDirtyBounds = newDirtyRegion.getBounds();
         }
