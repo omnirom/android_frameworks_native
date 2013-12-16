@@ -32,6 +32,7 @@ static struct {
     { AID_MEDIA, "media.player" },
     { AID_MEDIA, "media.camera" },
     { AID_MEDIA, "media.audio_policy" },
+    { AID_MEDIA, "media.nvidia.audio_alsa" },
 #ifdef YAMAHAPLAYER
     { AID_MEDIA, "media.yamahaplayer" },
 #endif

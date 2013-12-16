@@ -119,6 +119,8 @@ public:
     //! Close a composer transaction on all active SurfaceComposerClients.
     static void closeGlobalTransaction(bool synchronous = false);
 
+    static int setOrientation(int32_t dpy, int orientation, uint32_t flags);
+
     //! Flag the currently open transaction as an animation transaction.
     static void setAnimationTransaction();
 
@@ -185,6 +187,10 @@ private:
 public:
     ScreenshotClient();
     ~ScreenshotClient();
+
+#if defined(TOROPLUS_RADIO)
+    status_t update();
+#endif
 
     // frees the previous screenshot and capture a new one
     status_t update(const sp<IBinder>& display);

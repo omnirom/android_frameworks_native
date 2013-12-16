@@ -9,7 +9,6 @@ LOCAL_SRC_FILES:= \
     LinearAccelerationSensor.cpp \
     OrientationSensor.cpp \
     RotationVectorSensor.cpp \
-    RotationVectorSensor2.cpp \
     SensorDevice.cpp \
     SensorFusion.cpp \
     SensorInterface.cpp \
@@ -28,6 +27,10 @@ LOCAL_SHARED_LIBRARIES := \
 	libbinder \
 	libui \
 	libgui
+
+ifneq ($(BOARD_SYSFS_LIGHT_SENSOR),)
+    LOCAL_CFLAGS += -DSYSFS_LIGHT_SENSOR=\"$(BOARD_SYSFS_LIGHT_SENSOR)\"
+endif
 
 LOCAL_MODULE:= libsensorservice
 
