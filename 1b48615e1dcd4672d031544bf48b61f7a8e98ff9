@@ -34,6 +34,24 @@
       "revId": "1b48615e1dcd4672d031544bf48b61f7a8e98ff9",
       "serverId": "56841c99-7c94-43d4-bf0b-cb4707e66d55",
       "unresolved": false
+    },
+    {
+      "key": {
+        "uuid": "6b8b61a3_31e0caf8",
+        "filename": "services/surfaceflinger/Android.mk",
+        "patchSetId": 5
+      },
+      "lineNbr": 59,
+      "author": {
+        "id": 1000331
+      },
+      "writtenOn": "2013-12-17T18:54:06Z",
+      "side": 1,
+      "message": "I know you kept it as it was, but this a weird exception because every other define do  it the \"normal\" way, see many examples already merged deletes the BOARD_ or  TARGET_ starts:\nhttps://gerrit.omnirom.org/#/c/3340/2/services/surfaceflinger/Android.mk\nhttps://gerrit.omnirom.org/#/c/2396/1/opengl/libs/Android.mk\nhttps://gerrit.omnirom.org/#/c/2463/1/services/audioflinger/Android.mk\nhttps://gerrit.omnirom.org/#/c/2435/3/media/libstagefright/Android.mk",
+      "parentUuid": "6b8b61a3_5128f62e",
+      "revId": "1b48615e1dcd4672d031544bf48b61f7a8e98ff9",
+      "serverId": "56841c99-7c94-43d4-bf0b-cb4707e66d55",
+      "unresolved": false
     }
   ]
 }
