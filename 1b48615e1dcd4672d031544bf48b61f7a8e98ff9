@@ -16,6 +16,24 @@
       "revId": "1b48615e1dcd4672d031544bf48b61f7a8e98ff9",
       "serverId": "56841c99-7c94-43d4-bf0b-cb4707e66d55",
       "unresolved": false
+    },
+    {
+      "key": {
+        "uuid": "6b8b61a3_5128f62e",
+        "filename": "services/surfaceflinger/Android.mk",
+        "patchSetId": 5
+      },
+      "lineNbr": 59,
+      "author": {
+        "id": 1000174
+      },
+      "writtenOn": "2013-12-17T18:06:52Z",
+      "side": 1,
+      "message": "I just adapted as how all the rest where done. See how was:\n\nLOCAL_CFLAGS +\u003d -DBOARD_EGL_NEEDS_LEGACY_FB\n\nSo I think is better the way is right now",
+      "parentUuid": "6b8b61a3_112e6e3d",
+      "revId": "1b48615e1dcd4672d031544bf48b61f7a8e98ff9",
+      "serverId": "56841c99-7c94-43d4-bf0b-cb4707e66d55",
+      "unresolved": false
     }
   ]
 }
