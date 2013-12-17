@@ -1,0 +1,21 @@
+{
+  "comments": [
+    {
+      "key": {
+        "uuid": "6b8b61a3_112e6e3d",
+        "filename": "services/surfaceflinger/Android.mk",
+        "patchSetId": 5
+      },
+      "lineNbr": 59,
+      "author": {
+        "id": 1000331
+      },
+      "writtenOn": "2013-12-17T18:05:24Z",
+      "side": 1,
+      "message": "LOCAL_CFLAGS +\u003d -DEGL_NEEDS_FNW\nJust that for me looks so ugly, I guess BOARD should be used only for the makefile checking... xD",
+      "revId": "1b48615e1dcd4672d031544bf48b61f7a8e98ff9",
+      "serverId": "56841c99-7c94-43d4-bf0b-cb4707e66d55",
+      "unresolved": false
+    }
+  ]
+}
