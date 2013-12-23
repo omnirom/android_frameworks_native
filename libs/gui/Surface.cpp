@@ -68,7 +68,9 @@ Surface::Surface(
     mReqHeight = 0;
     mReqFormat = 0;
     mReqUsage = 0;
+#ifdef QCOM_HARDWARE
     mReqSize = 0;
+#endif
     mTimestamp = NATIVE_WINDOW_TIMESTAMP_AUTO;
     mCrop.clear();
     mScalingMode = NATIVE_WINDOW_SCALING_MODE_FREEZE;
@@ -379,6 +381,7 @@ int Surface::query(int what, int* value) const {
                 }
                 return err;
             }
+#ifdef QCOM_HARDWARE
             case NATIVE_WINDOW_CONSUMER_USAGE_BITS: {
                 status_t err = NO_ERROR;
                 err = mGraphicBufferProducer->query(what, value);
@@ -389,6 +392,7 @@ int Surface::query(int what, int* value) const {
                     return err;
                 }
             }
+#endif
         }
     }
     return mGraphicBufferProducer->query(what, value);
@@ -431,9 +435,11 @@ int Surface::perform(int operation, va_list args)
     case NATIVE_WINDOW_SET_BUFFERS_FORMAT:
         res = dispatchSetBuffersFormat(args);
         break;
+#ifdef QCOM_HARDWARE
     case NATIVE_WINDOW_SET_BUFFERS_SIZE:
         res = dispatchSetBuffersSize(args);
         break;
+#endif
     case NATIVE_WINDOW_LOCK:
         res = dispatchLock(args);
         break;
@@ -509,10 +515,12 @@ int Surface::dispatchSetBuffersFormat(va_list args) {
     return setBuffersFormat(f);
 }
 
+#ifdef QCOM_HARDWARE
 int Surface::dispatchSetBuffersSize(va_list args) {
     int size = va_arg(args, int);
     return setBuffersSize(size);
 }
+#endif
 
 int Surface::dispatchSetScalingMode(va_list args) {
     int m = va_arg(args, int);
@@ -571,7 +579,9 @@ int Surface::disconnect(int api) {
         mReqWidth = 0;
         mReqHeight = 0;
         mReqUsage = 0;
+#ifdef QCOM_HARDWARE
         mReqSize = 0;
+#endif
         mCrop.clear();
         mScalingMode = NATIVE_WINDOW_SCALING_MODE_FREEZE;
         mTransform = 0;
@@ -672,6 +682,7 @@ int Surface::setBuffersFormat(int format)
     return NO_ERROR;
 }
 
+#ifdef QCOM_HARDWARE
 int Surface::setBuffersSize(int size)
 {
     ATRACE_CALL();
@@ -687,6 +698,7 @@ int Surface::setBuffersSize(int size)
     }
     return NO_ERROR;
 }
+#endif
 
 int Surface::setScalingMode(int mode)
 {
@@ -838,7 +850,9 @@ status_t Surface::lock(
         }
 
         // figure out if we can copy the frontbuffer back
+#ifdef QCOM_HARDWARE
         int backBufferSlot(getSlotFromBufferLocked(backBuffer.get()));
+#endif
         const sp<GraphicBuffer>& frontBuffer(mPostedBuffer);
         const bool canCopyBack = (frontBuffer != 0 &&
                 backBuffer->width  == frontBuffer->width &&
@@ -846,6 +860,7 @@ status_t Surface::lock(
                 backBuffer->format == frontBuffer->format);
 
         if (canCopyBack) {
+#ifdef QCOM_HARDWARE
             Mutex::Autolock lock(mMutex);
             Region oldDirtyRegion;
             for(int i = 0 ; i < NUM_BUFFER_SLOTS; i++ ) {
@@ -853,12 +868,19 @@ status_t Surface::lock(
                     oldDirtyRegion.orSelf(mSlots[i].dirtyRegion);
             }
             const Region copyback(oldDirtyRegion.subtract(newDirtyRegion));
+#else
+            // copy the area that is invalid and not repainted this round
+            const Region copyback(mDirtyRegion.subtract(newDirtyRegion));
+#endif
             if (!copyback.isEmpty())
                 copyBlt(backBuffer, frontBuffer, copyback);
         } else {
             // if we can't copy-back anything, modify the user's dirty
             // region to make sure they redraw the whole buffer
             newDirtyRegion.set(bounds);
+#ifndef QCOM_HARDWARE
+            mDirtyRegion.clear();
+#endif
             Mutex::Autolock lock(mMutex);
             for (size_t i=0 ; i<NUM_BUFFER_SLOTS ; i++) {
                 mSlots[i].dirtyRegion.clear();
@@ -868,9 +890,21 @@ status_t Surface::lock(
 
         { // scope for the lock
             Mutex::Autolock lock(mMutex);
+#ifdef QCOM_HARDWARE
             mSlots[backBufferSlot].dirtyRegion = newDirtyRegion;
+#else
+            int backBufferSlot(getSlotFromBufferLocked(backBuffer.get()));
+            if (backBufferSlot >= 0) {
+                Region& dirtyRegion(mSlots[backBufferSlot].dirtyRegion);
+                mDirtyRegion.subtract(dirtyRegion);
+                dirtyRegion = newDirtyRegion;
+            }
+#endif
         }
 
+#ifndef QCOM_HARDWARE
+        mDirtyRegion.orSelf(newDirtyRegion);
+#endif
         if (inOutDirtyBounds) {
             *inOutDirtyBounds = newDirtyRegion.getBounds();
         }

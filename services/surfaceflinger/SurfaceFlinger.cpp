@@ -609,7 +609,11 @@ void SurfaceFlinger::init() {
             vsyncPhaseOffsetNs, true);
     mEventThread = new EventThread(vsyncSrc);
     sp<VSyncSource> sfVsyncSrc = new DispSyncSource(&mPrimaryDispSync,
+#ifdef QCOM_HARDWARE
             sfVsyncPhaseOffsetNs, true);
+#else
+            sfVsyncPhaseOffsetNs, false);
+#endif
     mSFEventThread = new EventThread(sfVsyncSrc);
     mEventQueue.setEventThread(mSFEventThread);
 
@@ -1041,20 +1045,36 @@ void SurfaceFlinger::rebuildLayerStacks() {
             const sp<DisplayDevice>& hw(mDisplays[dpy]);
             const Transform& tr(hw->getTransform());
             const Rect bounds(hw->getBounds());
+#ifdef QCOM_HARDWARE
             int dpyId = hw->getHwcDisplayId();
+#endif
             if (hw->canDraw()) {
+#ifdef QCOM_HARDWARE
                 SurfaceFlinger::computeVisibleRegions(dpyId, layers,
+#else
+                SurfaceFlinger::computeVisibleRegions(layers,
+#endif
                         hw->getLayerStack(), dirtyRegion, opaqueRegion);
 
                 const size_t count = layers.size();
                 for (size_t i=0 ; i<count ; i++) {
                     const sp<Layer>& layer(layers[i]);
                     const Layer::State& s(layer->getDrawingState());
+#ifdef QCOM_HARDWARE
                     Region drawRegion(tr.transform(
                             layer->visibleNonTransparentRegion));
                     drawRegion.andSelf(bounds);
                     if (!drawRegion.isEmpty()) {
                         layersSortedByZ.add(layer);
+#else
+                    if (s.layerStack == hw->getLayerStack()) {
+                        Region drawRegion(tr.transform(
+                                layer->visibleNonTransparentRegion));
+                        drawRegion.andSelf(bounds);
+                        if (!drawRegion.isEmpty()) {
+                            layersSortedByZ.add(layer);
+                        }
+#endif
                     }
                 }
             }
@@ -1103,6 +1123,7 @@ void SurfaceFlinger::setUpHWComposer() {
             sp<const DisplayDevice> hw(mDisplays[dpy]);
             const int32_t id = hw->getHwcDisplayId();
             if (id >= 0) {
+#ifdef QCOM_HARDWARE
                 // Get the layers in the current drawying state
                 const LayerVector& layers(mDrawingState.layersSortedByZ);
                 bool freezeSurfacePresent = false;
@@ -1122,6 +1143,7 @@ void SurfaceFlinger::setUpHWComposer() {
                         }
                     }
                 }
+#endif
 
                 const Vector< sp<Layer> >& currentLayers(
                     hw->getVisibleLayersSortedByZ());
@@ -1135,6 +1157,7 @@ void SurfaceFlinger::setUpHWComposer() {
                      */
                     const sp<Layer>& layer(currentLayers[i]);
                     layer->setPerFrameData(hw, *cur);
+#ifdef QCOM_HARDWARE
                     if(freezeSurfacePresent) {
                         // if freezeSurfacePresent, set ANIMATING flag
                         cur->setAnimating(true);
@@ -1155,6 +1178,7 @@ void SurfaceFlinger::setUpHWComposer() {
                             }
                         }
                     }
+#endif
                 }
             }
         }
@@ -1272,6 +1296,7 @@ void SurfaceFlinger::handleTransaction(uint32_t transactionFlags)
     // here the transaction has been committed
 }
 
+#ifdef QCOM_HARDWARE
 void SurfaceFlinger::setVirtualDisplayData(
     int32_t hwcDisplayId,
     const sp<IGraphicBufferProducer>& sink)
@@ -1291,6 +1316,7 @@ void SurfaceFlinger::setVirtualDisplayData(
 
     mHwc->setVirtualDisplayProperties(hwcDisplayId, w, h, format);
 }
+#endif
 
 void SurfaceFlinger::handleTransactionLocked(uint32_t transactionFlags)
 {
@@ -1380,6 +1406,7 @@ void SurfaceFlinger::handleTransactionLocked(uint32_t transactionFlags)
                                 || (state.viewport != draw[i].viewport)
                                 || (state.frame != draw[i].frame))
                         {
+#ifdef QCOM_HARDWARE
                             // Honor the orientation change after boot
                             // animation completes or the new orientation is
                             // same as panel orientation..
@@ -1388,6 +1415,10 @@ void SurfaceFlinger::handleTransactionLocked(uint32_t transactionFlags)
                                 disp->setProjection(state.orientation,
                                         state.viewport, state.frame);
                             }
+#else
+                            disp->setProjection(state.orientation,
+                                    state.viewport, state.frame);
+#endif
                         }
                     }
                 }
@@ -1410,11 +1441,15 @@ void SurfaceFlinger::handleTransactionLocked(uint32_t transactionFlags)
                         // etc.) but no internal state (i.e. a DisplayDevice).
                         if (state.surface != NULL) {
 
+#ifdef QCOM_HARDWARE
                             char value[PROPERTY_VALUE_MAX];
+#endif
                             hwcDisplayId = allocateHwcDisplayId(state.type);
+#ifdef QCOM_HARDWARE
                             property_get("persist.sys.wfd.virtual", value, "0");
                             int wfdVirtual = atoi(value);
                             if(!wfdVirtual) {
+#endif
                                 sp<VirtualDisplaySurface> vds =
                                               new VirtualDisplaySurface(
                                     *mHwc, hwcDisplayId, state.surface, bq,
@@ -1427,6 +1462,7 @@ void SurfaceFlinger::handleTransactionLocked(uint32_t transactionFlags)
                                   // so the GLES driver can pass buffers directly to the sink.
                                   producer = state.surface;
                                 }
+#ifdef QCOM_HARDWARE
                             } else {
                                 //Read virtual display properties and create a
                                 //rendering surface for it inorder to be handled
@@ -1437,6 +1473,7 @@ void SurfaceFlinger::handleTransactionLocked(uint32_t transactionFlags)
                                                                     state.type, bq);
                                 producer = bq;
                             }
+#endif
                         }
                     } else {
                         ALOGE_IF(state.surface!=NULL,
@@ -1589,7 +1626,11 @@ void SurfaceFlinger::commitTransaction()
     mTransactionCV.broadcast();
 }
 
+#ifdef QCOM_HARDWARE
 void SurfaceFlinger::computeVisibleRegions(size_t dpy,
+#else
+void SurfaceFlinger::computeVisibleRegions(
+#endif
         const LayerVector& currentLayers, uint32_t layerStack,
         Region& outDirtyRegion, Region& outOpaqueRegion)
 {
@@ -1600,8 +1641,10 @@ void SurfaceFlinger::computeVisibleRegions(size_t dpy,
     Region dirty;
 
     outDirtyRegion.clear();
+#ifdef QCOM_HARDWARE
     bool bIgnoreLayers = false;
     int indexLOI = -1;
+#endif
     size_t i = currentLayers.size();
 #ifdef QCOM_BSP
     while (i--) {
@@ -1651,6 +1694,7 @@ void SurfaceFlinger::computeVisibleRegions(size_t dpy,
             continue;
         }
 #endif
+#ifdef QCOM_HARDWARE
         // only consider the layers on the given later stack
         // Override layers created using presentation class by the layers having
         // ext_only flag enabled
@@ -1662,6 +1706,11 @@ void SurfaceFlinger::computeVisibleRegions(size_t dpy,
             layer->setVisibleNonTransparentRegion(visibleNonTransRegion);
             continue;
         }
+#else
+        // only consider the layers on the given layer stack
+        if (s.layerStack != layerStack)
+             continue;
+#endif
         /*
          * opaqueRegion: area of a surface that is fully opaque.
          */
@@ -1951,9 +2000,11 @@ void SurfaceFlinger::doComposeSurfaces(const sp<const DisplayDevice>& hw, const 
                         layer->draw(hw, clip);
                         break;
                     }
+#ifdef QCOM_HARDWARE
                     case HWC_BLIT:
                         //Do nothing
                         break;
+#endif
                     case HWC_FRAMEBUFFER_TARGET: {
                         // this should not happen as the iterator shouldn't
                         // let us get there.

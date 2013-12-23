@@ -131,14 +131,20 @@ DisplayDevice::DisplayDevice(
             mDisplayName = "Virtual Screen";    // e.g. Overlay #n
             break;
     }
+#ifdef QCOM_HARDWARE
     char property[PROPERTY_VALUE_MAX];
     int panelOrientation = DisplayState::eOrientationDefault;
     // Set the panel orientation from the property.
     property_get("persist.panel.orientation", property, "0");
     panelOrientation = atoi(property) / 90;
+#endif
 
     // initialize the display orientation transform.
+#ifdef QCOM_HARDWARE
     setProjection(panelOrientation, mViewport, mFrame);
+#else
+    setProjection(DisplayState::eOrientationDefault, mViewport, mFrame);
+#endif
 }
 
 DisplayDevice::~DisplayDevice() {
