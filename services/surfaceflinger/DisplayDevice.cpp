@@ -33,10 +33,6 @@
 #include <ui/FramebufferNativeWindow.h>
 #endif
 
-#include <GLES/gl.h>
-#include <EGL/egl.h>
-#include <EGL/eglext.h>
-
 #include <hardware/gralloc.h>
 
 #include "DisplayHardware/DisplaySurface.h"
@@ -82,7 +78,6 @@ DisplayDevice::DisplayDevice(
       mOrientation()
 {
     mNativeWindow = new Surface(producer, false);
-
 #ifndef BOARD_EGL_NEEDS_LEGACY_FB
     ANativeWindow* const window = mNativeWindow.get();
 #else

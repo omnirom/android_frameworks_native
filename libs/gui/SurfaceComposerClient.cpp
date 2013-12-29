@@ -655,15 +655,6 @@ void SurfaceComposerClient::unblankDisplay(const sp<IBinder>& token) {
     ComposerService::getComposerService()->unblank(token);
 }
 
-// TODO: Remove me.  Do not use.
-// This is a compatibility shim for one product whose drivers are depending on
-// this legacy function (when they shouldn't).
-status_t SurfaceComposerClient::getDisplayInfo(
-        int32_t displayId, DisplayInfo* info)
-{
-    return getDisplayInfo(getBuiltInDisplay(displayId), info);
-}
-
 #if defined(ICS_CAMERA_BLOB) || defined(MR0_CAMERA_BLOB)
 ssize_t SurfaceComposerClient::getDisplayWidth(int32_t displayId) {
     DisplayInfo info;
@@ -683,6 +674,15 @@ ssize_t SurfaceComposerClient::getDisplayOrientation(int32_t displayId) {
     return info.orientation;
 }
 #endif
+
+// TODO: Remove me.  Do not use.
+// This is a compatibility shim for one product whose drivers are depending on
+// this legacy function (when they shouldn't).
+status_t SurfaceComposerClient::getDisplayInfo(
+        int32_t displayId, DisplayInfo* info)
+{
+    return getDisplayInfo(getBuiltInDisplay(displayId), info);
+}
 
 // ----------------------------------------------------------------------------
 
