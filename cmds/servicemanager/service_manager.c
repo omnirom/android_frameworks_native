@@ -32,6 +32,7 @@ static struct {
     { AID_MEDIA, "media.player" },
     { AID_MEDIA, "media.camera" },
     { AID_MEDIA, "media.audio_policy" },
+    { AID_MEDIA, "media.nvidia.audio_alsa" },
 #ifdef YAMAHAPLAYER
     { AID_MEDIA, "media.yamahaplayer" },
 #endif
@@ -51,14 +52,18 @@ static struct {
     { AID_RADIO, "isms" },
     { AID_RADIO, "iphonesubinfo" },
     { AID_RADIO, "simphonebook" },
+#ifdef QCOM_HARDWARE
     { AID_RADIO, "phone_msim" },
     { AID_RADIO, "isms_msim" },
     { AID_RADIO, "iphonesubinfo_msim" },
     { AID_RADIO, "simphonebook_msim" },
+#endif
     { AID_MEDIA, "common_time.clock" },
     { AID_MEDIA, "common_time.config" },
     { AID_KEYSTORE, "android.security.keystore" },
+#ifdef QCOM_HARDWARE
     { AID_MEDIA, "listen.service" }
+#endif
 };
 
 void *svcmgr_handle;

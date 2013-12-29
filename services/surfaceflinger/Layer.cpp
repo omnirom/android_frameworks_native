@@ -45,12 +45,42 @@
 #include "DisplayHardware/HWComposer.h"
 
 #include "RenderEngine/RenderEngine.h"
+#ifdef QCOM_BSP
+#include <gralloc_priv.h>
+#endif
 
 #define DEBUG_RESIZE    0
 
 namespace android {
 
 // ---------------------------------------------------------------------------
+
+#ifdef QCOM_HARDWARE
+/* Calculates the aspect ratio for external display based on the video w/h */
+static Rect getAspectRatio(const sp<const DisplayDevice>& hw,
+                           const int& srcWidth, const int& srcHeight) {
+    Rect outRect;
+    int fbWidth  = hw->getWidth();
+    int fbHeight = hw->getHeight();
+    int x , y = 0;
+    int w = fbWidth, h = fbHeight;
+    if (srcWidth * fbHeight > fbWidth * srcHeight) {
+        h = fbWidth * srcHeight / srcWidth;
+        w = fbWidth;
+    } else if (srcWidth * fbHeight < fbWidth * srcHeight) {
+        w = fbHeight * srcWidth / srcHeight;
+        h = fbHeight;
+    }
+    x = (fbWidth - w) / 2;
+    y = (fbHeight - h) / 2;
+    outRect.left = x;
+    outRect.top = y;
+    outRect.right = x + w;
+    outRect.bottom = y + h;
+
+    return outRect;
+}
+#endif
 
 int32_t Layer::sSequence = 1;
 
@@ -364,6 +394,23 @@ void Layer::setGeometry(
     frame.intersect(hw->getViewport(), &frame);
     const Transform& tr(hw->getTransform());
     layer.setFrame(tr.transform(frame));
+#ifdef QCOM_BSP
+    // set dest_rect to display width and height, if external_only flag
+    // for the layer is enabled or if its yuvLayer in extended mode.
+    uint32_t x = 0, y = 0;
+    uint32_t w = hw->getWidth();
+    uint32_t h = hw->getHeight();
+    bool extendedMode = SurfaceFlinger::isExtendedMode();
+    if(isExtOnly()) {
+        // Position: fullscreen for ext_only
+        Rect r(0, 0, w, h);
+        layer.setFrame(r);
+    } else if(hw->getDisplayType() > 0 && (extendedMode && isYuvLayer())) {
+        // Need to position the video full screen on external with aspect ratio
+        Rect r = getAspectRatio(hw, s.active.w, s.active.h);
+        layer.setFrame(r);
+    }
+#endif
     layer.setCrop(computeCrop(hw));
     layer.setPlaneAlpha(s.alpha);
 
@@ -425,7 +472,12 @@ void Layer::setAcquireFence(const sp<const DisplayDevice>& hw,
     // TODO: there is a possible optimization here: we only need to set the
     // acquire fence the first time a new buffer is acquired on EACH display.
 
+#ifdef QCOM_HARDWARE
+    if (layer.getCompositionType() == HWC_OVERLAY ||
+            layer.getCompositionType() == HWC_BLIT) {
+#else
     if (layer.getCompositionType() == HWC_OVERLAY) {
+#endif
         sp<Fence> fence = mSurfaceFlingerConsumer->getCurrentFence();
         if (fence->isValid()) {
             fenceFd = fence->dup();
@@ -490,11 +542,22 @@ void Layer::onDraw(const sp<const DisplayDevice>& hw, const Region& clip) const
         // is probably going to have something visibly wrong.
     }
 
+    bool canAllowGPU = false;
+#ifdef QCOM_BSP
+    if(isProtected()) {
+        char property[PROPERTY_VALUE_MAX];
+        if ((property_get("persist.gralloc.cp.level3", property, NULL) > 0) &&
+                (atoi(property) == 1)) {
+            canAllowGPU = true;
+        }
+    }
+#endif
+
     bool blackOutLayer = isProtected() || (isSecure() && !hw->isSecure());
 
     RenderEngine& engine(mFlinger->getRenderEngine());
 
-    if (!blackOutLayer) {
+    if (!blackOutLayer || (canAllowGPU)) {
         // TODO: we could be more subtle with isFixedSize()
         const bool useFiltering = getFiltering() || needsFiltering(hw) || isFixedSize();
 
@@ -1238,6 +1301,55 @@ Layer::LayerCleaner::~LayerCleaner() {
     mFlinger->onLayerDestroyed(mLayer);
 }
 
+#ifdef QCOM_BSP
+bool Layer::isExtOnly() const
+{
+    const sp<GraphicBuffer>& activeBuffer(mActiveBuffer);
+    if (activeBuffer != 0) {
+        uint32_t usage = activeBuffer->getUsage();
+        if(usage & GRALLOC_USAGE_PRIVATE_EXTERNAL_ONLY)
+            return true;
+    }
+    return false;
+}
+
+bool Layer::isIntOnly() const
+{
+    const sp<GraphicBuffer>& activeBuffer(mActiveBuffer);
+    if (activeBuffer != 0) {
+        uint32_t usage = activeBuffer->getUsage();
+        if(usage & GRALLOC_USAGE_PRIVATE_INTERNAL_ONLY)
+            return true;
+    }
+    return false;
+}
+
+bool Layer::isSecureDisplay() const
+{
+    const sp<GraphicBuffer>& activeBuffer(mActiveBuffer);
+    if (activeBuffer != 0) {
+        uint32_t usage = activeBuffer->getUsage();
+        if(usage & GRALLOC_USAGE_PRIVATE_SECURE_DISPLAY)
+            return true;
+    }
+    return false;
+}
+
+// returns true, if the activeBuffer is Yuv
+bool Layer::isYuvLayer() const {
+    const sp<GraphicBuffer>& activeBuffer(mActiveBuffer);
+    if(activeBuffer != 0) {
+        ANativeWindowBuffer* buffer = activeBuffer->getNativeBuffer();
+        if(buffer) {
+            private_handle_t* hnd = static_cast<private_handle_t*>
+                (const_cast<native_handle_t*>(buffer->handle));
+            //if BUFFER_TYPE_VIDEO, its YUV
+            return (hnd && (hnd->bufferType == BUFFER_TYPE_VIDEO));
+        }
+    }
+    return false;
+}
+#endif
 // ---------------------------------------------------------------------------
 }; // namespace android
 

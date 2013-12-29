@@ -45,19 +45,35 @@ GraphicBuffer::GraphicBuffer()
     handle = NULL;
 }
 
-GraphicBuffer::GraphicBuffer(uint32_t w, uint32_t h, 
+GraphicBuffer::GraphicBuffer(uint32_t w, uint32_t h,
         PixelFormat reqFormat, uint32_t reqUsage)
     : BASE(), mOwner(ownData), mBufferMapper(GraphicBufferMapper::get()),
       mInitCheck(NO_ERROR)
 {
-    width  = 
-    height = 
-    stride = 
-    format = 
+    width  =
+    height =
+    stride =
+    format =
     usage  = 0;
     handle = NULL;
     mInitCheck = initSize(w, h, reqFormat, reqUsage);
 }
+
+#ifdef QCOM_HARDWARE
+GraphicBuffer::GraphicBuffer(uint32_t w, uint32_t h,
+        PixelFormat reqFormat, uint32_t reqUsage, uint32_t bufferSize)
+    : BASE(), mOwner(ownData), mBufferMapper(GraphicBufferMapper::get()),
+      mInitCheck(NO_ERROR)
+{
+    width  =
+    height =
+    stride =
+    format =
+    usage  = 0;
+    handle = NULL;
+    mInitCheck = initSize(w, h, reqFormat, reqUsage, bufferSize);
+}
+#endif
 
 GraphicBuffer::GraphicBuffer(uint32_t w, uint32_t h,
         PixelFormat inFormat, uint32_t inUsage,
@@ -153,6 +169,23 @@ status_t GraphicBuffer::initSize(uint32_t w, uint32_t h, PixelFormat format,
     return err;
 }
 
+#ifdef QCOM_HARDWARE
+status_t GraphicBuffer::initSize(uint32_t w, uint32_t h, PixelFormat format,
+                                 uint32_t reqUsage, uint32_t bufferSize)
+{
+    GraphicBufferAllocator& allocator = GraphicBufferAllocator::get();
+    status_t err = allocator.alloc(w, h, format,
+                                   reqUsage, &handle, &stride, bufferSize);
+    if (err == NO_ERROR) {
+        this->width  = w;
+        this->height = h;
+        this->format = format;
+        this->usage  = reqUsage;
+    }
+    return err;
+}
+#endif
+
 status_t GraphicBuffer::lock(uint32_t usage, void** vaddr)
 {
     const Rect lockBounds(width, height);
@@ -162,10 +195,10 @@ status_t GraphicBuffer::lock(uint32_t usage, void** vaddr)
 
 status_t GraphicBuffer::lock(uint32_t usage, const Rect& rect, void** vaddr)
 {
-    if (rect.left < 0 || rect.right  > this->width || 
+    if (rect.left < 0 || rect.right  > this->width ||
         rect.top  < 0 || rect.bottom > this->height) {
         ALOGE("locking pixels (%d,%d,%d,%d) outside of buffer (w=%d, h=%d)",
-                rect.left, rect.top, rect.right, rect.bottom, 
+                rect.left, rect.top, rect.right, rect.bottom,
                 this->width, this->height);
         return BAD_VALUE;
     }
@@ -231,12 +264,18 @@ status_t GraphicBuffer::flatten(void*& buffer, size_t& size, int*& fds, size_t& 
         native_handle_t const* const h = handle;
         memcpy(fds,     h->data,             h->numFds*sizeof(int));
         memcpy(&buf[8], h->data + h->numFds, h->numInts*sizeof(int));
+#ifdef QCOM_HARDWARE
+        fds += handle->numFds;
+        count -= handle->numFds;
+#endif
     }
 
     buffer = reinterpret_cast<void*>(static_cast<int*>(buffer) + sizeNeeded);
     size -= sizeNeeded;
+#ifndef QCOM_HARDWARE
     fds += handle->numFds;
     count -= handle->numFds;
+#endif
 
     return NO_ERROR;
 }

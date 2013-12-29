@@ -96,7 +96,8 @@ public:
     void run() ANDROID_API;
 
     enum {
-        EVENT_VSYNC = HWC_EVENT_VSYNC
+        EVENT_VSYNC = HWC_EVENT_VSYNC,
+        EVENT_ORIENTATION = HWC_EVENT_ORIENTATION
     };
 
     // post an asynchronous message to the main thread
@@ -132,7 +133,12 @@ public:
     RenderEngine& getRenderEngine() const {
         return *mRenderEngine;
     }
-
+#ifdef QCOM_BSP
+    // Extended Mode - No video on primary and it will be shown full
+    // screen on External
+    static bool sExtendedMode;
+    static bool isExtendedMode() { return sExtendedMode; };
+#endif
 private:
     friend class Client;
     friend class DisplayEventConnection;
@@ -246,6 +252,12 @@ private:
 
     void handleTransaction(uint32_t transactionFlags);
     void handleTransactionLocked(uint32_t transactionFlags);
+
+#ifdef QCOM_HARDWARE
+    // Read virtual display properties
+    void setVirtualDisplayData( int32_t hwcDisplayId,
+                                const sp<IGraphicBufferProducer>& sink);
+#endif
 
     /* handlePageFilp: this is were we latch a new buffer
      * if available and compute the dirty region.
@@ -361,7 +373,11 @@ private:
      * Compositing
      */
     void invalidateHwcGeometry();
+#ifdef QCOM_HARDWARE
+    static void computeVisibleRegions(size_t dpy,
+#else
     static void computeVisibleRegions(
+#endif
             const LayerVector& currentLayers, uint32_t layerStack,
             Region& dirtyRegion, Region& opaqueRegion);
 
