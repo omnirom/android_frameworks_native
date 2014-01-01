@@ -263,9 +263,18 @@ enum {
     AKEYCODE_RO              = 217,
     AKEYCODE_KANA            = 218,
     AKEYCODE_ASSIST          = 219,
-    AKEYCODE_BRIGHTNESS_DOWN = 220,
-    AKEYCODE_BRIGHTNESS_UP   = 221,
-    AKEYCODE_MEDIA_AUDIO_TRACK = 222,
+    AKEYCODE_WIRELESS        = 220,
+    AKEYCODE_BLUETOOTH       = 221,
+    AKEYCODE_TOUCHPAD        = 222,
+    AKEYCODE_BRIGHTNESS_UP   = 223,
+    AKEYCODE_BRIGHTNESS_DOWN = 224,
+    AKEYCODE_BRIGHTNESS_AUTO = 225,
+    AKEYCODE_CAPTURE         = 226,
+    AKEYCODE_EUROPE_1        = 227,
+    AKEYCODE_EUROPE_2        = 228,
+    AKEYCODE_SLEEP           = 229,
+    AKEYCODE_MEDIA_AUDIO_TRACK = 230,
+
 
     // NOTE: If you add a new keycode here you must also add it to several other files.
     //       Refer to frameworks/base/core/java/android/view/KeyEvent.java for the full list.
