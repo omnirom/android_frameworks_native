@@ -39,6 +39,7 @@ LOCAL_SHARED_LIBRARIES := \
 	libutils \
 	liblog
 
+
 ifeq ($(call is-board-platform-in-list, mpq8092), true)
     LOCAL_CFLAGS            += -DVFM_AVAILABLE
 endif
@@ -55,6 +56,14 @@ endif
     LOCAL_C_INCLUDES        += $(TARGET_OUT_HEADERS)/vpu/
     LOCAL_CFLAGS            += -DQCOM_BSP
     LOCAL_SHARED_LIBRARIES  += libqdMetaData
+endif
+
+ifeq ($(BOARD_EGL_SKIP_FIRST_DEQUEUE),true)
+    LOCAL_CFLAGS += -DSURFACE_SKIP_FIRST_DEQUEUE
+endif
+
+ifeq ($(BOARD_USE_MHEAP_SCREENSHOT),true)
+    LOCAL_CFLAGS += -DUSE_MHEAP_SCREENSHOT
 endif
 
 LOCAL_MODULE:= libgui
