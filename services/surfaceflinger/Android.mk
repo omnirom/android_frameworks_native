@@ -71,6 +71,10 @@ ifeq ($(BOARD_USE_MHEAP_SCREENSHOT),true)
     LOCAL_CFLAGS += -DUSE_MHEAP_SCREENSHOT
 endif
 
+ifeq ($(BOARD_NEEDS_OLD_HWC_API),true)
+    LOCAL_CFLAGS += -DOLD_HWC_API
+endif
+
 # See build/target/board/generic/BoardConfig.mk for a description of this setting.
 ifneq ($(VSYNC_EVENT_PHASE_OFFSET_NS),)
     LOCAL_CFLAGS += -DVSYNC_EVENT_PHASE_OFFSET_NS=$(VSYNC_EVENT_PHASE_OFFSET_NS)
