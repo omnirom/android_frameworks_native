@@ -1,0 +1,38 @@
+{
+  "comments": [
+    {
+      "key": {
+        "uuid": "6b8b61a3_64c7e016",
+        "filename": "services/surfaceflinger/DisplayHardware/HWComposer.cpp",
+        "patchSetId": 3
+      },
+      "lineNbr": 77,
+      "author": {
+        "id": 1000123
+      },
+      "writtenOn": "2014-01-04T10:21:34Z",
+      "side": 1,
+      "message": "typo: #endif",
+      "revId": "2ddf4d56ff1ec8b12c64d6e94c52f4a1bc20d7e1",
+      "serverId": "56841c99-7c94-43d4-bf0b-cb4707e66d55",
+      "unresolved": false
+    },
+    {
+      "key": {
+        "uuid": "6b8b61a3_84ccec38",
+        "filename": "services/surfaceflinger/DisplayHardware/HWComposer.cpp",
+        "patchSetId": 3
+      },
+      "lineNbr": 892,
+      "author": {
+        "id": 1000123
+      },
+      "writtenOn": "2014-01-04T10:21:34Z",
+      "side": 1,
+      "message": "shouldn\u0027t the part below also be ifdef\u0027ed?",
+      "revId": "2ddf4d56ff1ec8b12c64d6e94c52f4a1bc20d7e1",
+      "serverId": "56841c99-7c94-43d4-bf0b-cb4707e66d55",
+      "unresolved": false
+    }
+  ]
+}
