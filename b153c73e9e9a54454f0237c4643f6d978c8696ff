@@ -1,0 +1,38 @@
+{
+  "comments": [
+    {
+      "key": {
+        "uuid": "6b8b61a3_c746f626",
+        "filename": "services/surfaceflinger/DisplayHardware/HWComposer.cpp",
+        "patchSetId": 7
+      },
+      "lineNbr": 1422,
+      "author": {
+        "id": 1000123
+      },
+      "writtenOn": "2014-01-04T17:14:33Z",
+      "side": 1,
+      "message": "Still missing the OLD_HWC_API",
+      "revId": "b153c73e9e9a54454f0237c4643f6d978c8696ff",
+      "serverId": "56841c99-7c94-43d4-bf0b-cb4707e66d55",
+      "unresolved": false
+    },
+    {
+      "key": {
+        "uuid": "6b8b61a3_e743f214",
+        "filename": "services/surfaceflinger/DisplayHardware/HWComposer.cpp",
+        "patchSetId": 7
+      },
+      "lineNbr": 1528,
+      "author": {
+        "id": 1000123
+      },
+      "writtenOn": "2014-01-04T17:14:33Z",
+      "side": 1,
+      "message": "Missing #endif",
+      "revId": "b153c73e9e9a54454f0237c4643f6d978c8696ff",
+      "serverId": "56841c99-7c94-43d4-bf0b-cb4707e66d55",
+      "unresolved": false
+    }
+  ]
+}
