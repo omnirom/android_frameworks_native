@@ -1,0 +1,21 @@
+{
+  "comments": [
+    {
+      "key": {
+        "uuid": "6b8b61a3_27a07a9b",
+        "filename": "services/surfaceflinger/DisplayHardware/HWComposer.cpp",
+        "patchSetId": 10
+      },
+      "lineNbr": 894,
+      "author": {
+        "id": 1000123
+      },
+      "writtenOn": "2014-01-04T20:35:23Z",
+      "side": 1,
+      "message": "The section of line 894-917 should also be ifdef\u0027ed. Or moved up to the existing ifdef\u0027ed piece above.",
+      "revId": "d432fdba566409fc0a33c0d10950f1667cfeb0ce",
+      "serverId": "56841c99-7c94-43d4-bf0b-cb4707e66d55",
+      "unresolved": false
+    }
+  ]
+}
