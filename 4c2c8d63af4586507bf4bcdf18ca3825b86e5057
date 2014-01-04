@@ -1,0 +1,21 @@
+{
+  "comments": [
+    {
+      "key": {
+        "uuid": "6b8b61a3_27cb1a75",
+        "filename": "services/surfaceflinger/DisplayHardware/HWComposer.cpp",
+        "patchSetId": 9
+      },
+      "lineNbr": 195,
+      "author": {
+        "id": 1000123
+      },
+      "writtenOn": "2014-01-04T19:19:52Z",
+      "side": 1,
+      "message": "This #endif should go down one line (or the bracket on line 94 should be removed)",
+      "revId": "4c2c8d63af4586507bf4bcdf18ca3825b86e5057",
+      "serverId": "56841c99-7c94-43d4-bf0b-cb4707e66d55",
+      "unresolved": false
+    }
+  ]
+}
