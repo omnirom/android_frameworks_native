@@ -238,6 +238,7 @@ IMPLEMENT_META_INTERFACE(SurfaceComposer, "android.ui.ISurfaceComposer");
 status_t BnSurfaceComposer::onTransact(
     uint32_t code, const Parcel& data, Parcel* reply, uint32_t flags)
 {
+    ALOGE("XPLOD/ ONTRANSACT %d", code);
     switch(code) {
         case CREATE_CONNECTION: {
             CHECK_INTERFACE(ISurfaceComposer, data, reply);
@@ -252,6 +253,7 @@ status_t BnSurfaceComposer::onTransact(
             return NO_ERROR;
         }
         case SET_TRANSACTION_STATE: {
+return NO_ERROR; // XPLOD
             CHECK_INTERFACE(ISurfaceComposer, data, reply);
             size_t count = data.readInt32();
             ComposerState s;

@@ -109,6 +109,13 @@ public:
         // dependent.
         Region activeTransparentRegion;
         Region requestedTransparentRegion;
+
+#ifdef MTK_MT6589
+        uint32_t flagsEx;
+        uint32_t usageEx;
+        uint32_t stConnectedApi;
+        uint32_t stCurrentTransform;
+#endif
     };
 
     // -----------------------------------------------------------------------
@@ -285,6 +292,11 @@ public:
     void clearStats();
     void logFrameStats();
 
+#ifdef MTK_MT6589
+    bool setFlagsEx(uint32_t flags, uint32_t mask);
+    status_t updateLayerInfoToSurfaceTexture();
+#endif
+
 protected:
     // constant
     sp<SurfaceFlinger> mFlinger;
@@ -372,6 +384,7 @@ private:
     // Set to true once we've returned this surface's handle
     mutable bool mHasSurface;
     const wp<Client> mClientRef;
+
 };
 
 // ---------------------------------------------------------------------------

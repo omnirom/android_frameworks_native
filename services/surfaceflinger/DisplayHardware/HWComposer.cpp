@@ -960,6 +960,39 @@ public:
 
         getLayer()->acquireFenceFd = -1;
     }
+
+#ifdef MTK_MT6589
+    virtual int getMva() {
+        return getLayer()->ext.mva;
+    }
+    virtual void setLayerType(uint32_t type) {
+    }
+    virtual void setSecure(bool secure) {
+    }
+    virtual void setDirty(bool dirty) {
+    }
+    virtual void setConnectedApi(int32_t api) {
+        getLayer()->ext.connectApi = api;
+    }
+    virtual void setIdentity(int32_t id) {
+        getLayer()->ext.identity = id;
+    }
+    virtual void setFillColor(struct hwc_color color) {
+        getLayer()->ext.fillColor = color;
+    }
+    virtual void setMatrix(const Transform& tr) {
+        float *m = getLayer()->ext.transformMatrix;
+        for (int i = 0, j = 0; i < 9; i += 3, j++) {
+            m[i + 0] = tr[0][j];
+            m[i + 1] = tr[1][j];
+            m[i + 2] = tr[2][j];
+        }
+    }
+    virtual void setStereosFlags(uint32_t flag) {
+        getLayer()->ext.extraFlags = flag;
+    }
+#endif
+
 };
 
 /*

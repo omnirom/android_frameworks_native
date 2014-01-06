@@ -43,6 +43,10 @@ GraphicBuffer::GraphicBuffer()
     format = 
     usage  = 0;
     handle = NULL;
+#ifdef MTK_MT6589
+    mva = 0;
+    msize = 0;
+#endif
 }
 
 GraphicBuffer::GraphicBuffer(uint32_t w, uint32_t h, 
@@ -56,6 +60,10 @@ GraphicBuffer::GraphicBuffer(uint32_t w, uint32_t h,
     format = 
     usage  = 0;
     handle = NULL;
+#ifdef MTK_MT6589
+    mva = 0;
+    msize = 0;
+#endif
     mInitCheck = initSize(w, h, reqFormat, reqUsage);
 }
 
@@ -72,6 +80,10 @@ GraphicBuffer::GraphicBuffer(uint32_t w, uint32_t h,
     format = inFormat;
     usage  = inUsage;
     handle = inHandle;
+#ifdef MTK_MT6589
+    mva = 0;
+    msize = 0;
+#endif
 }
 
 GraphicBuffer::GraphicBuffer(ANativeWindowBuffer* buffer, bool keepOwnership)
@@ -85,13 +97,17 @@ GraphicBuffer::GraphicBuffer(ANativeWindowBuffer* buffer, bool keepOwnership)
     format = buffer->format;
     usage  = buffer->usage;
     handle = buffer->handle;
+#ifdef MTK_MT6589
+    mva = 0;
+    msize = 0;
+#endif
 }
 
 GraphicBuffer::~GraphicBuffer()
 {
-    if (handle) {
+/*    if (handle) {
         free_handle();
-    }
+    }*/
 }
 
 void GraphicBuffer::free_handle()
@@ -149,6 +165,10 @@ status_t GraphicBuffer::initSize(uint32_t w, uint32_t h, PixelFormat format,
         this->height = h;
         this->format = format;
         this->usage  = reqUsage;
+
+#if defined(MTK_MT6589) && defined(MTK_MMUMAP_SUPPORT)
+        mapBuffer();
+#endif
     }
     return err;
 }
@@ -295,6 +315,21 @@ status_t GraphicBuffer::unflatten(
 
     return NO_ERROR;
 }
+
+#ifdef MTK_MT6589
+status_t GraphicBuffer::getIonFd(int *idx, int *num)
+{
+    return getBufferMapper().getIonFd(handle, idx, num);
+}
+
+void GraphicBuffer::setMva(unsigned int _mva)
+{
+#ifndef MTK_MMUMAP_SUPPORT
+    mva = _mva;
+#endif
+}
+
+#endif
 
 // ---------------------------------------------------------------------------
 

@@ -1724,6 +1724,10 @@ void SurfaceFlinger::doDisplayComposition(const sp<const DisplayDevice>& hw,
         engine.endGroup();
     }
 
+#ifdef MTK_MT6589
+    doComposeSurfaces(hw, dirtyRegion);
+#endif
+
     // update the swap region and clear the dirty region
     hw->swapRegion.orSelf(dirtyRegion);
 
@@ -2062,6 +2066,11 @@ uint32_t SurfaceFlinger::setClientStateLocked(
         if (what & layer_state_t::eVisibilityChanged) {
             if (layer->setFlags(s.flags, s.mask))
                 flags |= eTraversalNeeded;
+
+#ifdef MTK_MT6589
+            if (layer->setFlagsEx(s.flagsEx, s.maskEx))
+                flags |= eTraversalNeeded;
+#endif
         }
         if (what & layer_state_t::eCropChanged) {
             if (layer->setCrop(s.crop))
@@ -2302,6 +2311,11 @@ void SurfaceFlinger::unblank(const sp<IBinder>& display) {
     };
     sp<MessageBase> msg = new MessageScreenAcquired(*this, display);
     postMessageSync(msg);
+
+#ifdef MTK_MT6589
+    usleep(16667);
+    property_set("sys.ipowin.done", "1");
+#endif
 }
 
 void SurfaceFlinger::blank(const sp<IBinder>& display) {

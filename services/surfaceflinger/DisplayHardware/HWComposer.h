@@ -32,6 +32,10 @@
 #include <utils/Timers.h>
 #include <utils/Vector.h>
 
+#ifdef MTK_MT6589
+#include "Transform.h"
+#endif
+
 extern "C" int clock_nanosleep(clockid_t clock_id, int flags,
                            const struct timespec *request,
                            struct timespec *remain);
@@ -168,6 +172,18 @@ public:
         virtual void setAcquireFenceFd(int fenceFd) = 0;
         virtual void setPlaneAlpha(uint8_t alpha) = 0;
         virtual void onDisplayed() = 0;
+
+#ifdef MTK_MT6589
+        virtual int getMva() = 0;
+        virtual void setLayerType(uint32_t type) = 0;
+        virtual void setSecure(bool secure) = 0;
+        virtual void setDirty(bool dirty) = 0;
+        virtual void setConnectedApi(int32_t api) = 0;
+        virtual void setIdentity(int32_t id) = 0;
+        virtual void setFillColor(struct hwc_color color) = 0;
+        virtual void setMatrix(const Transform& tr) = 0;
+        virtual void setStereosFlags(uint32_t flag) = 0;
+#endif
     };
 
     /*

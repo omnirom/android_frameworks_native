@@ -46,6 +46,10 @@
 
 #include "RenderEngine/RenderEngine.h"
 
+#ifdef MTK_MT6589
+#include <hardware/hwcomposer.h>
+#endif
+
 #define DEBUG_RESIZE    0
 
 namespace android {
@@ -104,6 +108,13 @@ Layer::Layer(SurfaceFlinger* flinger, const sp<Client>& client,
     mCurrentState.transform.set(0, 0);
     mCurrentState.requested = mCurrentState.active;
 
+#ifdef MTK_MT6589
+    mCurrentState.flagsEx = layer_state_t::eExInitValue;
+    mCurrentState.usageEx = EXTRA_USAGE_INIT_VALUE;
+    mCurrentState.stConnectedApi = BufferQueue::NO_CONNECTED_API;
+    mCurrentState.stCurrentTransform = Transform::ROT_INVALID;
+#endif
+
     // drawing state & current state are identical
     mDrawingState = mCurrentState;
 
@@ -125,6 +136,11 @@ void Layer::onFirstRef() {
     mSurfaceFlingerConsumer->setDefaultMaxBufferCount(2);
 #else
     mSurfaceFlingerConsumer->setDefaultMaxBufferCount(3);
+#endif
+
+#ifdef MTK_MT6589
+    // workaround to use quad buffer for SF layer
+    mSurfaceFlingerConsumer->setDefaultMaxBufferCount(4);
 #endif
 
     const sp<const DisplayDevice> hw(mFlinger->getDefaultDisplayDevice());
@@ -149,6 +165,10 @@ void Layer::onLayerDisplayed(const sp<const DisplayDevice>& hw,
     if (layer) {
         layer->onDisplayed();
         mSurfaceFlingerConsumer->setReleaseFence(layer->getAndResetReleaseFence());
+
+#ifdef MTK_MT6589
+        mActiveBuffer->setMva(layer->getMva());
+#endif
     }
 }
 
@@ -400,6 +420,12 @@ void Layer::setGeometry(
     } else {
         layer.setTransform(orientation);
     }
+
+#ifdef MTK_MT6589
+    layer.setTransform(orientation);
+    layer.setMatrix(tr);
+    layer.setSecure((isSecure() || isProtected()));
+#endif
 }
 
 void Layer::setPerFrameData(const sp<const DisplayDevice>& hw,
@@ -941,6 +967,10 @@ Region Layer::latchBuffer(bool& recomputeVisibleRegions)
 {
     ATRACE_CALL();
 
+#ifdef MTK_MT6589
+    updateLayerInfoToSurfaceTexture();
+#endif
+
     Region outDirtyRegion;
     if (mQueuedFrames > 0) {
 
@@ -1225,6 +1255,22 @@ void Layer::clearStats() {
 void Layer::logFrameStats() {
     mFrameTracker.logAndResetStats(mName);
 }
+
+#ifdef MTK_MT6589
+bool Layer::setFlagsEx(uint32_t flags, uint32_t mask) {
+    if (mask == 0) return false;
+
+    sp<SurfaceFlingerConsumer> s = mSurfaceFlingerConsumer;
+    const uint32_t newFlags = (mCurrentState.flagsEx & ~mask) | (flags & mask);
+    mCurrentState.sequence++;
+    //FIXME: s->setFlagsEx(newFlags);
+    return true;
+}
+
+status_t Layer::updateLayerInfoToSurfaceTexture() {
+    return OK;
+}
+#endif
 
 // ---------------------------------------------------------------------------
 

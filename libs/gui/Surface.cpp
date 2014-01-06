@@ -656,9 +656,9 @@ int Surface::setBuffersTimestamp(int64_t timestamp)
 }
 
 void Surface::freeAllBuffers() {
-    for (int i = 0; i < NUM_BUFFER_SLOTS; i++) {
+/*    for (int i = 0; i < NUM_BUFFER_SLOTS; i++) {
         mSlots[i].buffer = 0;
-    }
+    }*/
 }
 
 // ----------------------------------------------------------------------

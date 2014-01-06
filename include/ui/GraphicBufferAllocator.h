@@ -81,6 +81,9 @@ private:
         PixelFormat format;
         uint32_t usage;
         size_t size;
+#ifdef MTK_MT6589
+        uint32_t pid;
+#endif
     };
     
     static Mutex sLock;
@@ -91,6 +94,7 @@ private:
     ~GraphicBufferAllocator();
     
     alloc_device_t  *mAllocDev;
+
 };
 
 // ---------------------------------------------------------------------------
