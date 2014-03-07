@@ -26,6 +26,9 @@
 
 #include <ui/DisplayInfo.h>
 #include <ui/PixelFormat.h>
+#ifdef STE_HARDWARE
+#include <ui/FramebufferNativeWindow.h>
+#endif
 
 #include <gui/Surface.h>
 
@@ -78,11 +81,11 @@ DisplayDevice::DisplayDevice(
       mHardwareOrientation(0),
       mOrientation()
 {
-    mNativeWindow = new Surface(producer, false);
-#ifndef BOARD_EGL_NEEDS_LEGACY_FB
-    ANativeWindow* const window = mNativeWindow.get();
+#ifdef STE_HARDWARE
+     ANativeWindow* const window = new FramebufferNativeWindow();
 #else
-    ANativeWindow* const window = new FramebufferNativeWindow();
+    mNativeWindow = new Surface(producer, false);
+    ANativeWindow* const window = mNativeWindow.get();
 #endif
 
     int format;
@@ -506,12 +509,19 @@ void DisplayDevice::dump(String8& result) const {
     const Transform& tr(mGlobalTransform);
     result.appendFormat(
         "+ DisplayDevice: %s\n"
-        "   type=%x, hwcId=%d, layerStack=%u, (%4dx%4d), ANativeWindow=%p, orient=%2d (type=%08x), "
+        "   type=%x, hwcId=%d, layerStack=%u, (%4dx%4d),"
+#ifndef STE_HARDWARE
+	"ANativeWindow=%p, "
+#endif
+	"orient=%2d (type=%08x), "
         "flips=%u, isSecure=%d, secureVis=%d, acquired=%d, numLayers=%u\n"
         "   v:[%d,%d,%d,%d], f:[%d,%d,%d,%d], s:[%d,%d,%d,%d],"
         "transform:[[%0.3f,%0.3f,%0.3f][%0.3f,%0.3f,%0.3f][%0.3f,%0.3f,%0.3f]]\n",
         mDisplayName.string(), mType, mHwcDisplayId,
-        mLayerStack, mDisplayWidth, mDisplayHeight, mNativeWindow.get(),
+        mLayerStack, mDisplayWidth, mDisplayHeight,
+#ifndef STE_HARDWARE
+	mNativeWindow.get(),
+#endif
         mOrientation, tr.getType(), getPageFlipCount(),
         mIsSecure, mSecureLayerVisible, mScreenAcquired, mVisibleLayersSortedByZ.size(),
         mViewport.left, mViewport.top, mViewport.right, mViewport.bottom,
