@@ -273,7 +273,13 @@ public:
 
     // Updates the transform hint in our SurfaceFlingerConsumer to match
     // the current orientation of the display device.
-    void updateTransformHint(const sp<const DisplayDevice>& hw) const;
+    void updateTransformHint(const sp<const DisplayDevice>& hw);
+#ifdef QCOM_BSP
+    virtual bool isExtOnly() const;
+    virtual bool isIntOnly() const;
+    virtual bool isSecureDisplay() const;
+    virtual bool isYuvLayer() const;
+#endif
 
     /*
      * returns the rectangle that crops the content of the layer and scales it
@@ -306,6 +312,11 @@ public:
     void clearFrameStats();
     void logFrameStats();
     void getFrameStats(FrameStats* outStats) const;
+
+#ifdef QCOM_BSP
+    //GPUTileRect : Return true if the layer has been updated in this frame.
+    bool hasNewFrame() const;
+#endif
 
 protected:
     // constant
@@ -341,6 +352,7 @@ private:
     FloatRect computeCrop(const sp<const DisplayDevice>& hw) const;
     bool isCropped() const;
     static bool getOpacityForFormat(uint32_t format);
+    Transform computeBufferTransform(const sp<const DisplayDevice>& hw) const;
 
     // drawing
     void clearWithOpenGL(const sp<const DisplayDevice>& hw, const Region& clip,
@@ -403,6 +415,9 @@ private:
 
     // This layer can be a cursor on some displays.
     bool mPotentialCursor;
+
+    // Transform hint assigned for the layer
+    uint32_t mTransformHint;
 };
 
 // ---------------------------------------------------------------------------
