@@ -146,6 +146,11 @@ DisplayDevice::DisplayDevice(
             mDisplayName = "Virtual Screen";    // e.g. Overlay #n
             break;
     }
+    char property[PROPERTY_VALUE_MAX];
+    int panelOrientation = DisplayState::eOrientationDefault;
+    // Set the panel orientation from the property.
+    property_get("persist.panel.orientation", property, "0");
+    panelOrientation = atoi(property) / 90;
 
     char property[PROPERTY_VALUE_MAX];
     int panelOrientation = DisplayState::eOrientationDefault;
@@ -163,6 +168,13 @@ DisplayDevice::~DisplayDevice() {
         mSurface = EGL_NO_SURFACE;
     }
 }
+
+#ifdef QCOM_BSP
+void DisplayDevice::eglSwapPreserved(bool enable) const {
+    int swapValue = enable ? EGL_BUFFER_PRESERVED : EGL_BUFFER_DESTROYED;
+    eglSurfaceAttrib(mDisplay, mSurface, EGL_SWAP_BEHAVIOR, swapValue);
+}
+#endif
 
 void DisplayDevice::disconnect(HWComposer& hwc) {
     if (mHwcDisplayId >= 0) {
