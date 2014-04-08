@@ -109,6 +109,10 @@ HWComposer::HWComposer(
     int fberr = loadFbHalModule();
     loadHwcModule();
 
+#ifdef OMAP_ENHANCEMENT
+    // FB HAL must stay open independent of HWC API version. Closing FB HAL will
+    // result in destruction of flip chain and de-allocation of framebuffer.
+#else
     if (mFbDev && mHwc && hwcHasApiVersion(mHwc, HWC_DEVICE_API_VERSION_1_1)) {
         // close FB HAL if we don't needed it.
         // FIXME: this is temporary until we're not forced to open FB HAL
@@ -116,6 +120,7 @@ HWComposer::HWComposer(
         framebuffer_close(mFbDev);
         mFbDev = NULL;
     }
+#endif
 
     // If we have no HWC, or a pre-1.1 HWC, an FB dev is mandatory.
     if ((!mHwc || !hwcHasApiVersion(mHwc, HWC_DEVICE_API_VERSION_1_1))
@@ -164,7 +169,11 @@ HWComposer::HWComposer(
         }
     }
 
+#ifdef OMAP_ENHANCEMENT
+    if (!mHwc || !hwcHasApiVersion(mHwc, HWC_DEVICE_API_VERSION_1_1)) {
+#else
     if (mFbDev) {
+#endif
         ALOG_ASSERT(!(mHwc && hwcHasApiVersion(mHwc, HWC_DEVICE_API_VERSION_1_1)),
                 "should only have fbdev if no hwc or hwc is 1.0");
 
