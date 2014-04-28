@@ -19,6 +19,24 @@
     },
     {
       "key": {
+        "uuid": "8b77b57d_09a9d977",
+        "filename": "libs/binder/Parcel.cpp",
+        "patchSetId": 3
+      },
+      "lineNbr": 811,
+      "author": {
+        "id": 1000551
+      },
+      "writtenOn": "2014-04-28T17:16:21Z",
+      "side": 1,
+      "message": "Hey Lalit Maganti!\n\nCan you tell me a bit more? I don´t understand everything, i am still learning all those stuff :-P\n\nNo problem on your other comments (about the missing  #ifdef´s and wrong removed #ifdef) - i only don´t know how to fix it here (libs/binder/Parcel.cpp) :D Sorry if it sounds noob :p\n\nAlso am i missing an #else for other devices (original L 812- L814) ?\n\nKind regards\n\nAndi",
+      "parentUuid": "8b77b57d_e9957d44",
+      "revId": "c109581dcdaeee87497e1cf087628560b5ab1854",
+      "serverId": "56841c99-7c94-43d4-bf0b-cb4707e66d55",
+      "unresolved": false
+    },
+    {
+      "key": {
         "uuid": "8b77b57d_c998c17e",
         "filename": "services/surfaceflinger/DisplayDevice.cpp",
         "patchSetId": 3
