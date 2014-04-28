@@ -1,0 +1,55 @@
+{
+  "comments": [
+    {
+      "key": {
+        "uuid": "8b77b57d_e9957d44",
+        "filename": "libs/binder/Parcel.cpp",
+        "patchSetId": 3
+      },
+      "lineNbr": 811,
+      "author": {
+        "id": 1000022
+      },
+      "writtenOn": "2014-04-28T08:35:12Z",
+      "side": 1,
+      "message": "Please don\u0027t remove the compat code",
+      "revId": "c109581dcdaeee87497e1cf087628560b5ab1854",
+      "serverId": "56841c99-7c94-43d4-bf0b-cb4707e66d55",
+      "unresolved": false
+    },
+    {
+      "key": {
+        "uuid": "8b77b57d_c998c17e",
+        "filename": "services/surfaceflinger/DisplayDevice.cpp",
+        "patchSetId": 3
+      },
+      "lineNbr": 85,
+      "author": {
+        "id": 1000022
+      },
+      "writtenOn": "2014-04-28T08:35:12Z",
+      "side": 1,
+      "message": "You\u0027ve removed an ifdef for LEGACY_FB - please put it back in",
+      "revId": "c109581dcdaeee87497e1cf087628560b5ab1854",
+      "serverId": "56841c99-7c94-43d4-bf0b-cb4707e66d55",
+      "unresolved": false
+    },
+    {
+      "key": {
+        "uuid": "8b77b57d_a9b385fd",
+        "filename": "services/surfaceflinger/SurfaceFlinger.cpp",
+        "patchSetId": 3
+      },
+      "lineNbr": 2995,
+      "author": {
+        "id": 1000022
+      },
+      "writtenOn": "2014-04-28T08:35:12Z",
+      "side": 1,
+      "message": "Please ifdef the mutex stuff",
+      "revId": "c109581dcdaeee87497e1cf087628560b5ab1854",
+      "serverId": "56841c99-7c94-43d4-bf0b-cb4707e66d55",
+      "unresolved": false
+    }
+  ]
+}
