@@ -159,6 +159,17 @@ private:
     // If we're wrapping another buffer then this reference will make sure it
     // doesn't get freed.
     sp<ANativeWindowBuffer> mWrappedBuffer;
+
+#ifdef MTK_G_MT6589
+public:
+    status_t getIonFd(int *idx, int *num);
+    unsigned int getMva() const { return mva; }
+    void setMva(unsigned int _mva);
+
+private:
+    unsigned int mva;
+    unsigned int msize;
+#endif
 };
 
 }; // namespace android

@@ -28,6 +28,10 @@
 #include "DisplayDevice.h"
 #include "RenderEngine/RenderEngine.h"
 
+#ifdef MTK_MT6589
+#include <hardware/hwcomposer.h>
+#endif
+
 namespace android {
 // ---------------------------------------------------------------------------
 
@@ -57,7 +61,36 @@ bool LayerDim::isVisible() const {
     return !(s.flags & layer_state_t::eLayerHidden) && s.alpha;
 }
 
+#ifdef MTK_MT6589
+void LayerDim::setGeometry(
+    const sp<const DisplayDevice>& hw,
+        HWComposer::HWCLayerInterface& layer)
+{
+    Layer::setGeometry(hw, layer);
 
+    layer.setLayerType(HWC_DIM_LAYER);
+
+    const State& s(getDrawingState());
+    hwc_color_t color;
+    color.a = s.alpha;
+    layer.setFillColor(color);
+    if (s.alpha != 0xFF) {
+        layer.setBlending(HWC_BLENDING_PREMULT);
+    }
+    
+    const Transform tr(hw->getTransform() * s.transform);
+    layer.setTransform(tr.getOrientation());
+    layer.setMatrix(tr);
+}
+
+void LayerDim::setPerFrameData(const sp<const DisplayDevice>& hw,
+        HWComposer::HWCLayerInterface& layer) 
+{
+    Layer::setPerFrameData(hw, layer);
+    layer.setBuffer(NULL);
+}
+
+#endif
 // ---------------------------------------------------------------------------
 
 }; // namespace android

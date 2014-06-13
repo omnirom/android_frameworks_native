@@ -39,6 +39,12 @@ public:
     virtual bool isSecure() const         { return false; }
     virtual bool isFixedSize() const      { return true; }
     virtual bool isVisible() const;
+#ifdef MTK_MT6589
+    virtual void setGeometry(const sp<const DisplayDevice>& hw,
+            HWComposer::HWCLayerInterface& layer);
+    virtual void setPerFrameData(const sp<const DisplayDevice>& hw,
+            HWComposer::HWCLayerInterface& layer);
+#endif
 };
 
 // ---------------------------------------------------------------------------

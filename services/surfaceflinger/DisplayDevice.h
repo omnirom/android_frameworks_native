@@ -216,6 +216,11 @@ private:
     Rect mScissor;
     Transform mGlobalTransform;
     bool mNeedsFiltering;
+
+#ifdef MTK_MT6589
+public:
+    mutable bool mLayersSwapRequired;
+#endif
 };
 
 }; // namespace android

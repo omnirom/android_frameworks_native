@@ -28,7 +28,11 @@ namespace android {
 class SurfaceFlingerConsumer : public GLConsumer {
 public:
     SurfaceFlingerConsumer(const sp<BufferQueue>& bq, uint32_t tex)
+#ifndef MTK_MT6589
         : GLConsumer(bq, tex, GLConsumer::TEXTURE_EXTERNAL, false)
+#else
+        : GLConsumer(bq, tex, GLConsumer::TEXTURE_EXTERNAL, false), bq (bq)
+#endif
     {}
 
     class BufferRejecter {
@@ -54,6 +58,11 @@ public:
     // must be called from SF main thread
     bool getTransformToDisplayInverse() const;
 
+#ifdef MTK_MT6589
+    // get connected api type, for buffer data conversion condition (aux and hwc)
+    int getConnectedApi();
+#endif
+
 private:
     nsecs_t computeExpectedPresent();
 
@@ -61,6 +70,9 @@ private:
     // it is displayed onto. This is applied after GLConsumer::mCurrentTransform.
     // This must be set/read from SurfaceFlinger's main thread.
     bool mTransformToDisplayInverse;
+#ifdef MTK_MT6589
+    sp<BufferQueue> bq;
+#endif
 };
 
 // ----------------------------------------------------------------------------

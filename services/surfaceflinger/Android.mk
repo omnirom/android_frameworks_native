@@ -37,6 +37,10 @@ LOCAL_SRC_FILES:= \
 LOCAL_CFLAGS:= -DLOG_TAG=\"SurfaceFlinger\"
 LOCAL_CFLAGS += -DGL_GLEXT_PROTOTYPES -DEGL_EGLEXT_PROTOTYPES
 
+ifeq ($(TARGET_BOARD_PLATFORM),mt6589)
+LOCAL_CFLAGS += -DMTK_MT6589
+endif
+
 ifeq ($(TARGET_BOARD_PLATFORM),omap4)
 	LOCAL_CFLAGS += -DHAS_CONTEXT_PRIORITY
 endif
@@ -139,6 +143,10 @@ LOCAL_SHARED_LIBRARIES := \
 	libbinder \
 	libutils
 
+ifeq ($(TARGET_BOARD_PLATFORM),mt6589)
+LOCAL_CFLAGS += -DMTK_MT6589
+endif
+
 LOCAL_MODULE:= surfaceflinger
 
 include $(BUILD_EXECUTABLE)
@@ -148,6 +156,10 @@ include $(BUILD_EXECUTABLE)
 ifneq ($(wildcard libnativehelper/include),)
 include $(CLEAR_VARS)
 LOCAL_CFLAGS:= -DLOG_TAG=\"SurfaceFlinger\"
+
+ifeq ($(TARGET_BOARD_PLATFORM),mt6589)
+LOCAL_CFLAGS += -DMTK_MT6589
+endif
 
 LOCAL_SRC_FILES:= \
     DdmConnection.cpp

@@ -154,6 +154,10 @@ nsecs_t SurfaceFlingerConsumer::computeExpectedPresent()
     return prevVsync + hwcLatency * vsyncPeriod + extraPadding;
 }
 
+#ifdef MTK_MT6589
+int SurfaceFlingerConsumer::getConnectedApi () { return (bq != 0) ? bq->getConnectedApi () : -1; }
+#endif
+
 // ---------------------------------------------------------------------------
 }; // namespace android
 

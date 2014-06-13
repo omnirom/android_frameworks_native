@@ -321,6 +321,9 @@ public:
     // dump our state in a String
     virtual void dump(String8& result, const char* prefix) const;
 
+#ifdef MTK_MT6589
+    virtual int getConnectedApi () const;
+#endif
 
 private:
     // freeBufferLocked frees the GraphicBuffer and sync resources for the

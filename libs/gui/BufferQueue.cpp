@@ -844,6 +844,10 @@ void BufferQueue::dump(String8& result, const char* prefix) const {
     }
 }
 
+#ifdef MTK_MT6589
+int BufferQueue::getConnectedApi () const { return mConnectedApi; }
+#endif
+
 void BufferQueue::freeBufferLocked(int slot) {
     ST_LOGV("freeBufferLocked: slot=%d", slot);
     mSlots[slot].mGraphicBuffer = 0;
