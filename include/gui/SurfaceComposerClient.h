@@ -194,6 +194,10 @@ public:
     ScreenshotClient();
     ~ScreenshotClient();
 
+#ifdef TOROPLUS_RADIO
+    status_t update();
+#endif
+
     // frees the previous screenshot and capture a new one
     status_t update(const sp<IBinder>& display);
     status_t update(const sp<IBinder>& display,
