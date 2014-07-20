@@ -407,7 +407,7 @@ status_t VirtualDisplaySurface::queueBuffer(int pslot,
         uint32_t transform;
         bool async;
         input.deflate(&timestamp, &isAutoTimestamp, &crop, &scalingMode,
-                &transform, &async, &mFbFence);
+               &transform, &async, &mFbFence);
 
         mFbProducerSlot = pslot;
         mOutputFence = mFbFence;
@@ -447,11 +447,9 @@ status_t VirtualDisplaySurface::disconnect(int api) {
     return mSource[SOURCE_SINK]->disconnect(api);
 }
 
-#ifdef QCOM_HARDWARE
 status_t VirtualDisplaySurface::setBuffersSize(int size) {
    return mSource[SOURCE_SINK]->setBuffersSize(size);
 }
-#endif
 
 void VirtualDisplaySurface::updateQueueBufferOutput(
         const QueueBufferOutput& qbo) {

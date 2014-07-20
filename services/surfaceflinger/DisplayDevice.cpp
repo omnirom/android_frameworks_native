@@ -29,10 +29,6 @@
 
 #include <gui/Surface.h>
 
-#ifdef BOARD_EGL_NEEDS_LEGACY_FB
-#include <ui/FramebufferNativeWindow.h>
-#endif
-
 #include <hardware/gralloc.h>
 
 #include "DisplayHardware/DisplaySurface.h"
@@ -79,11 +75,7 @@ DisplayDevice::DisplayDevice(
       mOrientation()
 {
     mNativeWindow = new Surface(producer, false);
-#ifndef BOARD_EGL_NEEDS_LEGACY_FB
     ANativeWindow* const window = mNativeWindow.get();
-#else
-    ANativeWindow* const window = new FramebufferNativeWindow();
-#endif
 
     int format;
     window->query(window, NATIVE_WINDOW_FORMAT, &format);
@@ -137,20 +129,14 @@ DisplayDevice::DisplayDevice(
             mDisplayName = "Virtual Screen";    // e.g. Overlay #n
             break;
     }
-#ifdef QCOM_HARDWARE
     char property[PROPERTY_VALUE_MAX];
     int panelOrientation = DisplayState::eOrientationDefault;
     // Set the panel orientation from the property.
     property_get("persist.panel.orientation", property, "0");
     panelOrientation = atoi(property) / 90;
-#endif
 
     // initialize the display orientation transform.
-#ifdef QCOM_HARDWARE
     setProjection(panelOrientation, mViewport, mFrame);
-#else
-    setProjection(DisplayState::eOrientationDefault, mViewport, mFrame);
-#endif
 }
 
 DisplayDevice::~DisplayDevice() {
@@ -159,6 +145,13 @@ DisplayDevice::~DisplayDevice() {
         mSurface = EGL_NO_SURFACE;
     }
 }
+
+#ifdef QCOM_BSP
+void DisplayDevice::eglSwapPreserved(bool enable) const {
+    int swapValue = enable ? EGL_BUFFER_PRESERVED : EGL_BUFFER_DESTROYED;
+    eglSurfaceAttrib(mDisplay, mSurface, EGL_SWAP_BEHAVIOR, swapValue);
+}
+#endif
 
 void DisplayDevice::disconnect(HWComposer& hwc) {
     if (mHwcDisplayId >= 0) {

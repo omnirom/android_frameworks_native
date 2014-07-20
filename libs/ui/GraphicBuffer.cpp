@@ -59,7 +59,6 @@ GraphicBuffer::GraphicBuffer(uint32_t w, uint32_t h,
     mInitCheck = initSize(w, h, reqFormat, reqUsage);
 }
 
-#ifdef QCOM_HARDWARE
 GraphicBuffer::GraphicBuffer(uint32_t w, uint32_t h,
         PixelFormat reqFormat, uint32_t reqUsage, uint32_t bufferSize)
     : BASE(), mOwner(ownData), mBufferMapper(GraphicBufferMapper::get()),
@@ -73,7 +72,6 @@ GraphicBuffer::GraphicBuffer(uint32_t w, uint32_t h,
     handle = NULL;
     mInitCheck = initSize(w, h, reqFormat, reqUsage, bufferSize);
 }
-#endif
 
 GraphicBuffer::GraphicBuffer(uint32_t w, uint32_t h,
         PixelFormat inFormat, uint32_t inUsage,
@@ -169,7 +167,6 @@ status_t GraphicBuffer::initSize(uint32_t w, uint32_t h, PixelFormat format,
     return err;
 }
 
-#ifdef QCOM_HARDWARE
 status_t GraphicBuffer::initSize(uint32_t w, uint32_t h, PixelFormat format,
                                  uint32_t reqUsage, uint32_t bufferSize)
 {
@@ -184,7 +181,6 @@ status_t GraphicBuffer::initSize(uint32_t w, uint32_t h, PixelFormat format,
     }
     return err;
 }
-#endif
 
 status_t GraphicBuffer::lock(uint32_t usage, void** vaddr)
 {
@@ -264,18 +260,12 @@ status_t GraphicBuffer::flatten(void*& buffer, size_t& size, int*& fds, size_t& 
         native_handle_t const* const h = handle;
         memcpy(fds,     h->data,             h->numFds*sizeof(int));
         memcpy(&buf[8], h->data + h->numFds, h->numInts*sizeof(int));
-#ifdef QCOM_HARDWARE
         fds += handle->numFds;
         count -= handle->numFds;
-#endif
     }
 
     buffer = reinterpret_cast<void*>(static_cast<int*>(buffer) + sizeNeeded);
     size -= sizeNeeded;
-#ifndef QCOM_HARDWARE
-    fds += handle->numFds;
-    count -= handle->numFds;
-#endif
 
     return NO_ERROR;
 }

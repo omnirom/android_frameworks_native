@@ -515,11 +515,12 @@ sp<SurfaceControl> SurfaceComposerClient::createSurface(
         sp<IGraphicBufferProducer> gbp;
         status_t err = mClient->createSurface(name, w, h, format, flags,
                 &handle, &gbp);
-        ALOGE_IF(err, "SurfaceComposerClient::createSurface error %s", strerror(-err));
+        ALOGE_IF(err, "SurfaceComposerClient::createSurface(%s) error %s", name.string(), strerror(-err));
         if (err == NO_ERROR) {
             sur = new SurfaceControl(this, handle, gbp);
         }
-    }
+    } else
+        ALOGE("SurfaceComposerClient::createSurface(%s) error. Status = %s", name.string(), strerror(-mStatus));
     return sur;
 }
 
@@ -655,6 +656,15 @@ void SurfaceComposerClient::unblankDisplay(const sp<IBinder>& token) {
     ComposerService::getComposerService()->unblank(token);
 }
 
+// TODO: Remove me.  Do not use.
+// This is a compatibility shim for one product whose drivers are depending on
+// this legacy function (when they shouldn't).
+status_t SurfaceComposerClient::getDisplayInfo(
+        int32_t displayId, DisplayInfo* info)
+{
+    return getDisplayInfo(getBuiltInDisplay(displayId), info);
+}
+
 #if defined(ICS_CAMERA_BLOB) || defined(MR0_CAMERA_BLOB)
 ssize_t SurfaceComposerClient::getDisplayWidth(int32_t displayId) {
     DisplayInfo info;
@@ -674,15 +684,6 @@ ssize_t SurfaceComposerClient::getDisplayOrientation(int32_t displayId) {
     return info.orientation;
 }
 #endif
-
-// TODO: Remove me.  Do not use.
-// This is a compatibility shim for one product whose drivers are depending on
-// this legacy function (when they shouldn't).
-status_t SurfaceComposerClient::getDisplayInfo(
-        int32_t displayId, DisplayInfo* info)
-{
-    return getDisplayInfo(getBuiltInDisplay(displayId), info);
-}
 
 // ----------------------------------------------------------------------------
 
@@ -721,7 +722,7 @@ ScreenshotClient::~ScreenshotClient() {
     ScreenshotClient::release();
 }
 
-#ifdef TOROPLUS_RADIO
+#if defined(TOROPLUS_RADIO)
 status_t ScreenshotClient::update() {
     sp<ISurfaceComposer> sm(ComposerService::getComposerService());
     return update(sm->getBuiltInDisplay(0));
