@@ -78,12 +78,6 @@ public:
         return surface != NULL && surface->getIGraphicBufferProducer() != NULL;
     }
 
-#ifdef QCOM_HARDWARE
-    virtual int32_t getSessionId(){
-        return reinterpret_cast<int>(mGraphicBufferProducer.get());
-    }
-#endif
-
 protected:
     virtual ~Surface();
 
