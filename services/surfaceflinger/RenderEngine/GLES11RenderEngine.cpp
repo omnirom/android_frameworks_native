@@ -17,8 +17,11 @@
 #include <GLES/gl.h>
 #include <GLES/glext.h>
 
+#include <ui/Rect.h>
+
 #include <utils/String8.h>
 #include <cutils/compiler.h>
+#include <gui/ISurfaceComposer.h>
 
 #include "GLES11RenderEngine.h"
 #include "Mesh.h"
@@ -72,13 +75,41 @@ size_t GLES11RenderEngine::getMaxViewportDims() const {
 }
 
 void GLES11RenderEngine::setViewportAndProjection(
-        size_t vpw, size_t vph, size_t w, size_t h, bool yswap) {
+        size_t vpw, size_t vph, Rect sourceCrop, size_t hwh, bool yswap,
+        Transform::orientation_flags rotation) {
     glViewport(0, 0, vpw, vph);
     glMatrixMode(GL_PROJECTION);
     glLoadIdentity();
-    // put the origin in the left-bottom corner
-    if (yswap)  glOrthof(0, w, h, 0, 0, 1);
-    else        glOrthof(0, w, 0, h, 0, 1);
+
+    size_t l = sourceCrop.left;
+    size_t r = sourceCrop.right;
+
+    // In GL, (0, 0) is the bottom-left corner, so flip y coordinates
+    size_t t = hwh - sourceCrop.top;
+    size_t b = hwh - sourceCrop.bottom;
+
+    if (yswap) {
+        glOrthof(l, r, t, b, 0, 1);
+    } else {
+        glOrthof(l, r, b, t, 0, 1);
+    }
+
+    switch (rotation) {
+        case Transform::ROT_0:
+            break;
+        case Transform::ROT_90:
+            glRotatef(90, 0, 0, 1);
+            break;
+        case Transform::ROT_180:
+            glRotatef(180, 0, 0, 1);
+            break;
+        case Transform::ROT_270:
+            glRotatef(270, 0, 0, 1);
+            break;
+        default:
+            break;
+    }
+
     glMatrixMode(GL_MODELVIEW);
 }
 
@@ -254,7 +285,7 @@ void GLES11RenderEngine::drawMesh(const Mesh& mesh) {
     }
 }
 
-void GLES11RenderEngine::beginGroup(const mat4& colorTransform) {
+void GLES11RenderEngine::beginGroup(const mat4& /*colorTransform*/) {
     // doesn't do anything in GLES 1.1
 }
 

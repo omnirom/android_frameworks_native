@@ -17,8 +17,6 @@
 #include <stdint.h>
 #include <sys/types.h>
 
-#include <cutils/log.h>
-
 #include "SensorInterface.h"
 
 namespace android {
@@ -34,7 +32,6 @@ HardwareSensor::HardwareSensor(const sensor_t& sensor)
     : mSensorDevice(SensorDevice::getInstance()),
       mSensor(&sensor, mSensorDevice.getHalDeviceVersion())
 {
-    ALOGI("%s", sensor.name);
 }
 
 HardwareSensor::~HardwareSensor() {
@@ -50,7 +47,7 @@ status_t HardwareSensor::activate(void* ident, bool enabled) {
     return mSensorDevice.activate(ident, mSensor.getHandle(), enabled);
 }
 
-status_t HardwareSensor::batch(void* ident, int handle, int flags,
+status_t HardwareSensor::batch(void* ident, int /*handle*/, int flags,
                                int64_t samplingPeriodNs, int64_t maxBatchReportLatencyNs) {
     return mSensorDevice.batch(ident, mSensor.getHandle(), flags, samplingPeriodNs,
                                maxBatchReportLatencyNs);

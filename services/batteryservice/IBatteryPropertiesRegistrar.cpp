@@ -44,6 +44,22 @@ public:
             data.writeStrongBinder(listener->asBinder());
             remote()->transact(UNREGISTER_LISTENER, data, NULL);
         }
+
+        status_t getProperty(int id, struct BatteryProperty *val) {
+            Parcel data, reply;
+            data.writeInterfaceToken(IBatteryPropertiesRegistrar::getInterfaceDescriptor());
+            data.writeInt32(id);
+            remote()->transact(GET_PROPERTY, data, &reply);
+            int32_t ret = reply.readExceptionCode();
+            if (ret != 0) {
+                return ret;
+            }
+            ret = reply.readInt32();
+            int parcelpresent = reply.readInt32();
+            if (parcelpresent)
+                val->readFromParcel(&reply);
+            return ret;
+        }
 };
 
 IMPLEMENT_META_INTERFACE(BatteryPropertiesRegistrar, "android.os.IBatteryPropertiesRegistrar");
@@ -67,6 +83,18 @@ status_t BnBatteryPropertiesRegistrar::onTransact(uint32_t code,
             sp<IBatteryPropertiesListener> listener =
                 interface_cast<IBatteryPropertiesListener>(data.readStrongBinder());
             unregisterListener(listener);
+            return OK;
+        }
+
+        case GET_PROPERTY: {
+            CHECK_INTERFACE(IBatteryPropertiesRegistrar, data, reply);
+            int id = data.readInt32();
+            struct BatteryProperty val;
+            status_t result = getProperty(id, &val);
+            reply->writeNoException();
+            reply->writeInt32(result);
+            reply->writeInt32(1);
+            val.writeToParcel(reply);
             return OK;
         }
     }

@@ -22,11 +22,12 @@
  */
 
 #include <android/input.h>
-#include <utils/Vector.h>
+#include <utils/BitSet.h>
 #include <utils/KeyedVector.h>
-#include <utils/Timers.h>
 #include <utils/RefBase.h>
 #include <utils/String8.h>
+#include <utils/Timers.h>
+#include <utils/Vector.h>
 
 /*
  * Additional private constants not defined in ndk/ui/input.h.
@@ -64,6 +65,34 @@ enum {
      */
     AINPUT_SOURCE_SWITCH = 0x80000000,
 };
+
+enum {
+    /**
+     * Constants for LEDs. Hidden from the API since we don't actually expose a way to interact
+     * with LEDs to developers
+     *
+     * NOTE: If you add LEDs here, you must also add them to InputEventLabels.h
+     */
+
+    ALED_NUM_LOCK = 0x00,
+    ALED_CAPS_LOCK = 0x01,
+    ALED_SCROLL_LOCK = 0x02,
+    ALED_COMPOSE = 0x03,
+    ALED_KANA = 0x04,
+    ALED_SLEEP = 0x05,
+    ALED_SUSPEND = 0x06,
+    ALED_MUTE = 0x07,
+    ALED_MISC = 0x08,
+    ALED_MAIL = 0x09,
+    ALED_CHARGING = 0x0a,
+    ALED_CONTROLLER_1 = 0x10,
+    ALED_CONTROLLER_2 = 0x11,
+    ALED_CONTROLLER_3 = 0x12,
+    ALED_CONTROLLER_4 = 0x13,
+};
+
+/* Maximum number of controller LEDs we support */
+#define MAX_CONTROLLER_LEDS 4
 
 /*
  * SystemUiVisibility constants from View.
@@ -117,18 +146,12 @@ class Parcel;
  */
 enum {
     /* These flags originate in RawEvents and are generally set in the key map.
-     * NOTE: If you edit these flags, also edit labels in KeycodeLabels.h. */
+     * NOTE: If you want a flag to be able to set in a keylayout file, then you must add it to
+     * InputEventLabels.h as well. */
 
     POLICY_FLAG_WAKE = 0x00000001,
-    POLICY_FLAG_WAKE_DROPPED = 0x00000002,
-    POLICY_FLAG_SHIFT = 0x00000004,
-    POLICY_FLAG_CAPS_LOCK = 0x00000008,
-    POLICY_FLAG_ALT = 0x00000010,
-    POLICY_FLAG_ALT_GR = 0x00000020,
-    POLICY_FLAG_MENU = 0x00000040,
-    POLICY_FLAG_LAUNCHER = 0x00000080,
-    POLICY_FLAG_VIRTUAL = 0x00000100,
-    POLICY_FLAG_FUNCTION = 0x00000200,
+    POLICY_FLAG_VIRTUAL = 0x00000002,
+    POLICY_FLAG_FUNCTION = 0x00000004,
 
     POLICY_FLAG_RAW_MASK = 0x0000ffff,
 
@@ -149,13 +172,9 @@ enum {
 
     /* These flags are set by the input reader policy as it intercepts each event. */
 
-    // Indicates that the screen was off when the event was received and the event
-    // should wake the device.
-    POLICY_FLAG_WOKE_HERE = 0x10000000,
-
-    // Indicates that the screen was dim when the event was received and the event
-    // should brighten the device.
-    POLICY_FLAG_BRIGHT_HERE = 0x20000000,
+    // Indicates that the device was in an interactive state when the
+    // event was intercepted.
+    POLICY_FLAG_INTERACTIVE = 0x20000000,
 
     // Indicates that the event should be dispatched to applications.
     // The input event should still be sent to the InputDispatcher so that it can see all
@@ -167,23 +186,28 @@ enum {
  * Pointer coordinate data.
  */
 struct PointerCoords {
-    enum { MAX_AXES = 14 }; // 14 so that sizeof(PointerCoords) == 64
+    enum { MAX_AXES = 30 }; // 30 so that sizeof(PointerCoords) == 128
 
     // Bitfield of axes that are present in this structure.
-    uint64_t bits;
+    uint64_t bits __attribute__((aligned(8)));
 
     // Values of axes that are stored in this structure packed in order by axis id
     // for each axis that is present in the structure according to 'bits'.
     float values[MAX_AXES];
 
     inline void clear() {
-        bits = 0;
+        BitSet64::clear(bits);
+    }
+
+    bool isEmpty() const {
+        return BitSet64::isEmpty(bits);
     }
 
     float getAxisValue(int32_t axis) const;
     status_t setAxisValue(int32_t axis, float value);
 
     void scale(float scale);
+    void applyOffset(float xOffset, float yOffset);
 
     inline float getX() const {
         return getAxisValue(AMOTION_EVENT_AXIS_X);
@@ -282,13 +306,8 @@ public:
 
     inline nsecs_t getEventTime() const { return mEventTime; }
 
-    // Return true if this event may have a default action implementation.
-    static bool hasDefaultAction(int32_t keyCode);
-    bool hasDefaultAction() const;
-
-    // Return true if this event represents a system key.
-    static bool isSystemKey(int32_t keyCode);
-    bool isSystemKey() const;
+    static const char* getLabel(int32_t keyCode);
+    static int32_t getKeyCodeFromLabel(const char* label);
     
     void initialize(
             int32_t deviceId,
@@ -547,6 +566,9 @@ public:
     inline const PointerCoords* getSamplePointerCoords() const {
             return mSamplePointerCoords.array();
     }
+
+    static const char* getLabel(int32_t axis);
+    static int32_t getAxisFromLabel(const char* label);
 
 protected:
     int32_t mAction;

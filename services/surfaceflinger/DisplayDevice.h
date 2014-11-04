@@ -53,6 +53,7 @@ public:
     mutable Region swapRegion;
     // region in screen space
     Region undefinedRegion;
+    bool lastCompositionHadVisibleLayers;
 
     enum DisplayType {
         DISPLAY_ID_INVALID = -1,
@@ -75,6 +76,7 @@ public:
             const sp<SurfaceFlinger>& flinger,
             DisplayType type,
             int32_t hwcId,  // negative for non-HWC-composited displays
+            int format,
             bool isSecure,
             const wp<IBinder>& displayToken,
             const sp<DisplaySurface>& displaySurface,
@@ -108,6 +110,7 @@ public:
     Region                  getDirtyRegion(bool repaintEverything) const;
 
     void                    setLayerStack(uint32_t stack);
+    void                    setDisplaySize(const int newWidth, const int newHeight);
     void                    setProjection(int orientation, const Rect& viewport, const Rect& frame);
 
     int                     getOrientation() const { return mOrientation; }
@@ -123,7 +126,9 @@ public:
     int32_t                 getHwcDisplayId() const { return mHwcDisplayId; }
     const wp<IBinder>&      getDisplayToken() const { return mDisplayToken; }
 
-    status_t beginFrame() const;
+    // We pass in mustRecompose so we can keep VirtualDisplaySurface's state
+    // machine happy without actually queueing a buffer if nothing has changed
+    status_t beginFrame(bool mustRecompose) const;
     status_t prepareFrame(const HWComposer& hwc) const;
 
     void swapBuffers(HWComposer& hwc) const;
@@ -144,12 +149,17 @@ public:
     void setViewportAndProjection() const;
 
     /* ------------------------------------------------------------------------
-     * blank / unblank management
+     * Display power mode management.
      */
-    void releaseScreen() const;
-    void acquireScreen() const;
-    bool isScreenAcquired() const;
-    bool canDraw() const;
+    int getPowerMode() const;
+    void setPowerMode(int mode);
+    bool isDisplayOn() const;
+
+    /* ------------------------------------------------------------------------
+     * Display active config management.
+     */
+    int getActiveConfig() const;
+    void setActiveConfig(int mode);
 
     // release HWC resources (if any) for removable displays
     void disconnect(HWComposer& hwc);
@@ -174,6 +184,7 @@ private:
     sp<ANativeWindow> mNativeWindow;
     sp<DisplaySurface> mDisplaySurface;
 
+    EGLConfig       mConfig;
     EGLDisplay      mDisplay;
     EGLSurface      mSurface;
     int             mDisplayWidth;
@@ -195,9 +206,6 @@ private:
     // Whether we have a visible secure layer on this display
     bool mSecureLayerVisible;
 
-    // Whether the screen is blanked;
-    mutable int mScreenAcquired;
-
 
     /*
      * Transaction state
@@ -216,6 +224,10 @@ private:
     Rect mScissor;
     Transform mGlobalTransform;
     bool mNeedsFiltering;
+    // Current power mode
+    int mPowerMode;
+    // Current active config
+    int mActiveConfig;
 };
 
 }; // namespace android

@@ -101,6 +101,11 @@ TEST_F(UtilsTest, IsValidApkPath_Internal) {
     EXPECT_EQ(0, validate_apk_path(internal1))
             << internal1 << " should be allowed as a valid path";
 
+    // b/16888084
+    const char *path2 = TEST_APP_DIR "example.com/example.apk";
+    EXPECT_EQ(0, validate_apk_path(path2))
+            << path2 << " should be allowed as a valid path";
+
     const char *badint1 = TEST_APP_DIR "../example.apk";
     EXPECT_EQ(-1, validate_apk_path(badint1))
             << badint1 << " should be rejected as a invalid path";
@@ -109,9 +114,18 @@ TEST_F(UtilsTest, IsValidApkPath_Internal) {
     EXPECT_EQ(-1, validate_apk_path(badint2))
             << badint2 << " should be rejected as a invalid path";
 
-    const char *badint3 = TEST_APP_DIR "example.com/pkg.apk";
-    EXPECT_EQ(-1, validate_apk_path(badint3))
-            << badint3 << " should be rejected as a invalid path";
+    // Only one subdir should be allowed.
+    const char *bad_path3 = TEST_APP_DIR "example.com/subdir/pkg.apk";
+    EXPECT_EQ(-1, validate_apk_path(bad_path3))
+            << bad_path3 << " should be rejected as a invalid path";
+
+    const char *bad_path4 = TEST_APP_DIR "example.com/subdir/../pkg.apk";
+    EXPECT_EQ(-1, validate_apk_path(bad_path4))
+            << bad_path4 << " should be rejected as a invalid path";
+
+    const char *bad_path5 = TEST_APP_DIR "example.com1/../example.com2/pkg.apk";
+    EXPECT_EQ(-1, validate_apk_path(bad_path5))
+            << bad_path5 << " should be rejected as a invalid path";
 }
 
 TEST_F(UtilsTest, IsValidApkPath_Private) {
@@ -119,6 +133,11 @@ TEST_F(UtilsTest, IsValidApkPath_Private) {
     const char *private1 = TEST_APP_PRIVATE_DIR "example.apk";
     EXPECT_EQ(0, validate_apk_path(private1))
             << private1 << " should be allowed as a valid path";
+
+    // b/16888084
+    const char *path2 = TEST_APP_DIR "example.com/example.apk";
+    EXPECT_EQ(0, validate_apk_path(path2))
+            << path2 << " should be allowed as a valid path";
 
     const char *badpriv1 = TEST_APP_PRIVATE_DIR "../example.apk";
     EXPECT_EQ(-1, validate_apk_path(badpriv1))
@@ -128,9 +147,18 @@ TEST_F(UtilsTest, IsValidApkPath_Private) {
     EXPECT_EQ(-1, validate_apk_path(badpriv2))
             << badpriv2 << " should be rejected as a invalid path";
 
-    const char *badpriv3 = TEST_APP_PRIVATE_DIR "example.com/pkg.apk";
-    EXPECT_EQ(-1, validate_apk_path(badpriv3))
-            << badpriv3 << " should be rejected as a invalid path";
+    // Only one subdir should be allowed.
+    const char *bad_path3 = TEST_APP_PRIVATE_DIR "example.com/subdir/pkg.apk";
+    EXPECT_EQ(-1, validate_apk_path(bad_path3))
+            << bad_path3 << " should be rejected as a invalid path";
+
+    const char *bad_path4 = TEST_APP_PRIVATE_DIR "example.com/subdir/../pkg.apk";
+    EXPECT_EQ(-1, validate_apk_path(bad_path4))
+            << bad_path4 << " should be rejected as a invalid path";
+
+    const char *bad_path5 = TEST_APP_PRIVATE_DIR "example.com1/../example.com2/pkg.apk";
+    EXPECT_EQ(-1, validate_apk_path(bad_path5))
+            << bad_path5 << " should be rejected as a invalid path";
 }
 
 
@@ -216,6 +244,24 @@ TEST_F(UtilsTest, CheckSystemApp_BadPathEscapeFail) {
     const char *badapp3 = TEST_APP_DIR "/../../com.example.apk";
     EXPECT_EQ(-1, validate_system_app_path(badapp3))
             << badapp3 << " should be rejected not a system path";
+}
+
+TEST_F(UtilsTest, CheckSystemApp_Subdir) {
+    const char *sysapp = TEST_SYSTEM_DIR1 "com.example/com.example.apk";
+    EXPECT_EQ(0, validate_system_app_path(sysapp))
+            << sysapp << " should be allowed as a system path";
+
+    const char *badapp = TEST_SYSTEM_DIR1 "com.example/subdir/com.example.apk";
+    EXPECT_EQ(-1, validate_system_app_path(badapp))
+            << badapp << " should be rejected not a system path";
+
+    const char *badapp1 = TEST_SYSTEM_DIR1 "com.example/subdir/../com.example.apk";
+    EXPECT_EQ(-1, validate_system_app_path(badapp1))
+            << badapp1 << " should be rejected not a system path";
+
+    const char *badapp2 = TEST_SYSTEM_DIR1 "com.example1/../com.example2/com.example.apk";
+    EXPECT_EQ(-1, validate_system_app_path(badapp2))
+            << badapp2 << " should be rejected not a system path";
 }
 
 TEST_F(UtilsTest, GetPathFromString_NullPathFail) {

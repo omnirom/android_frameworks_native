@@ -17,6 +17,7 @@
 #ifndef ANDROID_SURFACEFLINGERCONSUMER_H
 #define ANDROID_SURFACEFLINGERCONSUMER_H
 
+#include "DispSync.h"
 #include <gui/GLConsumer.h>
 
 namespace android {
@@ -27,8 +28,14 @@ namespace android {
  */
 class SurfaceFlingerConsumer : public GLConsumer {
 public:
-    SurfaceFlingerConsumer(const sp<BufferQueue>& bq, uint32_t tex)
-        : GLConsumer(bq, tex, GLConsumer::TEXTURE_EXTERNAL, false)
+    struct ContentsChangedListener: public FrameAvailableListener {
+        virtual void onSidebandStreamChanged() = 0;
+    };
+
+    SurfaceFlingerConsumer(const sp<IGraphicBufferConsumer>& consumer,
+            uint32_t tex)
+        : GLConsumer(consumer, tex, GLConsumer::TEXTURE_EXTERNAL, false, false),
+          mTransformToDisplayInverse(false)
     {}
 
     class BufferRejecter {
@@ -46,7 +53,7 @@ public:
     // reject the newly acquired buffer.  Unlike the GLConsumer version,
     // this does not guarantee that the buffer has been bound to the GL
     // texture.
-    status_t updateTexImage(BufferRejecter* rejecter);
+    status_t updateTexImage(BufferRejecter* rejecter, const DispSync& dispSync);
 
     // See GLConsumer::bindTextureImageLocked().
     status_t bindTextureImage();
@@ -54,8 +61,18 @@ public:
     // must be called from SF main thread
     bool getTransformToDisplayInverse() const;
 
+    // Sets the contents changed listener. This should be used instead of
+    // ConsumerBase::setFrameAvailableListener().
+    void setContentsChangedListener(const wp<ContentsChangedListener>& listener);
+
+    sp<NativeHandle> getSidebandStream() const;
+
 private:
-    nsecs_t computeExpectedPresent();
+    nsecs_t computeExpectedPresent(const DispSync& dispSync);
+
+    virtual void onSidebandStreamChanged();
+
+    wp<ContentsChangedListener> mContentsChangedListener;
 
     // Indicates this buffer must be transformed by the inverse transform of the screen
     // it is displayed onto. This is applied after GLConsumer::mCurrentTransform.

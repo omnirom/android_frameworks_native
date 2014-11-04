@@ -33,8 +33,6 @@
 #include <utils/Mutex.h>
 #include <utils/Condition.h>
 
-#include <ui/FramebufferNativeWindow.h>
-
 #define CPU_CONSUMER_TEST_FORMAT_RAW 0
 #define CPU_CONSUMER_TEST_FORMAT_Y8 0
 #define CPU_CONSUMER_TEST_FORMAT_Y16 0
@@ -66,11 +64,13 @@ protected:
                 test_info->name(),
                 params.width, params.height,
                 params.maxLockedBuffers, params.format);
-        sp<BufferQueue> bq = new BufferQueue();
-        mCC = new CpuConsumer(bq, params.maxLockedBuffers);
+        sp<IGraphicBufferProducer> producer;
+        sp<IGraphicBufferConsumer> consumer;
+        BufferQueue::createBufferQueue(&producer, &consumer);
+        mCC = new CpuConsumer(consumer, params.maxLockedBuffers);
         String8 name("CpuConsumer_Under_Test");
         mCC->setName(name);
-        mSTC = new Surface(bq);
+        mSTC = new Surface(producer);
         mANW = mSTC;
     }
 
@@ -656,7 +656,7 @@ TEST_P(CpuConsumerTest, FromCpuLockMax) {
     ALOGV("Locking frame %d (too many)", params.maxLockedBuffers);
     CpuConsumer::LockedBuffer bTooMuch;
     err = mCC->lockNextBuffer(&bTooMuch);
-    ASSERT_TRUE(err == INVALID_OPERATION) << "Allowing too many locks";
+    ASSERT_TRUE(err == NOT_ENOUGH_DATA) << "Allowing too many locks";
 
     ALOGV("Unlocking frame 0");
     err = mCC->unlockBuffer(b[0]);

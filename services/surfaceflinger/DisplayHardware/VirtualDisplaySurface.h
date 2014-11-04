@@ -27,6 +27,7 @@ namespace android {
 // ---------------------------------------------------------------------------
 
 class HWComposer;
+class IProducerListener;
 
 /* This DisplaySurface implementation supports virtual displays, where GLES
  * and/or HWC compose into a buffer that is then passed to an arbitrary
@@ -73,18 +74,20 @@ class VirtualDisplaySurface : public DisplaySurface,
 public:
     VirtualDisplaySurface(HWComposer& hwc, int32_t dispId,
             const sp<IGraphicBufferProducer>& sink,
-            const sp<BufferQueue>& bq,
+            const sp<IGraphicBufferProducer>& bqProducer,
+            const sp<IGraphicBufferConsumer>& bqConsumer,
             const String8& name);
 
     //
     // DisplaySurface interface
     //
-    virtual status_t beginFrame();
+    virtual status_t beginFrame(bool mustRecompose);
     virtual status_t prepareFrame(CompositionType compositionType);
     virtual status_t compositionComplete();
     virtual status_t advanceFrame();
     virtual void onFrameCommitted();
     virtual void dump(String8& result) const;
+    virtual void resizeBuffers(const uint32_t w, const uint32_t h);
 
 private:
     enum Source {SOURCE_SINK = 0, SOURCE_SCRATCH = 1};
@@ -98,16 +101,23 @@ private:
     virtual status_t setBufferCount(int bufferCount);
     virtual status_t dequeueBuffer(int* pslot, sp<Fence>* fence, bool async,
             uint32_t w, uint32_t h, uint32_t format, uint32_t usage);
+    virtual status_t detachBuffer(int slot);
+    virtual status_t detachNextBuffer(sp<GraphicBuffer>* outBuffer,
+            sp<Fence>* outFence);
+    virtual status_t attachBuffer(int* slot, const sp<GraphicBuffer>& buffer);
     virtual status_t queueBuffer(int pslot,
             const QueueBufferInput& input, QueueBufferOutput* output);
     virtual void cancelBuffer(int pslot, const sp<Fence>& fence);
     virtual int query(int what, int* value);
-    virtual status_t connect(const sp<IBinder>& token,
+    virtual status_t connect(const sp<IProducerListener>& listener,
             int api, bool producerControlledByApp, QueueBufferOutput* output);
     virtual status_t disconnect(int api);
 #ifdef QCOM_HARDWARE
     virtual status_t setBuffersSize(int size);
 #endif
+    virtual status_t setSidebandStream(const sp<NativeHandle>& stream);
+    virtual void allocateBuffers(bool async, uint32_t width, uint32_t height,
+            uint32_t format, uint32_t usage);
 
     //
     // Utility methods
@@ -151,16 +161,20 @@ private:
     // Since we present a single producer interface to the GLES driver, but
     // are internally muxing between the sink and scratch producers, we have
     // to keep track of which source last returned each producer slot from
-    // dequeueBuffer. Each bit in mLastSlotSource corresponds to a producer
+    // dequeueBuffer. Each bit in mProducerSlotSource corresponds to a producer
     // slot. Both mProducerSlotSource and mProducerBuffers are indexed by a
     // "producer slot"; see the mapSlot*() functions.
-    uint32_t mProducerSlotSource;
+    uint64_t mProducerSlotSource;
     sp<GraphicBuffer> mProducerBuffers[BufferQueue::NUM_BUFFER_SLOTS];
 
     // The QueueBufferOutput with the latest info from the sink, and with the
     // transform hint cleared. Since we defer queueBuffer from the GLES driver
     // to the sink, we have to return the previous version.
     QueueBufferOutput mQueueBufferOutput;
+
+    // Details of the current sink buffer. These become valid when a buffer is
+    // dequeued from the sink, and are used when queueing the buffer.
+    uint32_t mSinkBufferWidth, mSinkBufferHeight;
 
     //
     // Intra-frame state
@@ -169,10 +183,6 @@ private:
     // Composition type and GLES buffer source for the current frame.
     // Valid after prepareFrame(), cleared in onFrameCommitted.
     CompositionType mCompositionType;
-
-    // Details of the current sink buffer. These become valid when a buffer is
-    // dequeued from the sink, and are used when queueing the buffer.
-    uint32_t mSinkBufferWidth, mSinkBufferHeight;
 
     // mFbFence is the fence HWC should wait for before reading the framebuffer
     // target buffer.
@@ -225,6 +235,8 @@ private:
 
     const char* dbgStateStr() const;
     static const char* dbgSourceStr(Source s);
+
+    bool mMustRecompose;
 };
 
 // ---------------------------------------------------------------------------

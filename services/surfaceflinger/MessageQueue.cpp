@@ -105,7 +105,7 @@ void MessageQueue::setEventThread(const sp<EventThread>& eventThread)
     mEventThread = eventThread;
     mEvents = eventThread->createEventConnection();
     mEventTube = mEvents->getDataChannel();
-    mLooper->addFd(mEventTube->getFd(), 0, ALOOPER_EVENT_INPUT,
+    mLooper->addFd(mEventTube->getFd(), 0, Looper::EVENT_INPUT,
             MessageQueue::cb_eventReceiver, this);
 }
 
@@ -114,12 +114,12 @@ void MessageQueue::waitMessage() {
         IPCThreadState::self()->flushCommands();
         int32_t ret = mLooper->pollOnce(-1);
         switch (ret) {
-            case ALOOPER_POLL_WAKE:
-            case ALOOPER_POLL_CALLBACK:
+            case Looper::POLL_WAKE:
+            case Looper::POLL_CALLBACK:
                 continue;
-            case ALOOPER_POLL_ERROR:
-                ALOGE("ALOOPER_POLL_ERROR");
-            case ALOOPER_POLL_TIMEOUT:
+            case Looper::POLL_ERROR:
+                ALOGE("Looper::POLL_ERROR");
+            case Looper::POLL_TIMEOUT:
                 // timeout (should not happen)
                 continue;
             default:
@@ -179,7 +179,7 @@ int MessageQueue::cb_eventReceiver(int fd, int events, void* data) {
     return queue->eventReceiver(fd, events);
 }
 
-int MessageQueue::eventReceiver(int fd, int events) {
+int MessageQueue::eventReceiver(int /*fd*/, int /*events*/) {
     ssize_t n;
     DisplayEventReceiver::Event buffer[8];
     while ((n = DisplayEventReceiver::getEvents(mEventTube, buffer, 8)) > 0) {

@@ -19,6 +19,7 @@
 
 #include <utils/Errors.h>
 #include <binder/IInterface.h>
+#include <hardware/power.h>
 
 namespace android {
 
@@ -30,12 +31,16 @@ class IPowerManager : public IInterface
 public:
     DECLARE_META_INTERFACE(PowerManager);
 
+    // FIXME remove the bool isOneWay parameters as they are not oneway in the .aidl
     virtual status_t acquireWakeLock(int flags, const sp<IBinder>& lock, const String16& tag,
-            const String16& packageName) = 0;
+            const String16& packageName, bool isOneWay = false) = 0;
     virtual status_t acquireWakeLockWithUid(int flags, const sp<IBinder>& lock, const String16& tag,
-            const String16& packageName, int uid) = 0;
-    virtual status_t releaseWakeLock(const sp<IBinder>& lock, int flags) = 0;
-    virtual status_t updateWakeLockUids(const sp<IBinder>& lock, int len, const int *uids) = 0;
+            const String16& packageName, int uid, bool isOneWay = false) = 0;
+    virtual status_t releaseWakeLock(const sp<IBinder>& lock, int flags, bool isOneWay = false) = 0;
+    virtual status_t updateWakeLockUids(const sp<IBinder>& lock, int len, const int *uids,
+            bool isOneWay = false) = 0;
+    // oneway in the .aidl
+    virtual status_t powerHint(int hintId, int data) = 0;
 };
 
 // ----------------------------------------------------------------------------

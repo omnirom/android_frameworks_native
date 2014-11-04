@@ -21,6 +21,7 @@
 #include <limits.h>
 
 #include <input/Input.h>
+#include <input/InputEventLabels.h>
 
 #ifdef HAVE_ANDROID_OS
 #include <binder/Parcel.h>
@@ -42,82 +43,12 @@ void InputEvent::initialize(const InputEvent& from) {
 
 // --- KeyEvent ---
 
-bool KeyEvent::hasDefaultAction(int32_t keyCode) {
-    switch (keyCode) {
-        case AKEYCODE_HOME:
-        case AKEYCODE_BACK:
-        case AKEYCODE_CALL:
-        case AKEYCODE_ENDCALL:
-        case AKEYCODE_VOLUME_UP:
-        case AKEYCODE_VOLUME_DOWN:
-        case AKEYCODE_VOLUME_MUTE:
-        case AKEYCODE_POWER:
-        case AKEYCODE_CAMERA:
-        case AKEYCODE_HEADSETHOOK:
-        case AKEYCODE_MENU:
-        case AKEYCODE_NOTIFICATION:
-        case AKEYCODE_FOCUS:
-        case AKEYCODE_SEARCH:
-        case AKEYCODE_MEDIA_PLAY:
-        case AKEYCODE_MEDIA_PAUSE:
-        case AKEYCODE_MEDIA_PLAY_PAUSE:
-        case AKEYCODE_MEDIA_STOP:
-        case AKEYCODE_MEDIA_NEXT:
-        case AKEYCODE_MEDIA_PREVIOUS:
-        case AKEYCODE_MEDIA_REWIND:
-        case AKEYCODE_MEDIA_RECORD:
-        case AKEYCODE_MEDIA_FAST_FORWARD:
-        case AKEYCODE_MUTE:
-        case AKEYCODE_BRIGHTNESS_DOWN:
-        case AKEYCODE_BRIGHTNESS_UP:
-        case AKEYCODE_MEDIA_AUDIO_TRACK:
-            return true;
-    }
-    
-    return false;
+const char* KeyEvent::getLabel(int32_t keyCode) {
+    return getLabelByKeyCode(keyCode);
 }
 
-bool KeyEvent::hasDefaultAction() const {
-    return hasDefaultAction(getKeyCode());
-}
-
-bool KeyEvent::isSystemKey(int32_t keyCode) {
-    switch (keyCode) {
-        case AKEYCODE_MENU:
-        case AKEYCODE_SOFT_RIGHT:
-        case AKEYCODE_HOME:
-        case AKEYCODE_BACK:
-        case AKEYCODE_CALL:
-        case AKEYCODE_ENDCALL:
-        case AKEYCODE_VOLUME_UP:
-        case AKEYCODE_VOLUME_DOWN:
-        case AKEYCODE_VOLUME_MUTE:
-        case AKEYCODE_MUTE:
-        case AKEYCODE_POWER:
-        case AKEYCODE_HEADSETHOOK:
-        case AKEYCODE_MEDIA_PLAY:
-        case AKEYCODE_MEDIA_PAUSE:
-        case AKEYCODE_MEDIA_PLAY_PAUSE:
-        case AKEYCODE_MEDIA_STOP:
-        case AKEYCODE_MEDIA_NEXT:
-        case AKEYCODE_MEDIA_PREVIOUS:
-        case AKEYCODE_MEDIA_REWIND:
-        case AKEYCODE_MEDIA_RECORD:
-        case AKEYCODE_MEDIA_FAST_FORWARD:
-        case AKEYCODE_CAMERA:
-        case AKEYCODE_FOCUS:
-        case AKEYCODE_SEARCH:
-        case AKEYCODE_BRIGHTNESS_DOWN:
-        case AKEYCODE_BRIGHTNESS_UP:
-        case AKEYCODE_MEDIA_AUDIO_TRACK:
-            return true;
-    }
-    
-    return false;
-}
-
-bool KeyEvent::isSystemKey() const {
-    return isSystemKey(getKeyCode());
+int32_t KeyEvent::getKeyCodeFromLabel(const char* label) {
+    return getKeyCodeByLabel(label);
 }
 
 void KeyEvent::initialize(
@@ -158,16 +89,10 @@ void KeyEvent::initialize(const KeyEvent& from) {
 // --- PointerCoords ---
 
 float PointerCoords::getAxisValue(int32_t axis) const {
-    if (axis < 0 || axis > 63) {
+    if (axis < 0 || axis > 63 || !BitSet64::hasBit(bits, axis)){
         return 0;
     }
-
-    uint64_t axisBit = 1LL << axis;
-    if (!(bits & axisBit)) {
-        return 0;
-    }
-    uint32_t index = __builtin_popcountll(bits & (axisBit - 1LL));
-    return values[index];
+    return values[BitSet64::getIndexOfBit(bits, axis)];
 }
 
 status_t PointerCoords::setAxisValue(int32_t axis, float value) {
@@ -175,22 +100,23 @@ status_t PointerCoords::setAxisValue(int32_t axis, float value) {
         return NAME_NOT_FOUND;
     }
 
-    uint64_t axisBit = 1LL << axis;
-    uint32_t index = __builtin_popcountll(bits & (axisBit - 1LL));
-    if (!(bits & axisBit)) {
+    uint32_t index = BitSet64::getIndexOfBit(bits, axis);
+    if (!BitSet64::hasBit(bits, axis)) {
         if (value == 0) {
             return OK; // axes with value 0 do not need to be stored
         }
-        uint32_t count = __builtin_popcountll(bits);
+
+        uint32_t count = BitSet64::count(bits);
         if (count >= MAX_AXES) {
             tooManyAxes(axis);
             return NO_MEMORY;
         }
-        bits |= axisBit;
+        BitSet64::markBit(bits, axis);
         for (uint32_t i = count; i > index; i--) {
             values[i] = values[i - 1];
         }
     }
+
     values[index] = value;
     return OK;
 }
@@ -213,11 +139,16 @@ void PointerCoords::scale(float scaleFactor) {
     scaleAxisValue(*this, AMOTION_EVENT_AXIS_TOOL_MINOR, scaleFactor);
 }
 
+void PointerCoords::applyOffset(float xOffset, float yOffset) {
+    setAxisValue(AMOTION_EVENT_AXIS_X, getX() + xOffset);
+    setAxisValue(AMOTION_EVENT_AXIS_Y, getY() + yOffset);
+}
+
 #ifdef HAVE_ANDROID_OS
 status_t PointerCoords::readFromParcel(Parcel* parcel) {
     bits = parcel->readInt64();
 
-    uint32_t count = __builtin_popcountll(bits);
+    uint32_t count = BitSet64::count(bits);
     if (count > MAX_AXES) {
         return BAD_VALUE;
     }
@@ -231,7 +162,7 @@ status_t PointerCoords::readFromParcel(Parcel* parcel) {
 status_t PointerCoords::writeToParcel(Parcel* parcel) const {
     parcel->writeInt64(bits);
 
-    uint32_t count = __builtin_popcountll(bits);
+    uint32_t count = BitSet64::count(bits);
     for (uint32_t i = 0; i < count; i++) {
         parcel->writeFloat(values[i]);
     }
@@ -248,7 +179,7 @@ bool PointerCoords::operator==(const PointerCoords& other) const {
     if (bits != other.bits) {
         return false;
     }
-    uint32_t count = __builtin_popcountll(bits);
+    uint32_t count = BitSet64::count(bits);
     for (uint32_t i = 0; i < count; i++) {
         if (values[i] != other.values[i]) {
             return false;
@@ -259,7 +190,7 @@ bool PointerCoords::operator==(const PointerCoords& other) const {
 
 void PointerCoords::copyFrom(const PointerCoords& other) {
     bits = other.bits;
-    uint32_t count = __builtin_popcountll(bits);
+    uint32_t count = BitSet64::count(bits);
     for (uint32_t i = 0; i < count; i++) {
         values[i] = other.values[i];
     }
@@ -589,6 +520,14 @@ bool MotionEvent::isTouchEvent(int32_t source, int32_t action) {
         }
     }
     return false;
+}
+
+const char* MotionEvent::getLabel(int32_t axis) {
+    return getAxisLabel(axis);
+}
+
+int32_t MotionEvent::getAxisFromLabel(const char* label) {
+    return getAxisByLabel(label);
 }
 
 

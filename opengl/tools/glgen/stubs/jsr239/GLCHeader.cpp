@@ -128,7 +128,7 @@ getPointer(JNIEnv *_env, jobject buffer, jarray *array, jint *remaining, jint *o
             getBasePointerID, buffer);
     if (pointer != 0L) {
         *array = NULL;
-        return (void *) (jint) pointer;
+        return reinterpret_cast<void *>(pointer);
     }
 
     *array = (jarray) _env->CallStaticObjectMethod(nioAccessClass,
@@ -182,7 +182,7 @@ getDirectBufferPointer(JNIEnv *_env, jobject buffer) {
             if (array) {
                 releasePointer(_env, array, buf, 0);
             }
-            buf = buf + offset;
+            buf = (char*)buf + offset;
         } else {
             jniThrowException(_env, "java/lang/IllegalArgumentException",
                               "Must use a native order direct Buffer");

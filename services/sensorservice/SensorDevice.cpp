@@ -14,8 +14,9 @@
  * limitations under the License.
  */
 
-#include <stdint.h>
+#include <inttypes.h>
 #include <math.h>
+#include <stdint.h>
 #include <sys/types.h>
 
 #include <utils/Atomic.h>
@@ -79,6 +80,11 @@ SensorDevice::SensorDevice()
                 SENSORS_HARDWARE_MODULE_ID, strerror(-err));
 
         if (mSensorDevice) {
+            if (mSensorDevice->common.version == SENSORS_DEVICE_API_VERSION_1_1 ||
+                mSensorDevice->common.version == SENSORS_DEVICE_API_VERSION_1_2) {
+                ALOGE(">>>> WARNING <<< Upgrade sensor HAL to version 1_3");
+            }
+
             sensor_t const* list;
             ssize_t count = mSensorModule->get_sensors_list(mSensorModule, &list);
 #ifdef SYSFS_LIGHT_SENSOR
@@ -102,12 +108,13 @@ void SensorDevice::dump(String8& result)
     sensor_t const* list;
     ssize_t count = mSensorModule->get_sensors_list(mSensorModule, &list);
 
+    result.appendFormat("halVersion %d\n", getHalDeviceVersion());
     result.appendFormat("%d h/w sensors:\n", int(count));
 
     Mutex::Autolock _l(mLock);
     for (size_t i=0 ; i<size_t(count) ; i++) {
         const Info& info = mActivationCount.valueFor(list[i].handle);
-        result.appendFormat("handle=0x%08x, active-count=%d, batch_period(ms)={ ", list[i].handle,
+        result.appendFormat("handle=0x%08x, active-count=%zu, batch_period(ms)={ ", list[i].handle,
                             info.batchParams.size());
         for (size_t j = 0; j < info.batchParams.size(); j++) {
             BatchParams params = info.batchParams.valueAt(j);
@@ -116,7 +123,7 @@ void SensorDevice::dump(String8& result)
         }
         result.appendFormat(" }, selected=%4.1f ms\n", info.bestBatchParams.batchDelay / 1e6f);
 
-        result.appendFormat("handle=0x%08x, active-count=%d, batch_timeout(ms)={ ", list[i].handle,
+        result.appendFormat("handle=0x%08x, active-count=%zu, batch_timeout(ms)={ ", list[i].handle,
                             info.batchParams.size());
         for (size_t j = 0; j < info.batchParams.size(); j++) {
             BatchParams params = info.batchParams.valueAt(j);
@@ -184,11 +191,11 @@ status_t SensorDevice::activate(void* ident, int handle, int enabled)
     Info& info( mActivationCount.editValueFor(handle) );
 
     ALOGD_IF(DEBUG_CONNECTIONS,
-             "SensorDevice::activate: ident=%p, handle=0x%08x, enabled=%d, count=%d",
+             "SensorDevice::activate: ident=%p, handle=0x%08x, enabled=%d, count=%zu",
              ident, handle, enabled, info.batchParams.size());
 
     if (enabled) {
-        ALOGD_IF(DEBUG_CONNECTIONS, "enable index=%d", info.batchParams.indexOfKey(ident));
+        ALOGD_IF(DEBUG_CONNECTIONS, "enable index=%zd", info.batchParams.indexOfKey(ident));
 
         if (info.batchParams.indexOfKey(ident) >= 0) {
           if (info.batchParams.size() == 1) {
@@ -200,7 +207,7 @@ status_t SensorDevice::activate(void* ident, int handle, int enabled)
             ALOGE("\t >>>ERROR: activate called without batch");
         }
     } else {
-        ALOGD_IF(DEBUG_CONNECTIONS, "disable index=%d", info.batchParams.indexOfKey(ident));
+        ALOGD_IF(DEBUG_CONNECTIONS, "disable index=%zd", info.batchParams.indexOfKey(ident));
 
         if (info.removeBatchParamsForIdent(ident) >= 0) {
             if (info.batchParams.size() == 0) {
@@ -213,7 +220,7 @@ status_t SensorDevice::activate(void* ident, int handle, int enabled)
                     // batch_rate and timeout. One of the apps has unregistered for sensor
                     // events, and the best effort batch parameters might have changed.
                     ALOGD_IF(DEBUG_CONNECTIONS,
-                             "\t>>> actuating h/w batch %d %d %lld %lld ", handle,
+                             "\t>>> actuating h/w batch %d %d %" PRId64 " %" PRId64, handle,
                              info.bestBatchParams.flags, info.bestBatchParams.batchDelay,
                              info.bestBatchParams.batchTimeout);
                     mSensorDevice->batch(mSensorDevice, handle,info.bestBatchParams.flags,
@@ -241,7 +248,7 @@ status_t SensorDevice::activate(void* ident, int handle, int enabled)
 
     // On older devices which do not support batch, call setDelay().
     if (getHalDeviceVersion() < SENSORS_DEVICE_API_VERSION_1_1 && info.batchParams.size() > 0) {
-        ALOGD_IF(DEBUG_CONNECTIONS, "\t>>> actuating h/w setDelay %d %lld ", handle,
+        ALOGD_IF(DEBUG_CONNECTIONS, "\t>>> actuating h/w setDelay %d %" PRId64, handle,
                  info.bestBatchParams.batchDelay);
         mSensorDevice->setDelay(
                 reinterpret_cast<struct sensors_poll_device_t *>(mSensorDevice),
@@ -259,29 +266,13 @@ status_t SensorDevice::batch(void* ident, int handle, int flags, int64_t samplin
     }
 
     const int halVersion = getHalDeviceVersion();
-    if (halVersion >= SENSORS_DEVICE_API_VERSION_1_1) {
-        if (flags & SENSORS_BATCH_DRY_RUN) {
-            return mSensorDevice->batch(mSensorDevice, handle, flags, samplingPeriodNs,
-                                        maxBatchReportLatencyNs);
-        } else {
-            // Call h/w with dry run to see if the given parameters are feasible or not. Return if
-            // there is an error.
-            status_t errDryRun(NO_ERROR);
-            errDryRun = mSensorDevice->batch(mSensorDevice, handle, flags | SENSORS_BATCH_DRY_RUN,
-                                             samplingPeriodNs, maxBatchReportLatencyNs);
-            if (errDryRun != NO_ERROR) {
-                ALOGD_IF(DEBUG_CONNECTIONS, "SensorDevice::batch dry run error %s",
-                         strerror(-errDryRun));
-                return errDryRun;
-            }
-        }
-    } else if (maxBatchReportLatencyNs != 0) {
-        // Batch is not supported on older devices.
+    if (halVersion < SENSORS_DEVICE_API_VERSION_1_1 && maxBatchReportLatencyNs != 0) {
+        // Batch is not supported on older devices return invalid operation.
         return INVALID_OPERATION;
     }
 
     ALOGD_IF(DEBUG_CONNECTIONS,
-             "SensorDevice::batch: ident=%p, handle=0x%08x, flags=%d, period_ns=%lld timeout=%lld",
+             "SensorDevice::batch: ident=%p, handle=0x%08x, flags=%d, period_ns=%" PRId64 " timeout=%" PRId64,
              ident, handle, flags, samplingPeriodNs, maxBatchReportLatencyNs);
 
     Mutex::Autolock _l(mLock);
@@ -300,7 +291,8 @@ status_t SensorDevice::batch(void* ident, int handle, int flags, int64_t samplin
     info.selectBatchParams();
 
     ALOGD_IF(DEBUG_CONNECTIONS,
-             "\t>>> curr_period=%lld min_period=%lld curr_timeout=%lld min_timeout=%lld",
+             "\t>>> curr_period=%" PRId64 " min_period=%" PRId64
+             " curr_timeout=%" PRId64 " min_timeout=%" PRId64,
              prevBestBatchParams.batchDelay, info.bestBatchParams.batchDelay,
              prevBestBatchParams.batchTimeout, info.bestBatchParams.batchTimeout);
 
@@ -308,7 +300,7 @@ status_t SensorDevice::batch(void* ident, int handle, int flags, int64_t samplin
     // If the min period or min timeout has changed since the last batch call, call batch.
     if (prevBestBatchParams != info.bestBatchParams) {
         if (halVersion >= SENSORS_DEVICE_API_VERSION_1_1) {
-            ALOGD_IF(DEBUG_CONNECTIONS, "\t>>> actuating h/w BATCH %d %d %lld %lld ", handle,
+            ALOGD_IF(DEBUG_CONNECTIONS, "\t>>> actuating h/w BATCH %d %d %" PRId64 " %" PRId64, handle,
                      info.bestBatchParams.flags, info.bestBatchParams.batchDelay,
                      info.bestBatchParams.batchTimeout);
             err = mSensorDevice->batch(mSensorDevice, handle, info.bestBatchParams.flags,
@@ -320,7 +312,8 @@ status_t SensorDevice::batch(void* ident, int handle, int flags, int64_t samplin
             // call setDelay in SensorDevice::activate() method.
         }
         if (err != NO_ERROR) {
-            ALOGE("sensor batch failed %p %d %d %lld %lld err=%s", mSensorDevice, handle,
+            ALOGE("sensor batch failed %p %d %d %" PRId64 " %" PRId64 " err=%s",
+                  mSensorDevice, handle,
                   info.bestBatchParams.flags, info.bestBatchParams.batchDelay,
                   info.bestBatchParams.batchTimeout, strerror(-err));
             info.removeBatchParamsForIdent(ident);
@@ -374,7 +367,7 @@ status_t SensorDevice::Info::setBatchParamsForIdent(void* ident, int flags,
                                                     int64_t maxBatchReportLatencyNs) {
     ssize_t index = batchParams.indexOfKey(ident);
     if (index < 0) {
-        ALOGE("Info::setBatchParamsForIdent(ident=%p, period_ns=%lld timeout=%lld) failed (%s)",
+        ALOGE("Info::setBatchParamsForIdent(ident=%p, period_ns=%" PRId64 " timeout=%" PRId64 ") failed (%s)",
               ident, samplingPeriodNs, maxBatchReportLatencyNs, strerror(-index));
         return BAD_INDEX;
     }

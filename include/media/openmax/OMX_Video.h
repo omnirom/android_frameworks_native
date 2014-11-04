@@ -87,6 +87,7 @@ typedef enum OMX_VIDEO_CODINGTYPE {
     OMX_VIDEO_CodingMJPEG,      /**< Motion JPEG */
     OMX_VIDEO_CodingVP8,        /**< Google VP8, formerly known as On2 VP8 */
     OMX_VIDEO_CodingVP9,        /**< Google VP9 */
+    OMX_VIDEO_CodingHEVC,       /**< ITU H.265/HEVC */
     OMX_VIDEO_CodingKhronosExtensions = 0x6F000000, /**< Reserved region for introducing Khronos Standard Extensions */ 
     OMX_VIDEO_CodingVendorStartUnused = 0x7F000000, /**< Reserved region for introducing Vendor Extensions */
     OMX_VIDEO_CodingMax = 0x7FFFFFFF
@@ -817,6 +818,7 @@ typedef enum OMX_VIDEO_AVCLEVELTYPE {
     OMX_VIDEO_AVCLevel42  = 0x2000,   /**< Level 4.2 */
     OMX_VIDEO_AVCLevel5   = 0x4000,   /**< Level 5 */
     OMX_VIDEO_AVCLevel51  = 0x8000,   /**< Level 5.1 */
+    OMX_VIDEO_AVCLevel52  = 0x10000,  /**< Level 5.2 */
     OMX_VIDEO_AVCLevelKhronosExtensions = 0x6F000000, /**< Reserved region for introducing Khronos Standard Extensions */ 
     OMX_VIDEO_AVCLevelVendorStartUnused = 0x7F000000, /**< Reserved region for introducing Vendor Extensions */
     OMX_VIDEO_AVCLevelMax = 0x7FFFFFFF  

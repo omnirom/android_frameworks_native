@@ -25,6 +25,18 @@
 
 namespace android {
 
+// Ignore present (retire) fences if the device doesn't have support for the
+// sync framework, or if all phase offsets are zero.  The latter is useful
+// because it allows us to avoid resync bursts on devices that don't need
+// phase-offset VSYNC events.
+#if defined(RUNNING_WITHOUT_SYNC_FRAMEWORK) || \
+        (VSYNC_EVENT_PHASE_OFFSET_NS == 0 && SF_VSYNC_EVENT_PHASE_OFFSET_NS == 0)
+static const bool kIgnorePresentFences = true;
+#else
+static const bool kIgnorePresentFences = false;
+#endif
+
+
 class String8;
 class Fence;
 class DispSyncThread;
@@ -55,6 +67,7 @@ public:
     DispSync();
     ~DispSync();
 
+    // reset clears the resync samples and error value.
     void reset();
 
     // addPresentFence adds a fence for use in validating the current vsync
@@ -83,10 +96,19 @@ public:
     bool addResyncSample(nsecs_t timestamp);
     void endResync();
 
-    // The setPreiod method sets the vsync event model's period to a specific
+    // The setPeriod method sets the vsync event model's period to a specific
     // value.  This should be used to prime the model when a display is first
     // turned on.  It should NOT be used after that.
     void setPeriod(nsecs_t period);
+
+    // The getPeriod method returns the current vsync period.
+    nsecs_t getPeriod();
+
+    // setRefreshSkipCount specifies an additional number of refresh
+    // cycles to skip.  For example, on a 60Hz display, a skip count of 1
+    // will result in events happening at 30Hz.  Default is zero.  The idea
+    // is to sacrifice smoothness for battery life.
+    void setRefreshSkipCount(int count);
 
     // addEventListener registers a callback to be called repeatedly at the
     // given phase offset from the hardware vsync events.  The callback is
@@ -98,6 +120,15 @@ public:
     // this method returns that callback will no longer be called by the
     // DispSync object.
     status_t removeEventListener(const sp<Callback>& callback);
+
+    // computeNextRefresh computes when the next refresh is expected to begin.
+    // The periodOffset value can be used to move forward or backward; an
+    // offset of zero is the next refresh, -1 is the previous refresh, 1 is
+    // the refresh after next. etc.
+    nsecs_t computeNextRefresh(int periodOffset) const;
+
+    // dump appends human-readable debug info to the result string.
+    void dump(String8& result) const;
 
 private:
 
@@ -136,6 +167,8 @@ private:
     sp<Fence> mPresentFences[NUM_PRESENT_SAMPLES];
     nsecs_t mPresentTimes[NUM_PRESENT_SAMPLES];
     size_t mPresentSampleOffset;
+
+    int mRefreshSkipCount;
 
     // mThread is the thread from which all the callbacks are called.
     sp<DispSyncThread> mThread;

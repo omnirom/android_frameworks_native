@@ -14,16 +14,11 @@
  * limitations under the License.
  */
 
-#define EGL_EGLEXT_PROTOTYPES
-
-#include <EGL/egl.h>
-#include <EGL/eglext.h>
-
-
 #include <stdint.h>
 #include <sys/types.h>
 
 #include <utils/Errors.h>
+#include <utils/NativeHandle.h>
 
 #include <binder/Parcel.h>
 #include <binder/IInterface.h>
@@ -70,11 +65,11 @@ size_t IGraphicBufferConsumer::BufferItem::getFlattenedSize() const {
     size_t c = 0;
     if (mGraphicBuffer != 0) {
         c += mGraphicBuffer->getFlattenedSize();
-        FlattenableUtils::align<4>(c);
+        c = FlattenableUtils::align<4>(c);
     }
     if (mFence != 0) {
         c += mFence->getFlattenedSize();
-        FlattenableUtils::align<4>(c);
+        c = FlattenableUtils::align<4>(c);
     }
     return sizeof(int32_t) + c + getPodSize();
 }
@@ -90,11 +85,21 @@ size_t IGraphicBufferConsumer::BufferItem::getFdCount() const {
     return c;
 }
 
+static void writeBoolAsInt(void*& buffer, size_t& size, bool b) {
+    FlattenableUtils::write(buffer, size, static_cast<int32_t>(b));
+}
+
+static bool readBoolFromInt(void const*& buffer, size_t& size) {
+    int32_t i;
+    FlattenableUtils::read(buffer, size, i);
+    return static_cast<bool>(i);
+}
+
 status_t IGraphicBufferConsumer::BufferItem::flatten(
         void*& buffer, size_t& size, int*& fds, size_t& count) const {
 
     // make sure we have enough space
-    if (count < BufferItem::getFlattenedSize()) {
+    if (size < BufferItem::getFlattenedSize()) {
         return NO_MEMORY;
     }
 
@@ -127,12 +132,12 @@ status_t IGraphicBufferConsumer::BufferItem::flatten(
     FlattenableUtils::write(buffer, size, mTransform);
     FlattenableUtils::write(buffer, size, mScalingMode);
     FlattenableUtils::write(buffer, size, mTimestamp);
-    FlattenableUtils::write(buffer, size, mIsAutoTimestamp);
+    writeBoolAsInt(buffer, size, mIsAutoTimestamp);
     FlattenableUtils::write(buffer, size, mFrameNumber);
     FlattenableUtils::write(buffer, size, mBuf);
-    FlattenableUtils::write(buffer, size, mIsDroppable);
-    FlattenableUtils::write(buffer, size, mAcquireCalled);
-    FlattenableUtils::write(buffer, size, mTransformToDisplayInverse);
+    writeBoolAsInt(buffer, size, mIsDroppable);
+    writeBoolAsInt(buffer, size, mAcquireCalled);
+    writeBoolAsInt(buffer, size, mTransformToDisplayInverse);
 
     return NO_ERROR;
 }
@@ -169,12 +174,12 @@ status_t IGraphicBufferConsumer::BufferItem::unflatten(
     FlattenableUtils::read(buffer, size, mTransform);
     FlattenableUtils::read(buffer, size, mScalingMode);
     FlattenableUtils::read(buffer, size, mTimestamp);
-    FlattenableUtils::read(buffer, size, mIsAutoTimestamp);
+    mIsAutoTimestamp = readBoolFromInt(buffer, size);
     FlattenableUtils::read(buffer, size, mFrameNumber);
     FlattenableUtils::read(buffer, size, mBuf);
-    FlattenableUtils::read(buffer, size, mIsDroppable);
-    FlattenableUtils::read(buffer, size, mAcquireCalled);
-    FlattenableUtils::read(buffer, size, mTransformToDisplayInverse);
+    mIsDroppable = readBoolFromInt(buffer, size);
+    mAcquireCalled = readBoolFromInt(buffer, size);
+    mTransformToDisplayInverse = readBoolFromInt(buffer, size);
 
     return NO_ERROR;
 }
@@ -183,6 +188,8 @@ status_t IGraphicBufferConsumer::BufferItem::unflatten(
 
 enum {
     ACQUIRE_BUFFER = IBinder::FIRST_CALL_TRANSACTION,
+    DETACH_BUFFER,
+    ATTACH_BUFFER,
     RELEASE_BUFFER,
     CONSUMER_CONNECT,
     CONSUMER_DISCONNECT,
@@ -195,6 +202,7 @@ enum {
     SET_DEFAULT_BUFFER_FORMAT,
     SET_CONSUMER_USAGE_BITS,
     SET_TRANSFORM_HINT,
+    GET_SIDEBAND_STREAM,
     DUMP,
 };
 
@@ -222,8 +230,33 @@ public:
         return reply.readInt32();
     }
 
+    virtual status_t detachBuffer(int slot) {
+        Parcel data, reply;
+        data.writeInterfaceToken(IGraphicBufferConsumer::getInterfaceDescriptor());
+        data.writeInt32(slot);
+        status_t result = remote()->transact(DETACH_BUFFER, data, &reply);
+        if (result != NO_ERROR) {
+            return result;
+        }
+        result = reply.readInt32();
+        return result;
+    }
+
+    virtual status_t attachBuffer(int* slot, const sp<GraphicBuffer>& buffer) {
+        Parcel data, reply;
+        data.writeInterfaceToken(IGraphicBufferConsumer::getInterfaceDescriptor());
+        data.write(*buffer.get());
+        status_t result = remote()->transact(ATTACH_BUFFER, data, &reply);
+        if (result != NO_ERROR) {
+            return result;
+        }
+        *slot = reply.readInt32();
+        result = reply.readInt32();
+        return result;
+    }
+
     virtual status_t releaseBuffer(int buf, uint64_t frameNumber,
-            EGLDisplay display, EGLSyncKHR fence,
+            EGLDisplay display __attribute__((unused)), EGLSyncKHR fence __attribute__((unused)),
             const sp<Fence>& releaseFence) {
         Parcel data, reply;
         data.writeInterfaceToken(IGraphicBufferConsumer::getInterfaceDescriptor());
@@ -259,14 +292,18 @@ public:
         return reply.readInt32();
     }
 
-    virtual status_t getReleasedBuffers(uint32_t* slotMask) {
+    virtual status_t getReleasedBuffers(uint64_t* slotMask) {
         Parcel data, reply;
+        if (slotMask == NULL) {
+            ALOGE("getReleasedBuffers: slotMask must not be NULL");
+            return BAD_VALUE;
+        }
         data.writeInterfaceToken(IGraphicBufferConsumer::getInterfaceDescriptor());
         status_t result = remote()->transact(GET_RELEASED_BUFFERS, data, &reply);
         if (result != NO_ERROR) {
             return result;
         }
-        *slotMask = reply.readInt32();
+        *slotMask = reply.readInt64();
         return reply.readInt32();
     }
 
@@ -354,6 +391,20 @@ public:
         return reply.readInt32();
     }
 
+    virtual sp<NativeHandle> getSidebandStream() const {
+        Parcel data, reply;
+        status_t err;
+        data.writeInterfaceToken(IGraphicBufferConsumer::getInterfaceDescriptor());
+        if ((err = remote()->transact(GET_SIDEBAND_STREAM, data, &reply)) != NO_ERROR) {
+            return NULL;
+        }
+        sp<NativeHandle> stream;
+        if (reply.readInt32()) {
+            stream = NativeHandle::create(reply.readNativeHandle(), true);
+        }
+        return stream;
+    }
+
     virtual void dump(String8& result, const char* prefix) const {
         Parcel data, reply;
         data.writeInterfaceToken(IGraphicBufferConsumer::getInterfaceDescriptor());
@@ -379,6 +430,23 @@ status_t BnGraphicBufferConsumer::onTransact(
             status_t result = acquireBuffer(&item, presentWhen);
             status_t err = reply->write(item);
             if (err) return err;
+            reply->writeInt32(result);
+            return NO_ERROR;
+        } break;
+        case DETACH_BUFFER: {
+            CHECK_INTERFACE(IGraphicBufferConsumer, data, reply);
+            int slot = data.readInt32();
+            int result = detachBuffer(slot);
+            reply->writeInt32(result);
+            return NO_ERROR;
+        } break;
+        case ATTACH_BUFFER: {
+            CHECK_INTERFACE(IGraphicBufferConsumer, data, reply);
+            sp<GraphicBuffer> buffer = new GraphicBuffer();
+            data.read(*buffer.get());
+            int slot;
+            int result = attachBuffer(&slot, buffer);
+            reply->writeInt32(slot);
             reply->writeInt32(result);
             return NO_ERROR;
         } break;
@@ -410,9 +478,9 @@ status_t BnGraphicBufferConsumer::onTransact(
         } break;
         case GET_RELEASED_BUFFERS: {
             CHECK_INTERFACE(IGraphicBufferConsumer, data, reply);
-            uint32_t slotMask;
+            uint64_t slotMask;
             status_t result = getReleasedBuffers(&slotMask);
-            reply->writeInt32(slotMask);
+            reply->writeInt64(slotMask);
             reply->writeInt32(result);
             return NO_ERROR;
         } break;

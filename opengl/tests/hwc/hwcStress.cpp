@@ -101,7 +101,6 @@
 #include <GLES2/gl2.h>
 #include <GLES2/gl2ext.h>
 
-#include <ui/FramebufferNativeWindow.h>
 #include <ui/GraphicBuffer.h>
 
 #define LOG_TAG "hwcStressTest"
@@ -574,8 +573,8 @@ void initFrames(unsigned int seed)
         // mod the wMod/hMod value must be equal to 0.
         size_t w = (width * maxSizeRatio) * testRandFract();
         size_t h = (height * maxSizeRatio) * testRandFract();
-        w = max(1u, w);
-        h = max(1u, h);
+        w = max(size_t(1u), w);
+        h = max(size_t(1u), h);
         if ((w % formatPtr->wMod) != 0) {
             w += formatPtr->wMod - (w % formatPtr->wMod);
         }

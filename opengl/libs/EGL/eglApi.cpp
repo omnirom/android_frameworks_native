@@ -204,7 +204,7 @@ EGLDisplay eglGetDisplay(EGLNativeDisplayType display)
 {
     clearError();
 
-    uint32_t index = uint32_t(display);
+    uintptr_t index = reinterpret_cast<uintptr_t>(display);
     if (index >= NUM_DISPLAYS) {
         return setError(EGL_BAD_PARAMETER, EGL_NO_DISPLAY);
     }
@@ -408,9 +408,11 @@ EGLSurface eglCreateWindowSurface(  EGLDisplay dpy, EGLConfig config,
     if (dp) {
         EGLDisplay iDpy = dp->disp.dpy;
 
-        if (native_window_api_connect(window, NATIVE_WINDOW_API_EGL) != OK) {
-            ALOGE("EGLNativeWindowType %p already connected to another API",
-                    window);
+        int result = native_window_api_connect(window, NATIVE_WINDOW_API_EGL);
+        if (result != OK) {
+            ALOGE("eglCreateWindowSurface: native_window_api_connect (win=%p) "
+                    "failed (%#x) (already connected to another API?)",
+                    window, result);
             return setError(EGL_BAD_ALLOC, EGL_NO_SURFACE);
         }
 
@@ -877,10 +879,13 @@ EGLint eglGetError(void)
     return err;
 }
 
-static __eglMustCastToProperFunctionPointerType findBuiltinGLWrapper(
+static __eglMustCastToProperFunctionPointerType findBuiltinWrapper(
         const char* procname) {
     const egl_connection_t* cnx = &gEGLImpl;
     void* proc = NULL;
+
+    proc = dlsym(cnx->libEgl, procname);
+    if (proc) return (__eglMustCastToProperFunctionPointerType)proc;
 
     proc = dlsym(cnx->libGles2, procname);
     if (proc) return (__eglMustCastToProperFunctionPointerType)proc;
@@ -912,7 +917,7 @@ __eglMustCastToProperFunctionPointerType eglGetProcAddress(const char *procname)
     addr = findProcAddress(procname, sExtensionMap, NELEM(sExtensionMap));
     if (addr) return addr;
 
-    addr = findBuiltinGLWrapper(procname);
+    addr = findBuiltinWrapper(procname);
     if (addr) return addr;
 
     // this protects accesses to sGLExtentionMap and sGLExtentionSlot

@@ -42,6 +42,8 @@
 
 #include "dumpstate.h"
 
+static const int64_t NANOS_PER_SEC = 1000000000;
+
 /* list of native processes to include in the native dumps */
 static const char* native_processes_to_dump[] = {
         "/system/bin/drmserver",
@@ -50,6 +52,29 @@ static const char* native_processes_to_dump[] = {
         "/system/bin/surfaceflinger",
         NULL,
 };
+
+void for_each_userid(void (*func)(int), const char *header) {
+    DIR *d;
+    struct dirent *de;
+
+    if (header) printf("\n------ %s ------\n", header);
+    func(0);
+
+    if (!(d = opendir("/data/system/users"))) {
+        printf("Failed to open /data/system/users (%s)\n", strerror(errno));
+        return;
+    }
+
+    while ((de = readdir(d))) {
+        int userid;
+        if (de->d_type != DT_DIR || !(userid = atoi(de->d_name))) {
+            continue;
+        }
+        func(userid);
+    }
+
+    closedir(d);
+}
 
 static void __for_each_pid(void (*helper)(int, const char *, void *), const char *header, void *arg) {
     DIR *d;
@@ -175,6 +200,22 @@ out_close:
     return;
 }
 
+void do_dump_settings(int userid) {
+    char title[255];
+    char dbpath[255];
+    char sql[255];
+    sprintf(title, "SYSTEM SETTINGS (user %d)", userid);
+    if (userid == 0) {
+        strcpy(dbpath, "/data/data/com.android.providers.settings/databases/settings.db");
+        strcpy(sql, "pragma user_version; select * from system; select * from secure; select * from global;");
+    } else {
+        sprintf(dbpath, "/data/system/users/%d/settings.db", userid);
+        strcpy(sql, "pragma user_version; select * from system; select * from secure;");
+    }
+    run_command(title, 20, SU_PATH, "root", "sqlite3", dbpath, sql, NULL);
+    return;
+}
+
 void do_dmesg() {
     printf("------ KERNEL LOG (dmesg) ------\n");
     /* Get size of kernel buffer */
@@ -210,8 +251,7 @@ void do_showmap(int pid, const char *name) {
 }
 
 /* prints the contents of a file */
-int dump_file(const char *title, const char* path) {
-    char buffer[32768];
+int dump_file(const char *title, const char *path) {
     int fd = open(path, O_RDONLY);
     if (fd < 0) {
         int err = errno;
@@ -220,6 +260,11 @@ int dump_file(const char *title, const char* path) {
         if (title) printf("\n");
         return -1;
     }
+    return dump_file_from_fd(title, path, fd);
+}
+
+int dump_file_from_fd(const char *title, const char *path, int fd) {
+    char buffer[32768];
 
     if (title) printf("------ %s (%s", title, path);
 
@@ -243,17 +288,23 @@ int dump_file(const char *title, const char* path) {
         }
         if (ret <= 0) break;
     }
-
     close(fd);
+
     if (!newline) printf("\n");
     if (title) printf("\n");
     return 0;
 }
 
+static int64_t nanotime() {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (int64_t)ts.tv_sec * NANOS_PER_SEC + ts.tv_nsec;
+}
+
 /* forks a command and waits for it to finish */
 int run_command(const char *title, int timeout_seconds, const char *command, ...) {
     fflush(stdout);
-    clock_t start = clock();
+    int64_t start = nanotime();
     pid_t pid = fork();
 
     /* handle error case */
@@ -269,6 +320,12 @@ int run_command(const char *title, int timeout_seconds, const char *command, ...
 
         /* make sure the child dies when dumpstate dies */
         prctl(PR_SET_PDEATHSIG, SIGKILL);
+
+        /* just ignore SIGPIPE, will go down with parent's */
+        struct sigaction sigact;
+        memset(&sigact, 0, sizeof(sigact));
+        sigact.sa_handler = SIG_IGN;
+        sigaction(SIGPIPE, &sigact, NULL);
 
         va_list ap;
         va_start(ap, command);
@@ -291,19 +348,19 @@ int run_command(const char *title, int timeout_seconds, const char *command, ...
     for (;;) {
         int status;
         pid_t p = waitpid(pid, &status, WNOHANG);
-        float elapsed = (float) (clock() - start) / CLOCKS_PER_SEC;
+        int64_t elapsed = nanotime() - start;
         if (p == pid) {
             if (WIFSIGNALED(status)) {
                 printf("*** %s: Killed by signal %d\n", command, WTERMSIG(status));
             } else if (WIFEXITED(status) && WEXITSTATUS(status) > 0) {
                 printf("*** %s: Exit code %d\n", command, WEXITSTATUS(status));
             }
-            if (title) printf("[%s: %.1fs elapsed]\n\n", command, elapsed);
+            if (title) printf("[%s: %.3fs elapsed]\n\n", command, (float)elapsed / NANOS_PER_SEC);
             return status;
         }
 
-        if (timeout_seconds && elapsed > timeout_seconds) {
-            printf("*** %s: Timed out after %.1fs (killing pid %d)\n", command, elapsed, pid);
+        if (timeout_seconds && elapsed / NANOS_PER_SEC > timeout_seconds) {
+            printf("*** %s: Timed out after %ds (killing pid %d)\n", command, (int) elapsed, pid);
             kill(pid, SIGTERM);
             return -1;
         }
@@ -469,7 +526,7 @@ const char *dump_traces() {
         if (!mkdir(anr_traces_dir, 0775)) {
             chown(anr_traces_dir, AID_SYSTEM, AID_SYSTEM);
             chmod(anr_traces_dir, 0775);
-            if (selinux_android_restorecon(anr_traces_dir) == -1) {
+            if (selinux_android_restorecon(anr_traces_dir, 0) == -1) {
                 fprintf(stderr, "restorecon failed for %s: %s\n", anr_traces_dir, strerror(errno));
             }
         } else if (errno != EEXIST) {
@@ -526,21 +583,22 @@ const char *dump_traces() {
         }
         data[len] = '\0';
 
-        if (!strcmp(data, "/system/bin/app_process")) {
+        if (!strncmp(data, "/system/bin/app_process", strlen("/system/bin/app_process"))) {
             /* skip zygote -- it won't dump its stack anyway */
             snprintf(path, sizeof(path), "/proc/%d/cmdline", pid);
-            int fd = open(path, O_RDONLY);
-            len = read(fd, data, sizeof(data) - 1);
-            close(fd);
+            int cfd = open(path, O_RDONLY);
+            len = read(cfd, data, sizeof(data) - 1);
+            close(cfd);
             if (len <= 0) {
                 continue;
             }
             data[len] = '\0';
-            if (!strcmp(data, "zygote")) {
+            if (!strncmp(data, "zygote", strlen("zygote"))) {
                 continue;
             }
 
             ++dalvik_found;
+            int64_t start = nanotime();
             if (kill(pid, SIGQUIT)) {
                 fprintf(stderr, "kill(%d, SIGQUIT): %s\n", pid, strerror(errno));
                 continue;
@@ -548,7 +606,7 @@ const char *dump_traces() {
 
             /* wait for the writable-close notification from inotify */
             struct pollfd pfd = { ifd, POLLIN, 0 };
-            int ret = poll(&pfd, 1, 200);  /* 200 msec timeout */
+            int ret = poll(&pfd, 1, 5000);  /* 5 sec timeout */
             if (ret < 0) {
                 fprintf(stderr, "poll: %s\n", strerror(errno));
             } else if (ret == 0) {
@@ -557,12 +615,24 @@ const char *dump_traces() {
                 struct inotify_event ie;
                 read(ifd, &ie, sizeof(ie));
             }
+
+            if (lseek(fd, 0, SEEK_END) < 0) {
+                fprintf(stderr, "lseek: %s\n", strerror(errno));
+            } else {
+                snprintf(data, sizeof(data), "[dump dalvik stack %d: %.3fs elapsed]\n",
+                        pid, (float)(nanotime() - start) / NANOS_PER_SEC);
+                write(fd, data, strlen(data));
+            }
         } else if (should_dump_native_traces(data)) {
             /* dump native process if appropriate */
             if (lseek(fd, 0, SEEK_END) < 0) {
                 fprintf(stderr, "lseek: %s\n", strerror(errno));
             } else {
+                int64_t start = nanotime();
                 dump_backtrace_to_file(pid, fd);
+                snprintf(data, sizeof(data), "[dump native stack %d: %.3fs elapsed]\n",
+                        pid, (float)(nanotime() - start) / NANOS_PER_SEC);
+                write(fd, data, strlen(data));
             }
         }
     }
@@ -590,6 +660,21 @@ error_close_fd:
     return result;
 }
 
-void play_sound(const char* path) {
-    run_command(NULL, 5, "/system/bin/stagefright", "-o", "-a", path, NULL);
+void dump_route_tables() {
+    const char* const RT_TABLES_PATH = "/data/misc/net/rt_tables";
+    dump_file("RT_TABLES", RT_TABLES_PATH);
+    FILE* fp = fopen(RT_TABLES_PATH, "r");
+    if (!fp) {
+        printf("*** %s: %s\n", RT_TABLES_PATH, strerror(errno));
+        return;
+    }
+    char table[16];
+    // Each line has an integer (the table number), a space, and a string (the table name). We only
+    // need the table number. It's a 32-bit unsigned number, so max 10 chars. Skip the table name.
+    // Add a fixed max limit so this doesn't go awry.
+    for (int i = 0; i < 64 && fscanf(fp, " %10s %*s", table) == 1; ++i) {
+        run_command("ROUTE TABLE IPv4", 10, "ip", "-4", "route", "show", "table", table, NULL);
+        run_command("ROUTE TABLE IPv6", 10, "ip", "-6", "route", "show", "table", table, NULL);
+    }
+    fclose(fp);
 }

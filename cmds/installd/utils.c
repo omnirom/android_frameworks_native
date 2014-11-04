@@ -1,16 +1,16 @@
 /*
 ** Copyright 2008, The Android Open Source Project
 **
-** Licensed under the Apache License, Version 2.0 (the "License"); 
-** you may not use this file except in compliance with the License. 
-** You may obtain a copy of the License at 
+** Licensed under the Apache License, Version 2.0 (the "License");
+** you may not use this file except in compliance with the License.
+** You may obtain a copy of the License at
 **
-**     http://www.apache.org/licenses/LICENSE-2.0 
+**     http://www.apache.org/licenses/LICENSE-2.0
 **
-** Unless required by applicable law or agreed to in writing, software 
-** distributed under the License is distributed on an "AS IS" BASIS, 
-** WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. 
-** See the License for the specific language governing permissions and 
+** Unless required by applicable law or agreed to in writing, software
+** distributed under the License is distributed on an "AS IS" BASIS,
+** WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+** See the License for the specific language governing permissions and
 ** limitations under the License.
 */
 
@@ -149,6 +149,17 @@ int create_user_media_path(char path[PATH_MAX], userid_t userid) {
     return 0;
 }
 
+/**
+ * Create the path name for config for a certain userid.
+ * Returns 0 on success, and -1 on failure.
+ */
+int create_user_config_path(char path[PATH_MAX], userid_t userid) {
+    if (snprintf(path, PATH_MAX, "%s%d", "/data/misc/user/", userid) > PATH_MAX) {
+        return -1;
+    }
+    return 0;
+}
+
 int create_move_path(char path[PKG_PATH_MAX],
     const char* pkgname,
     const char* leaf,
@@ -208,7 +219,8 @@ int is_valid_package_name(const char* pkgname) {
     return 0;
 }
 
-static int _delete_dir_contents(DIR *d, const char *ignore)
+static int _delete_dir_contents(DIR *d,
+                                int (*exclusion_predicate)(const char *name, const int is_dir))
 {
     int result = 0;
     struct dirent *de;
@@ -221,8 +233,10 @@ static int _delete_dir_contents(DIR *d, const char *ignore)
     while ((de = readdir(d))) {
         const char *name = de->d_name;
 
-            /* skip the ignore name if provided */
-        if (ignore && !strcmp(name, ignore)) continue;
+            /* check using the exclusion predicate, if provided */
+        if (exclusion_predicate && exclusion_predicate(name, (de->d_type == DT_DIR))) {
+            continue;
+        }
 
         if (de->d_type == DT_DIR) {
             int r, subfd;
@@ -247,7 +261,7 @@ static int _delete_dir_contents(DIR *d, const char *ignore)
                 result = -1;
                 continue;
             }
-            if (_delete_dir_contents(subdir, 0)) {
+            if (_delete_dir_contents(subdir, exclusion_predicate)) {
                 result = -1;
             }
             closedir(subdir);
@@ -268,7 +282,7 @@ static int _delete_dir_contents(DIR *d, const char *ignore)
 
 int delete_dir_contents(const char *pathname,
                         int also_delete_dir,
-                        const char *ignore)
+                        int (*exclusion_predicate)(const char*, const int))
 {
     int res = 0;
     DIR *d;
@@ -278,7 +292,7 @@ int delete_dir_contents(const char *pathname,
         ALOGE("Couldn't opendir %s: %s\n", pathname, strerror(errno));
         return -errno;
     }
-    res = _delete_dir_contents(d, ignore);
+    res = _delete_dir_contents(d, exclusion_predicate);
     closedir(d);
     if (also_delete_dir) {
         if (rmdir(pathname)) {
@@ -307,6 +321,104 @@ int delete_dir_contents_fd(int dfd, const char *name)
     }
     res = _delete_dir_contents(d, 0);
     closedir(d);
+    return res;
+}
+
+static int _copy_owner_permissions(int srcfd, int dstfd)
+{
+    struct stat st;
+    if (fstat(srcfd, &st) != 0) {
+        return -1;
+    }
+    if (fchmod(dstfd, st.st_mode) != 0) {
+        return -1;
+    }
+    return 0;
+}
+
+static int _copy_dir_files(int sdfd, int ddfd, uid_t owner, gid_t group)
+{
+    int result = 0;
+    if (_copy_owner_permissions(sdfd, ddfd) != 0) {
+        ALOGE("_copy_dir_files failed to copy dir permissions\n");
+    }
+    if (fchown(ddfd, owner, group) != 0) {
+        ALOGE("_copy_dir_files failed to change dir owner\n");
+    }
+
+    DIR *ds = fdopendir(sdfd);
+    if (ds == NULL) {
+        ALOGE("Couldn't fdopendir: %s\n", strerror(errno));
+        return -1;
+    }
+    struct dirent *de;
+    while ((de = readdir(ds))) {
+        if (de->d_type != DT_REG) {
+            continue;
+        }
+
+        const char *name = de->d_name;
+        int fsfd = openat(sdfd, name, O_RDONLY | O_NOFOLLOW | O_CLOEXEC);
+        int fdfd = openat(ddfd, name, O_WRONLY | O_NOFOLLOW | O_CLOEXEC | O_CREAT, 0600);
+        if (fsfd == -1 || fdfd == -1) {
+            ALOGW("Couldn't copy %s: %s\n", name, strerror(errno));
+        } else {
+            if (_copy_owner_permissions(fsfd, fdfd) != 0) {
+                ALOGE("Failed to change file permissions\n");
+            }
+            if (fchown(fdfd, owner, group) != 0) {
+                ALOGE("Failed to change file owner\n");
+            }
+
+            char buf[8192];
+            ssize_t size;
+            while ((size = read(fsfd, buf, sizeof(buf))) > 0) {
+                write(fdfd, buf, size);
+            }
+            if (size < 0) {
+                ALOGW("Couldn't copy %s: %s\n", name, strerror(errno));
+                result = -1;
+            }
+        }
+        close(fdfd);
+        close(fsfd);
+    }
+
+    return result;
+}
+
+int copy_dir_files(const char *srcname,
+                   const char *dstname,
+                   uid_t owner,
+                   uid_t group)
+{
+    int res = 0;
+    DIR *ds = NULL;
+    DIR *dd = NULL;
+
+    ds = opendir(srcname);
+    if (ds == NULL) {
+        ALOGE("Couldn't opendir %s: %s\n", srcname, strerror(errno));
+        return -errno;
+    }
+
+    mkdir(dstname, 0600);
+    dd = opendir(dstname);
+    if (dd == NULL) {
+        ALOGE("Couldn't opendir %s: %s\n", dstname, strerror(errno));
+        closedir(ds);
+        return -errno;
+    }
+
+    int sdfd = dirfd(ds);
+    int ddfd = dirfd(dd);
+    if (sdfd != -1 && ddfd != -1) {
+        res = _copy_dir_files(sdfd, ddfd, owner, group);
+    } else {
+        res = -errno;
+    }
+    closedir(dd);
+    closedir(ds);
     return res;
 }
 
@@ -439,7 +551,7 @@ static void _inc_num_cache_collected(cache_t* cache)
 {
     cache->numCollected++;
     if ((cache->numCollected%20000) == 0) {
-        ALOGI("Collected cache so far: %d directories, %d files",
+        ALOGI("Collected cache so far: %zd directories, %zd files",
             cache->numDirs, cache->numFiles);
     }
 }
@@ -734,7 +846,7 @@ void clear_cache_files(cache_t* cache, int64_t free_size)
     int skip = 0;
     char path[PATH_MAX];
 
-    ALOGI("Collected cache files: %d directories, %d files",
+    ALOGI("Collected cache files: %zd directories, %zd files",
         cache->numDirs, cache->numFiles);
 
     CACHE_NOISY(ALOGI("Sorting files..."));
@@ -798,6 +910,33 @@ void finish_cache_collection(cache_t* cache)
 }
 
 /**
+ * Validate that the path is valid in the context of the provided directory.
+ * The path is allowed to have at most one subdirectory and no indirections
+ * to top level directories (i.e. have "..").
+ */
+static int validate_path(const dir_rec_t* dir, const char* path) {
+    size_t dir_len = dir->len;
+    const char* subdir = strchr(path + dir_len, '/');
+
+    // Only allow the path to have at most one subdirectory.
+    if (subdir != NULL) {
+        ++subdir;
+        if (strchr(subdir, '/') != NULL) {
+            ALOGE("invalid apk path '%s' (subdir?)\n", path);
+            return -1;
+        }
+    }
+
+    // Directories can't have a period directly after the directory markers to prevent "..".
+    if ((path[dir_len] == '.') || ((subdir != NULL) && (*subdir == '.'))) {
+        ALOGE("invalid apk path '%s' (trickery)\n", path);
+        return -1;
+    }
+
+    return 0;
+}
+
+/**
  * Checks whether a path points to a system app (.apk file). Returns 0
  * if it is a system app or -1 if it is not.
  */
@@ -807,11 +946,7 @@ int validate_system_app_path(const char* path) {
     for (i = 0; i < android_system_dirs.count; i++) {
         const size_t dir_len = android_system_dirs.dirs[i].len;
         if (!strncmp(path, android_system_dirs.dirs[i].path, dir_len)) {
-            if (path[dir_len] == '.' || strchr(path + dir_len, '/') != NULL) {
-                ALOGE("invalid system apk path '%s' (trickery)\n", path);
-                return -1;
-            }
-            return 0;
+            return validate_path(android_system_dirs.dirs + i, path);
         }
     }
 
@@ -904,54 +1039,25 @@ int copy_and_append(dir_rec_t* dst, const dir_rec_t* src, const char* suffix) {
 }
 
 /**
- * Check whether path points to a valid path for an APK file. An ASEC
- * directory is allowed to have one level of subdirectory names. Returns -1
- * when an invalid path is encountered and 0 when a valid path is encountered.
+ * Check whether path points to a valid path for an APK file. Only one level of
+ * subdirectory names is allowed. Returns -1 when an invalid path is encountered
+ * and 0 when a valid path is encountered.
  */
 int validate_apk_path(const char *path)
 {
-    int allowsubdir = 0;
-    char *subdir = NULL;
-    size_t dir_len;
-    size_t path_len;
+    const dir_rec_t* dir = NULL;
 
     if (!strncmp(path, android_app_dir.path, android_app_dir.len)) {
-        dir_len = android_app_dir.len;
+        dir = &android_app_dir;
     } else if (!strncmp(path, android_app_private_dir.path, android_app_private_dir.len)) {
-        dir_len = android_app_private_dir.len;
+        dir = &android_app_private_dir;
     } else if (!strncmp(path, android_asec_dir.path, android_asec_dir.len)) {
-        dir_len = android_asec_dir.len;
-        allowsubdir = 1;
+        dir = &android_asec_dir;
     } else {
-        ALOGE("invalid apk path '%s' (bad prefix)\n", path);
         return -1;
     }
 
-    path_len = strlen(path);
-
-    /*
-     * Only allow the path to have a subdirectory if it's been marked as being allowed.
-     */
-    if ((subdir = strchr(path + dir_len, '/')) != NULL) {
-        ++subdir;
-        if (!allowsubdir
-                || (path_len > (size_t) (subdir - path) && (strchr(subdir, '/') != NULL))) {
-            ALOGE("invalid apk path '%s' (subdir?)\n", path);
-            return -1;
-        }
-    }
-
-    /*
-     *  Directories can't have a period directly after the directory markers
-     *  to prevent ".."
-     */
-    if (path[dir_len] == '.'
-            || (subdir != NULL && ((*subdir == '.') || (strchr(subdir, '/') != NULL)))) {
-        ALOGE("invalid apk path '%s' (trickery)\n", path);
-        return -1;
-    }
-
-    return 0;
+    return validate_path(dir, path);
 }
 
 int append_and_increment(char** dst, const char* src, size_t* dst_size) {
@@ -1008,4 +1114,60 @@ int ensure_media_user_dirs(userid_t userid) {
     }
 
     return 0;
+}
+
+int ensure_config_user_dirs(userid_t userid) {
+    char config_user_path[PATH_MAX];
+    char path[PATH_MAX];
+
+    // writable by system, readable by any app within the same user
+    const int uid = multiuser_get_uid(userid, AID_SYSTEM);
+    const int gid = multiuser_get_uid(userid, AID_EVERYBODY);
+
+    // Ensure /data/misc/user/<userid> exists
+    create_user_config_path(config_user_path, userid);
+    if (fs_prepare_dir(config_user_path, 0750, uid, gid) == -1) {
+        return -1;
+    }
+
+   return 0;
+}
+
+int create_profile_file(const char *pkgname, gid_t gid) {
+    const char *profile_dir = DALVIK_CACHE_PREFIX "profiles";
+    char profile_file[PKG_PATH_MAX];
+
+    snprintf(profile_file, sizeof(profile_file), "%s/%s", profile_dir, pkgname);
+
+    // The 'system' user needs to be able to read the profile to determine if dex2oat
+    // needs to be run.  This is done in dalvik.system.DexFile.isDexOptNeededInternal().  So
+    // we assign ownership to AID_SYSTEM and ensure it's not world-readable.
+
+    int fd = open(profile_file, O_WRONLY | O_CREAT | O_NOFOLLOW | O_CLOEXEC, 0660);
+
+    // Always set the uid/gid/permissions. The file could have been previously created
+    // with different permissions.
+    if (fd >= 0) {
+        if (fchown(fd, AID_SYSTEM, gid) < 0) {
+            ALOGE("cannot chown profile file '%s': %s\n", profile_file, strerror(errno));
+            close(fd);
+            unlink(profile_file);
+            return -1;
+        }
+
+        if (fchmod(fd, 0660) < 0) {
+            ALOGE("cannot chmod profile file '%s': %s\n", profile_file, strerror(errno));
+            close(fd);
+            unlink(profile_file);
+            return -1;
+        }
+        close(fd);
+    }
+    return 0;
+}
+
+void remove_profile_file(const char *pkgname) {
+    char profile_file[PKG_PATH_MAX];
+    snprintf(profile_file, sizeof(profile_file), "%s/%s", DALVIK_CACHE_PREFIX "profiles", pkgname);
+    unlink(profile_file);
 }

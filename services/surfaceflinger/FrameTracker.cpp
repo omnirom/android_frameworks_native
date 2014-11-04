@@ -17,9 +17,12 @@
 // This is needed for stdint.h to define INT64_MAX in C++
 #define __STDC_LIMIT_MACROS
 
+#include <inttypes.h>
+
 #include <cutils/log.h>
 
 #include <ui/Fence.h>
+#include <ui/FrameStats.h>
 
 #include <utils/String8.h>
 
@@ -98,7 +101,7 @@ void FrameTracker::advanceFrame() {
     processFencesLocked();
 }
 
-void FrameTracker::clear() {
+void FrameTracker::clearStats() {
     Mutex::Autolock lock(mMutex);
     for (size_t i = 0; i < NUM_FRAME_RECORDS; i++) {
         mFrameRecords[i].desiredPresentTime = 0;
@@ -111,6 +114,32 @@ void FrameTracker::clear() {
     mFrameRecords[mOffset].desiredPresentTime = INT64_MAX;
     mFrameRecords[mOffset].frameReadyTime = INT64_MAX;
     mFrameRecords[mOffset].actualPresentTime = INT64_MAX;
+}
+
+void FrameTracker::getStats(FrameStats* outStats) const {
+    Mutex::Autolock lock(mMutex);
+    processFencesLocked();
+
+    outStats->refreshPeriodNano = mDisplayPeriod;
+
+    const size_t offset = mOffset;
+    for (size_t i = 1; i < NUM_FRAME_RECORDS; i++) {
+        const size_t index = (offset + i) % NUM_FRAME_RECORDS;
+
+        // Skip frame records with no data (if buffer not yet full).
+        if (mFrameRecords[index].desiredPresentTime == 0) {
+            continue;
+        }
+
+        nsecs_t desiredPresentTimeNano = mFrameRecords[index].desiredPresentTime;
+        outStats->desiredPresentTimesNano.push_back(desiredPresentTimeNano);
+
+        nsecs_t actualPresentTimeNano = mFrameRecords[index].actualPresentTime;
+        outStats->actualPresentTimesNano.push_back(actualPresentTimeNano);
+
+        nsecs_t frameReadyTimeNano = mFrameRecords[index].frameReadyTime;
+        outStats->frameReadyTimesNano.push_back(frameReadyTimeNano);
+    }
 }
 
 void FrameTracker::logAndResetStats(const String8& name) {
@@ -204,14 +233,14 @@ bool FrameTracker::isFrameValidLocked(size_t idx) const {
             mFrameRecords[idx].actualPresentTime < INT64_MAX;
 }
 
-void FrameTracker::dump(String8& result) const {
+void FrameTracker::dumpStats(String8& result) const {
     Mutex::Autolock lock(mMutex);
     processFencesLocked();
 
     const size_t o = mOffset;
     for (size_t i = 1; i < NUM_FRAME_RECORDS; i++) {
         const size_t index = (o+i) % NUM_FRAME_RECORDS;
-        result.appendFormat("%lld\t%lld\t%lld\n",
+        result.appendFormat("%" PRId64 "\t%" PRId64 "\t%" PRId64 "\n",
             mFrameRecords[index].desiredPresentTime,
             mFrameRecords[index].actualPresentTime,
             mFrameRecords[index].frameReadyTime);

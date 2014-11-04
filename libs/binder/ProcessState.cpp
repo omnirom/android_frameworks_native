@@ -48,11 +48,6 @@
 
 namespace android {
  
-// Global variables
-int                 mArgC;
-const char* const*  mArgV;
-int                 mArgLen;
-
 class PoolThread : public Thread
 {
 public:
@@ -86,7 +81,7 @@ void ProcessState::setContextObject(const sp<IBinder>& object)
     setContextObject(object, String16("default"));
 }
 
-sp<IBinder> ProcessState::getContextObject(const sp<IBinder>& caller)
+sp<IBinder> ProcessState::getContextObject(const sp<IBinder>& /*caller*/)
 {
     return getStrongProxyForHandle(0);
 }
@@ -280,36 +275,6 @@ void ProcessState::expungeHandle(int32_t handle, IBinder* binder)
     if (e && e->binder == binder) e->binder = NULL;
 }
 
-void ProcessState::setArgs(int argc, const char* const argv[])
-{
-    mArgC = argc;
-    mArgV = (const char **)argv;
-
-    mArgLen = 0;
-    for (int i=0; i<argc; i++) {
-        mArgLen += strlen(argv[i]) + 1;
-    }
-    mArgLen--;
-}
-
-int ProcessState::getArgC() const
-{
-    return mArgC;
-}
-
-const char* const* ProcessState::getArgV() const
-{
-    return mArgV;
-}
-
-void ProcessState::setArgV0(const char* txt)
-{
-    if (mArgV != NULL) {
-        strncpy((char*)mArgV[0], txt, mArgLen);
-        set_process_name(txt);
-    }
-}
-
 String8 ProcessState::makeBinderThreadName() {
     int32_t s = android_atomic_add(1, &mThreadPoolSeq);
     String8 name;
@@ -345,7 +310,7 @@ static int open_driver()
     int fd = open("/dev/binder", O_RDWR);
     if (fd >= 0) {
         fcntl(fd, F_SETFD, FD_CLOEXEC);
-        int vers;
+        int vers = 0;
         status_t result = ioctl(fd, BINDER_VERSION, &vers);
         if (result == -1) {
             ALOGE("Binder ioctl to obtain version failed: %s", strerror(errno));

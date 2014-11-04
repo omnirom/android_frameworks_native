@@ -29,12 +29,19 @@
 
 namespace android {
 
-BufferItemConsumer::BufferItemConsumer(const sp<BufferQueue>& bq,
-        uint32_t consumerUsage, int bufferCount, bool controlledByApp) :
-    ConsumerBase(bq, controlledByApp)
+BufferItemConsumer::BufferItemConsumer(
+        const sp<IGraphicBufferConsumer>& consumer, uint32_t consumerUsage,
+        int bufferCount, bool controlledByApp) :
+    ConsumerBase(consumer, controlledByApp)
 {
-    mConsumer->setConsumerUsageBits(consumerUsage);
-    mConsumer->setMaxAcquiredBufferCount(bufferCount);
+    status_t err = mConsumer->setConsumerUsageBits(consumerUsage);
+    LOG_ALWAYS_FATAL_IF(err != OK,
+            "Failed to set consumer usage bits to %#x", consumerUsage);
+    if (bufferCount != DEFAULT_MAX_BUFFERS) {
+        err = mConsumer->setMaxAcquiredBufferCount(bufferCount);
+        LOG_ALWAYS_FATAL_IF(err != OK,
+                "Failed to set max acquired buffer count to %d", bufferCount);
+    }
 }
 
 BufferItemConsumer::~BufferItemConsumer() {

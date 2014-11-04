@@ -59,9 +59,11 @@
 #define PKG_LIB_POSTFIX        "/lib"
 
 #define CACHE_DIR_POSTFIX      "/cache"
+#define CODE_CACHE_DIR_POSTFIX "/code_cache"
 
 #define DATA_SUBDIR             "data/" // sub-directory under ANDROID_DATA
 #define APP_SUBDIR             "app/" // sub-directory under ANDROID_DATA
+#define PRIV_APP_SUBDIR        "priv-app/" // sub-directory under ANDROID_DATA
 
 #define APP_LIB_SUBDIR         "app-lib/" // sub-directory under ANDROID_DATA
 
@@ -75,6 +77,9 @@
 #define DALVIK_CACHE_POSTFIX   "/classes.dex"
 
 #define UPDATE_COMMANDS_DIR_PREFIX  "/system/etc/updatecmds/"
+
+#define IDMAP_PREFIX           "/data/resource-cache/"
+#define IDMAP_SUFFIX           "@idmap"
 
 #define PKG_NAME_MAX  128   /* largest allowed package name */
 #define PKG_PATH_MAX  256   /* max size of any path we use */
@@ -144,6 +149,8 @@ int create_user_path(char path[PKG_PATH_MAX],
 
 int create_user_media_path(char path[PKG_PATH_MAX], userid_t userid);
 
+int create_user_config_path(char path[PKG_PATH_MAX], userid_t userid);
+
 int create_move_path(char path[PKG_PATH_MAX],
                      const char* pkgname,
                      const char* leaf,
@@ -151,13 +158,16 @@ int create_move_path(char path[PKG_PATH_MAX],
 
 int is_valid_package_name(const char* pkgname);
 
-int create_cache_path(char path[PKG_PATH_MAX], const char *src);
+int create_cache_path(char path[PKG_PATH_MAX], const char *src,
+                      const char *instruction_set);
 
 int delete_dir_contents(const char *pathname,
                         int also_delete_dir,
-                        const char *ignore);
+                        int (*exclusion_predicate)(const char *name, const int is_dir));
 
 int delete_dir_contents_fd(int dfd, const char *name);
+
+int copy_dir_files(const char *srcname, const char *dstname, uid_t owner, gid_t group);
 
 int lookup_media_dir(char basepath[PATH_MAX], const char *dir);
 
@@ -188,6 +198,9 @@ char *build_string3(char *s1, char *s2, char *s3);
 
 int ensure_dir(const char* path, mode_t mode, uid_t uid, gid_t gid);
 int ensure_media_user_dirs(userid_t userid);
+int ensure_config_user_dirs(userid_t userid);
+int create_profile_file(const char *pkgname, gid_t gid);
+void remove_profile_file(const char *pkgname);
 
 /* commands.c */
 
@@ -196,16 +209,21 @@ int uninstall(const char *pkgname, userid_t userid);
 int renamepkg(const char *oldpkgname, const char *newpkgname);
 int fix_uid(const char *pkgname, uid_t uid, gid_t gid);
 int delete_user_data(const char *pkgname, userid_t userid);
-int make_user_data(const char *pkgname, uid_t uid, userid_t userid);
+int make_user_data(const char *pkgname, uid_t uid, userid_t userid, const char* seinfo);
+int make_user_config(userid_t userid);
 int delete_user(userid_t userid);
 int delete_cache(const char *pkgname, userid_t userid);
-int move_dex(const char *src, const char *dst);
-int rm_dex(const char *path);
+int delete_code_cache(const char *pkgname, userid_t userid);
+int move_dex(const char *src, const char *dst, const char *instruction_set);
+int rm_dex(const char *path, const char *instruction_set);
 int protect(char *pkgname, gid_t gid);
 int get_size(const char *pkgname, userid_t userid, const char *apkpath, const char *libdirpath,
-             const char *fwdlock_apkpath, const char *asecpath, int64_t *codesize,
-             int64_t *datasize, int64_t *cachesize, int64_t *asecsize);
+             const char *fwdlock_apkpath, const char *asecpath, const char *instruction_set,
+             int64_t *codesize, int64_t *datasize, int64_t *cachesize, int64_t *asecsize);
 int free_cache(int64_t free_size);
-int dexopt(const char *apk_path, uid_t uid, int is_public);
+int dexopt(const char *apk_path, uid_t uid, bool is_public, const char *pkgName,
+           const char *instruction_set, bool vm_safe_mode, bool should_relocate);
 int movefiles();
 int linklib(const char* target, const char* source, int userId);
+int idmap(const char *target_path, const char *overlay_path, uid_t uid);
+int restorecon_data();

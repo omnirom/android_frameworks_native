@@ -18,6 +18,7 @@
 #define ANDROID_BATTERYSERVICE_H
 
 #include <binder/Parcel.h>
+#include <sys/types.h>
 #include <utils/Errors.h>
 #include <utils/String8.h>
 
@@ -43,6 +44,15 @@ enum {
     BATTERY_HEALTH_COLD = 7, // equals BatteryManager.BATTERY_HEALTH_COLD constant
 };
 
+// must be kept in sync with definitions in BatteryProperty.java
+enum {
+    BATTERY_PROP_CHARGE_COUNTER = 1, // equals BatteryProperty.CHARGE_COUNTER constant
+    BATTERY_PROP_CURRENT_NOW = 2, // equals BatteryProperty.CURRENT_NOW constant
+    BATTERY_PROP_CURRENT_AVG = 3, // equals BatteryProperty.CURRENT_AVG constant
+    BATTERY_PROP_CAPACITY = 4, // equals BatteryProperty.CAPACITY constant
+    BATTERY_PROP_ENERGY_COUNTER = 5, // equals BatteryProperty.ENERGY_COUNTER constant
+};
+
 struct BatteryProperties {
     bool chargerAcOnline;
     bool chargerUsbOnline;
@@ -52,10 +62,15 @@ struct BatteryProperties {
     bool batteryPresent;
     int batteryLevel;
     int batteryVoltage;
-    int batteryCurrentNow;
-    int batteryChargeCounter;
     int batteryTemperature;
     String8 batteryTechnology;
+
+    status_t writeToParcel(Parcel* parcel) const;
+    status_t readFromParcel(Parcel* parcel);
+};
+
+struct BatteryProperty {
+    int64_t valueInt64;
 
     status_t writeToParcel(Parcel* parcel) const;
     status_t readFromParcel(Parcel* parcel);

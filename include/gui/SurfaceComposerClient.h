@@ -28,6 +28,7 @@
 #include <utils/SortedVector.h>
 #include <utils/threads.h>
 
+#include <ui/FrameStats.h>
 #include <ui/PixelFormat.h>
 
 #include <gui/CpuConsumer.h>
@@ -68,11 +69,13 @@ public:
     status_t linkToComposerDeath(const sp<IBinder::DeathRecipient>& recipient,
             void* cookie = NULL, uint32_t flags = 0);
 
-    // Get information about a display
-    static status_t getDisplayInfo(const sp<IBinder>& display, DisplayInfo* info);
+    // Get a list of supported configurations for a given display
+    static status_t getDisplayConfigs(const sp<IBinder>& display,
+            Vector<DisplayInfo>* configs);
 
-    /* triggers screen off and waits for it to complete */
-    static void blankDisplay(const sp<IBinder>& display);
+    // Get the DisplayInfo for the currently-active configuration
+    static status_t getDisplayInfo(const sp<IBinder>& display,
+            DisplayInfo* info);
 
     /* triggers screen on and waits for it to complete */
     static void unblankDisplay(const sp<IBinder>& display);
@@ -86,6 +89,17 @@ public:
     static ssize_t getDisplayHeight(int32_t displayId);
     static ssize_t getDisplayOrientation(int32_t displayId);
 #endif
+
+    // Get the index of the current active configuration (relative to the list
+    // returned by getDisplayInfo)
+    static int getActiveConfig(const sp<IBinder>& display);
+
+    // Set a new active configuration using an index relative to the list
+    // returned by getDisplayInfo
+    static status_t setActiveConfig(const sp<IBinder>& display, int id);
+
+    /* Triggers screen on/off or low power mode and waits for it to complete */
+    static void setDisplayPowerMode(const sp<IBinder>& display, int mode);
 
     // ------------------------------------------------------------------------
     // surface creation / destruction
@@ -140,10 +154,17 @@ public:
     status_t    setLayerStack(const sp<IBinder>& id, uint32_t layerStack);
     status_t    destroySurface(const sp<IBinder>& id);
 
+    status_t clearLayerFrameStats(const sp<IBinder>& token) const;
+    status_t getLayerFrameStats(const sp<IBinder>& token, FrameStats* outStats) const;
+
+    static status_t clearAnimationFrameStats();
+    static status_t getAnimationFrameStats(FrameStats* outStats);
+
     static void setDisplaySurface(const sp<IBinder>& token,
             const sp<IGraphicBufferProducer>& bufferProducer);
     static void setDisplayLayerStack(const sp<IBinder>& token,
             uint32_t layerStack);
+    static void setDisplaySize(const sp<IBinder>& token, uint32_t width, uint32_t height);
 
     /* setDisplayProjection() defines the projection of layer stacks
      * to a given display.
@@ -175,18 +196,21 @@ private:
 class ScreenshotClient
 {
 public:
+    // if cropping isn't required, callers may pass in a default Rect, e.g.:
+    //   capture(display, producer, Rect(), reqWidth, ...);
     static status_t capture(
             const sp<IBinder>& display,
             const sp<IGraphicBufferProducer>& producer,
-            uint32_t reqWidth, uint32_t reqHeight,
-            uint32_t minLayerZ, uint32_t maxLayerZ);
+            Rect sourceCrop, uint32_t reqWidth, uint32_t reqHeight,
+            uint32_t minLayerZ, uint32_t maxLayerZ,
+            bool useIdentityTransform);
 
 private:
 #ifdef USE_MHEAP_SCREENSHOT
     sp<IMemoryHeap> mHeap;
 #endif
     mutable sp<CpuConsumer> mCpuConsumer;
-    mutable sp<BufferQueue> mBufferQueue;
+    mutable sp<IGraphicBufferProducer> mProducer;
     CpuConsumer::LockedBuffer mBuffer;
     bool mHaveBuffer;
 
@@ -198,13 +222,23 @@ public:
     status_t update();
 #endif
 
-    // frees the previous screenshot and capture a new one
+    // frees the previous screenshot and captures a new one
+    // if cropping isn't required, callers may pass in a default Rect, e.g.:
+    //   update(display, Rect(), useIdentityTransform);
     status_t update(const sp<IBinder>& display);
     status_t update(const sp<IBinder>& display,
-            uint32_t reqWidth, uint32_t reqHeight);
+            Rect sourceCrop, bool useIdentityTransform);
     status_t update(const sp<IBinder>& display,
-            uint32_t reqWidth, uint32_t reqHeight,
-            uint32_t minLayerZ, uint32_t maxLayerZ);
+            Rect sourceCrop, uint32_t reqWidth, uint32_t reqHeight,
+            bool useIdentityTransform);
+    status_t update(const sp<IBinder>& display,
+            Rect sourceCrop, uint32_t reqWidth, uint32_t reqHeight,
+            uint32_t minLayerZ, uint32_t maxLayerZ,
+            bool useIdentityTransform);
+    status_t update(const sp<IBinder>& display,
+            Rect sourceCrop, uint32_t reqWidth, uint32_t reqHeight,
+            uint32_t minLayerZ, uint32_t maxLayerZ,
+            bool useIdentityTransform, uint32_t rotation);
 
     sp<CpuConsumer> getCpuConsumer() const;
 

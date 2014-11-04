@@ -24,6 +24,14 @@ enum {
     POWERMANAGER_PARTIAL_WAKE_LOCK = 1, // equals PowerManager.PARTIAL_WAKE_LOCK constant
 };
 
+enum {
+    USER_ACTIVITY_EVENT_OTHER = 0,
+    USER_ACTIVITY_EVENT_BUTTON = 1,
+    USER_ACTIVITY_EVENT_TOUCH = 2,
+
+    USER_ACTIVITY_EVENT_LAST = USER_ACTIVITY_EVENT_TOUCH, // Last valid event code.
+};
+
 }; // namespace android
 
 #endif // ANDROID_POWERMANAGER_H

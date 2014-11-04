@@ -27,7 +27,6 @@
 #include <cutils/log.h>
 #include <cutils/atomic.h>
 #include <cutils/properties.h>
-#include <cutils/memory.h>
 
 #include <utils/CallStack.h>
 #include <utils/String8.h>
@@ -41,6 +40,8 @@
 
 #include "egl_display.h"
 #include "egl_object.h"
+
+typedef __eglMustCastToProperFunctionPointerType EGLFuncPointer;
 
 // ----------------------------------------------------------------------------
 namespace android {
@@ -234,11 +235,11 @@ static void early_egl_init(void)
     pthread_key_create(&gGLTraceKey, NULL);
     initEglTraceLevel();
 #endif
-    uint32_t addr = (uint32_t)((void*)gl_no_context);
-    android_memset32(
-            (uint32_t*)(void*)&gHooksNoContext,
-            addr,
-            sizeof(gHooksNoContext));
+    int numHooks = sizeof(gHooksNoContext) / sizeof(EGLFuncPointer);
+    EGLFuncPointer *iter = reinterpret_cast<EGLFuncPointer*>(&gHooksNoContext);
+    for (int hook = 0; hook < numHooks; ++hook) {
+        *(iter++) = reinterpret_cast<EGLFuncPointer>(gl_no_context);
+    }
 
     setGLHooksThreadSpecific(&gHooksNoContext);
 }
@@ -329,12 +330,26 @@ EGLBoolean egl_init_drivers() {
     return res;
 }
 
+static pthread_mutex_t sLogPrintMutex = PTHREAD_MUTEX_INITIALIZER;
+static nsecs_t sLogPrintTime = 0;
+#define NSECS_DURATION 1000000000
+
 void gl_unimplemented() {
-    ALOGE("called unimplemented OpenGL ES API");
-    char value[PROPERTY_VALUE_MAX];
-    property_get("debug.egl.callstack", value, "0");
-    if (atoi(value)) {
-        CallStack stack(LOG_TAG);
+    bool printLog = false;
+    nsecs_t now = systemTime();
+    pthread_mutex_lock(&sLogPrintMutex);
+    if ((now - sLogPrintTime) > NSECS_DURATION) {
+        sLogPrintTime = now;
+        printLog = true;
+    }
+    pthread_mutex_unlock(&sLogPrintMutex);
+    if (printLog) {
+        ALOGE("called unimplemented OpenGL ES API");
+        char value[PROPERTY_VALUE_MAX];
+        property_get("debug.egl.callstack", value, "0");
+        if (atoi(value)) {
+            CallStack stack(LOG_TAG);
+        }
     }
 }
 

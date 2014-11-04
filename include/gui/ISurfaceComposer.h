@@ -22,9 +22,12 @@
 
 #include <utils/RefBase.h>
 #include <utils/Errors.h>
+#include <utils/Timers.h>
+#include <utils/Vector.h>
 
 #include <binder/IInterface.h>
 
+#include <ui/FrameStats.h>
 #include <ui/PixelFormat.h>
 
 #include <gui/IGraphicBufferAlloc.h>
@@ -36,8 +39,10 @@ namespace android {
 class ComposerState;
 class DisplayState;
 class DisplayInfo;
+class DisplayStatInfo;
 class IDisplayEventConnection;
 class IMemoryHeap;
+class Rect;
 
 /*
  * This class defines the Binder IPC interface for accessing various
@@ -56,6 +61,13 @@ public:
     enum {
         eDisplayIdMain = 0,
         eDisplayIdHdmi = 1
+    };
+
+    enum Rotation {
+        eRotateNone = 0,
+        eRotate90   = 1,
+        eRotate180  = 2,
+        eRotate270  = 3
     };
 
     /* create connection with surface flinger, requires
@@ -100,28 +112,41 @@ public:
     virtual bool authenticateSurfaceTexture(
             const sp<IGraphicBufferProducer>& surface) const = 0;
 
-    /* triggers screen off and waits for it to complete
+    /* set display power mode. depending on the mode, it can either trigger
+     * screen on, off or low power mode and wait for it to complete.
      * requires ACCESS_SURFACE_FLINGER permission.
      */
-    virtual void blank(const sp<IBinder>& display) = 0;
+    virtual void setPowerMode(const sp<IBinder>& display, int mode) = 0;
 
-    /* triggers screen on and waits for it to complete
-     * requires ACCESS_SURFACE_FLINGER permission.
-     */
-    virtual void unblank(const sp<IBinder>& display) = 0;
-
-    /* returns information about a display
+    /* returns information for each configuration of the given display
      * intended to be used to get information about built-in displays */
-    virtual status_t getDisplayInfo(const sp<IBinder>& display, DisplayInfo* info) = 0;
+    virtual status_t getDisplayConfigs(const sp<IBinder>& display,
+            Vector<DisplayInfo>* configs) = 0;
+
+    /* returns display statistics for a given display
+     * intended to be used by the media framework to properly schedule
+     * video frames */
+    virtual status_t getDisplayStats(const sp<IBinder>& display,
+            DisplayStatInfo* stats) = 0;
+
+    /* indicates which of the configurations returned by getDisplayInfo is
+     * currently active */
+    virtual int getActiveConfig(const sp<IBinder>& display) = 0;
+
+    /* specifies which configuration (of those returned by getDisplayInfo)
+     * should be used */
+    virtual status_t setActiveConfig(const sp<IBinder>& display, int id) = 0;
 
     /* Capture the specified screen. requires READ_FRAME_BUFFER permission
      * This function will fail if there is a secure window on screen.
      */
     virtual status_t captureScreen(const sp<IBinder>& display,
             const sp<IGraphicBufferProducer>& producer,
-            uint32_t reqWidth, uint32_t reqHeight,
+            Rect sourceCrop, uint32_t reqWidth, uint32_t reqHeight,
             uint32_t minLayerZ, uint32_t maxLayerZ,
-            bool isCpuConsumer) = 0;
+            bool isCpuConsumer,
+            bool useIdentityTransform,
+            Rotation rotation = eRotateNone) = 0;
 
 #ifdef USE_MHEAP_SCREENSHOT
     /* Capture the specified screen. requires READ_FRAME_BUFFER permission
@@ -132,6 +157,18 @@ public:
             uint32_t reqWidth, uint32_t reqHeight,
             uint32_t minLayerZ, uint32_t maxLayerZ) = 0;
 #endif
+
+    /* Clears the frame statistics for animations.
+     *
+     * Requires the ACCESS_SURFACE_FLINGER permission.
+     */
+    virtual status_t clearAnimationFrameStats() = 0;
+
+    /* Gets the frame statistics for animations.
+     *
+     * Requires the ACCESS_SURFACE_FLINGER permission.
+     */
+    virtual status_t getAnimationFrameStats(FrameStats* outStats) const = 0;
 };
 
 // ----------------------------------------------------------------------------
@@ -156,8 +193,15 @@ public:
         BLANK,
         UNBLANK,
         GET_DISPLAY_INFO,
+        GET_DISPLAY_CONFIGS,
+        GET_ACTIVE_CONFIG,
+        SET_ACTIVE_CONFIG,
         CONNECT_DISPLAY,
         CAPTURE_SCREEN,
+        CLEAR_ANIMATION_FRAME_STATS,
+        GET_ANIMATION_FRAME_STATS,
+        SET_POWER_MODE,
+        GET_DISPLAY_STATS,
     };
 
     virtual status_t onTransact(uint32_t code, const Parcel& data,

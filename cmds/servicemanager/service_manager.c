@@ -8,6 +8,9 @@
 
 #include <private/android_filesystem_config.h>
 
+#include <selinux/android.h>
+#include <selinux/avc.h>
+
 #include "binder.h"
 
 #if 0
@@ -18,72 +21,29 @@
 #include <cutils/log.h>
 #endif
 
-/* TODO:
- * These should come from a config file or perhaps be
- * based on some namespace rules of some sort (media
- * uid can register media.*, etc)
- */
-static struct {
-    unsigned uid;
-    const char *name;
-} allowed[] = {
-    { AID_MEDIA, "media.audio_flinger" },
-    { AID_MEDIA, "media.log" },
-    { AID_MEDIA, "media.player" },
-    { AID_MEDIA, "media.camera" },
-    { AID_MEDIA, "media.audio_policy" },
-    { AID_MEDIA, "media.nvidia.audio_alsa" },
-#ifdef YAMAHAPLAYER
-    { AID_MEDIA, "media.yamahaplayer" },
-#endif
-#ifdef SECTVOUT
-    { AID_MEDIA, "SecTVOutService" },
-#endif
-    { AID_DRM,   "drm.drmManager" },
-    { AID_NFC,   "nfc" },
-    { AID_BLUETOOTH, "bluetooth" },
-    { AID_RADIO, "radio.phone" },
-    { AID_RADIO, "radio.sms" },
-    { AID_RADIO, "radio.phonesubinfo" },
-    { AID_RADIO, "radio.simphonebook" },
-/* TODO: remove after phone services are updated: */
-    { AID_RADIO, "phone" },
-    { AID_RADIO, "sip" },
-    { AID_RADIO, "isms" },
-    { AID_RADIO, "iphonesubinfo" },
-    { AID_RADIO, "simphonebook" },
-#ifdef QCOM_HARDWARE
-    { AID_RADIO, "phone_msim" },
-    { AID_RADIO, "isms_msim" },
-    { AID_RADIO, "iphonesubinfo_msim" },
-    { AID_RADIO, "simphonebook_msim" },
-#endif
-    { AID_MEDIA, "common_time.clock" },
-    { AID_MEDIA, "common_time.config" },
-    { AID_KEYSTORE, "android.security.keystore" },
-#ifdef QCOM_HARDWARE
-    { AID_MEDIA, "listen.service" }
-#endif
-};
+uint32_t svcmgr_handle;
 
-void *svcmgr_handle;
-
-const char *str8(uint16_t *x)
+const char *str8(const uint16_t *x, size_t x_len)
 {
     static char buf[128];
-    unsigned max = 127;
+    size_t max = 127;
     char *p = buf;
 
+    if (x_len < max) {
+        max = x_len;
+    }
+
     if (x) {
-        while (*x && max--) {
+        while ((max > 0) && (*x != '\0')) {
             *p++ = *x++;
+            max--;
         }
     }
     *p++ = 0;
     return buf;
 }
 
-int str16eq(uint16_t *a, const char *b)
+int str16eq(const uint16_t *a, const char *b)
 {
     while (*a && *b)
         if (*a++ != *b++) return 0;
@@ -92,33 +52,92 @@ int str16eq(uint16_t *a, const char *b)
     return 1;
 }
 
-int svc_can_register(unsigned uid, uint16_t *name)
+static int selinux_enabled;
+static char *service_manager_context;
+static struct selabel_handle* sehandle;
+
+static bool check_mac_perms(pid_t spid, const char *tctx, const char *perm, const char *name)
 {
-    unsigned n;
-    
-    if ((uid == 0) || (uid == AID_SYSTEM))
-        return 1;
+    char *sctx = NULL;
+    const char *class = "service_manager";
+    bool allowed;
 
-    for (n = 0; n < sizeof(allowed) / sizeof(allowed[0]); n++)
-        if ((uid == allowed[n].uid) && str16eq(name, allowed[n].name))
-            return 1;
+    if (getpidcon(spid, &sctx) < 0) {
+        ALOGE("SELinux: getpidcon(pid=%d) failed to retrieve pid context.\n", spid);
+        return false;
+    }
 
-    return 0;
+    int result = selinux_check_access(sctx, tctx, class, perm, (void *) name);
+    allowed = (result == 0);
+
+    freecon(sctx);
+    return allowed;
 }
 
-struct svcinfo 
+static bool check_mac_perms_from_getcon(pid_t spid, const char *perm)
+{
+    if (selinux_enabled <= 0) {
+        return true;
+    }
+
+    return check_mac_perms(spid, service_manager_context, perm, NULL);
+}
+
+static bool check_mac_perms_from_lookup(pid_t spid, const char *perm, const char *name)
+{
+    bool allowed;
+    char *tctx = NULL;
+
+    if (selinux_enabled <= 0) {
+        return true;
+    }
+
+    if (!sehandle) {
+        ALOGE("SELinux: Failed to find sehandle. Aborting service_manager.\n");
+        abort();
+    }
+
+    if (selabel_lookup(sehandle, &tctx, name, 0) != 0) {
+        ALOGE("SELinux: No match for %s in service_contexts.\n", name);
+        return false;
+    }
+
+    allowed = check_mac_perms(spid, tctx, perm, name);
+    freecon(tctx);
+    return allowed;
+}
+
+static int svc_can_register(const uint16_t *name, size_t name_len, pid_t spid)
+{
+    const char *perm = "add";
+    return check_mac_perms_from_lookup(spid, perm, str8(name, name_len)) ? 1 : 0;
+}
+
+static int svc_can_list(pid_t spid)
+{
+    const char *perm = "list";
+    return check_mac_perms_from_getcon(spid, perm) ? 1 : 0;
+}
+
+static int svc_can_find(const uint16_t *name, size_t name_len, pid_t spid)
+{
+    const char *perm = "find";
+    return check_mac_perms_from_lookup(spid, perm, str8(name, name_len)) ? 1 : 0;
+}
+
+struct svcinfo
 {
     struct svcinfo *next;
-    void *ptr;
+    uint32_t handle;
     struct binder_death death;
     int allow_isolated;
-    unsigned len;
+    size_t len;
     uint16_t name[0];
 };
 
-struct svcinfo *svclist = 0;
+struct svcinfo *svclist = NULL;
 
-struct svcinfo *find_svc(uint16_t *s16, unsigned len)
+struct svcinfo *find_svc(const uint16_t *s16, size_t len)
 {
     struct svcinfo *si;
 
@@ -128,111 +147,122 @@ struct svcinfo *find_svc(uint16_t *s16, unsigned len)
             return si;
         }
     }
-    return 0;
+    return NULL;
 }
 
 void svcinfo_death(struct binder_state *bs, void *ptr)
 {
-    struct svcinfo *si = ptr;
-    ALOGI("service '%s' died\n", str8(si->name));
-    if (si->ptr) {
-        binder_release(bs, si->ptr);
-        si->ptr = 0;
-    }   
+    struct svcinfo *si = (struct svcinfo* ) ptr;
+
+    ALOGI("service '%s' died\n", str8(si->name, si->len));
+    if (si->handle) {
+        binder_release(bs, si->handle);
+        si->handle = 0;
+    }
 }
 
-uint16_t svcmgr_id[] = { 
+uint16_t svcmgr_id[] = {
     'a','n','d','r','o','i','d','.','o','s','.',
-    'I','S','e','r','v','i','c','e','M','a','n','a','g','e','r' 
+    'I','S','e','r','v','i','c','e','M','a','n','a','g','e','r'
 };
-  
 
-void *do_find_service(struct binder_state *bs, uint16_t *s, unsigned len, unsigned uid)
+
+uint32_t do_find_service(struct binder_state *bs, const uint16_t *s, size_t len, uid_t uid, pid_t spid)
 {
     struct svcinfo *si;
-    si = find_svc(s, len);
 
-//    ALOGI("check_service('%s') ptr = %p\n", str8(s), si ? si->ptr : 0);
-    if (si && si->ptr) {
+    if (!svc_can_find(s, len, spid)) {
+        ALOGE("find_service('%s') uid=%d - PERMISSION DENIED\n",
+             str8(s, len), uid);
+        return 0;
+    }
+    si = find_svc(s, len);
+    //ALOGI("check_service('%s') handle = %x\n", str8(s, len), si ? si->handle : 0);
+    if (si && si->handle) {
         if (!si->allow_isolated) {
             // If this service doesn't allow access from isolated processes,
             // then check the uid to see if it is isolated.
-            unsigned appid = uid % AID_USER;
+            uid_t appid = uid % AID_USER;
             if (appid >= AID_ISOLATED_START && appid <= AID_ISOLATED_END) {
                 return 0;
             }
         }
-        return si->ptr;
+        return si->handle;
     } else {
         return 0;
     }
 }
 
 int do_add_service(struct binder_state *bs,
-                   uint16_t *s, unsigned len,
-                   void *ptr, unsigned uid, int allow_isolated)
+                   const uint16_t *s, size_t len,
+                   uint32_t handle, uid_t uid, int allow_isolated,
+                   pid_t spid)
 {
     struct svcinfo *si;
-    //ALOGI("add_service('%s',%p,%s) uid=%d\n", str8(s), ptr,
+
+    //ALOGI("add_service('%s',%x,%s) uid=%d\n", str8(s, len), handle,
     //        allow_isolated ? "allow_isolated" : "!allow_isolated", uid);
 
-    if (!ptr || (len == 0) || (len > 127))
+    if (!handle || (len == 0) || (len > 127))
         return -1;
 
-    if (!svc_can_register(uid, s)) {
-        ALOGE("add_service('%s',%p) uid=%d - PERMISSION DENIED\n",
-             str8(s), ptr, uid);
+    if (!svc_can_register(s, len, spid)) {
+        ALOGE("add_service('%s',%x) uid=%d - PERMISSION DENIED\n",
+             str8(s, len), handle, uid);
         return -1;
     }
 
     si = find_svc(s, len);
     if (si) {
-        if (si->ptr) {
-            ALOGE("add_service('%s',%p) uid=%d - ALREADY REGISTERED, OVERRIDE\n",
-                 str8(s), ptr, uid);
+        if (si->handle) {
+            ALOGE("add_service('%s',%x) uid=%d - ALREADY REGISTERED, OVERRIDE\n",
+                 str8(s, len), handle, uid);
             svcinfo_death(bs, si);
         }
-        si->ptr = ptr;
+        si->handle = handle;
     } else {
         si = malloc(sizeof(*si) + (len + 1) * sizeof(uint16_t));
         if (!si) {
-            ALOGE("add_service('%s',%p) uid=%d - OUT OF MEMORY\n",
-                 str8(s), ptr, uid);
+            ALOGE("add_service('%s',%x) uid=%d - OUT OF MEMORY\n",
+                 str8(s, len), handle, uid);
             return -1;
         }
-        si->ptr = ptr;
+        si->handle = handle;
         si->len = len;
         memcpy(si->name, s, (len + 1) * sizeof(uint16_t));
         si->name[len] = '\0';
-        si->death.func = svcinfo_death;
+        si->death.func = (void*) svcinfo_death;
         si->death.ptr = si;
         si->allow_isolated = allow_isolated;
         si->next = svclist;
         svclist = si;
     }
 
-    binder_acquire(bs, ptr);
-    binder_link_to_death(bs, ptr, &si->death);
+    binder_acquire(bs, handle);
+    binder_link_to_death(bs, handle, &si->death);
     return 0;
 }
 
 int svcmgr_handler(struct binder_state *bs,
-                   struct binder_txn *txn,
+                   struct binder_transaction_data *txn,
                    struct binder_io *msg,
                    struct binder_io *reply)
 {
     struct svcinfo *si;
     uint16_t *s;
-    unsigned len;
-    void *ptr;
+    size_t len;
+    uint32_t handle;
     uint32_t strict_policy;
     int allow_isolated;
 
-//    ALOGI("target=%p code=%d pid=%d uid=%d\n",
-//         txn->target, txn->code, txn->sender_pid, txn->sender_euid);
+    //ALOGI("target=%x code=%d pid=%d uid=%d\n",
+    //  txn->target.handle, txn->code, txn->sender_pid, txn->sender_euid);
 
-    if (txn->target != svcmgr_handle)
+    if (txn->target.handle != svcmgr_handle)
         return -1;
+
+    if (txn->code == PING_TRANSACTION)
+        return 0;
 
     // Equivalent to Parcel::enforceInterface(), reading the RPC
     // header with the strict mode policy mask and the interface name.
@@ -240,33 +270,57 @@ int svcmgr_handler(struct binder_state *bs,
     // further (since we do no outbound RPCs anyway).
     strict_policy = bio_get_uint32(msg);
     s = bio_get_string16(msg, &len);
+    if (s == NULL) {
+        return -1;
+    }
+
     if ((len != (sizeof(svcmgr_id) / 2)) ||
         memcmp(svcmgr_id, s, sizeof(svcmgr_id))) {
-        fprintf(stderr,"invalid id %s\n", str8(s));
+        fprintf(stderr,"invalid id %s\n", str8(s, len));
         return -1;
+    }
+
+    if (sehandle && selinux_status_updated() > 0) {
+        struct selabel_handle *tmp_sehandle = selinux_android_service_context_handle();
+        if (tmp_sehandle) {
+            selabel_close(sehandle);
+            sehandle = tmp_sehandle;
+        }
     }
 
     switch(txn->code) {
     case SVC_MGR_GET_SERVICE:
     case SVC_MGR_CHECK_SERVICE:
         s = bio_get_string16(msg, &len);
-        ptr = do_find_service(bs, s, len, txn->sender_euid);
-        if (!ptr)
+        if (s == NULL) {
+            return -1;
+        }
+        handle = do_find_service(bs, s, len, txn->sender_euid, txn->sender_pid);
+        if (!handle)
             break;
-        bio_put_ref(reply, ptr);
+        bio_put_ref(reply, handle);
         return 0;
 
     case SVC_MGR_ADD_SERVICE:
         s = bio_get_string16(msg, &len);
-        ptr = bio_get_ref(msg);
+        if (s == NULL) {
+            return -1;
+        }
+        handle = bio_get_ref(msg);
         allow_isolated = bio_get_uint32(msg) ? 1 : 0;
-        if (do_add_service(bs, s, len, ptr, txn->sender_euid, allow_isolated))
+        if (do_add_service(bs, s, len, handle, txn->sender_euid,
+            allow_isolated, txn->sender_pid))
             return -1;
         break;
 
     case SVC_MGR_LIST_SERVICES: {
-        unsigned n = bio_get_uint32(msg);
+        uint32_t n = bio_get_uint32(msg);
 
+        if (!svc_can_list(txn->sender_pid)) {
+            ALOGE("list_service() uid=%d - PERMISSION DENIED\n",
+                    txn->sender_euid);
+            return -1;
+        }
         si = svclist;
         while ((n-- > 0) && si)
             si = si->next;
@@ -285,19 +339,51 @@ int svcmgr_handler(struct binder_state *bs,
     return 0;
 }
 
+
+static int audit_callback(void *data, security_class_t cls, char *buf, size_t len)
+{
+    snprintf(buf, len, "service=%s", !data ? "NULL" : (char *)data);
+    return 0;
+}
+
 int main(int argc, char **argv)
 {
     struct binder_state *bs;
-    void *svcmgr = BINDER_SERVICE_MANAGER;
 
     bs = binder_open(128*1024);
+    if (!bs) {
+        ALOGE("failed to open binder driver\n");
+        return -1;
+    }
 
     if (binder_become_context_manager(bs)) {
         ALOGE("cannot become context manager (%s)\n", strerror(errno));
         return -1;
     }
 
-    svcmgr_handle = svcmgr;
+    selinux_enabled = is_selinux_enabled();
+    sehandle = selinux_android_service_context_handle();
+
+    if (selinux_enabled > 0) {
+        if (sehandle == NULL) {
+            ALOGE("SELinux: Failed to acquire sehandle. Aborting.\n");
+            abort();
+        }
+
+        if (getcon(&service_manager_context) != 0) {
+            ALOGE("SELinux: Failed to acquire service_manager context. Aborting.\n");
+            abort();
+        }
+    }
+
+    union selinux_callback cb;
+    cb.func_audit = audit_callback;
+    selinux_set_callback(SELINUX_CB_AUDIT, cb);
+    cb.func_log = selinux_log_callback;
+    selinux_set_callback(SELINUX_CB_LOG, cb);
+
+    svcmgr_handle = BINDER_SERVICE_MANAGER;
     binder_loop(bs, svcmgr_handler);
+
     return 0;
 }

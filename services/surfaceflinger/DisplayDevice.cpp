@@ -57,12 +57,14 @@ DisplayDevice::DisplayDevice(
         const sp<SurfaceFlinger>& flinger,
         DisplayType type,
         int32_t hwcId,
+        int format,
         bool isSecure,
         const wp<IBinder>& displayToken,
         const sp<DisplaySurface>& displaySurface,
         const sp<IGraphicBufferProducer>& producer,
         EGLConfig config)
-    : mFlinger(flinger),
+    : lastCompositionHadVisibleLayers(false),
+      mFlinger(flinger),
       mType(type), mHwcDisplayId(hwcId),
       mDisplayToken(displayToken),
       mDisplaySurface(displaySurface),
@@ -73,10 +75,11 @@ DisplayDevice::DisplayDevice(
       mPageFlipCount(),
       mIsSecure(isSecure),
       mSecureLayerVisible(false),
-      mScreenAcquired(false),
       mLayerStack(NO_LAYER_STACK),
       mHardwareOrientation(0),
-      mOrientation()
+      mOrientation(),
+      mPowerMode(HWC_POWER_MODE_OFF),
+      mActiveConfig(0)
 {
     mNativeWindow = new Surface(producer, false);
 #ifndef BOARD_EGL_NEEDS_LEGACY_FB
@@ -85,8 +88,19 @@ DisplayDevice::DisplayDevice(
     ANativeWindow* const window = new FramebufferNativeWindow();
 #endif
 
-    int format;
-    window->query(window, NATIVE_WINDOW_FORMAT, &format);
+    /*
+     * Create our display's surface
+     */
+
+    EGLSurface surface;
+    EGLint w, h;
+    EGLDisplay display = eglGetDisplay(EGL_DEFAULT_DISPLAY);
+    if (config == EGL_NO_CONFIG) {
+        config = RenderEngine::chooseEglConfig(display, format);
+    }
+    surface = eglCreateWindowSurface(display, config, window, NULL);
+    eglQuerySurface(display, surface, EGL_WIDTH,  &mDisplayWidth);
+    eglQuerySurface(display, surface, EGL_HEIGHT, &mDisplayHeight);
 
     // Make sure that composition can never be stalled by a virtual display
     // consumer that isn't processing buffers fast enough. We have to do this
@@ -98,17 +112,7 @@ DisplayDevice::DisplayDevice(
     if (mType >= DisplayDevice::DISPLAY_VIRTUAL)
         window->setSwapInterval(window, 0);
 
-    /*
-     * Create our display's surface
-     */
-
-    EGLSurface surface;
-    EGLint w, h;
-    EGLDisplay display = eglGetDisplay(EGL_DEFAULT_DISPLAY);
-    surface = eglCreateWindowSurface(display, config, window, NULL);
-    eglQuerySurface(display, surface, EGL_WIDTH,  &mDisplayWidth);
-    eglQuerySurface(display, surface, EGL_HEIGHT, &mDisplayHeight);
-
+    mConfig = config;
     mDisplay = display;
     mSurface = surface;
     mFormat  = format;
@@ -117,7 +121,8 @@ DisplayDevice::DisplayDevice(
     mFrame.makeInvalid();
 
     // virtual displays are always considered enabled
-    mScreenAcquired = (mType >= DisplayDevice::DISPLAY_VIRTUAL);
+    mPowerMode = (mType >= DisplayDevice::DISPLAY_VIRTUAL) ?
+                  HWC_POWER_MODE_NORMAL : HWC_POWER_MODE_OFF;
 
     // Name the display.  The name will be replaced shortly if the display
     // was created with createDisplay().
@@ -218,13 +223,15 @@ void DisplayDevice::flip(const Region& dirty) const
         eglSetSwapRectangleANDROID(dpy, surface,
                 b.left, b.top, b.width(), b.height());
     }
+#else
+    (void) dirty; // Eliminate unused parameter warning
 #endif
 
     mPageFlipCount++;
 }
 
-status_t DisplayDevice::beginFrame() const {
-    return mDisplaySurface->beginFrame();
+status_t DisplayDevice::beginFrame(bool mustRecompose) const {
+    return mDisplaySurface->beginFrame(mustRecompose);
 }
 
 status_t DisplayDevice::prepareFrame(const HWComposer& hwc) const {
@@ -305,7 +312,9 @@ EGLBoolean DisplayDevice::makeCurrent(EGLDisplay dpy, EGLContext ctx) const {
 void DisplayDevice::setViewportAndProjection() const {
     size_t w = mDisplayWidth;
     size_t h = mDisplayHeight;
-    mFlinger->getRenderEngine().setViewportAndProjection(w, h, w, h, false);
+    Rect sourceCrop(0, 0, w, h);
+    mFlinger->getRenderEngine().setViewportAndProjection(w, h, sourceCrop, h,
+        false, Transform::ROT_0);
 }
 
 // ----------------------------------------------------------------------------
@@ -343,21 +352,25 @@ Region DisplayDevice::getDirtyRegion(bool repaintEverything) const {
 }
 
 // ----------------------------------------------------------------------------
-
-bool DisplayDevice::canDraw() const {
-    return mScreenAcquired;
+void DisplayDevice::setPowerMode(int mode) {
+    mPowerMode = mode;
 }
 
-void DisplayDevice::releaseScreen() const {
-    mScreenAcquired = false;
+int DisplayDevice::getPowerMode()  const {
+    return mPowerMode;
 }
 
-void DisplayDevice::acquireScreen() const {
-    mScreenAcquired = true;
+bool DisplayDevice::isDisplayOn() const {
+    return (mPowerMode != HWC_POWER_MODE_OFF);
 }
 
-bool DisplayDevice::isScreenAcquired() const {
-    return mScreenAcquired;
+// ----------------------------------------------------------------------------
+void DisplayDevice::setActiveConfig(int mode) {
+    mActiveConfig = mode;
+}
+
+int DisplayDevice::getActiveConfig()  const {
+    return mActiveConfig;
 }
 
 // ----------------------------------------------------------------------------
@@ -423,6 +436,27 @@ status_t DisplayDevice::orientationToTransfrom(
 
     tr->set(flags, w, h);
     return NO_ERROR;
+}
+
+void DisplayDevice::setDisplaySize(const int newWidth, const int newHeight) {
+    dirtyRegion.set(getBounds());
+
+    if (mSurface != EGL_NO_SURFACE) {
+        eglDestroySurface(mDisplay, mSurface);
+        mSurface = EGL_NO_SURFACE;
+    }
+
+    mDisplaySurface->resizeBuffers(newWidth, newHeight);
+
+    ANativeWindow* const window = mNativeWindow.get();
+    mSurface = eglCreateWindowSurface(mDisplay, mConfig, window, NULL);
+    eglQuerySurface(mDisplay, mSurface, EGL_WIDTH,  &mDisplayWidth);
+    eglQuerySurface(mDisplay, mSurface, EGL_HEIGHT, &mDisplayHeight);
+
+    LOG_FATAL_IF(mDisplayWidth != newWidth,
+                "Unable to set new width to %d", newWidth);
+    LOG_FATAL_IF(mDisplayHeight != newHeight,
+                "Unable to set new height to %d", newHeight);
 }
 
 void DisplayDevice::setProjection(int orientation,
@@ -507,13 +541,14 @@ void DisplayDevice::dump(String8& result) const {
     result.appendFormat(
         "+ DisplayDevice: %s\n"
         "   type=%x, hwcId=%d, layerStack=%u, (%4dx%4d), ANativeWindow=%p, orient=%2d (type=%08x), "
-        "flips=%u, isSecure=%d, secureVis=%d, acquired=%d, numLayers=%u\n"
+        "flips=%u, isSecure=%d, secureVis=%d, powerMode=%d, activeConfig=%d, numLayers=%zu\n"
         "   v:[%d,%d,%d,%d], f:[%d,%d,%d,%d], s:[%d,%d,%d,%d],"
         "transform:[[%0.3f,%0.3f,%0.3f][%0.3f,%0.3f,%0.3f][%0.3f,%0.3f,%0.3f]]\n",
         mDisplayName.string(), mType, mHwcDisplayId,
         mLayerStack, mDisplayWidth, mDisplayHeight, mNativeWindow.get(),
         mOrientation, tr.getType(), getPageFlipCount(),
-        mIsSecure, mSecureLayerVisible, mScreenAcquired, mVisibleLayersSortedByZ.size(),
+        mIsSecure, mSecureLayerVisible, mPowerMode, mActiveConfig,
+        mVisibleLayersSortedByZ.size(),
         mViewport.left, mViewport.top, mViewport.right, mViewport.bottom,
         mFrame.left, mFrame.top, mFrame.right, mFrame.bottom,
         mScissor.left, mScissor.top, mScissor.right, mScissor.bottom,

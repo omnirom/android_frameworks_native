@@ -103,12 +103,15 @@ TEST_F(EGLTest, EGLTerminateSucceedsWithRemainingObjects) {
     struct DummyConsumer : public BnConsumerListener {
         virtual void onFrameAvailable() {}
         virtual void onBuffersReleased() {}
+        virtual void onSidebandStreamChanged() {}
     };
 
     // Create a EGLSurface
-    sp<BufferQueue> bq = new BufferQueue();
-    bq->consumerConnect(new DummyConsumer, false);
-    sp<Surface> mSTC = new Surface(static_cast<sp<IGraphicBufferProducer> >( bq));
+    sp<IGraphicBufferProducer> producer;
+    sp<IGraphicBufferConsumer> consumer;
+    BufferQueue::createBufferQueue(&producer, &consumer);
+    consumer->consumerConnect(new DummyConsumer, false);
+    sp<Surface> mSTC = new Surface(producer);
     sp<ANativeWindow> mANW = mSTC;
 
     EGLSurface eglSurface = eglCreateWindowSurface(mEglDisplay, config,

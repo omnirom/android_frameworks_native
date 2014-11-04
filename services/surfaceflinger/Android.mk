@@ -1,6 +1,9 @@
 LOCAL_PATH:= $(call my-dir)
 include $(CLEAR_VARS)
 
+LOCAL_CLANG := true
+
+LOCAL_ADDITIONAL_DEPENDENCIES := $(LOCAL_PATH)/Android.mk
 LOCAL_SRC_FILES:= \
     Client.cpp \
     DisplayDevice.cpp \
@@ -11,9 +14,9 @@ LOCAL_SRC_FILES:= \
     Layer.cpp \
     LayerDim.cpp \
     MessageQueue.cpp \
+    MonitoredProducer.cpp \
     SurfaceFlinger.cpp \
     SurfaceFlingerConsumer.cpp \
-    SurfaceTextureLayer.cpp \
     Transform.cpp \
     DisplayHardware/FramebufferSurface.cpp \
     DisplayHardware/HWComposer.cpp \
@@ -95,7 +98,8 @@ else
     LOCAL_CFLAGS += -DPRESENT_TIME_OFFSET_FROM_VSYNC_NS=0
 endif
 
-LOCAL_CFLAGS += -fvisibility=hidden
+LOCAL_CFLAGS += -fvisibility=hidden -Werror=format
+LOCAL_CFLAGS += -std=c++11
 
 LOCAL_SHARED_LIBRARIES := \
 	libcutils \
@@ -108,7 +112,8 @@ LOCAL_SHARED_LIBRARIES := \
 	libGLESv2 \
 	libbinder \
 	libui \
-	libgui
+	libgui \
+	libpowermanager
 
 ifeq ($(TARGET_USES_QCOM_BSP), true)
 ifneq ($(TARGET_QCOM_DISPLAY_VARIANT),)
@@ -140,6 +145,10 @@ LOCAL_SHARED_LIBRARIES := \
 	libutils
 
 LOCAL_MODULE:= surfaceflinger
+
+ifdef TARGET_32_BIT_SURFACEFLINGER
+LOCAL_32_BIT_ONLY := true
+endif
 
 include $(BUILD_EXECUTABLE)
 

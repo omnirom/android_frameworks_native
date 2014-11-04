@@ -15,7 +15,9 @@
 */
 
 #include <sys/capability.h>
-#include <linux/prctl.h>
+#include <sys/prctl.h>
+#include <selinux/android.h>
+#include <selinux/avc.h>
 
 #include "installd.h"
 
@@ -36,18 +38,18 @@ static int do_install(char **arg, char reply[REPLY_MAX])
 
 static int do_dexopt(char **arg, char reply[REPLY_MAX])
 {
-        /* apk_path, uid, is_public */
-    return dexopt(arg[0], atoi(arg[1]), atoi(arg[2]));
+    /* apk_path, uid, is_public, pkgname, instruction_set, vm_safe_mode, should_relocate */
+    return dexopt(arg[0], atoi(arg[1]), atoi(arg[2]), arg[3], arg[4], atoi(arg[5]), 0);
 }
 
 static int do_move_dex(char **arg, char reply[REPLY_MAX])
 {
-    return move_dex(arg[0], arg[1]); /* src, dst */
+    return move_dex(arg[0], arg[1], arg[2]); /* src, dst, instruction_set */
 }
 
 static int do_rm_dex(char **arg, char reply[REPLY_MAX])
 {
-    return rm_dex(arg[0]); /* pkgname */
+    return rm_dex(arg[0], arg[1]); /* pkgname, instruction_set */
 }
 
 static int do_remove(char **arg, char reply[REPLY_MAX])
@@ -75,6 +77,11 @@ static int do_rm_cache(char **arg, char reply[REPLY_MAX])
     return delete_cache(arg[0], atoi(arg[1])); /* pkgname, userid */
 }
 
+static int do_rm_code_cache(char **arg, char reply[REPLY_MAX])
+{
+    return delete_code_cache(arg[0], atoi(arg[1])); /* pkgname, userid */
+}
+
 static int do_get_size(char **arg, char reply[REPLY_MAX])
 {
     int64_t codesize = 0;
@@ -85,7 +92,7 @@ static int do_get_size(char **arg, char reply[REPLY_MAX])
 
         /* pkgdir, userid, apkpath */
     res = get_size(arg[0], atoi(arg[1]), arg[2], arg[3], arg[4], arg[5],
-            &codesize, &datasize, &cachesize, &asecsize);
+            arg[6], &codesize, &datasize, &cachesize, &asecsize);
 
     /*
      * Each int64_t can take up 22 characters printed out. Make sure it
@@ -103,7 +110,13 @@ static int do_rm_user_data(char **arg, char reply[REPLY_MAX])
 
 static int do_mk_user_data(char **arg, char reply[REPLY_MAX])
 {
-    return make_user_data(arg[0], atoi(arg[1]), atoi(arg[2])); /* pkgname, uid, userid */
+    return make_user_data(arg[0], atoi(arg[1]), atoi(arg[2]), arg[3]);
+                             /* pkgname, uid, userid, seinfo */
+}
+
+static int do_mk_user_config(char **arg, char reply[REPLY_MAX])
+{
+    return make_user_config(atoi(arg[0])); /* userid */
 }
 
 static int do_rm_user(char **arg, char reply[REPLY_MAX])
@@ -121,6 +134,22 @@ static int do_linklib(char **arg, char reply[REPLY_MAX])
     return linklib(arg[0], arg[1], atoi(arg[2]));
 }
 
+static int do_idmap(char **arg, char reply[REPLY_MAX])
+{
+    return idmap(arg[0], arg[1], atoi(arg[2]));
+}
+
+static int do_restorecon_data(char **arg, char reply[REPLY_MAX] __attribute__((unused)))
+{
+    return restorecon_data(arg[0], arg[1], atoi(arg[2]));
+                             /* pkgName, seinfo, uid*/
+}
+
+static int do_patchoat(char **arg, char reply[REPLY_MAX]) {
+    /* apk_path, uid, is_public, pkgname, instruction_set, vm_safe_mode, should_relocate */
+    return dexopt(arg[0], atoi(arg[1]), atoi(arg[2]), arg[3], arg[4], 0, 1);
+}
+
 struct cmdinfo {
     const char *name;
     unsigned numargs;
@@ -130,20 +159,25 @@ struct cmdinfo {
 struct cmdinfo cmds[] = {
     { "ping",                 0, do_ping },
     { "install",              4, do_install },
-    { "dexopt",               3, do_dexopt },
-    { "movedex",              2, do_move_dex },
-    { "rmdex",                1, do_rm_dex },
+    { "dexopt",               6, do_dexopt },
+    { "movedex",              3, do_move_dex },
+    { "rmdex",                2, do_rm_dex },
     { "remove",               2, do_remove },
     { "rename",               2, do_rename },
     { "fixuid",               3, do_fixuid },
     { "freecache",            1, do_free_cache },
     { "rmcache",              2, do_rm_cache },
-    { "getsize",              6, do_get_size },
+    { "rmcodecache",          2, do_rm_code_cache },
+    { "getsize",              7, do_get_size },
     { "rmuserdata",           2, do_rm_user_data },
     { "movefiles",            0, do_movefiles },
     { "linklib",              3, do_linklib },
-    { "mkuserdata",           3, do_mk_user_data },
+    { "mkuserdata",           4, do_mk_user_data },
+    { "mkuserconfig",         1, do_mk_user_config },
     { "rmuser",               1, do_rm_user },
+    { "idmap",                3, do_idmap },
+    { "restorecondata",       3, do_restorecon_data },
+    { "patchoat",             5, do_patchoat },
 };
 
 static int readx(int s, void *_buf, int count)
@@ -299,7 +333,7 @@ int initialize_globals() {
     }
 
     // Take note of the system and vendor directories.
-    android_system_dirs.count = 2;
+    android_system_dirs.count = 4;
 
     android_system_dirs.dirs = calloc(android_system_dirs.count, sizeof(dir_rec_t));
     if (android_system_dirs.dirs == NULL) {
@@ -307,21 +341,23 @@ int initialize_globals() {
         return -1;
     }
 
-    // system
-    if (get_path_from_env(&android_system_dirs.dirs[0], "ANDROID_ROOT") < 0) {
-        free_globals();
+    dir_rec_t android_root_dir;
+    if (get_path_from_env(&android_root_dir, "ANDROID_ROOT") < 0) {
+        ALOGE("Missing ANDROID_ROOT; aborting\n");
         return -1;
     }
 
-    // append "app/" to dirs[0]
-    char *system_app_path = build_string2(android_system_dirs.dirs[0].path, APP_SUBDIR);
-    android_system_dirs.dirs[0].path = system_app_path;
-    android_system_dirs.dirs[0].len = strlen(system_app_path);
+    android_system_dirs.dirs[0].path = build_string2(android_root_dir.path, APP_SUBDIR);
+    android_system_dirs.dirs[0].len = strlen(android_system_dirs.dirs[0].path);
 
-    // vendor
-    // TODO replace this with an environment variable (doesn't exist yet)
-    android_system_dirs.dirs[1].path = "/vendor/app/";
+    android_system_dirs.dirs[1].path = build_string2(android_root_dir.path, PRIV_APP_SUBDIR);
     android_system_dirs.dirs[1].len = strlen(android_system_dirs.dirs[1].path);
+
+    android_system_dirs.dirs[2].path = "/vendor/app/";
+    android_system_dirs.dirs[2].len = strlen(android_system_dirs.dirs[2].path);
+
+    android_system_dirs.dirs[3].path = "/oem/app/";
+    android_system_dirs.dirs[3].len = strlen(android_system_dirs.dirs[3].path);
 
     return 0;
 }
@@ -391,6 +427,10 @@ int initialize_directories() {
 
         // Create /data/media again
         if (fs_prepare_dir(android_media_dir.path, 0770, AID_MEDIA_RW, AID_MEDIA_RW) == -1) {
+            goto fail;
+        }
+
+        if (selinux_android_restorecon(android_media_dir.path, 0)) {
             goto fail;
         }
 
@@ -468,6 +508,75 @@ int initialize_directories() {
         goto fail;
     }
 
+    if (ensure_config_user_dirs(0) == -1) {
+        ALOGE("Failed to setup misc for user 0");
+        goto fail;
+    }
+
+    if (version == 2) {
+        ALOGD("Upgrading to /data/misc/user directories");
+
+        char misc_dir[PATH_MAX];
+        snprintf(misc_dir, PATH_MAX, "%smisc", android_data_dir.path);
+
+        char keychain_added_dir[PATH_MAX];
+        snprintf(keychain_added_dir, PATH_MAX, "%s/keychain/cacerts-added", misc_dir);
+
+        char keychain_removed_dir[PATH_MAX];
+        snprintf(keychain_removed_dir, PATH_MAX, "%s/keychain/cacerts-removed", misc_dir);
+
+        DIR *dir;
+        struct dirent *dirent;
+        dir = opendir(user_data_dir);
+        if (dir != NULL) {
+            while ((dirent = readdir(dir))) {
+                const char *name = dirent->d_name;
+
+                // skip "." and ".."
+                if (name[0] == '.') {
+                    if (name[1] == 0) continue;
+                    if ((name[1] == '.') && (name[2] == 0)) continue;
+                }
+
+                uint32_t user_id = atoi(name);
+
+                // /data/misc/user/<user_id>
+                if (ensure_config_user_dirs(user_id) == -1) {
+                    goto fail;
+                }
+
+                char misc_added_dir[PATH_MAX];
+                snprintf(misc_added_dir, PATH_MAX, "%s/user/%s/cacerts-added", misc_dir, name);
+
+                char misc_removed_dir[PATH_MAX];
+                snprintf(misc_removed_dir, PATH_MAX, "%s/user/%s/cacerts-removed", misc_dir, name);
+
+                uid_t uid = multiuser_get_uid(user_id, AID_SYSTEM);
+                gid_t gid = uid;
+                if (access(keychain_added_dir, F_OK) == 0) {
+                    if (copy_dir_files(keychain_added_dir, misc_added_dir, uid, gid) != 0) {
+                        ALOGE("Some files failed to copy");
+                    }
+                }
+                if (access(keychain_removed_dir, F_OK) == 0) {
+                    if (copy_dir_files(keychain_removed_dir, misc_removed_dir, uid, gid) != 0) {
+                        ALOGE("Some files failed to copy");
+                    }
+                }
+            }
+            closedir(dir);
+
+            if (access(keychain_added_dir, F_OK) == 0) {
+                delete_dir_contents(keychain_added_dir, 1, 0);
+            }
+            if (access(keychain_removed_dir, F_OK) == 0) {
+                delete_dir_contents(keychain_removed_dir, 1, 0);
+            }
+        }
+
+        version = 3;
+    }
+
     // Persist layout version if changed
     if (version != oldVersion) {
         if (fs_write_atomic_int(version_path, version) == -1) {
@@ -513,6 +622,7 @@ static void drop_privileges() {
     capdata[CAP_TO_INDEX(CAP_CHOWN)].permitted        |= CAP_TO_MASK(CAP_CHOWN);
     capdata[CAP_TO_INDEX(CAP_SETUID)].permitted       |= CAP_TO_MASK(CAP_SETUID);
     capdata[CAP_TO_INDEX(CAP_SETGID)].permitted       |= CAP_TO_MASK(CAP_SETGID);
+    capdata[CAP_TO_INDEX(CAP_FOWNER)].permitted       |= CAP_TO_MASK(CAP_FOWNER);
 
     capdata[0].effective = capdata[0].permitted;
     capdata[1].effective = capdata[1].permitted;
@@ -525,13 +635,39 @@ static void drop_privileges() {
     }
 }
 
+static int log_callback(int type, const char *fmt, ...) {
+    va_list ap;
+    int priority;
+
+    switch (type) {
+    case SELINUX_WARNING:
+        priority = ANDROID_LOG_WARN;
+        break;
+    case SELINUX_INFO:
+        priority = ANDROID_LOG_INFO;
+        break;
+    default:
+        priority = ANDROID_LOG_ERROR;
+        break;
+    }
+    va_start(ap, fmt);
+    LOG_PRI_VA(priority, "SELinux", fmt, ap);
+    va_end(ap);
+    return 0;
+}
+
 int main(const int argc, const char *argv[]) {
     char buf[BUFFER_MAX];
     struct sockaddr addr;
     socklen_t alen;
     int lsocket, s, count;
+    int selinux_enabled = (is_selinux_enabled() > 0);
 
     ALOGI("installd firing up\n");
+
+    union selinux_callback cb;
+    cb.func_log = log_callback;
+    selinux_set_callback(SELINUX_CB_LOG, cb);
 
     if (initialize_globals() < 0) {
         ALOGE("Could not initialize globals; exiting.\n");
@@ -540,6 +676,11 @@ int main(const int argc, const char *argv[]) {
 
     if (initialize_directories() < 0) {
         ALOGE("Could not create directories; exiting.\n");
+        exit(1);
+    }
+
+    if (selinux_enabled && selinux_status_open(true) < 0) {
+        ALOGE("Could not open selinux status; exiting.\n");
         exit(1);
     }
 
@@ -581,6 +722,9 @@ int main(const int argc, const char *argv[]) {
                 break;
             }
             buf[count] = 0;
+            if (selinux_enabled && selinux_status_updated() > 0) {
+                selinux_android_seapp_context_reload();
+            }
             if (execute(s, buf)) break;
         }
         ALOGI("closing connection\n");

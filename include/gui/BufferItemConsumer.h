@@ -44,6 +44,7 @@ class BufferItemConsumer: public ConsumerBase
 
     typedef BufferQueue::BufferItem BufferItem;
 
+    enum { DEFAULT_MAX_BUFFERS = -1 };
     enum { INVALID_BUFFER_SLOT = BufferQueue::INVALID_BUFFER_SLOT };
     enum { NO_BUFFER_AVAILABLE = BufferQueue::NO_BUFFER_AVAILABLE };
 
@@ -53,8 +54,8 @@ class BufferItemConsumer: public ConsumerBase
     // access at the same time.
     // controlledByApp tells whether this consumer is controlled by the
     // application.
-    BufferItemConsumer(const sp<BufferQueue>& bq, uint32_t consumerUsage,
-            int bufferCount = BufferQueue::MIN_UNDEQUEUED_BUFFERS,
+    BufferItemConsumer(const sp<IGraphicBufferConsumer>& consumer,
+            uint32_t consumerUsage, int bufferCount = DEFAULT_MAX_BUFFERS,
             bool controlledByApp = false);
 
     virtual ~BufferItemConsumer();

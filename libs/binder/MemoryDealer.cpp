@@ -210,7 +210,7 @@ Allocation::~Allocation()
 #ifdef MADV_REMOVE
             if (size) {
                 int err = madvise(start_ptr, size, MADV_REMOVE);
-                ALOGW_IF(err, "madvise(%p, %u, MADV_REMOVE) returned %s",
+                ALOGW_IF(err, "madvise(%p, %zu, MADV_REMOVE) returned %s",
                         start_ptr, size, err<0 ? strerror(errno) : "Ok");
             }
 #endif
@@ -225,8 +225,8 @@ Allocation::~Allocation()
 
 // ----------------------------------------------------------------------------
 
-MemoryDealer::MemoryDealer(size_t size, const char* name)
-    : mHeap(new MemoryHeapBase(size, 0, name)),
+MemoryDealer::MemoryDealer(size_t size, const char* name, uint32_t flags)
+    : mHeap(new MemoryHeapBase(size, flags, name)),
     mAllocator(new SimpleBestFitAllocator(size))
 {    
 }
@@ -445,8 +445,8 @@ void SimpleBestFitAllocator::dump_l(String8& result,
         int np = ((cur->next) && cur->next->prev != cur) ? 1 : 0;
         int pn = ((cur->prev) && cur->prev->next != cur) ? 2 : 0;
 
-        snprintf(buffer, SIZE, "  %3u: %08x | 0x%08X | 0x%08X | %s %s\n",
-            i, int(cur), int(cur->start*kMemoryAlign),
+        snprintf(buffer, SIZE, "  %3u: %p | 0x%08X | 0x%08X | %s %s\n",
+            i, cur, int(cur->start*kMemoryAlign),
             int(cur->size*kMemoryAlign),
                     int(cur->free) ? "F" : "A",
                     errs[np|pn]);

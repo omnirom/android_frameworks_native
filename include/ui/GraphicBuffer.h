@@ -68,6 +68,8 @@ public:
 #ifdef EXYNOS4_ENHANCEMENTS
         USAGE_HW_FIMC1          = GRALLOC_USAGE_HW_FIMC1
 #endif
+
+        USAGE_CURSOR            = GRALLOC_USAGE_CURSOR,
     };
 
     GraphicBuffer();
@@ -97,6 +99,7 @@ public:
     uint32_t getUsage() const           { return usage; }
     PixelFormat getPixelFormat() const  { return format; }
     Rect getBounds() const              { return Rect(width, height); }
+    uint64_t getId() const              { return mId; }
 
     status_t reallocate(uint32_t w, uint32_t h, PixelFormat f, uint32_t usage);
 
@@ -106,6 +109,11 @@ public:
     status_t lockYCbCr(uint32_t usage, android_ycbcr *ycbcr);
     status_t lockYCbCr(uint32_t usage, const Rect& rect, android_ycbcr *ycbcr);
     status_t unlock();
+    status_t lockAsync(uint32_t usage, void** vaddr, int fenceFd);
+    status_t lockAsync(uint32_t usage, const Rect& rect, void** vaddr, int fenceFd);
+    status_t lockAsyncYCbCr(uint32_t usage, android_ycbcr *ycbcr, int fenceFd);
+    status_t lockAsyncYCbCr(uint32_t usage, const Rect& rect, android_ycbcr *ycbcr, int fenceFd);
+    status_t unlockAsync(int *fenceFd);
 
     ANativeWindowBuffer* getNativeBuffer() const;
 
@@ -159,6 +167,8 @@ private:
     // If we're wrapping another buffer then this reference will make sure it
     // doesn't get freed.
     sp<ANativeWindowBuffer> mWrappedBuffer;
+
+    uint64_t mId;
 };
 
 }; // namespace android

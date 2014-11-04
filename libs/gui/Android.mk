@@ -5,8 +5,13 @@ LOCAL_SRC_FILES:= \
 	IGraphicBufferConsumer.cpp \
 	IConsumerListener.cpp \
 	BitTube.cpp \
+	BufferItem.cpp \
 	BufferItemConsumer.cpp \
 	BufferQueue.cpp \
+	BufferQueueConsumer.cpp \
+	BufferQueueCore.cpp \
+	BufferQueueProducer.cpp \
+	BufferSlot.cpp \
 	ConsumerBase.cpp \
 	CpuConsumer.cpp \
 	DisplayEventReceiver.cpp \
@@ -16,6 +21,7 @@ LOCAL_SRC_FILES:= \
 	IDisplayEventConnection.cpp \
 	IGraphicBufferAlloc.cpp \
 	IGraphicBufferProducer.cpp \
+	IProducerListener.cpp \
 	ISensorEventConnection.cpp \
 	ISensorServer.cpp \
 	ISurfaceComposer.cpp \
@@ -24,6 +30,7 @@ LOCAL_SRC_FILES:= \
 	Sensor.cpp \
 	SensorEventQueue.cpp \
 	SensorManager.cpp \
+	StreamSplitter.cpp \
 	Surface.cpp \
 	SurfaceControl.cpp \
 	SurfaceComposerClient.cpp \

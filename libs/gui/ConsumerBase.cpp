@@ -14,6 +14,8 @@
  * limitations under the License.
  */
 
+#include <inttypes.h>
+
 #define LOG_TAG "ConsumerBase"
 #define ATRACE_TAG ATRACE_TAG_GRAPHICS
 //#define LOG_NDEBUG 0
@@ -85,7 +87,7 @@ ConsumerBase::~ConsumerBase() {
         "consumer is not abandoned!", mName.string());
 }
 
-void ConsumerBase::onLastStrongRef(const void* id) {
+void ConsumerBase::onLastStrongRef(const void* id __attribute__((unused))) {
     abandon();
 }
 
@@ -121,13 +123,16 @@ void ConsumerBase::onBuffersReleased() {
         return;
     }
 
-    uint32_t mask = 0;
+    uint64_t mask = 0;
     mConsumer->getReleasedBuffers(&mask);
     for (int i = 0; i < BufferQueue::NUM_BUFFER_SLOTS; i++) {
-        if (mask & (1 << i)) {
+        if (mask & (1ULL << i)) {
             freeBufferLocked(i);
         }
     }
+}
+
+void ConsumerBase::onSidebandStreamChanged() {
 }
 
 void ConsumerBase::abandon() {
@@ -188,7 +193,7 @@ status_t ConsumerBase::acquireBufferLocked(BufferQueue::BufferItem *item,
     mSlots[item->mBuf].mFrameNumber = item->mFrameNumber;
     mSlots[item->mBuf].mFence = item->mFence;
 
-    CB_LOGV("acquireBufferLocked: -> slot=%d/%llu",
+    CB_LOGV("acquireBufferLocked: -> slot=%d/%" PRIu64,
             item->mBuf, item->mFrameNumber);
 
     return OK;
@@ -239,11 +244,11 @@ status_t ConsumerBase::releaseBufferLocked(
         return OK;
     }
 
-    CB_LOGV("releaseBufferLocked: slot=%d/%llu",
+    CB_LOGV("releaseBufferLocked: slot=%d/%" PRIu64,
             slot, mSlots[slot].mFrameNumber);
     status_t err = mConsumer->releaseBuffer(slot, mSlots[slot].mFrameNumber,
             display, eglFence, mSlots[slot].mFence);
-    if (err == BufferQueue::STALE_BUFFER_SLOT) {
+    if (err == IGraphicBufferConsumer::STALE_BUFFER_SLOT) {
         freeBufferLocked(slot);
     }
 

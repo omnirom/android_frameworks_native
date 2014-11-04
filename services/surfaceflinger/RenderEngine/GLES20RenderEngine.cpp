@@ -19,10 +19,14 @@
 #include <GLES2/gl2.h>
 #include <GLES2/gl2ext.h>
 
+#include <ui/Rect.h>
+
 #include <utils/String8.h>
 #include <utils/Trace.h>
 
 #include <cutils/compiler.h>
+#include <gui/ISurfaceComposer.h>
+#include <math.h>
 
 #include "GLES20RenderEngine.h"
 #include "Program.h"
@@ -78,10 +82,40 @@ size_t GLES20RenderEngine::getMaxViewportDims() const {
 }
 
 void GLES20RenderEngine::setViewportAndProjection(
-        size_t vpw, size_t vph, size_t w, size_t h, bool yswap) {
+        size_t vpw, size_t vph, Rect sourceCrop, size_t hwh, bool yswap,
+        Transform::orientation_flags rotation) {
+
+    size_t l = sourceCrop.left;
+    size_t r = sourceCrop.right;
+
+    // In GL, (0, 0) is the bottom-left corner, so flip y coordinates
+    size_t t = hwh - sourceCrop.top;
+    size_t b = hwh - sourceCrop.bottom;
+
     mat4 m;
-    if (yswap)  m = mat4::ortho(0, w, h, 0, 0, 1);
-    else        m = mat4::ortho(0, w, 0, h, 0, 1);
+    if (yswap) {
+        m = mat4::ortho(l, r, t, b, 0, 1);
+    } else {
+        m = mat4::ortho(l, r, b, t, 0, 1);
+    }
+
+    // Apply custom rotation to the projection.
+    float rot90InRadians = 2.0f * static_cast<float>(M_PI) / 4.0f;
+    switch (rotation) {
+        case Transform::ROT_0:
+            break;
+        case Transform::ROT_90:
+            m = mat4::rotate(rot90InRadians, vec3(0,0,1)) * m;
+            break;
+        case Transform::ROT_180:
+            m = mat4::rotate(rot90InRadians * 2.0f, vec3(0,0,1)) * m;
+            break;
+        case Transform::ROT_270:
+            m = mat4::rotate(rot90InRadians * 3.0f, vec3(0,0,1)) * m;
+            break;
+        default:
+            break;
+    }
 
     glViewport(0, 0, vpw, vph);
     mState.setProjectionMatrix(m);

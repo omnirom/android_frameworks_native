@@ -53,7 +53,71 @@ namespace android {
             : [tls] "J"(TLS_SLOT_OPENGL_API*4),                 \
               [api] "J"(__builtin_offsetof(gl_hooks_t,          \
                                       ext.extensions[_api]))    \
-            :                                                   \
+            : "r12"                                             \
+            );
+
+#elif defined(__aarch64__)
+
+    #define API_ENTRY(_api) __attribute__((noinline)) _api
+
+    #define CALL_GL_EXTENSION_API(_api)                             \
+        asm volatile(                                               \
+            "mrs x16, tpidr_el0\n"                                  \
+            "ldr x16, [x16, %[tls]]\n"                              \
+            "cbz x16, 1f\n"                                         \
+            "ldr x16, [x16, %[api]]\n"                              \
+            "cbz x16, 1f\n"                                         \
+            "br  x16\n"                                             \
+            "1:\n"                                                  \
+            :                                                       \
+            : [tls] "i" (TLS_SLOT_OPENGL_API * sizeof(void*)),      \
+              [api] "i" (__builtin_offsetof(gl_hooks_t,             \
+                                        ext.extensions[_api]))      \
+            : "x16"                                                 \
+        );
+
+#elif defined(__i386__)
+
+    #define API_ENTRY(_api) __attribute__((noinline)) _api
+
+    #define CALL_GL_EXTENSION_API(_api)                         \
+         register void** fn;                                    \
+         __asm__ volatile(                                      \
+            "mov %%gs:0, %[fn]\n"                               \
+            "mov %P[tls](%[fn]), %[fn]\n"                       \
+            "test %[fn], %[fn]\n"                               \
+            "cmovne %P[api](%[fn]), %[fn]\n"                    \
+            "test %[fn], %[fn]\n"                               \
+            "je 1f\n"                                           \
+            "jmp *%[fn]\n"                                      \
+            "1:\n"                                              \
+            : [fn] "=r" (fn)                                    \
+            : [tls] "i" (TLS_SLOT_OPENGL_API*sizeof(void*)),    \
+              [api] "i" (__builtin_offsetof(gl_hooks_t,         \
+                                      ext.extensions[_api]))    \
+            : "cc"                                              \
+            );
+
+#elif defined(__x86_64__)
+
+    #define API_ENTRY(_api) __attribute__((noinline)) _api
+
+    #define CALL_GL_EXTENSION_API(_api)                         \
+         register void** fn;                                    \
+         __asm__ volatile(                                      \
+            "mov %%fs:0, %[fn]\n"                               \
+            "mov %P[tls](%[fn]), %[fn]\n"                       \
+            "test %[fn], %[fn]\n"                               \
+            "cmovne %P[api](%[fn]), %[fn]\n"                    \
+            "test %[fn], %[fn]\n"                               \
+            "je 1f\n"                                           \
+            "jmp *%[fn]\n"                                      \
+            "1:\n"                                              \
+            : [fn] "=r" (fn)                                    \
+            : [tls] "i" (TLS_SLOT_OPENGL_API*sizeof(void*)),    \
+              [api] "i" (__builtin_offsetof(gl_hooks_t,         \
+                                      ext.extensions[_api]))    \
+            : "cc"                                              \
             );
 
 #elif defined(__mips__)
@@ -86,6 +150,7 @@ namespace android {
                                           ext.extensions[_api]))    \
                 :                                                   \
             );
+
 #endif
 
 #if defined(CALL_GL_EXTENSION_API)
