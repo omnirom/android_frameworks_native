@@ -1126,12 +1126,13 @@ status_t HWComposer::setActiveConfig(int disp, int mode) {
 #ifdef OLD_HWC_API
         return (status_t)hwcBlank(mHwc, disp, 0);
 #else
-    DisplayData& dd(mDisplayData[disp]);
-    dd.currentConfig = mode;
-    if (mHwc && hwcHasApiVersion(mHwc, HWC_DEVICE_API_VERSION_1_4)) {
-        return (status_t)mHwc->setActiveConfig(mHwc, disp, mode);
-    } else {
-        LOG_FATAL_IF(mode != 0);
+        DisplayData& dd(mDisplayData[disp]);
+        dd.currentConfig = mode;
+        if (mHwc && hwcHasApiVersion(mHwc, HWC_DEVICE_API_VERSION_1_4)) {
+            return (status_t)mHwc->setActiveConfig(mHwc, disp, mode);
+        } else {
+            LOG_FATAL_IF(mode != 0);
+        }
 #endif
     }
     return NO_ERROR;
@@ -1454,6 +1455,7 @@ public:
             getLayer()->flags |= HWC_SCREENSHOT_ANIMATOR_LAYER;
         } else {
             getLayer()->flags &= ~HWC_SCREENSHOT_ANIMATOR_LAYER;
+        }
     }
     virtual void setIsCursorLayerHint(bool isCursor) {
         if (hwcHasApiVersion(mHwc, HWC_DEVICE_API_VERSION_1_4)) {
