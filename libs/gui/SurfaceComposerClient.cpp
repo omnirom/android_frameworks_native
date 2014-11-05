@@ -764,7 +764,6 @@ status_t ScreenshotClient::capture(
         uint32_t minLayerZ, uint32_t maxLayerZ, bool useIdentityTransform) {
     sp<ISurfaceComposer> s(ComposerService::getComposerService());
     if (s == NULL) return NO_INIT;
-<<<<<<< HEAD
 #ifdef USE_MHEAP_SCREENSHOT
     int format = 0;
     producer->query(NATIVE_WINDOW_FORMAT,&format);
@@ -773,13 +772,9 @@ status_t ScreenshotClient::capture(
         return BAD_VALUE;
     }
 #endif
-    return s->captureScreen(display, producer,
-            reqWidth, reqHeight, minLayerZ, maxLayerZ,
-            SS_CPU_CONSUMER);
-=======
     return s->captureScreen(display, producer, sourceCrop,
-            reqWidth, reqHeight, minLayerZ, maxLayerZ, useIdentityTransform);
->>>>>>> android-5.0.0_r2
+            reqWidth, reqHeight, minLayerZ, maxLayerZ, SS_CPU_CONSUMER,
+            useIdentityTransform);
 }
 
 ScreenshotClient::ScreenshotClient()
@@ -835,14 +830,9 @@ status_t ScreenshotClient::update(const sp<IBinder>& display,
         mHaveBuffer = false;
     }
 
-<<<<<<< HEAD
-    status_t err = s->captureScreen(display, mBufferQueue,
-            reqWidth, reqHeight, minLayerZ, maxLayerZ, true);
-=======
     status_t err = s->captureScreen(display, mProducer, sourceCrop,
-            reqWidth, reqHeight, minLayerZ, maxLayerZ, useIdentityTransform,
+            reqWidth, reqHeight, minLayerZ, maxLayerZ, true, useIdentityTransform,
             static_cast<ISurfaceComposer::Rotation>(rotation));
->>>>>>> android-5.0.0_r2
 
     if (err == NO_ERROR) {
         err = mCpuConsumer->lockNextBuffer(&mBuffer);
