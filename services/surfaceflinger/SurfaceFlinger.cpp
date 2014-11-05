@@ -581,10 +581,19 @@ status_t SurfaceFlinger::getDisplayConfigs(const sp<IBinder>& display,
             info.orientation = 0;
         }
 
-        info.w = hwConfig.width;
-        info.h = hwConfig.height;
-        info.xdpi = xdpi;
-        info.ydpi = ydpi;
+        int additionalRot = mDisplays[0]->getHardwareOrientation() / 90;
+        if ((type == DisplayDevice::DISPLAY_PRIMARY) && (additionalRot & DisplayState::eOrientationSwapMask)) {
+            info.h = hwConfig.width;
+            info.w = hwConfig.height;
+            info.xdpi = ydpi;
+            info.ydpi = xdpi;
+        } else {
+            info.w = hwConfig.width;
+            info.h = hwConfig.height;
+            info.xdpi = xdpi;
+            info.ydpi = ydpi;
+        }
+
         info.fps = float(1e9 / hwConfig.refresh);
         info.appVsyncOffset = VSYNC_EVENT_PHASE_OFFSET_NS;
 
@@ -608,21 +617,6 @@ status_t SurfaceFlinger::getDisplayConfigs(const sp<IBinder>& display,
 
         configs->push_back(info);
     }
-
-    int additionalRot = mDisplays[0]->getHardwareOrientation() / 90;
-    if ((type == DisplayDevice::DISPLAY_PRIMARY) && (additionalRot & DisplayState::eOrientationSwapMask)) {
-        info->h = hwc.getWidth(type);
-        info->w = hwc.getHeight(type);
-        info->xdpi = ydpi;
-        info->ydpi = xdpi;
-    }
-    else {
-        info->w = hwc.getWidth(type);
-        info->h = hwc.getHeight(type);
-        info->xdpi = xdpi;
-        info->ydpi = ydpi;
-    }
-    info->fps = float(1e9 / hwc.getRefreshPeriod(type));
 
     return NO_ERROR;
 }
