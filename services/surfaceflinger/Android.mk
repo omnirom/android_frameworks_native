@@ -70,6 +70,9 @@ else
     endif
 endif
 
+ifeq ($(TARGET_FORCE_SCREENSHOT_CPU_PATH),true)
+    LOCAL_CFLAGS += -DFORCE_SCREENSHOT_CPU_PATH
+endif
 ifeq ($(TARGET_BOARD_PLATFORM),omap4)
     LOCAL_CFLAGS += -DHAS_CONTEXT_PRIORITY
 endif
