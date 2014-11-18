@@ -330,7 +330,8 @@ private:
             const sp<IGraphicBufferProducer>& producer,
             Rect sourceCrop, uint32_t reqWidth, uint32_t reqHeight,
             uint32_t minLayerZ, uint32_t maxLayerZ,
-            bool useIdentityTransform, Transform::orientation_flags rotation);
+            bool useIdentityTransform, Transform::orientation_flags rotation,
+            bool useReadPixels);
 
 #ifdef USE_MHEAP_SCREENSHOT
     status_t captureScreenImplCpuConsumerLocked(
