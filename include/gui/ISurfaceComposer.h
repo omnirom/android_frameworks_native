@@ -145,7 +145,8 @@ public:
             Rect sourceCrop, uint32_t reqWidth, uint32_t reqHeight,
             uint32_t minLayerZ, uint32_t maxLayerZ,
             bool useIdentityTransform,
-            Rotation rotation = eRotateNone) = 0;
+            Rotation rotation,
+            bool isCpuConsumer) = 0;
 
 #ifdef USE_MHEAP_SCREENSHOT
     /* Capture the specified screen. requires READ_FRAME_BUFFER permission
