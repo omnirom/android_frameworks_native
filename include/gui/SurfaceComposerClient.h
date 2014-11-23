@@ -40,6 +40,9 @@ namespace android {
 
 class DisplayInfo;
 class Composer;
+#ifdef USE_MHEAP_SCREENSHOT
+class IMemoryHeap;
+#endif
 class ISurfaceComposerClient;
 class IGraphicBufferProducer;
 class Region;
@@ -73,6 +76,19 @@ public:
     // Get the DisplayInfo for the currently-active configuration
     static status_t getDisplayInfo(const sp<IBinder>& display,
             DisplayInfo* info);
+
+    /* triggers screen on and waits for it to complete */
+    static void unblankDisplay(const sp<IBinder>& display);
+    // TODO: Remove me.  Do not use.
+    // This is a compatibility shim for one product whose drivers are depending on
+    // this legacy function (when they shouldn't).
+    static status_t getDisplayInfo(int32_t displayId, DisplayInfo* info);
+
+#if defined(ICS_CAMERA_BLOB) || defined(MR0_CAMERA_BLOB)
+    static ssize_t getDisplayWidth(int32_t displayId);
+    static ssize_t getDisplayHeight(int32_t displayId);
+    static ssize_t getDisplayOrientation(int32_t displayId);
+#endif
 
     // Get the index of the current active configuration (relative to the list
     // returned by getDisplayInfo)
@@ -119,6 +135,8 @@ public:
 
     //! Close a composer transaction on all active SurfaceComposerClients.
     static void closeGlobalTransaction(bool synchronous = false);
+
+    static int setOrientation(int32_t dpy, int orientation, uint32_t flags);
 
     //! Flag the currently open transaction as an animation transaction.
     static void setAnimationTransaction();
@@ -188,6 +206,9 @@ public:
             bool useIdentityTransform);
 
 private:
+#ifdef USE_MHEAP_SCREENSHOT
+    sp<IMemoryHeap> mHeap;
+#endif
     mutable sp<CpuConsumer> mCpuConsumer;
     mutable sp<IGraphicBufferProducer> mProducer;
     CpuConsumer::LockedBuffer mBuffer;
@@ -197,9 +218,14 @@ public:
     ScreenshotClient();
     ~ScreenshotClient();
 
+#ifdef TOROPLUS_RADIO
+    status_t update();
+#endif
+
     // frees the previous screenshot and captures a new one
     // if cropping isn't required, callers may pass in a default Rect, e.g.:
     //   update(display, Rect(), useIdentityTransform);
+    status_t update(const sp<IBinder>& display);
     status_t update(const sp<IBinder>& display,
             Rect sourceCrop, bool useIdentityTransform);
     status_t update(const sp<IBinder>& display,

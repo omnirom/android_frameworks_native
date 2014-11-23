@@ -111,6 +111,19 @@ status_t GraphicBufferMapper::unlock(buffer_handle_t handle)
     return err;
 }
 
+#ifdef EXYNOS4_ENHANCEMENTS
+status_t GraphicBufferMapper::getphys(buffer_handle_t handle, void** paddr)
+{
+    status_t err;
+
+    err = mAllocMod->getphys(mAllocMod, handle, paddr);
+
+    ALOGW_IF(err, "getphys(%p) fail %d(%s)",
+    handle, err, strerror(-err));
+    return err;
+}
+#endif
+
 status_t GraphicBufferMapper::lockAsync(buffer_handle_t handle,
         int usage, const Rect& bounds, void** vaddr, int fenceFd)
 {

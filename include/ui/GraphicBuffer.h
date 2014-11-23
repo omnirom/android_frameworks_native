@@ -49,7 +49,7 @@ public:
         USAGE_SW_READ_RARELY    = GRALLOC_USAGE_SW_READ_RARELY,
         USAGE_SW_READ_OFTEN     = GRALLOC_USAGE_SW_READ_OFTEN,
         USAGE_SW_READ_MASK      = GRALLOC_USAGE_SW_READ_MASK,
-        
+
         USAGE_SW_WRITE_NEVER    = GRALLOC_USAGE_SW_WRITE_NEVER,
         USAGE_SW_WRITE_RARELY   = GRALLOC_USAGE_SW_WRITE_RARELY,
         USAGE_SW_WRITE_OFTEN    = GRALLOC_USAGE_SW_WRITE_OFTEN,
@@ -65,11 +65,20 @@ public:
         USAGE_HW_COMPOSER       = GRALLOC_USAGE_HW_COMPOSER,
         USAGE_HW_VIDEO_ENCODER  = GRALLOC_USAGE_HW_VIDEO_ENCODER,
         USAGE_HW_MASK           = GRALLOC_USAGE_HW_MASK,
+#ifdef EXYNOS4_ENHANCEMENTS
+        USAGE_HW_FIMC1          = GRALLOC_USAGE_HW_FIMC1
+#endif
 
         USAGE_CURSOR            = GRALLOC_USAGE_CURSOR,
     };
 
     GraphicBuffer();
+
+#ifdef QCOM_HARDWARE
+    // creates buffer of bufferSize
+    GraphicBuffer(uint32_t w, uint32_t h,
+                  PixelFormat format, uint32_t usage, uint32_t bufferSize);
+#endif
 
     // creates w * h buffer
     GraphicBuffer(uint32_t w, uint32_t h, PixelFormat format, uint32_t usage);
@@ -143,8 +152,12 @@ private:
     GraphicBuffer& operator = (const GraphicBuffer& rhs);
     const GraphicBuffer& operator = (const GraphicBuffer& rhs) const;
 
-    status_t initSize(uint32_t w, uint32_t h, PixelFormat format, 
+    status_t initSize(uint32_t w, uint32_t h, PixelFormat format,
             uint32_t usage);
+#ifdef QCOM_HARDWARE
+    status_t initSize(uint32_t w, uint32_t h, PixelFormat format,
+            uint32_t usage, uint32_t bufferSize);
+#endif
 
     void free_handle();
 

@@ -48,6 +48,7 @@
 #include "LinearAccelerationSensor.h"
 #include "OrientationSensor.h"
 #include "RotationVectorSensor.h"
+#include "RotationVectorSensor2.h"
 #include "SensorFusion.h"
 #include "SensorService.h"
 
@@ -146,6 +147,12 @@ void SensorService::onFirstRef()
                 // virtual debugging sensors are not added to mUserSensorList
                 registerVirtualSensor( new CorrectedGyroSensor(list, count) );
                 registerVirtualSensor( new GyroDriftSensor() );
+            } else if (orientationIndex != -1) {
+                // If we don't have a gyro but have a orientation sensor from
+                // elsewhere, we can compute rotation vector from that.
+                // (Google Maps expects rotation vector sensor to exist.)
+
+                registerVirtualSensor( &RotationVectorSensor2::getInstance() );
             }
 
             // debugging sensor list
@@ -450,6 +457,12 @@ bool SensorService::threadLoop()
                         fusion.process(event[i]);
                     }
                 }
+                RotationVectorSensor2& rv2(RotationVectorSensor2::getInstance());
+                if (rv2.isEnabled()) {
+                    for (size_t i=0 ; i<size_t(count) ; i++) {
+                        rv2.process(event[i]);
+                    }
+                }
                 for (size_t i=0 ; i<size_t(count) && k<minBufferSize ; i++) {
                     for (size_t j=0 ; j<activeVirtualSensorCount ; j++) {
                         if (count + k >= minBufferSize) {
@@ -751,19 +764,26 @@ status_t SensorService::enable(const sp<SensorEventConnection>& connection,
 
     status_t err = sensor->batch(connection.get(), handle, reservedFlags, samplingPeriodNs,
                                  maxBatchReportLatencyNs);
-
-    // Call flush() before calling activate() on the sensor. Wait for a first flush complete
-    // event before sending events on this connection. Ignore one-shot sensors which don't
-    // support flush(). Also if this sensor isn't already active, don't call flush().
-    if (err == NO_ERROR && sensor->getSensor().getReportingMode() != AREPORTING_MODE_ONE_SHOT &&
-            rec->getNumConnections() > 1) {
-        connection->setFirstFlushPending(handle, true);
-        status_t err_flush = sensor->flush(connection.get(), handle);
-        // Flush may return error if the underlying h/w sensor uses an older HAL.
-        if (err_flush == NO_ERROR) {
-            rec->addPendingFlushConnection(connection.get());
+    if (err == NO_ERROR) {
+        const SensorDevice& device(SensorDevice::getInstance());
+        if (device.getHalDeviceVersion() >= SENSORS_DEVICE_API_VERSION_1_1) {
+            // Call flush() before calling activate() on the sensor. Wait for a first flush complete
+            // event before sending events on this connection. Ignore one-shot sensors which don't
+            // support flush(). Also if this sensor isn't already active, don't call flush().
+            if (sensor->getSensor().getReportingMode() != AREPORTING_MODE_ONE_SHOT &&
+                    rec->getNumConnections() > 1) {
+                connection->setFirstFlushPending(handle, true);
+                status_t err_flush = sensor->flush(connection.get(), handle);
+                // Flush may return error if the underlying h/w sensor uses an older HAL.
+                if (err_flush == NO_ERROR) {
+                    rec->addPendingFlushConnection(connection.get());
+                } else {
+                    connection->setFirstFlushPending(handle, false);
+                }
+            }
         } else {
-            connection->setFirstFlushPending(handle, false);
+            // Pre-1.1 sensor HALs had no flush method, and relied on setDelay at init
+            sensor->setDelay(connection.get(), handle, samplingPeriodNs);
         }
     }
 

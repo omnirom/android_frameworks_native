@@ -380,6 +380,15 @@ status_t BufferQueueConsumer::disconnect() {
     return NO_ERROR;
 }
 
+#ifdef QCOM_HARDWARE
+status_t BufferQueue::setBuffersSize(int size) {
+    ST_LOGV("setBuffersSize: size=%d", size);
+    Mutex::Autolock lock(mMutex);
+    mGraphicBufferAlloc->setGraphicBufferSize(size);
+    return NO_ERROR;
+}
+#endif
+
 status_t BufferQueueConsumer::getReleasedBuffers(uint64_t *outSlotMask) {
     ATRACE_CALL();
 

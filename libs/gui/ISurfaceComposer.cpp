@@ -103,10 +103,33 @@ public:
         remote()->transact(BnSurfaceComposer::BOOT_FINISHED, data, &reply);
     }
 
+#ifdef USE_MHEAP_SCREENSHOT
+    virtual status_t captureScreen(
+            const sp<IBinder>& display, sp<IMemoryHeap>* heap,
+            uint32_t* width, uint32_t* height,
+            uint32_t reqWidth, uint32_t reqHeight,
+            uint32_t minLayerZ, uint32_t maxLayerZ)
+    {
+        Parcel data, reply;
+        data.writeInterfaceToken(ISurfaceComposer::getInterfaceDescriptor());
+        data.writeStrongBinder(display);
+        data.writeInt32(reqWidth);
+        data.writeInt32(reqHeight);
+        data.writeInt32(minLayerZ);
+        data.writeInt32(maxLayerZ);
+        remote()->transact(BnSurfaceComposer::CAPTURE_SCREEN_DEPRECATED, data, &reply);
+        *heap = interface_cast<IMemoryHeap>(reply.readStrongBinder());
+        *width = reply.readInt32();
+        *height = reply.readInt32();
+        return reply.readInt32();
+    }
+#endif
+
     virtual status_t captureScreen(const sp<IBinder>& display,
             const sp<IGraphicBufferProducer>& producer,
             Rect sourceCrop, uint32_t reqWidth, uint32_t reqHeight,
             uint32_t minLayerZ, uint32_t maxLayerZ,
+            bool isCpuConsumer,
             bool useIdentityTransform,
             ISurfaceComposer::Rotation rotation)
     {
@@ -119,6 +142,7 @@ public:
         data.writeInt32(reqHeight);
         data.writeInt32(minLayerZ);
         data.writeInt32(maxLayerZ);
+        data.writeInt32(isCpuConsumer);
         data.writeInt32(static_cast<int32_t>(useIdentityTransform));
         data.writeInt32(static_cast<int32_t>(rotation));
         remote()->transact(BnSurfaceComposer::CAPTURE_SCREEN, data, &reply);
@@ -336,6 +360,25 @@ status_t BnSurfaceComposer::onTransact(
             bootFinished();
             return NO_ERROR;
         }
+#ifdef USE_MHEAP_SCREENSHOT
+        case CAPTURE_SCREEN_DEPRECATED: {
+            CHECK_INTERFACE(ISurfaceComposer, data, reply);
+            sp<IBinder> display = data.readStrongBinder();
+            uint32_t reqWidth = data.readInt32();
+            uint32_t reqHeight = data.readInt32();
+            uint32_t minLayerZ = data.readInt32();
+            uint32_t maxLayerZ = data.readInt32();
+            sp<IMemoryHeap> heap;
+            uint32_t w, h;
+            status_t res = captureScreen(display, &heap, &w, &h,
+                    reqWidth, reqHeight, minLayerZ, maxLayerZ);
+            reply->writeStrongBinder(heap->asBinder());
+            reply->writeInt32(w);
+            reply->writeInt32(h);
+            reply->writeInt32(res);
+            return NO_ERROR;
+        }
+#endif
         case CAPTURE_SCREEN: {
             CHECK_INTERFACE(ISurfaceComposer, data, reply);
             sp<IBinder> display = data.readStrongBinder();
@@ -347,13 +390,14 @@ status_t BnSurfaceComposer::onTransact(
             uint32_t reqHeight = data.readInt32();
             uint32_t minLayerZ = data.readInt32();
             uint32_t maxLayerZ = data.readInt32();
+            bool isCpuConsumer = data.readInt32();
             bool useIdentityTransform = static_cast<bool>(data.readInt32());
             uint32_t rotation = data.readInt32();
-
             status_t res = captureScreen(display, producer,
                     sourceCrop, reqWidth, reqHeight, minLayerZ, maxLayerZ,
-                    useIdentityTransform,
+                    isCpuConsumer, useIdentityTransform,
                     static_cast<ISurfaceComposer::Rotation>(rotation));
+
             reply->writeInt32(res);
             return NO_ERROR;
         }

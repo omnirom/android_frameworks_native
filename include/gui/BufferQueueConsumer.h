@@ -88,6 +88,16 @@ public:
     // fail.
     virtual status_t disconnect();
 
+#ifdef QCOM_HARDWARE
+    // setBufferSize enables us to specify user defined sizes for the buffers
+    // that need to be allocated by surfaceflinger for its client. This is
+    // useful for cases where the client doesn't want the gralloc to calculate
+    // buffer size. client should reset this value to 0, if it wants gralloc
+    // to calculate the size for the buffer. this will take effect from next
+    // dequeue buffer.
+    virtual status_t setBuffersSize(int size);
+#endif
+
     // getReleasedBuffers sets the value pointed to by outSlotMask to a bit mask
     // indicating which buffer slots have been released by the BufferQueue
     // but have not yet been released by the consumer.

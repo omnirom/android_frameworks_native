@@ -162,6 +162,9 @@ public:
         virtual sp<Fence> getAndResetReleaseFence() = 0;
         virtual void setDefaultState() = 0;
         virtual void setSkip(bool skip) = 0;
+#ifndef OLD_HWC_API
+        virtual void setAnimating(bool animating) = 0;
+#endif
         virtual void setIsCursorLayerHint(bool isCursor = true) = 0;
         virtual void setBlending(uint32_t blending) = 0;
         virtual void setTransform(uint32_t transform) = 0;
@@ -245,7 +248,8 @@ public:
     // Events handling ---------------------------------------------------------
 
     enum {
-        EVENT_VSYNC = HWC_EVENT_VSYNC
+        EVENT_VSYNC = HWC_EVENT_VSYNC,
+        EVENT_ORIENTATION = HWC_EVENT_ORIENTATION
     };
 
     void eventControl(int disp, int event, int enabled);

@@ -425,6 +425,16 @@ public:
     // * DEAD_OBJECT - the token is hosted by an already-dead process
     virtual status_t disconnect(int api) = 0;
 
+#ifdef QCOM_HARDWARE
+    // setBufferSize enables to specify the user defined size of the buffer
+    // that needs to be allocated by surfaceflinger for its client. This is
+    // useful for cases where the client doesn't want the gralloc to calculate
+    // buffer size. client should reset this value to 0, if it wants gralloc to
+    // calculate the size for the buffer. this will take effect from next
+    // dequeue buffer.
+    virtual status_t setBuffersSize(int size) = 0;
+#endif
+
     // Attaches a sideband buffer stream to the IGraphicBufferProducer.
     //
     // A sideband stream is a device-specific mechanism for passing buffers
