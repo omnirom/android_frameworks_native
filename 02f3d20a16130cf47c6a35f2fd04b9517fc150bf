@@ -22,6 +22,24 @@
       "revId": "02f3d20a16130cf47c6a35f2fd04b9517fc150bf",
       "serverId": "56841c99-7c94-43d4-bf0b-cb4707e66d55",
       "unresolved": false
+    },
+    {
+      "key": {
+        "uuid": "eb3671c6_123cd2ba",
+        "filename": "include/ui/DisplayInfo.h",
+        "patchSetId": 1
+      },
+      "lineNbr": 39,
+      "author": {
+        "id": 1000979
+      },
+      "writtenOn": "2014-12-18T18:16:21Z",
+      "side": 1,
+      "message": "I fully agree, will look into this.",
+      "parentUuid": "eb3671c6_92f9a21a",
+      "revId": "02f3d20a16130cf47c6a35f2fd04b9517fc150bf",
+      "serverId": "56841c99-7c94-43d4-bf0b-cb4707e66d55",
+      "unresolved": false
     }
   ]
 }
