@@ -172,6 +172,13 @@ int Surface::hook_perform(ANativeWindow* window, int operation, ...) {
     return c->perform(operation, args);
 }
 
+#ifdef QCOM_HARDWARE
+status_t Surface::setDirtyRect(const Rect* dirtyRect) {
+    // TODO: THIS IS ONLY TEMPORARY    
+    return NO_ERROR;
+}
+#endif
+
 int Surface::setSwapInterval(int interval) {
     ATRACE_CALL();
     // EGL specification states:

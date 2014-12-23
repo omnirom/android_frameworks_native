@@ -101,6 +101,12 @@ public:
      */
     void allocateBuffers();
 
+#ifdef QCOM_HARDWARE
+    /* sets dirty rectangle of the buffer that gets queued next for the
+     * Surface */
+    status_t setDirtyRect(const Rect* dirtyRect);
+#endif
+
 protected:
     virtual ~Surface();
 
