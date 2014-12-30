@@ -60,6 +60,9 @@ public:
     status_t    setLayerStack(int32_t layerStack);
     status_t    setLayer(int32_t layer);
     status_t    setPosition(float x, float y);
+#ifdef USES_LEGACY_SET_POSITION
+    status_t    setPosition(int32_t x, int32_t y);
+#endif
     status_t    setSize(uint32_t w, uint32_t h);
     status_t    hide();
     status_t    show();
