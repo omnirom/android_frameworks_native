@@ -146,11 +146,6 @@ DisplayDevice::DisplayDevice(
             mDisplayName = "Virtual Screen";    // e.g. Overlay #n
             break;
     }
-    char property[PROPERTY_VALUE_MAX];
-    int panelOrientation = DisplayState::eOrientationDefault;
-    // Set the panel orientation from the property.
-    property_get("persist.panel.orientation", property, "0");
-    panelOrientation = atoi(property) / 90;
 
     char property[PROPERTY_VALUE_MAX];
     int panelOrientation = DisplayState::eOrientationDefault;
