@@ -22,6 +22,30 @@
       "revId": "553516e83a881239aaf938e42229d08fd3154cb6",
       "serverId": "56841c99-7c94-43d4-bf0b-cb4707e66d55",
       "unresolved": false
+    },
+    {
+      "key": {
+        "uuid": "6b22818b_68819b93",
+        "filename": "include/gui/ISurfaceComposer.h",
+        "patchSetId": 4
+      },
+      "lineNbr": 152,
+      "author": {
+        "id": 1000026
+      },
+      "writtenOn": "2015-02-05T22:09:11Z",
+      "side": 1,
+      "message": "actually I dont see a reason to change anything here since FORCE_SCREENSHOT_CPU_PATH is already supported.\n\nSure that the change using eRotateNone doesnt come from anywhere else?",
+      "parentUuid": "6b22818b_e874abcf",
+      "range": {
+        "startLine": 152,
+        "startChar": 17,
+        "endLine": 152,
+        "endChar": 30
+      },
+      "revId": "553516e83a881239aaf938e42229d08fd3154cb6",
+      "serverId": "56841c99-7c94-43d4-bf0b-cb4707e66d55",
+      "unresolved": false
     }
   ]
 }
