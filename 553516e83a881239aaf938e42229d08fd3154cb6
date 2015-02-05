@@ -1,0 +1,27 @@
+{
+  "comments": [
+    {
+      "key": {
+        "uuid": "6b22818b_e874abcf",
+        "filename": "include/gui/ISurfaceComposer.h",
+        "patchSetId": 4
+      },
+      "lineNbr": 152,
+      "author": {
+        "id": 1000026
+      },
+      "writtenOn": "2015-02-05T22:05:58Z",
+      "side": 1,
+      "message": "hm - thats not the same code as before",
+      "range": {
+        "startLine": 152,
+        "startChar": 17,
+        "endLine": 152,
+        "endChar": 30
+      },
+      "revId": "553516e83a881239aaf938e42229d08fd3154cb6",
+      "serverId": "56841c99-7c94-43d4-bf0b-cb4707e66d55",
+      "unresolved": false
+    }
+  ]
+}
