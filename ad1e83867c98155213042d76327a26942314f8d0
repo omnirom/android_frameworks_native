@@ -1,0 +1,44 @@
+{
+  "comments": [
+    {
+      "key": {
+        "uuid": "6b22818b_b4da0e4e",
+        "filename": "libs/ui/GraphicBufferAllocator.cpp",
+        "patchSetId": 6
+      },
+      "lineNbr": 104,
+      "author": {
+        "id": 1000515
+      },
+      "writtenOn": "2015-02-12T22:39:04Z",
+      "side": 1,
+      "message": "I think it can be a problem for QCOM (caf) merges.",
+      "range": {
+        "startLine": 104,
+        "startChar": 7,
+        "endLine": 104,
+        "endChar": 15
+      },
+      "revId": "ad1e83867c98155213042d76327a26942314f8d0",
+      "serverId": "56841c99-7c94-43d4-bf0b-cb4707e66d55",
+      "unresolved": false
+    },
+    {
+      "key": {
+        "uuid": "6b22818b_d4df8a3c",
+        "filename": "libs/ui/GraphicBufferAllocator.cpp",
+        "patchSetId": 6
+      },
+      "lineNbr": 115,
+      "author": {
+        "id": 1000515
+      },
+      "writtenOn": "2015-02-12T22:39:04Z",
+      "side": 1,
+      "message": "Sorry but is it correct?\n\n#ifdef QCOM_BSP\n#endif\n#ifdef EXYNOS4_ENHANCEMENTS\n#endif\n\n???",
+      "revId": "ad1e83867c98155213042d76327a26942314f8d0",
+      "serverId": "56841c99-7c94-43d4-bf0b-cb4707e66d55",
+      "unresolved": false
+    }
+  ]
+}
