@@ -164,7 +164,7 @@ void Layer::onFirstRef() {
 
 #ifdef QCOM_BSP
     char property[PROPERTY_VALUE_MAX];
-    if (property_get("sf.default.app_buffer_count", property, NULL) > 0) {
+    if (property_get("hw.sf.app_buff_count", property, NULL) > 0) {
         mSurfaceFlingerConsumer->setDefaultMaxBufferCount(atoi(property));
     }
 #endif
@@ -1199,7 +1199,8 @@ void Layer::onPostComposition() {
 
 bool Layer::isVisible() const {
     const Layer::State& s(mDrawingState);
-    return !(s.flags & layer_state_t::eLayerHidden) && s.alpha
+    return !(s.flags & layer_state_t::eLayerHidden) &&
+            !(s.flags & layer_state_t::eLayerTransparent) && s.alpha
             && (mActiveBuffer != NULL || mSidebandStream != NULL);
 }
 

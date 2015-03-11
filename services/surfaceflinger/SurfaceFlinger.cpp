@@ -278,13 +278,13 @@ void SurfaceFlinger::destroyDisplay(const sp<IBinder>& display) {
     setTransactionFlags(eDisplayTransactionNeeded);
 }
 
-void SurfaceFlinger::createBuiltinDisplayLocked(DisplayDevice::DisplayType type) {
+void SurfaceFlinger::createBuiltinDisplayLocked(DisplayDevice::DisplayType type,
+                                                bool secure) {
     ALOGW_IF(mBuiltinDisplays[type],
             "Overwriting display token for display type %d", type);
     mBuiltinDisplays[type] = new BBinder();
     DisplayDeviceState info(type);
-    // All non-virtual displays are currently considered secure.
-    info.isSecure = true;
+    info.isSecure = secure;
     mCurrentState.displays.add(mBuiltinDisplays[type], info);
 }
 
@@ -444,9 +444,9 @@ void SurfaceFlinger::init() {
         DisplayDevice::DisplayType type((DisplayDevice::DisplayType)i);
         // set-up the displays that are already connected
         if (mHwc->isConnected(i) || type==DisplayDevice::DISPLAY_PRIMARY) {
-            // All non-virtual displays are currently considered secure.
-            bool isSecure = true;
-            createBuiltinDisplayLocked(type);
+            // query from hwc if the non-virtual display is secure.
+            bool isSecure = mHwc->isSecure(i);;
+            createBuiltinDisplayLocked(type, isSecure);
             wp<IBinder> token = mBuiltinDisplays[i];
 
             sp<IGraphicBufferProducer> producer;
@@ -626,8 +626,8 @@ status_t SurfaceFlinger::getDisplayConfigs(const sp<IBinder>& display,
         info.presentationDeadline =
                 hwConfig.refresh - SF_VSYNC_EVENT_PHASE_OFFSET_NS + 1000000;
 
-        // All non-virtual displays are currently considered secure.
-        info.secure = true;
+        // set secure info based on the hwcConfig
+        info.secure = hwConfig.secure;
 
         configs->push_back(info);
     }
@@ -840,7 +840,9 @@ void SurfaceFlinger::onHotplugReceived(int type, bool connected) {
     if (uint32_t(type) < DisplayDevice::NUM_BUILTIN_DISPLAY_TYPES) {
         Mutex::Autolock _l(mStateLock);
         if (connected) {
-            createBuiltinDisplayLocked((DisplayDevice::DisplayType)type);
+            // query from hwc if the connected display is secure
+            bool secure = mHwc->isSecure(type);;
+            createBuiltinDisplayLocked((DisplayDevice::DisplayType)type, secure);
         } else {
             mCurrentState.displays.removeItem(mBuiltinDisplays[type]);
             mBuiltinDisplays[type].clear();
@@ -2533,7 +2535,8 @@ uint32_t SurfaceFlinger::setClientStateLocked(
                 flags |= eTraversalNeeded;
         }
         if ((what & layer_state_t::eVisibilityChanged) ||
-                (what & layer_state_t::eOpacityChanged)) {
+                (what & layer_state_t::eOpacityChanged) ||
+                (what & layer_state_t::eTransparencyChanged)) {
             // TODO: should we just use an eFlagsChanged for this?
             if (layer->setFlags(s.flags, s.mask))
                 flags |= eTraversalNeeded;
@@ -3528,6 +3531,12 @@ void SurfaceFlinger::renderScreenImplLocked(
     // make sure to clear all GL error flags
     engine.checkErrors();
 
+    if (DisplayDevice::DISPLAY_PRIMARY == hw->getDisplayType() &&
+                hw->isPanelInverseMounted()) {
+        rotation = (Transform::orientation_flags)
+                (rotation ^ Transform::ROT_180);
+    }
+
     // set-up our viewport
     engine.setViewportAndProjection(
         reqWidth, reqHeight, sourceCrop, hw_h, yswap, rotation);
@@ -3620,7 +3629,6 @@ status_t SurfaceFlinger::captureScreenImplLocked(
              */
             result = native_window_dequeue_buffer_and_wait(window,  &buffer);
             if (result == NO_ERROR) {
-                int syncFd = -1;
                 // create an EGLImage from the buffer so we can later
                 // turn it into a texture
                 EGLImageKHR image = eglCreateImageKHR(mEGLDisplay, EGL_NO_CONTEXT,
@@ -3638,41 +3646,27 @@ status_t SurfaceFlinger::captureScreenImplLocked(
                             hw, sourceCrop, reqWidth, reqHeight, minLayerZ, maxLayerZ, true,
                             useIdentityTransform, rotation);
 
-                        // Attempt to create a sync khr object that can produce a sync point. If that
-                        // isn't available, create a non-dupable sync object in the fallback path and
-                        // wait on it directly.
-                        EGLSyncKHR sync;
-                        if (!DEBUG_SCREENSHOTS) {
-                           sync = eglCreateSyncKHR(mEGLDisplay, EGL_SYNC_NATIVE_FENCE_ANDROID, NULL);
-                        } else {
-                            sync = EGL_NO_SYNC_KHR;
-                        }
+                        // Create a sync point and wait on it, so we know the buffer is
+                        // ready before we pass it along.  We can't trivially call glFlush(),
+                        // so we use a wait flag instead.
+                        // TODO: pass a sync fd to queueBuffer() and let the consumer wait.
+                        EGLSyncKHR sync = eglCreateSyncKHR(mEGLDisplay, EGL_SYNC_FENCE_KHR, NULL);
                         if (sync != EGL_NO_SYNC_KHR) {
-                            // get the sync fd
-                            syncFd = eglDupNativeFenceFDANDROID(mEGLDisplay, sync);
-                            if (syncFd == EGL_NO_NATIVE_FENCE_FD_ANDROID) {
-                                ALOGW("captureScreen: failed to dup sync khr object");
-                                syncFd = -1;
-                            }
-                            eglDestroySyncKHR(mEGLDisplay, sync);
-                        } else {
-                            // fallback path
-                            sync = eglCreateSyncKHR(mEGLDisplay, EGL_SYNC_FENCE_KHR, NULL);
-                            if (sync != EGL_NO_SYNC_KHR) {
-                                EGLint result = eglClientWaitSyncKHR(mEGLDisplay, sync,
+                            EGLint result = eglClientWaitSyncKHR(mEGLDisplay, sync,
                                     EGL_SYNC_FLUSH_COMMANDS_BIT_KHR, 2000000000 /*2 sec*/);
-                                EGLint eglErr = eglGetError();
-                                if (result == EGL_TIMEOUT_EXPIRED_KHR) {
-                                    ALOGW("captureScreen: fence wait timed out");
-                                } else {
-                                    ALOGW_IF(eglErr != EGL_SUCCESS,
-                                            "captureScreen: error waiting on EGL fence: %#x", eglErr);
-                                }
-                                eglDestroySyncKHR(mEGLDisplay, sync);
+                            EGLint eglErr = eglGetError();
+                            eglDestroySyncKHR(mEGLDisplay, sync);
+                            if (result == EGL_TIMEOUT_EXPIRED_KHR) {
+                                ALOGW("captureScreen: fence wait timed out");
                             } else {
-                                ALOGW("captureScreen: error creating EGL fence: %#x", eglGetError());
+                                ALOGW_IF(eglErr != EGL_SUCCESS,
+                                        "captureScreen: error waiting on EGL fence: %#x", eglErr);
                             }
+                        } else {
+                            ALOGW("captureScreen: error creating EGL fence: %#x", eglGetError());
+                            // not fatal
                         }
+
                         if (DEBUG_SCREENSHOTS) {
                             uint32_t* pixels = new uint32_t[reqWidth*reqHeight];
                             getRenderEngine().readPixels(0, 0, reqWidth, reqHeight, pixels);
@@ -3690,8 +3684,7 @@ status_t SurfaceFlinger::captureScreenImplLocked(
                 } else {
                     result = BAD_VALUE;
                 }
-                // queueBuffer takes ownership of syncFd
-                window->queueBuffer(window, buffer, syncFd);
+                window->queueBuffer(window, buffer, -1);
             }
         } else {
             result = BAD_VALUE;
