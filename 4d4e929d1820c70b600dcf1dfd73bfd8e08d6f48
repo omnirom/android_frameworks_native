@@ -1,0 +1,21 @@
+{
+  "comments": [
+    {
+      "key": {
+        "uuid": "6b22818b_41d1ffd0",
+        "filename": "libs/gui/Android.mk",
+        "patchSetId": 1
+      },
+      "lineNbr": 54,
+      "author": {
+        "id": 1000026
+      },
+      "writtenOn": "2015-04-09T11:43:00Z",
+      "side": 1,
+      "message": "but you know that this path will never be choosen if you build for CAF? So this change in this branch doesnt make much sense. If you go this path in your build something terrible is wrong anyway :)",
+      "revId": "4d4e929d1820c70b600dcf1dfd73bfd8e08d6f48",
+      "serverId": "56841c99-7c94-43d4-bf0b-cb4707e66d55",
+      "unresolved": false
+    }
+  ]
+}
