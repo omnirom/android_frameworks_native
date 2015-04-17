@@ -146,6 +146,7 @@ DisplayDevice::DisplayDevice(
             mDisplayName = "Virtual Screen";    // e.g. Overlay #n
             break;
     }
+#ifdef QCOM_HARDWARE
     char property[PROPERTY_VALUE_MAX];
     int panelOrientation = DisplayState::eOrientationDefault;
     // Set the panel orientation from the property.
@@ -156,6 +157,7 @@ DisplayDevice::DisplayDevice(
     // Check if panel is inverse mounted (contents show up HV flipped)
     property_get("persist.panel.inversemounted", property, "0");
     mPanelInverseMounted = !!atoi(property);
+#endif /* QCOM_HARDWARE */
 
     char property[PROPERTY_VALUE_MAX];
     int panelOrientation = DisplayState::eOrientationDefault;
@@ -174,6 +176,7 @@ DisplayDevice::~DisplayDevice() {
     }
 }
 
+#ifdef QCOM_HARDWARE
 #ifdef QCOM_BSP
 void DisplayDevice::eglSwapPreserved(bool enable) const {
     int swapValue = enable ? EGL_BUFFER_PRESERVED : EGL_BUFFER_DESTROYED;
@@ -181,6 +184,7 @@ void DisplayDevice::eglSwapPreserved(bool enable) const {
 }
 #endif
 
+#endif /* QCOM_HARDWARE */
 void DisplayDevice::disconnect(HWComposer& hwc) {
     if (mHwcDisplayId >= 0) {
         hwc.disconnectDisplay(mHwcDisplayId);
@@ -448,10 +452,12 @@ status_t DisplayDevice::orientationToTransfrom(
         break;
     default:
         return BAD_VALUE;
+#ifdef QCOM_HARDWARE
     }
 
     if (DISPLAY_PRIMARY == mHwcDisplayId && isPanelInverseMounted()) {
         flags = flags ^ Transform::ROT_180;
+#endif /* QCOM_HARDWARE */
     }
 
     tr->set(flags, w, h);

@@ -26,8 +26,16 @@
 namespace android {
 
 // Ignore present (retire) fences if the device doesn't have support for the
+#ifndef QCOM_HARDWARE
+// sync framework, or if all phase offsets are zero.  The latter is useful
+// because it allows us to avoid resync bursts on devices that don't need
+// phase-offset VSYNC events.
+#if defined(RUNNING_WITHOUT_SYNC_FRAMEWORK) || \
+        (VSYNC_EVENT_PHASE_OFFSET_NS == 0 && SF_VSYNC_EVENT_PHASE_OFFSET_NS == 0)
+#else /* QCOM_HARDWARE */
 // sync framework.
 #if defined(RUNNING_WITHOUT_SYNC_FRAMEWORK)
+#endif /* QCOM_HARDWARE */
 static const bool kIgnorePresentFences = true;
 #else
 static const bool kIgnorePresentFences = false;

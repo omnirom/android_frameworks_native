@@ -42,7 +42,9 @@
 
 #include <gui/ISurfaceComposer.h>
 #include <gui/ISurfaceComposerClient.h>
+#ifdef QCOM_HARDWARE
 #include <gui/BufferQueue.h>
+#endif /* QCOM_HARDWARE */
 
 #include <hardware/hwcomposer_defs.h>
 
@@ -98,8 +100,12 @@ public:
     void run() ANDROID_API;
 
     enum {
+#ifndef QCOM_HARDWARE
+        EVENT_VSYNC = HWC_EVENT_VSYNC
+#else /* QCOM_HARDWARE */
         EVENT_VSYNC = HWC_EVENT_VSYNC,
         EVENT_ORIENTATION = HWC_EVENT_ORIENTATION
+#endif /* QCOM_HARDWARE */
     };
 
     // post an asynchronous message to the main thread
@@ -135,12 +141,16 @@ public:
     RenderEngine& getRenderEngine() const {
         return *mRenderEngine;
     }
+#ifndef QCOM_HARDWARE
+
+#else /* QCOM_HARDWARE */
 #ifdef QCOM_BSP
     // Extended Mode - No video on primary and it will be shown full
     // screen on External
     static bool sExtendedMode;
     static bool isExtendedMode() { return sExtendedMode; };
 #endif
+#endif /* QCOM_HARDWARE */
 private:
     friend class Client;
     friend class DisplayEventConnection;
@@ -268,6 +278,7 @@ private:
 
     void updateCursorAsync();
 
+#ifdef QCOM_HARDWARE
     // Read virtual display properties
     void setVirtualDisplayData( int32_t hwcDisplayId,
                                 const sp<IGraphicBufferProducer>& sink);
@@ -281,6 +292,7 @@ private:
             sp<IGraphicBufferProducer> bqProducer,
             sp<IGraphicBufferConsumer> bqConsumer);
 
+#endif /* QCOM_HARDWARE */
     /* handlePageFlip - latch a new buffer if available and compute the dirty
      * region. Returns whether a new buffer has been latched, i.e., whether it
      * is necessary to perform a refresh during this vsync.
@@ -364,8 +376,12 @@ private:
     void initializeDisplays();
 
     // Create an IBinder for a builtin display and add it to current state
+#ifndef QCOM_HARDWARE
+    void createBuiltinDisplayLocked(DisplayDevice::DisplayType type);
+#else /* QCOM_HARDWARE */
     void createBuiltinDisplayLocked(DisplayDevice::DisplayType type,
                                     bool secure);
+#endif /* QCOM_HARDWARE */
 
     // NOTE: can only be called from the main thread or with mStateLock held
     sp<const DisplayDevice> getDisplayDevice(const wp<IBinder>& dpy) const {
@@ -394,7 +410,11 @@ private:
      * Compositing
      */
     void invalidateHwcGeometry();
+#ifndef QCOM_HARDWARE
+    static void computeVisibleRegions(
+#else /* QCOM_HARDWARE */
     static void computeVisibleRegions(size_t dpy,
+#endif /* QCOM_HARDWARE */
             const LayerVector& currentLayers, uint32_t layerStack,
             Region& dirtyRegion, Region& opaqueRegion);
 
@@ -493,6 +513,7 @@ private:
     nsecs_t mLastTransactionTime;
     bool mBootFinished;
 
+#ifdef QCOM_HARDWARE
     // Set if the Gpu Tile render DR optimization enabled
     bool mGpuTileRenderEnable;
     bool mCanUseGpuTileRender;
@@ -510,6 +531,7 @@ private:
     };
 #endif
 
+#endif /* QCOM_HARDWARE */
     // these are thread safe
     mutable MessageQueue mEventQueue;
     FrameTracker mAnimFrameTracker;
@@ -533,10 +555,12 @@ private:
 
     mat4 mColorMatrix;
     bool mHasColorMatrix;
+#ifdef QCOM_HARDWARE
 #ifdef QCOM_BSP
     // Flag to disable external rotation animation feature.
     bool mDisableExtAnimation;
 #endif
+#endif /* QCOM_HARDWARE */
 };
 
 }; // namespace android

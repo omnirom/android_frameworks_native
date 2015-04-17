@@ -46,6 +46,7 @@ LOCAL_SHARED_LIBRARIES := \
 	libutils \
 	liblog
 
+#ifdef QCOM_HARDWARE
 # Executed only on QCOM BSPs
 ifeq ($(TARGET_USES_QCOM_BSP),true)
 ifneq ($(TARGET_QCOM_DISPLAY_VARIANT),)
@@ -55,6 +56,7 @@ else
 endif
     LOCAL_CFLAGS += -DQCOM_BSP
 endif
+#endif /* QCOM_HARDWARE */
 
 LOCAL_MODULE:= libgui
 

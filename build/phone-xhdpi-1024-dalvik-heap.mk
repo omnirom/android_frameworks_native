@@ -21,5 +21,9 @@ PRODUCT_PROPERTY_OVERRIDES += \
     dalvik.vm.heapgrowthlimit=96m \
     dalvik.vm.heapsize=256m \
     dalvik.vm.heaptargetutilization=0.75 \
+#ifndef QCOM_HARDWARE
+    dalvik.vm.heapminfree=512k \
+#else /* QCOM_HARDWARE */
     dalvik.vm.heapminfree=2m \
+#endif /* QCOM_HARDWARE */
     dalvik.vm.heapmaxfree=8m
