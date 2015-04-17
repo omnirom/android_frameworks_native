@@ -47,9 +47,11 @@
 #include "DisplayHardware/HWComposer.h"
 
 #include "RenderEngine/RenderEngine.h"
+#ifdef QCOM_HARDWARE
 #ifdef QCOM_BSP
 #include <gralloc_priv.h>
 #endif
+#endif /* QCOM_HARDWARE */
 
 #define DEBUG_RESIZE    0
 
@@ -57,6 +59,7 @@ namespace android {
 
 // ---------------------------------------------------------------------------
 
+#ifdef QCOM_HARDWARE
 /* Calculates the aspect ratio for external display based on the video w/h */
 static Rect getAspectRatio(const sp<const DisplayDevice>& hw,
                            const int& srcWidth, const int& srcHeight) {
@@ -82,6 +85,7 @@ static Rect getAspectRatio(const sp<const DisplayDevice>& hw,
     return outRect;
 }
 
+#endif /* QCOM_HARDWARE */
 int32_t Layer::sSequence = 1;
 
 Layer::Layer(SurfaceFlinger* flinger, const sp<Client>& client,
@@ -109,8 +113,12 @@ Layer::Layer(SurfaceFlinger* flinger, const sp<Client>& client,
         mProtectedByApp(false),
         mHasSurface(false),
         mClientRef(client),
+#ifndef QCOM_HARDWARE
+        mPotentialCursor(false)
+#else /* QCOM_HARDWARE */
         mPotentialCursor(false),
         mTransformHint(0)
+#endif /* QCOM_HARDWARE */
 {
     mCurrentCrop.makeInvalid();
     mFlinger->getRenderEngine().genTextures(1, &mTextureName);
@@ -162,6 +170,7 @@ void Layer::onFirstRef() {
     mSurfaceFlingerConsumer->setDefaultMaxBufferCount(2);
 #else
     mSurfaceFlingerConsumer->setDefaultMaxBufferCount(3);
+#ifdef QCOM_HARDWARE
 
 #ifdef QCOM_BSP
     char property[PROPERTY_VALUE_MAX];
@@ -170,6 +179,7 @@ void Layer::onFirstRef() {
     }
 #endif
 
+#endif /* QCOM_HARDWARE */
 #endif
 
     const sp<const DisplayDevice> hw(mFlinger->getDefaultDisplayDevice());
@@ -323,9 +333,13 @@ static Rect reduce(const Rect& win, const Region& exclude) {
     if (CC_LIKELY(exclude.isEmpty())) {
         return win;
     }
+#ifndef QCOM_HARDWARE
+    if (exclude.isRect()) {
+#else /* QCOM_HARDWARE */
     Rect tmp;
     win.intersect(exclude.getBounds(), &tmp);
     if (exclude.isRect() && !tmp.isEmpty()) {
+#endif /* QCOM_HARDWARE */
         return win.reduce(exclude.getBounds());
     }
     return Region(win).subtract(exclude).getBounds();
@@ -446,9 +460,34 @@ FloatRect Layer::computeCrop(const sp<const DisplayDevice>& hw) const {
     return crop;
 }
 
+#ifndef QCOM_HARDWARE
+void Layer::setGeometry(
+    const sp<const DisplayDevice>& hw,
+        HWComposer::HWCLayerInterface& layer)
+#else /* QCOM_HARDWARE */
 Transform Layer::computeBufferTransform(const sp<const DisplayDevice>& hw) const
+#endif /* QCOM_HARDWARE */
 {
+#ifndef QCOM_HARDWARE
+    layer.setDefaultState();
+
+    // enable this layer
+    layer.setSkip(false);
+
+    if (isSecure() && !hw->isSecure()) {
+        layer.setSkip(true);
+    }
+
+    // this gives us only the "orientation" component of the transform
+#endif /* ! QCOM_HARDWARE */
     const State& s(getDrawingState());
+#ifndef QCOM_HARDWARE
+    if (!isOpaque(s) || s.alpha != 0xFF) {
+        layer.setBlending(mPremultipliedAlpha ?
+                HWC_BLENDING_PREMULT :
+                HWC_BLENDING_COVERAGE);
+    }
+#endif /* ! QCOM_HARDWARE */
 
     // apply the layer's transform, followed by the display's global transform
     // here we're guaranteed that the layer's transform preserves rects
@@ -477,6 +516,12 @@ Transform Layer::computeBufferTransform(const sp<const DisplayDevice>& hw) const
     Rect frame(s.transform.transform(computeBounds(activeTransparentRegion)));
     frame.intersect(hw->getViewport(), &frame);
     const Transform& tr(hw->getTransform());
+#ifndef QCOM_HARDWARE
+    layer.setFrame(tr.transform(frame));
+    layer.setCrop(computeCrop(hw));
+    layer.setPlaneAlpha(s.alpha);
+
+#endif /* ! QCOM_HARDWARE */
     /*
      * Transformations are applied in this order:
      * 1) buffer orientation/flip/mirror
@@ -505,12 +550,17 @@ Transform Layer::computeBufferTransform(const sp<const DisplayDevice>& hw) const
             if (is_h_flipped != is_v_flipped) {
                 t_orientation ^= NATIVE_WINDOW_TRANSFORM_FLIP_V |
                         NATIVE_WINDOW_TRANSFORM_FLIP_H;
+#ifndef QCOM_HARDWARE
+            }
+#else /* QCOM_HARDWARE */
         }
 
+#endif /* QCOM_HARDWARE */
         }
         // and apply to the current transform
         transform = Transform(t_orientation) * Transform(invTransform);
     }
+#ifdef QCOM_HARDWARE
     return transform;
 }
 
@@ -578,6 +628,7 @@ void Layer::setGeometry(
     layer.setPlaneAlpha(s.alpha);
 
     Transform transform = computeBufferTransform(hw);
+#endif /* QCOM_HARDWARE */
 
     // this gives us only the "orientation" component of the transform
     const uint32_t orientation = transform.getOrientation();
@@ -589,8 +640,10 @@ void Layer::setGeometry(
     }
 }
 
+#ifdef QCOM_HARDWARE
 
 
+#endif /* QCOM_HARDWARE */
 void Layer::setPerFrameData(const sp<const DisplayDevice>& hw,
         HWComposer::HWCLayerInterface& layer) {
     // we have to set the visible region on every frame because
@@ -609,6 +662,7 @@ void Layer::setPerFrameData(const sp<const DisplayDevice>& hw,
         // layer yet, or if we ran out of memory
         layer.setBuffer(mActiveBuffer);
     }
+#ifdef QCOM_HARDWARE
 
     Rect dirtyRect =  mSurfaceFlingerConsumer->getCurrentDirtyRect();
     int bufferOrientation = computeBufferTransform(hw).getOrientation();
@@ -659,6 +713,7 @@ void Layer::setPerFrameData(const sp<const DisplayDevice>& hw,
     // NOTE: buffer can be NULL if the client never drew into this
     // layer yet, or if we ran out of memory
     layer.setBuffer(mActiveBuffer);
+#endif /* QCOM_HARDWARE */
 }
 
 void Layer::setAcquireFence(const sp<const DisplayDevice>& /* hw */,
@@ -668,8 +723,12 @@ void Layer::setAcquireFence(const sp<const DisplayDevice>& /* hw */,
     // TODO: there is a possible optimization here: we only need to set the
     // acquire fence the first time a new buffer is acquired on EACH display.
 
+#ifndef QCOM_HARDWARE
+    if (layer.getCompositionType() == HWC_OVERLAY || layer.getCompositionType() == HWC_CURSOR_OVERLAY) {
+#else /* QCOM_HARDWARE */
     if (layer.getCompositionType() == HWC_OVERLAY || layer.getCompositionType() == HWC_CURSOR_OVERLAY ||
             layer.getCompositionType() == HWC_BLIT) {
+#endif /* QCOM_HARDWARE */
         sp<Fence> fence = mSurfaceFlingerConsumer->getCurrentFence();
         if (fence->isValid()) {
             fenceFd = fence->dup();
@@ -760,6 +819,7 @@ void Layer::onDraw(const sp<const DisplayDevice>& hw, const Region& clip,
         // is probably going to have something visibly wrong.
     }
 
+#ifdef QCOM_HARDWARE
     bool canAllowGPU = false;
 #ifdef QCOM_BSP
     if(isProtected()) {
@@ -772,11 +832,16 @@ void Layer::onDraw(const sp<const DisplayDevice>& hw, const Region& clip,
     }
 #endif
 
+#endif /* QCOM_HARDWARE */
     bool blackOutLayer = isProtected() || (isSecure() && !hw->isSecure());
 
     RenderEngine& engine(mFlinger->getRenderEngine());
 
+#ifndef QCOM_HARDWARE
+    if (!blackOutLayer) {
+#else /* QCOM_HARDWARE */
     if (!blackOutLayer || (canAllowGPU)) {
+#endif /* QCOM_HARDWARE */
         // TODO: we could be more subtle with isFixedSize()
         const bool useFiltering = getFiltering() || needsFiltering(hw) || isFixedSize();
 
@@ -849,6 +914,24 @@ void Layer::drawWithOpenGL(const sp<const DisplayDevice>& hw,
 
     computeGeometry(hw, mMesh, useIdentityTransform);
 
+#ifndef QCOM_HARDWARE
+    /*
+     * NOTE: the way we compute the texture coordinates here produces
+     * different results than when we take the HWC path -- in the later case
+     * the "source crop" is rounded to texel boundaries.
+     * This can produce significantly different results when the texture
+     * is scaled by a large amount.
+     *
+     * The GL code below is more logical (imho), and the difference with
+     * HWC is due to a limitation of the HWC API to integers -- a question
+     * is suspend is whether we should ignore this problem or revert to
+     * GL composition when a buffer scaling is applied (maybe with some
+     * minimal value)? Or, we could make GL behave like HWC -- but this feel
+     * like more of a hack.
+     */
+    const Rect win(computeBounds());
+
+#else /* QCOM_HARDWARE */
     // Compute the crops exactly in the way we are doing
     // for HWC & program texture coordinates for the clipped
     // source after transformation.
@@ -865,6 +948,7 @@ void Layer::drawWithOpenGL(const sp<const DisplayDevice>& hw,
 #else
     win = reduce(win, s.activeTransparentRegion);
 #endif
+#endif /* QCOM_HARDWARE */
     float left   = float(win.left)   / float(s.active.w);
     float top    = float(win.top)    / float(s.active.h);
     float right  = float(win.right)  / float(s.active.w);
@@ -932,13 +1016,18 @@ void Layer::computeGeometry(const sp<const DisplayDevice>& hw, Mesh& mesh,
         bool useIdentityTransform) const
 {
     const Layer::State& s(getDrawingState());
+#ifndef QCOM_HARDWARE
+    const Transform tr(useIdentityTransform ?
+#else /* QCOM_HARDWARE */
     Transform tr(useIdentityTransform ?
+#endif /* QCOM_HARDWARE */
             hw->getTransform() : hw->getTransform() * s.transform);
     const uint32_t hw_h = hw->getHeight();
     Rect win(s.active.w, s.active.h);
     if (!s.active.crop.isEmpty()) {
         win.intersect(s.active.crop, &win);
     }
+#ifdef QCOM_HARDWARE
 
 #ifdef QCOM_BSP
     win = s.transform.transform(win);
@@ -963,6 +1052,10 @@ void Layer::computeGeometry(const sp<const DisplayDevice>& hw, Mesh& mesh,
     // subtract the transparent region and snap to the bounds
     win = reduce(win, s.activeTransparentRegion);
 #endif
+#else /* QCOM_HARDWARE */
+    // subtract the transparent region and snap to the bounds
+    win = reduce(win, s.activeTransparentRegion);
+#endif /* QCOM_HARDWARE */
 
     Mesh::VertexArray<vec2> position(mesh.getPositionArray<vec2>());
     position[0] = tr.transform(win.left,  win.top);
@@ -1259,8 +1352,12 @@ void Layer::onPostComposition() {
 
 bool Layer::isVisible() const {
     const Layer::State& s(mDrawingState);
+#ifndef QCOM_HARDWARE
+    return !(s.flags & layer_state_t::eLayerHidden) && s.alpha
+#else /* QCOM_HARDWARE */
     return !(s.flags & layer_state_t::eLayerHidden) &&
             !(s.flags & layer_state_t::eLayerTransparent) && s.alpha
+#endif /* QCOM_HARDWARE */
             && (mActiveBuffer != NULL || mSidebandStream != NULL);
 }
 
@@ -1495,7 +1592,11 @@ uint32_t Layer::getEffectiveUsage(uint32_t usage) const
     return usage;
 }
 
+#ifndef QCOM_HARDWARE
+void Layer::updateTransformHint(const sp<const DisplayDevice>& hw) const {
+#else /* QCOM_HARDWARE */
 void Layer::updateTransformHint(const sp<const DisplayDevice>& hw) {
+#endif /* QCOM_HARDWARE */
     uint32_t orientation = 0;
     if (!mFlinger->mDebugDisableTransformHint) {
         // The transform hint is used to improve performance, but we can
@@ -1508,7 +1609,9 @@ void Layer::updateTransformHint(const sp<const DisplayDevice>& hw) {
         }
     }
     mSurfaceFlingerConsumer->setTransformHint(orientation);
+#ifdef QCOM_HARDWARE
     mTransformHint = orientation;
+#endif /* QCOM_HARDWARE */
 }
 
 // ----------------------------------------------------------------------------
@@ -1590,6 +1693,7 @@ Layer::LayerCleaner::~LayerCleaner() {
     // destroy client resources
     mFlinger->onLayerDestroyed(mLayer);
 }
+#ifdef QCOM_HARDWARE
 
 #ifdef QCOM_BSP
 bool Layer::hasNewFrame() const {
@@ -1644,6 +1748,7 @@ bool Layer::isYuvLayer() const {
     return false;
 }
 #endif
+#endif /* QCOM_HARDWARE */
 
 // ---------------------------------------------------------------------------
 }; // namespace android

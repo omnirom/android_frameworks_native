@@ -276,6 +276,9 @@ public:
 
     // Updates the transform hint in our SurfaceFlingerConsumer to match
     // the current orientation of the display device.
+#ifndef QCOM_HARDWARE
+    void updateTransformHint(const sp<const DisplayDevice>& hw) const;
+#else /* QCOM_HARDWARE */
     void updateTransformHint(const sp<const DisplayDevice>& hw);
 #ifdef QCOM_BSP
     virtual bool isExtOnly() const;
@@ -283,6 +286,7 @@ public:
     virtual bool isSecureDisplay() const;
     virtual bool isYuvLayer() const;
 #endif
+#endif /* QCOM_HARDWARE */
 
     /*
      * returns the rectangle that crops the content of the layer and scales it
@@ -316,11 +320,13 @@ public:
     void logFrameStats();
     void getFrameStats(FrameStats* outStats) const;
 
+#ifdef QCOM_HARDWARE
 #ifdef QCOM_BSP
     //GPUTileRect : Return true if the layer has been updated in this frame.
     bool hasNewFrame() const;
 #endif
 
+#endif /* QCOM_HARDWARE */
 protected:
     // constant
     sp<SurfaceFlinger> mFlinger;
@@ -356,7 +362,9 @@ private:
     FloatRect computeCrop(const sp<const DisplayDevice>& hw) const;
     bool isCropped() const;
     static bool getOpacityForFormat(uint32_t format);
+#ifdef QCOM_HARDWARE
     Transform computeBufferTransform(const sp<const DisplayDevice>& hw) const;
+#endif /* QCOM_HARDWARE */
 
     // drawing
     void clearWithOpenGL(const sp<const DisplayDevice>& hw, const Region& clip,
@@ -423,9 +431,11 @@ private:
     // Local copy of the queued contents of the incoming BufferQueue
     mutable Mutex mQueueItemLock;
     Vector<BufferItem> mQueueItems;
+#ifdef QCOM_HARDWARE
 
     // Transform hint assigned for the layer
     uint32_t mTransformHint;
+#endif /* QCOM_HARDWARE */
 };
 
 // ---------------------------------------------------------------------------
