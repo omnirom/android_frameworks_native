@@ -110,6 +110,7 @@ LOCAL_SHARED_LIBRARIES := \
 	libgui \
 	libpowermanager
 
+ifeq ($(BOARD_USES_QCOM_HARDWARE), true)
 ifeq ($(TARGET_USES_QCOM_BSP), true)
 ifneq ($(TARGET_QCOM_DISPLAY_VARIANT),)
     LOCAL_C_INCLUDES        += hardware/qcom/display-$(TARGET_QCOM_DISPLAY_VARIANT)/libgralloc
@@ -120,6 +121,7 @@ else
 endif
     LOCAL_SHARED_LIBRARIES += libqdutils
     LOCAL_CFLAGS += -DQCOM_BSP
+endif
 endif
 
 LOCAL_MODULE:= libsurfaceflinger
