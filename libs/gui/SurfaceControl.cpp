@@ -181,10 +181,14 @@ status_t SurfaceControl::writeSurfaceToParcel(
     if (control != NULL) {
         bp = control->mGraphicBufferProducer;
     }
+#ifndef QCOM_HARDWARE
+    return parcel->writeStrongBinder(bp->asBinder());
+#else /* QCOM_HARDWARE */
     if (bp != NULL) {
         return parcel->writeStrongBinder(bp->asBinder());
     }
     return NO_INIT;
+#endif /* QCOM_HARDWARE */
 }
 
 sp<Surface> SurfaceControl::getSurface() const

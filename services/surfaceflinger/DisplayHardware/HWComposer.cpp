@@ -47,8 +47,10 @@
 #include "../Layer.h"           // needed only for debugging
 #include "../SurfaceFlinger.h"
 
+#ifdef QCOM_HARDWARE
 #define GPUTILERECT_DEBUG 0
 
+#endif /* QCOM_HARDWARE */
 namespace android {
 
 #define MIN_HWC_HEADER_VERSION HWC_HEADER_VERSION
@@ -90,8 +92,12 @@ HWComposer::HWComposer(
       mFbDev(0), mHwc(0), mNumDisplays(1),
       mCBContext(new cb_context),
       mEventHandler(handler),
+#ifndef QCOM_HARDWARE
+      mDebugForceFakeVSync(false)
+#else /* QCOM_HARDWARE */
       mDebugForceFakeVSync(false),
       mVDSEnabled(false)
+#endif /* QCOM_HARDWARE */
 {
     for (size_t i =0 ; i<MAX_HWC_DISPLAYS ; i++) {
         mLists[i] = 0;
@@ -179,7 +185,9 @@ HWComposer::HWComposer(
         config.height = mFbDev->height;
         config.xdpi = mFbDev->xdpi;
         config.ydpi = mFbDev->ydpi;
+#ifdef QCOM_HARDWARE
         config.secure = true; //XXX: Assuming primary is always true
+#endif /* QCOM_HARDWARE */
         config.refresh = nsecs_t(1e9 / mFbDev->fps);
         disp.configs.push_back(config);
         disp.currentConfig = 0;
@@ -190,6 +198,7 @@ HWComposer::HWComposer(
         }
     }
 
+#ifdef QCOM_HARDWARE
     // read system property for VDS solution
     // This property is expected to be setup once during bootup
     if( (property_get("persist.hwc.enable_vds", value, NULL) > 0) &&
@@ -199,15 +208,18 @@ HWComposer::HWComposer(
         mVDSEnabled = true;
     }
 
+#endif /* QCOM_HARDWARE */
     if (needVSyncThread) {
         // we don't have VSYNC support, we need to fake it
         mVSyncThread = new VSyncThread(*this);
     }
+#ifdef QCOM_HARDWARE
 #ifdef QCOM_BSP
     // Threshold Area to enable GPU Tiled Rect.
     property_get("debug.hwc.gpuTiledThreshold", value, "1.9");
     mDynThreshold = atof(value);
 #endif
+#endif /* QCOM_HARDWARE */
 }
 
 HWComposer::~HWComposer() {
@@ -351,10 +363,12 @@ static const uint32_t DISPLAY_ATTRIBUTES[] = {
     HWC_DISPLAY_HEIGHT,
     HWC_DISPLAY_DPI_X,
     HWC_DISPLAY_DPI_Y,
+#ifdef QCOM_HARDWARE
     //To specify if display is secure
     //Primary is considered as secure always
     //HDMI can be secure based on HDCP
     HWC_DISPLAY_SECURE,
+#endif /* QCOM_HARDWARE */
     HWC_DISPLAY_NO_ATTRIBUTE,
 };
 #define NUM_DISPLAY_ATTRIBUTES (sizeof(DISPLAY_ATTRIBUTES) / sizeof(DISPLAY_ATTRIBUTES)[0])
@@ -377,12 +391,16 @@ status_t HWComposer::queryDisplayProperties(int disp) {
         return err;
     }
 
+#ifndef QCOM_HARDWARE
+    mDisplayData[disp].currentConfig = 0;
+#else /* QCOM_HARDWARE */
     int currentConfig = getActiveConfig(disp);
     if (currentConfig < 0 || currentConfig > (numConfigs-1)) {
         ALOGE("%s: Invalid display config! %d", __FUNCTION__, currentConfig);
         currentConfig = 0;
     }
     mDisplayData[disp].currentConfig = currentConfig;
+#endif /* QCOM_HARDWARE */
     for (size_t c = 0; c < numConfigs; ++c) {
         err = mHwc->getDisplayAttributes(mHwc, disp, configs[c],
                 DISPLAY_ATTRIBUTES, values);
@@ -410,9 +428,11 @@ status_t HWComposer::queryDisplayProperties(int disp) {
                 case HWC_DISPLAY_DPI_Y:
                     config.ydpi = values[i] / 1000.0f;
                     break;
+#ifdef QCOM_HARDWARE
                 case HWC_DISPLAY_SECURE:
                     config.secure = values[i];
                     break;
+#endif /* QCOM_HARDWARE */
                 default:
                     ALOG_ASSERT(false, "unknown display attribute[%zu] %#x",
                             i, DISPLAY_ATTRIBUTES[i]);
@@ -493,7 +513,11 @@ sp<Fence> HWComposer::getDisplayFence(int disp) const {
 }
 
 uint32_t HWComposer::getFormat(int disp) const {
+#ifndef QCOM_HARDWARE
+    if (uint32_t(disp)>31 || !mAllocatedDisplayIDs.hasBit(disp)) {
+#else /* QCOM_HARDWARE */
     if (uint32_t(disp)>= MAX_HWC_DISPLAYS || !mAllocatedDisplayIDs.hasBit(disp)) {
+#endif /* QCOM_HARDWARE */
         return HAL_PIXEL_FORMAT_RGBA_8888;
     } else {
         return mDisplayData[disp].format;
@@ -524,11 +548,12 @@ float HWComposer::getDpiY(int disp) const {
     return mDisplayData[disp].configs[currentConfig].ydpi;
 }
 
+#ifdef QCOM_HARDWARE
 bool HWComposer::isSecure(int disp) const {
     size_t currentConfig = mDisplayData[disp].currentConfig;
     return mDisplayData[disp].configs[currentConfig].secure;
 }
-
+#endif /* QCOM_HARDWARE */
 
 nsecs_t HWComposer::getRefreshPeriod(int disp) const {
     size_t currentConfig = mDisplayData[disp].currentConfig;
@@ -549,7 +574,46 @@ void HWComposer::eventControl(int disp, int event, int enabled) {
               event, disp, enabled);
         return;
     }
+#ifndef QCOM_HARDWARE
+    if (event != EVENT_VSYNC) {
+        ALOGW("eventControl got unexpected event %d (disp=%d en=%d)",
+              event, disp, enabled);
+        return;
+    }
+#endif /* ! QCOM_HARDWARE */
     status_t err = NO_ERROR;
+#ifndef QCOM_HARDWARE
+    if (mHwc && !mDebugForceFakeVSync) {
+        // NOTE: we use our own internal lock here because we have to call
+        // into the HWC with the lock held, and we want to make sure
+        // that even if HWC blocks (which it shouldn't), it won't
+        // affect other threads.
+        Mutex::Autolock _l(mEventControlLock);
+        const int32_t eventBit = 1UL << event;
+        const int32_t newValue = enabled ? eventBit : 0;
+        const int32_t oldValue = mDisplayData[disp].events & eventBit;
+        if (newValue != oldValue) {
+            ATRACE_CALL();
+            err = mHwc->eventControl(mHwc, disp, event, enabled);
+            if (!err) {
+                int32_t& events(mDisplayData[disp].events);
+                events = (events & ~eventBit) | newValue;
+
+                char tag[16];
+                snprintf(tag, sizeof(tag), "HW_VSYNC_ON_%1u", disp);
+                ATRACE_INT(tag, enabled);
+	    }
+        }
+        // error here should not happen -- not sure what we should
+        // do if it does.
+        ALOGE_IF(err, "eventControl(%d, %d) failed %s",
+                event, enabled, strerror(-err));
+    }
+
+    if (err == NO_ERROR && mVSyncThread != NULL) {
+        mVSyncThread->setEnabled(enabled);
+    }
+#else /* QCOM_HARDWARE */
     switch(event) {
         case EVENT_VSYNC:
             if (mHwc && !mDebugForceFakeVSync) {
@@ -578,7 +642,6 @@ void HWComposer::eventControl(int disp, int event, int enabled) {
                 ALOGE_IF(err, "eventControl(%d, %d) failed %s",
                          event, enabled, strerror(-err));
             }
-
             if (err == NO_ERROR && mVSyncThread != NULL) {
                 mVSyncThread->setEnabled(enabled);
             }
@@ -593,6 +656,7 @@ void HWComposer::eventControl(int disp, int event, int enabled) {
             break;
     }
     return;
+#endif /* QCOM_HARDWARE */
 }
 
 status_t HWComposer::createWorkList(int32_t id, size_t numLayers) {
@@ -611,8 +675,10 @@ status_t HWComposer::createWorkList(int32_t id, size_t numLayers) {
                     + numLayers * sizeof(hwc_layer_1_t);
             free(disp.list);
             disp.list = (hwc_display_contents_1_t*)malloc(size);
+#ifdef QCOM_HARDWARE
             if(disp.list == NULL)
                 return NO_MEMORY;
+#endif /* QCOM_HARDWARE */
             disp.capacity = numLayers;
         }
         if (hwcHasApiVersion(mHwc, HWC_DEVICE_API_VERSION_1_1)) {
@@ -680,7 +746,9 @@ status_t HWComposer::setFramebufferTarget(int32_t id,
 }
 
 status_t HWComposer::prepare() {
+#ifdef QCOM_HARDWARE
     Mutex::Autolock _l(mDrawLock);
+#endif /* QCOM_HARDWARE */
     for (size_t i=0 ; i<mNumDisplays ; i++) {
         DisplayData& disp(mDisplayData[i]);
         if (disp.framebufferTarget) {
@@ -726,11 +794,17 @@ status_t HWComposer::prepare() {
             DisplayData& disp(mDisplayData[i]);
             disp.hasFbComp = false;
             disp.hasOvComp = false;
+#ifdef QCOM_HARDWARE
 #ifdef QCOM_BSP
             disp.hasBlitComp = false;
 #endif
 
+#endif /* QCOM_HARDWARE */
             if (disp.list) {
+#ifndef QCOM_HARDWARE
+                for (size_t i=0 ; i<disp.list->numHwLayers ; i++) {
+                    hwc_layer_1_t& l = disp.list->hwLayers[i];
+#else /* QCOM_HARDWARE */
 #ifdef QCOM_BSP
                //GPUTILERECT
                prev_comp_map[i] = current_comp_map[i];
@@ -739,17 +813,27 @@ status_t HWComposer::prepare() {
 #endif
                 for (size_t j=0 ; j<disp.list->numHwLayers ; j++) {
                     hwc_layer_1_t& l = disp.list->hwLayers[j];
+#endif /* QCOM_HARDWARE */
 
                     //ALOGD("prepare: %d, type=%d, handle=%p",
+#ifndef QCOM_HARDWARE
+                    //        i, l.compositionType, l.handle);
+#else /* QCOM_HARDWARE */
                     //        j, l.compositionType, l.handle);
+#endif /* QCOM_HARDWARE */
 
+#ifndef QCOM_HARDWARE
+                    if (l.flags & HWC_SKIP_LAYER) {
+#else /* QCOM_HARDWARE */
                     if ((i == DisplayDevice::DISPLAY_PRIMARY) &&
                                 l.flags & HWC_SKIP_LAYER) {
+#endif /* QCOM_HARDWARE */
                         l.compositionType = HWC_FRAMEBUFFER;
                     }
                     if (l.compositionType == HWC_FRAMEBUFFER) {
                         disp.hasFbComp = true;
                     }
+#ifdef QCOM_HARDWARE
                     // If the composition type is BLIT, we set this to
                     // trigger a FLIP
                     if(l.compositionType == HWC_BLIT) {
@@ -758,18 +842,21 @@ status_t HWComposer::prepare() {
                         disp.hasBlitComp = true;
 #endif
                     }
+#endif /* QCOM_HARDWARE */
                     if (l.compositionType == HWC_OVERLAY) {
                         disp.hasOvComp = true;
                     }
                     if (l.compositionType == HWC_CURSOR_OVERLAY) {
                         disp.hasOvComp = true;
                     }
+#ifdef QCOM_HARDWARE
 #ifdef QCOM_BSP
                     //GPUTILERECT
                     if(l.compositionType != HWC_FRAMEBUFFER_TARGET) {
                         current_comp_map[i].compType[j] = l.compositionType;
                     }
 #endif
+#endif /* QCOM_HARDWARE */
                 }
                 if (disp.list->numHwLayers == (disp.framebufferTarget ? 1 : 0)) {
                     disp.hasFbComp = true;
@@ -782,6 +869,7 @@ status_t HWComposer::prepare() {
     return (status_t)err;
 }
 
+#ifdef QCOM_HARDWARE
 #ifdef QCOM_BSP
 bool HWComposer::hasBlitComposition(int32_t id) const {
     if (!mHwc || uint32_t(id) > 31 || !mAllocatedDisplayIDs.hasBit(id))
@@ -789,6 +877,7 @@ bool HWComposer::hasBlitComposition(int32_t id) const {
     return mDisplayData[id].hasBlitComp;
 }
 #endif
+#endif /* QCOM_HARDWARE */
 bool HWComposer::hasHwcComposition(int32_t id) const {
     if (!mHwc || uint32_t(id)>31 || !mAllocatedDisplayIDs.hasBit(id))
         return false;
@@ -874,7 +963,13 @@ status_t HWComposer::setPowerMode(int disp, int mode) {
 status_t HWComposer::setActiveConfig(int disp, int mode) {
     LOG_FATAL_IF(disp >= VIRTUAL_DISPLAY_ID_BASE);
     DisplayData& dd(mDisplayData[disp]);
+#ifndef QCOM_HARDWARE
+    dd.currentConfig = mode;
+#endif /* ! QCOM_HARDWARE */
     if (mHwc && hwcHasApiVersion(mHwc, HWC_DEVICE_API_VERSION_1_4)) {
+#ifndef QCOM_HARDWARE
+        return (status_t)mHwc->setActiveConfig(mHwc, disp, mode);
+#else /* QCOM_HARDWARE */
         status_t status = static_cast<status_t>(
                 mHwc->setActiveConfig(mHwc, disp, mode));
         if (status == NO_ERROR) {
@@ -884,12 +979,14 @@ status_t HWComposer::setActiveConfig(int disp, int mode) {
                     __FUNCTION__, mode, disp);
         }
         return status;
+#endif /* QCOM_HARDWARE */
     } else {
         LOG_FATAL_IF(mode != 0);
     }
     return NO_ERROR;
 }
 
+#ifdef QCOM_HARDWARE
 int HWComposer::getActiveConfig(int disp) const {
     LOG_FATAL_IF(disp >= VIRTUAL_DISPLAY_ID_BASE);
     if (mHwc && hwcHasApiVersion(mHwc, HWC_DEVICE_API_VERSION_1_4)) {
@@ -899,6 +996,7 @@ int HWComposer::getActiveConfig(int disp) const {
     }
 }
 
+#endif /* QCOM_HARDWARE */
 void HWComposer::disconnectDisplay(int disp) {
     LOG_ALWAYS_FATAL_IF(disp < 0 || disp == HWC_DISPLAY_PRIMARY);
     DisplayData& dd(mDisplayData[disp]);
@@ -1082,6 +1180,7 @@ public:
             }
         }
     }
+#ifdef QCOM_HARDWARE
     virtual void setAnimating(bool animating) {
         if (animating) {
             getLayer()->flags |= HWC_SCREENSHOT_ANIMATOR_LAYER;
@@ -1089,6 +1188,7 @@ public:
             getLayer()->flags &= ~HWC_SCREENSHOT_ANIMATOR_LAYER;
         }
     }
+#endif /* QCOM_HARDWARE */
     virtual void setBlending(uint32_t blending) {
         getLayer()->blending = blending;
     }
@@ -1131,6 +1231,7 @@ public:
         getLayer()->sidebandStream = stream->handle();
     }
 
+#ifdef QCOM_HARDWARE
     virtual void setDirtyRect(const Rect& dirtyRect) {
         Rect srcCrop;
         srcCrop.left = int(ceilf(getLayer()->sourceCropf.left));
@@ -1145,6 +1246,7 @@ public:
         srcCrop.intersect(dirtyRect, &finalDR);
         getLayer()->dirtyRect = reinterpret_cast<hwc_rect_t const&>(finalDR);
     }
+#endif /* QCOM_HARDWARE */
 
     virtual void setBuffer(const sp<GraphicBuffer>& buffer) {
         if (buffer == 0 || buffer->handle == 0) {
@@ -1222,8 +1324,10 @@ HWComposer::LayerListIterator HWComposer::end(int32_t id) {
 static String8 getFormatStr(PixelFormat format) {
     switch (format) {
     case PIXEL_FORMAT_RGBA_8888:    return String8("RGBA_8888");
+#ifdef QCOM_HARDWARE
     case PIXEL_FORMAT_RGBA_4444:    return String8("RGBA_4444");
     case PIXEL_FORMAT_RGBA_5551:    return String8("RGBA_5551");
+#endif /* QCOM_HARDWARE */
     case PIXEL_FORMAT_RGBX_8888:    return String8("RGBx_8888");
     case PIXEL_FORMAT_RGB_888:      return String8("RGB_888");
     case PIXEL_FORMAT_RGB_565:      return String8("RGB_565");
@@ -1240,7 +1344,9 @@ static String8 getFormatStr(PixelFormat format) {
 }
 
 void HWComposer::dump(String8& result) const {
+#ifdef QCOM_HARDWARE
     Mutex::Autolock _l(mDrawLock);
+#endif /* QCOM_HARDWARE */
     if (mHwc) {
         result.appendFormat("Hardware Composer state (version %08x):\n", hwcApiVersion(mHwc));
         result.appendFormat("  mDebugForceFakeVSync=%d\n", mDebugForceFakeVSync);
@@ -1256,20 +1362,35 @@ void HWComposer::dump(String8& result) const {
             result.appendFormat("  Display[%zd] configurations (* current):\n", i);
             for (size_t c = 0; c < disp.configs.size(); ++c) {
                 const DisplayConfig& config(disp.configs[c]);
+#ifndef QCOM_HARDWARE
+                result.appendFormat("    %s%zd: %ux%u, xdpi=%f, ydpi=%f, refresh=%" PRId64 "\n",
+#else /* QCOM_HARDWARE */
                 result.appendFormat("    %s%zd: %ux%u, xdpi=%f, ydpi=%f, secure=%d refresh=%" PRId64 "\n",
+#endif /* QCOM_HARDWARE */
                         c == disp.currentConfig ? "* " : "", c, config.width, config.height,
+#ifndef QCOM_HARDWARE
+                        config.xdpi, config.ydpi, config.refresh);
+#else /* QCOM_HARDWARE */
                         config.xdpi, config.ydpi, config.secure, config.refresh);
+#endif /* QCOM_HARDWARE */
             }
 
             if (disp.list) {
                 result.appendFormat(
                         "  numHwLayers=%zu, flags=%08x\n",
                         disp.list->numHwLayers, disp.list->flags);
+
                 result.append(
+#ifndef QCOM_HARDWARE
+                        "    type   |  handle  | hint | flag | tr | blnd |   format    |     source crop (l,t,r,b)      |          frame         | name \n"
+                        "-----------+----------+------+------+----+------+-------------+--------------------------------+------------------------+------\n");
+                //      " _________ | ________ | ____ | ____ | __ | ____ | ___________ |_____._,_____._,_____._,_____._ |_____,_____,_____,_____ | ___...
+#else /* QCOM_HARDWARE */
 
                         "    type   |  handle  | hint | flag | tr | blnd |  format     |     source crop(l,t,r,b)       |           frame        |      dirtyRect         |  name \n"
                         "------------+----------+----------+----------+----+-------+----------+-----------------------------------+---------------------------+-------------------\n");
                 //      " __________ | ________ | ________ | ________ | __ | _____ | ________ | [_____._,_____._,_____._,_____._] | [_____,_____,_____,_____] | [_____,_____,_____,_____] |
+#endif /* QCOM_HARDWARE */
                 for (size_t i=0 ; i<disp.list->numHwLayers ; i++) {
                     const hwc_layer_1_t&l = disp.list->hwLayers[i];
                     int32_t format = -1;
@@ -1298,7 +1419,9 @@ void HWComposer::dump(String8& result) const {
                             "FB TARGET",
                             "SIDEBAND",
                             "HWC_CURSOR",
+#ifdef QCOM_HARDWARE
                             "FB_BLIT",
+#endif /* QCOM_HARDWARE */
                             "UNKNOWN"};
                     if (type >= NELEM(compositionTypeName))
                         type = NELEM(compositionTypeName) - 1;
@@ -1306,21 +1429,33 @@ void HWComposer::dump(String8& result) const {
                     String8 formatStr = getFormatStr(format);
                     if (hwcHasApiVersion(mHwc, HWC_DEVICE_API_VERSION_1_3)) {
                         result.appendFormat(
+#ifndef QCOM_HARDWARE
+                                " %9s | %08" PRIxPTR " | %04x | %04x | %02x | %04x | %-11s |%7.1f,%7.1f,%7.1f,%7.1f |%5d,%5d,%5d,%5d | %s\n",
+#else /* QCOM_HARDWARE */
                                 " %9s | %08" PRIxPTR " | %04x | %04x | %02x | %04x | %-11s |%7.1f,%7.1f,%7.1f,%7.1f |%5d,%5d,%5d,%5d | [%5d,%5d,%5d,%5d] | %s\n",
+#endif /* QCOM_HARDWARE */
                                         compositionTypeName[type],
                                         intptr_t(l.handle), l.hints, l.flags, l.transform, l.blending, formatStr.string(),
                                         l.sourceCropf.left, l.sourceCropf.top, l.sourceCropf.right, l.sourceCropf.bottom,
                                         l.displayFrame.left, l.displayFrame.top, l.displayFrame.right, l.displayFrame.bottom,
+#ifdef QCOM_HARDWARE
                                         l.dirtyRect.left, l.dirtyRect.top, l.dirtyRect.right, l.dirtyRect.bottom,
+#endif /* QCOM_HARDWARE */
                                         name.string());
                     } else {
                         result.appendFormat(
+#ifndef QCOM_HARDWARE
+                                " %9s | %08" PRIxPTR " | %04x | %04x | %02x | %04x | %-11s |%7d,%7d,%7d,%7d |%5d,%5d,%5d,%5d | %s\n",
+#else /* QCOM_HARDWARE */
                                 " %9s | %08" PRIxPTR " | %04x | %04x | %02x | %04x | %-11s |%7d,%7d,%7d,%7d |%5d,%5d,%5d,%5d | [%5d,%5d,%5d,%5d] | %s\n",
+#endif /* QCOM_HARDWARE */
                                         compositionTypeName[type],
                                         intptr_t(l.handle), l.hints, l.flags, l.transform, l.blending, formatStr.string(),
                                         l.sourceCrop.left, l.sourceCrop.top, l.sourceCrop.right, l.sourceCrop.bottom,
                                         l.displayFrame.left, l.displayFrame.top, l.displayFrame.right, l.displayFrame.bottom,
+#ifdef QCOM_HARDWARE
                                         l.dirtyRect.left, l.dirtyRect.top, l.dirtyRect.right, l.dirtyRect.bottom,
+#endif /* QCOM_HARDWARE */
                                         name.string());
                     }
                 }
@@ -1409,6 +1544,7 @@ HWComposer::DisplayData::~DisplayData() {
     free(list);
 }
 
+#ifdef QCOM_HARDWARE
 #ifdef QCOM_BSP
 //======================== GPU TiledRect/DR changes =====================
 bool HWComposer::areVisibleRegionsOverlapping(int32_t id ) {
@@ -1577,5 +1713,6 @@ bool HWComposer::canUseTiledDR(int32_t id, Rect& unionDr ){
     return status;
 }
 #endif
+#endif /* QCOM_HARDWARE */
 
 }; // namespace android

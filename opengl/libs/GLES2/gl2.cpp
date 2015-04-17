@@ -180,7 +180,11 @@ const GLubyte * glGetString(GLenum name)
     const GLubyte * ret = egl_get_string_for_current_context(name);
     if (ret == NULL) {
         gl_hooks_t::gl_t const * const _c = &getGlThreadSpecific()->gl;
+#ifndef QCOM_HARDWARE
+        ret = _c->glGetString(name);
+#else /* QCOM_HARDWARE */
         if(_c) ret = _c->glGetString(name);
+#endif /* QCOM_HARDWARE */
     }
     return ret;
 }
