@@ -1,0 +1,276 @@
+{
+  "comments": [
+    {
+      "key": {
+        "uuid": "2b1c0951_c66fe4f6",
+        "filename": "build/phone-xhdpi-1024-dalvik-heap.mk",
+        "patchSetId": 1
+      },
+      "lineNbr": 24,
+      "author": {
+        "id": 1000008
+      },
+      "writtenOn": "2015-04-22T14:37:33Z",
+      "side": 1,
+      "message": "Nuke this, it\u0027s just an update, all devices should get it",
+      "revId": "13f452732829e1f7bcf5823cc4a5556dfb26ea0b",
+      "serverId": "56841c99-7c94-43d4-bf0b-cb4707e66d55",
+      "unresolved": false
+    },
+    {
+      "key": {
+        "uuid": "2b1c0951_e674e0cf",
+        "filename": "build/phone-xxhdpi-2048-hwui-memory.mk",
+        "patchSetId": 1
+      },
+      "lineNbr": 20,
+      "author": {
+        "id": 1000008
+      },
+      "writtenOn": "2015-04-22T14:37:33Z",
+      "side": 1,
+      "message": "Nuke all of these, just an update, all devices should get same values",
+      "revId": "13f452732829e1f7bcf5823cc4a5556dfb26ea0b",
+      "serverId": "56841c99-7c94-43d4-bf0b-cb4707e66d55",
+      "unresolved": false
+    },
+    {
+      "key": {
+        "uuid": "2b1c0951_067adcb8",
+        "filename": "include/media/openmax/OMX_Audio.h",
+        "patchSetId": 1
+      },
+      "lineNbr": 16,
+      "author": {
+        "id": 1000008
+      },
+      "writtenOn": "2015-04-22T14:37:33Z",
+      "side": 1,
+      "message": "Kill this, we shouldn\u0027t ifdef comments, bad things happen",
+      "revId": "13f452732829e1f7bcf5823cc4a5556dfb26ea0b",
+      "serverId": "56841c99-7c94-43d4-bf0b-cb4707e66d55",
+      "unresolved": false
+    },
+    {
+      "key": {
+        "uuid": "2b1c0951_2677d8d1",
+        "filename": "include/media/openmax/OMX_Audio.h",
+        "patchSetId": 1
+      },
+      "lineNbr": 130,
+      "author": {
+        "id": 1000008
+      },
+      "writtenOn": "2015-04-22T14:37:33Z",
+      "side": 1,
+      "message": "This can likely be made cleaner...",
+      "revId": "13f452732829e1f7bcf5823cc4a5556dfb26ea0b",
+      "serverId": "56841c99-7c94-43d4-bf0b-cb4707e66d55",
+      "unresolved": false
+    },
+    {
+      "key": {
+        "uuid": "2b1c0951_a63828ec",
+        "filename": "libs/gui/Android.mk",
+        "patchSetId": 1
+      },
+      "lineNbr": 49,
+      "author": {
+        "id": 1000008
+      },
+      "writtenOn": "2015-04-22T14:37:33Z",
+      "side": 1,
+      "message": "FIX THIS!!!  CRITICAL!!!  Can\u0027t use ifdef in .mk files!",
+      "revId": "13f452732829e1f7bcf5823cc4a5556dfb26ea0b",
+      "serverId": "56841c99-7c94-43d4-bf0b-cb4707e66d55",
+      "unresolved": false
+    },
+    {
+      "key": {
+        "uuid": "2b1c0951_4684d4a4",
+        "filename": "libs/gui/GLConsumer.cpp",
+        "patchSetId": 1
+      },
+      "lineNbr": 990,
+      "author": {
+        "id": 1000008
+      },
+      "writtenOn": "2015-04-22T14:37:33Z",
+      "side": 1,
+      "message": "This and its mate are placed in a way that makes things ugly, clean em\u0027 up",
+      "revId": "13f452732829e1f7bcf5823cc4a5556dfb26ea0b",
+      "serverId": "56841c99-7c94-43d4-bf0b-cb4707e66d55",
+      "unresolved": false
+    },
+    {
+      "key": {
+        "uuid": "2b1c0951_6681d093",
+        "filename": "libs/gui/IGraphicBufferAlloc.cpp",
+        "patchSetId": 1
+      },
+      "lineNbr": 53,
+      "author": {
+        "id": 1000008
+      },
+      "writtenOn": "2015-04-22T14:37:33Z",
+      "side": 1,
+      "message": "Need to think about this, may be OK to just use without ifdefs",
+      "revId": "13f452732829e1f7bcf5823cc4a5556dfb26ea0b",
+      "serverId": "56841c99-7c94-43d4-bf0b-cb4707e66d55",
+      "unresolved": false
+    },
+    {
+      "key": {
+        "uuid": "2b1c0951_864ecc98",
+        "filename": "libs/gui/Surface.cpp",
+        "patchSetId": 1
+      },
+      "lineNbr": 138,
+      "author": {
+        "id": 1000008
+      },
+      "writtenOn": "2015-04-22T14:37:33Z",
+      "side": 1,
+      "message": "Some of this is probably OK to not ifdef",
+      "revId": "13f452732829e1f7bcf5823cc4a5556dfb26ea0b",
+      "serverId": "56841c99-7c94-43d4-bf0b-cb4707e66d55",
+      "unresolved": false
+    },
+    {
+      "key": {
+        "uuid": "2b1c0951_a653c843",
+        "filename": "libs/gui/Surface.cpp",
+        "patchSetId": 1
+      },
+      "lineNbr": 377,
+      "author": {
+        "id": 1000008
+      },
+      "writtenOn": "2015-04-22T14:37:33Z",
+      "side": 1,
+      "message": "Clean up these ifdefs, ugly!",
+      "revId": "13f452732829e1f7bcf5823cc4a5556dfb26ea0b",
+      "serverId": "56841c99-7c94-43d4-bf0b-cb4707e66d55",
+      "unresolved": false
+    },
+    {
+      "key": {
+        "uuid": "2b1c0951_c648c48e",
+        "filename": "libs/gui/Surface.cpp",
+        "patchSetId": 1
+      },
+      "lineNbr": 865,
+      "author": {
+        "id": 1000008
+      },
+      "writtenOn": "2015-04-22T14:37:33Z",
+      "side": 1,
+      "message": "Need to make decision on QCOM_HARDWARE vs QCOM_BSP redundancy",
+      "revId": "13f452732829e1f7bcf5823cc4a5556dfb26ea0b",
+      "serverId": "56841c99-7c94-43d4-bf0b-cb4707e66d55",
+      "unresolved": false
+    },
+    {
+      "key": {
+        "uuid": "2b1c0951_e64dc09b",
+        "filename": "libs/gui/Surface.cpp",
+        "patchSetId": 1
+      },
+      "lineNbr": 942,
+      "author": {
+        "id": 1000008
+      },
+      "writtenOn": "2015-04-22T14:37:33Z",
+      "side": 1,
+      "message": "Probably some cleaning/reorg to do here",
+      "revId": "13f452732829e1f7bcf5823cc4a5556dfb26ea0b",
+      "serverId": "56841c99-7c94-43d4-bf0b-cb4707e66d55",
+      "unresolved": false
+    },
+    {
+      "key": {
+        "uuid": "2b1c0951_0663bc0c",
+        "filename": "libs/gui/SurfaceControl.cpp",
+        "patchSetId": 1
+      },
+      "lineNbr": 184,
+      "author": {
+        "id": 1000008
+      },
+      "writtenOn": "2015-04-22T14:37:33Z",
+      "side": 1,
+      "message": "This is error handling stuff that might be benficial to non-QCOM, take a look",
+      "revId": "13f452732829e1f7bcf5823cc4a5556dfb26ea0b",
+      "serverId": "56841c99-7c94-43d4-bf0b-cb4707e66d55",
+      "unresolved": false
+    },
+    {
+      "key": {
+        "uuid": "2b1c0951_2660b8fd",
+        "filename": "libs/ui/Region.cpp",
+        "patchSetId": 1
+      },
+      "lineNbr": 803,
+      "author": {
+        "id": 1000008
+      },
+      "writtenOn": "2015-04-22T14:37:33Z",
+      "side": 1,
+      "message": "More error-handling to look more closely at",
+      "revId": "13f452732829e1f7bcf5823cc4a5556dfb26ea0b",
+      "serverId": "56841c99-7c94-43d4-bf0b-cb4707e66d55",
+      "unresolved": false
+    },
+    {
+      "key": {
+        "uuid": "2b1c0951_465db448",
+        "filename": "opengl/libs/EGL/eglApi.cpp",
+        "patchSetId": 1
+      },
+      "lineNbr": 1616,
+      "author": {
+        "id": 1000008
+      },
+      "writtenOn": "2015-04-22T14:37:33Z",
+      "side": 1,
+      "message": "Shift this and its mate down one",
+      "revId": "13f452732829e1f7bcf5823cc4a5556dfb26ea0b",
+      "serverId": "56841c99-7c94-43d4-bf0b-cb4707e66d55",
+      "unresolved": false
+    },
+    {
+      "key": {
+        "uuid": "2b1c0951_665ab053",
+        "filename": "opengl/libs/GLES2/gl2.cpp",
+        "patchSetId": 1
+      },
+      "lineNbr": 183,
+      "author": {
+        "id": 1000008
+      },
+      "writtenOn": "2015-04-22T14:37:33Z",
+      "side": 1,
+      "message": "Looks like error handling stuff, take a closer look",
+      "revId": "13f452732829e1f7bcf5823cc4a5556dfb26ea0b",
+      "serverId": "56841c99-7c94-43d4-bf0b-cb4707e66d55",
+      "unresolved": false
+    },
+    {
+      "key": {
+        "uuid": "2b1c0951_86332c11",
+        "filename": "services/surfaceflinger/Android.mk",
+        "patchSetId": 1
+      },
+      "lineNbr": 113,
+      "author": {
+        "id": 1000008
+      },
+      "writtenOn": "2015-04-22T14:37:33Z",
+      "side": 1,
+      "message": "FIX THIS!  CRITICAL!!!  can\u0027t ifdef .mk files!",
+      "revId": "13f452732829e1f7bcf5823cc4a5556dfb26ea0b",
+      "serverId": "56841c99-7c94-43d4-bf0b-cb4707e66d55",
+      "unresolved": false
+    }
+  ]
+}
