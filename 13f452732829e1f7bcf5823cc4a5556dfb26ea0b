@@ -271,6 +271,431 @@
       "revId": "13f452732829e1f7bcf5823cc4a5556dfb26ea0b",
       "serverId": "56841c99-7c94-43d4-bf0b-cb4707e66d55",
       "unresolved": false
+    },
+    {
+      "key": {
+        "uuid": "2b1c0951_89709da6",
+        "filename": "services/surfaceflinger/DispSync.h",
+        "patchSetId": 1
+      },
+      "lineNbr": 29,
+      "author": {
+        "id": 1000008
+      },
+      "writtenOn": "2015-04-23T12:04:22Z",
+      "side": 1,
+      "message": "Hmm looks like qcom removed something?  Need to look at the commit that did this.",
+      "revId": "13f452732829e1f7bcf5823cc4a5556dfb26ea0b",
+      "serverId": "56841c99-7c94-43d4-bf0b-cb4707e66d55",
+      "unresolved": false
+    },
+    {
+      "key": {
+        "uuid": "2b1c0951_a9755995",
+        "filename": "services/surfaceflinger/DisplayDevice.cpp",
+        "patchSetId": 1
+      },
+      "lineNbr": 179,
+      "author": {
+        "id": 1000008
+      },
+      "writtenOn": "2015-04-23T12:04:22Z",
+      "side": 1,
+      "message": "I think QCOM_BSP will only be defined when QCOM_HARDWARE is defined so we can PROBABLY remove this, but need to make sure.",
+      "revId": "13f452732829e1f7bcf5823cc4a5556dfb26ea0b",
+      "serverId": "56841c99-7c94-43d4-bf0b-cb4707e66d55",
+      "unresolved": false
+    },
+    {
+      "key": {
+        "uuid": "2b1c0951_c96a95b0",
+        "filename": "services/surfaceflinger/DisplayDevice.cpp",
+        "patchSetId": 1
+      },
+      "lineNbr": 455,
+      "author": {
+        "id": 1000008
+      },
+      "writtenOn": "2015-04-23T12:04:22Z",
+      "side": 1,
+      "message": "Shift this and its mate down one for cleanliness.",
+      "revId": "13f452732829e1f7bcf5823cc4a5556dfb26ea0b",
+      "serverId": "56841c99-7c94-43d4-bf0b-cb4707e66d55",
+      "unresolved": false
+    },
+    {
+      "key": {
+        "uuid": "2b1c0951_e96f51bd",
+        "filename": "services/surfaceflinger/DisplayDevice.h",
+        "patchSetId": 1
+      },
+      "lineNbr": 180,
+      "author": {
+        "id": 1000008
+      },
+      "writtenOn": "2015-04-23T12:04:22Z",
+      "side": 1,
+      "message": "Again, need to check this for redundancy",
+      "revId": "13f452732829e1f7bcf5823cc4a5556dfb26ea0b",
+      "serverId": "56841c99-7c94-43d4-bf0b-cb4707e66d55",
+      "unresolved": false
+    },
+    {
+      "key": {
+        "uuid": "2b1c0951_09658dde",
+        "filename": "services/surfaceflinger/DisplayHardware/HWComposer.cpp",
+        "patchSetId": 1
+      },
+      "lineNbr": 216,
+      "author": {
+        "id": 1000008
+      },
+      "writtenOn": "2015-04-23T12:04:22Z",
+      "side": 1,
+      "message": "Again, need to check for redundancy",
+      "revId": "13f452732829e1f7bcf5823cc4a5556dfb26ea0b",
+      "serverId": "56841c99-7c94-43d4-bf0b-cb4707e66d55",
+      "unresolved": false
+    },
+    {
+      "key": {
+        "uuid": "2b1c0951_296249d7",
+        "filename": "services/surfaceflinger/DisplayHardware/HWComposer.cpp",
+        "patchSetId": 1
+      },
+      "lineNbr": 470,
+      "author": {
+        "id": 1000008
+      },
+      "writtenOn": "2015-04-23T12:04:22Z",
+      "side": 1,
+      "message": "ifdefing a comment - we can remove this.  :)",
+      "revId": "13f452732829e1f7bcf5823cc4a5556dfb26ea0b",
+      "serverId": "56841c99-7c94-43d4-bf0b-cb4707e66d55",
+      "unresolved": false
+    },
+    {
+      "key": {
+        "uuid": "2b1c0951_495f8512",
+        "filename": "services/surfaceflinger/DisplayHardware/HWComposer.cpp",
+        "patchSetId": 1
+      },
+      "lineNbr": 636,
+      "author": {
+        "id": 1000008
+      },
+      "writtenOn": "2015-04-23T12:04:22Z",
+      "side": 1,
+      "message": "These ifndefs + endifs + end-brackets don\u0027t look quite right, take a close look at these",
+      "revId": "13f452732829e1f7bcf5823cc4a5556dfb26ea0b",
+      "serverId": "56841c99-7c94-43d4-bf0b-cb4707e66d55",
+      "unresolved": false
+    },
+    {
+      "key": {
+        "uuid": "2b1c0951_695c411d",
+        "filename": "services/surfaceflinger/DisplayHardware/HWComposer.cpp",
+        "patchSetId": 1
+      },
+      "lineNbr": 663,
+      "author": {
+        "id": 1000008
+      },
+      "writtenOn": "2015-04-23T12:04:22Z",
+      "side": 1,
+      "message": "OK, I think there needs to be some serious rearranging done here...",
+      "revId": "13f452732829e1f7bcf5823cc4a5556dfb26ea0b",
+      "serverId": "56841c99-7c94-43d4-bf0b-cb4707e66d55",
+      "unresolved": false
+    },
+    {
+      "key": {
+        "uuid": "2b1c0951_899dfdc1",
+        "filename": "services/surfaceflinger/DisplayHardware/HWComposer.cpp",
+        "patchSetId": 1
+      },
+      "lineNbr": 805,
+      "author": {
+        "id": 1000008
+      },
+      "writtenOn": "2015-04-23T12:04:22Z",
+      "side": 1,
+      "message": "Again, have to check for redundancy issues",
+      "revId": "13f452732829e1f7bcf5823cc4a5556dfb26ea0b",
+      "serverId": "56841c99-7c94-43d4-bf0b-cb4707e66d55",
+      "unresolved": false
+    },
+    {
+      "key": {
+        "uuid": "2b1c0951_a9a2b9f8",
+        "filename": "services/surfaceflinger/DisplayHardware/HWComposer.cpp",
+        "patchSetId": 1
+      },
+      "lineNbr": 1235,
+      "author": {
+        "id": 1000008
+      },
+      "writtenOn": "2015-04-23T12:04:22Z",
+      "side": 1,
+      "message": "ifdefing a blank line?  Nuke it...",
+      "revId": "13f452732829e1f7bcf5823cc4a5556dfb26ea0b",
+      "serverId": "56841c99-7c94-43d4-bf0b-cb4707e66d55",
+      "unresolved": false
+    },
+    {
+      "key": {
+        "uuid": "2b1c0951_c9a7f507",
+        "filename": "services/surfaceflinger/DisplayHardware/HWComposer.cpp",
+        "patchSetId": 1
+      },
+      "lineNbr": 1392,
+      "author": {
+        "id": 1000008
+      },
+      "writtenOn": "2015-04-23T12:04:22Z",
+      "side": 1,
+      "message": "blank line ifdef?  Clean this up",
+      "revId": "13f452732829e1f7bcf5823cc4a5556dfb26ea0b",
+      "serverId": "56841c99-7c94-43d4-bf0b-cb4707e66d55",
+      "unresolved": false
+    },
+    {
+      "key": {
+        "uuid": "2b1c0951_e9acb1ec",
+        "filename": "services/surfaceflinger/DisplayHardware/HWComposer.cpp",
+        "patchSetId": 1
+      },
+      "lineNbr": 1559,
+      "author": {
+        "id": 1000008
+      },
+      "writtenOn": "2015-04-23T12:04:22Z",
+      "side": 1,
+      "message": "ifndef of a comment here?  This can be cleaned up a little",
+      "revId": "13f452732829e1f7bcf5823cc4a5556dfb26ea0b",
+      "serverId": "56841c99-7c94-43d4-bf0b-cb4707e66d55",
+      "unresolved": false
+    },
+    {
+      "key": {
+        "uuid": "2b1c0951_09b2ed49",
+        "filename": "services/surfaceflinger/DisplayHardware/HWComposer.h",
+        "patchSetId": 1
+      },
+      "lineNbr": 129,
+      "author": {
+        "id": 1000008
+      },
+      "writtenOn": "2015-04-23T12:04:22Z",
+      "side": 1,
+      "message": "Redundancy check this",
+      "revId": "13f452732829e1f7bcf5823cc4a5556dfb26ea0b",
+      "serverId": "56841c99-7c94-43d4-bf0b-cb4707e66d55",
+      "unresolved": false
+    },
+    {
+      "key": {
+        "uuid": "2b1c0951_29afa9de",
+        "filename": "services/surfaceflinger/DisplayHardware/HWComposer.h",
+        "patchSetId": 1
+      },
+      "lineNbr": 376,
+      "author": {
+        "id": 1000008
+      },
+      "writtenOn": "2015-04-23T12:04:22Z",
+      "side": 1,
+      "message": "Redundancy check this",
+      "revId": "13f452732829e1f7bcf5823cc4a5556dfb26ea0b",
+      "serverId": "56841c99-7c94-43d4-bf0b-cb4707e66d55",
+      "unresolved": false
+    },
+    {
+      "key": {
+        "uuid": "2b1c0951_49bce519",
+        "filename": "services/surfaceflinger/DisplayHardware/HWComposer.h",
+        "patchSetId": 1
+      },
+      "lineNbr": 410,
+      "author": {
+        "id": 1000008
+      },
+      "writtenOn": "2015-04-23T12:04:22Z",
+      "side": 1,
+      "message": "ifndef of a blank line \u003d clean this up to just an ifdef for mVDSEnabled",
+      "revId": "13f452732829e1f7bcf5823cc4a5556dfb26ea0b",
+      "serverId": "56841c99-7c94-43d4-bf0b-cb4707e66d55",
+      "unresolved": false
+    },
+    {
+      "key": {
+        "uuid": "2b1c0951_69b9a128",
+        "filename": "services/surfaceflinger/DisplayHardware/VirtualDisplaySurface.cpp",
+        "patchSetId": 1
+      },
+      "lineNbr": 20,
+      "author": {
+        "id": 1000008
+      },
+      "writtenOn": "2015-04-23T12:04:22Z",
+      "side": 1,
+      "message": "Clean this up, blank line ifndef",
+      "revId": "13f452732829e1f7bcf5823cc4a5556dfb26ea0b",
+      "serverId": "56841c99-7c94-43d4-bf0b-cb4707e66d55",
+      "unresolved": false
+    },
+    {
+      "key": {
+        "uuid": "2b1c0951_8986dd69",
+        "filename": "services/surfaceflinger/DisplayHardware/VirtualDisplaySurface.cpp",
+        "patchSetId": 1
+      },
+      "lineNbr": 127,
+      "author": {
+        "id": 1000008
+      },
+      "writtenOn": "2015-04-23T12:04:22Z",
+      "side": 1,
+      "message": "#if not #ifdef?  Check this",
+      "revId": "13f452732829e1f7bcf5823cc4a5556dfb26ea0b",
+      "serverId": "56841c99-7c94-43d4-bf0b-cb4707e66d55",
+      "unresolved": false
+    },
+    {
+      "key": {
+        "uuid": "2b1c0951_a98b9970",
+        "filename": "services/surfaceflinger/DisplayHardware/VirtualDisplaySurface.cpp",
+        "patchSetId": 1
+      },
+      "lineNbr": 603,
+      "author": {
+        "id": 1000008
+      },
+      "writtenOn": "2015-04-23T12:04:22Z",
+      "side": 1,
+      "message": "This looks like just an indentation change being ifdefed, probably can remove it",
+      "revId": "13f452732829e1f7bcf5823cc4a5556dfb26ea0b",
+      "serverId": "56841c99-7c94-43d4-bf0b-cb4707e66d55",
+      "unresolved": false
+    },
+    {
+      "key": {
+        "uuid": "2b1c0951_c980d54f",
+        "filename": "services/surfaceflinger/Layer.cpp",
+        "patchSetId": 1
+      },
+      "lineNbr": 173,
+      "author": {
+        "id": 1000008
+      },
+      "writtenOn": "2015-04-23T12:04:22Z",
+      "side": 1,
+      "message": "Another QCOM_BSP redundancy check",
+      "revId": "13f452732829e1f7bcf5823cc4a5556dfb26ea0b",
+      "serverId": "56841c99-7c94-43d4-bf0b-cb4707e66d55",
+      "unresolved": false
+    },
+    {
+      "key": {
+        "uuid": "2b1c0951_e985915c",
+        "filename": "services/surfaceflinger/Layer.cpp",
+        "patchSetId": 1
+      },
+      "lineNbr": 463,
+      "author": {
+        "id": 1000008
+      },
+      "writtenOn": "2015-04-23T12:04:22Z",
+      "side": 1,
+      "message": "This looks like a mess where a Google function was removed and it became horribly ifdefed - CLEAN THIS UP!!!",
+      "revId": "13f452732829e1f7bcf5823cc4a5556dfb26ea0b",
+      "serverId": "56841c99-7c94-43d4-bf0b-cb4707e66d55",
+      "unresolved": false
+    },
+    {
+      "key": {
+        "uuid": "2b1c0951_099bcdc1",
+        "filename": "services/surfaceflinger/Layer.cpp",
+        "patchSetId": 1
+      },
+      "lineNbr": 563,
+      "author": {
+        "id": 1000008
+      },
+      "writtenOn": "2015-04-23T12:04:22Z",
+      "side": 1,
+      "message": "Looks like the mess might continue here...",
+      "revId": "13f452732829e1f7bcf5823cc4a5556dfb26ea0b",
+      "serverId": "56841c99-7c94-43d4-bf0b-cb4707e66d55",
+      "unresolved": false
+    },
+    {
+      "key": {
+        "uuid": "2b1c0951_299889c2",
+        "filename": "services/surfaceflinger/Layer.cpp",
+        "patchSetId": 1
+      },
+      "lineNbr": 631,
+      "author": {
+        "id": 1000008
+      },
+      "writtenOn": "2015-04-23T12:04:22Z",
+      "side": 1,
+      "message": "This can probably be moved to the end of this method once the whole mess here is cleaned up",
+      "revId": "13f452732829e1f7bcf5823cc4a5556dfb26ea0b",
+      "serverId": "56841c99-7c94-43d4-bf0b-cb4707e66d55",
+      "unresolved": false
+    },
+    {
+      "key": {
+        "uuid": "2b1c0951_4995c589",
+        "filename": "services/surfaceflinger/Layer.cpp",
+        "patchSetId": 1
+      },
+      "lineNbr": 1052,
+      "author": {
+        "id": 1000008
+      },
+      "writtenOn": "2015-04-23T12:04:22Z",
+      "side": 1,
+      "message": "CLEAN THIS UP!  BROKEN!",
+      "revId": "13f452732829e1f7bcf5823cc4a5556dfb26ea0b",
+      "serverId": "56841c99-7c94-43d4-bf0b-cb4707e66d55",
+      "unresolved": false
+    },
+    {
+      "key": {
+        "uuid": "2b1c0951_699281a4",
+        "filename": "services/surfaceflinger/SurfaceFlinger.cpp",
+        "patchSetId": 1
+      },
+      "lineNbr": 1015,
+      "author": {
+        "id": 1000008
+      },
+      "writtenOn": "2015-04-23T12:04:22Z",
+      "side": 1,
+      "message": "These are all mixed inside a QCOM_BSP define...  it\u0027s gonna break, fix it",
+      "revId": "13f452732829e1f7bcf5823cc4a5556dfb26ea0b",
+      "serverId": "56841c99-7c94-43d4-bf0b-cb4707e66d55",
+      "unresolved": false
+    },
+    {
+      "key": {
+        "uuid": "2b1c0951_89eb3d0e",
+        "filename": "services/surfaceflinger/SurfaceFlinger.h",
+        "patchSetId": 1
+      },
+      "lineNbr": 144,
+      "author": {
+        "id": 1000008
+      },
+      "writtenOn": "2015-04-23T12:04:22Z",
+      "side": 1,
+      "message": "Another blank line ifndef to fix",
+      "revId": "13f452732829e1f7bcf5823cc4a5556dfb26ea0b",
+      "serverId": "56841c99-7c94-43d4-bf0b-cb4707e66d55",
+      "unresolved": false
     }
   ]
 }
