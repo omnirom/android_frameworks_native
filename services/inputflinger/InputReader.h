@@ -141,6 +141,9 @@ struct InputReaderConfiguration {
         // The location calibration matrix changed.
         TOUCH_AFFINE_TRANSFORMATION = 1 << 6,
 
+        // Stylus icon option changed.
+        CHANGE_STYLUS_ICON_ENABLED = 1 << 7,
+
         // All devices must be reopened.
         CHANGE_MUST_REOPEN = 1 << 31,
     };
@@ -1732,6 +1735,8 @@ private:
     const VirtualKey* findVirtualKeyHit(int32_t x, int32_t y);
 
     void assignPointerIds();
+
+    void unfadePointer(PointerControllerInterface::Transition transition);
 
     bool rejectPalm(nsecs_t when);
 };
