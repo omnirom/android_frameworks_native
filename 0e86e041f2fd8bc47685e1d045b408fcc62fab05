@@ -16,6 +16,24 @@
       "revId": "0e86e041f2fd8bc47685e1d045b408fcc62fab05",
       "serverId": "56841c99-7c94-43d4-bf0b-cb4707e66d55",
       "unresolved": false
+    },
+    {
+      "key": {
+        "uuid": "18e79d95_85bae469",
+        "filename": "services/surfaceflinger/DisplayDevice.cpp",
+        "patchSetId": 2
+      },
+      "lineNbr": 150,
+      "author": {
+        "id": 1000008
+      },
+      "writtenOn": "2015-05-12T14:18:39Z",
+      "side": 1,
+      "message": "OK, it\u0027s within a QCOM_HARDWARE ifdef which explains why it didn\u0027t bomb me.\n\nIt is not surprising that this happened in code related to the orientation stuff, since there were a bunch of conflicts when trying to merge your stuff with Humberto\u0027s orientation patches (which appear to be modified CAF cherrypicks).",
+      "parentUuid": "18e79d95_e5f89047",
+      "revId": "0e86e041f2fd8bc47685e1d045b408fcc62fab05",
+      "serverId": "56841c99-7c94-43d4-bf0b-cb4707e66d55",
+      "unresolved": false
     }
   ]
 }
