@@ -34,6 +34,46 @@
       "revId": "0e86e041f2fd8bc47685e1d045b408fcc62fab05",
       "serverId": "56841c99-7c94-43d4-bf0b-cb4707e66d55",
       "unresolved": false
+    },
+    {
+      "key": {
+        "uuid": "18e79d95_05aed42d",
+        "filename": "services/surfaceflinger/DisplayDevice.cpp",
+        "patchSetId": 2
+      },
+      "lineNbr": 155,
+      "author": {
+        "id": 1000026
+      },
+      "writtenOn": "2015-05-12T14:43:19Z",
+      "side": 1,
+      "message": "moved from here -\u003e",
+      "revId": "0e86e041f2fd8bc47685e1d045b408fcc62fab05",
+      "serverId": "56841c99-7c94-43d4-bf0b-cb4707e66d55",
+      "unresolved": false
+    },
+    {
+      "key": {
+        "uuid": "18e79d95_25b9d873",
+        "filename": "services/surfaceflinger/DisplayDevice.cpp",
+        "patchSetId": 2
+      },
+      "lineNbr": 160,
+      "author": {
+        "id": 1000026
+      },
+      "writtenOn": "2015-05-12T14:43:19Z",
+      "side": 1,
+      "message": "-\u003e to here - inside QCOM_HARDWARE only\nand kill the section below",
+      "range": {
+        "startLine": 160,
+        "startChar": 1,
+        "endLine": 160,
+        "endChar": 6
+      },
+      "revId": "0e86e041f2fd8bc47685e1d045b408fcc62fab05",
+      "serverId": "56841c99-7c94-43d4-bf0b-cb4707e66d55",
+      "unresolved": false
     }
   ]
 }
