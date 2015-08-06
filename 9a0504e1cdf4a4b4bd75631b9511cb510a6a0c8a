@@ -1,0 +1,21 @@
+{
+  "comments": [
+    {
+      "key": {
+        "uuid": "f8eba960_8abf8a5a",
+        "filename": "include/binder/IMemory.h",
+        "patchSetId": 1
+      },
+      "lineNbr": 43,
+      "author": {
+        "id": 1000026
+      },
+      "writtenOn": "2015-08-06T10:35:15Z",
+      "side": 1,
+      "message": "do we really need that else part?",
+      "revId": "9a0504e1cdf4a4b4bd75631b9511cb510a6a0c8a",
+      "serverId": "56841c99-7c94-43d4-bf0b-cb4707e66d55",
+      "unresolved": false
+    }
+  ]
+}
