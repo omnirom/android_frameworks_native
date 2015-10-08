@@ -28,7 +28,6 @@
 #include <binder/IInterface.h>
 
 #include <ui/FrameStats.h>
-#include <ui/PixelFormat.h>
 
 #include <gui/IGraphicBufferAlloc.h>
 #include <gui/ISurfaceComposerClient.h>
@@ -45,7 +44,7 @@ namespace android {
 class ComposerState;
 class DisplayState;
 struct DisplayInfo;
-class DisplayStatInfo;
+struct DisplayStatInfo;
 class IDisplayEventConnection;
 class IMemoryHeap;
 class Rect;

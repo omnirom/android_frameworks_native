@@ -14,13 +14,22 @@
 ** limitations under the License.
 */
 
-#include <inttypes.h>
-#include <sys/capability.h>
 #include "installd.h"
+
+#include <base/stringprintf.h>
+#include <base/logging.h>
 #include <cutils/sched_policy.h>
 #include <diskusage/dirsize.h>
-#include <selinux/android.h>
+#include <logwrap/logwrap.h>
 #include <system/thread_defs.h>
+#include <selinux/android.h>
+
+#include <inttypes.h>
+#include <sys/capability.h>
+#include <sys/file.h>
+#include <unistd.h>
+
+using android::base::StringPrintf;
 
 /* Directory records that are used in execution of commands. */
 dir_rec_t android_data_dir;
@@ -29,34 +38,20 @@ dir_rec_t android_app_dir;
 dir_rec_t android_app_private_dir;
 dir_rec_t android_app_lib_dir;
 dir_rec_t android_media_dir;
+dir_rec_t android_mnt_expand_dir;
 dir_rec_array_t android_system_dirs;
 
-int install(const char *pkgname, uid_t uid, gid_t gid, const char *seinfo)
-{
-    char pkgdir[PKG_PATH_MAX];
-    char libsymlink[PKG_PATH_MAX];
-    char applibdir[PKG_PATH_MAX];
-    struct stat libStat;
+static const char* kCpPath = "/system/bin/cp";
 
+int install(const char *uuid, const char *pkgname, uid_t uid, gid_t gid, const char *seinfo)
+{
     if ((uid < AID_SYSTEM) || (gid < AID_SYSTEM)) {
         ALOGE("invalid uid/gid: %d %d\n", uid, gid);
         return -1;
     }
 
-    if (create_pkg_path(pkgdir, pkgname, PKG_DIR_POSTFIX, 0)) {
-        ALOGE("cannot create package path\n");
-        return -1;
-    }
-
-    if (create_pkg_path(libsymlink, pkgname, PKG_LIB_POSTFIX, 0)) {
-        ALOGE("cannot create package lib symlink origin path\n");
-        return -1;
-    }
-
-    if (create_pkg_path_in_dir(applibdir, &android_app_lib_dir, pkgname, PKG_DIR_POSTFIX)) {
-        ALOGE("cannot create package lib symlink dest path\n");
-        return -1;
-    }
+    std::string _pkgdir(create_data_user_package_path(uuid, 0, pkgname));
+    const char* pkgdir = _pkgdir.c_str();
 
     if (mkdir(pkgdir, 0751) < 0) {
         ALOGE("cannot create dir '%s': %s\n", pkgdir, strerror(errno));
@@ -68,42 +63,14 @@ int install(const char *pkgname, uid_t uid, gid_t gid, const char *seinfo)
         return -1;
     }
 
-    if (lstat(libsymlink, &libStat) < 0) {
-        if (errno != ENOENT) {
-            ALOGE("couldn't stat lib dir: %s\n", strerror(errno));
-            return -1;
-        }
-    } else {
-        if (S_ISDIR(libStat.st_mode)) {
-            if (delete_dir_contents(libsymlink, 1, NULL) < 0) {
-                ALOGE("couldn't delete lib directory during install for: %s", libsymlink);
-                return -1;
-            }
-        } else if (S_ISLNK(libStat.st_mode)) {
-            if (unlink(libsymlink) < 0) {
-                ALOGE("couldn't unlink lib directory during install for: %s", libsymlink);
-                return -1;
-            }
-        }
-    }
-
     if (selinux_android_setfilecon(pkgdir, pkgname, seinfo, uid) < 0) {
         ALOGE("cannot setfilecon dir '%s': %s\n", pkgdir, strerror(errno));
-        unlink(libsymlink);
         unlink(pkgdir);
         return -errno;
     }
 
-    if (symlink(applibdir, libsymlink) < 0) {
-        ALOGE("couldn't symlink directory '%s' -> '%s': %s\n", libsymlink, applibdir,
-                strerror(errno));
-        unlink(pkgdir);
-        return -1;
-    }
-
     if (chown(pkgdir, uid, gid) < 0) {
         ALOGE("cannot chown dir '%s': %s\n", pkgdir, strerror(errno));
-        unlink(libsymlink);
         unlink(pkgdir);
         return -1;
     }
@@ -111,12 +78,10 @@ int install(const char *pkgname, uid_t uid, gid_t gid, const char *seinfo)
     return 0;
 }
 
-int uninstall(const char *pkgname, userid_t userid)
+int uninstall(const char *uuid, const char *pkgname, userid_t userid)
 {
-    char pkgdir[PKG_PATH_MAX];
-
-    if (create_pkg_path(pkgdir, pkgname, PKG_DIR_POSTFIX, userid))
-        return -1;
+    std::string _pkgdir(create_data_user_package_path(uuid, userid, pkgname));
+    const char* pkgdir = _pkgdir.c_str();
 
     remove_profile_file(pkgname);
 
@@ -141,21 +106,17 @@ int renamepkg(const char *oldpkgname, const char *newpkgname)
     return 0;
 }
 
-int fix_uid(const char *pkgname, uid_t uid, gid_t gid)
+int fix_uid(const char *uuid, const char *pkgname, uid_t uid, gid_t gid)
 {
-    char pkgdir[PKG_PATH_MAX];
     struct stat s;
-    int rc = 0;
 
     if ((uid < AID_SYSTEM) || (gid < AID_SYSTEM)) {
         ALOGE("invalid uid/gid: %d %d\n", uid, gid);
         return -1;
     }
 
-    if (create_pkg_path(pkgdir, pkgname, PKG_DIR_POSTFIX, 0)) {
-        ALOGE("cannot create package path\n");
-        return -1;
-    }
+    std::string _pkgdir(create_data_user_package_path(uuid, 0, pkgname));
+    const char* pkgdir = _pkgdir.c_str();
 
     if (stat(pkgdir, &s) < 0) return -1;
 
@@ -178,35 +139,18 @@ int fix_uid(const char *pkgname, uid_t uid, gid_t gid)
     return 0;
 }
 
-int delete_user_data(const char *pkgname, userid_t userid)
+int delete_user_data(const char *uuid, const char *pkgname, userid_t userid)
 {
-    char pkgdir[PKG_PATH_MAX];
-
-    if (create_pkg_path(pkgdir, pkgname, PKG_DIR_POSTFIX, userid))
-        return -1;
+    std::string _pkgdir(create_data_user_package_path(uuid, userid, pkgname));
+    const char* pkgdir = _pkgdir.c_str();
 
     return delete_dir_contents(pkgdir, 0, NULL);
 }
 
-int make_user_data(const char *pkgname, uid_t uid, userid_t userid, const char* seinfo)
+int make_user_data(const char *uuid, const char *pkgname, uid_t uid, userid_t userid, const char* seinfo)
 {
-    char pkgdir[PKG_PATH_MAX];
-    char applibdir[PKG_PATH_MAX];
-    char libsymlink[PKG_PATH_MAX];
-    struct stat libStat;
-
-    // Create the data dir for the package
-    if (create_pkg_path(pkgdir, pkgname, PKG_DIR_POSTFIX, userid)) {
-        return -1;
-    }
-    if (create_pkg_path(libsymlink, pkgname, PKG_LIB_POSTFIX, userid)) {
-        ALOGE("cannot create package lib symlink origin path\n");
-        return -1;
-    }
-    if (create_pkg_path_in_dir(applibdir, &android_app_lib_dir, pkgname, PKG_DIR_POSTFIX)) {
-        ALOGE("cannot create package lib symlink dest path\n");
-        return -1;
-    }
+    std::string _pkgdir(create_data_user_package_path(uuid, userid, pkgname));
+    const char* pkgdir = _pkgdir.c_str();
 
     if (mkdir(pkgdir, 0751) < 0) {
         ALOGE("cannot create dir '%s': %s\n", pkgdir, strerror(errno));
@@ -218,52 +162,128 @@ int make_user_data(const char *pkgname, uid_t uid, userid_t userid, const char* 
         return -errno;
     }
 
-    if (lstat(libsymlink, &libStat) < 0) {
-        if (errno != ENOENT) {
-            ALOGE("couldn't stat lib dir for non-primary: %s\n", strerror(errno));
-            unlink(pkgdir);
-            return -1;
-        }
-    } else {
-        if (S_ISDIR(libStat.st_mode)) {
-            if (delete_dir_contents(libsymlink, 1, NULL) < 0) {
-                ALOGE("couldn't delete lib directory during install for non-primary: %s",
-                        libsymlink);
-                unlink(pkgdir);
-                return -1;
-            }
-        } else if (S_ISLNK(libStat.st_mode)) {
-            if (unlink(libsymlink) < 0) {
-                ALOGE("couldn't unlink lib directory during install for non-primary: %s",
-                        libsymlink);
-                unlink(pkgdir);
-                return -1;
-            }
-        }
-    }
-
     if (selinux_android_setfilecon(pkgdir, pkgname, seinfo, uid) < 0) {
         ALOGE("cannot setfilecon dir '%s': %s\n", pkgdir, strerror(errno));
-        unlink(libsymlink);
         unlink(pkgdir);
         return -errno;
     }
 
-    if (symlink(applibdir, libsymlink) < 0) {
-        ALOGE("couldn't symlink directory for non-primary '%s' -> '%s': %s\n", libsymlink,
-                applibdir, strerror(errno));
-        unlink(pkgdir);
-        return -1;
-    }
-
     if (chown(pkgdir, uid, uid) < 0) {
         ALOGE("cannot chown dir '%s': %s\n", pkgdir, strerror(errno));
-        unlink(libsymlink);
         unlink(pkgdir);
         return -errno;
     }
 
     return 0;
+}
+
+int copy_complete_app(const char *from_uuid, const char *to_uuid,
+        const char *package_name, const char *data_app_name, appid_t appid,
+        const char* seinfo) {
+    std::vector<userid_t> users = get_known_users(from_uuid);
+
+    // Copy app
+    {
+        std::string from(create_data_app_package_path(from_uuid, data_app_name));
+        std::string to(create_data_app_package_path(to_uuid, data_app_name));
+        std::string to_parent(create_data_app_path(to_uuid));
+
+        char *argv[] = {
+            (char*) kCpPath,
+            (char*) "-F", /* delete any existing destination file first (--remove-destination) */
+            (char*) "-p", /* preserve timestamps, ownership, and permissions */
+            (char*) "-R", /* recurse into subdirectories (DEST must be a directory) */
+            (char*) "-P", /* Do not follow symlinks [default] */
+            (char*) "-d", /* don't dereference symlinks */
+            (char*) from.c_str(),
+            (char*) to_parent.c_str()
+        };
+
+        LOG(DEBUG) << "Copying " << from << " to " << to;
+        int rc = android_fork_execvp(ARRAY_SIZE(argv), argv, NULL, false, true);
+
+        if (rc != 0) {
+            LOG(ERROR) << "Failed copying " << from << " to " << to
+                    << ": status " << rc;
+            goto fail;
+        }
+
+        if (selinux_android_restorecon(to.c_str(), SELINUX_ANDROID_RESTORECON_RECURSE) != 0) {
+            LOG(ERROR) << "Failed to restorecon " << to;
+            goto fail;
+        }
+    }
+
+    // Copy private data for all known users
+    for (auto user : users) {
+        std::string from(create_data_user_package_path(from_uuid, user, package_name));
+        std::string to(create_data_user_package_path(to_uuid, user, package_name));
+        std::string to_parent(create_data_user_path(to_uuid, user));
+
+        // Data source may not exist for all users; that's okay
+        if (access(from.c_str(), F_OK) != 0) {
+            LOG(INFO) << "Missing source " << from;
+            continue;
+        }
+
+        std::string user_path(create_data_user_path(to_uuid, user));
+        if (fs_prepare_dir(user_path.c_str(), 0771, AID_SYSTEM, AID_SYSTEM) != 0) {
+            LOG(ERROR) << "Failed to prepare user target " << user_path;
+            goto fail;
+        }
+
+        uid_t uid = multiuser_get_uid(user, appid);
+        if (make_user_data(to_uuid, package_name, uid, user, seinfo) != 0) {
+            LOG(ERROR) << "Failed to create package target " << to;
+            goto fail;
+        }
+
+        char *argv[] = {
+            (char*) kCpPath,
+            (char*) "-F", /* delete any existing destination file first (--remove-destination) */
+            (char*) "-p", /* preserve timestamps, ownership, and permissions */
+            (char*) "-R", /* recurse into subdirectories (DEST must be a directory) */
+            (char*) "-P", /* Do not follow symlinks [default] */
+            (char*) "-d", /* don't dereference symlinks */
+            (char*) from.c_str(),
+            (char*) to_parent.c_str()
+        };
+
+        LOG(DEBUG) << "Copying " << from << " to " << to;
+        int rc = android_fork_execvp(ARRAY_SIZE(argv), argv, NULL, false, true);
+
+        if (rc != 0) {
+            LOG(ERROR) << "Failed copying " << from << " to " << to
+                    << ": status " << rc;
+            goto fail;
+        }
+    }
+
+    if (restorecon_data(to_uuid, package_name, seinfo, multiuser_get_uid(0, appid)) != 0) {
+        LOG(ERROR) << "Failed to restorecon";
+        goto fail;
+    }
+
+    // We let the framework scan the new location and persist that before
+    // deleting the data in the old location; this ordering ensures that
+    // we can recover from things like battery pulls.
+    return 0;
+
+fail:
+    // Nuke everything we might have already copied
+    {
+        std::string to(create_data_app_package_path(to_uuid, data_app_name));
+        if (delete_dir_contents(to.c_str(), 1, NULL) != 0) {
+            LOG(WARNING) << "Failed to rollback " << to;
+        }
+    }
+    for (auto user : users) {
+        std::string to(create_data_user_package_path(to_uuid, user, package_name));
+        if (delete_dir_contents(to.c_str(), 1, NULL) != 0) {
+            LOG(WARNING) << "Failed to rollback " << to;
+        }
+    }
+    return -1;
 }
 
 int make_user_config(userid_t userid)
@@ -275,49 +295,49 @@ int make_user_config(userid_t userid)
     return 0;
 }
 
-int delete_user(userid_t userid)
+int delete_user(const char *uuid, userid_t userid)
 {
     int status = 0;
 
-    char data_path[PKG_PATH_MAX];
-    if ((create_user_path(data_path, userid) != 0)
-            || (delete_dir_contents(data_path, 1, NULL) != 0)) {
+    std::string data_path(create_data_user_path(uuid, userid));
+    if (delete_dir_contents(data_path.c_str(), 1, NULL) != 0) {
         status = -1;
     }
 
-    char media_path[PATH_MAX];
-    if ((create_user_media_path(media_path, userid) != 0)
-            || (delete_dir_contents(media_path, 1, NULL) != 0)) {
+    std::string media_path(create_data_media_path(uuid, userid));
+    if (delete_dir_contents(media_path.c_str(), 1, NULL) != 0) {
         status = -1;
     }
 
-    char config_path[PATH_MAX];
-    if ((create_user_config_path(config_path, userid) != 0)
-            || (delete_dir_contents(config_path, 1, NULL) != 0)) {
-        status = -1;
+    // Config paths only exist on internal storage
+    if (uuid == nullptr) {
+        char config_path[PATH_MAX];
+        if ((create_user_config_path(config_path, userid) != 0)
+                || (delete_dir_contents(config_path, 1, NULL) != 0)) {
+            status = -1;
+        }
     }
 
     return status;
 }
 
-int delete_cache(const char *pkgname, userid_t userid)
+int delete_cache(const char *uuid, const char *pkgname, userid_t userid)
 {
-    char cachedir[PKG_PATH_MAX];
-
-    if (create_pkg_path(cachedir, pkgname, CACHE_DIR_POSTFIX, userid))
-        return -1;
+    std::string _cachedir(
+            create_data_user_package_path(uuid, userid, pkgname) + CACHE_DIR_POSTFIX);
+    const char* cachedir = _cachedir.c_str();
 
     /* delete contents, not the directory, no exceptions */
     return delete_dir_contents(cachedir, 0, NULL);
 }
 
-int delete_code_cache(const char *pkgname, userid_t userid)
+int delete_code_cache(const char *uuid, const char *pkgname, userid_t userid)
 {
-    char codecachedir[PKG_PATH_MAX];
-    struct stat s;
+    std::string _codecachedir(
+            create_data_user_package_path(uuid, userid, pkgname) + CODE_CACHE_DIR_POSTFIX);
+    const char* codecachedir = _codecachedir.c_str();
 
-    if (create_pkg_path(codecachedir, pkgname, CODE_CACHE_DIR_POSTFIX, userid))
-        return -1;
+    struct stat s;
 
     /* it's okay if code cache is missing */
     if (lstat(codecachedir, &s) == -1 && errno == ENOENT) {
@@ -335,7 +355,7 @@ int delete_code_cache(const char *pkgname, userid_t userid)
  * also require that apps constantly modify file metadata even
  * when just reading from the cache, which is pretty awful.
  */
-int free_cache(int64_t free_size)
+int free_cache(const char *uuid, int64_t free_size)
 {
     cache_t* cache;
     int64_t avail;
@@ -344,7 +364,9 @@ int free_cache(int64_t free_size)
     char tmpdir[PATH_MAX];
     char *dirpos;
 
-    avail = data_disk_free();
+    std::string data_path(create_data_path(uuid));
+
+    avail = data_disk_free(data_path);
     if (avail < 0) return -1;
 
     ALOGI("free_cache(%" PRId64 ") avail %" PRId64 "\n", free_size, avail);
@@ -352,15 +374,16 @@ int free_cache(int64_t free_size)
 
     cache = start_cache_collection();
 
-    // Collect cache files for primary user.
-    if (create_user_path(tmpdir, 0) == 0) {
-        //ALOGI("adding cache files from %s\n", tmpdir);
-        add_cache_files(cache, tmpdir, "cache");
+    // Special case for owner on internal storage
+    if (uuid == nullptr) {
+        std::string _tmpdir(create_data_user_path(nullptr, 0));
+        add_cache_files(cache, _tmpdir.c_str(), "cache");
     }
 
     // Search for other users and add any cache files from them.
-    snprintf(tmpdir, sizeof(tmpdir), "%s%s", android_data_dir.path,
-            SECONDARY_USER_PREFIX);
+    std::string _tmpdir(create_data_path(uuid) + "/" + SECONDARY_USER_PREFIX);
+    strcpy(tmpdir, _tmpdir.c_str());
+
     dirpos = tmpdir + strlen(tmpdir);
     d = opendir(tmpdir);
     if (d != NULL) {
@@ -412,10 +435,10 @@ int free_cache(int64_t free_size)
         closedir(d);
     }
 
-    clear_cache_files(cache, free_size);
+    clear_cache_files(data_path, cache, free_size);
     finish_cache_collection(cache);
 
-    return data_disk_free() >= free_size ? 0 : -1;
+    return data_disk_free(data_path) >= free_size ? 0 : -1;
 }
 
 int move_dex(const char *src, const char *dst, const char *instruction_set)
@@ -466,7 +489,7 @@ int rm_dex(const char *path, const char *instruction_set)
     }
 }
 
-int get_size(const char *pkgname, userid_t userid, const char *apkpath,
+int get_size(const char *uuid, const char *pkgname, int userid, const char *apkpath,
              const char *libdirpath, const char *fwdlock_apkpath, const char *asecpath,
              const char *instruction_set, int64_t *_codesize, int64_t *_datasize,
              int64_t *_cachesize, int64_t* _asecsize)
@@ -482,30 +505,38 @@ int get_size(const char *pkgname, userid_t userid, const char *apkpath,
     int64_t cachesize = 0;
     int64_t asecsize = 0;
 
-        /* count the source apk as code -- but only if it's not
-         * on the /system partition and its not on the sdcard.
-         */
+    /* count the source apk as code -- but only if it's not
+     * on the /system partition and its not on the sdcard. */
     if (validate_system_app_path(apkpath) &&
             strncmp(apkpath, android_asec_dir.path, android_asec_dir.len) != 0) {
         if (stat(apkpath, &s) == 0) {
             codesize += stat_size(&s);
+            if (S_ISDIR(s.st_mode)) {
+                d = opendir(apkpath);
+                if (d != NULL) {
+                    dfd = dirfd(d);
+                    codesize += calculate_dir_size(dfd);
+                    closedir(d);
+                }
+            }
         }
     }
-        /* count the forward locked apk as code if it is given
-         */
+
+    /* count the forward locked apk as code if it is given */
     if (fwdlock_apkpath != NULL && fwdlock_apkpath[0] != '!') {
         if (stat(fwdlock_apkpath, &s) == 0) {
             codesize += stat_size(&s);
         }
     }
-        /* count the cached dexfile as code */
+
+    /* count the cached dexfile as code */
     if (!create_cache_path(path, apkpath, instruction_set)) {
         if (stat(path, &s) == 0) {
             codesize += stat_size(&s);
         }
     }
 
-        /* add in size of any libraries */
+    /* add in size of any libraries */
     if (libdirpath != NULL && libdirpath[0] != '!') {
         d = opendir(libdirpath);
         if (d != NULL) {
@@ -515,69 +546,76 @@ int get_size(const char *pkgname, userid_t userid, const char *apkpath,
         }
     }
 
-        /* compute asec size if it is given
-         */
+    /* compute asec size if it is given */
     if (asecpath != NULL && asecpath[0] != '!') {
         if (stat(asecpath, &s) == 0) {
             asecsize += stat_size(&s);
         }
     }
 
-    if (create_pkg_path(path, pkgname, PKG_DIR_POSTFIX, userid)) {
-        goto done;
+    std::vector<userid_t> users;
+    if (userid == -1) {
+        users = get_known_users(uuid);
+    } else {
+        users.push_back(userid);
     }
 
-    d = opendir(path);
-    if (d == NULL) {
-        goto done;
-    }
-    dfd = dirfd(d);
+    for (auto user : users) {
+        std::string _pkgdir(create_data_user_package_path(uuid, user, pkgname));
+        const char* pkgdir = _pkgdir.c_str();
 
-    /* most stuff in the pkgdir is data, except for the "cache"
-     * directory and below, which is cache, and the "lib" directory
-     * and below, which is code...
-     */
-    while ((de = readdir(d))) {
-        const char *name = de->d_name;
+        d = opendir(pkgdir);
+        if (d == NULL) {
+            PLOG(WARNING) << "Failed to open " << pkgdir;
+            continue;
+        }
+        dfd = dirfd(d);
 
-        if (de->d_type == DT_DIR) {
-            int subfd;
-            int64_t statsize = 0;
-            int64_t dirsize = 0;
-                /* always skip "." and ".." */
-            if (name[0] == '.') {
-                if (name[1] == 0) continue;
-                if ((name[1] == '.') && (name[2] == 0)) continue;
-            }
-            if (fstatat(dfd, name, &s, AT_SYMLINK_NOFOLLOW) == 0) {
-                statsize = stat_size(&s);
-            }
-            subfd = openat(dfd, name, O_RDONLY | O_DIRECTORY);
-            if (subfd >= 0) {
-                dirsize = calculate_dir_size(subfd);
-            }
-            if(!strcmp(name,"lib")) {
-                codesize += dirsize + statsize;
-            } else if(!strcmp(name,"cache")) {
-                cachesize += dirsize + statsize;
+        /* most stuff in the pkgdir is data, except for the "cache"
+         * directory and below, which is cache, and the "lib" directory
+         * and below, which is code...
+         */
+        while ((de = readdir(d))) {
+            const char *name = de->d_name;
+
+            if (de->d_type == DT_DIR) {
+                int subfd;
+                int64_t statsize = 0;
+                int64_t dirsize = 0;
+                    /* always skip "." and ".." */
+                if (name[0] == '.') {
+                    if (name[1] == 0) continue;
+                    if ((name[1] == '.') && (name[2] == 0)) continue;
+                }
+                if (fstatat(dfd, name, &s, AT_SYMLINK_NOFOLLOW) == 0) {
+                    statsize = stat_size(&s);
+                }
+                subfd = openat(dfd, name, O_RDONLY | O_DIRECTORY);
+                if (subfd >= 0) {
+                    dirsize = calculate_dir_size(subfd);
+                }
+                if(!strcmp(name,"lib")) {
+                    codesize += dirsize + statsize;
+                } else if(!strcmp(name,"cache")) {
+                    cachesize += dirsize + statsize;
+                } else {
+                    datasize += dirsize + statsize;
+                }
+            } else if (de->d_type == DT_LNK && !strcmp(name,"lib")) {
+                // This is the symbolic link to the application's library
+                // code.  We'll count this as code instead of data, since
+                // it is not something that the app creates.
+                if (fstatat(dfd, name, &s, AT_SYMLINK_NOFOLLOW) == 0) {
+                    codesize += stat_size(&s);
+                }
             } else {
-                datasize += dirsize + statsize;
-            }
-        } else if (de->d_type == DT_LNK && !strcmp(name,"lib")) {
-            // This is the symbolic link to the application's library
-            // code.  We'll count this as code instead of data, since
-            // it is not something that the app creates.
-            if (fstatat(dfd, name, &s, AT_SYMLINK_NOFOLLOW) == 0) {
-                codesize += stat_size(&s);
-            }
-        } else {
-            if (fstatat(dfd, name, &s, AT_SYMLINK_NOFOLLOW) == 0) {
-                datasize += stat_size(&s);
+                if (fstatat(dfd, name, &s, AT_SYMLINK_NOFOLLOW) == 0) {
+                    datasize += stat_size(&s);
+                }
             }
         }
+        closedir(d);
     }
-    closedir(d);
-done:
     *_codesize = codesize;
     *_datasize = datasize;
     *_cachesize = cachesize;
@@ -625,30 +663,40 @@ int create_cache_path(char path[PKG_PATH_MAX], const char *src, const char *inst
     return 0;
 }
 
-static void run_dexopt(int zip_fd, int odex_fd, const char* input_file_name,
-    const char* output_file_name)
+static int split_count(const char *str)
 {
-    /* platform-specific flags affecting optimization and verification */
-    char dexopt_flags[PROPERTY_VALUE_MAX];
-    property_get("dalvik.vm.dexopt-flags", dexopt_flags, "");
-    ALOGV("dalvik.vm.dexopt-flags=%s\n", dexopt_flags);
+  char *ctx;
+  int count = 0;
+  char buf[PROPERTY_VALUE_MAX];
 
-    static const char* DEX_OPT_BIN = "/system/bin/dexopt";
-    static const int MAX_INT_LEN = 12;      // '-'+10dig+'\0' -OR- 0x+8dig
-    char zip_num[MAX_INT_LEN];
-    char odex_num[MAX_INT_LEN];
+  strncpy(buf, str, sizeof(buf));
+  char *pBuf = buf;
 
-    sprintf(zip_num, "%d", zip_fd);
-    sprintf(odex_num, "%d", odex_fd);
+  while(strtok_r(pBuf, " ", &ctx) != NULL) {
+    count++;
+    pBuf = NULL;
+  }
 
-    ALOGV("Running %s in=%s out=%s\n", DEX_OPT_BIN, input_file_name, output_file_name);
-    execl(DEX_OPT_BIN, DEX_OPT_BIN, "--zip", zip_num, odex_num, input_file_name,
-        dexopt_flags, (char*) NULL);
-    ALOGE("execl(%s) failed: %s\n", DEX_OPT_BIN, strerror(errno));
+  return count;
+}
+
+static int split(char *buf, const char **argv)
+{
+  char *ctx;
+  int count = 0;
+  char *tok;
+  char *pBuf = buf;
+
+  while((tok = strtok_r(pBuf, " ", &ctx)) != NULL) {
+    argv[count++] = tok;
+    pBuf = NULL;
+  }
+
+  return count;
 }
 
 static void run_patchoat(int input_fd, int oat_fd, const char* input_file_name,
-    const char* output_file_name, const char *pkgname, const char *instruction_set)
+    const char* output_file_name, const char *pkgname __unused, const char *instruction_set)
 {
     static const int MAX_INT_LEN = 12;      // '-'+10dig+'\0' -OR- 0x+8dig
     static const unsigned int MAX_INSTRUCTION_SET_LEN = 7;
@@ -670,7 +718,7 @@ static void run_patchoat(int input_fd, int oat_fd, const char* input_file_name,
     sprintf(instruction_set_arg, "--instruction-set=%s", instruction_set);
     sprintf(output_oat_fd_arg, "--output-oat-fd=%d", oat_fd);
     sprintf(input_oat_fd_arg, "--input-oat-fd=%d", input_fd);
-    ALOGE("Running %s isa=%s in-fd=%d (%s) out-fd=%d (%s)\n",
+    ALOGV("Running %s isa=%s in-fd=%d (%s) out-fd=%d (%s)\n",
           PATCHOAT_BIN, instruction_set, input_fd, input_file_name, oat_fd, output_file_name);
 
     /* patchoat, patched-image-location, no-lock, isa, input-fd, output-fd */
@@ -687,9 +735,18 @@ static void run_patchoat(int input_fd, int oat_fd, const char* input_file_name,
     ALOGE("execv(%s) failed: %s\n", PATCHOAT_BIN, strerror(errno));
 }
 
+static bool check_boolean_property(const char* property_name, bool default_value = false) {
+    char tmp_property_value[PROPERTY_VALUE_MAX];
+    bool have_property = property_get(property_name, tmp_property_value, nullptr) > 0;
+    if (!have_property) {
+        return default_value;
+    }
+    return strcmp(tmp_property_value, "true") == 0;
+}
+
 static void run_dex2oat(int zip_fd, int oat_fd, const char* input_file_name,
     const char* output_file_name, int swap_fd, const char *pkgname, const char *instruction_set,
-    bool vm_safe_mode)
+    bool vm_safe_mode, bool debuggable)
 {
     static const unsigned int MAX_INSTRUCTION_SET_LEN = 7;
 
@@ -712,14 +769,32 @@ static void run_dex2oat(int zip_fd, int oat_fd, const char* input_file_name,
     bool have_dex2oat_compiler_filter_flag = property_get("dalvik.vm.dex2oat-filter",
                                                           dex2oat_compiler_filter_flag, NULL) > 0;
 
+    char dex2oat_threads_buf[PROPERTY_VALUE_MAX];
+    bool have_dex2oat_threads_flag = property_get("dalvik.vm.dex2oat-threads", dex2oat_threads_buf,
+                                                  NULL) > 0;
+    char dex2oat_threads_arg[PROPERTY_VALUE_MAX + 2];
+    if (have_dex2oat_threads_flag) {
+        sprintf(dex2oat_threads_arg, "-j%s", dex2oat_threads_buf);
+    }
+
     char dex2oat_isa_features_key[PROPERTY_KEY_MAX];
     sprintf(dex2oat_isa_features_key, "dalvik.vm.isa.%s.features", instruction_set);
     char dex2oat_isa_features[PROPERTY_VALUE_MAX];
     bool have_dex2oat_isa_features = property_get(dex2oat_isa_features_key,
                                                   dex2oat_isa_features, NULL) > 0;
 
+    char dex2oat_isa_variant_key[PROPERTY_KEY_MAX];
+    sprintf(dex2oat_isa_variant_key, "dalvik.vm.isa.%s.variant", instruction_set);
+    char dex2oat_isa_variant[PROPERTY_VALUE_MAX];
+    bool have_dex2oat_isa_variant = property_get(dex2oat_isa_variant_key,
+                                                 dex2oat_isa_variant, NULL) > 0;
+
+    const char *dex2oat_norelocation = "-Xnorelocate";
+    bool have_dex2oat_relocation_skip_flag = false;
+
     char dex2oat_flags[PROPERTY_VALUE_MAX];
-    bool have_dex2oat_flags = property_get("dalvik.vm.dex2oat-flags", dex2oat_flags, NULL) > 0;
+    int dex2oat_flags_count = property_get("dalvik.vm.dex2oat-flags",
+                                 dex2oat_flags, NULL) <= 0 ? 0 : split_count(dex2oat_flags);
     ALOGV("dalvik.vm.dex2oat-flags=%s\n", dex2oat_flags);
 
     // If we booting without the real /data, don't spend time compiling.
@@ -728,6 +803,9 @@ static void run_dex2oat(int zip_fd, int oat_fd, const char* input_file_name,
     bool skip_compilation = (have_vold_decrypt &&
                              (strcmp(vold_decrypt, "trigger_restart_min_framework") == 0 ||
                              (strcmp(vold_decrypt, "1") == 0)));
+
+    bool use_jit = check_boolean_property("debug.usejit");
+    bool generate_debug_info = check_boolean_property("debug.generate-debug-info");
 
     static const char* DEX2OAT_BIN = "/system/bin/dex2oat";
 
@@ -740,6 +818,7 @@ static void run_dex2oat(int zip_fd, int oat_fd, const char* input_file_name,
     char oat_fd_arg[strlen("--oat-fd=") + MAX_INT_LEN];
     char oat_location_arg[strlen("--oat-location=") + PKG_PATH_MAX];
     char instruction_set_arg[strlen("--instruction-set=") + MAX_INSTRUCTION_SET_LEN];
+    char instruction_set_variant_arg[strlen("--instruction-set-variant=") + PROPERTY_VALUE_MAX];
     char instruction_set_features_arg[strlen("--instruction-set-features=") + PROPERTY_VALUE_MAX];
     char profile_file_arg[strlen("--profile-file=") + PKG_PATH_MAX];
     char top_k_profile_threshold_arg[strlen("--top-k-profile-threshold=") + PROPERTY_VALUE_MAX];
@@ -754,6 +833,7 @@ static void run_dex2oat(int zip_fd, int oat_fd, const char* input_file_name,
     sprintf(oat_fd_arg, "--oat-fd=%d", oat_fd);
     sprintf(oat_location_arg, "--oat-location=%s", output_file_name);
     sprintf(instruction_set_arg, "--instruction-set=%s", instruction_set);
+    sprintf(instruction_set_variant_arg, "--instruction-set-variant=%s", dex2oat_isa_variant);
     sprintf(instruction_set_features_arg, "--instruction-set-features=%s", dex2oat_isa_features);
     if (swap_fd >= 0) {
         have_dex2oat_swap_fd = true;
@@ -787,31 +867,50 @@ static void run_dex2oat(int zip_fd, int oat_fd, const char* input_file_name,
     if (skip_compilation) {
         strcpy(dex2oat_compiler_filter_arg, "--compiler-filter=verify-none");
         have_dex2oat_compiler_filter_flag = true;
+        have_dex2oat_relocation_skip_flag = true;
     } else if (vm_safe_mode) {
         strcpy(dex2oat_compiler_filter_arg, "--compiler-filter=interpret-only");
+        have_dex2oat_compiler_filter_flag = true;
+    } else if (use_jit) {
+        strcpy(dex2oat_compiler_filter_arg, "--compiler-filter=verify-at-runtime");
         have_dex2oat_compiler_filter_flag = true;
     } else if (have_dex2oat_compiler_filter_flag) {
         sprintf(dex2oat_compiler_filter_arg, "--compiler-filter=%s", dex2oat_compiler_filter_flag);
     }
 
+    // Check whether all apps should be compiled debuggable.
+    if (!debuggable) {
+        debuggable =
+                (property_get("dalvik.vm.always_debuggable", prop_buf, "0") > 0) &&
+                (prop_buf[0] == '1');
+    }
+
     ALOGV("Running %s in=%s out=%s\n", DEX2OAT_BIN, input_file_name, output_file_name);
 
-    char* argv[7  // program name, mandatory arguments and the final NULL
-               + (have_dex2oat_isa_features ? 1 : 0)
-               + (have_profile_file ? 1 : 0)
-               + (have_top_k_profile_threshold ? 1 : 0)
-               + (have_dex2oat_Xms_flag ? 2 : 0)
-               + (have_dex2oat_Xmx_flag ? 2 : 0)
-               + (have_dex2oat_compiler_filter_flag ? 1 : 0)
-               + (have_dex2oat_flags ? 1 : 0)
-               + (have_dex2oat_swap_fd ? 1 : 0)];
+    const char* argv[7  // program name, mandatory arguments and the final NULL
+                     + (have_dex2oat_isa_variant ? 1 : 0)
+                     + (have_dex2oat_isa_features ? 1 : 0)
+                     + (have_profile_file ? 1 : 0)
+                     + (have_top_k_profile_threshold ? 1 : 0)
+                     + (have_dex2oat_Xms_flag ? 2 : 0)
+                     + (have_dex2oat_Xmx_flag ? 2 : 0)
+                     + (have_dex2oat_compiler_filter_flag ? 1 : 0)
+                     + (have_dex2oat_threads_flag ? 1 : 0)
+                     + (have_dex2oat_swap_fd ? 1 : 0)
+                     + (have_dex2oat_relocation_skip_flag ? 2 : 0)
+                     + (generate_debug_info ? 1 : 0)
+                     + (debuggable ? 1 : 0)
+                     + dex2oat_flags_count];
     int i = 0;
-    argv[i++] = (char*)DEX2OAT_BIN;
+    argv[i++] = DEX2OAT_BIN;
     argv[i++] = zip_fd_arg;
     argv[i++] = zip_location_arg;
     argv[i++] = oat_fd_arg;
     argv[i++] = oat_location_arg;
     argv[i++] = instruction_set_arg;
+    if (have_dex2oat_isa_variant) {
+        argv[i++] = instruction_set_variant_arg;
+    }
     if (have_dex2oat_isa_features) {
         argv[i++] = instruction_set_features_arg;
     }
@@ -822,27 +921,40 @@ static void run_dex2oat(int zip_fd, int oat_fd, const char* input_file_name,
         argv[i++] = top_k_profile_threshold_arg;
     }
     if (have_dex2oat_Xms_flag) {
-        argv[i++] = (char*)RUNTIME_ARG;
+        argv[i++] = RUNTIME_ARG;
         argv[i++] = dex2oat_Xms_arg;
     }
     if (have_dex2oat_Xmx_flag) {
-        argv[i++] = (char*)RUNTIME_ARG;
+        argv[i++] = RUNTIME_ARG;
         argv[i++] = dex2oat_Xmx_arg;
     }
     if (have_dex2oat_compiler_filter_flag) {
         argv[i++] = dex2oat_compiler_filter_arg;
     }
-    if (have_dex2oat_flags) {
-        argv[i++] = dex2oat_flags;
+    if (have_dex2oat_threads_flag) {
+        argv[i++] = dex2oat_threads_arg;
     }
     if (have_dex2oat_swap_fd) {
         argv[i++] = dex2oat_swap_fd;
     }
+    if (generate_debug_info) {
+        argv[i++] = "--generate-debug-info";
+    }
+    if (debuggable) {
+        argv[i++] = "--debuggable";
+    }
+    if (dex2oat_flags_count) {
+        i += split(dex2oat_flags, argv + i);
+    }
+    if (have_dex2oat_relocation_skip_flag) {
+        argv[i++] = RUNTIME_ARG;
+        argv[i++] = dex2oat_norelocation;
+    }
     // Do not add after dex2oat_flags, they should override others for debugging.
     argv[i] = NULL;
 
-    execv(DEX2OAT_BIN, (char* const *)argv);
-    ALOGE("execl(%s) failed: %s\n", DEX2OAT_BIN, strerror(errno));
+    execv(DEX2OAT_BIN, (char * const *)argv);
+    ALOGE("execv(%s) failed: %s\n", DEX2OAT_BIN, strerror(errno));
 }
 
 static int wait_child(pid_t pid)
@@ -872,32 +984,95 @@ static int wait_child(pid_t pid)
 }
 
 /*
- * Whether dexopt should use a swap file when compiling an APK. If kAlwaysProvideSwapFile, do this
- * on all devices (dex2oat will make a more informed decision itself, anyways). Otherwise, only do
- * this on a low-mem device.
+ * Whether dexopt should use a swap file when compiling an APK.
+ *
+ * If kAlwaysProvideSwapFile, do this on all devices (dex2oat will make a more informed decision
+ * itself, anyways).
+ *
+ * Otherwise, read "dalvik.vm.dex2oat-swap". If the property exists, return whether it is "true".
+ *
+ * Otherwise, return true if this is a low-mem device.
+ *
+ * Otherwise, return default value.
  */
-static bool kAlwaysProvideSwapFile = true;
+static bool kAlwaysProvideSwapFile = false;
+static bool kDefaultProvideSwapFile = true;
 
 static bool ShouldUseSwapFileForDexopt() {
     if (kAlwaysProvideSwapFile) {
         return true;
     }
 
-    char low_mem_buf[PROPERTY_VALUE_MAX];
-    property_get("ro.config.low_ram", low_mem_buf, "");
-    return (strcmp(low_mem_buf, "true") == 0);
+    // Check the "override" property. If it exists, return value == "true".
+    char dex2oat_prop_buf[PROPERTY_VALUE_MAX];
+    if (property_get("dalvik.vm.dex2oat-swap", dex2oat_prop_buf, "") > 0) {
+        if (strcmp(dex2oat_prop_buf, "true") == 0) {
+            return true;
+        } else {
+            return false;
+        }
+    }
+
+    // Shortcut for default value. This is an implementation optimization for the process sketched
+    // above. If the default value is true, we can avoid to check whether this is a low-mem device,
+    // as low-mem is never returning false. The compiler will optimize this away if it can.
+    if (kDefaultProvideSwapFile) {
+        return true;
+    }
+
+    bool is_low_mem = check_boolean_property("ro.config.low_ram");
+    if (is_low_mem) {
+        return true;
+    }
+
+    // Default value must be false here.
+    return kDefaultProvideSwapFile;
+}
+
+/*
+ * Computes the odex file for the given apk_path and instruction_set.
+ * /system/framework/whatever.jar -> /system/framework/oat/<isa>/whatever.odex
+ *
+ * Returns false if it failed to determine the odex file path.
+ */
+static bool calculate_odex_file_path(char path[PKG_PATH_MAX],
+                                     const char *apk_path,
+                                     const char *instruction_set)
+{
+    if (strlen(apk_path) + strlen("oat/") + strlen(instruction_set)
+        + strlen("/") + strlen("odex") + 1 > PKG_PATH_MAX) {
+      ALOGE("apk_path '%s' may be too long to form odex file path.\n", apk_path);
+      return false;
+    }
+
+    strcpy(path, apk_path);
+    char *end = strrchr(path, '/');
+    if (end == NULL) {
+      ALOGE("apk_path '%s' has no '/'s in it?!\n", apk_path);
+      return false;
+    }
+    const char *apk_end = apk_path + (end - path); // strrchr(apk_path, '/');
+
+    strcpy(end + 1, "oat/");       // path = /system/framework/oat/\0
+    strcat(path, instruction_set); // path = /system/framework/oat/<isa>\0
+    strcat(path, apk_end);         // path = /system/framework/oat/<isa>/whatever.jar\0
+    end = strrchr(path, '.');
+    if (end == NULL) {
+      ALOGE("apk_path '%s' has no extension.\n", apk_path);
+      return false;
+    }
+    strcpy(end + 1, "odex");
+    return true;
 }
 
 int dexopt(const char *apk_path, uid_t uid, bool is_public,
-           const char *pkgname, const char *instruction_set,
-           bool vm_safe_mode, bool is_patchoat)
+           const char *pkgname, const char *instruction_set, int dexopt_needed,
+           bool vm_safe_mode, bool debuggable, const char* oat_dir)
 {
     struct utimbuf ut;
-    struct stat input_stat, dex_stat;
+    struct stat input_stat;
     char out_path[PKG_PATH_MAX];
-    char persist_sys_dalvik_vm_lib[PROPERTY_VALUE_MAX];
     char swap_file_name[PKG_PATH_MAX];
-    char *end;
     const char *input_file;
     char in_odex_path[PKG_PATH_MAX];
     int res, input_fd=-1, out_fd=-1, swap_fd=-1;
@@ -906,55 +1081,43 @@ int dexopt(const char *apk_path, uid_t uid, bool is_public,
     // Note: the cache path will require an additional 5 bytes for ".swap", but we'll try to run
     // without a swap file, if necessary.
     if (strlen(apk_path) >= (PKG_PATH_MAX - 8)) {
+        ALOGE("apk_path too long '%s'\n", apk_path);
         return -1;
     }
 
-    /* The command to run depend on the value of persist.sys.dalvik.vm.lib */
-    property_get("persist.sys.dalvik.vm.lib.2", persist_sys_dalvik_vm_lib, "libart.so");
-
-    if (is_patchoat && strncmp(persist_sys_dalvik_vm_lib, "libart", 6) != 0) {
-        /* We may only patch if we are libart */
-        ALOGE("Patching is only supported in libart\n");
-        return -1;
-    }
-
-    /* Before anything else: is there a .odex file?  If so, we have
-     * precompiled the apk and there is nothing to do here.
-     *
-     * We skip this if we are doing a patchoat.
-     */
-    strcpy(out_path, apk_path);
-    end = strrchr(out_path, '.');
-    if (end != NULL && !is_patchoat) {
-        strcpy(end, ".odex");
-        if (stat(out_path, &dex_stat) == 0) {
-            return 0;
-        }
-    }
-
-    if (create_cache_path(out_path, apk_path, instruction_set)) {
-        return -1;
-    }
-
-    if (is_patchoat) {
-        /* /system/framework/whatever.jar -> /system/framework/<isa>/whatever.odex */
-        strcpy(in_odex_path, apk_path);
-        end = strrchr(in_odex_path, '/');
-        if (end == NULL) {
-            ALOGE("apk_path '%s' has no '/'s in it?!\n", apk_path);
+    if (oat_dir != NULL && oat_dir[0] != '!') {
+        if (validate_apk_path(oat_dir)) {
+            ALOGE("invalid oat_dir '%s'\n", oat_dir);
             return -1;
         }
-        const char *apk_end = apk_path + (end - in_odex_path); // strrchr(apk_path, '/');
-        strcpy(end + 1, instruction_set); // in_odex_path now is /system/framework/<isa>\0
-        strcat(in_odex_path, apk_end);
-        end = strrchr(in_odex_path, '.');
-        if (end == NULL) {
+        if (calculate_oat_file_path(out_path, oat_dir, apk_path, instruction_set)) {
             return -1;
         }
-        strcpy(end + 1, "odex");
-        input_file = in_odex_path;
     } else {
-        input_file = apk_path;
+        if (create_cache_path(out_path, apk_path, instruction_set)) {
+            return -1;
+        }
+    }
+
+    switch (dexopt_needed) {
+        case DEXOPT_DEX2OAT_NEEDED:
+            input_file = apk_path;
+            break;
+
+        case DEXOPT_PATCHOAT_NEEDED:
+            if (!calculate_odex_file_path(in_odex_path, apk_path, instruction_set)) {
+                return -1;
+            }
+            input_file = in_odex_path;
+            break;
+
+        case DEXOPT_SELF_PATCHOAT_NEEDED:
+            input_file = out_path;
+            break;
+
+        default:
+            ALOGE("Invalid dexopt needed: %d\n", dexopt_needed);
+            exit(72);
     }
 
     memset(&input_stat, 0, sizeof(input_stat));
@@ -989,7 +1152,7 @@ int dexopt(const char *apk_path, uid_t uid, bool is_public,
     }
 
     // Create a swap file if necessary.
-    if (!is_patchoat && ShouldUseSwapFileForDexopt()) {
+    if (ShouldUseSwapFileForDexopt()) {
         // Make sure there really is enough space.
         size_t out_len = strlen(out_path);
         if (out_len + strlen(".swap") + 1 <= PKG_PATH_MAX) {
@@ -1048,17 +1211,21 @@ int dexopt(const char *apk_path, uid_t uid, bool is_public,
             exit(67);
         }
 
-        if (strncmp(persist_sys_dalvik_vm_lib, "libdvm", 6) == 0) {
-            run_dexopt(input_fd, out_fd, input_file, out_path);
-        } else if (strncmp(persist_sys_dalvik_vm_lib, "libart", 6) == 0) {
-            if (is_patchoat) {
-                run_patchoat(input_fd, out_fd, input_file, out_path, pkgname, instruction_set);
+        if (dexopt_needed == DEXOPT_PATCHOAT_NEEDED
+            || dexopt_needed == DEXOPT_SELF_PATCHOAT_NEEDED) {
+            run_patchoat(input_fd, out_fd, input_file, out_path, pkgname, instruction_set);
+        } else if (dexopt_needed == DEXOPT_DEX2OAT_NEEDED) {
+            const char *input_file_name = strrchr(input_file, '/');
+            if (input_file_name == NULL) {
+                input_file_name = input_file;
             } else {
-                run_dex2oat(input_fd, out_fd, input_file, out_path, swap_fd, pkgname,
-                            instruction_set, vm_safe_mode);
+                input_file_name++;
             }
+            run_dex2oat(input_fd, out_fd, input_file_name, out_path, swap_fd, pkgname,
+                        instruction_set, vm_safe_mode, debuggable);
         } else {
-            exit(69);   /* Unexpected persist.sys.dalvik.vm.lib value */
+            ALOGE("Invalid dexopt needed: %d\n", dexopt_needed);
+            exit(73);
         }
         exit(68);   /* only get here on exec failure */
     } else {
@@ -1368,21 +1535,16 @@ done:
     return 0;
 }
 
-int linklib(const char* pkgname, const char* asecLibDir, int userId)
+int linklib(const char* uuid, const char* pkgname, const char* asecLibDir, int userId)
 {
-    char pkgdir[PKG_PATH_MAX];
-    char libsymlink[PKG_PATH_MAX];
     struct stat s, libStat;
     int rc = 0;
 
-    if (create_pkg_path(pkgdir, pkgname, PKG_DIR_POSTFIX, userId)) {
-        ALOGE("cannot create package path\n");
-        return -1;
-    }
-    if (create_pkg_path(libsymlink, pkgname, PKG_LIB_POSTFIX, userId)) {
-        ALOGE("cannot create package lib symlink origin path\n");
-        return -1;
-    }
+    std::string _pkgdir(create_data_user_package_path(uuid, userId, pkgname));
+    std::string _libsymlink(_pkgdir + PKG_LIB_POSTFIX);
+
+    const char* pkgdir = _pkgdir.c_str();
+    const char* libsymlink = _libsymlink.c_str();
 
     if (stat(pkgdir, &s) < 0) return -1;
 
@@ -1551,14 +1713,12 @@ fail:
     return -1;
 }
 
-int restorecon_data(const char* pkgName, const char* seinfo, uid_t uid)
+int restorecon_data(const char* uuid, const char* pkgName,
+                    const char* seinfo, uid_t uid)
 {
     struct dirent *entry;
     DIR *d;
     struct stat s;
-    char *userdir;
-    char *primarydir;
-    char *pkgdir;
     int ret = 0;
 
     // SELINUX_ANDROID_RESTORECON_DATADATA flag is set by libselinux. Not needed here.
@@ -1569,26 +1729,20 @@ int restorecon_data(const char* pkgName, const char* seinfo, uid_t uid)
         return -1;
     }
 
-    if (asprintf(&primarydir, "%s%s%s", android_data_dir.path, PRIMARY_USER_PREFIX, pkgName) < 0) {
-        return -1;
-    }
+    // Special case for owner on internal storage
+    if (uuid == nullptr) {
+        std::string path(create_data_user_package_path(nullptr, 0, pkgName));
 
-    // Relabel for primary user.
-    if (selinux_android_restorecon_pkgdir(primarydir, seinfo, uid, flags) < 0) {
-        ALOGE("restorecon failed for %s: %s\n", primarydir, strerror(errno));
-        ret |= -1;
-    }
-
-    if (asprintf(&userdir, "%s%s", android_data_dir.path, SECONDARY_USER_PREFIX) < 0) {
-        free(primarydir);
-        return -1;
+        if (selinux_android_restorecon_pkgdir(path.c_str(), seinfo, uid, flags) < 0) {
+            PLOG(ERROR) << "restorecon failed for " << path;
+            ret |= -1;
+        }
     }
 
     // Relabel package directory for all secondary users.
-    d = opendir(userdir);
+    std::string userdir(create_data_path(uuid) + "/" + SECONDARY_USER_PREFIX);
+    d = opendir(userdir.c_str());
     if (d == NULL) {
-        free(primarydir);
-        free(userdir);
         return -1;
     }
 
@@ -1609,25 +1763,100 @@ int restorecon_data(const char* pkgName, const char* seinfo, uid_t uid)
             continue;
         }
 
-        if (asprintf(&pkgdir, "%s%s/%s", userdir, user, pkgName) < 0) {
+        std::string pkgdir(StringPrintf("%s%s/%s", userdir.c_str(), user, pkgName));
+        if (stat(pkgdir.c_str(), &s) < 0) {
             continue;
         }
 
-        if (stat(pkgdir, &s) < 0) {
-            free(pkgdir);
-            continue;
-        }
-
-        if (selinux_android_restorecon_pkgdir(pkgdir, seinfo, uid, flags) < 0) {
-            ALOGE("restorecon failed for %s: %s\n", pkgdir, strerror(errno));
+        if (selinux_android_restorecon_pkgdir(pkgdir.c_str(), seinfo, s.st_uid, flags) < 0) {
+            PLOG(ERROR) << "restorecon failed for " << pkgdir;
             ret |= -1;
         }
-        free(pkgdir);
     }
 
     closedir(d);
-    free(primarydir);
-    free(userdir);
     return ret;
 }
 
+int create_oat_dir(const char* oat_dir, const char* instruction_set)
+{
+    char oat_instr_dir[PKG_PATH_MAX];
+
+    if (validate_apk_path(oat_dir)) {
+        ALOGE("invalid apk path '%s' (bad prefix)\n", oat_dir);
+        return -1;
+    }
+    if (fs_prepare_dir(oat_dir, S_IRWXU | S_IRWXG | S_IXOTH, AID_SYSTEM, AID_INSTALL)) {
+        return -1;
+    }
+    if (selinux_android_restorecon(oat_dir, 0)) {
+        ALOGE("cannot restorecon dir '%s': %s\n", oat_dir, strerror(errno));
+        return -1;
+    }
+    snprintf(oat_instr_dir, PKG_PATH_MAX, "%s/%s", oat_dir, instruction_set);
+    if (fs_prepare_dir(oat_instr_dir, S_IRWXU | S_IRWXG | S_IXOTH, AID_SYSTEM, AID_INSTALL)) {
+        return -1;
+    }
+    return 0;
+}
+
+int rm_package_dir(const char* apk_path)
+{
+    if (validate_apk_path(apk_path)) {
+        ALOGE("invalid apk path '%s' (bad prefix)\n", apk_path);
+        return -1;
+    }
+    return delete_dir_contents(apk_path, 1 /* also_delete_dir */ , NULL /* exclusion_predicate */);
+}
+
+int link_file(const char* relative_path, const char* from_base, const char* to_base) {
+    char from_path[PKG_PATH_MAX];
+    char to_path[PKG_PATH_MAX];
+    snprintf(from_path, PKG_PATH_MAX, "%s/%s", from_base, relative_path);
+    snprintf(to_path, PKG_PATH_MAX, "%s/%s", to_base, relative_path);
+
+    if (validate_apk_path_subdirs(from_path)) {
+        ALOGE("invalid app data sub-path '%s' (bad prefix)\n", from_path);
+        return -1;
+    }
+
+    if (validate_apk_path_subdirs(to_path)) {
+        ALOGE("invalid app data sub-path '%s' (bad prefix)\n", to_path);
+        return -1;
+    }
+
+    const int ret = link(from_path, to_path);
+    if (ret < 0) {
+        ALOGE("link(%s, %s) failed : %s", from_path, to_path, strerror(errno));
+        return -1;
+    }
+
+    return 0;
+}
+
+int calculate_oat_file_path(char path[PKG_PATH_MAX], const char *oat_dir, const char *apk_path,
+        const char *instruction_set) {
+    char *file_name_start;
+    char *file_name_end;
+
+    file_name_start = strrchr(apk_path, '/');
+    if (file_name_start == NULL) {
+         ALOGE("apk_path '%s' has no '/'s in it\n", apk_path);
+        return -1;
+    }
+    file_name_end = strrchr(apk_path, '.');
+    if (file_name_end < file_name_start) {
+        ALOGE("apk_path '%s' has no extension\n", apk_path);
+        return -1;
+    }
+
+    // Calculate file_name
+    int file_name_len = file_name_end - file_name_start - 1;
+    char file_name[file_name_len + 1];
+    memcpy(file_name, file_name_start + 1, file_name_len);
+    file_name[file_name_len] = '\0';
+
+    // <apk_parent_dir>/oat/<isa>/<file_name>.odex
+    snprintf(path, PKG_PATH_MAX, "%s/%s/%s.odex", oat_dir, instruction_set, file_name);
+    return 0;
+}

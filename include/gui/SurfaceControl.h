@@ -57,8 +57,8 @@ public:
     // release surface data from java
     void        clear();
 
-    status_t    setLayerStack(int32_t layerStack);
-    status_t    setLayer(int32_t layer);
+    status_t    setLayerStack(uint32_t layerStack);
+    status_t    setLayer(uint32_t layer);
     status_t    setPosition(float x, float y);
 #ifdef USES_LEGACY_SET_POSITION
     status_t    setPosition(int32_t x, int32_t y);

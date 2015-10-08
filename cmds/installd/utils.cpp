@@ -16,137 +16,141 @@
 
 #include "installd.h"
 
+#include <base/stringprintf.h>
+#include <base/logging.h>
+
 #define CACHE_NOISY(x) //x
 
-int create_pkg_path_in_dir(char path[PKG_PATH_MAX],
-                                const dir_rec_t* dir,
-                                const char* pkgname,
-                                const char* postfix)
-{
-     const size_t postfix_len = strlen(postfix);
+using android::base::StringPrintf;
 
-     const size_t pkgname_len = strlen(pkgname);
-     if (pkgname_len > PKG_NAME_MAX) {
-         return -1;
-     }
-
-     if (is_valid_package_name(pkgname) < 0) {
-         return -1;
-     }
-
-     if ((pkgname_len + dir->len + postfix_len) >= PKG_PATH_MAX) {
-         return -1;
-     }
-
-     char *dst = path;
-     size_t dst_size = PKG_PATH_MAX;
-
-     if (append_and_increment(&dst, dir->path, &dst_size) < 0
-             || append_and_increment(&dst, pkgname, &dst_size) < 0
-             || append_and_increment(&dst, postfix, &dst_size) < 0) {
-         ALOGE("Error building APK path");
-         return -1;
-     }
-
-     return 0;
+/**
+ * Check that given string is valid filename, and that it attempts no
+ * parent or child directory traversal.
+ */
+static bool is_valid_filename(const std::string& name) {
+    if (name.empty() || (name == ".") || (name == "..")
+            || (name.find('/') != std::string::npos)) {
+        return false;
+    } else {
+        return true;
+    }
 }
 
 /**
- * Create the package path name for a given package name with a postfix for
- * a certain userid. Returns 0 on success, and -1 on failure.
+ * Create the path name where package app contents should be stored for
+ * the given volume UUID and package name.  An empty UUID is assumed to
+ * be internal storage.
  */
-int create_pkg_path(char path[PKG_PATH_MAX],
-                    const char *pkgname,
-                    const char *postfix,
-                    userid_t userid)
-{
-    size_t userid_len;
-    char* userid_prefix;
-    if (userid == 0) {
-        userid_prefix = PRIMARY_USER_PREFIX;
-        userid_len = 0;
-    } else {
-        userid_prefix = SECONDARY_USER_PREFIX;
-        userid_len = snprintf(NULL, 0, "%d", userid);
-    }
+std::string create_data_app_package_path(const char* volume_uuid,
+        const char* package_name) {
+    CHECK(is_valid_filename(package_name));
+    CHECK(is_valid_package_name(package_name) == 0);
 
-    const size_t prefix_len = android_data_dir.len + strlen(userid_prefix)
-            + userid_len + 1 /*slash*/;
-    char prefix[prefix_len + 1];
+    return StringPrintf("%s/%s",
+            create_data_app_path(volume_uuid).c_str(), package_name);
+}
 
-    char *dst = prefix;
-    size_t dst_size = sizeof(prefix);
+/**
+ * Create the path name where package data should be stored for the given
+ * volume UUID, package name, and user ID. An empty UUID is assumed to be
+ * internal storage.
+ */
+std::string create_data_user_package_path(const char* volume_uuid,
+        userid_t user, const char* package_name) {
+    CHECK(is_valid_filename(package_name));
+    CHECK(is_valid_package_name(package_name) == 0);
 
-    if (append_and_increment(&dst, android_data_dir.path, &dst_size) < 0
-            || append_and_increment(&dst, userid_prefix, &dst_size) < 0) {
-        ALOGE("Error building prefix for APK path");
+    return StringPrintf("%s/%s",
+            create_data_user_path(volume_uuid, user).c_str(), package_name);
+}
+
+int create_pkg_path(char path[PKG_PATH_MAX], const char *pkgname,
+        const char *postfix, userid_t userid) {
+    if (is_valid_package_name(pkgname) != 0) {
+        path[0] = '\0';
         return -1;
     }
 
-    if (userid != 0) {
-        int ret = snprintf(dst, dst_size, "%d/", userid);
-        if (ret < 0 || (size_t) ret != userid_len + 1) {
-            ALOGW("Error appending UID to APK path");
-            return -1;
-        }
+    std::string _tmp(create_data_user_package_path(nullptr, userid, pkgname) + postfix);
+    const char* tmp = _tmp.c_str();
+    if (strlen(tmp) >= PKG_PATH_MAX) {
+        path[0] = '\0';
+        return -1;
+    } else {
+        strcpy(path, tmp);
+        return 0;
     }
+}
 
-    dir_rec_t dir;
-    dir.path = prefix;
-    dir.len = prefix_len;
+std::string create_data_path(const char* volume_uuid) {
+    if (volume_uuid == nullptr) {
+        return "/data";
+    } else {
+        CHECK(is_valid_filename(volume_uuid));
+        return StringPrintf("/mnt/expand/%s", volume_uuid);
+    }
+}
 
-    return create_pkg_path_in_dir(path, &dir, pkgname, postfix);
+/**
+ * Create the path name for app data.
+ */
+std::string create_data_app_path(const char* volume_uuid) {
+    return StringPrintf("%s/app", create_data_path(volume_uuid).c_str());
 }
 
 /**
  * Create the path name for user data for a certain userid.
- * Returns 0 on success, and -1 on failure.
  */
-int create_user_path(char path[PKG_PATH_MAX],
-                    userid_t userid)
-{
-    size_t userid_len;
-    char* userid_prefix;
-    if (userid == 0) {
-        userid_prefix = PRIMARY_USER_PREFIX;
-        userid_len = 0;
+std::string create_data_user_path(const char* volume_uuid, userid_t userid) {
+    std::string data(create_data_path(volume_uuid));
+    if (volume_uuid == nullptr) {
+        if (userid == 0) {
+            return StringPrintf("%s/data", data.c_str());
+        } else {
+            return StringPrintf("%s/user/%u", data.c_str(), userid);
+        }
     } else {
-        userid_prefix = SECONDARY_USER_PREFIX;
-        userid_len = snprintf(NULL, 0, "%d/", userid);
+        return StringPrintf("%s/user/%u", data.c_str(), userid);
     }
-
-    char *dst = path;
-    size_t dst_size = PKG_PATH_MAX;
-
-    if (append_and_increment(&dst, android_data_dir.path, &dst_size) < 0
-            || append_and_increment(&dst, userid_prefix, &dst_size) < 0) {
-        ALOGE("Error building prefix for user path");
-        return -1;
-    }
-
-    if (userid != 0) {
-        if (dst_size < userid_len + 1) {
-            ALOGE("Error building user path");
-            return -1;
-        }
-        int ret = snprintf(dst, dst_size, "%d/", userid);
-        if (ret < 0 || (size_t) ret != userid_len) {
-            ALOGE("Error appending userid to path");
-            return -1;
-        }
-    }
-    return 0;
 }
 
 /**
  * Create the path name for media for a certain userid.
- * Returns 0 on success, and -1 on failure.
  */
-int create_user_media_path(char path[PATH_MAX], userid_t userid) {
-    if (snprintf(path, PATH_MAX, "%s%d", android_media_dir.path, userid) > PATH_MAX) {
-        return -1;
+std::string create_data_media_path(const char* volume_uuid, userid_t userid) {
+    return StringPrintf("%s/media/%u", create_data_path(volume_uuid).c_str(), userid);
+}
+
+std::vector<userid_t> get_known_users(const char* volume_uuid) {
+    std::vector<userid_t> users;
+
+    // We always have an owner
+    users.push_back(0);
+
+    std::string path(create_data_path(volume_uuid) + "/" + SECONDARY_USER_PREFIX);
+    DIR* dir = opendir(path.c_str());
+    if (dir == NULL) {
+        // Unable to discover other users, but at least return owner
+        PLOG(ERROR) << "Failed to opendir " << path;
+        return users;
     }
-    return 0;
+
+    struct dirent* ent;
+    while ((ent = readdir(dir))) {
+        if (ent->d_type != DT_DIR) {
+            continue;
+        }
+
+        char* end;
+        userid_t user = strtol(ent->d_name, &end, 10);
+        if (*end == '\0' && user != 0) {
+            LOG(DEBUG) << "Found valid user " << user;
+            users.push_back(user);
+        }
+    }
+    closedir(dir);
+
+    return users;
 }
 
 /**
@@ -163,7 +167,7 @@ int create_user_config_path(char path[PATH_MAX], userid_t userid) {
 int create_move_path(char path[PKG_PATH_MAX],
     const char* pkgname,
     const char* leaf,
-    userid_t userid)
+    userid_t userid __unused)
 {
     if ((android_data_dir.len + strlen(PRIMARY_USER_PREFIX) + strlen(pkgname) + strlen(leaf) + 1)
             >= PKG_PATH_MAX) {
@@ -181,6 +185,10 @@ int create_move_path(char path[PKG_PATH_MAX],
 int is_valid_package_name(const char* pkgname) {
     const char *x = pkgname;
     int alpha = -1;
+
+    if (strlen(pkgname) > PKG_NAME_MAX) {
+        return -1;
+    }
 
     while (*x) {
         if (isalnum(*x) || (*x == '_')) {
@@ -239,7 +247,7 @@ static int _delete_dir_contents(DIR *d,
         }
 
         if (de->d_type == DT_DIR) {
-            int r, subfd;
+            int subfd;
             DIR *subdir;
 
                 /* always skip "." and ".." */
@@ -472,13 +480,13 @@ int lookup_media_dir(char basepath[PATH_MAX], const char *dir)
     return -1;
 }
 
-int64_t data_disk_free()
+int64_t data_disk_free(const std::string& data_path)
 {
     struct statfs sfs;
-    if (statfs(android_data_dir.path, &sfs) == 0) {
+    if (statfs(data_path.c_str(), &sfs) == 0) {
         return sfs.f_bavail * sfs.f_bsize;
     } else {
-        ALOGE("Couldn't statfs %s: %s\n", android_data_dir.path, strerror(errno));
+        PLOG(ERROR) << "Couldn't statfs " << data_path;
         return -1;
     }
 }
@@ -516,7 +524,7 @@ static void* _cache_malloc(cache_t* cache, size_t len)
     int8_t* res = cache->curMemBlockAvail;
     int8_t* nextPos = res + len;
     if (cache->memBlocks == NULL || nextPos > cache->curMemBlockEnd) {
-        int8_t* newBlock = malloc(CACHE_BLOCK_SIZE);
+        int8_t* newBlock = (int8_t*) malloc(CACHE_BLOCK_SIZE);
         if (newBlock == NULL) {
             return NULL;
         }
@@ -836,7 +844,7 @@ static int cache_modtime_sort(const void *lhsP, const void *rhsP)
     return lhs->modTime < rhs->modTime ? -1 : (lhs->modTime > rhs->modTime ? 1 : 0);
 }
 
-void clear_cache_files(cache_t* cache, int64_t free_size)
+void clear_cache_files(const std::string& data_path, cache_t* cache, int64_t free_size)
 {
     size_t i;
     int skip = 0;
@@ -861,7 +869,7 @@ void clear_cache_files(cache_t* cache, int64_t free_size)
     for (i=0; i<cache->numFiles; i++) {
         skip++;
         if (skip > 10) {
-            if (data_disk_free() > free_size) {
+            if (data_disk_free(data_path) > free_size) {
                 return;
             }
             skip = 0;
@@ -881,7 +889,7 @@ void clear_cache_files(cache_t* cache, int64_t free_size)
 
 void finish_cache_collection(cache_t* cache)
 {
-    size_t i;
+    CACHE_NOISY(size_t i;)
 
     CACHE_NOISY(ALOGI("clear_cache_files: %d dirs, %d files\n", cache->numDirs, cache->numFiles));
     CACHE_NOISY(
@@ -910,14 +918,14 @@ void finish_cache_collection(cache_t* cache)
  * The path is allowed to have at most one subdirectory and no indirections
  * to top level directories (i.e. have "..").
  */
-static int validate_path(const dir_rec_t* dir, const char* path) {
+static int validate_path(const dir_rec_t* dir, const char* path, int maxSubdirs) {
     size_t dir_len = dir->len;
     const char* subdir = strchr(path + dir_len, '/');
 
     // Only allow the path to have at most one subdirectory.
     if (subdir != NULL) {
         ++subdir;
-        if (strchr(subdir, '/') != NULL) {
+        if ((--maxSubdirs == 0) && strchr(subdir, '/') != NULL) {
             ALOGE("invalid apk path '%s' (subdir?)\n", path);
             return -1;
         }
@@ -942,7 +950,7 @@ int validate_system_app_path(const char* path) {
     for (i = 0; i < android_system_dirs.count; i++) {
         const size_t dir_len = android_system_dirs.dirs[i].len;
         if (!strncmp(path, android_system_dirs.dirs[i].path, dir_len)) {
-            return validate_path(android_system_dirs.dirs + i, path);
+            return validate_path(android_system_dirs.dirs + i, path, 1);
         }
     }
 
@@ -1000,7 +1008,7 @@ int get_path_from_string(dir_rec_t* rec, const char* path) {
             // Add space for slash and terminating null.
             size_t dst_size = path_len + 2;
 
-            rec->path = malloc(dst_size);
+            rec->path = (char*) malloc(dst_size);
             if (rec->path == NULL) {
                 return -1;
             }
@@ -1035,25 +1043,37 @@ int copy_and_append(dir_rec_t* dst, const dir_rec_t* src, const char* suffix) {
 }
 
 /**
- * Check whether path points to a valid path for an APK file. Only one level of
- * subdirectory names is allowed. Returns -1 when an invalid path is encountered
- * and 0 when a valid path is encountered.
+ * Check whether path points to a valid path for an APK file. The path must
+ * begin with a whitelisted prefix path and must be no deeper than |maxSubdirs| within
+ * that path. Returns -1 when an invalid path is encountered and 0 when a valid path
+ * is encountered.
  */
-int validate_apk_path(const char *path)
-{
+static int validate_apk_path_internal(const char *path, int maxSubdirs) {
     const dir_rec_t* dir = NULL;
-
     if (!strncmp(path, android_app_dir.path, android_app_dir.len)) {
         dir = &android_app_dir;
     } else if (!strncmp(path, android_app_private_dir.path, android_app_private_dir.len)) {
         dir = &android_app_private_dir;
     } else if (!strncmp(path, android_asec_dir.path, android_asec_dir.len)) {
         dir = &android_asec_dir;
+    } else if (!strncmp(path, android_mnt_expand_dir.path, android_mnt_expand_dir.len)) {
+        dir = &android_mnt_expand_dir;
+        if (maxSubdirs < 2) {
+            maxSubdirs = 2;
+        }
     } else {
         return -1;
     }
 
-    return validate_path(dir, path);
+    return validate_path(dir, path, maxSubdirs);
+}
+
+int validate_apk_path(const char* path) {
+    return validate_apk_path_internal(path, 1 /* maxSubdirs */);
+}
+
+int validate_apk_path_subdirs(const char* path) {
+    return validate_apk_path_internal(path, 3 /* maxSubdirs */);
 }
 
 int append_and_increment(char** dst, const char* src, size_t* dst_size) {
@@ -1066,13 +1086,13 @@ int append_and_increment(char** dst, const char* src, size_t* dst_size) {
     return 0;
 }
 
-char *build_string2(char *s1, char *s2) {
+char *build_string2(const char *s1, const char *s2) {
     if (s1 == NULL || s2 == NULL) return NULL;
 
     int len_s1 = strlen(s1);
     int len_s2 = strlen(s2);
     int len = len_s1 + len_s2 + 1;
-    char *result = malloc(len);
+    char *result = (char *) malloc(len);
     if (result == NULL) return NULL;
 
     strcpy(result, s1);
@@ -1081,14 +1101,14 @@ char *build_string2(char *s1, char *s2) {
     return result;
 }
 
-char *build_string3(char *s1, char *s2, char *s3) {
+char *build_string3(const char *s1, const char *s2, const char *s3) {
     if (s1 == NULL || s2 == NULL || s3 == NULL) return NULL;
 
     int len_s1 = strlen(s1);
     int len_s2 = strlen(s2);
     int len_s3 = strlen(s3);
     int len = len_s1 + len_s2 + len_s3 + 1;
-    char *result = malloc(len);
+    char *result = (char *) malloc(len);
     if (result == NULL) return NULL;
 
     strcpy(result, s1);
@@ -1099,13 +1119,9 @@ char *build_string3(char *s1, char *s2, char *s3) {
 }
 
 /* Ensure that /data/media directories are prepared for given user. */
-int ensure_media_user_dirs(userid_t userid) {
-    char media_user_path[PATH_MAX];
-    char path[PATH_MAX];
-
-    // Ensure /data/media/<userid> exists
-    create_user_media_path(media_user_path, userid);
-    if (fs_prepare_dir(media_user_path, 0770, AID_MEDIA_RW, AID_MEDIA_RW) == -1) {
+int ensure_media_user_dirs(const char* uuid, userid_t userid) {
+    std::string media_user_path(create_data_media_path(uuid, userid));
+    if (fs_prepare_dir(media_user_path.c_str(), 0770, AID_MEDIA_RW, AID_MEDIA_RW) == -1) {
         return -1;
     }
 
@@ -1114,7 +1130,6 @@ int ensure_media_user_dirs(userid_t userid) {
 
 int ensure_config_user_dirs(userid_t userid) {
     char config_user_path[PATH_MAX];
-    char path[PATH_MAX];
 
     // writable by system, readable by any app within the same user
     const int uid = multiuser_get_uid(userid, AID_SYSTEM);

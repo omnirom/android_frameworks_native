@@ -195,6 +195,7 @@ public:
         virtual void setFrame(const Rect& frame) = 0;
         virtual void setCrop(const FloatRect& crop) = 0;
         virtual void setVisibleRegionScreen(const Region& reg) = 0;
+        virtual void setSurfaceDamage(const Region& reg) = 0;
         virtual void setSidebandStream(const sp<NativeHandle>& stream) = 0;
 #ifdef QCOM_HARDWARE
         virtual void setDirtyRect(const Rect& dirtyRect) = 0;
@@ -399,6 +400,8 @@ private:
     // mLists[i>0] can be NULL. that display is to be ignored
     struct hwc_display_contents_1*  mLists[MAX_HWC_DISPLAYS];
     DisplayData                     mDisplayData[MAX_HWC_DISPLAYS];
+    // protect mDisplayData from races between prepare and dump
+    mutable Mutex mDisplayLock;
     size_t                          mNumDisplays;
 
     cb_context*                     mCBContext;

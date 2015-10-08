@@ -1,90 +1,101 @@
 /*
 ** Copyright 2008, The Android Open Source Project
 **
-** Licensed under the Apache License, Version 2.0 (the "License"); 
-** you may not use this file except in compliance with the License. 
-** You may obtain a copy of the License at 
+** Licensed under the Apache License, Version 2.0 (the "License");
+** you may not use this file except in compliance with the License.
+** You may obtain a copy of the License at
 **
-**     http://www.apache.org/licenses/LICENSE-2.0 
+**     http://www.apache.org/licenses/LICENSE-2.0
 **
-** Unless required by applicable law or agreed to in writing, software 
-** distributed under the License is distributed on an "AS IS" BASIS, 
-** WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. 
-** See the License for the specific language governing permissions and 
+** Unless required by applicable law or agreed to in writing, software
+** distributed under the License is distributed on an "AS IS" BASIS,
+** WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+** See the License for the specific language governing permissions and
 ** limitations under the License.
 */
+
+#include "installd.h"
+
+#include <base/logging.h>
 
 #include <sys/capability.h>
 #include <sys/prctl.h>
 #include <selinux/android.h>
 #include <selinux/avc.h>
 
-#include "installd.h"
-
-
 #define BUFFER_MAX    1024  /* input buffer for commands */
-#define TOKEN_MAX     8     /* max number of arguments in buffer */
+#define TOKEN_MAX     16    /* max number of arguments in buffer */
 #define REPLY_MAX     256   /* largest reply allowed */
 
-static int do_ping(char **arg, char reply[REPLY_MAX])
+static char* parse_null(char* arg) {
+    if (strcmp(arg, "!") == 0) {
+        return nullptr;
+    } else {
+        return arg;
+    }
+}
+
+static int do_ping(char **arg __unused, char reply[REPLY_MAX] __unused)
 {
     return 0;
 }
 
-static int do_install(char **arg, char reply[REPLY_MAX])
+static int do_install(char **arg, char reply[REPLY_MAX] __unused)
 {
-    return install(arg[0], atoi(arg[1]), atoi(arg[2]), arg[3]); /* pkgname, uid, gid, seinfo */
+    return install(parse_null(arg[0]), arg[1], atoi(arg[2]), atoi(arg[3]), arg[4]); /* uuid, pkgname, uid, gid, seinfo */
 }
 
-static int do_dexopt(char **arg, char reply[REPLY_MAX])
+static int do_dexopt(char **arg, char reply[REPLY_MAX] __unused)
 {
-    /* apk_path, uid, is_public, pkgname, instruction_set, vm_safe_mode, should_relocate */
-    return dexopt(arg[0], atoi(arg[1]), atoi(arg[2]), arg[3], arg[4], atoi(arg[5]), 0);
+    /* apk_path, uid, is_public, pkgname, instruction_set,
+     * dexopt_needed, vm_safe_mode, debuggable, oat_dir */
+    return dexopt(arg[0], atoi(arg[1]), atoi(arg[2]), arg[3], arg[4], atoi(arg[5]),
+                  atoi(arg[6]), atoi(arg[7]), arg[8]);
 }
 
-static int do_mark_boot_complete(char **arg, char reply[REPLY_MAX])
+static int do_mark_boot_complete(char **arg, char reply[REPLY_MAX] __unused)
 {
     return mark_boot_complete(arg[0] /* instruction set */);
 }
 
-static int do_move_dex(char **arg, char reply[REPLY_MAX])
+static int do_move_dex(char **arg, char reply[REPLY_MAX] __unused)
 {
     return move_dex(arg[0], arg[1], arg[2]); /* src, dst, instruction_set */
 }
 
-static int do_rm_dex(char **arg, char reply[REPLY_MAX])
+static int do_rm_dex(char **arg, char reply[REPLY_MAX] __unused)
 {
     return rm_dex(arg[0], arg[1]); /* pkgname, instruction_set */
 }
 
-static int do_remove(char **arg, char reply[REPLY_MAX])
+static int do_remove(char **arg, char reply[REPLY_MAX] __unused)
 {
-    return uninstall(arg[0], atoi(arg[1])); /* pkgname, userid */
+    return uninstall(parse_null(arg[0]), arg[1], atoi(arg[2])); /* uuid, pkgname, userid */
 }
 
-static int do_rename(char **arg, char reply[REPLY_MAX])
+static int do_rename(char **arg, char reply[REPLY_MAX] __unused)
 {
     return renamepkg(arg[0], arg[1]); /* oldpkgname, newpkgname */
 }
 
-static int do_fixuid(char **arg, char reply[REPLY_MAX])
+static int do_fixuid(char **arg, char reply[REPLY_MAX] __unused)
 {
-    return fix_uid(arg[0], atoi(arg[1]), atoi(arg[2])); /* pkgname, uid, gid */
+    return fix_uid(parse_null(arg[0]), arg[1], atoi(arg[2]), atoi(arg[3])); /* uuid, pkgname, uid, gid */
 }
 
-static int do_free_cache(char **arg, char reply[REPLY_MAX]) /* TODO int:free_size */
+static int do_free_cache(char **arg, char reply[REPLY_MAX] __unused) /* TODO int:free_size */
 {
-    return free_cache((int64_t)atoll(arg[0])); /* free_size */
+    return free_cache(parse_null(arg[0]), (int64_t)atoll(arg[1])); /* uuid, free_size */
 }
 
-static int do_rm_cache(char **arg, char reply[REPLY_MAX])
+static int do_rm_cache(char **arg, char reply[REPLY_MAX] __unused)
 {
-    return delete_cache(arg[0], atoi(arg[1])); /* pkgname, userid */
+    return delete_cache(parse_null(arg[0]), arg[1], atoi(arg[2])); /* uuid, pkgname, userid */
 }
 
-static int do_rm_code_cache(char **arg, char reply[REPLY_MAX])
+static int do_rm_code_cache(char **arg, char reply[REPLY_MAX] __unused)
 {
-    return delete_code_cache(arg[0], atoi(arg[1])); /* pkgname, userid */
+    return delete_code_cache(parse_null(arg[0]), arg[1], atoi(arg[2])); /* uuid, pkgname, userid */
 }
 
 static int do_get_size(char **arg, char reply[REPLY_MAX])
@@ -95,9 +106,9 @@ static int do_get_size(char **arg, char reply[REPLY_MAX])
     int64_t asecsize = 0;
     int res = 0;
 
-        /* pkgdir, userid, apkpath */
-    res = get_size(arg[0], atoi(arg[1]), arg[2], arg[3], arg[4], arg[5],
-            arg[6], &codesize, &datasize, &cachesize, &asecsize);
+        /* uuid, pkgdir, userid, apkpath */
+    res = get_size(parse_null(arg[0]), arg[1], atoi(arg[2]), arg[3], arg[4], arg[5], arg[6],
+            arg[7], &codesize, &datasize, &cachesize, &asecsize);
 
     /*
      * Each int64_t can take up 22 characters printed out. Make sure it
@@ -108,51 +119,70 @@ static int do_get_size(char **arg, char reply[REPLY_MAX])
     return res;
 }
 
-static int do_rm_user_data(char **arg, char reply[REPLY_MAX])
+static int do_rm_user_data(char **arg, char reply[REPLY_MAX] __unused)
 {
-    return delete_user_data(arg[0], atoi(arg[1])); /* pkgname, userid */
+    return delete_user_data(parse_null(arg[0]), arg[1], atoi(arg[2])); /* uuid, pkgname, userid */
 }
 
-static int do_mk_user_data(char **arg, char reply[REPLY_MAX])
+static int do_cp_complete_app(char **arg, char reply[REPLY_MAX] __unused)
 {
-    return make_user_data(arg[0], atoi(arg[1]), atoi(arg[2]), arg[3]);
-                             /* pkgname, uid, userid, seinfo */
+    // from_uuid, to_uuid, package_name, data_app_name, appid, seinfo
+    return copy_complete_app(parse_null(arg[0]), parse_null(arg[1]), arg[2], arg[3], atoi(arg[4]), arg[5]);
 }
 
-static int do_mk_user_config(char **arg, char reply[REPLY_MAX])
+static int do_mk_user_data(char **arg, char reply[REPLY_MAX] __unused)
+{
+    return make_user_data(parse_null(arg[0]), arg[1], atoi(arg[2]), atoi(arg[3]), arg[4]);
+                             /* uuid, pkgname, uid, userid, seinfo */
+}
+
+static int do_mk_user_config(char **arg, char reply[REPLY_MAX] __unused)
 {
     return make_user_config(atoi(arg[0])); /* userid */
 }
 
-static int do_rm_user(char **arg, char reply[REPLY_MAX])
+static int do_rm_user(char **arg, char reply[REPLY_MAX] __unused)
 {
-    return delete_user(atoi(arg[0])); /* userid */
+    return delete_user(parse_null(arg[0]), atoi(arg[1])); /* uuid, userid */
 }
 
-static int do_movefiles(char **arg, char reply[REPLY_MAX])
+static int do_movefiles(char **arg __unused, char reply[REPLY_MAX] __unused)
 {
     return movefiles();
 }
 
-static int do_linklib(char **arg, char reply[REPLY_MAX])
+static int do_linklib(char **arg, char reply[REPLY_MAX] __unused)
 {
-    return linklib(arg[0], arg[1], atoi(arg[2]));
+    return linklib(parse_null(arg[0]), arg[1], arg[2], atoi(arg[3]));
 }
 
-static int do_idmap(char **arg, char reply[REPLY_MAX])
+static int do_idmap(char **arg, char reply[REPLY_MAX] __unused)
 {
     return idmap(arg[0], arg[1], atoi(arg[2]));
 }
 
 static int do_restorecon_data(char **arg, char reply[REPLY_MAX] __attribute__((unused)))
 {
-    return restorecon_data(arg[0], arg[1], atoi(arg[2]));
-                             /* pkgName, seinfo, uid*/
+    return restorecon_data(parse_null(arg[0]), arg[1], arg[2], atoi(arg[3]));
+                             /* uuid, pkgName, seinfo, uid*/
 }
 
-static int do_patchoat(char **arg, char reply[REPLY_MAX]) {
-    /* apk_path, uid, is_public, pkgname, instruction_set, vm_safe_mode, should_relocate */
-    return dexopt(arg[0], atoi(arg[1]), atoi(arg[2]), arg[3], arg[4], 0, 1);
+static int do_create_oat_dir(char **arg, char reply[REPLY_MAX] __unused)
+{
+    /* oat_dir, instruction_set */
+    return create_oat_dir(arg[0], arg[1]);
+}
+
+static int do_rm_package_dir(char **arg, char reply[REPLY_MAX] __unused)
+{
+    /* oat_dir */
+    return rm_package_dir(arg[0]);
+}
+
+static int do_link_file(char **arg, char reply[REPLY_MAX] __unused)
+{
+    /* relative_path, from_base, to_base */
+    return link_file(arg[0], arg[1], arg[2]);
 }
 
 struct cmdinfo {
@@ -163,32 +193,35 @@ struct cmdinfo {
 
 struct cmdinfo cmds[] = {
     { "ping",                 0, do_ping },
-    { "install",              4, do_install },
-    { "dexopt",               6, do_dexopt },
+    { "install",              5, do_install },
+    { "dexopt",               9, do_dexopt },
     { "markbootcomplete",     1, do_mark_boot_complete },
     { "movedex",              3, do_move_dex },
     { "rmdex",                2, do_rm_dex },
-    { "remove",               2, do_remove },
+    { "remove",               3, do_remove },
     { "rename",               2, do_rename },
-    { "fixuid",               3, do_fixuid },
-    { "freecache",            1, do_free_cache },
-    { "rmcache",              2, do_rm_cache },
-    { "rmcodecache",          2, do_rm_code_cache },
-    { "getsize",              7, do_get_size },
-    { "rmuserdata",           2, do_rm_user_data },
+    { "fixuid",               4, do_fixuid },
+    { "freecache",            2, do_free_cache },
+    { "rmcache",              3, do_rm_cache },
+    { "rmcodecache",          3, do_rm_code_cache },
+    { "getsize",              8, do_get_size },
+    { "rmuserdata",           3, do_rm_user_data },
+    { "cpcompleteapp",        6, do_cp_complete_app },
     { "movefiles",            0, do_movefiles },
-    { "linklib",              3, do_linklib },
-    { "mkuserdata",           4, do_mk_user_data },
+    { "linklib",              4, do_linklib },
+    { "mkuserdata",           5, do_mk_user_data },
     { "mkuserconfig",         1, do_mk_user_config },
-    { "rmuser",               1, do_rm_user },
+    { "rmuser",               2, do_rm_user },
     { "idmap",                3, do_idmap },
-    { "restorecondata",       3, do_restorecon_data },
-    { "patchoat",             5, do_patchoat },
+    { "restorecondata",       4, do_restorecon_data },
+    { "createoatdir",         2, do_create_oat_dir },
+    { "rmpackagedir",         1, do_rm_package_dir },
+    { "linkfile",             3, do_link_file }
 };
 
 static int readx(int s, void *_buf, int count)
 {
-    char *buf = _buf;
+    char *buf = (char *) _buf;
     int n = 0, r;
     if (count < 0) return -1;
     while (n < count) {
@@ -209,7 +242,7 @@ static int readx(int s, void *_buf, int count)
 
 static int writex(int s, const void *_buf, int count)
 {
-    const char *buf = _buf;
+    const char *buf = (const char *) _buf;
     int n = 0, r;
     if (count < 0) return -1;
     while (n < count) {
@@ -255,7 +288,9 @@ static int execute(int s, char cmd[BUFFER_MAX])
                 goto done;
             }
         }
-        cmd++;
+        if (*cmd) {
+          cmd++;
+        }
     }
 
     for (i = 0; i < sizeof(cmds) / sizeof(cmds[0]); i++) {
@@ -333,10 +368,15 @@ int initialize_globals() {
         return -1;
     }
 
+    // Get the android external app directory.
+    if (get_path_from_string(&android_mnt_expand_dir, "/mnt/expand/") < 0) {
+        return -1;
+    }
+
     // Take note of the system and vendor directories.
     android_system_dirs.count = 4;
 
-    android_system_dirs.dirs = calloc(android_system_dirs.count, sizeof(dir_rec_t));
+    android_system_dirs.dirs = (dir_rec_t*) calloc(android_system_dirs.count, sizeof(dir_rec_t));
     if (android_system_dirs.dirs == NULL) {
         ALOGE("Couldn't allocate array for dirs; aborting\n");
         return -1;
@@ -354,10 +394,10 @@ int initialize_globals() {
     android_system_dirs.dirs[1].path = build_string2(android_root_dir.path, PRIV_APP_SUBDIR);
     android_system_dirs.dirs[1].len = strlen(android_system_dirs.dirs[1].path);
 
-    android_system_dirs.dirs[2].path = "/vendor/app/";
+    android_system_dirs.dirs[2].path = strdup("/vendor/app/");
     android_system_dirs.dirs[2].len = strlen(android_system_dirs.dirs[2].path);
 
-    android_system_dirs.dirs[3].path = "/oem/app/";
+    android_system_dirs.dirs[3].path = strdup("/oem/app/");
     android_system_dirs.dirs[3].len = strlen(android_system_dirs.dirs[3].path);
 
     return 0;
@@ -501,7 +541,7 @@ int initialize_directories() {
         version = 2;
     }
 
-    if (ensure_media_user_dirs(0) == -1) {
+    if (ensure_media_user_dirs(nullptr, 0) == -1) {
         ALOGE("Failed to setup media for user 0");
         goto fail;
     }
@@ -596,46 +636,6 @@ fail:
     return res;
 }
 
-static void drop_privileges() {
-    if (prctl(PR_SET_KEEPCAPS, 1) < 0) {
-        ALOGE("prctl(PR_SET_KEEPCAPS) failed: %s\n", strerror(errno));
-        exit(1);
-    }
-
-    if (setgid(AID_INSTALL) < 0) {
-        ALOGE("setgid() can't drop privileges; exiting.\n");
-        exit(1);
-    }
-
-    if (setuid(AID_INSTALL) < 0) {
-        ALOGE("setuid() can't drop privileges; exiting.\n");
-        exit(1);
-    }
-
-    struct __user_cap_header_struct capheader;
-    struct __user_cap_data_struct capdata[2];
-    memset(&capheader, 0, sizeof(capheader));
-    memset(&capdata, 0, sizeof(capdata));
-    capheader.version = _LINUX_CAPABILITY_VERSION_3;
-    capheader.pid = 0;
-
-    capdata[CAP_TO_INDEX(CAP_DAC_OVERRIDE)].permitted |= CAP_TO_MASK(CAP_DAC_OVERRIDE);
-    capdata[CAP_TO_INDEX(CAP_CHOWN)].permitted        |= CAP_TO_MASK(CAP_CHOWN);
-    capdata[CAP_TO_INDEX(CAP_SETUID)].permitted       |= CAP_TO_MASK(CAP_SETUID);
-    capdata[CAP_TO_INDEX(CAP_SETGID)].permitted       |= CAP_TO_MASK(CAP_SETGID);
-    capdata[CAP_TO_INDEX(CAP_FOWNER)].permitted       |= CAP_TO_MASK(CAP_FOWNER);
-
-    capdata[0].effective = capdata[0].permitted;
-    capdata[1].effective = capdata[1].permitted;
-    capdata[0].inheritable = 0;
-    capdata[1].inheritable = 0;
-
-    if (capset(&capheader, &capdata[0]) < 0) {
-        ALOGE("capset failed: %s\n", strerror(errno));
-        exit(1);
-    }
-}
-
 static int log_callback(int type, const char *fmt, ...) {
     va_list ap;
     int priority;
@@ -657,12 +657,15 @@ static int log_callback(int type, const char *fmt, ...) {
     return 0;
 }
 
-int main(const int argc, const char *argv[]) {
+int main(const int argc __unused, char *argv[]) {
     char buf[BUFFER_MAX];
     struct sockaddr addr;
     socklen_t alen;
-    int lsocket, s, count;
+    int lsocket, s;
     int selinux_enabled = (is_selinux_enabled() > 0);
+
+    setenv("ANDROID_LOG_TAGS", "*:v", 1);
+    android::base::InitLogging(argv);
 
     ALOGI("installd firing up\n");
 
@@ -684,8 +687,6 @@ int main(const int argc, const char *argv[]) {
         ALOGE("Could not open selinux status; exiting.\n");
         exit(1);
     }
-
-    drop_privileges();
 
     lsocket = android_get_control_socket(SOCKET_PATH);
     if (lsocket < 0) {

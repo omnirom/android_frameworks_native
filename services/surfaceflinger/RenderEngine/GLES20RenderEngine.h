@@ -73,6 +73,7 @@ protected:
     virtual void setupLayerTexturing(const Texture& texture);
     virtual void setupLayerBlackedOut();
     virtual void setupFillWithColor(float r, float g, float b, float a);
+    virtual mat4 setupColorTransform(const mat4& colorTransform);
     virtual void disableTexturing();
     virtual void disableBlending();
 #ifdef QCOM_HARDWARE
@@ -84,9 +85,6 @@ protected:
 #endif /* QCOM_HARDWARE */
 
     virtual void drawMesh(const Mesh& mesh);
-
-    virtual void beginGroup(const mat4& colorTransform);
-    virtual void endGroup();
 
     virtual size_t getMaxTextureSize() const;
     virtual size_t getMaxViewportDims() const;
