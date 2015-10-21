@@ -17,7 +17,7 @@ static_libraries := \
     libdiskusage \
 
 c_includes := \
-    frameworks/native/cmds/installd
+    frameworks/native-caf/cmds/installd
 
 $(foreach file,$(test_src_files), \
     $(eval include $(CLEAR_VARS)) \
