@@ -16,6 +16,23 @@
       "revId": "95ac12069f5b14520198302cfc011487dd7fca7d",
       "serverId": "56841c99-7c94-43d4-bf0b-cb4707e66d55",
       "unresolved": false
+    },
+    {
+      "key": {
+        "uuid": "b8f5b13e_6e933f5a",
+        "filename": "libs/gui/SurfaceControl.cpp",
+        "patchSetId": 3
+      },
+      "lineNbr": 109,
+      "author": {
+        "id": 1000026
+      },
+      "writtenOn": "2015-10-24T23:11:32Z",
+      "side": 1,
+      "message": "thats not really the same as before.\nsetPosition(float x, float y)  is calling e.g. validate which isnt the case now anymore",
+      "revId": "95ac12069f5b14520198302cfc011487dd7fca7d",
+      "serverId": "56841c99-7c94-43d4-bf0b-cb4707e66d55",
+      "unresolved": false
     }
   ]
 }
