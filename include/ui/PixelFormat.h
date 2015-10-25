@@ -26,6 +26,9 @@
 #define UI_PIXELFORMAT_H
 
 #include <hardware/hardware.h>
+#ifdef HAVE_PIXEL_FORMAT_INFO
+#include <utils/Errors.h>
+#endif
 
 namespace android {
 
