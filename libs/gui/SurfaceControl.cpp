@@ -106,7 +106,7 @@ status_t SurfaceControl::setPosition(float x, float y) {
 }
 #ifdef USES_LEGACY_SET_POSITION
 status_t SurfaceControl::setPosition(int32_t x, int32_t y) {
-    return setPosition((float)x, (float)y);
+    return setPosition(static_cast<float>(x), static_cast<float>(y));
 }
 #endif
 status_t SurfaceControl::setSize(uint32_t w, uint32_t h) {
