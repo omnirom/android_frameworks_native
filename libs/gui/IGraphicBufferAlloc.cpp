@@ -53,21 +53,9 @@ public:
         data.writeUint32(height);
         data.writeInt32(static_cast<int32_t>(format));
         data.writeUint32(usage);
-#ifndef QCOM_HARDWARE
         remote()->transact(CREATE_GRAPHIC_BUFFER, data, &reply);
-#else /* QCOM_HARDWARE */
-        status_t result = remote()->transact(CREATE_GRAPHIC_BUFFER, data, &reply);
-        if(result != NO_ERROR){
-            *error = result;
-            return NULL;
-        }
-#endif /* QCOM_HARDWARE */
         sp<GraphicBuffer> graphicBuffer;
-#ifndef QCOM_HARDWARE
         status_t result = reply.readInt32();
-#else /* QCOM_HARDWARE */
-        result = reply.readInt32();
-#endif /* QCOM_HARDWARE */
         if (result == NO_ERROR) {
             graphicBuffer = new GraphicBuffer();
             result = reply.read(*graphicBuffer);

@@ -35,9 +35,6 @@ BufferItem::BufferItem() :
     mAcquireCalled(false),
     mTransformToDisplayInverse(false) {
     mCrop.makeInvalid();
-#ifdef QCOM_HARDWARE
-    mDirtyRect.makeInvalid();
-#endif /* QCOM_HARDWARE */
 }
 
 BufferItem::~BufferItem() {}
@@ -51,9 +48,6 @@ static void addAligned(size_t& size, T /* value */) {
 size_t BufferItem::getPodSize() const {
     size_t size = 0;
     addAligned(size, mCrop);
-#ifdef QCOM_HARDWARE
-    addAligned(size, mDirtyRect);
-#endif /* QCOM_HARDWARE */
     addAligned(size, mTransform);
     addAligned(size, mScalingMode);
     addAligned(size, mTimestampLo);
@@ -139,9 +133,6 @@ status_t BufferItem::flatten(
     }
 
     writeAligned(buffer, size, mCrop);
-#ifdef QCOM_HARDWARE
-    writeAligned(buffer, size, mDirtyRect);
-#endif /* QCOM_HARDWARE */
     writeAligned(buffer, size, mTransform);
     writeAligned(buffer, size, mScalingMode);
     writeAligned(buffer, size, mTimestampLo);
@@ -198,9 +189,6 @@ status_t BufferItem::unflatten(
     }
 
     readAligned(buffer, size, mCrop);
-#ifdef QCOM_HARDWARE
-    readAligned(buffer, size, mDirtyRect);
-#endif /* QCOM_HARDWARE */
     readAligned(buffer, size, mTransform);
     readAligned(buffer, size, mScalingMode);
     readAligned(buffer, size, mTimestampLo);

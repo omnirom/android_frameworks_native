@@ -548,18 +548,13 @@ status_t BufferQueueProducer::queueBuffer(int slot,
     bool isAutoTimestamp;
     android_dataspace dataSpace;
     Rect crop;
-#ifdef QCOM_HARDWARE
-    Rect dirtyRect;
-#endif /* QCOM_HARDWARE */
     int scalingMode;
     uint32_t transform;
     uint32_t stickyTransform;
     bool async;
     sp<Fence> fence;
-
     input.deflate(&timestamp, &isAutoTimestamp, &dataSpace, &crop, &scalingMode,
             &transform, &async, &fence, &stickyTransform);
-
     Region surfaceDamage = input.getSurfaceDamage();
 
     if (fence == NULL) {
@@ -645,9 +640,6 @@ status_t BufferQueueProducer::queueBuffer(int slot,
         item.mAcquireCalled = mSlots[slot].mAcquireCalled;
         item.mGraphicBuffer = mSlots[slot].mGraphicBuffer;
         item.mCrop = crop;
-#ifdef QCOM_HARDWARE
-        item.mDirtyRect = dirtyRect;
-#endif /* QCOM_HARDWARE */
         item.mTransform = transform &
                 ~static_cast<uint32_t>(NATIVE_WINDOW_TRANSFORM_INVERSE_DISPLAY);
         item.mTransformToDisplayInverse =

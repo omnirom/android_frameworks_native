@@ -81,12 +81,6 @@ EGL_ENTRY(EGLBoolean, eglSetSwapRectangleANDROID, EGLDisplay, EGLSurface, EGLint
 EGL_ENTRY(EGLClientBuffer, eglGetRenderBufferANDROID, EGLDisplay, EGLSurface)
 EGL_ENTRY(EGLint, eglDupNativeFenceFDANDROID, EGLDisplay, EGLSyncKHR)
 
-#ifdef QCOM_HARDWARE
-/* QCOM extensions */
-
-EGL_ENTRY(EGLBoolean, eglGpuPerfHintQCOM, EGLDisplay, EGLContext, EGLint *)
-
-#endif /* QCOM_HARDWARE */
 /* NVIDIA extensions */
 
 EGL_ENTRY(EGLuint64NV, eglGetSystemTimeFrequencyNV, void)

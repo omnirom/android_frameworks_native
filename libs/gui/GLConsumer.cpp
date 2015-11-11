@@ -152,9 +152,6 @@ GLConsumer::GLConsumer(const sp<IGraphicBufferConsumer>& bq, uint32_t tex,
             sizeof(mCurrentTransformMatrix));
 
     mConsumer->setConsumerUsageBits(DEFAULT_USAGE_FLAGS);
-#ifdef QCOM_HARDWARE
-    mCurrentDirtyRect.clear();
-#endif /* QCOM_HARDWARE */
 }
 
 GLConsumer::GLConsumer(const sp<IGraphicBufferConsumer>& bq, uint32_t texTarget,
@@ -453,9 +450,6 @@ status_t GLConsumer::updateAndReleaseLocked(const BufferItem& item)
     mCurrentTimestamp = item.mTimestamp;
     mCurrentFence = item.mFence;
     mCurrentFrameNumber = item.mFrameNumber;
-#ifdef QCOM_HARDWARE
-    mCurrentDirtyRect = item.mDirtyRect;
-#endif /* QCOM_HARDWARE */
 
     computeCurrentTransformMatrixLocked();
 
@@ -1008,13 +1002,6 @@ status_t GLConsumer::doGLFenceWaitLocked() const {
 
     return NO_ERROR;
 }
-
-#ifdef QCOM_HARDWARE
-Rect GLConsumer::getCurrentDirtyRect() const {
-     Mutex::Autolock lock(mMutex);
-     return mCurrentDirtyRect;
-}
-#endif /* QCOM_HARDWARE */
 
 void GLConsumer::freeBufferLocked(int slotIndex) {
     GLC_LOGV("freeBufferLocked: slotIndex=%d", slotIndex);

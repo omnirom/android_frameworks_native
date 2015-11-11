@@ -843,13 +843,7 @@ SharedBuffer const* Region::getSharedBuffer(size_t* count) const {
         size_t numRects = isRect() ? 1 : mStorage.size() - 1;
         count[0] = numRects;
     }
-#ifndef QCOM_HARDWARE
     sb->acquire();
-#else /* QCOM_HARDWARE */
-    if (sb != NULL) {
-       sb->acquire();
-    }
-#endif /* QCOM_HARDWARE */
     return sb;
 }
 

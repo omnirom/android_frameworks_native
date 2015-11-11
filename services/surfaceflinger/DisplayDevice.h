@@ -126,12 +126,6 @@ public:
     int32_t                 getHwcDisplayId() const { return mHwcDisplayId; }
     const wp<IBinder>&      getDisplayToken() const { return mDisplayToken; }
 
-#ifdef QCOM_HARDWARE
-    bool isPanelInverseMounted() const {
-        return mPanelInverseMounted;
-    }
-
-#endif /* QCOM_HARDWARE */
     // We pass in mustRecompose so we can keep VirtualDisplaySurface's state
     // machine happy without actually queueing a buffer if nothing has changed
     status_t beginFrame(bool mustRecompose) const;
@@ -177,14 +171,6 @@ public:
     void dump(String8& result) const;
     int getHardwareOrientation();
 
-#ifdef QCOM_HARDWARE
-#ifdef QCOM_BSP
-    /* To set egl atribute, EGL_SWAP_BEHAVIOR value
-     * (EGL_BUFFER_PRESERVED/EGL_BUFFER_DESTROYED)
-     */
-    void eglSwapPreserved(bool status) const;
-#endif
-#endif /* QCOM_HARDWARE */
 private:
     /*
      *  Constants, set during initialization
@@ -242,10 +228,6 @@ private:
     int mPowerMode;
     // Current active config
     int mActiveConfig;
-#ifdef QCOM_HARDWARE
-    // Panel is inverse mounted
-    int mPanelInverseMounted;
-#endif /* QCOM_HARDWARE */
 };
 
 }; // namespace android

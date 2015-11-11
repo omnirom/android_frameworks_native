@@ -72,20 +72,11 @@ class VirtualDisplaySurface : public DisplaySurface,
                               public BnGraphicBufferProducer,
                               private ConsumerBase {
 public:
-#ifndef QCOM_HARDWARE
     VirtualDisplaySurface(HWComposer& hwc, int32_t dispId,
-#else /* QCOM_HARDWARE */
-    VirtualDisplaySurface(HWComposer& hwc, int32_t &hwcDisplayId,
-#endif /* QCOM_HARDWARE */
             const sp<IGraphicBufferProducer>& sink,
             const sp<IGraphicBufferProducer>& bqProducer,
             const sp<IGraphicBufferConsumer>& bqConsumer,
-#ifndef QCOM_HARDWARE
             const String8& name);
-#else /* QCOM_HARDWARE */
-            const String8& name,
-            bool secure);
-#endif /* QCOM_HARDWARE */
 
     //
     // DisplaySurface interface
@@ -137,9 +128,6 @@ private:
     void updateQueueBufferOutput(const QueueBufferOutput& qbo);
     void resetPerFrameState();
     status_t refreshOutputBuffer();
-#ifdef QCOM_HARDWARE
-    void setOutputUsage();
-#endif /* QCOM_HARDWARE */
 
     // Both the sink and scratch buffer pools have their own set of slots
     // ("source slots", or "sslot"). We have to merge these into the single
@@ -154,27 +142,10 @@ private:
     // Immutable after construction
     //
     HWComposer& mHwc;
-#ifndef QCOM_HARDWARE
     const int32_t mDisplayId;
-#endif /* ! QCOM_HARDWARE */
     const String8 mDisplayName;
     sp<IGraphicBufferProducer> mSource[2]; // indexed by SOURCE_*
     uint32_t mDefaultOutputFormat;
-#ifdef QCOM_HARDWARE
-
-    // Force copy flag. Used to determine if we are forcing composition
-    // through HWC.
-    bool mForceHwcCopy;
-
-    // The display ID is now determined when VDS is initialized. This
-    // is done because VDS has all the requisite information to make
-    // a call on whether the display is to be composed/copied by HWC
-    // or not.
-    int32_t mDisplayId;
-
-    // secure flag
-    bool mSecure;
-#endif /* QCOM_HARDWARE */
 
     //
     // Inter-frame state
