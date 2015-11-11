@@ -1480,13 +1480,6 @@ protected:
 
     Vector<VirtualKey> mVirtualKeys;
 
-#ifdef QCOM_HARDWARE
-    // true if we support external hovering cursor control
-    bool mHasExternalHoveringCursorControl;
-    // visibility state of hovering cursor (true=visible)
-    bool mExternalHoveringCursorVisible;
-
-#endif /* QCOM_HARDWARE */
     virtual void configureParameters();
     virtual void dumpParameters(String8& dump);
     virtual void configureRawPointerAxes();

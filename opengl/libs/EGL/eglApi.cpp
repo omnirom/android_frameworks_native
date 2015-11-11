@@ -203,20 +203,13 @@ static const extention_map_t sExtensionMap[] = {
  * These extensions entry-points should not be exposed to applications.
  * They're used internally by the Android EGL layer.
  */
-#ifndef QCOM_HARDWARE
 #define FILTER_EXTENSIONS(procname) \
         (!strcmp((procname), "eglSetBlobCacheFuncsANDROID") ||    \
          !strcmp((procname), "eglHibernateProcessIMG")      ||    \
          !strcmp((procname), "eglAwakenProcessIMG")         ||    \
          !strcmp((procname), "eglDupNativeFenceFDANDROID"))
-#else /* QCOM_HARDWARE */
-#define FILTER_EXTENSIONS(procname) \
-        (!strcmp((procname), "eglSetBlobCacheFuncsANDROID") ||    \
-         !strcmp((procname), "eglHibernateProcessIMG")      ||    \
-         !strcmp((procname), "eglAwakenProcessIMG")         ||    \
-         !strcmp((procname), "eglDupNativeFenceFDANDROID")  ||    \
-         !strcmp((procname), "eglGpuPerfHintQCOM"))
-#endif /* QCOM_HARDWARE */
+
+
 
 // accesses protected by sExtensionMapMutex
 static DefaultKeyedVector<String8, __eglMustCastToProperFunctionPointerType> sGLExtentionMap;
@@ -472,11 +465,7 @@ EGLSurface eglCreateWindowSurface(  EGLDisplay dpy, EGLConfig config,
         // by default, just pick RGBA_8888
         EGLint format = HAL_PIXEL_FORMAT_RGBA_8888;
         android_dataspace dataSpace = HAL_DATASPACE_UNKNOWN;
-#ifdef QCOM_HARDWARE
-        EGLint color_buffer = EGL_RGB_BUFFER;
-#endif /* QCOM_HARDWARE */
 
-#ifndef QCOM_HARDWARE
         EGLint a = 0;
         cnx->egl.eglGetConfigAttrib(iDpy, config, EGL_ALPHA_SIZE, &a);
         if (a > 0) {
@@ -491,47 +480,11 @@ EGLSurface eglCreateWindowSurface(  EGLDisplay dpy, EGLConfig config,
             EGLint colorDepth = r + g + b;
             if (colorDepth <= 16) {
                 format = HAL_PIXEL_FORMAT_RGB_565;
-#else /* QCOM_HARDWARE */
-        if (!cnx->egl.eglGetConfigAttrib(iDpy, config, EGL_COLOR_BUFFER_TYPE, &color_buffer))
-        {
-            ALOGE("Could not configure a color buffer format");
-            return setError(EGL_BAD_ATTRIBUTE, EGL_NO_SURFACE);
-        }
-        if (EGL_RGB_BUFFER != color_buffer &&
-            EGL_LUMINANCE_BUFFER != color_buffer)
-        {
-            cnx->egl.eglGetConfigAttrib(iDpy, config, EGL_NATIVE_VISUAL_ID, &format);
-        }
-        else
-        {
-            EGLint a = 0;
-            cnx->egl.eglGetConfigAttrib(iDpy, config, EGL_ALPHA_SIZE, &a);
-            if (a > 0) {
-                // alpha-channel requested, there's really only one suitable format
-                // Format will already be RGBA8888
-#endif /* QCOM_HARDWARE */
             } else {
-#ifndef QCOM_HARDWARE
                 format = HAL_PIXEL_FORMAT_RGBX_8888;
-#else /* QCOM_HARDWARE */
-                EGLint r, g, b;
-                r = g = b = 0;
-                cnx->egl.eglGetConfigAttrib(iDpy, config, EGL_RED_SIZE,   &r);
-                cnx->egl.eglGetConfigAttrib(iDpy, config, EGL_GREEN_SIZE, &g);
-                cnx->egl.eglGetConfigAttrib(iDpy, config, EGL_BLUE_SIZE,  &b);
-                EGLint colorDepth = r + g + b;
-                if (colorDepth <= 16) {
-                    format = HAL_PIXEL_FORMAT_RGB_565;
-                } else {
-                    format = HAL_PIXEL_FORMAT_RGBX_8888;
-                }
-#endif /* QCOM_HARDWARE */
             }
-#ifndef QCOM_HARDWARE
         }
-#endif /* ! QCOM_HARDWARE */
 
-#ifndef QCOM_HARDWARE
         // now select a corresponding sRGB format if needed
         if (attrib_list && dp->haveExtension("EGL_KHR_gl_colorspace")) {
             for (const EGLint* attr = attrib_list; *attr != EGL_NONE; attr += 2) {
@@ -546,23 +499,6 @@ EGLSurface eglCreateWindowSurface(  EGLDisplay dpy, EGLConfig config,
                         // our help.
                         ALOGE("sRGB window surfaces not supported");
                         return setError(EGL_BAD_ATTRIBUTE, EGL_NO_SURFACE);
-#else /* QCOM_HARDWARE */
-            // now select a corresponding sRGB format if needed
-            if (attrib_list && dp->haveExtension("EGL_KHR_gl_colorspace")) {
-                for (const EGLint* attr = attrib_list; *attr != EGL_NONE; attr += 2) {
-                    if (*attr == EGL_GL_COLORSPACE_KHR) {
-                        if (ENABLE_EGL_KHR_GL_COLORSPACE) {
-                            format = modifyFormatColorspace(format, *(attr+1));
-                        } else {
-                            // Normally we'd pass through unhandled attributes to
-                            // the driver. But in case the driver implements this
-                            // extension but we're disabling it, we want to prevent
-                            // it getting through -- support will be broken without
-                            // our help.
-                            ALOGE("sRGB window surfaces not supported");
-                            return setError(EGL_BAD_ATTRIBUTE, EGL_NO_SURFACE);
-                        }
-#endif /* QCOM_HARDWARE */
                     }
                 }
             }
@@ -1886,47 +1822,6 @@ EGLBoolean eglPresentationTimeANDROID(EGLDisplay dpy, EGLSurface surface,
 
     return EGL_TRUE;
 }
-
-#ifdef QCOM_HARDWARE
-
-// ----------------------------------------------------------------------------
-// QCOM extensions
-// ----------------------------------------------------------------------------
-#ifdef __cplusplus
-extern "C" {
-#endif
-EGLAPI EGLBoolean eglGpuPerfHintQCOM(EGLDisplay dpy, EGLContext ctx, EGLint *attrib_list);
-#ifdef __cplusplus
-}
-#endif
-
-EGLBoolean eglGpuPerfHintQCOM(EGLDisplay dpy, EGLContext ctx, EGLint *attrib_list)
-{
-    clearError();
-
-    const egl_display_ptr dp = validate_display(dpy);
-    if (!dp) return EGL_FALSE;
-
-    ContextRef _c(dp.get(), ctx);
-    if ((ctx != EGL_NO_CONTEXT) && !_c.get()) {
-        // ctx is not valid
-        return setError(EGL_BAD_CONTEXT, EGL_FALSE);
-    }
-
-    egl_context_t * c = NULL;
-    c = get_context(ctx);
-
-    EGLint result = EGL_FALSE;
-    egl_connection_t* const cnx = &gEGLImpl;
-    if (cnx->dso && cnx->egl.eglGpuPerfHintQCOM) {
-        result = cnx->egl.eglGpuPerfHintQCOM(
-                dp->disp.dpy,
-                c->context,
-                attrib_list);
-    }
-    return result;
-}
-#endif /* QCOM_HARDWARE */
 
 // ----------------------------------------------------------------------------
 // NVIDIA extensions

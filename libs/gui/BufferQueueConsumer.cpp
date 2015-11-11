@@ -25,9 +25,6 @@
 #include <gui/BufferQueueCore.h>
 #include <gui/IConsumerListener.h>
 #include <gui/IProducerListener.h>
-#ifdef QCOM_HARDWARE
-#include <cutils/properties.h>
-#endif /* QCOM_HARDWARE */
 
 namespace android {
 

@@ -37,12 +37,6 @@
 
 #include <private/gui/ComposerService.h>
 
-#ifdef QCOM_HARDWARE
-#ifdef QCOM_BSP
-#include <gralloc_priv.h>
-#endif
-#endif /* QCOM_HARDWARE */
-
 namespace android {
 
 Surface::Surface(
@@ -74,9 +68,6 @@ Surface::Surface(
     mTimestamp = NATIVE_WINDOW_TIMESTAMP_AUTO;
     mDataSpace = HAL_DATASPACE_UNKNOWN;
     mCrop.clear();
-#ifdef QCOM_HARDWARE
-    mDirtyRect.clear();
-#endif /* QCOM_HARDWARE */
     mScalingMode = NATIVE_WINDOW_SCALING_MODE_FREEZE;
     mTransform = 0;
     mStickyTransform = 0;
@@ -150,18 +141,9 @@ int Surface::hook_queueBuffer(ANativeWindow* window,
 int Surface::hook_dequeueBuffer_DEPRECATED(ANativeWindow* window,
         ANativeWindowBuffer** buffer) {
     Surface* c = getSelf(window);
-#ifndef QCOM_HARDWARE
     ANativeWindowBuffer* buf;
-#else /* QCOM_HARDWARE */
-    ANativeWindowBuffer* buf = NULL;
-#endif /* QCOM_HARDWARE */
     int fenceFd = -1;
     int result = c->dequeueBuffer(&buf, &fenceFd);
-#ifdef QCOM_HARDWARE
-
-    if (result != NO_ERROR) return result;
-
-#endif /* QCOM_HARDWARE */
     sp<Fence> fence(new Fence(fenceFd));
     int waitResult = fence->waitForever("dequeueBuffer_DEPRECATED");
     if (waitResult != OK) {
@@ -204,14 +186,6 @@ int Surface::hook_perform(ANativeWindow* window, int operation, ...) {
     Surface* c = getSelf(window);
     return c->perform(operation, args);
 }
-
-#ifdef QCOM_HARDWARE
-status_t Surface::setDirtyRect(const Rect* dirtyRect) {
-    Mutex::Autolock lock(mMutex);
-    mDirtyRect = *dirtyRect;
-    return NO_ERROR;
-}
-#endif /* QCOM_HARDWARE */
 
 int Surface::setSwapInterval(int interval) {
     ATRACE_CALL();
@@ -361,15 +335,6 @@ int Surface::queueBuffer(android_native_buffer_t* buffer, int fenceFd) {
     Rect crop;
     mCrop.intersect(Rect(buffer->width, buffer->height), &crop);
 
-#ifdef QCOM_HARDWARE
-    Rect dirtyRect = mDirtyRect;
-    if(dirtyRect.isEmpty()) {
-        int drWidth = mUserWidth ? mUserWidth : mDefaultWidth;
-        int drHeight = mUserHeight ? mUserHeight : mDefaultHeight;
-        dirtyRect = Rect(drWidth, drHeight);
-    }
-#endif /* QCOM_HARDWARE */
-
     sp<Fence> fence(fenceFd >= 0 ? new Fence(fenceFd) : Fence::NO_FENCE);
     IGraphicBufferProducer::QueueBufferOutput output;
     IGraphicBufferProducer::QueueBufferInput input(timestamp, isAutoTimestamp,
@@ -460,10 +425,6 @@ int Surface::queueBuffer(android_native_buffer_t* buffer, int fenceFd) {
         mDirtyRegion = Region::INVALID_REGION;
     }
 
-#ifdef QCOM_HARDWARE
-    mDirtyRect.clear();
-#endif /* QCOM_HARDWARE */
-
     return err;
 }
 
@@ -515,18 +476,6 @@ int Surface::query(int what, int* value) const {
                 }
                 return err;
             }
-#ifdef QCOM_HARDWARE
-            case NATIVE_WINDOW_CONSUMER_USAGE_BITS: {
-                status_t err = NO_ERROR;
-                err = mGraphicBufferProducer->query(what, value);
-                if(err == NO_ERROR) {
-                    *value |= mReqUsage;
-                    return NO_ERROR;
-                } else {
-                    return err;
-                }
-            }
-#endif /* QCOM_HARDWARE */
         }
     }
     return mGraphicBufferProducer->query(what, value);
@@ -1054,20 +1003,7 @@ status_t Surface::lock(
             return err;
         }
         // we're intending to do software rendering from this point
-#ifdef QCOM_HARDWARE
-        // Do not overwrite the mReqUsage flag which was set by the client
-#ifdef QCOM_BSP
-        setUsage(mReqUsage & GRALLOC_USAGE_PRIVATE_EXTERNAL_ONLY |
-                mReqUsage & GRALLOC_USAGE_PRIVATE_INTERNAL_ONLY |
-                mReqUsage & GRALLOC_USAGE_PRIVATE_SECURE_DISPLAY |
-                    GRALLOC_USAGE_SW_READ_OFTEN |
-                    GRALLOC_USAGE_SW_WRITE_OFTEN);
-#else
-#endif /* QCOM_HARDWARE */
         setUsage(GRALLOC_USAGE_SW_READ_OFTEN | GRALLOC_USAGE_SW_WRITE_OFTEN);
-#ifdef QCOM_HARDWARE
-#endif
-#endif /* QCOM_HARDWARE */
     }
 
     ANativeWindowBuffer* out;
@@ -1087,9 +1023,6 @@ status_t Surface::lock(
         }
 
         // figure out if we can copy the frontbuffer back
-#ifdef QCOM_HARDWARE
-        int backBufferSlot(getSlotFromBufferLocked(backBuffer.get()));
-#endif /* QCOM_HARDWARE */
         const sp<GraphicBuffer>& frontBuffer(mPostedBuffer);
         const bool canCopyBack = (frontBuffer != 0 &&
                 backBuffer->width  == frontBuffer->width &&
@@ -1097,31 +1030,15 @@ status_t Surface::lock(
                 backBuffer->format == frontBuffer->format);
 
         if (canCopyBack) {
-#ifndef QCOM_HARDWARE
             // copy the area that is invalid and not repainted this round
             const Region copyback(mDirtyRegion.subtract(newDirtyRegion));
-#else /* QCOM_HARDWARE */
-            Mutex::Autolock lock(mMutex);
-            Region oldDirtyRegion;
-            if(mSlots[backBufferSlot].dirtyRegion.isEmpty()) {
-                oldDirtyRegion.set(bounds);
-            } else {
-                for(int i = 0 ; i < NUM_BUFFER_SLOTS; i++ ) {
-                    if(i != backBufferSlot && !mSlots[i].dirtyRegion.isEmpty())
-                        oldDirtyRegion.orSelf(mSlots[i].dirtyRegion);
-                }
-            }
-            const Region copyback(oldDirtyRegion.subtract(newDirtyRegion));
-#endif /* QCOM_HARDWARE */
             if (!copyback.isEmpty())
                 copyBlt(backBuffer, frontBuffer, copyback);
         } else {
             // if we can't copy-back anything, modify the user's dirty
             // region to make sure they redraw the whole buffer
             newDirtyRegion.set(bounds);
-#ifndef QCOM_HARDWARE
             mDirtyRegion.clear();
-#endif /* ! QCOM_HARDWARE */
             Mutex::Autolock lock(mMutex);
             for (size_t i=0 ; i<NUM_BUFFER_SLOTS ; i++) {
                 mSlots[i].dirtyRegion.clear();
@@ -1131,23 +1048,15 @@ status_t Surface::lock(
 
         { // scope for the lock
             Mutex::Autolock lock(mMutex);
-#ifndef QCOM_HARDWARE
             int backBufferSlot(getSlotFromBufferLocked(backBuffer.get()));
-#endif /* ! QCOM_HARDWARE */
             if (backBufferSlot >= 0) {
-#ifndef QCOM_HARDWARE
                 Region& dirtyRegion(mSlots[backBufferSlot].dirtyRegion);
                 mDirtyRegion.subtract(dirtyRegion);
                 dirtyRegion = newDirtyRegion;
-#else /* QCOM_HARDWARE */
-               mSlots[backBufferSlot].dirtyRegion = newDirtyRegion;
-#endif /* QCOM_HARDWARE */
             }
         }
 
-#ifndef QCOM_HARDWARE
         mDirtyRegion.orSelf(newDirtyRegion);
-#endif /* ! QCOM_HARDWARE */
         if (inOutDirtyBounds) {
             *inOutDirtyBounds = newDirtyRegion.getBounds();
         }

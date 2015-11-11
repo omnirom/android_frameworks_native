@@ -284,16 +284,6 @@ public:
                   dataSpace(dataSpace), crop(crop), scalingMode(scalingMode),
                   transform(transform), stickyTransform(sticky),
                   async(async), fence(fence), surfaceDamage() { }
-#ifdef QCOM_HARDWARE
-
-        inline QueueBufferInput(int64_t timestamp, bool isAutoTimestamp,
-                const Rect& crop, const Rect& dirtyRect, int scalingMode, uint32_t transform, bool async,
-                const sp<Fence>& fence, uint32_t sticky = 0)
-        : timestamp(timestamp), isAutoTimestamp(isAutoTimestamp), crop(crop),
-          dirtyRect(dirtyRect),scalingMode(scalingMode), transform(transform), stickyTransform(sticky),
-          async(async), fence(fence) { }
-
-#endif /* QCOM_HARDWARE */
         inline void deflate(int64_t* outTimestamp, bool* outIsAutoTimestamp,
                 android_dataspace* outDataSpace,
                 Rect* outCrop, int* outScalingMode,
@@ -312,26 +302,6 @@ public:
             }
         }
 
-#ifdef QCOM_HARDWARE
-        inline void deflate(int64_t* outTimestamp, bool* outIsAutoTimestamp,
-                Rect* outCrop, Rect* outDirtyRect, int* outScalingMode, uint32_t* outTransform,
-                bool* outAsync, sp<Fence>* outFence,
-                uint32_t* outStickyTransform = NULL) const {
-            *outTimestamp = timestamp;
-            *outIsAutoTimestamp = bool(isAutoTimestamp);
-            *outCrop = crop;
-            *outDirtyRect = dirtyRect;
-            *outScalingMode = scalingMode;
-            *outTransform = transform;
-            *outAsync = bool(async);
-            *outFence = fence;
-            if (outStickyTransform != NULL) {
-                *outStickyTransform = stickyTransform;
-            }
-        }
-
-
-#endif /* QCOM_HARDWARE */
         // Flattenable protocol
         size_t getFlattenedSize() const;
         size_t getFdCount() const;
@@ -346,9 +316,6 @@ public:
         int isAutoTimestamp;
         android_dataspace dataSpace;
         Rect crop;
-#ifdef QCOM_HARDWARE
-        Rect dirtyRect;
-#endif /* QCOM_HARDWARE */
         int scalingMode;
         uint32_t transform;
         uint32_t stickyTransform;

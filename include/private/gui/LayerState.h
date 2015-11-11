@@ -40,9 +40,6 @@ struct layer_state_t {
         eLayerHidden        = 0x01,     // SURFACE_HIDDEN in SurfaceControl.java
         eLayerOpaque        = 0x02,     // SURFACE_OPAQUE
         eLayerSecure        = 0x80,     // SECURE
-#ifdef QCOM_HARDWARE
-        eLayerTransparent   = 0x04,     // SURFACE_TRANSPARENT TODO: Check this (xplod-6.0-merge)
-#endif /* QCOM_HARDWARE */
     };
 
     enum {
@@ -55,10 +52,6 @@ struct layer_state_t {
         eFlagsChanged               = 0x00000040,
         eLayerStackChanged          = 0x00000080,
         eCropChanged                = 0x00000100,
-        eOpacityChanged             = 0x00000200,
-#ifdef QCOM_HARDWARE
-        eTransparencyChanged        = 0x80000000,
-#endif /* QCOM_HARDWARE */
     };
 
     layer_state_t()

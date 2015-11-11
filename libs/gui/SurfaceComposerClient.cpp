@@ -315,11 +315,6 @@ status_t Composer::setFlags(const sp<SurfaceComposerClient>& client,
             mask & layer_state_t::eLayerSecure) {
         s->what |= layer_state_t::eFlagsChanged;
     }
-#ifdef QCOM_HARDWARE
-    if (mask & layer_state_t::eLayerTransparent) {
-        s->what |= layer_state_t::eTransparencyChanged;
-    }
-#endif /* QCOM_HARDWARE */
     s->flags &= ~mask;
     s->flags |= (flags & mask);
     s->mask |= mask;

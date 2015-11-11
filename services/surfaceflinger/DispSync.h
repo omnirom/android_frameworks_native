@@ -29,10 +29,8 @@ namespace android {
 // sync framework, or if all phase offsets are zero.  The latter is useful
 // because it allows us to avoid resync bursts on devices that don't need
 // phase-offset VSYNC events.
-#if !defined(QCOM_HARDWARE) && (defined(RUNNING_WITHOUT_SYNC_FRAMEWORK) || \
-        (VSYNC_EVENT_PHASE_OFFSET_NS == 0 && SF_VSYNC_EVENT_PHASE_OFFSET_NS == 0))
-static const bool kIgnorePresentFences = true;
-#elif defined(QCOM_HARDWARE) && defined(RUNNING_WITHOUT_SYNC_FRAMEWORK)
+#if defined(RUNNING_WITHOUT_SYNC_FRAMEWORK) || \
+        (VSYNC_EVENT_PHASE_OFFSET_NS == 0 && SF_VSYNC_EVENT_PHASE_OFFSET_NS == 0)
 static const bool kIgnorePresentFences = true;
 #else
 static const bool kIgnorePresentFences = false;
