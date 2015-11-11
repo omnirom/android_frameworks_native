@@ -1,0 +1,21 @@
+{
+  "comments": [
+    {
+      "key": {
+        "uuid": "b8f5b13e_dea7944d",
+        "filename": "build/phone-xhdpi-1024-dalvik-heap.mk",
+        "patchSetId": 1
+      },
+      "lineNbr": 24,
+      "author": {
+        "id": 1000124
+      },
+      "writtenOn": "2015-11-11T17:51:16Z",
+      "side": 1,
+      "message": "this value is from AOSP android-6.0.0_r26, not sure where it changed, but it changed.",
+      "revId": "f9116bce7b9200792edd16b660708673977b7990",
+      "serverId": "56841c99-7c94-43d4-bf0b-cb4707e66d55",
+      "unresolved": false
+    }
+  ]
+}
