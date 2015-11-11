@@ -40,6 +40,7 @@ struct DisplayInfo {
     // TODO: this needs to go away (currently needed only by webkit)
     PixelFormatInfo pixelFormatInfo;
 #endif
+    int colorTransform;
 };
 
 /* Display orientations as defined in Surface.java and ISurfaceComposer.h. */

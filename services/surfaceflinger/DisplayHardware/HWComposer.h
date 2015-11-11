@@ -295,6 +295,7 @@ public:
         bool secure;
 #endif /* QCOM_HARDWARE */
         nsecs_t refresh;
+        int colorTransform;
     };
 
     // Query display parameters.  Pass in a display index (e.g.

@@ -181,6 +181,9 @@ SurfaceFlinger::SurfaceFlinger()
     property_get("ro.bq.gpu_to_cpu_unsupported", value, "0");
     mGpuToCpuSupported = !atoi(value);
 
+    property_get("debug.sf.drop_missed_frames", value, "0");
+    mDropMissedFrames = atoi(value);
+
     property_get("debug.sf.showupdates", value, "0");
     mDebugRegion = atoi(value);
 
@@ -491,6 +494,15 @@ void SurfaceFlinger::init() {
     mEGLDisplay = eglGetDisplay(EGL_DEFAULT_DISPLAY);
     eglInitialize(mEGLDisplay, NULL, NULL);
 
+    // start the EventThread
+    sp<VSyncSource> vsyncSrc = new DispSyncSource(&mPrimaryDispSync,
+            vsyncPhaseOffsetNs, true, "app");
+    mEventThread = new EventThread(vsyncSrc);
+    sp<VSyncSource> sfVsyncSrc = new DispSyncSource(&mPrimaryDispSync,
+            sfVsyncPhaseOffsetNs, true, "sf");
+    mSFEventThread = new EventThread(sfVsyncSrc);
+    mEventQueue.setEventThread(mSFEventThread);
+
     // Initialize the H/W composer object.  There may or may not be an
     // actual hardware composer underneath.
     mHwc = new HWComposer(this,
@@ -547,15 +559,6 @@ void SurfaceFlinger::init() {
     // make the GLContext current so that we can create textures when creating Layers
     // (which may happens before we render something)
     getDefaultDisplayDevice()->makeCurrent(mEGLDisplay, mEGLContext);
-
-    // start the EventThread
-    sp<VSyncSource> vsyncSrc = new DispSyncSource(&mPrimaryDispSync,
-            vsyncPhaseOffsetNs, true, "app");
-    mEventThread = new EventThread(vsyncSrc);
-    sp<VSyncSource> sfVsyncSrc = new DispSyncSource(&mPrimaryDispSync,
-            sfVsyncPhaseOffsetNs, true, "sf");
-    mSFEventThread = new EventThread(sfVsyncSrc);
-    mEventQueue.setEventThread(mSFEventThread);
 
     mEventControlThread = new EventControlThread(this);
     mEventControlThread->run("EventControl", PRIORITY_URGENT_DISPLAY);
@@ -698,6 +701,7 @@ status_t SurfaceFlinger::getDisplayConfigs(const sp<IBinder>& display,
         }
         info.fps = float(1e9 / hwConfig.refresh);
         info.appVsyncOffset = VSYNC_EVENT_PHASE_OFFSET_NS;
+        info.colorTransform = hwConfig.colorTransform;
 
         // This is how far in advance a buffer must be queued for
         // presentation at a given time.  If you want a buffer to appear
@@ -1013,31 +1017,33 @@ bool SurfaceFlinger::handleMessageInvalidate() {
     return handlePageFlip();
 }
 
-#ifdef QCOM_HARDWARE
-#ifdef QCOM_BSP
-/* Compute DirtyRegion, if DR optimization for GPU comp optimization
- * is ON & and no external device is connected.*/
-void SurfaceFlinger::setUpTiledDr() {
-    if(mGpuTileRenderEnable && (mDisplays.size()==1)) {
-        const sp<DisplayDevice>& hw(mDisplays[HWC_DISPLAY_PRIMARY]);
-        mCanUseGpuTileRender = computeTiledDr(hw);
-    }
-}
-#endif
-#endif /* QCOM_HARDWARE */
 void SurfaceFlinger::handleMessageRefresh() {
     ATRACE_CALL();
-    preComposition();
-    rebuildLayerStacks();
-    setUpHWComposer();
-#ifdef QCOM_HARDWARE
-#ifdef QCOM_BSP
-    setUpTiledDr();
-#endif
-#endif /* QCOM_HARDWARE */
-    doDebugFlashRegions();
-    doComposition();
-    postComposition();
+
+    static nsecs_t previousExpectedPresent = 0;
+    nsecs_t expectedPresent = mPrimaryDispSync.computeNextRefresh(0);
+    static bool previousFrameMissed = false;
+    bool frameMissed = (expectedPresent == previousExpectedPresent);
+    if (frameMissed != previousFrameMissed) {
+        ATRACE_INT("FrameMissed", static_cast<int>(frameMissed));
+    }
+    previousFrameMissed = frameMissed;
+
+    if (CC_UNLIKELY(mDropMissedFrames && frameMissed)) {
+        // Latch buffers, but don't send anything to HWC, then signal another
+        // wakeup for the next vsync
+        preComposition();
+        repaintEverything();
+    } else {
+        preComposition();
+        rebuildLayerStacks();
+        setUpHWComposer();
+        doDebugFlashRegions();
+        doComposition();
+        postComposition();
+    }
+
+    previousExpectedPresent = mPrimaryDispSync.computeNextRefresh(0);
 }
 
 #ifndef QCOM_HARDWARE
