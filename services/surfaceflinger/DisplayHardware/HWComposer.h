@@ -181,6 +181,7 @@ public:
         virtual void setAcquireFenceFd(int fenceFd) = 0;
         virtual void setPlaneAlpha(uint8_t alpha) = 0;
         virtual void onDisplayed() = 0;
+        virtual void setAnimating(bool animating)= 0;
     };
 
     /*
@@ -313,6 +314,9 @@ public:
      * Extensions
      */
     virtual inline bool isVDSEnabled() const { return true; };
+    virtual inline bool isCompositionTypeBlit(const int32_t /*compType*/) const {
+            return false;
+    };
 
 private:
     void loadHwcModule();
