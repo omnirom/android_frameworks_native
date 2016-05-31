@@ -36,6 +36,9 @@
 
 #include <hardware/hardware.h>
 #include <hardware/hwcomposer.h>
+#ifdef QTI_BSP
+#include <exhwcomposer_defs.h>
+#endif
 
 #include <android/configuration.h>
 
@@ -711,13 +714,14 @@ status_t HWComposer::prepare() {
             disp.hasFbComp = false;
             disp.hasOvComp = false;
             if (disp.list) {
-                for (size_t i=0 ; i<disp.list->numHwLayers ; i++) {
-                    hwc_layer_1_t& l = disp.list->hwLayers[i];
+                for (size_t j=0 ; j<disp.list->numHwLayers ; j++) {
+                    hwc_layer_1_t& l = disp.list->hwLayers[j];
 
                     //ALOGD("prepare: %d, type=%d, handle=%p",
                     //        i, l.compositionType, l.handle);
 
-                    if (l.flags & HWC_SKIP_LAYER) {
+                    if ((i == DisplayDevice::DISPLAY_PRIMARY) &&
+                        l.flags & HWC_SKIP_LAYER) {
                         l.compositionType = HWC_FRAMEBUFFER;
                     }
                     if (l.compositionType == HWC_FRAMEBUFFER) {
@@ -725,6 +729,9 @@ status_t HWComposer::prepare() {
                     }
                     if (l.compositionType == HWC_OVERLAY) {
                         disp.hasOvComp = true;
+                    }
+                    if (isCompositionTypeBlit(l.compositionType)) {
+                        disp.hasFbComp = true;
                     }
                     if (l.compositionType == HWC_CURSOR_OVERLAY) {
                         disp.hasOvComp = true;
@@ -1003,6 +1010,17 @@ public:
             }
         }
     }
+    virtual void setAnimating(bool animating) {
+        if (animating) {
+#ifdef QTI_BSP
+            getLayer()->flags |= HWC_SCREENSHOT_ANIMATOR_LAYER;
+#endif
+        } else {
+#ifdef QTI_BSP
+            getLayer()->flags &= ~HWC_SCREENSHOT_ANIMATOR_LAYER;
+#endif
+        }
+    }
     virtual void setDefaultState() {
         hwc_layer_1_t* const l = getLayer();
         l->compositionType = HWC_FRAMEBUFFER;
@@ -1263,7 +1281,7 @@ void HWComposer::dump(String8& result) const {
                     if (hwcHasApiVersion(mHwc, HWC_DEVICE_API_VERSION_1_3)) {
                         result.appendFormat(
                                 " %9s | %08" PRIxPTR " | %04x | %04x | %02x | %04x | %-11s |%7.1f,%7.1f,%7.1f,%7.1f |%5d,%5d,%5d,%5d | %s\n",
-                                        compositionTypeName[type],
+                                        (isCompositionTypeBlit(l.compositionType)) ? "HWC_BLIT" : compositionTypeName[type],
                                         intptr_t(l.handle), l.hints, l.flags, l.transform, l.blending, formatStr.string(),
                                         l.sourceCropf.left, l.sourceCropf.top, l.sourceCropf.right, l.sourceCropf.bottom,
                                         l.displayFrame.left, l.displayFrame.top, l.displayFrame.right, l.displayFrame.bottom,
@@ -1271,7 +1289,7 @@ void HWComposer::dump(String8& result) const {
                     } else {
                         result.appendFormat(
                                 " %9s | %08" PRIxPTR " | %04x | %04x | %02x | %04x | %-11s |%7d,%7d,%7d,%7d |%5d,%5d,%5d,%5d | %s\n",
-                                        compositionTypeName[type],
+                                        (isCompositionTypeBlit(l.compositionType)) ? "HWC_BLIT" : compositionTypeName[type],
                                         intptr_t(l.handle), l.hints, l.flags, l.transform, l.blending, formatStr.string(),
                                         l.sourceCrop.left, l.sourceCrop.top, l.sourceCrop.right, l.sourceCrop.bottom,
                                         l.displayFrame.left, l.displayFrame.top, l.displayFrame.right, l.displayFrame.bottom,
