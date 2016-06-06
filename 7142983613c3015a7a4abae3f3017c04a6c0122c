@@ -1,0 +1,21 @@
+{
+  "comments": [
+    {
+      "key": {
+        "uuid": "78f7b947_c6c3588d",
+        "filename": "services/surfaceflinger/Android.mk",
+        "patchSetId": 3
+      },
+      "lineNbr": 122,
+      "author": {
+        "id": 1000026
+      },
+      "writtenOn": "2016-06-06T14:04:45Z",
+      "side": 1,
+      "message": "I would remove it completely so see any issues imemdiately",
+      "revId": "7142983613c3015a7a4abae3f3017c04a6c0122c",
+      "serverId": "56841c99-7c94-43d4-bf0b-cb4707e66d55",
+      "unresolved": false
+    }
+  ]
+}
