@@ -58,12 +58,17 @@ struct BatteryProperties {
     bool chargerUsbOnline;
     bool chargerWirelessOnline;
     int maxChargingCurrent;
+    int maxChargingVoltage;
     int batteryStatus;
     int batteryHealth;
     bool batteryPresent;
     int batteryLevel;
     int batteryVoltage;
     int batteryTemperature;
+    int batteryCurrent;
+    int batteryCycleCount;
+    int batteryFullCharge;
+    int batteryChargeCounter;
     String8 batteryTechnology;
 
     status_t writeToParcel(Parcel* parcel) const;

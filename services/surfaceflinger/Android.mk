@@ -10,16 +10,18 @@ LOCAL_SRC_FILES := \
     DispSync.cpp \
     EventControlThread.cpp \
     EventThread.cpp \
+    FenceTracker.cpp \
     FrameTracker.cpp \
+    GpuService.cpp \
     Layer.cpp \
     LayerDim.cpp \
     MessageQueue.cpp \
     MonitoredProducer.cpp \
-    SurfaceFlinger.cpp \
     SurfaceFlingerConsumer.cpp \
     Transform.cpp \
     DisplayHardware/FramebufferSurface.cpp \
-    DisplayHardware/HWComposer.cpp \
+    DisplayHardware/HWC2.cpp \
+    DisplayHardware/HWC2On1Adapter.cpp \
     DisplayHardware/PowerHAL.cpp \
     DisplayHardware/VirtualDisplaySurface.cpp \
     Effects/Daltonizer.cpp \
@@ -36,9 +38,25 @@ LOCAL_SRC_FILES := \
     RenderEngine/GLES11RenderEngine.cpp \
     RenderEngine/GLES20RenderEngine.cpp
 
+LOCAL_C_INCLUDES := \
+	frameworks/native/vulkan/include \
+	external/vulkan-validation-layers/libs/vkjson
 
 LOCAL_CFLAGS := -DLOG_TAG=\"SurfaceFlinger\"
 LOCAL_CFLAGS += -DGL_GLEXT_PROTOTYPES -DEGL_EGLEXT_PROTOTYPES
+#LOCAL_CFLAGS += -DENABLE_FENCE_TRACKING
+
+USE_HWC2 := false
+ifeq ($(USE_HWC2),true)
+    LOCAL_CFLAGS += -DUSE_HWC2
+    LOCAL_SRC_FILES += \
+        SurfaceFlinger.cpp \
+        DisplayHardware/HWComposer.cpp
+else
+    LOCAL_SRC_FILES += \
+        SurfaceFlinger_hwc1.cpp \
+        DisplayHardware/HWComposer_hwc1.cpp
+endif
 
 ifeq ($(TARGET_BOARD_PLATFORM),omap4)
     LOCAL_CFLAGS += -DHAS_CONTEXT_PRIORITY
@@ -94,8 +112,9 @@ else
 endif
 
 LOCAL_CFLAGS += -fvisibility=hidden -Werror=format
-LOCAL_CFLAGS += -std=c++11
+LOCAL_CFLAGS += -std=c++14
 
+LOCAL_STATIC_LIBRARIES := libvkjson
 LOCAL_SHARED_LIBRARIES := \
     libcutils \
     liblog \
@@ -108,7 +127,8 @@ LOCAL_SHARED_LIBRARIES := \
     libbinder \
     libui \
     libgui \
-    libpowermanager
+    libpowermanager \
+    libvulkan
 
 LOCAL_MODULE := libsurfaceflinger
 
@@ -124,7 +144,9 @@ LOCAL_CLANG := true
 
 LOCAL_LDFLAGS := -Wl,--version-script,art/sigchainlib/version-script.txt -Wl,--export-dynamic
 LOCAL_CFLAGS := -DLOG_TAG=\"SurfaceFlinger\"
-LOCAL_CPPFLAGS := -std=c++11
+LOCAL_CPPFLAGS := -std=c++14
+
+LOCAL_INIT_RC := surfaceflinger.rc
 
 ifneq ($(ENABLE_CPUSETS),)
     LOCAL_CFLAGS += -DENABLE_CPUSETS
@@ -161,7 +183,7 @@ include $(CLEAR_VARS)
 LOCAL_CLANG := true
 
 LOCAL_CFLAGS := -DLOG_TAG=\"SurfaceFlinger\"
-LOCAL_CPPFLAGS := -std=c++11
+LOCAL_CPPFLAGS := -std=c++14
 
 LOCAL_SRC_FILES := \
     DdmConnection.cpp

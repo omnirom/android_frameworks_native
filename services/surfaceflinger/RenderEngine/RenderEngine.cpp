@@ -147,7 +147,7 @@ RenderEngine* RenderEngine::create(EGLDisplay display, int hwcFormat) {
     return engine;
 }
 
-RenderEngine::RenderEngine() : mEGLContext(EGL_NO_CONTEXT) {
+RenderEngine::RenderEngine() : mEGLConfig(NULL), mEGLContext(EGL_NO_CONTEXT) {
 }
 
 RenderEngine::~RenderEngine() {
@@ -317,7 +317,7 @@ class EGLAttributeVector {
     friend class Adder;
     KeyedVector<Attribute, EGLint> mList;
     struct Attribute {
-        Attribute() {};
+        Attribute() : v(0) {};
         Attribute(EGLint v) : v(v) { }
         EGLint v;
         bool operator < (const Attribute& other) const {

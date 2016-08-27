@@ -23,19 +23,23 @@ sources := \
     IAppOpsService.cpp \
     IBatteryStats.cpp \
     IInterface.cpp \
+    IMediaResourceMonitor.cpp \
     IMemory.cpp \
     IPCThreadState.cpp \
     IPermissionController.cpp \
     IProcessInfoService.cpp \
-    ProcessInfoService.cpp \
+    IResultReceiver.cpp \
     IServiceManager.cpp \
-    MemoryDealer.cpp \
     MemoryBase.cpp \
+    MemoryDealer.cpp \
     MemoryHeapBase.cpp \
     Parcel.cpp \
     PermissionCache.cpp \
+    PersistableBundle.cpp \
+    ProcessInfoService.cpp \
     ProcessState.cpp \
     Static.cpp \
+    Status.cpp \
     TextOutput.cpp \
 
 ifeq ($(BOARD_NEEDS_MEMORYHEAPPMEM),true)
@@ -65,6 +69,9 @@ endif
 
 LOCAL_MODULE := libbinder
 LOCAL_SHARED_LIBRARIES += liblog libcutils libutils
+
+LOCAL_CLANG := true
+LOCAL_SANITIZE := integer
 LOCAL_SRC_FILES := $(sources)
 ifeq ($(BOARD_NEEDS_MEMORYHEAPPMEM),true)
 LOCAL_C_INCLUDES += \

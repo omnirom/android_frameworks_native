@@ -19,7 +19,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#if HAVE_ANDROID_OS
+#ifdef __ANDROID__
 #include <binder/Parcel.h>
 #endif
 
@@ -599,12 +599,16 @@ void KeyCharacterMap::addLockedMetaKey(Vector<KeyEvent>& outEvents,
     }
 }
 
-#if HAVE_ANDROID_OS
+#ifdef __ANDROID__
 sp<KeyCharacterMap> KeyCharacterMap::readFromParcel(Parcel* parcel) {
     sp<KeyCharacterMap> map = new KeyCharacterMap();
     map->mType = parcel->readInt32();
     size_t numKeys = parcel->readInt32();
     if (parcel->errorCheck()) {
+        return NULL;
+    }
+    if (numKeys > MAX_KEYS) {
+        ALOGE("Too many keys in KeyCharacterMap (%zu > %d)", numKeys, MAX_KEYS);
         return NULL;
     }
 

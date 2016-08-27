@@ -45,6 +45,7 @@ class ComposerState;
 class DisplayState;
 struct DisplayInfo;
 struct DisplayStatInfo;
+class HdrCapabilities;
 class IDisplayEventConnection;
 class IMemoryHeap;
 class Rect;
@@ -164,6 +165,13 @@ public:
      * Requires the ACCESS_SURFACE_FLINGER permission.
      */
     virtual status_t getAnimationFrameStats(FrameStats* outStats) const = 0;
+
+    /* Gets the supported HDR capabilities of the given display.
+     *
+     * Requires the ACCESS_SURFACE_FLINGER permission.
+     */
+    virtual status_t getHdrCapabilities(const sp<IBinder>& display,
+            HdrCapabilities* outCapabilities) const = 0;
 };
 
 // ----------------------------------------------------------------------------
@@ -191,6 +199,7 @@ public:
         GET_ANIMATION_FRAME_STATS,
         SET_POWER_MODE,
         GET_DISPLAY_STATS,
+        GET_HDR_CAPABILITIES,
     };
 
     virtual status_t onTransact(uint32_t code, const Parcel& data,
