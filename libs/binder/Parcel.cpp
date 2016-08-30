@@ -50,18 +50,6 @@
 #include <private/binder/binder_module.h>
 #include <private/binder/Static.h>
 
-<<<<<<< HEAD
-#include <inttypes.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <stdint.h>
-#include <sys/mman.h>
-#include <sys/stat.h>
-#include <sys/types.h>
-#include <unistd.h>
-
-=======
->>>>>>> android-7.0.0_r1
 #ifndef INT32_MAX
 #define INT32_MAX ((int32_t)(2147483647))
 #endif
