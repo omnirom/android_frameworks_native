@@ -104,8 +104,7 @@ public:
             Rect sourceCrop, uint32_t reqWidth, uint32_t reqHeight,
             uint32_t minLayerZ, uint32_t maxLayerZ,
             bool useIdentityTransform,
-            ISurfaceComposer::Rotation rotation,
-            bool isCpuConsumer)
+            ISurfaceComposer::Rotation rotation)
     {
         Parcel data, reply;
         data.writeInterfaceToken(ISurfaceComposer::getInterfaceDescriptor());
@@ -118,7 +117,6 @@ public:
         data.writeUint32(maxLayerZ);
         data.writeInt32(static_cast<int32_t>(useIdentityTransform));
         data.writeInt32(static_cast<int32_t>(rotation));
-        data.writeInt32(isCpuConsumer);
         remote()->transact(BnSurfaceComposer::CAPTURE_SCREEN, data, &reply);
         return reply.readInt32();
     }
@@ -386,13 +384,11 @@ status_t BnSurfaceComposer::onTransact(
             uint32_t maxLayerZ = data.readUint32();
             bool useIdentityTransform = static_cast<bool>(data.readInt32());
             int32_t rotation = data.readInt32();
-            bool isCpuConsumer = data.readInt32();
 
             status_t res = captureScreen(display, producer,
                     sourceCrop, reqWidth, reqHeight, minLayerZ, maxLayerZ,
                     useIdentityTransform,
-                    static_cast<ISurfaceComposer::Rotation>(rotation),
-                    isCpuConsumer);
+                    static_cast<ISurfaceComposer::Rotation>(rotation));
             reply->writeInt32(res);
             return NO_ERROR;
         }

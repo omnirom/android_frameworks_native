@@ -261,11 +261,9 @@ void RenderEngine::dump(String8& result) {
 // ---------------------------------------------------------------------------
 
 RenderEngine::BindImageAsFramebuffer::BindImageAsFramebuffer(
-        RenderEngine& engine, EGLImageKHR image, bool useReadPixels,
-        int reqWidth, int reqHeight) : mEngine(engine), mUseReadPixels(useReadPixels)
+        RenderEngine& engine, EGLImageKHR image) : mEngine(engine)
 {
-    mEngine.bindImageAsFramebuffer(image, &mTexName, &mFbName, &mStatus,
-            useReadPixels, reqWidth, reqHeight);
+    mEngine.bindImageAsFramebuffer(image, &mTexName, &mFbName, &mStatus);
 
     ALOGE_IF(mStatus != GL_FRAMEBUFFER_COMPLETE_OES,
             "glCheckFramebufferStatusOES error %d", mStatus);
@@ -273,7 +271,7 @@ RenderEngine::BindImageAsFramebuffer::BindImageAsFramebuffer(
 
 RenderEngine::BindImageAsFramebuffer::~BindImageAsFramebuffer() {
     // back to main framebuffer
-    mEngine.unbindFramebuffer(mTexName, mFbName, mUseReadPixels);
+    mEngine.unbindFramebuffer(mTexName, mFbName);
 }
 
 status_t RenderEngine::BindImageAsFramebuffer::getStatus() const {
