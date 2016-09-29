@@ -112,14 +112,6 @@ public:
 
     virtual void disableTexturing() = 0;
     virtual void disableBlending() = 0;
-#ifdef QCOM_HARDWARE
-#ifdef QCOM_BSP
-    virtual void startTileComposition(int x, int y, int width,
-          int height, bool preserve){}
-    virtual void endTileComposition(unsigned int) {}
-#endif
-
-#endif /* QCOM_HARDWARE */
 
     // drawing
     virtual void drawMesh(const Mesh& mesh) = 0;
