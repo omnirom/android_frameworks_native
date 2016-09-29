@@ -1,4 +1,8 @@
 /*
+ * Copyright (c) 2016, The Linux Foundation. All rights reserved.
+ * Not a Contribution
+ *
+ *
  * Copyright (C) 2007 The Android Open Source Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -96,7 +100,8 @@ Layer::Layer(SurfaceFlinger* flinger, const sp<Client>& client,
         mLastFrameNumberReceived(0),
         mUpdateTexImageFailed(false),
         mAutoRefresh(false),
-        mFreezePositionUpdates(false)
+        mFreezePositionUpdates(false),
+        mTransformHint(0)
 {
 #ifdef USE_HWC2
     ALOGV("Creating Layer %s", name.string());
@@ -134,6 +139,7 @@ Layer::Layer(SurfaceFlinger* flinger, const sp<Client>& client,
     mCurrentState.flags = layerFlags;
     mCurrentState.sequence = 0;
     mCurrentState.requested = mCurrentState.active;
+    mCurrentState.color = 0;
 
     // drawing state & current state are identical
     mDrawingState = mCurrentState;
@@ -363,7 +369,7 @@ Rect Layer::getContentCrop() const {
     return crop;
 }
 
-static Rect reduce(const Rect& win, const Region& exclude) {
+Rect Layer::reduce(const Rect& win, const Region& exclude) const{
     if (CC_LIKELY(exclude.isEmpty())) {
         return win;
     }
@@ -536,7 +542,7 @@ void Layer::setGeometry(
                 to_string(error).c_str(), static_cast<int32_t>(error));
     }
 #else
-    if (!isOpaque(s) || s.alpha != 0xFF) {
+    if (!isOpaque(s)) {
         layer.setBlending(mPremultipliedAlpha ?
                 HWC_BLENDING_PREMULT :
                 HWC_BLENDING_COVERAGE);
@@ -617,6 +623,7 @@ void Layer::setGeometry(
     }
     const Transform& tr(hw->getTransform());
     layer.setFrame(tr.transform(frame));
+    setPosition(hw, layer, s);
     layer.setCrop(computeCrop(hw));
     layer.setPlaneAlpha(s.alpha);
 #endif
@@ -825,6 +832,7 @@ void Layer::setAcquireFence(const sp<const DisplayDevice>& /* hw */,
             }
         }
     }
+    setAcquiredFenceIfBlit(fenceFd, layer);
     layer.setAcquireFenceFd(fenceFd);
 }
 
@@ -915,7 +923,8 @@ void Layer::onDraw(const sp<const DisplayDevice>& hw, const Region& clip,
 
     RenderEngine& engine(mFlinger->getRenderEngine());
 
-    if (!blackOutLayer) {
+    if (!blackOutLayer ||
+            ((hw->getDisplayType() == HWC_DISPLAY_PRIMARY) && canAllowGPUForProtected())) {
         // TODO: we could be more subtle with isFixedSize()
         const bool useFiltering = getFiltering() || needsFiltering(hw) || isFixedSize();
 
@@ -983,6 +992,16 @@ void Layer::clearWithOpenGL(
     clearWithOpenGL(hw, clip, 0,0,0,0);
 }
 
+void Layer::handleOpenGLDraw(const sp<const DisplayDevice>& /* hw */,
+            Mesh& mesh) const {
+    const State& s(getDrawingState());
+    RenderEngine& engine(mFlinger->getRenderEngine());
+
+    engine.setupLayerBlending(mPremultipliedAlpha, isOpaque(s), s.alpha);
+    engine.drawMesh(mesh);
+    engine.disableBlending();
+}
+
 void Layer::drawWithOpenGL(const sp<const DisplayDevice>& hw,
         const Region& /* clip */, bool useIdentityTransform) const {
     const State& s(getDrawingState());
@@ -1003,6 +1022,19 @@ void Layer::drawWithOpenGL(const sp<const DisplayDevice>& hw,
      * minimal value)? Or, we could make GL behave like HWC -- but this feel
      * like more of a hack.
      */
+#ifdef QTI_BSP
+    Rect win(s.active.w, s.active.h);
+
+    if (!s.crop.isEmpty()) {
+        win = s.crop;
+    }
+
+    win = s.active.transform.transform(win);
+    win.intersect(hw->getViewport(), &win);
+    win = s.active.transform.inverse().transform(win);
+    win.intersect(Rect(s.active.w, s.active.h), &win);
+    win = reduce(win, s.activeTransparentRegion);
+#else
     Rect win(computeBounds());
 
     if (!s.finalCrop.isEmpty()) {
@@ -1015,7 +1047,7 @@ void Layer::drawWithOpenGL(const sp<const DisplayDevice>& hw,
             win.clear();
         }
     }
-
+#endif
     float left   = float(win.left)   / float(s.active.w);
     float top    = float(win.top)    / float(s.active.h);
     float right  = float(win.right)  / float(s.active.w);
@@ -1029,10 +1061,7 @@ void Layer::drawWithOpenGL(const sp<const DisplayDevice>& hw,
     texCoords[2] = vec2(right, 1.0f - bottom);
     texCoords[3] = vec2(right, 1.0f - top);
 
-    RenderEngine& engine(mFlinger->getRenderEngine());
-    engine.setupLayerBlending(mPremultipliedAlpha, isOpaque(s), s.alpha);
-    engine.drawMesh(mMesh);
-    engine.disableBlending();
+    handleOpenGLDraw(hw, mMesh);
 }
 
 #ifdef USE_HWC2
@@ -1173,8 +1202,37 @@ void Layer::computeGeometry(const sp<const DisplayDevice>& hw, Mesh& mesh,
     if (!s.crop.isEmpty()) {
         win.intersect(s.crop, &win);
     }
-    // subtract the transparent region and snap to the bounds
+#ifdef QTI_BSP
+    win = s.active.transform.transform(win);
+    win.intersect(hw->getViewport(), &win);
+    win = s.active.transform.inverse().transform(win);
+    win.intersect(Rect(s.active.w, s.active.h), &win);
     win = reduce(win, s.activeTransparentRegion);
+
+    const Transform bufferOrientation(mCurrentTransform);
+    Transform transform(tr * s.active.transform * bufferOrientation);
+    if (mSurfaceFlingerConsumer->getTransformToDisplayInverse()) {
+        uint32_t invTransform =  DisplayDevice::getPrimaryDisplayOrientationTransform();
+         if (invTransform & NATIVE_WINDOW_TRANSFORM_ROT_90) {
+              invTransform ^= NATIVE_WINDOW_TRANSFORM_FLIP_V |
+                      NATIVE_WINDOW_TRANSFORM_FLIP_H;
+         }
+          transform = Transform(invTransform) * transform;
+    }
+    const uint32_t orientation = transform.getOrientation();
+    if (!(orientation | mCurrentTransform | mTransformHint)) {
+        if (!useIdentityTransform) {
+            win = s.active.transform.transform(win);
+            win.intersect(hw->getViewport(), &win);
+        }
+    }
+#else
+    win = reduce(win, s.activeTransparentRegion);
+#endif
+
+
+
+    // subtract the transparent region and snap to the bounds
 
     vec2 lt = vec2(win.left, win.top);
     vec2 lb = vec2(win.left, win.bottom);
@@ -1182,12 +1240,20 @@ void Layer::computeGeometry(const sp<const DisplayDevice>& hw, Mesh& mesh,
     vec2 rt = vec2(win.right, win.top);
 
     if (!useIdentityTransform) {
-        lt = s.active.transform.transform(lt);
-        lb = s.active.transform.transform(lb);
-        rb = s.active.transform.transform(rb);
-        rt = s.active.transform.transform(rt);
+#ifdef QTI_BSP
+        if (orientation | mCurrentTransform | mTransformHint) {
+            lt = s.active.transform.transform(lt);
+            lb = s.active.transform.transform(lb);
+            rb = s.active.transform.transform(rb);
+            rt = s.active.transform.transform(rt);
+        }
+#else
+            lt = s.active.transform.transform(lt);
+            lb = s.active.transform.transform(lb);
+            rb = s.active.transform.transform(rb);
+            rt = s.active.transform.transform(rt);
+#endif
     }
-
     if (!s.finalCrop.isEmpty()) {
         boundPoint(&lt, s.finalCrop);
         boundPoint(&lb, s.finalCrop);
@@ -1600,6 +1666,16 @@ bool Layer::setOverrideScalingMode(int32_t scalingMode) {
     return true;
 }
 
+bool Layer::setColor(uint32_t color) {
+    if (mCurrentState.color == color)
+        return false;
+    mCurrentState.sequence++;
+    mCurrentState.color = color;
+    mCurrentState.modified = true;
+    setTransactionFlags(eTransactionNeeded);
+    return true;
+}
+
 uint32_t Layer::getEffectiveScalingMode() const {
     if (mOverrideScalingMode >= 0) {
       return mOverrideScalingMode;
@@ -1960,9 +2036,14 @@ Region Layer::latchBuffer(bool& recomputeVisibleRegions)
 
             // Remove any stale buffers that have been dropped during
             // updateTexImage
-            while (mQueueItems[0].mFrameNumber != currentFrameNumber) {
+            while ((mQueuedFrames > 0) && (mQueueItems[0].mFrameNumber != currentFrameNumber)) {
                 mQueueItems.removeAt(0);
                 android_atomic_dec(&mQueuedFrames);
+            }
+
+            if (mQueuedFrames == 0) {
+                ALOGE("[%s] mQueuedFrames is zero !!", mName.string());
+                return outDirtyRegion;
             }
 
             mQueueItems.removeAt(0);
@@ -2072,7 +2153,7 @@ uint32_t Layer::getEffectiveUsage(uint32_t usage) const
     return usage;
 }
 
-void Layer::updateTransformHint(const sp<const DisplayDevice>& hw) const {
+void Layer::updateTransformHint(const sp<const DisplayDevice>& hw) {
     uint32_t orientation = 0;
     if (!mFlinger->mDebugDisableTransformHint) {
         // The transform hint is used to improve performance, but we can
@@ -2085,6 +2166,7 @@ void Layer::updateTransformHint(const sp<const DisplayDevice>& hw) const {
         }
     }
     mSurfaceFlingerConsumer->setTransformHint(orientation);
+    mTransformHint = orientation;
 }
 
 // ----------------------------------------------------------------------------

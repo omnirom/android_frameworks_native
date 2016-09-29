@@ -73,6 +73,7 @@ class Layer : public SurfaceFlingerConsumer::ContentsChangedListener {
     static int32_t sSequence;
 
 public:
+    friend class ExLayer;
     mutable bool contentDirty;
     // regions below are in window-manager space
     Region visibleRegion;
@@ -118,6 +119,7 @@ public:
         uint8_t reserved[2];
         int32_t sequence; // changes when visible regions can change
         bool modified;
+        uint32_t color;
 
         Rect crop;
         Rect finalCrop;
@@ -161,6 +163,7 @@ public:
     bool setLayerStack(uint32_t layerStack);
     void deferTransactionUntil(const sp<IBinder>& handle, uint64_t frameNumber);
     bool setOverrideScalingMode(int32_t overrideScalingMode);
+    bool setColor(uint32_t color);
 
     // If we have received a new buffer this frame, we will pass its surface
     // damage down to hardware composer. Otherwise, we must send a region with
@@ -171,7 +174,7 @@ public:
     uint32_t getTransactionFlags(uint32_t flags);
     uint32_t setTransactionFlags(uint32_t flags);
 
-    void computeGeometry(const sp<const DisplayDevice>& hw, Mesh& mesh,
+    virtual void computeGeometry(const sp<const DisplayDevice>& hw, Mesh& mesh,
             bool useIdentityTransform) const;
     Rect computeBounds(const Region& activeTransparentRegion) const;
     Rect computeBounds() const;
@@ -247,7 +250,7 @@ public:
 #else
     void setGeometry(const sp<const DisplayDevice>& hw,
             HWComposer::HWCLayerInterface& layer);
-    void setPerFrameData(const sp<const DisplayDevice>& hw,
+    virtual void setPerFrameData(const sp<const DisplayDevice>& hw,
             HWComposer::HWCLayerInterface& layer);
     void setAcquireFence(const sp<const DisplayDevice>& hw,
             HWComposer::HWCLayerInterface& layer);
@@ -336,7 +339,23 @@ public:
 
     // Updates the transform hint in our SurfaceFlingerConsumer to match
     // the current orientation of the display device.
-    void updateTransformHint(const sp<const DisplayDevice>& hw) const;
+    void updateTransformHint(const sp<const DisplayDevice>& hw);
+
+    /* ------------------------------------------------------------------------
+     * Extensions
+     */
+    virtual bool isExtOnly() const { return false; }
+    virtual bool isIntOnly() const { return false; }
+    virtual bool isSecureDisplay() const { return false; }
+    virtual bool isYuvLayer() const { return false; }
+    virtual void setPosition(const sp<const DisplayDevice>& /*hw*/,
+                             HWComposer::HWCLayerInterface& /*layer*/,
+                             const State& /*state*/) { }
+    virtual void setAcquiredFenceIfBlit(int& /*fenceFd */,
+                       HWComposer::HWCLayerInterface& /*layer */) { }
+    virtual bool canAllowGPUForProtected() const { return false; }
+    virtual void handleOpenGLDraw(const sp<const DisplayDevice>& /*hw*/,
+            Mesh& mesh) const;
 
     /*
      * returns the rectangle that crops the content of the layer and scales it
@@ -425,6 +444,7 @@ protected:
         LayerCleaner(const sp<SurfaceFlinger>& flinger, const sp<Layer>& layer);
     };
 
+    Rect reduce(const Rect& win, const Region& exclude) const;
 
 private:
     // Interface implementation for SurfaceFlingerConsumer::ContentsChangedListener
@@ -445,7 +465,7 @@ private:
     // drawing
     void clearWithOpenGL(const sp<const DisplayDevice>& hw, const Region& clip,
             float r, float g, float b, float alpha) const;
-    void drawWithOpenGL(const sp<const DisplayDevice>& hw, const Region& clip,
+    virtual void drawWithOpenGL(const sp<const DisplayDevice>& hw, const Region& clip,
             bool useIdentityTransform) const;
 
     // Temporary - Used only for LEGACY camera mode.
@@ -597,6 +617,7 @@ private:
 
     bool mAutoRefresh;
     bool mFreezePositionUpdates;
+    uint32_t mTransformHint;
 };
 
 // ---------------------------------------------------------------------------

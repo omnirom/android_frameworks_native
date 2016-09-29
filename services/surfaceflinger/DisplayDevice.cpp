@@ -187,6 +187,11 @@ DisplayDevice::DisplayDevice(
     property_get("persist.panel.orientation", property, "0");
     panelOrientation = atoi(property) / 90;
 
+    mPanelMountFlip = 0;
+    // 1: H-Flip, 2: V-Flip, 3: 180 (HV Flip)
+    property_get("persist.panel.mountflip", property, "0");
+    mPanelMountFlip = atoi(property);
+
     // initialize the display orientation transform.
     setProjection(panelOrientation, mViewport, mFrame);
 
@@ -498,6 +503,10 @@ status_t DisplayDevice::orientationToTransfrom(
         break;
     default:
         return BAD_VALUE;
+    }
+
+    if (DISPLAY_PRIMARY == mHwcDisplayId) {
+        flags = flags ^ getPanelMountFlip();
     }
 
     tr->set(flags, w, h);
