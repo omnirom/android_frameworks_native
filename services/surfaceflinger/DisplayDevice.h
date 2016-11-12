@@ -141,6 +141,10 @@ public:
     int32_t                 getHwcDisplayId() const { return mHwcDisplayId; }
     const wp<IBinder>&      getDisplayToken() const { return mDisplayToken; }
 
+    uint32_t getPanelMountFlip() const {
+        return mPanelMountFlip;
+    }
+
     // We pass in mustRecompose so we can keep VirtualDisplaySurface's state
     // machine happy without actually queueing a buffer if nothing has changed
     status_t beginFrame(bool mustRecompose) const;
@@ -239,7 +243,7 @@ private:
     /*
      * Transaction state
      */
-    static status_t orientationToTransfrom(int orientation,
+    status_t orientationToTransfrom(int orientation,
             int w, int h, Transform* tr);
 
     uint32_t mLayerStack;
@@ -261,6 +265,8 @@ private:
     // current active color mode
     android_color_mode_t mActiveColorMode;
 #endif
+    // Panel's mount flip, H, V or 180 (HV)
+    uint32_t mPanelMountFlip;
 };
 
 }; // namespace android

@@ -168,7 +168,7 @@ status_t VirtualDisplaySurface::prepareFrame(CompositionType compositionType) {
         // format/usage and get a new buffer when the GLES driver calls
         // dequeueBuffer().
         mOutputFormat = mDefaultOutputFormat;
-        mOutputUsage = GRALLOC_USAGE_HW_COMPOSER;
+        setOutputUsage(GRALLOC_USAGE_HW_COMPOSER);
         refreshOutputBuffer();
     }
 
@@ -344,6 +344,13 @@ status_t VirtualDisplaySurface::dequeueBuffer(Source source,
         PixelFormat format, uint32_t usage, int* sslot, sp<Fence>* fence) {
     LOG_FATAL_IF(mDisplayId < 0, "mDisplayId=%d but should not be < 0.", mDisplayId);
 
+    // Exclude video encoder usage flag from scratch buffer usage flags
+    if (source == SOURCE_SCRATCH) {
+        usage &= ~(GRALLOC_USAGE_HW_VIDEO_ENCODER);
+        VDS_LOGV("dequeueBuffer(%s): updated scratch buffer usage flags=%#x",
+                dbgSourceStr(source), usage);
+    }
+
     status_t result = mSource[source]->dequeueBuffer(sslot, fence,
             mSinkBufferWidth, mSinkBufferHeight, format, usage);
     if (result < 0)
@@ -428,7 +435,7 @@ status_t VirtualDisplaySurface::dequeueBuffer(int* pslot, sp<Fence>* fence,
                     mSinkBufferWidth, mSinkBufferHeight,
                     buf->getPixelFormat(), buf->getUsage());
             mOutputFormat = format;
-            mOutputUsage = usage;
+            setOutputUsage(usage);
             result = refreshOutputBuffer();
             if (result < 0)
                 return result;
@@ -692,6 +699,10 @@ const char* VirtualDisplaySurface::dbgSourceStr(Source s) {
         case SOURCE_SCRATCH: return "SCRATCH";
         default:             return "INVALID";
     }
+}
+
+void VirtualDisplaySurface::setOutputUsage(uint32_t usage) {
+    mOutputUsage = usage;
 }
 
 // ---------------------------------------------------------------------------

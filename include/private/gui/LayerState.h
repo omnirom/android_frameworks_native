@@ -56,6 +56,8 @@ struct layer_state_t {
         eFinalCropChanged           = 0x00000400,
         eOverrideScalingModeChanged = 0x00000800,
         eGeometryAppliesWithResize  = 0x00001000,
+        ePositionAppliesWithResize  = 0x00002000,
+        eColorChanged               = 0x00004000,
     };
 
     layer_state_t()
@@ -64,7 +66,7 @@ struct layer_state_t {
             alpha(0), flags(0), mask(0),
             reserved(0), crop(Rect::INVALID_RECT),
             finalCrop(Rect::INVALID_RECT), frameNumber(0),
-            overrideScalingMode(-1)
+            overrideScalingMode(-1), color(0)
     {
         matrix.dsdx = matrix.dtdy = 1.0f;
         matrix.dsdy = matrix.dtdx = 0.0f;
@@ -99,6 +101,7 @@ struct layer_state_t {
             int32_t         overrideScalingMode;
             // non POD must be last. see write/read
             Region          transparentRegion;
+            uint32_t        color;
 };
 
 struct ComposerState {

@@ -91,6 +91,8 @@ class SurfaceFlinger : public BnSurfaceComposer,
                        private HWComposer::EventHandler
 {
 public:
+    friend class ExSurfaceFlinger;
+
     static char const* getServiceName() ANDROID_API {
         return "SurfaceFlinger";
     }
@@ -149,6 +151,7 @@ private:
     friend class Client;
     friend class DisplayEventConnection;
     friend class Layer;
+    friend class LayerDim;
     friend class MonitoredProducer;
 
     // This value is specified in number of frames.  Log frame stats at most
@@ -251,6 +254,44 @@ private:
     virtual void onVSyncReceived(int type, nsecs_t timestamp);
     virtual void onHotplugReceived(int disp, bool connected);
 
+    /* ------------------------------------------------------------------------
+     * Extensions
+     */
+    virtual void updateExtendedMode() { }
+
+    virtual void getIndexLOI(size_t /*dpy*/,
+                     const LayerVector& /*currentLayers*/,
+                     bool& /*bIgnoreLayers*/,
+                     int& /*indexLOI*/) { }
+
+    virtual bool updateLayerVisibleNonTransparentRegion(
+                     const int& dpy, const sp<Layer>& layer,
+                     bool& bIgnoreLayers, int& indexLOI,
+                     uint32_t layerStack, const int& i);
+
+    virtual void delayDPTransactionIfNeeded(
+                     const Vector<DisplayState>& /*displays*/) { }
+
+    virtual bool canDrawLayerinScreenShot(
+                     const sp<const DisplayDevice>& hw,
+                     const sp<Layer>& layer);
+
+    virtual void isfreezeSurfacePresent(
+                     bool& freezeSurfacePresent,
+                     const sp<const DisplayDevice>& /*hw*/,
+                     const int32_t& /*id*/) { freezeSurfacePresent = false; }
+
+    virtual void setOrientationEventControl(
+                     bool& /*freezeSurfacePresent*/,
+                     const int32_t& /*id*/) { }
+
+    virtual void updateVisibleRegionsDirty() { }
+    virtual void  drawWormHoleIfRequired(HWComposer::LayerListIterator &cur,
+        const HWComposer::LayerListIterator &end,
+        const sp<const DisplayDevice>& hw,
+        const Region& region);
+    virtual bool isS3DLayerPresent(const sp<const DisplayDevice>& /*hw*/)
+        { return false; };
     /* ------------------------------------------------------------------------
      * Message handling
      */
@@ -405,7 +446,7 @@ private:
      * Compositing
      */
     void invalidateHwcGeometry();
-    static void computeVisibleRegions(
+    void computeVisibleRegions(size_t dpy,
             const LayerVector& currentLayers, uint32_t layerStack,
             Region& dirtyRegion, Region& opaqueRegion);
 
@@ -454,6 +495,7 @@ private:
     void logFrameStats();
 
     void dumpStaticScreenStats(String8& result) const;
+    virtual void dumpDrawCycle(bool /* prePrepare */ ) { }
 
     void recordBufferingStats(const char* layerName,
             std::vector<OccupancyTracker::Segment>&& history);
