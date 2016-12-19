@@ -160,9 +160,11 @@ ifeq ($(TARGET_USES_QCOM_BSP), true)
     ifeq ($(TARGET_QCOM_DISPLAY_VARIANT),)
         LOCAL_C_INCLUDES += hardware/qcom/display/libgralloc
         LOCAL_C_INCLUDES += hardware/qcom/display/libqdutils
+        LOCAL_C_INCLUDES += $(TARGET_OUT_HEADERS)/qcom/display
     else
         LOCAL_C_INCLUDES += hardware/qcom/display-$(TARGET_QCOM_DISPLAY_VARIANT)/libgralloc
         LOCAL_C_INCLUDES += hardware/qcom/display-$(TARGET_QCOM_DISPLAY_VARIANT)/libqdutils
+        LOCAL_C_INCLUDES += $(TARGET_OUT_HEADERS)/qcom/$(TARGET_QCOM_DISPLAY_VARIANT)
     endif
   endif
     LOCAL_SHARED_LIBRARIES += libqdutils
