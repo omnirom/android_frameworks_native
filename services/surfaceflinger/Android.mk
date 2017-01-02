@@ -162,6 +162,9 @@ ifeq ($(TARGET_USES_QCOM_BSP), true)
     LOCAL_SHARED_LIBRARIES += libqdutils
     LOCAL_SHARED_LIBRARIES += libqdMetaData
     LOCAL_CFLAGS += -DQTI_BSP
+  ifeq ($(call is-board-platform-in-list, msm8996), true)
+    LOCAL_CFLAGS += -DUSE_COLOR_METADATA
+  endif
 endif
 
 LOCAL_MODULE := libsurfaceflinger
