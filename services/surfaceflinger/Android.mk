@@ -172,6 +172,10 @@ ifeq ($(TARGET_USES_QCOM_BSP), true)
     LOCAL_CFLAGS += -DQTI_BSP
 endif
 
+ifeq ($(TARGET_USES_PREBUILT_HWC),true)
+    LOCAL_CFLAGS += -DPREBUILT_HWC
+endif
+
 LOCAL_MODULE := libsurfaceflinger
 
 LOCAL_CFLAGS += -Wall -Werror -Wunused -Wunreachable-code
