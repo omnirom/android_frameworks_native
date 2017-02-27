@@ -1179,7 +1179,7 @@ void SurfaceFlinger::postComposition(nsecs_t refreshStartTime)
         mAnimFrameTracker.advanceFrame();
     }
 
-    dumpDrawCycle(true);
+    dumpDrawCycle(false);
 
     if (hw->getPowerMode() == HWC_POWER_MODE_OFF) {
         return;
