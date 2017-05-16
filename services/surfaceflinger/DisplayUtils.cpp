@@ -49,10 +49,6 @@
 #include <gralloc_priv.h>
 #endif
 
-#if QTI_BSP
-#include <gralloc_priv.h>
-#endif
-
 namespace android {
 
 DisplayUtils* DisplayUtils::sDisplayUtils = NULL;
