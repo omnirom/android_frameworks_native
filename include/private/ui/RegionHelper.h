@@ -19,6 +19,7 @@
 
 #include <stdint.h>
 #include <sys/types.h>
+#include <limits>
 
 namespace android {
 // ----------------------------------------------------------------------------
@@ -28,7 +29,7 @@ class region_operator
 {
 public:
     typedef typename RECT::value_type TYPE;    
-    static const TYPE max_value = 0x7FFFFFF;
+    static const TYPE max_value = std::numeric_limits<TYPE>::max();
 
     /* 
      * Common boolean operations:
