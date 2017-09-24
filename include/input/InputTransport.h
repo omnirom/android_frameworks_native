@@ -305,6 +305,9 @@ public:
     status_t consume(InputEventFactoryInterface* factory, bool consumeBatches,
             nsecs_t frameTime, uint32_t* outSeq, InputEvent** outEvent);
 
+    status_t consume(InputEventFactoryInterface* factory, bool consumeBatches,
+            nsecs_t frameTime, uint32_t* outSeq, int* motionEventType, int* touchMoveNumber, bool* flag, InputEvent** outEvent);
+
     /* Sends a finished signal to the publisher to inform it that the message
      * with the specified sequence number has finished being process and whether
      * the message was handled by the consumer.
@@ -341,6 +344,8 @@ public:
     bool hasPendingBatch() const;
 
 private:
+    int mTouchMoveCounter = 0;
+
     // True if touch resampling is enabled.
     const bool mResampleTouch;
 
@@ -425,6 +430,8 @@ private:
 
     status_t consumeBatch(InputEventFactoryInterface* factory,
             nsecs_t frameTime, uint32_t* outSeq, InputEvent** outEvent);
+    status_t consumeBatch(InputEventFactoryInterface* factory,
+            nsecs_t frameTime, uint32_t* outSeq, int* touchMoveNumber, InputEvent** outEvent);
     status_t consumeSamples(InputEventFactoryInterface* factory,
             Batch& batch, size_t count, uint32_t* outSeq, InputEvent** outEvent);
 

@@ -7,7 +7,7 @@ on post-fs
     chown root shell /sys/kernel/debug/tracing/events/sync/enable
     chown root shell /sys/kernel/debug/tracing/events/workqueue/enable
     chown root shell /sys/kernel/debug/tracing/events/regulator/enable
-    chown root shell /sys/kernel/debug/tracing/events/pagecache/enable
+    chown root shell /sys/kernel/debug/tracing/events/filemap/enable
 
     # irq
     chown root shell /sys/kernel/debug/tracing/events/irq/enable
@@ -28,7 +28,7 @@ on post-fs
     chmod 0664 /sys/kernel/debug/tracing/events/sync/enable
     chmod 0664 /sys/kernel/debug/tracing/events/workqueue/enable
     chmod 0664 /sys/kernel/debug/tracing/events/regulator/enable
-    chmod 0664 /sys/kernel/debug/tracing/events/pagecache/enable
+    chmod 0664 /sys/kernel/debug/tracing/events/filemap/enable
 
     # irq
     chmod 0664 /sys/kernel/debug/tracing/events/irq/enable
