@@ -62,6 +62,10 @@ endif
 
 LOCAL_CFLAGS += -fvisibility=hidden -Werror=format
 
+ifeq ($(TARGET_USES_HWC_DIM_LAYER_COLOR),true)
+    LOCAL_CFLAGS += -DUSE_HWC_DIM_LAYER_COLOR
+endif
+
 LOCAL_STATIC_LIBRARIES := \
     libhwcomposer-command-buffer \
     libtrace_proto \
