@@ -7,6 +7,12 @@ cc_test {
         "InputEvent_test.cpp",
         "InputPublisherAndConsumer_test.cpp",
     ],
+    cflags: [
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+        "-Wno-unused-variable",
+    ],
     shared_libs: [
         "libinput",
         "libcutils",
