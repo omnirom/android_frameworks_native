@@ -32,6 +32,7 @@
 #include <fstream>
 #include <cutils/properties.h>
 #include <ui/GraphicBufferAllocator.h>
+#include <vendor/display/config/1.1/IDisplayConfig.h>
 
 namespace android {
 
@@ -50,7 +51,7 @@ ExSurfaceFlinger::ExSurfaceFlinger() {
     ALOGD_IF(isDebug(),"Creating custom SurfaceFlinger %s",__FUNCTION__);
 
     mDisableExtAnimation = false;
-    if ((property_get("vendor.display.disable_ext_animation", property, "0") > 0) &&
+    if ((property_get("vendor.display.disable_ext_anim", property, "0") > 0) &&
         (!strncmp(property, "1", PROPERTY_VALUE_MAX ) ||
          (!strncasecmp(property,"true", PROPERTY_VALUE_MAX )))) {
         mDisableExtAnimation = true;
@@ -93,6 +94,32 @@ void ExSurfaceFlinger::handleDPTransactionIfNeeded(
             }
         }
     }
+}
+
+void ExSurfaceFlinger::setDisplayAnimating(const sp<const DisplayDevice>& hw,
+                                           const int32_t& dpy) {
+    static android::sp<vendor::display::config::V1_1::IDisplayConfig> disp_config_v1_1 =
+                                        vendor::display::config::V1_1::IDisplayConfig::getService();
+
+    if (disp_config_v1_1 == NULL || dpy == HWC_DISPLAY_PRIMARY || !mDisableExtAnimation) {
+        return;
+    }
+
+    bool hasScreenshot = false;
+    mDrawingState.traverseInZOrder([&](Layer* layer) {
+      if (layer->getLayerStack() == hw->getLayerStack()) {
+          if (layer->isScreenshot()) {
+              hasScreenshot = true;
+          }
+      }
+    });
+
+    if (hasScreenshot == mAnimating) {
+        return;
+    }
+
+    disp_config_v1_1->setDisplayAnimating(dpy, hasScreenshot);
+    mAnimating = hasScreenshot;
 }
 
 }; // namespace android
