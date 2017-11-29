@@ -15,6 +15,12 @@
 extern "C" {
 #endif
 
+#ifdef __GNUC__
+#define ALIGNED_DVR_STRUCT(x) __attribute__((packed, aligned(x)))
+#else
+#define ALIGNED_DVR_STRUCT(x)
+#endif
+
 typedef struct ANativeWindow ANativeWindow;
 
 typedef struct DvrPoseAsync DvrPoseAsync;
@@ -34,6 +40,7 @@ typedef struct AHardwareBuffer AHardwareBuffer;
 
 typedef struct DvrReadBufferQueue DvrReadBufferQueue;
 typedef struct DvrWriteBufferQueue DvrWriteBufferQueue;
+typedef struct DvrNativeBufferMetadata DvrNativeBufferMetadata;
 
 typedef struct DvrSurface DvrSurface;
 typedef uint64_t DvrSurfaceAttributeType;
@@ -180,6 +187,13 @@ typedef int (*DvrWriteBufferQueueDequeuePtr)(DvrWriteBufferQueue* write_queue,
                                              int timeout,
                                              DvrWriteBuffer* out_buffer,
                                              int* out_fence_fd);
+typedef int (*DvrWriteBufferQueueGainBufferPtr)(
+    DvrWriteBufferQueue* write_queue, int timeout,
+    DvrWriteBuffer** out_write_buffer, DvrNativeBufferMetadata* out_meta,
+    int* out_fence_fd);
+typedef int (*DvrWriteBufferQueuePostBufferPtr)(
+    DvrWriteBufferQueue* write_queue, DvrWriteBuffer* write_buffer,
+    const DvrNativeBufferMetadata* meta, int ready_fence_fd);
 typedef int (*DvrWriteBufferQueueResizeBufferPtr)(
     DvrWriteBufferQueue* write_queue, uint32_t width, uint32_t height);
 typedef void (*DvrReadBufferQueueDestroyPtr)(DvrReadBufferQueue* read_queue);
@@ -194,6 +208,13 @@ typedef int (*DvrReadBufferQueueDequeuePtr)(DvrReadBufferQueue* read_queue,
                                             DvrReadBuffer* out_buffer,
                                             int* out_fence_fd, void* out_meta,
                                             size_t meta_size_bytes);
+typedef int (*DvrReadBufferQueueAcquireBufferPtr)(
+    DvrReadBufferQueue* read_queue, int timeout,
+    DvrReadBuffer** out_read_buffer, DvrNativeBufferMetadata* out_meta,
+    int* out_fence_fd);
+typedef int (*DvrReadBufferQueueReleaseBufferPtr)(
+    DvrReadBufferQueue* read_queue, DvrReadBuffer* read_buffer,
+    const DvrNativeBufferMetadata* meta, int release_fence_fd);
 typedef void (*DvrReadBufferQueueBufferAvailableCallback)(void* context);
 typedef int (*DvrReadBufferQueueSetBufferAvailableCallbackPtr)(
     DvrReadBufferQueue* read_queue,
@@ -250,11 +271,11 @@ typedef int (*DvrPoseClientSensorsEnablePtr)(DvrPoseClient* client,
 typedef int (*DvrPoseClientDataCapturePtr)(DvrPoseClient* client,
     const DvrPoseDataCaptureRequest* request);
 typedef int (*DvrPoseClientDataReaderDestroyPtr)(DvrPoseClient* client,
-                                                 DvrPoseRawDataType data_type);
+                                                 uint64_t data_type);
 
 // dvr_pose.h
 typedef int (*DvrPoseClientGetDataReaderPtr)(DvrPoseClient* client,
-                                             DvrPoseRawDataType data_type,
+                                             uint64_t data_type,
                                              DvrReadBufferQueue** read_queue);
 
 // services/vr/virtual_touchpad/include/dvr/virtual_touchpad_client.h
@@ -352,7 +373,24 @@ typedef int (*DvrPerformanceSetSchedulerPolicyPtr)(
 // existing data members. If new fields need to be added, please take extra care
 // to make sure that new data field is padded properly the size of the struct
 // stays same.
-struct DvrNativeBufferMetadata {
+struct ALIGNED_DVR_STRUCT(8) DvrNativeBufferMetadata {
+#ifdef __cplusplus
+  DvrNativeBufferMetadata()
+      : timestamp(0),
+        is_auto_timestamp(0),
+        dataspace(0),
+        crop_left(0),
+        crop_top(0),
+        crop_right(0),
+        crop_bottom(0),
+        scaling_mode(0),
+        transform(0),
+        index(0),
+        user_metadata_size(0),
+        user_metadata_ptr(0),
+        release_fence_mask(0),
+        reserved{0} {}
+#endif
   // Timestamp of the frame.
   int64_t timestamp;
 
@@ -376,9 +414,31 @@ struct DvrNativeBufferMetadata {
   // android/native_window.h
   int32_t transform;
 
-  // Reserved bytes for so that the struct is forward compatible.
-  int32_t reserved[16];
+  // The index of the frame.
+  int64_t index;
+
+  // Size of additional metadata requested by user.
+  uint64_t user_metadata_size;
+
+  // Raw memory address of the additional user defined metadata. Only valid when
+  // user_metadata_size is non-zero.
+  uint64_t user_metadata_ptr;
+
+  // Only applicable for metadata retrieved from GainAsync. This indicates which
+  // consumer has pending fence that producer should epoll on.
+  uint64_t release_fence_mask;
+
+  // Reserved bytes for so that the struct is forward compatible and padding to
+  // 104 bytes so the size is a multiple of 8.
+  int32_t reserved[8];
 };
+
+#ifdef __cplusplus
+// Warning: DvrNativeBufferMetadata is part of the DVR API and changing its size
+// will cause compatiblity issues between different DVR API releases.
+static_assert(sizeof(DvrNativeBufferMetadata) == 104,
+              "Unexpected size for DvrNativeBufferMetadata");
+#endif
 
 struct DvrApi_v1 {
 // Defines an API entry for V1 (no version suffix).

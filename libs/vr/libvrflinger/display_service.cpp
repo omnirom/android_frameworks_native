@@ -124,6 +124,8 @@ void DisplayService::OnChannelClose(pdx::Message& message,
 // surface-specific messages to the per-instance handlers.
 Status<void> DisplayService::HandleMessage(pdx::Message& message) {
   ALOGD_IF(TRACE, "DisplayService::HandleMessage: opcode=%d", message.GetOp());
+  ATRACE_NAME("DisplayService::HandleMessage");
+
   switch (message.GetOp()) {
     case DisplayProtocol::GetMetrics::Opcode:
       DispatchRemoteMethod<DisplayProtocol::GetMetrics>(
@@ -349,17 +351,9 @@ DisplayService::GetVisibleDisplaySurfaces() const {
 
 void DisplayService::UpdateActiveDisplaySurfaces() {
   auto visible_surfaces = GetVisibleDisplaySurfaces();
-
-  std::sort(visible_surfaces.begin(), visible_surfaces.end(),
-            [](const std::shared_ptr<DisplaySurface>& a,
-               const std::shared_ptr<DisplaySurface>& b) {
-              return a->z_order() < b->z_order();
-            });
-
   ALOGD_IF(TRACE,
            "DisplayService::UpdateActiveDisplaySurfaces: %zd visible surfaces",
            visible_surfaces.size());
-
   hardware_composer_.SetDisplaySurfaces(std::move(visible_surfaces));
 }
 
