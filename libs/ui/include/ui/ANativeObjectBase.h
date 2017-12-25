@@ -19,7 +19,7 @@
 
 #include <sys/types.h>
 
-#include <nativebase/nativebase.h>
+#include "../../../nativebase/include/nativebase/nativebase.h"
 
 
 /*****************************************************************************/

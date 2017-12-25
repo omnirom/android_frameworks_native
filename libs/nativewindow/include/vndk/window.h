@@ -17,7 +17,7 @@
 #ifndef ANDROID_VNDK_NATIVEWINDOW_ANATIVEWINDOW_H
 #define ANDROID_VNDK_NATIVEWINDOW_ANATIVEWINDOW_H
 
-#include <nativebase/nativebase.h>
+#include "../../../nativebase/include/nativebase/nativebase.h"
 
 // vndk is a superset of the NDK
 #include <android/native_window.h>
