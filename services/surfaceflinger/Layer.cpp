@@ -39,7 +39,6 @@
 #include <ui/PixelFormat.h>
 
 #include <gui/BufferItem.h>
-#include <gui/BufferQueue.h>
 #include <gui/LayerDebugInfo.h>
 #include <gui/Surface.h>
 
@@ -61,6 +60,11 @@
 #define DEBUG_RESIZE 0
 
 namespace android {
+
+LayerBE::LayerBE()
+      : mMesh(Mesh::TRIANGLE_FAN, 4, 2, 2) {
+}
+
 
 int32_t Layer::sSequence = 1;
 
@@ -84,10 +88,6 @@ Layer::Layer(SurfaceFlinger* flinger, const sp<Client>& client, const String8& n
         mFrameLatencyNeeded(false),
         mFiltering(false),
         mNeedsFiltering(false),
-        mMesh(Mesh::TRIANGLE_FAN, 4, 2, 2),
-#ifndef USE_HWC2
-        mIsGlesComposition(false),
-#endif
         mProtectedByApp(false),
         mClientRef(client),
         mPotentialCursor(false),
@@ -128,23 +128,31 @@ Layer::Layer(SurfaceFlinger* flinger, const sp<Client>& client, const String8& n
     // drawing state & current state are identical
     mDrawingState = mCurrentState;
 
-#ifdef USE_HWC2
     const auto& hwc = flinger->getHwComposer();
     const auto& activeConfig = hwc.getActiveConfig(HWC_DISPLAY_PRIMARY);
     nsecs_t displayPeriod = activeConfig->getVsyncPeriod();
-#else
-    nsecs_t displayPeriod = flinger->getHwComposer().getRefreshPeriod(HWC_DISPLAY_PRIMARY);
-#endif
     mFrameTracker.setDisplayRefreshPeriod(displayPeriod);
 
     CompositorTiming compositorTiming;
     flinger->getCompositorTiming(&compositorTiming);
     mFrameEventHistory.initializeCompositorTiming(compositorTiming);
+
 }
 
 void Layer::onFirstRef() {}
 
 Layer::~Layer() {
+    sp<Client> c(mClientRef.promote());
+    if (c != 0) {
+        c->detachLayer(this);
+    }
+
+    for (auto& point : mRemoteSyncPoints) {
+        point->setTransactionApplied();
+    }
+    for (auto& point : mLocalSyncPoints) {
+        point->setFrameAvailable();
+    }
     mFrameTracker.logAndResetStats(mName);
 }
 
@@ -157,15 +165,12 @@ Layer::~Layer() {
  * Layer.  So, the implementation is done in BufferLayer.  When called on a
  * ColorLayer object, it's essentially a NOP.
  */
-#ifdef USE_HWC2
 void Layer::onLayerDisplayed(const sp<Fence>& /*releaseFence*/) {}
-#else
-void Layer::onLayerDisplayed(const sp<const DisplayDevice>& /* hw */,
-                             HWComposer::HWCLayerInterface* /*layer*/) {}
-#endif
 
 void Layer::onRemovedFromCurrentState() {
     // the layer is removed from SF mCurrentState to mLayersPendingRemoval
+
+    mPendingRemoval = true;
 
     if (mCurrentState.zOrderRelativeOf != nullptr) {
         sp<Layer> strongRelative = mCurrentState.zOrderRelativeOf.promote();
@@ -185,9 +190,7 @@ void Layer::onRemoved() {
     // the layer is removed from SF mLayersPendingRemoval
     abandon();
 
-#ifdef USE_HWC2
     destroyAllHwcLayers();
-#endif
 
     for (const auto& child : mCurrentChildren) {
         child->onRemoved();
@@ -215,44 +218,45 @@ sp<IBinder> Layer::getHandle() {
 // h/w composer set-up
 // ---------------------------------------------------------------------------
 
-#ifdef USE_HWC2
 bool Layer::createHwcLayer(HWComposer* hwc, int32_t hwcId) {
-    LOG_ALWAYS_FATAL_IF(mHwcLayers.count(hwcId) != 0, "Already have a layer for hwcId %d", hwcId);
+    LOG_ALWAYS_FATAL_IF(getBE().mHwcLayers.count(hwcId) != 0,
+                        "Already have a layer for hwcId %d", hwcId);
     HWC2::Layer* layer = hwc->createLayer(hwcId);
     if (!layer) {
         return false;
     }
-    HWCInfo& hwcInfo = mHwcLayers[hwcId];
+    LayerBE::HWCInfo& hwcInfo = getBE().mHwcLayers[hwcId];
     hwcInfo.hwc = hwc;
     hwcInfo.layer = layer;
     layer->setLayerDestroyedListener(
-            [this, hwcId](HWC2::Layer* /*layer*/) { mHwcLayers.erase(hwcId); });
+            [this, hwcId](HWC2::Layer* /*layer*/) { getBE().mHwcLayers.erase(hwcId); });
     return true;
 }
 
-void Layer::destroyHwcLayer(int32_t hwcId) {
-    if (mHwcLayers.count(hwcId) == 0) {
-        return;
+bool Layer::destroyHwcLayer(int32_t hwcId) {
+    if (getBE().mHwcLayers.count(hwcId) == 0) {
+        return false;
     }
-    auto& hwcInfo = mHwcLayers[hwcId];
+    auto& hwcInfo = getBE().mHwcLayers[hwcId];
     LOG_ALWAYS_FATAL_IF(hwcInfo.layer == nullptr, "Attempt to destroy null layer");
     LOG_ALWAYS_FATAL_IF(hwcInfo.hwc == nullptr, "Missing HWComposer");
     hwcInfo.hwc->destroyLayer(hwcId, hwcInfo.layer);
     // The layer destroyed listener should have cleared the entry from
     // mHwcLayers. Verify that.
-    LOG_ALWAYS_FATAL_IF(mHwcLayers.count(hwcId) != 0, "Stale layer entry in mHwcLayers");
+    LOG_ALWAYS_FATAL_IF(getBE().mHwcLayers.count(hwcId) != 0,
+                        "Stale layer entry in getBE().mHwcLayers");
+    return true;
 }
 
 void Layer::destroyAllHwcLayers() {
-    size_t numLayers = mHwcLayers.size();
+    size_t numLayers = getBE().mHwcLayers.size();
     for (size_t i = 0; i < numLayers; ++i) {
-        LOG_ALWAYS_FATAL_IF(mHwcLayers.empty(), "destroyAllHwcLayers failed");
-        destroyHwcLayer(mHwcLayers.begin()->first);
+        LOG_ALWAYS_FATAL_IF(getBE().mHwcLayers.empty(), "destroyAllHwcLayers failed");
+        destroyHwcLayer(getBE().mHwcLayers.begin()->first);
     }
-    LOG_ALWAYS_FATAL_IF(!mHwcLayers.empty(),
+    LOG_ALWAYS_FATAL_IF(!getBE().mHwcLayers.empty(),
                         "All hardware composer layers should have been destroyed");
 }
-#endif
 
 Rect Layer::getContentCrop() const {
     // this is the crop rectangle that applies to the buffer
@@ -261,9 +265,9 @@ Rect Layer::getContentCrop() const {
     if (!mCurrentCrop.isEmpty()) {
         // if the buffer crop is defined, we use that
         crop = mCurrentCrop;
-    } else if (mActiveBuffer != NULL) {
+    } else if (getBE().compositionInfo.mBuffer != NULL) {
         // otherwise we use the whole buffer
-        crop = mActiveBuffer->getBounds();
+        crop = getBE().compositionInfo.mBuffer->getBounds();
     } else {
         // if we don't have a buffer yet, we use an empty/invalid crop
         crop.makeInvalid();
@@ -279,6 +283,14 @@ static Rect reduce(const Rect& win, const Region& exclude) {
         return win.reduce(exclude.getBounds());
     }
     return Region(win).subtract(exclude).getBounds();
+}
+
+static FloatRect reduce(const FloatRect& win, const Region& exclude) {
+    if (CC_LIKELY(exclude.isEmpty())) {
+        return win;
+    }
+    // Convert through Rect (by rounding) for lack of FloatRegion
+    return Region(Rect{win}).subtract(exclude).getBounds().toFloatRect();
 }
 
 Rect Layer::computeScreenBounds(bool reduceTransparentRegion) const {
@@ -319,12 +331,12 @@ Rect Layer::computeScreenBounds(bool reduceTransparentRegion) const {
     return win;
 }
 
-Rect Layer::computeBounds() const {
+FloatRect Layer::computeBounds() const {
     const Layer::State& s(getDrawingState());
     return computeBounds(s.activeTransparentRegion);
 }
 
-Rect Layer::computeBounds(const Region& activeTransparentRegion) const {
+FloatRect Layer::computeBounds(const Region& activeTransparentRegion) const {
     const Layer::State& s(getDrawingState());
     Rect win(s.active.w, s.active.h);
 
@@ -341,14 +353,16 @@ Rect Layer::computeBounds(const Region& activeTransparentRegion) const {
     }
 
     Transform t = getTransform();
+
+    FloatRect floatWin = win.toFloatRect();
     if (p != nullptr) {
-        win = t.transform(win);
-        win.intersect(bounds, &win);
-        win = t.inverse().transform(win);
+        floatWin = t.transform(floatWin);
+        floatWin = floatWin.intersect(bounds.toFloatRect());
+        floatWin = t.inverse().transform(floatWin);
     }
 
     // subtract the transparent region and snap to the bounds
-    return reduce(win, activeTransparentRegion);
+    return reduce(floatWin, activeTransparentRegion);
 }
 
 Rect Layer::computeInitialCrop(const sp<const DisplayDevice>& hw) const {
@@ -468,21 +482,12 @@ FloatRect Layer::computeCrop(const sp<const DisplayDevice>& hw) const {
     return crop;
 }
 
-#ifdef USE_HWC2
 void Layer::setGeometry(const sp<const DisplayDevice>& displayDevice, uint32_t z)
-#else
-void Layer::setGeometry(const sp<const DisplayDevice>& hw, HWComposer::HWCLayerInterface& layer)
-#endif
 {
-#ifdef USE_HWC2
     const auto hwcId = displayDevice->getHwcDisplayId();
-    auto& hwcInfo = mHwcLayers[hwcId];
-#else
-    layer.setDefaultState();
-#endif
+    auto& hwcInfo = getBE().mHwcLayers[hwcId];
 
     // enable this layer
-#ifdef USE_HWC2
     hwcInfo.forceClientComposition = false;
 
     if (isSecure() && !displayDevice->isSecure()) {
@@ -490,17 +495,9 @@ void Layer::setGeometry(const sp<const DisplayDevice>& hw, HWComposer::HWCLayerI
     }
 
     auto& hwcLayer = hwcInfo.layer;
-#else
-    layer.setSkip(false);
-
-    if (isSecure() && !hw->isSecure()) {
-        layer.setSkip(true);
-    }
-#endif
 
     // this gives us only the "orientation" component of the transform
     const State& s(getDrawingState());
-#ifdef USE_HWC2
     auto blendMode = HWC2::BlendMode::None;
     if (!isOpaque(s) || getAlpha() != 1.0f) {
         blendMode =
@@ -512,11 +509,6 @@ void Layer::setGeometry(const sp<const DisplayDevice>& hw, HWComposer::HWCLayerI
              " %s (%d)",
              mName.string(), to_string(blendMode).c_str(), to_string(error).c_str(),
              static_cast<int32_t>(error));
-#else
-    if (!isOpaque(s) || getAlpha() != 1.0f) {
-        layer.setBlending(mPremultipliedAlpha ? HWC_BLENDING_PREMULT : HWC_BLENDING_COVERAGE);
-    }
-#endif
 
     // apply the layer's transform, followed by the display's global transform
     // here we're guaranteed that the layer's transform preserves rects
@@ -525,11 +517,7 @@ void Layer::setGeometry(const sp<const DisplayDevice>& hw, HWComposer::HWCLayerI
     if (!s.crop.isEmpty()) {
         Rect activeCrop(s.crop);
         activeCrop = t.transform(activeCrop);
-#ifdef USE_HWC2
         if (!activeCrop.intersect(displayDevice->getViewport(), &activeCrop)) {
-#else
-        if (!activeCrop.intersect(hw->getViewport(), &activeCrop)) {
-#endif
             activeCrop.clear();
         }
         activeCrop = t.inverse().transform(activeCrop, true);
@@ -550,13 +538,14 @@ void Layer::setGeometry(const sp<const DisplayDevice>& hw, HWComposer::HWCLayerI
                 Rect(activeCrop.right, activeCrop.top, s.active.w, activeCrop.bottom));
     }
 
-    Rect frame(t.transform(computeBounds(activeTransparentRegion)));
+    // computeBounds returns a FloatRect to provide more accuracy during the
+    // transformation. We then round upon constructing 'frame'.
+    Rect frame{t.transform(computeBounds(activeTransparentRegion))};
     if (!s.finalCrop.isEmpty()) {
         if (!frame.intersect(s.finalCrop, &frame)) {
             frame.clear();
         }
     }
-#ifdef USE_HWC2
     if (!frame.intersect(displayDevice->getViewport(), &frame)) {
         frame.clear();
     }
@@ -605,15 +594,6 @@ void Layer::setGeometry(const sp<const DisplayDevice>& hw, HWComposer::HWCLayerI
     error = hwcLayer->setInfo(type, appId);
     ALOGE_IF(error != HWC2::Error::None, "[%s] Failed to set info (%d)", mName.string(),
              static_cast<int32_t>(error));
-#else
-    if (!frame.intersect(hw->getViewport(), &frame)) {
-        frame.clear();
-    }
-    const Transform& tr(hw->getTransform());
-    layer.setFrame(tr.transform(frame));
-    layer.setCrop(computeCrop(hw));
-    layer.setPlaneAlpha(static_cast<uint8_t>(std::round(255.0f * getAlpha())));
-#endif
 
     /*
      * Transformations are applied in this order:
@@ -648,7 +628,6 @@ void Layer::setGeometry(const sp<const DisplayDevice>& hw, HWComposer::HWCLayerI
 
     // this gives us only the "orientation" component of the transform
     const uint32_t orientation = transform.getOrientation();
-#ifdef USE_HWC2
     if (orientation & Transform::ROT_INVALID) {
         // we can only handle simple transformation
         hwcInfo.forceClientComposition = true;
@@ -661,54 +640,30 @@ void Layer::setGeometry(const sp<const DisplayDevice>& hw, HWComposer::HWCLayerI
                  mName.string(), to_string(transform).c_str(), to_string(error).c_str(),
                  static_cast<int32_t>(error));
     }
-#else
-    if (orientation & Transform::ROT_INVALID) {
-        // we can only handle simple transformation
-        layer.setSkip(true);
-    } else {
-        layer.setTransform(orientation);
-    }
-#endif
 }
 
-#ifdef USE_HWC2
 void Layer::forceClientComposition(int32_t hwcId) {
-    if (mHwcLayers.count(hwcId) == 0) {
+    if (getBE().mHwcLayers.count(hwcId) == 0) {
         ALOGE("forceClientComposition: no HWC layer found (%d)", hwcId);
         return;
     }
 
-    mHwcLayers[hwcId].forceClientComposition = true;
+    getBE().mHwcLayers[hwcId].forceClientComposition = true;
 }
-#else
-void Layer::setPerFrameData(const sp<const DisplayDevice>& hw,
-                                  HWComposer::HWCLayerInterface& layer) {
-    // we have to set the visible region on every frame because
-    // we currently free it during onLayerDisplayed(), which is called
-    // after HWComposer::commit() -- every frame.
-    // Apply this display's projection's viewport to the visible region
-    // before giving it to the HWC HAL.
-    const Transform& tr = hw->getTransform();
-    Region visible = tr.transform(visibleRegion.intersect(hw->getViewport()));
-    layer.setVisibleRegionScreen(visible);
-    layer.setSurfaceDamage(surfaceDamageRegion);
-    mIsGlesComposition = (layer.getCompositionType() == HWC_FRAMEBUFFER);
 
-    if (mSidebandStream.get()) {
-        layer.setSidebandStream(mSidebandStream);
-    } else {
-        // NOTE: buffer can be NULL if the client never drew into this
-        // layer yet, or if we ran out of memory
-        layer.setBuffer(mActiveBuffer);
+bool Layer::getForceClientComposition(int32_t hwcId) {
+    if (getBE().mHwcLayers.count(hwcId) == 0) {
+        ALOGE("getForceClientComposition: no HWC layer found (%d)", hwcId);
+        return false;
     }
+
+    return getBE().mHwcLayers[hwcId].forceClientComposition;
 }
-#endif
 
-
-#ifdef USE_HWC2
 void Layer::updateCursorPosition(const sp<const DisplayDevice>& displayDevice) {
     auto hwcId = displayDevice->getHwcDisplayId();
-    if (mHwcLayers.count(hwcId) == 0 || getCompositionType(hwcId) != HWC2::Composition::Cursor) {
+    if (getBE().mHwcLayers.count(hwcId) == 0 ||
+        getCompositionType(hwcId) != HWC2::Composition::Cursor) {
         return;
     }
 
@@ -731,35 +686,14 @@ void Layer::updateCursorPosition(const sp<const DisplayDevice>& displayDevice) {
     auto& displayTransform(displayDevice->getTransform());
     auto position = displayTransform.transform(frame);
 
-    auto error = mHwcLayers[hwcId].layer->setCursorPosition(position.left, position.top);
+    auto error = getBE().mHwcLayers[hwcId].layer->setCursorPosition(position.left,
+                                                                              position.top);
     ALOGE_IF(error != HWC2::Error::None,
              "[%s] Failed to set cursor position "
              "to (%d, %d): %s (%d)",
              mName.string(), position.left, position.top, to_string(error).c_str(),
              static_cast<int32_t>(error));
 }
-#else
-Rect Layer::getPosition(const sp<const DisplayDevice>& hw) {
-    // this gives us only the "orientation" component of the transform
-    const State& s(getCurrentState());
-
-    // apply the layer's transform, followed by the display's global transform
-    // here we're guaranteed that the layer's transform preserves rects
-    Rect win(s.active.w, s.active.h);
-    if (!s.crop.isEmpty()) {
-        win.intersect(s.crop, &win);
-    }
-    // subtract the transparent region and snap to the bounds
-    Rect bounds = reduce(win, s.activeTransparentRegion);
-    Rect frame(getTransform().transform(bounds));
-    frame.intersect(hw->getViewport(), &frame);
-    if (!s.finalCrop.isEmpty()) {
-        frame.intersect(s.finalCrop, &frame);
-    }
-    const Transform& tr(hw->getTransform());
-    return Rect(tr.transform(frame));
-}
-#endif
 
 // ---------------------------------------------------------------------------
 // drawing...
@@ -780,22 +714,21 @@ void Layer::draw(const RenderArea& renderArea) const {
 void Layer::clearWithOpenGL(const RenderArea& renderArea, float red, float green, float blue,
                             float alpha) const {
     RenderEngine& engine(mFlinger->getRenderEngine());
-    computeGeometry(renderArea, mMesh, false);
+    computeGeometry(renderArea, getBE().mMesh, false);
     engine.setupFillWithColor(red, green, blue, alpha);
-    engine.drawMesh(mMesh);
+    engine.drawMesh(getBE().mMesh);
 }
 
 void Layer::clearWithOpenGL(const RenderArea& renderArea) const {
     clearWithOpenGL(renderArea, 0, 0, 0, 0);
 }
 
-#ifdef USE_HWC2
 void Layer::setCompositionType(int32_t hwcId, HWC2::Composition type, bool callIntoHwc) {
-    if (mHwcLayers.count(hwcId) == 0) {
+    if (getBE().mHwcLayers.count(hwcId) == 0) {
         ALOGE("setCompositionType called without a valid HWC layer");
         return;
     }
-    auto& hwcInfo = mHwcLayers[hwcId];
+    auto& hwcInfo = getBE().mHwcLayers[hwcId];
     auto& hwcLayer = hwcInfo.layer;
     ALOGV("setCompositionType(%" PRIx64 ", %s, %d)", hwcLayer->getId(), to_string(type).c_str(),
           static_cast<int>(callIntoHwc));
@@ -819,29 +752,28 @@ HWC2::Composition Layer::getCompositionType(int32_t hwcId) const {
         // have a HWC counterpart, then it will always be Client
         return HWC2::Composition::Client;
     }
-    if (mHwcLayers.count(hwcId) == 0) {
+    if (getBE().mHwcLayers.count(hwcId) == 0) {
         ALOGE("getCompositionType called with an invalid HWC layer");
         return HWC2::Composition::Invalid;
     }
-    return mHwcLayers.at(hwcId).compositionType;
+    return getBE().mHwcLayers.at(hwcId).compositionType;
 }
 
 void Layer::setClearClientTarget(int32_t hwcId, bool clear) {
-    if (mHwcLayers.count(hwcId) == 0) {
+    if (getBE().mHwcLayers.count(hwcId) == 0) {
         ALOGE("setClearClientTarget called without a valid HWC layer");
         return;
     }
-    mHwcLayers[hwcId].clearClientTarget = clear;
+    getBE().mHwcLayers[hwcId].clearClientTarget = clear;
 }
 
 bool Layer::getClearClientTarget(int32_t hwcId) const {
-    if (mHwcLayers.count(hwcId) == 0) {
+    if (getBE().mHwcLayers.count(hwcId) == 0) {
         ALOGE("getClearClientTarget called without a valid HWC layer");
         return false;
     }
-    return mHwcLayers.at(hwcId).clearClientTarget;
+    return getBE().mHwcLayers.at(hwcId).clearClientTarget;
 }
-#endif
 
 bool Layer::addSyncPoint(const std::shared_ptr<SyncPoint>& point) {
     if (point->getFrameNumber() <= mCurrentFrameNumber) {
@@ -887,7 +819,7 @@ void Layer::computeGeometry(const RenderArea& renderArea, Mesh& mesh,
     const Layer::State& s(getDrawingState());
     const Transform renderAreaTransform(renderArea.getTransform());
     const uint32_t height = renderArea.getHeight();
-    Rect win = computeBounds();
+    FloatRect win = computeBounds();
 
     vec2 lt = vec2(win.left, win.top);
     vec2 lb = vec2(win.left, win.bottom);
@@ -1059,11 +991,12 @@ uint32_t Layer::doTransaction(uint32_t flags) {
                  "            requested={ wh={%4u,%4u} }}\n"
                  "  drawing={ active   ={ wh={%4u,%4u} crop={%4d,%4d,%4d,%4d} (%4d,%4d) }\n"
                  "            requested={ wh={%4u,%4u} }}\n",
-                 this, getName().string(), mCurrentTransform, getEffectiveScalingMode(), c.active.w,
-                 c.active.h, c.crop.left, c.crop.top, c.crop.right, c.crop.bottom,
-                 c.crop.getWidth(), c.crop.getHeight(), c.requested.w, c.requested.h, s.active.w,
-                 s.active.h, s.crop.left, s.crop.top, s.crop.right, s.crop.bottom,
-                 s.crop.getWidth(), s.crop.getHeight(), s.requested.w, s.requested.h);
+                 this, getName().string(), mCurrentTransform,
+                 getEffectiveScalingMode(), c.active.w, c.active.h, c.crop.left, c.crop.top,
+                 c.crop.right, c.crop.bottom, c.crop.getWidth(), c.crop.getHeight(), c.requested.w,
+                 c.requested.h, s.active.w, s.active.h, s.crop.left, s.crop.top, s.crop.right,
+                 s.crop.bottom, s.crop.getWidth(), s.crop.getHeight(), s.requested.w,
+                 s.requested.h);
 
         // record the new size, form this point on, when the client request
         // a buffer, it'll get the new size.
@@ -1089,9 +1022,9 @@ uint32_t Layer::doTransaction(uint32_t flags) {
     // to the old buffer. However in the state where we don't have an old buffer
     // there is no such concern but we may still be being used as a parent layer.
     const bool resizePending = ((c.requested.w != c.active.w) || (c.requested.h != c.active.h)) &&
-            (mActiveBuffer != nullptr);
+            (getBE().compositionInfo.mBuffer != nullptr);
     if (!isFixedSize()) {
-        if (resizePending && mSidebandStream == NULL) {
+        if (resizePending && getBE().compositionInfo.hwc.sidebandStream == nullptr) {
             flags |= eDontUpdateGeometryState;
         }
     }
@@ -1194,6 +1127,19 @@ bool Layer::setChildLayer(const sp<Layer>& childLayer, int32_t z) {
         return false;
     }
     if (childLayer->setLayer(z)) {
+        mCurrentChildren.removeAt(idx);
+        mCurrentChildren.add(childLayer);
+    }
+    return true;
+}
+
+bool Layer::setChildRelativeLayer(const sp<Layer>& childLayer,
+        const sp<IBinder>& relativeToHandle, int32_t relativeZ) {
+    ssize_t idx = mCurrentChildren.indexOf(childLayer);
+    if (idx < 0) {
+        return false;
+    }
+    if (childLayer->setRelativeLayer(relativeToHandle, relativeZ)) {
         mCurrentChildren.removeAt(idx);
         mCurrentChildren.add(childLayer);
     }
@@ -1475,12 +1421,12 @@ LayerDebugInfo Layer::getLayerDebugInfo() const {
     info.mMatrix[1][0] = ds.active.transform[1][0];
     info.mMatrix[1][1] = ds.active.transform[1][1];
     {
-        sp<const GraphicBuffer> activeBuffer = getActiveBuffer();
-        if (activeBuffer != 0) {
-            info.mActiveBufferWidth = activeBuffer->getWidth();
-            info.mActiveBufferHeight = activeBuffer->getHeight();
-            info.mActiveBufferStride = activeBuffer->getStride();
-            info.mActiveBufferFormat = activeBuffer->format;
+        sp<const GraphicBuffer> buffer = getBE().compositionInfo.mBuffer;
+        if (buffer != 0) {
+            info.mActiveBufferWidth = buffer->getWidth();
+            info.mActiveBufferHeight = buffer->getHeight();
+            info.mActiveBufferStride = buffer->getStride();
+            info.mActiveBufferFormat = buffer->format;
         } else {
             info.mActiveBufferWidth = 0;
             info.mActiveBufferHeight = 0;
@@ -1494,7 +1440,7 @@ LayerDebugInfo Layer::getLayerDebugInfo() const {
     info.mContentDirty = contentDirty;
     return info;
 }
-#ifdef USE_HWC2
+
 void Layer::miniDumpHeader(String8& result) {
     result.append("----------------------------------------");
     result.append("---------------------------------------\n");
@@ -1508,7 +1454,7 @@ void Layer::miniDumpHeader(String8& result) {
 }
 
 void Layer::miniDump(String8& result, int32_t hwcId) const {
-    if (mHwcLayers.count(hwcId) == 0) {
+    if (getBE().mHwcLayers.count(hwcId) == 0) {
         return;
     }
 
@@ -1526,7 +1472,7 @@ void Layer::miniDump(String8& result, int32_t hwcId) const {
     result.appendFormat(" %s\n", name.string());
 
     const Layer::State& layerState(getDrawingState());
-    const HWCInfo& hwcInfo = mHwcLayers.at(hwcId);
+    const LayerBE::HWCInfo& hwcInfo = getBE().mHwcLayers.at(hwcId);
     result.appendFormat("  %10d | ", layerState.z);
     result.appendFormat("%10s | ", to_string(getCompositionType(hwcId)).c_str());
     const Rect& frame = hwcInfo.displayFrame;
@@ -1537,7 +1483,6 @@ void Layer::miniDump(String8& result, int32_t hwcId) const {
     result.append("- - - - - - - - - - - - - - - - - - - - ");
     result.append("- - - - - - - - - - - - - - - - - - - -\n");
 }
-#endif
 
 void Layer::dumpFrameStats(String8& result) const {
     mFrameTracker.dumpStats(result);
@@ -1659,17 +1604,14 @@ bool Layer::reparent(const sp<IBinder>& newParentHandle) {
 }
 
 bool Layer::detachChildren() {
-    traverseInZOrder(LayerVector::StateSet::Drawing, [this](Layer* child) {
-        if (child == this) {
-            return;
-        }
-
+    for (const sp<Layer>& child : mCurrentChildren) {
         sp<Client> parentClient = mClientRef.promote();
         sp<Client> client(child->mClientRef.promote());
         if (client != nullptr && parentClient != client) {
-            client->detachLayer(child);
+            client->detachLayer(child.get());
+            child->detachChildren();
         }
-    });
+    }
 
     return true;
 }
@@ -1694,8 +1636,14 @@ int32_t Layer::getZ() const {
     return mDrawingState.z;
 }
 
+bool Layer::usingRelativeZ(LayerVector::StateSet stateSet) {
+    const bool useDrawing = stateSet == LayerVector::StateSet::Drawing;
+    const State& state = useDrawing ? mDrawingState : mCurrentState;
+    return state.zOrderRelativeOf != nullptr;
+}
+
 __attribute__((no_sanitize("unsigned-integer-overflow"))) LayerVector Layer::makeTraversalList(
-        LayerVector::StateSet stateSet) {
+        LayerVector::StateSet stateSet, bool* outSkipRelativeZUsers) {
     LOG_ALWAYS_FATAL_IF(stateSet == LayerVector::StateSet::Invalid,
                         "makeTraversalList received invalid stateSet");
     const bool useDrawing = stateSet == LayerVector::StateSet::Drawing;
@@ -1703,10 +1651,11 @@ __attribute__((no_sanitize("unsigned-integer-overflow"))) LayerVector Layer::mak
     const State& state = useDrawing ? mDrawingState : mCurrentState;
 
     if (state.zOrderRelatives.size() == 0) {
+        *outSkipRelativeZUsers = true;
         return children;
     }
-    LayerVector traverse;
 
+    LayerVector traverse;
     for (const wp<Layer>& weakRelative : state.zOrderRelatives) {
         sp<Layer> strongRelative = weakRelative.promote();
         if (strongRelative != nullptr) {
@@ -1715,6 +1664,10 @@ __attribute__((no_sanitize("unsigned-integer-overflow"))) LayerVector Layer::mak
     }
 
     for (const sp<Layer>& child : children) {
+        const State& childState = useDrawing ? child->mDrawingState : child->mCurrentState;
+        if (childState.zOrderRelativeOf != nullptr) {
+            continue;
+        }
         traverse.add(child);
     }
 
@@ -1725,19 +1678,35 @@ __attribute__((no_sanitize("unsigned-integer-overflow"))) LayerVector Layer::mak
  * Negatively signed relatives are before 'this' in Z-order.
  */
 void Layer::traverseInZOrder(LayerVector::StateSet stateSet, const LayerVector::Visitor& visitor) {
-    LayerVector list = makeTraversalList(stateSet);
+    // In the case we have other layers who are using a relative Z to us, makeTraversalList will
+    // produce a new list for traversing, including our relatives, and not including our children
+    // who are relatives of another surface. In the case that there are no relative Z,
+    // makeTraversalList returns our children directly to avoid significant overhead.
+    // However in this case we need to take the responsibility for filtering children which
+    // are relatives of another surface here.
+    bool skipRelativeZUsers = false;
+    const LayerVector list = makeTraversalList(stateSet, &skipRelativeZUsers);
 
     size_t i = 0;
     for (; i < list.size(); i++) {
         const auto& relative = list[i];
+        if (skipRelativeZUsers && relative->usingRelativeZ(stateSet)) {
+            continue;
+        }
+
         if (relative->getZ() >= 0) {
             break;
         }
         relative->traverseInZOrder(stateSet, visitor);
     }
+
     visitor(this);
     for (; i < list.size(); i++) {
         const auto& relative = list[i];
+
+        if (skipRelativeZUsers && relative->usingRelativeZ(stateSet)) {
+            continue;
+        }
         relative->traverseInZOrder(stateSet, visitor);
     }
 }
@@ -1747,11 +1716,18 @@ void Layer::traverseInZOrder(LayerVector::StateSet stateSet, const LayerVector::
  */
 void Layer::traverseInReverseZOrder(LayerVector::StateSet stateSet,
                                     const LayerVector::Visitor& visitor) {
-    LayerVector list = makeTraversalList(stateSet);
+    // See traverseInZOrder for documentation.
+    bool skipRelativeZUsers = false;
+    LayerVector list = makeTraversalList(stateSet, &skipRelativeZUsers);
 
     int32_t i = 0;
     for (i = int32_t(list.size()) - 1; i >= 0; i--) {
         const auto& relative = list[i];
+
+        if (skipRelativeZUsers && relative->usingRelativeZ(stateSet)) {
+            continue;
+        }
+
         if (relative->getZ() < 0) {
             break;
         }
@@ -1760,6 +1736,11 @@ void Layer::traverseInReverseZOrder(LayerVector::StateSet stateSet,
     visitor(this);
     for (; i >= 0; i--) {
         const auto& relative = list[i];
+
+        if (skipRelativeZUsers && relative->usingRelativeZ(stateSet)) {
+            continue;
+        }
+
         relative->traverseInReverseZOrder(stateSet, visitor);
     }
 }
@@ -1798,15 +1779,15 @@ Transform Layer::getTransform() const {
         // for in the transform. We need to mirror this scaling in child surfaces
         // or we will break the contract where WM can treat child surfaces as
         // pixels in the parent surface.
-        if (p->isFixedSize() && p->mActiveBuffer != nullptr) {
+        if (p->isFixedSize() && p->getBE().compositionInfo.mBuffer != nullptr) {
             int bufferWidth;
             int bufferHeight;
             if ((p->mCurrentTransform & NATIVE_WINDOW_TRANSFORM_ROT_90) == 0) {
-                bufferWidth = p->mActiveBuffer->getWidth();
-                bufferHeight = p->mActiveBuffer->getHeight();
+                bufferWidth = p->getBE().compositionInfo.mBuffer->getWidth();
+                bufferHeight = p->getBE().compositionInfo.mBuffer->getHeight();
             } else {
-                bufferHeight = p->mActiveBuffer->getWidth();
-                bufferWidth = p->mActiveBuffer->getHeight();
+                bufferHeight = p->getBE().compositionInfo.mBuffer->getWidth();
+                bufferWidth = p->getBE().compositionInfo.mBuffer->getHeight();
             }
             float sx = p->getDrawingState().active.w / static_cast<float>(bufferWidth);
             float sy = p->getDrawingState().active.h / static_cast<float>(bufferHeight);
@@ -1896,7 +1877,7 @@ void Layer::writeToProto(LayerProto* layerInfo, LayerVector::StateSet stateSet) 
     LayerProtoHelper::writeToProto(transform, layerInfo->mutable_transform());
     LayerProtoHelper::writeToProto(requestedTransform, layerInfo->mutable_requested_transform());
 
-    auto parent = getParent();
+    auto parent = useDrawing ? mDrawingParent.promote() : mCurrentParent.promote();
     if (parent != nullptr) {
         layerInfo->set_parent(parent->sequence);
     }
@@ -1906,9 +1887,9 @@ void Layer::writeToProto(LayerProto* layerInfo, LayerVector::StateSet stateSet) 
         layerInfo->set_z_order_relative_of(zOrderRelativeOf->sequence);
     }
 
-    auto activeBuffer = getActiveBuffer();
-    if (activeBuffer != nullptr) {
-        LayerProtoHelper::writeToProto(activeBuffer, layerInfo->mutable_active_buffer());
+    auto buffer = getBE().compositionInfo.mBuffer;
+    if (buffer != nullptr) {
+        LayerProtoHelper::writeToProto(buffer, layerInfo->mutable_active_buffer());
     }
 
     layerInfo->set_queued_frames(getQueuedFrameCount());

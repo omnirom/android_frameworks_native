@@ -38,9 +38,7 @@
 
 #include "DisplayHardware/DisplaySurface.h"
 #include "DisplayHardware/HWComposer.h"
-#ifdef USE_HWC2
 #include "DisplayHardware/HWC2.h"
-#endif
 #include "RenderEngine/RenderEngine.h"
 
 #include "clz.h"
@@ -55,24 +53,12 @@
 using namespace android;
 // ----------------------------------------------------------------------------
 
-#ifdef EGL_ANDROID_swap_rectangle
-static constexpr bool kEGLAndroidSwapRectangle = true;
-#else
-static constexpr bool kEGLAndroidSwapRectangle = false;
-#endif
-
 // retrieve triple buffer setting from configstore
 using namespace android::hardware::configstore;
 using namespace android::hardware::configstore::V1_0;
 
 static bool useTripleFramebuffer = getInt64< ISurfaceFlingerConfigs,
         &ISurfaceFlingerConfigs::maxFrameBufferAcquiredBuffers>(2) >= 3;
-
-#if !defined(EGL_EGLEXT_PROTOTYPES) || !defined(EGL_ANDROID_swap_rectangle)
-// Dummy implementation in case it is missing.
-inline void eglSetSwapRectangleANDROID (EGLDisplay, EGLSurface, EGLint, EGLint, EGLint, EGLint) {
-}
-#endif
 
 /*
  * Initialize the display to the specified values.
@@ -86,14 +72,10 @@ DisplayDevice::DisplayDevice(
         const sp<SurfaceFlinger>& flinger,
         DisplayType type,
         int32_t hwcId,
-#ifndef USE_HWC2
-        int format,
-#endif
         bool isSecure,
         const wp<IBinder>& displayToken,
         const sp<DisplaySurface>& displaySurface,
         const sp<IGraphicBufferProducer>& producer,
-        EGLConfig config,
         bool supportWideColor)
     : lastCompositionHadVisibleLayers(false),
       mFlinger(flinger),
@@ -101,14 +83,9 @@ DisplayDevice::DisplayDevice(
       mHwcDisplayId(hwcId),
       mDisplayToken(displayToken),
       mDisplaySurface(displaySurface),
-      mDisplay(EGL_NO_DISPLAY),
-      mSurface(EGL_NO_SURFACE),
+      mSurface{flinger->getRenderEngine()},
       mDisplayWidth(),
       mDisplayHeight(),
-#ifndef USE_HWC2
-      mFormat(),
-#endif
-      mFlags(),
       mPageFlipCount(),
       mIsSecure(isSecure),
       mLayerStack(NO_LAYER_STACK),
@@ -121,30 +98,16 @@ DisplayDevice::DisplayDevice(
     mNativeWindow = surface = new Surface(producer, false);
     ANativeWindow* const window = mNativeWindow.get();
 
-#ifdef USE_HWC2
     mActiveColorMode = HAL_COLOR_MODE_NATIVE;
     mDisplayHasWideColor = supportWideColor;
-#else
-    (void) supportWideColor;
-#endif
     /*
      * Create our display's surface
      */
-
-    EGLSurface eglSurface;
-    EGLDisplay display = eglGetDisplay(EGL_DEFAULT_DISPLAY);
-    if (config == EGL_NO_CONFIG) {
-#ifdef USE_HWC2
-        config = RenderEngine::chooseEglConfig(display, PIXEL_FORMAT_RGBA_8888,
-                                               /*logConfig*/ false);
-#else
-        config = RenderEngine::chooseEglConfig(display, format,
-                                               /*logConfig*/ false);
-#endif
-    }
-    eglSurface = eglCreateWindowSurface(display, config, window, NULL);
-    eglQuerySurface(display, eglSurface, EGL_WIDTH,  &mDisplayWidth);
-    eglQuerySurface(display, eglSurface, EGL_HEIGHT, &mDisplayHeight);
+    mSurface.setCritical(mType == DisplayDevice::DISPLAY_PRIMARY);
+    mSurface.setAsync(mType >= DisplayDevice::DISPLAY_VIRTUAL);
+    mSurface.setNativeWindow(window);
+    mDisplayWidth = mSurface.queryWidth();
+    mDisplayHeight = mSurface.queryHeight();
 
     // Make sure that composition can never be stalled by a virtual display
     // consumer that isn't processing buffers fast enough. We have to do this
@@ -156,12 +119,6 @@ DisplayDevice::DisplayDevice(
     if (mType >= DisplayDevice::DISPLAY_VIRTUAL)
         window->setSwapInterval(window, 0);
 
-    mConfig = config;
-    mDisplay = display;
-    mSurface = eglSurface;
-#ifndef USE_HWC2
-    mFormat = format;
-#endif
     mPageFlipCount = 0;
     mViewport.makeInvalid();
     mFrame.makeInvalid();
@@ -193,19 +150,11 @@ DisplayDevice::DisplayDevice(
 }
 
 DisplayDevice::~DisplayDevice() {
-    if (mSurface != EGL_NO_SURFACE) {
-        eglDestroySurface(mDisplay, mSurface);
-        mSurface = EGL_NO_SURFACE;
-    }
 }
 
 void DisplayDevice::disconnect(HWComposer& hwc) {
     if (mHwcDisplayId >= 0) {
         hwc.disconnectDisplay(mHwcDisplayId);
-#ifndef USE_HWC2
-        if (mHwcDisplayId >= DISPLAY_VIRTUAL)
-            hwc.freeDisplayId(mHwcDisplayId);
-#endif
         mHwcDisplayId = -1;
     }
 }
@@ -222,16 +171,6 @@ int DisplayDevice::getHeight() const {
     return mDisplayHeight;
 }
 
-#ifndef USE_HWC2
-PixelFormat DisplayDevice::getFormat() const {
-    return mFormat;
-}
-#endif
-
-EGLSurface DisplayDevice::getEGLSurface() const {
-    return mSurface;
-}
-
 void DisplayDevice::setDisplayName(const String8& displayName) {
     if (!displayName.isEmpty()) {
         // never override the name with an empty name
@@ -243,25 +182,9 @@ uint32_t DisplayDevice::getPageFlipCount() const {
     return mPageFlipCount;
 }
 
-#ifndef USE_HWC2
-status_t DisplayDevice::compositionComplete() const {
-    return mDisplaySurface->compositionComplete();
-}
-#endif
-
-void DisplayDevice::flip(const Region& dirty) const
+void DisplayDevice::flip() const
 {
     mFlinger->getRenderEngine().checkErrors();
-
-    if (kEGLAndroidSwapRectangle) {
-        if (mFlags & SWAP_RECTANGLE) {
-            const Region newDirty(dirty.intersect(bounds()));
-            const Rect b(newDirty.getBounds());
-            eglSetSwapRectangleANDROID(mDisplay, mSurface,
-                    b.left, b.top, b.width(), b.height());
-        }
-    }
-
     mPageFlipCount++;
 }
 
@@ -269,7 +192,6 @@ status_t DisplayDevice::beginFrame(bool mustRecompose) const {
     return mDisplaySurface->beginFrame(mustRecompose);
 }
 
-#ifdef USE_HWC2
 status_t DisplayDevice::prepareFrame(HWComposer& hwc) {
     status_t error = hwc.prepare(*this);
     if (error != NO_ERROR) {
@@ -293,53 +215,10 @@ status_t DisplayDevice::prepareFrame(HWComposer& hwc) {
     }
     return mDisplaySurface->prepareFrame(compositionType);
 }
-#else
-status_t DisplayDevice::prepareFrame(const HWComposer& hwc) const {
-    DisplaySurface::CompositionType compositionType;
-    bool haveGles = hwc.hasGlesComposition(mHwcDisplayId);
-    bool haveHwc = hwc.hasHwcComposition(mHwcDisplayId);
-    if (haveGles && haveHwc) {
-        compositionType = DisplaySurface::COMPOSITION_MIXED;
-    } else if (haveGles) {
-        compositionType = DisplaySurface::COMPOSITION_GLES;
-    } else if (haveHwc) {
-        compositionType = DisplaySurface::COMPOSITION_HWC;
-    } else {
-        // Nothing to do -- when turning the screen off we get a frame like
-        // this. Call it a HWC frame since we won't be doing any GLES work but
-        // will do a prepare/set cycle.
-        compositionType = DisplaySurface::COMPOSITION_HWC;
-    }
-    return mDisplaySurface->prepareFrame(compositionType);
-}
-#endif
 
 void DisplayDevice::swapBuffers(HWComposer& hwc) const {
-#ifdef USE_HWC2
     if (hwc.hasClientComposition(mHwcDisplayId)) {
-#else
-    // We need to call eglSwapBuffers() if:
-    //  (1) we don't have a hardware composer, or
-    //  (2) we did GLES composition this frame, and either
-    //    (a) we have framebuffer target support (not present on legacy
-    //        devices, where HWComposer::commit() handles things); or
-    //    (b) this is a virtual display
-    if (hwc.initCheck() != NO_ERROR ||
-            (hwc.hasGlesComposition(mHwcDisplayId) &&
-             (hwc.supportsFramebufferTarget() || mType >= DISPLAY_VIRTUAL))) {
-#endif
-        EGLBoolean success = eglSwapBuffers(mDisplay, mSurface);
-        if (!success) {
-            EGLint error = eglGetError();
-            if (error == EGL_CONTEXT_LOST ||
-                    mType == DisplayDevice::DISPLAY_PRIMARY) {
-                LOG_ALWAYS_FATAL("eglSwapBuffers(%p, %p) failed with 0x%08x",
-                        mDisplay, mSurface, error);
-            } else {
-                ALOGE("eglSwapBuffers(%p, %p) failed with 0x%08x",
-                        mDisplay, mSurface, error);
-            }
-        }
+        mSurface.swapBuffers();
     }
 
     status_t result = mDisplaySurface->advanceFrame();
@@ -349,35 +228,14 @@ void DisplayDevice::swapBuffers(HWComposer& hwc) const {
     }
 }
 
-#ifdef USE_HWC2
 void DisplayDevice::onSwapBuffersCompleted() const {
     mDisplaySurface->onFrameCommitted();
 }
-#else
-void DisplayDevice::onSwapBuffersCompleted(HWComposer& hwc) const {
-    if (hwc.initCheck() == NO_ERROR) {
-        mDisplaySurface->onFrameCommitted();
-    }
-}
-#endif
 
-uint32_t DisplayDevice::getFlags() const
-{
-    return mFlags;
-}
-
-EGLBoolean DisplayDevice::makeCurrent(EGLDisplay dpy, EGLContext ctx) const {
-    EGLBoolean result = EGL_TRUE;
-    EGLSurface sur = eglGetCurrentSurface(EGL_DRAW);
-    if (sur != mSurface) {
-        result = eglMakeCurrent(dpy, mSurface, mSurface, ctx);
-        if (result == EGL_TRUE) {
-            if (mType >= DisplayDevice::DISPLAY_VIRTUAL)
-                eglSwapInterval(dpy, 0);
-        }
-    }
+bool DisplayDevice::makeCurrent() const {
+    bool success = mFlinger->getRenderEngine().setCurrentSurface(mSurface);
     setViewportAndProjection();
-    return result;
+    return success;
 }
 
 void DisplayDevice::setViewportAndProjection() const {
@@ -400,6 +258,14 @@ void DisplayDevice::setVisibleLayersSortedByZ(const Vector< sp<Layer> >& layers)
 
 const Vector< sp<Layer> >& DisplayDevice::getVisibleLayersSortedByZ() const {
     return mVisibleLayersSortedByZ;
+}
+
+void DisplayDevice::setLayersNeedingFences(const Vector< sp<Layer> >& layers) {
+    mLayersNeedingFences = layers;
+}
+
+const Vector< sp<Layer> >& DisplayDevice::getLayersNeedingFences() const {
+    return mLayersNeedingFences;
 }
 
 Region DisplayDevice::getDirtyRegion(bool repaintEverything) const {
@@ -437,7 +303,6 @@ int DisplayDevice::getActiveConfig()  const {
 }
 
 // ----------------------------------------------------------------------------
-#ifdef USE_HWC2
 void DisplayDevice::setActiveColorMode(android_color_mode_t mode) {
     mActiveColorMode = mode;
 }
@@ -450,7 +315,6 @@ void DisplayDevice::setCompositionDataSpace(android_dataspace dataspace) {
     ANativeWindow* const window = mNativeWindow.get();
     native_window_set_buffers_data_space(window, dataspace);
 }
-#endif
 
 // ----------------------------------------------------------------------------
 
@@ -507,17 +371,14 @@ status_t DisplayDevice::orientationToTransfrom(
 void DisplayDevice::setDisplaySize(const int newWidth, const int newHeight) {
     dirtyRegion.set(getBounds());
 
-    if (mSurface != EGL_NO_SURFACE) {
-        eglDestroySurface(mDisplay, mSurface);
-        mSurface = EGL_NO_SURFACE;
-    }
+    mSurface.setNativeWindow(nullptr);
 
     mDisplaySurface->resizeBuffers(newWidth, newHeight);
 
     ANativeWindow* const window = mNativeWindow.get();
-    mSurface = eglCreateWindowSurface(mDisplay, mConfig, window, NULL);
-    eglQuerySurface(mDisplay, mSurface, EGL_WIDTH,  &mDisplayWidth);
-    eglQuerySurface(mDisplay, mSurface, EGL_HEIGHT, &mDisplayHeight);
+    mSurface.setNativeWindow(window);
+    mDisplayWidth = mSurface.queryWidth();
+    mDisplayHeight = mSurface.queryHeight();
 
     LOG_FATAL_IF(mDisplayWidth != newWidth,
                 "Unable to set new width to %d", newWidth);
@@ -619,17 +480,13 @@ uint32_t DisplayDevice::getPrimaryDisplayOrientationTransform() {
 void DisplayDevice::dump(String8& result) const {
     const Transform& tr(mGlobalTransform);
     ANativeWindow* const window = mNativeWindow.get();
-    EGLint redSize, greenSize, blueSize, alphaSize;
-    eglGetConfigAttrib(mDisplay, mConfig, EGL_RED_SIZE, &redSize);
-    eglGetConfigAttrib(mDisplay, mConfig, EGL_GREEN_SIZE, &greenSize);
-    eglGetConfigAttrib(mDisplay, mConfig, EGL_BLUE_SIZE, &blueSize);
-    eglGetConfigAttrib(mDisplay, mConfig, EGL_ALPHA_SIZE, &alphaSize);
     result.appendFormat("+ DisplayDevice: %s\n", mDisplayName.string());
     result.appendFormat("   type=%x, hwcId=%d, layerStack=%u, (%4dx%4d), ANativeWindow=%p "
                         "(%d:%d:%d:%d), orient=%2d (type=%08x), "
                         "flips=%u, isSecure=%d, powerMode=%d, activeConfig=%d, numLayers=%zu\n",
                         mType, mHwcDisplayId, mLayerStack, mDisplayWidth, mDisplayHeight, window,
-                        redSize, greenSize, blueSize, alphaSize, mOrientation, tr.getType(),
+                        mSurface.queryRedSize(), mSurface.queryGreenSize(), mSurface.queryBlueSize(),
+                        mSurface.queryAlphaSize(), mOrientation, tr.getType(),
                         getPageFlipCount(), mIsSecure, mPowerMode, mActiveConfig,
                         mVisibleLayersSortedByZ.size());
     result.appendFormat("   v:[%d,%d,%d,%d], f:[%d,%d,%d,%d], s:[%d,%d,%d,%d],"

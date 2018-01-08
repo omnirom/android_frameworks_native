@@ -81,6 +81,7 @@ void add_mountinfo();
 #define PROFILE_DATA_DIR_CUR "/data/misc/profiles/cur"
 #define PROFILE_DATA_DIR_REF "/data/misc/profiles/ref"
 #define WLUTIL "/vendor/xbin/wlutil"
+#define WMTRACE_DATA_DIR "/data/misc/wmtrace"
 
 // TODO(narayan): Since this information has to be kept in sync
 // with tombstoned, we should just put it in a common header.
@@ -112,8 +113,8 @@ static int RunCommand(const std::string& title, const std::vector<std::string>& 
 }
 static void RunDumpsys(const std::string& title, const std::vector<std::string>& dumpsysArgs,
                        const CommandOptions& options = Dumpstate::DEFAULT_DUMPSYS,
-                       long dumpsysTimeout = 0) {
-    return ds.RunDumpsys(title, dumpsysArgs, options, dumpsysTimeout);
+                       long dumpsysTimeoutMs = 0) {
+    return ds.RunDumpsys(title, dumpsysArgs, options, dumpsysTimeoutMs);
 }
 static int DumpFile(const std::string& title, const std::string& path) {
     return ds.DumpFile(title, path);
@@ -690,7 +691,9 @@ void Dumpstate::PrintHeader() const {
     printf("Kernel: ");
     DumpFileToFd(STDOUT_FILENO, "", "/proc/version");
     printf("Command line: %s\n", strtok(cmdline_buf, "\n"));
-    ds.RunCommand("UPTIME", {"uptime"}, CommandOptions::DEFAULT);
+    printf("Uptime: ");
+    RunCommandToFd(STDOUT_FILENO, "", {"uptime", "-p"},
+                   CommandOptions::WithTimeout(1).Always().Build());
     printf("Bugreport format version: %s\n", version_.c_str());
     printf("Dumpstate info: id=%d pid=%d dry_run=%d args=%s extra_options=%s\n", id_, pid_,
            PropertiesHelper::IsDryRun(), args_.c_str(), extra_options_.c_str());
@@ -829,33 +832,32 @@ static void DoKmsg() {
 }
 
 static void DoLogcat() {
-    unsigned long timeout;
+    unsigned long timeout_ms;
     // DumpFile("EVENT LOG TAGS", "/etc/event-log-tags");
     // calculate timeout
-    timeout = logcat_timeout("main") + logcat_timeout("system") + logcat_timeout("crash");
-    if (timeout < 20000) {
-        timeout = 20000;
+    timeout_ms = logcat_timeout("main") + logcat_timeout("system") + logcat_timeout("crash");
+    if (timeout_ms < 20000) {
+        timeout_ms = 20000;
     }
     RunCommand("SYSTEM LOG",
-               {"logcat", "-v", "threadtime", "-v", "printable", "-v", "uid",
-                        "-d", "*:v"},
-               CommandOptions::WithTimeout(timeout / 1000).Build());
-    timeout = logcat_timeout("events");
-    if (timeout < 20000) {
-        timeout = 20000;
+               {"logcat", "-v", "threadtime", "-v", "printable", "-v", "uid", "-d", "*:v"},
+               CommandOptions::WithTimeoutInMs(timeout_ms).Build());
+    timeout_ms = logcat_timeout("events");
+    if (timeout_ms < 20000) {
+        timeout_ms = 20000;
     }
     RunCommand("EVENT LOG",
                {"logcat", "-b", "events", "-v", "threadtime", "-v", "printable", "-v", "uid",
                         "-d", "*:v"},
-               CommandOptions::WithTimeout(timeout / 1000).Build());
-    timeout = logcat_timeout("radio");
-    if (timeout < 20000) {
-        timeout = 20000;
+               CommandOptions::WithTimeoutInMs(timeout_ms).Build());
+    timeout_ms = logcat_timeout("radio");
+    if (timeout_ms < 20000) {
+        timeout_ms = 20000;
     }
     RunCommand("RADIO LOG",
                {"logcat", "-b", "radio", "-v", "threadtime", "-v", "printable", "-v", "uid",
                         "-d", "*:v"},
-               CommandOptions::WithTimeout(timeout / 1000).Build());
+               CommandOptions::WithTimeoutInMs(timeout_ms).Build());
 
     RunCommand("LOG STATISTICS", {"logcat", "-b", "all", "-S"});
 
@@ -1085,7 +1087,7 @@ static void RunDumpsysNormal() {
                    CommandOptions::WithTimeout(90).DropRoot().Build());
     } else {
         RunDumpsys("DUMPSYS", {"--skip", "meminfo", "cpuinfo"},
-                   CommandOptions::WithTimeout(90).Build(), 10);
+                   CommandOptions::WithTimeout(90).Build(), SEC_TO_MSEC(10));
     }
 }
 
@@ -1093,7 +1095,6 @@ static void dumpstate() {
     DurationReporter duration_reporter("DUMPSTATE");
 
     dump_dev_files("TRUSTY VERSION", "/sys/bus/platform/drivers/trusty", "trusty_version");
-    /* TODO: Remove duplicate uptime call when tools use it from header */
     RunCommand("UPTIME", {"uptime"});
     DumpBlockStatFiles();
     dump_emmc_ecsd("/d/mmc0/mmc0:0001/ext_csd");
@@ -1184,27 +1185,11 @@ static void dumpstate() {
 
     RunCommand("SYSTEM PROPERTIES", {"getprop"});
 
-    RunCommand("VOLD DUMP", {"vdc", "dump"});
-    RunCommand("SECURE CONTAINERS", {"vdc", "asec", "list"});
-
     RunCommand("STORAGED IO INFO", {"storaged", "-u", "-p"});
 
     RunCommand("FILESYSTEMS & FREE SPACE", {"df"});
 
     RunCommand("LAST RADIO LOG", {"parse_radio_log", "/proc/last_radio_log"});
-
-    printf("------ BACKLIGHTS ------\n");
-    printf("LCD brightness=");
-    DumpFile("", "/sys/class/leds/lcd-backlight/brightness");
-    printf("Button brightness=");
-    DumpFile("", "/sys/class/leds/button-backlight/brightness");
-    printf("Keyboard brightness=");
-    DumpFile("", "/sys/class/leds/keyboard-backlight/brightness");
-    printf("ALS mode=");
-    DumpFile("", "/sys/class/leds/lcd-backlight/als");
-    printf("LCD driver registers:\n");
-    DumpFile("", "/sys/class/leds/lcd-backlight/registers");
-    printf("\n");
 
     /* Binder state is expensive to look at as it uses a lot of memory. */
     DumpFile("BINDER FAILED TRANSACTION LOG", "/sys/kernel/debug/binder/failed_transaction_log");
@@ -1212,6 +1197,11 @@ static void dumpstate() {
     DumpFile("BINDER TRANSACTIONS", "/sys/kernel/debug/binder/transactions");
     DumpFile("BINDER STATS", "/sys/kernel/debug/binder/stats");
     DumpFile("BINDER STATE", "/sys/kernel/debug/binder/state");
+
+    /* Add window and surface trace files. */
+    if (!PropertiesHelper::IsUserBuild()) {
+        ds.AddDir(WMTRACE_DATA_DIR, false);
+    }
 
     ds.DumpstateBoard();
 
@@ -1305,8 +1295,10 @@ static void DumpstateTelephonyOnly() {
     printf("== Android Framework Services\n");
     printf("========================================================\n");
 
-    RunDumpsys("DUMPSYS", {"connectivity"}, CommandOptions::WithTimeout(90).Build(), 10);
-    RunDumpsys("DUMPSYS", {"carrier_config"}, CommandOptions::WithTimeout(90).Build(), 10);
+    RunDumpsys("DUMPSYS", {"connectivity"}, CommandOptions::WithTimeout(90).Build(),
+               SEC_TO_MSEC(10));
+    RunDumpsys("DUMPSYS", {"carrier_config"}, CommandOptions::WithTimeout(90).Build(),
+               SEC_TO_MSEC(10));
 
     printf("========================================================\n");
     printf("== Running Application Services\n");

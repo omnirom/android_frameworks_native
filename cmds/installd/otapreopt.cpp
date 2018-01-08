@@ -882,13 +882,14 @@ private:
         //        backs to do weird things.)
         const char* apk_path = package_parameters_.apk_path;
         CHECK(apk_path != nullptr);
-        if (StartsWith(apk_path, android_root_.c_str())) {
+        if (StartsWith(apk_path, android_root_)) {
             const char* last_slash = strrchr(apk_path, '/');
             if (last_slash != nullptr) {
                 std::string path(apk_path, last_slash - apk_path + 1);
                 CHECK(EndsWith(path, "/"));
                 path = path + "oat";
                 if (access(path.c_str(), F_OK) == 0) {
+                    LOG(INFO) << "Skipping A/B OTA preopt of already preopted package " << apk_path;
                     return true;
                 }
             }
@@ -900,7 +901,7 @@ private:
         // this tool will wipe the OTA artifact cache and try again (for robustness after
         // a failed OTA with remaining cache artifacts).
         if (access(apk_path, F_OK) != 0) {
-            LOG(WARNING) << "Skipping preopt of non-existing package " << apk_path;
+            LOG(WARNING) << "Skipping A/B OTA preopt of non-existing package " << apk_path;
             return true;
         }
 

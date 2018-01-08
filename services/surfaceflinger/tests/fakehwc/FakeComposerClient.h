@@ -16,7 +16,11 @@
 
 #pragma once
 
+#define HWC2_USE_CPP11
+#define HWC2_INCLUDE_STRINGIFICATION
 #include "ComposerClient.h"
+#undef HWC2_USE_CPP11
+#undef HWC2_INCLUDE_STRINGIFICATION
 #include "RenderState.h"
 
 // Needed for display type/ID enums
@@ -54,6 +58,8 @@ class FakeComposerClient : public ComposerBase {
 public:
     FakeComposerClient();
     virtual ~FakeComposerClient();
+
+    bool hasCapability(hwc2_capability_t capability) override;
 
     void removeClient() override;
     void enableCallback(bool enable) override;

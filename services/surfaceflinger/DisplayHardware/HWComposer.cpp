@@ -444,10 +444,16 @@ status_t HWComposer::prepare(DisplayDevice& displayDevice) {
 
     HWC2::Error error = HWC2::Error::None;
 
-    // First try to skip validate altogether if the HWC supports it.
+    // First try to skip validate altogether when there is no client
+    // composition.  When there is client composition, since we haven't
+    // rendered to the client target yet, we should not attempt to skip
+    // validate.
+    //
+    // displayData.hasClientComposition hasn't been updated for this frame.
+    // The check below is incorrect.  We actually rely on HWC here to fall
+    // back to validate when there is any client layer.
     displayData.validateWasSkipped = false;
-    if (hasCapability(HWC2::Capability::SkipValidate) &&
-            !displayData.hasClientComposition) {
+    if (!displayData.hasClientComposition) {
         sp<android::Fence> outPresentFence;
         uint32_t state = UINT32_MAX;
         error = hwcDisplay->presentOrValidate(&numTypes, &numRequests, &outPresentFence , &state);
@@ -866,6 +872,14 @@ void HWComposer::dump(String8& result) const {
     // all the state going into the layers. This is probably better done in
     // Layer itself, but it's going to take a bit of work to get there.
     result.append(mHwcDevice->dump().c_str());
+}
+
+std::optional<hwc2_display_t>
+HWComposer::getHwcDisplayId(int32_t displayId) const {
+    if (!isValidDisplay(displayId)) {
+        return {};
+    }
+    return mDisplayData[displayId].hwcDisplay->getId();
 }
 
 // ---------------------------------------------------------------------------

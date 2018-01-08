@@ -21,18 +21,10 @@
 
 #include <stdlib.h>
 
-#ifndef USE_HWC2
-#include <ui/PixelFormat.h>
-#endif
 #include <ui/Region.h>
 
-#include <EGL/egl.h>
-#include <EGL/eglext.h>
-
-#ifdef USE_HWC2
 #include <binder/IBinder.h>
 #include <utils/RefBase.h>
-#endif
 #include <utils/Mutex.h>
 #include <utils/String8.h>
 #include <utils/Timers.h>
@@ -40,10 +32,9 @@
 #include <gui/ISurfaceComposer.h>
 #include <hardware/hwcomposer_defs.h>
 #include "RenderArea.h"
+#include "RenderEngine/Surface.h"
 
-#ifdef USE_HWC2
 #include <memory>
-#endif
 
 struct ANativeWindow;
 
@@ -63,8 +54,6 @@ public:
     // region in layer-stack space
     mutable Region dirtyRegion;
     // region in screen space
-    mutable Region swapRegion;
-    // region in screen space
     Region undefinedRegion;
     bool lastCompositionHadVisibleLayers;
 
@@ -77,11 +66,6 @@ public:
     };
 
     enum {
-        PARTIAL_UPDATES = 0x00020000, // video driver feature
-        SWAP_RECTANGLE  = 0x00080000,
-    };
-
-    enum {
         NO_LAYER_STACK = 0xFFFFFFFF,
     };
 
@@ -90,14 +74,10 @@ public:
             const sp<SurfaceFlinger>& flinger,
             DisplayType type,
             int32_t hwcId,
-#ifndef USE_HWC2
-            int format,
-#endif
             bool isSecure,
             const wp<IBinder>& displayToken,
             const sp<DisplaySurface>& displaySurface,
             const sp<IGraphicBufferProducer>& producer,
-            EGLConfig config,
             bool supportWideColor);
     // clang-format on
 
@@ -113,19 +93,15 @@ public:
 
     // Flip the front and back buffers if the back buffer is "dirty".  Might
     // be instantaneous, might involve copying the frame buffer around.
-    void flip(const Region& dirty) const;
+    void flip() const;
 
     int         getWidth() const;
     int         getHeight() const;
-#ifndef USE_HWC2
-    PixelFormat getFormat() const;
-#endif
-    uint32_t    getFlags() const;
-
-    EGLSurface  getEGLSurface() const;
 
     void                    setVisibleLayersSortedByZ(const Vector< sp<Layer> >& layers);
     const Vector< sp<Layer> >& getVisibleLayersSortedByZ() const;
+    void                    setLayersNeedingFences(const Vector< sp<Layer> >& layers);
+    const Vector< sp<Layer> >& getLayersNeedingFences() const;
     Region                  getDirtyRegion(bool repaintEverything) const;
 
     void                    setLayerStack(uint32_t stack);
@@ -150,24 +126,13 @@ public:
     // We pass in mustRecompose so we can keep VirtualDisplaySurface's state
     // machine happy without actually queueing a buffer if nothing has changed
     status_t beginFrame(bool mustRecompose) const;
-#ifdef USE_HWC2
     status_t prepareFrame(HWComposer& hwc);
     bool getWideColorSupport() const { return mDisplayHasWideColor; }
-#else
-    status_t prepareFrame(const HWComposer& hwc) const;
-#endif
 
     void swapBuffers(HWComposer& hwc) const;
-#ifndef USE_HWC2
-    status_t compositionComplete() const;
-#endif
 
     // called after h/w composer has completed its set() call
-#ifdef USE_HWC2
     void onSwapBuffersCompleted() const;
-#else
-    void onSwapBuffersCompleted(HWComposer& hwc) const;
-#endif
 
     Rect getBounds() const {
         return Rect(mDisplayWidth, mDisplayHeight);
@@ -177,7 +142,7 @@ public:
     void setDisplayName(const String8& displayName);
     const String8& getDisplayName() const { return mDisplayName; }
 
-    EGLBoolean makeCurrent(EGLDisplay dpy, EGLContext ctx) const;
+    bool makeCurrent() const;
     void setViewportAndProjection() const;
 
     const sp<Fence>& getClientTargetAcquireFence() const;
@@ -189,11 +154,9 @@ public:
     void setPowerMode(int mode);
     bool isDisplayOn() const;
 
-#ifdef USE_HWC2
     android_color_mode_t getActiveColorMode() const;
     void setActiveColorMode(android_color_mode_t mode);
     void setCompositionDataSpace(android_dataspace dataspace);
-#endif
 
     /* ------------------------------------------------------------------------
      * Display active config management.
@@ -223,15 +186,9 @@ private:
     sp<ANativeWindow> mNativeWindow;
     sp<DisplaySurface> mDisplaySurface;
 
-    EGLConfig       mConfig;
-    EGLDisplay      mDisplay;
-    EGLSurface      mSurface;
+    RE::Surface     mSurface;
     int             mDisplayWidth;
     int             mDisplayHeight;
-#ifndef USE_HWC2
-    PixelFormat     mFormat;
-#endif
-    uint32_t        mFlags;
     mutable uint32_t mPageFlipCount;
     String8         mDisplayName;
     bool            mIsSecure;
@@ -243,6 +200,8 @@ private:
 
     // list of visible layers on that display
     Vector< sp<Layer> > mVisibleLayersSortedByZ;
+    // list of layers needing fences
+    Vector< sp<Layer> > mLayersNeedingFences;
 
     /*
      * Transaction state
@@ -269,7 +228,6 @@ private:
     int mPowerMode;
     // Current active config
     int mActiveConfig;
-#ifdef USE_HWC2
     // current active color mode
     android_color_mode_t mActiveColorMode;
 
@@ -277,7 +235,6 @@ private:
     // Initialized by SurfaceFlinger when the DisplayDevice is created.
     // Fed to RenderEngine during composition.
     bool mDisplayHasWideColor;
-#endif
 };
 
 struct DisplayDeviceState {
@@ -319,12 +276,10 @@ public:
     bool isSecure() const override { return mDevice->isSecure(); }
     bool needsFiltering() const override { return mDevice->needsFiltering(); }
     Rect getSourceCrop() const override { return mSourceCrop; }
-#ifdef USE_HWC2
     bool getWideColorSupport() const override { return mDevice->getWideColorSupport(); }
     android_color_mode_t getActiveColorMode() const override {
         return mDevice->getActiveColorMode();
     }
-#endif
 
 private:
     const sp<const DisplayDevice> mDevice;

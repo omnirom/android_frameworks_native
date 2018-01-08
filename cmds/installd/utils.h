@@ -60,6 +60,8 @@ std::string create_data_user_ce_package_path(const char* volume_uuid,
         userid_t user, const char* package_name, ino_t ce_data_inode);
 std::string create_data_user_de_package_path(const char* volume_uuid,
         userid_t user, const char* package_name);
+std::string create_data_user_ce_package_path_as_user_link(
+        const char* volume_uuid, userid_t userid, const char* package_name);
 
 std::string create_data_media_path(const char* volume_uuid, userid_t userid);
 std::string create_data_media_obb_path(const char* volume_uuid, const char* package_name);
@@ -81,6 +83,7 @@ std::string create_current_profile_path(
         userid_t user, const std::string& package_name, bool is_secondary_dex);
 std::string create_reference_profile_path(
         const std::string& package_name, bool is_secondary_dex);
+std::string create_snapshot_profile_path(const std::string& package, const std::string& code_path);
 
 std::vector<userid_t> get_known_users(const char* volume_uuid);
 
@@ -114,7 +117,7 @@ void remove_path_xattr(const std::string& path, const char* inode_xattr);
 
 int validate_system_app_path(const char* path);
 bool validate_secondary_dex_path(const std::string& pkgname, const std::string& dex_path,
-        const char* volume_uuid, int uid, int storage_flag, bool validate_package_path = true);
+        const char* volume_uuid, int uid, int storage_flag);
 
 int validate_apk_path(const char *path);
 int validate_apk_path_subdirs(const char *path);

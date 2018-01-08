@@ -14,6 +14,7 @@
 
 sourceFiles = [
     "buffer_hub_queue_client.cpp",
+    "buffer_hub_queue_parcelable.cpp",
     "buffer_hub_queue_producer.cpp",
 ]
 
@@ -49,6 +50,11 @@ cc_library {
         "-DLOG_TAG=\"libbufferhubqueue\"",
         "-DTRACE=0",
         "-DATRACE_TAG=ATRACE_TAG_GRAPHICS",
+        "-Wall",
+        "-Werror",
+        "-Wno-format",
+        "-Wno-unused-parameter",
+        "-Wno-unused-variable",
     ],
     srcs: sourceFiles,
     export_include_dirs: includeFiles,

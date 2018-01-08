@@ -20,13 +20,11 @@
 #include <stdint.h>
 #include <sys/types.h>
 
-#include <EGL/egl.h>
-#include <EGL/eglext.h>
-
 #include <utils/RefBase.h>
 #include <utils/String8.h>
 #include <utils/Timers.h>
 
+#include <ui/FloatRect.h>
 #include <ui/FrameStats.h>
 #include <ui/GraphicBuffer.h>
 #include <ui/PixelFormat.h>
@@ -34,6 +32,7 @@
 
 #include <gui/ISurfaceComposerClient.h>
 #include <gui/LayerState.h>
+#include <gui/BufferQueue.h>
 
 #include <list>
 
@@ -65,13 +64,78 @@ class DisplayDevice;
 class GraphicBuffer;
 class SurfaceFlinger;
 class LayerDebugInfo;
+class LayerBE;
 
 // ---------------------------------------------------------------------------
+
+struct CompositionInfo {
+    HWC2::Composition compositionType;
+    sp<GraphicBuffer> mBuffer = nullptr;
+    int mBufferSlot = BufferQueue::INVALID_BUFFER_SLOT;
+    struct {
+        HWComposer* hwc;
+        sp<Fence> fence;
+        HWC2::BlendMode blendMode;
+        Rect displayFrame;
+        float alpha;
+        FloatRect sourceCrop;
+        HWC2::Transform transform;
+        int z;
+        int type;
+        int appId;
+        Region visibleRegion;
+        Region surfaceDamage;
+        sp<NativeHandle> sidebandStream;
+        android_dataspace dataspace;
+        hwc_color_t color;
+    } hwc;
+    struct {
+        RenderEngine* renderEngine;
+        Mesh* mesh;
+    } renderEngine;
+};
+
+class LayerBE {
+public:
+    LayerBE();
+
+    // The mesh used to draw the layer in GLES composition mode
+    Mesh mMesh;
+
+    // HWC items, accessed from the main thread
+    struct HWCInfo {
+        HWCInfo()
+              : hwc(nullptr),
+                layer(nullptr),
+                forceClientComposition(false),
+                compositionType(HWC2::Composition::Invalid),
+                clearClientTarget(false) {}
+
+        HWComposer* hwc;
+        HWC2::Layer* layer;
+        bool forceClientComposition;
+        HWC2::Composition compositionType;
+        bool clearClientTarget;
+        Rect displayFrame;
+        FloatRect sourceCrop;
+        HWComposerBufferCache bufferCache;
+    };
+
+    // A layer can be attached to multiple displays when operating in mirror mode
+    // (a.k.a: when several displays are attached with equal layerStack). In this
+    // case we need to keep track. In non-mirror mode, a layer will have only one
+    // HWCInfo. This map key is a display layerStack.
+    std::unordered_map<int32_t, HWCInfo> mHwcLayers;
+
+    CompositionInfo compositionInfo;
+};
 
 class Layer : public virtual RefBase {
     static int32_t sSequence;
 
 public:
+    LayerBE& getBE() { return mBE; }
+    LayerBE& getBE() const { return mBE; }
     mutable bool contentDirty;
     // regions below are in window-manager space
     Region visibleRegion;
@@ -240,8 +304,8 @@ public:
     }
 
     void computeGeometry(const RenderArea& renderArea, Mesh& mesh, bool useIdentityTransform) const;
-    Rect computeBounds(const Region& activeTransparentRegion) const;
-    Rect computeBounds() const;
+    FloatRect computeBounds(const Region& activeTransparentRegion) const;
+    FloatRect computeBounds() const;
 
     int32_t getSequence() const { return sequence; }
 
@@ -282,6 +346,8 @@ public:
      */
     virtual bool isFixedSize() const = 0;
 
+    bool isPendingRemoval() const { return mPendingRemoval; }
+
     void writeToProto(LayerProto* layerInfo,
                       LayerVector::StateSet stateSet = LayerVector::StateSet::Drawing);
 
@@ -295,9 +361,9 @@ protected:
 public:
     virtual void setDefaultBufferSize(uint32_t w, uint32_t h) = 0;
 
-#ifdef USE_HWC2
     void setGeometry(const sp<const DisplayDevice>& displayDevice, uint32_t z);
     void forceClientComposition(int32_t hwcId);
+    bool getForceClientComposition(int32_t hwcId);
     virtual void setPerFrameData(const sp<const DisplayDevice>& displayDevice) = 0;
 
     // callIntoHwc exists so we can update our local state and call
@@ -307,23 +373,11 @@ public:
     void setClearClientTarget(int32_t hwcId, bool clear);
     bool getClearClientTarget(int32_t hwcId) const;
     void updateCursorPosition(const sp<const DisplayDevice>& hw);
-#else
-    void setGeometry(const sp<const DisplayDevice>& hw, HWComposer::HWCLayerInterface& layer);
-    void setPerFrameData(const sp<const DisplayDevice>& hw, HWComposer::HWCLayerInterface& layer);
-    virtual void setAcquireFence(const sp<const DisplayDevice>& hw,
-                                 HWComposer::HWCLayerInterface& layer) = 0;
-    Rect getPosition(const sp<const DisplayDevice>& hw);
-#endif
 
     /*
      * called after page-flip
      */
-#ifdef USE_HWC2
     virtual void onLayerDisplayed(const sp<Fence>& releaseFence);
-#else
-    virtual void onLayerDisplayed(const sp<const DisplayDevice>& hw,
-                                  HWComposer::HWCLayerInterface* layer);
-#endif
 
     virtual void abandon() = 0;
 
@@ -344,10 +398,8 @@ public:
                                    const std::shared_ptr<FenceTime>& presentFence,
                                    const CompositorTiming& compositorTiming) = 0;
 
-#ifdef USE_HWC2
     // If a buffer was replaced this frame, release the former buffer
     virtual void releasePendingBuffer(nsecs_t dequeueReadyTime) = 0;
-#endif
 
     /*
      * draw - performs some global clipping optimizations
@@ -423,31 +475,29 @@ public:
 
     int32_t getQueuedFrameCount() const { return mQueuedFrames; }
 
-#ifdef USE_HWC2
     // -----------------------------------------------------------------------
 
     bool createHwcLayer(HWComposer* hwc, int32_t hwcId);
-    void destroyHwcLayer(int32_t hwcId);
+    bool destroyHwcLayer(int32_t hwcId);
     void destroyAllHwcLayers();
 
-    bool hasHwcLayer(int32_t hwcId) { return mHwcLayers.count(hwcId) > 0; }
-
-    HWC2::Layer* getHwcLayer(int32_t hwcId) {
-        if (mHwcLayers.count(hwcId) == 0) {
-            return nullptr;
-        }
-        return mHwcLayers[hwcId].layer;
+    bool hasHwcLayer(int32_t hwcId) {
+        return getBE().mHwcLayers.count(hwcId) > 0;
     }
 
-#endif
+    HWC2::Layer* getHwcLayer(int32_t hwcId) {
+        if (getBE().mHwcLayers.count(hwcId) == 0) {
+            return nullptr;
+        }
+        return getBE().mHwcLayers[hwcId].layer;
+    }
+
     // -----------------------------------------------------------------------
 
     void clearWithOpenGL(const RenderArea& renderArea) const;
     void setFiltering(bool filtering);
     bool getFiltering() const;
 
-    // only for debugging
-    inline const sp<GraphicBuffer>& getActiveBuffer() const { return mActiveBuffer; }
 
     inline const State& getDrawingState() const { return mDrawingState; }
     inline const State& getCurrentState() const { return mCurrentState; }
@@ -456,10 +506,8 @@ public:
     LayerDebugInfo getLayerDebugInfo() const;
 
     /* always call base class first */
-#ifdef USE_HWC2
     static void miniDumpHeader(String8& result);
     void miniDump(String8& result, int32_t hwcId) const;
-#endif
     void dumpFrameStats(String8& result) const;
     void dumpFrameEvents(String8& result);
     void clearFrameStats();
@@ -498,6 +546,8 @@ public:
     bool hasParent() const { return getParent() != nullptr; }
     Rect computeScreenBounds(bool reduceTransparentRegion = true) const;
     bool setChildLayer(const sp<Layer>& childLayer, int32_t z);
+    bool setChildRelativeLayer(const sp<Layer>& childLayer,
+            const sp<IBinder>& relativeToHandle, int32_t relativeZ);
 
     // Copy the current list of children to the drawing state. Called by
     // SurfaceFlinger to complete a transaction.
@@ -547,7 +597,7 @@ protected:
 
     void setParent(const sp<Layer>& layer);
 
-    LayerVector makeTraversalList(LayerVector::StateSet stateSet);
+    LayerVector makeTraversalList(LayerVector::StateSet stateSet, bool* outSkipRelativeZUsers);
     void addZOrderRelative(const wp<Layer>& relative);
     void removeZOrderRelative(const wp<Layer>& relative);
 
@@ -621,6 +671,7 @@ public:
 
 protected:
     // -----------------------------------------------------------------------
+    bool usingRelativeZ(LayerVector::StateSet stateSet);
 
     bool mPremultipliedAlpha;
     String8 mName;
@@ -666,37 +717,8 @@ protected:
     bool mFiltering;
     // Whether filtering is needed b/c of the drawingstate
     bool mNeedsFiltering;
-    // The mesh used to draw the layer in GLES composition mode
-    mutable Mesh mMesh;
 
-#ifdef USE_HWC2
-    // HWC items, accessed from the main thread
-    struct HWCInfo {
-        HWCInfo()
-              : hwc(nullptr),
-                layer(nullptr),
-                forceClientComposition(false),
-                compositionType(HWC2::Composition::Invalid),
-                clearClientTarget(false) {}
-
-        HWComposer* hwc;
-        HWC2::Layer* layer;
-        bool forceClientComposition;
-        HWC2::Composition compositionType;
-        bool clearClientTarget;
-        Rect displayFrame;
-        FloatRect sourceCrop;
-        HWComposerBufferCache bufferCache;
-    };
-
-    // A layer can be attached to multiple displays when operating in mirror mode
-    // (a.k.a: when several displays are attached with equal layerStack). In this
-    // case we need to keep track. In non-mirror mode, a layer will have only one
-    // HWCInfo. This map key is a display layerStack.
-    std::unordered_map<int32_t, HWCInfo> mHwcLayers;
-#else
-    bool mIsGlesComposition;
-#endif
+    bool mPendingRemoval = false;
 
     // page-flip thread (currently main thread)
     bool mProtectedByApp; // application requires protected path to external sink
@@ -724,6 +746,8 @@ protected:
 
     wp<Layer> mCurrentParent;
     wp<Layer> mDrawingParent;
+
+    mutable LayerBE mBE;
 };
 
 // ---------------------------------------------------------------------------

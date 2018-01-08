@@ -15,30 +15,33 @@ LOCAL_SRC_FILES := \
     GpuService.cpp \
     Layer.cpp \
     BufferLayer.cpp \
+    BufferLayerConsumer.cpp \
     ColorLayer.cpp \
     LayerRejecter.cpp \
     LayerVector.cpp \
     MessageQueue.cpp \
     MonitoredProducer.cpp \
-    SurfaceFlingerConsumer.cpp \
+    SurfaceFlinger.cpp \
     SurfaceInterceptor.cpp \
     SurfaceTracing.cpp \
     Transform.cpp \
     DisplayHardware/ComposerHal.cpp \
     DisplayHardware/FramebufferSurface.cpp \
     DisplayHardware/HWC2.cpp \
+    DisplayHardware/HWComposer.cpp \
     DisplayHardware/HWComposerBufferCache.cpp \
-    DisplayHardware/PowerHAL.cpp \
     DisplayHardware/VirtualDisplaySurface.cpp \
     Effects/Daltonizer.cpp \
     EventLog/EventLogTags.logtags \
     EventLog/EventLog.cpp \
     RenderEngine/Description.cpp \
+    RenderEngine/Image.cpp \
     RenderEngine/Mesh.cpp \
     RenderEngine/Program.cpp \
     RenderEngine/ProgramCache.cpp \
     RenderEngine/GLExtensions.cpp \
     RenderEngine/RenderEngine.cpp \
+    RenderEngine/Surface.cpp \
     RenderEngine/Texture.cpp \
     RenderEngine/GLES20RenderEngine.cpp \
     LayerProtoHelper.cpp \
@@ -52,17 +55,6 @@ LOCAL_C_INCLUDES := \
 
 LOCAL_CFLAGS := -DLOG_TAG=\"SurfaceFlinger\"
 LOCAL_CFLAGS += -DGL_GLEXT_PROTOTYPES -DEGL_EGLEXT_PROTOTYPES
-
-ifeq ($(TARGET_USES_HWC2),true)
-    LOCAL_CFLAGS += -DUSE_HWC2
-    LOCAL_SRC_FILES += \
-        SurfaceFlinger.cpp \
-        DisplayHardware/HWComposer.cpp
-else
-    LOCAL_SRC_FILES += \
-        SurfaceFlinger_hwc1.cpp \
-        DisplayHardware/HWComposer_hwc1.cpp
-endif
 
 LOCAL_CFLAGS += -fvisibility=hidden -Werror=format
 
@@ -97,7 +89,6 @@ LOCAL_SHARED_LIBRARIES := \
     libbinder \
     libui \
     libgui \
-    libpowermanager \
     libvulkan \
     libsync \
     libprotobuf-cpp-lite \
@@ -127,10 +118,6 @@ LOCAL_LDFLAGS_64 := -Wl,--version-script,art/sigchainlib/version-script64.txt -W
 LOCAL_CFLAGS := -DLOG_TAG=\"SurfaceFlinger\"
 
 LOCAL_INIT_RC := surfaceflinger.rc
-
-ifeq ($(TARGET_USES_HWC2),true)
-    LOCAL_CFLAGS += -DUSE_HWC2
-endif
 
 LOCAL_SRC_FILES := \
     main_surfaceflinger.cpp
@@ -163,7 +150,7 @@ ifdef TARGET_32_BIT_SURFACEFLINGER
 LOCAL_32_BIT_ONLY := true
 endif
 
-LOCAL_CFLAGS += -Wall -Werror -Wunused -Wunreachable-code
+LOCAL_CFLAGS += -Wall -Werror -Wunused -Wunreachable-code -std=c++1z
 
 include $(BUILD_EXECUTABLE)
 

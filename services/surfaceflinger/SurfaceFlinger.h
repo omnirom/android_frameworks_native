@@ -21,8 +21,6 @@
 #include <stdint.h>
 #include <sys/types.h>
 
-#include <EGL/egl.h>
-
 /*
  * NOTE: Make sure this file doesn't include  anything from <gl/ > or <gl2/ >
  */
@@ -63,12 +61,8 @@
 #include "SurfaceTracing.h"
 #include "StartPropertySetThread.h"
 
-#ifdef USE_HWC2
 #include "DisplayHardware/HWC2.h"
 #include "DisplayHardware/HWComposer.h"
-#else
-#include "DisplayHardware/HWComposer_hwc1.h"
-#endif
 
 #include "Effects/Daltonizer.h"
 
@@ -98,6 +92,7 @@ class RenderEngine;
 class EventControlThread;
 class VSyncSource;
 class InjectVSyncSource;
+class SurfaceFlingerBE;
 
 typedef std::function<void(const LayerVector::Visitor&)> TraverseLayersFunction;
 
@@ -114,16 +109,97 @@ enum {
     eTransactionMask          = 0x07
 };
 
+class SurfaceFlingerBE
+{
+public:
+    SurfaceFlingerBE();
+
+    // The current hardware composer interface.
+    //
+    // The following thread safety rules apply when accessing mHwc, either
+    // directly or via getHwComposer():
+    //
+    // 1. When recreating mHwc, acquire mStateLock. We currently recreate mHwc
+    //    only when switching into and out of vr. Recreating mHwc must only be
+    //    done on the main thread.
+    //
+    // 2. When accessing mHwc on the main thread, it's not necessary to acquire
+    //    mStateLock.
+    //
+    // 3. When accessing mHwc on a thread other than the main thread, we always
+    //    need to acquire mStateLock. This is because the main thread could be
+    //    in the process of destroying the current mHwc instance.
+    //
+    // The above thread safety rules only apply to SurfaceFlinger.cpp. In
+    // SurfaceFlinger_hwc1.cpp we create mHwc at surface flinger init and never
+    // destroy it, so it's always safe to access mHwc from any thread without
+    // acquiring mStateLock.
+    std::unique_ptr<HWComposer> mHwc;
+
+    const std::string mHwcServiceName; // "default" for real use, something else for testing.
+
+    // constant members (no synchronization needed for access)
+    std::unique_ptr<RenderEngine> mRenderEngine;
+    EGLContext mEGLContext;
+    EGLDisplay mEGLDisplay;
+    
+    FenceTimeline mGlCompositionDoneTimeline;
+    FenceTimeline mDisplayTimeline;
+
+    // protected by mCompositorTimingLock;
+    mutable std::mutex mCompositorTimingLock;
+    CompositorTiming mCompositorTiming;
+    
+    // Only accessed from the main thread.
+    struct CompositePresentTime {
+        nsecs_t composite { -1 };
+        std::shared_ptr<FenceTime> display { FenceTime::NO_FENCE };
+    };
+    std::queue<CompositePresentTime> mCompositePresentTimes;
+
+    static const size_t NUM_BUCKETS = 8; // < 1-7, 7+
+    nsecs_t mFrameBuckets[NUM_BUCKETS];
+    nsecs_t mTotalTime;
+    std::atomic<nsecs_t> mLastSwapTime;
+
+    // Double- vs. triple-buffering stats
+    struct BufferingStats {
+        BufferingStats()
+          : numSegments(0),
+            totalTime(0),
+            twoBufferTime(0),
+            doubleBufferedTime(0),
+            tripleBufferedTime(0) {}
+
+        size_t numSegments;
+        nsecs_t totalTime;
+
+        // "Two buffer" means that a third buffer was never used, whereas
+        // "double-buffered" means that on average the segment only used two
+        // buffers (though it may have used a third for some part of the
+        // segment)
+        nsecs_t twoBufferTime;
+        nsecs_t doubleBufferedTime;
+        nsecs_t tripleBufferedTime;
+    };
+    mutable Mutex mBufferingStatsMutex;
+    std::unordered_map<std::string, BufferingStats> mBufferingStats;
+
+    // The composer sequence id is a monotonically increasing integer that we
+    // use to differentiate callbacks from different hardware composer
+    // instances. Each hardware composer instance gets a different sequence id.
+    int32_t mComposerSequenceId;
+};
+
+
 class SurfaceFlinger : public BnSurfaceComposer,
                        public PriorityDumper,
                        private IBinder::DeathRecipient,
-#ifdef USE_HWC2
                        private HWC2::ComposerCallback
-#else
-                       private HWComposer::EventHandler
-#endif
 {
 public:
+    SurfaceFlingerBE& getBE() { return mBE; }
+    const SurfaceFlingerBE& getBE() const { return mBE; }
 
     // This is the phase offset in nanoseconds of the software vsync event
     // relative to the vsync event reported by HWComposer.  The software vsync
@@ -217,11 +293,7 @@ public:
 
     // enable/disable h/w composer event
     // TODO: this should be made accessible only to EventThread
-#ifdef USE_HWC2
     void setVsyncEnabled(int disp, int enabled);
-#else
-    void eventControl(int disp, int event, int enabled);
-#endif
 
     // called on the main thread by MessageQueue when an internal message
     // is received
@@ -233,7 +305,7 @@ public:
     const Vector< sp<Layer> >& getLayerSortedByZForHwcDisplay(int id);
 
     RenderEngine& getRenderEngine() const {
-        return *mRenderEngine;
+        return *getBE().mRenderEngine;
     }
 
     bool authenticateSurfaceTextureLocked(
@@ -303,14 +375,12 @@ private:
             std::vector<FrameEvent>* outSupported) const;
     virtual sp<IDisplayEventConnection> createDisplayEventConnection(
             ISurfaceComposer::VsyncSource vsyncSource = eVsyncSourceApp);
-    virtual status_t captureScreen(const sp<IBinder>& display,
-            const sp<IGraphicBufferProducer>& producer,
-            Rect sourceCrop, uint32_t reqWidth, uint32_t reqHeight,
-            int32_t minLayerZ, int32_t maxLayerZ,
-            bool useIdentityTransform, ISurfaceComposer::Rotation rotation);
-    virtual status_t captureLayers(const sp<IBinder>& parentHandle,
-                                   const sp<IGraphicBufferProducer>& producer,
+    virtual status_t captureScreen(const sp<IBinder>& display, sp<GraphicBuffer>* outBuffer,
+                                   Rect sourceCrop, uint32_t reqWidth, uint32_t reqHeight,
+                                   int32_t minLayerZ, int32_t maxLayerZ, bool useIdentityTransform,
                                    ISurfaceComposer::Rotation rotation);
+    virtual status_t captureLayers(const sp<IBinder>& parentHandle, sp<GraphicBuffer>* outBuffer,
+                                   const Rect& sourceCrop, float frameScale);
     virtual status_t getDisplayStats(const sp<IBinder>& display,
             DisplayStatInfo* stats);
     virtual status_t getDisplayConfigs(const sp<IBinder>& display,
@@ -344,18 +414,12 @@ private:
     /* ------------------------------------------------------------------------
      * HWC2::ComposerCallback / HWComposer::EventHandler interface
      */
-#ifdef USE_HWC2
     void onVsyncReceived(int32_t sequenceId, hwc2_display_t display,
                          int64_t timestamp) override;
     void onHotplugReceived(int32_t sequenceId, hwc2_display_t display,
                            HWC2::Connection connection,
                            bool primaryDisplay) override;
     void onRefreshReceived(int32_t sequenceId, hwc2_display_t display) override;
-#else
-    void onVSyncReceived(HWComposer* composer, int type, nsecs_t timestamp) override;
-    void onHotplugReceived(HWComposer* composer, int disp, bool connected) override;
-    void onInvalidateReceived(HWComposer* composer) override;
-#endif
 
     /* ------------------------------------------------------------------------
      * Message handling
@@ -372,12 +436,8 @@ private:
     // called on the main thread in response to setActiveConfig()
     void setActiveConfigInternal(const sp<DisplayDevice>& hw, int mode);
     // called on the main thread in response to setPowerMode()
-#ifdef USE_HWC2
     void setPowerModeInternal(const sp<DisplayDevice>& hw, int mode,
                               bool stateLockHeld);
-#else
-    void setPowerModeInternal(const sp<DisplayDevice>& hw, int mode);
-#endif
 
     // Called on the main thread in response to setActiveColorMode()
     void setActiveColorModeInternal(const sp<DisplayDevice>& hw, android_color_mode_t colorMode);
@@ -458,22 +518,13 @@ private:
 
     void renderScreenImplLocked(const RenderArea& renderArea, TraverseLayersFunction traverseLayers,
                                 bool yswap, bool useIdentityTransform);
-
     status_t captureScreenCommon(RenderArea& renderArea, TraverseLayersFunction traverseLayers,
-                                 const sp<IGraphicBufferProducer>& producer,
+                                 sp<GraphicBuffer>* outBuffer,
                                  bool useIdentityTransform);
-
-#ifdef USE_HWC2
     status_t captureScreenImplLocked(const RenderArea& renderArea,
                                      TraverseLayersFunction traverseLayers,
                                      ANativeWindowBuffer* buffer, bool useIdentityTransform,
-                                     bool isLocalScreenshot, int* outSyncFd);
-#else
-    status_t captureScreenImplLocked(const RenderArea& renderArea,
-                                     TraverseLayersFunction traverseLayers,
-                                     const sp<IGraphicBufferProducer>& producer,
-                                     bool useIdentityTransform, bool isLocalScreenshot);
-#endif
+                                     int* outSyncFd);
     void traverseLayersInDisplay(const sp<const DisplayDevice>& display, int32_t minLayerZ,
                                  int32_t maxLayerZ, const LayerVector::Visitor& visitor);
 
@@ -540,15 +591,11 @@ private:
     // region of all screens presenting this layer stack.
     void invalidateLayerStack(const sp<const Layer>& layer, const Region& dirty);
 
-#ifndef USE_HWC2
-    int32_t allocateHwcDisplayId(DisplayDevice::DisplayType type);
-#endif
-
     /* ------------------------------------------------------------------------
      * H/W composer
      */
 
-    HWComposer& getHwComposer() const { return *mHwc; }
+    HWComposer& getHwComposer() const { return *getBE().mHwc; }
 
     /* ------------------------------------------------------------------------
      * Compositing
@@ -582,7 +629,7 @@ private:
 
     // compose surfaces for display hw. this fails if using GL and the surface
     // has been destroyed and is no longer valid.
-    bool doComposeSurfaces(const sp<const DisplayDevice>& displayDevice, const Region& dirty);
+    bool doComposeSurfaces(const sp<const DisplayDevice>& displayDevice);
 
     void postFramebuffer();
     void drawWormhole(const sp<const DisplayDevice>& displayDevice, const Region& region) const;
@@ -635,14 +682,13 @@ private:
             std::vector<OccupancyTracker::Segment>&& history);
     void dumpBufferingStats(String8& result) const;
     void dumpWideColorInfo(String8& result) const;
-    LayersProto dumpProtoInfo() const;
+    LayersProto dumpProtoInfo(LayerVector::StateSet stateSet) const;
 
     bool isLayerTripleBufferingDisabled() const {
         return this->mLayerTripleBufferingDisabled;
     }
     status_t doDump(int fd, const Vector<String16>& args, bool asProto);
 
-#ifdef USE_HWC2
     /* ------------------------------------------------------------------------
      * VrFlinger
      */
@@ -650,7 +696,6 @@ private:
 
     // Check to see if we should handoff to vr flinger.
     void updateVrFlinger();
-#endif
 
     /* ------------------------------------------------------------------------
      * Attributes
@@ -673,34 +718,7 @@ private:
     // access must be protected by mInvalidateLock
     volatile int32_t mRepaintEverything;
 
-    // The current hardware composer interface.
-    //
-    // The following thread safety rules apply when accessing mHwc, either
-    // directly or via getHwComposer():
-    //
-    // 1. When recreating mHwc, acquire mStateLock. We currently recreate mHwc
-    //    only when switching into and out of vr. Recreating mHwc must only be
-    //    done on the main thread.
-    //
-    // 2. When accessing mHwc on the main thread, it's not necessary to acquire
-    //    mStateLock.
-    //
-    // 3. When accessing mHwc on a thread other than the main thread, we always
-    //    need to acquire mStateLock. This is because the main thread could be
-    //    in the process of destroying the current mHwc instance.
-    //
-    // The above thread safety rules only apply to SurfaceFlinger.cpp. In
-    // SurfaceFlinger_hwc1.cpp we create mHwc at surface flinger init and never
-    // destroy it, so it's always safe to access mHwc from any thread without
-    // acquiring mStateLock.
-    std::unique_ptr<HWComposer> mHwc;
-
-#ifdef USE_HWC2
-    const std::string mHwcServiceName; // "default" for real use, something else for testing.
-#endif
-
     // constant members (no synchronization needed for access)
-    RenderEngine* mRenderEngine;
     nsecs_t mBootTime;
     bool mGpuToCpuSupported;
     sp<EventThread> mEventThread;
@@ -708,27 +726,17 @@ private:
     sp<EventThread> mInjectorEventThread;
     sp<InjectVSyncSource> mVSyncInjector;
     sp<EventControlThread> mEventControlThread;
-    EGLContext mEGLContext;
-    EGLDisplay mEGLDisplay;
     sp<IBinder> mBuiltinDisplays[DisplayDevice::NUM_BUILTIN_DISPLAY_TYPES];
 
     // Can only accessed from the main thread, these members
     // don't need synchronization
     State mDrawingState{LayerVector::StateSet::Drawing};
     bool mVisibleRegionsDirty;
-#ifndef USE_HWC2
-    bool mHwWorkListDirty;
-#else
     bool mGeometryInvalid;
-#endif
     bool mAnimCompositionPending;
-#ifdef USE_HWC2
     std::vector<sp<Layer>> mLayersWithQueuedFrames;
     sp<Fence> mPreviousPresentFence = Fence::NO_FENCE;
     bool mHadClientComposition = false;
-#endif
-    FenceTimeline mGlCompositionDoneTimeline;
-    FenceTimeline mDisplayTimeline;
 
     // this may only be written from the main thread with mStateLock held
     // it may be read from other threads with mStateLock held
@@ -745,9 +753,7 @@ private:
     nsecs_t mLastTransactionTime;
     bool mBootFinished;
     bool mForceFullDamage;
-#ifdef USE_HWC2
     bool mPropagateBackpressure = true;
-#endif
     SurfaceInterceptor mInterceptor;
     SurfaceTracing mTracing;
     bool mUseHwcVirtualDisplays = false;
@@ -769,17 +775,6 @@ private:
     bool mPrimaryHWVsyncEnabled;
     bool mHWVsyncAvailable;
 
-    // protected by mCompositorTimingLock;
-    mutable std::mutex mCompositorTimingLock;
-    CompositorTiming mCompositorTiming;
-
-    // Only accessed from the main thread.
-    struct CompositePresentTime {
-        nsecs_t composite { -1 };
-        std::shared_ptr<FenceTime> display { FenceTime::NO_FENCE };
-    };
-    std::queue<CompositePresentTime> mCompositePresentTimes;
-
     std::atomic<bool> mRefreshPending{false};
 
     /* ------------------------------------------------------------------------
@@ -789,9 +784,6 @@ private:
     bool mInjectVSyncs;
 
     Daltonizer mDaltonizer;
-#ifndef USE_HWC2
-    bool mDaltonize;
-#endif
 
     mat4 mPreviousColorMatrix;
     mat4 mColorMatrix;
@@ -799,53 +791,23 @@ private:
 
     // Static screen stats
     bool mHasPoweredOff;
-    static const size_t NUM_BUCKETS = 8; // < 1-7, 7+
-    nsecs_t mFrameBuckets[NUM_BUCKETS];
-    nsecs_t mTotalTime;
-    std::atomic<nsecs_t> mLastSwapTime;
 
     size_t mNumLayers;
 
-    // Double- vs. triple-buffering stats
-    struct BufferingStats {
-        BufferingStats()
-          : numSegments(0),
-            totalTime(0),
-            twoBufferTime(0),
-            doubleBufferedTime(0),
-            tripleBufferedTime(0) {}
-
-        size_t numSegments;
-        nsecs_t totalTime;
-
-        // "Two buffer" means that a third buffer was never used, whereas
-        // "double-buffered" means that on average the segment only used two
-        // buffers (though it may have used a third for some part of the
-        // segment)
-        nsecs_t twoBufferTime;
-        nsecs_t doubleBufferedTime;
-        nsecs_t tripleBufferedTime;
-    };
-    mutable Mutex mBufferingStatsMutex;
-    std::unordered_map<std::string, BufferingStats> mBufferingStats;
 
     // Verify that transaction is being called by an approved process:
     // either AID_GRAPHICS or AID_SYSTEM.
     status_t CheckTransactCodeCredentials(uint32_t code);
 
-#ifdef USE_HWC2
     std::unique_ptr<dvr::VrFlinger> mVrFlinger;
     std::atomic<bool> mVrFlingerRequestsDisplay;
     static bool useVrFlinger;
     std::thread::id mMainThreadId;
-    // The composer sequence id is a monotonically increasing integer that we
-    // use to differentiate callbacks from different hardware composer
-    // instances. Each hardware composer instance gets a different sequence id.
-    int32_t mComposerSequenceId;
-#endif
 
     float mSaturation = 1.0f;
     bool mForceNativeColorMode = false;
+
+    SurfaceFlingerBE mBE;
 };
 }; // namespace android
 

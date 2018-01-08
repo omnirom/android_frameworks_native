@@ -61,13 +61,12 @@ bool ColorLayer::isVisible() const {
     return !isHiddenByPolicy() && s.color.a;
 }
 
-#ifdef USE_HWC2
 void ColorLayer::setPerFrameData(const sp<const DisplayDevice>& displayDevice) {
     const Transform& tr = displayDevice->getTransform();
     const auto& viewport = displayDevice->getViewport();
     Region visible = tr.transform(visibleRegion.intersect(viewport));
     auto hwcId = displayDevice->getHwcDisplayId();
-    auto& hwcInfo = mHwcLayers[hwcId];
+    auto& hwcInfo = getBE().mHwcLayers[hwcId];
     auto& hwcLayer = hwcInfo.layer;
     auto error = hwcLayer->setVisibleRegion(visible);
 
@@ -89,7 +88,6 @@ void ColorLayer::setPerFrameData(const sp<const DisplayDevice>& displayDevice) {
               static_cast<int32_t>(error));
     }
 }
-#endif
 
 // ---------------------------------------------------------------------------
 

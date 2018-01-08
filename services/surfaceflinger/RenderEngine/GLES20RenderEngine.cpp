@@ -33,18 +33,17 @@
 #include <gui/ISurfaceComposer.h>
 #include <math.h>
 
+#include "Description.h"
 #include "GLES20RenderEngine.h"
+#include "Mesh.h"
 #include "Program.h"
 #include "ProgramCache.h"
-#include "Description.h"
-#include "Mesh.h"
 #include "Texture.h"
 
-#include <sstream>
 #include <fstream>
+#include <sstream>
 
 // ---------------------------------------------------------------------------
-#ifdef USE_HWC2
 bool checkGlError(const char* op, int lineNumber) {
     bool errorFound = false;
     GLint error = glGetError();
@@ -103,41 +102,36 @@ void writePPM(const char* basename, GLuint width, GLuint height) {
     }
     file.write(reinterpret_cast<char*>(outBuffer.data()), outBuffer.size());
 }
-#endif
 
 // ---------------------------------------------------------------------------
 namespace android {
 // ---------------------------------------------------------------------------
 
-GLES20RenderEngine::GLES20RenderEngine(uint32_t featureFlags) :
-         mVpWidth(0),
-         mVpHeight(0),
-         mPlatformHasWideColor((featureFlags & WIDE_COLOR_SUPPORT) != 0) {
-
+GLES20RenderEngine::GLES20RenderEngine(uint32_t featureFlags)
+      : mVpWidth(0), mVpHeight(0), mPlatformHasWideColor((featureFlags & WIDE_COLOR_SUPPORT) != 0) {
     glGetIntegerv(GL_MAX_TEXTURE_SIZE, &mMaxTextureSize);
     glGetIntegerv(GL_MAX_VIEWPORT_DIMS, mMaxViewportDims);
 
     glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
     glPixelStorei(GL_PACK_ALIGNMENT, 4);
 
-    const uint16_t protTexData[] = { 0 };
+    const uint16_t protTexData[] = {0};
     glGenTextures(1, &mProtectedTexName);
     glBindTexture(GL_TEXTURE_2D, mProtectedTexName);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, 1, 1, 0,
-            GL_RGB, GL_UNSIGNED_SHORT_5_6_5, protTexData);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, 1, 1, 0, GL_RGB, GL_UNSIGNED_SHORT_5_6_5, protTexData);
 
-    //mColorBlindnessCorrection = M;
+    // mColorBlindnessCorrection = M;
 
-#ifdef USE_HWC2
     if (mPlatformHasWideColor) {
         // Compute sRGB to DisplayP3 color transform
         // NOTE: For now, we are limiting wide-color support to
         // Display-P3 only.
-        mat3 srgbToP3 = ColorSpaceConnector(ColorSpace::sRGB(), ColorSpace::DisplayP3()).getTransform();
+        mat3 srgbToP3 =
+                ColorSpaceConnector(ColorSpace::sRGB(), ColorSpace::DisplayP3()).getTransform();
 
         // color transform needs to be expanded to 4x4 to be what the shader wants
         // mat has an initializer that expands mat3 to mat4, but
@@ -145,33 +139,27 @@ GLES20RenderEngine::GLES20RenderEngine(uint32_t featureFlags) :
         mat4 gamutTransform(srgbToP3);
         mSrgbToDisplayP3 = gamutTransform;
     }
-#endif
 }
 
-GLES20RenderEngine::~GLES20RenderEngine() {
-}
-
+GLES20RenderEngine::~GLES20RenderEngine() {}
 
 size_t GLES20RenderEngine::getMaxTextureSize() const {
     return mMaxTextureSize;
 }
 
 size_t GLES20RenderEngine::getMaxViewportDims() const {
-    return
-        mMaxViewportDims[0] < mMaxViewportDims[1] ?
-            mMaxViewportDims[0] : mMaxViewportDims[1];
+    return mMaxViewportDims[0] < mMaxViewportDims[1] ? mMaxViewportDims[0] : mMaxViewportDims[1];
 }
 
-void GLES20RenderEngine::setViewportAndProjection(
-        size_t vpw, size_t vph, Rect sourceCrop, size_t hwh, bool yswap,
-        Transform::orientation_flags rotation) {
-
-    size_t l = sourceCrop.left;
-    size_t r = sourceCrop.right;
+void GLES20RenderEngine::setViewportAndProjection(size_t vpw, size_t vph, Rect sourceCrop,
+                                                  size_t hwh, bool yswap,
+                                                  Transform::orientation_flags rotation) {
+    int32_t l = sourceCrop.left;
+    int32_t r = sourceCrop.right;
 
     // In GL, (0, 0) is the bottom-left corner, so flip y coordinates
-    size_t t = hwh - sourceCrop.top;
-    size_t b = hwh - sourceCrop.bottom;
+    int32_t t = hwh - sourceCrop.top;
+    int32_t b = hwh - sourceCrop.bottom;
 
     mat4 m;
     if (yswap) {
@@ -186,13 +174,13 @@ void GLES20RenderEngine::setViewportAndProjection(
         case Transform::ROT_0:
             break;
         case Transform::ROT_90:
-            m = mat4::rotate(rot90InRadians, vec3(0,0,1)) * m;
+            m = mat4::rotate(rot90InRadians, vec3(0, 0, 1)) * m;
             break;
         case Transform::ROT_180:
-            m = mat4::rotate(rot90InRadians * 2.0f, vec3(0,0,1)) * m;
+            m = mat4::rotate(rot90InRadians * 2.0f, vec3(0, 0, 1)) * m;
             break;
         case Transform::ROT_270:
-            m = mat4::rotate(rot90InRadians * 3.0f, vec3(0,0,1)) * m;
+            m = mat4::rotate(rot90InRadians * 3.0f, vec3(0, 0, 1)) * m;
             break;
         default:
             break;
@@ -204,8 +192,8 @@ void GLES20RenderEngine::setViewportAndProjection(
     mVpHeight = vph;
 }
 
-void GLES20RenderEngine::setupLayerBlending(bool premultipliedAlpha,
-        bool opaque, bool disableTexture, const half4& color) {
+void GLES20RenderEngine::setupLayerBlending(bool premultipliedAlpha, bool opaque,
+                                            bool disableTexture, const half4& color) {
     mState.setPremultipliedAlpha(premultipliedAlpha);
     mState.setOpaque(opaque);
     mState.setColor(color);
@@ -222,7 +210,6 @@ void GLES20RenderEngine::setupLayerBlending(bool premultipliedAlpha,
     }
 }
 
-#ifdef USE_HWC2
 void GLES20RenderEngine::setColorMode(android_color_mode mode) {
     ALOGV("setColorMode: %s (0x%x)", decodeColorMode(mode).c_str(), mode);
 
@@ -256,7 +243,6 @@ void GLES20RenderEngine::setWideColor(bool hasWideColor) {
 bool GLES20RenderEngine::usesWideColor() {
     return mUseWideColor;
 }
-#endif
 
 void GLES20RenderEngine::setupLayerTexturing(const Texture& texture) {
     GLuint target = texture.getTextureTarget();
@@ -294,9 +280,8 @@ void GLES20RenderEngine::disableBlending() {
     glDisable(GL_BLEND);
 }
 
-
-void GLES20RenderEngine::bindImageAsFramebuffer(EGLImageKHR image,
-        uint32_t* texName, uint32_t* fbName, uint32_t* status) {
+void GLES20RenderEngine::bindImageAsFramebuffer(EGLImageKHR image, uint32_t* texName,
+                                                uint32_t* fbName, uint32_t* status) {
     GLuint tname, name;
     // turn our EGLImage into a texture
     glGenTextures(1, &tname);
@@ -328,23 +313,15 @@ void GLES20RenderEngine::setupFillWithColor(float r, float g, float b, float a) 
 }
 
 void GLES20RenderEngine::drawMesh(const Mesh& mesh) {
-
     if (mesh.getTexCoordsSize()) {
         glEnableVertexAttribArray(Program::texCoords);
-        glVertexAttribPointer(Program::texCoords,
-                mesh.getTexCoordsSize(),
-                GL_FLOAT, GL_FALSE,
-                mesh.getByteStride(),
-                mesh.getTexCoords());
+        glVertexAttribPointer(Program::texCoords, mesh.getTexCoordsSize(), GL_FLOAT, GL_FALSE,
+                              mesh.getByteStride(), mesh.getTexCoords());
     }
 
-    glVertexAttribPointer(Program::position,
-            mesh.getVertexSize(),
-            GL_FLOAT, GL_FALSE,
-            mesh.getByteStride(),
-            mesh.getPositions());
+    glVertexAttribPointer(Program::position, mesh.getVertexSize(), GL_FLOAT, GL_FALSE,
+                          mesh.getByteStride(), mesh.getPositions());
 
-#ifdef USE_HWC2
     if (usesWideColor()) {
         Description wideColorState = mState;
         if (mDataSpace != HAL_DATASPACE_DISPLAY_P3) {
@@ -366,11 +343,6 @@ void GLES20RenderEngine::drawMesh(const Mesh& mesh) {
 
         glDrawArrays(mesh.getPrimitive(), 0, mesh.getVertexCount());
     }
-#else
-    ProgramCache::getInstance().useProgram(mState);
-
-    glDrawArrays(mesh.getPrimitive(), 0, mesh.getVertexCount());
-#endif
 
     if (mesh.getTexCoordsSize()) {
         glDisableVertexAttribArray(Program::texCoords);
@@ -379,13 +351,11 @@ void GLES20RenderEngine::drawMesh(const Mesh& mesh) {
 
 void GLES20RenderEngine::dump(String8& result) {
     RenderEngine::dump(result);
-#ifdef USE_HWC2
     if (usesWideColor()) {
         result.append("Wide-color: On\n");
     } else {
         result.append("Wide-color: Off\n");
     }
-#endif
 }
 
 // ---------------------------------------------------------------------------

@@ -62,6 +62,10 @@ interface IInstalld {
     void clearAppProfiles(@utf8InCpp String packageName);
     void destroyAppProfiles(@utf8InCpp String packageName);
 
+    boolean createProfileSnapshot(int appId, @utf8InCpp String packageName,
+            @utf8InCpp String codePath);
+    void destroyProfileSnapshot(@utf8InCpp String packageName, @utf8InCpp String codePath);
+
     void idmap(@utf8InCpp String targetApkPath, @utf8InCpp String overlayApkPath, int uid);
     void removeIdmap(@utf8InCpp String overlayApkPath);
     void rmPackageDir(@utf8InCpp String packageDir);
@@ -81,6 +85,9 @@ interface IInstalld {
     boolean reconcileSecondaryDexFile(@utf8InCpp String dexPath, @utf8InCpp String pkgName,
         int uid, in @utf8InCpp String[] isas, @nullable @utf8InCpp String volume_uuid,
         int storage_flag);
+
+    byte[] hashSecondaryDexFile(@utf8InCpp String dexPath, @utf8InCpp String pkgName,
+        int uid, @nullable @utf8InCpp String volumeUuid, int storageFlag);
 
     void invalidateMounts();
     boolean isQuotaSupported(@nullable @utf8InCpp String uuid);

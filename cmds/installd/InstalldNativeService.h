@@ -96,6 +96,11 @@ public:
     binder::Status clearAppProfiles(const std::string& packageName);
     binder::Status destroyAppProfiles(const std::string& packageName);
 
+    binder::Status createProfileSnapshot(int32_t appId, const std::string& packageName,
+            const std::string& codePath, bool* _aidl_return);
+    binder::Status destroyProfileSnapshot(const std::string& packageName,
+            const std::string& codePath);
+
     binder::Status idmap(const std::string& targetApkPath, const std::string& overlayApkPath,
             int32_t uid);
     binder::Status removeIdmap(const std::string& overlayApkPath);
@@ -115,6 +120,9 @@ public:
     binder::Status reconcileSecondaryDexFile(const std::string& dexPath,
         const std::string& packageName, int32_t uid, const std::vector<std::string>& isa,
         const std::unique_ptr<std::string>& volumeUuid, int32_t storage_flag, bool* _aidl_return);
+    binder::Status hashSecondaryDexFile(const std::string& dexPath,
+        const std::string& packageName, int32_t uid, const std::unique_ptr<std::string>& volumeUuid,
+        int32_t storageFlag, std::vector<uint8_t>* _aidl_return);
 
     binder::Status invalidateMounts();
     binder::Status isQuotaSupported(const std::unique_ptr<std::string>& volumeUuid,

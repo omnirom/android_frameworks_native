@@ -15,6 +15,7 @@
  */
 #define LOG_TAG "installed"
 
+#include <array>
 #include <fcntl.h>
 #include <stdlib.h>
 #include <string.h>
@@ -27,6 +28,7 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
+#include <android-base/file.h>
 #include <android-base/logging.h>
 #include <android-base/properties.h>
 #include <android-base/stringprintf.h>
@@ -36,6 +38,7 @@
 #include <cutils/properties.h>
 #include <cutils/sched_policy.h>
 #include <log/log.h>               // TODO: Move everything to base/logging.
+#include <openssl/sha.h>
 #include <private/android_filesystem_config.h>
 #include <selinux/android.h>
 #include <system/thread_defs.h>
@@ -46,8 +49,10 @@
 #include "otapreopt_utils.h"
 #include "utils.h"
 
-using android::base::StringPrintf;
 using android::base::EndsWith;
+using android::base::ReadFully;
+using android::base::StringPrintf;
+using android::base::WriteFully;
 using android::base::unique_fd;
 
 namespace android {
@@ -561,14 +566,12 @@ static void SetDex2OatScheduling(bool set_to_bg) {
     }
 }
 
-static bool create_profile(int uid, const std::string& profile) {
-    unique_fd fd(TEMP_FAILURE_RETRY(open(profile.c_str(), O_CREAT | O_NOFOLLOW, 0600)));
+static unique_fd create_profile(uid_t uid, const std::string& profile, int32_t flags) {
+    unique_fd fd(TEMP_FAILURE_RETRY(open(profile.c_str(), flags, 0600)));
     if (fd.get() < 0) {
-        if (errno == EEXIST) {
-            return true;
-        } else {
+        if (errno != EEXIST) {
             PLOG(ERROR) << "Failed to create profile " << profile;
-            return false;
+            return invalid_unique_fd();
         }
     }
     // Profiles should belong to the app; make sure of that by giving ownership to
@@ -576,27 +579,26 @@ static bool create_profile(int uid, const std::string& profile) {
     // since dex2oat/profman will fail with SElinux denials.
     if (fchown(fd.get(), uid, uid) < 0) {
         PLOG(ERROR) << "Could not chwon profile " << profile;
-        return false;
+        return invalid_unique_fd();
     }
-    return true;
+    return fd;
 }
 
-static unique_fd open_profile(int uid, const std::string& profile, bool read_write) {
-    // Check if we need to open the profile for a read-write operation. If so, we
-    // might need to create the profile since the file might not be there. Reference
-    // profiles are created on the fly so they might not exist beforehand.
-    if (read_write) {
-        if (!create_profile(uid, profile)) {
-            return invalid_unique_fd();
-        }
-    }
-    int flags = read_write ? O_RDWR : O_RDONLY;
+static unique_fd open_profile(uid_t uid, const std::string& profile, int32_t flags) {
     // Do not follow symlinks when opening a profile:
     //   - primary profiles should not contain symlinks in their paths
     //   - secondary dex paths should have been already resolved and validated
     flags |= O_NOFOLLOW;
 
-    unique_fd fd(TEMP_FAILURE_RETRY(open(profile.c_str(), flags)));
+    // Check if we need to create the profile
+    // Reference profiles and snapshots are created on the fly; so they might not exist beforehand.
+    unique_fd fd;
+    if ((flags & O_CREAT) != 0) {
+        fd = create_profile(uid, profile, flags);
+    } else {
+        fd.reset(TEMP_FAILURE_RETRY(open(profile.c_str(), flags)));
+    }
+
     if (fd.get() < 0) {
         if (errno != ENOENT) {
             // Profiles might be missing for various reasons. For example, in a
@@ -616,13 +618,19 @@ static unique_fd open_profile(int uid, const std::string& profile, bool read_wri
 static unique_fd open_current_profile(uid_t uid, userid_t user, const std::string& location,
         bool is_secondary_dex) {
     std::string profile = create_current_profile_path(user, location, is_secondary_dex);
-    return open_profile(uid, profile, /*read_write*/false);
+    return open_profile(uid, profile, O_RDONLY);
 }
 
 static unique_fd open_reference_profile(uid_t uid, const std::string& location, bool read_write,
         bool is_secondary_dex) {
     std::string profile = create_reference_profile_path(location, is_secondary_dex);
-    return open_profile(uid, profile, read_write);
+    return open_profile(uid, profile, read_write ? (O_CREAT | O_RDWR) : O_RDONLY);
+}
+
+static unique_fd open_spnashot_profile(uid_t uid, const std::string& package_name,
+        const std::string& code_path) {
+    std::string profile = create_snapshot_profile_path(package_name, code_path);
+    return open_profile(uid, profile, O_CREAT | O_RDWR | O_TRUNC);
 }
 
 static void open_profile_files(uid_t uid, const std::string& location, bool is_secondary_dex,
@@ -955,7 +963,7 @@ static std::string replace_file_extension(const std::string& oat_path, const std
   if (EndsWith(oat_path, ".dex")) {
     std::string new_path = oat_path;
     new_path.replace(new_path.length() - strlen(".dex"), strlen(".dex"), new_ext);
-    CHECK(EndsWith(new_path, new_ext.c_str()));
+    CHECK(EndsWith(new_path, new_ext));
     return new_path;
   }
 
@@ -1385,6 +1393,8 @@ bool maybe_open_oat_and_vdex_file(const std::string& apk_path,
                              oat_dir.c_str(),
                              is_secondary_dex,
                              oat_path)) {
+        LOG(ERROR) << "Could not create oat out path for "
+                << apk_path << " with oat dir " << oat_dir;
         return false;
     }
     oat_file_fd->reset(open(oat_path, O_RDONLY));
@@ -1489,7 +1499,7 @@ static void exec_dexoptanalyzer(const std::string& dex_file, int vdex_fd, int oa
 
 // Prepares the oat dir for the secondary dex files.
 static bool prepare_secondary_dex_oat_dir(const std::string& dex_path, int uid,
-        const char* instruction_set, std::string* oat_dir_out) {
+        const char* instruction_set) {
     unsigned long dirIndex = dex_path.rfind('/');
     if (dirIndex == std::string::npos) {
         LOG(ERROR ) << "Unexpected dir structure for secondary dex " << dex_path;
@@ -1506,10 +1516,8 @@ static bool prepare_secondary_dex_oat_dir(const std::string& dex_path, int uid,
 
     char oat_dir[PKG_PATH_MAX];
     snprintf(oat_dir, PKG_PATH_MAX, "%s/oat", dex_dir.c_str());
-    oat_dir_out->assign(oat_dir);
 
-    // Create oat/isa output directory.
-    if (prepare_app_cache_dir(*oat_dir_out, instruction_set, oat_dir_mode, uid, uid) != 0) {
+    if (prepare_app_cache_dir(oat_dir, instruction_set, oat_dir_mode, uid, uid) != 0) {
         LOG(ERROR) << "Could not prepare oat/isa dir for secondary dex: " << dex_path;
         return false;
     }
@@ -1517,37 +1525,126 @@ static bool prepare_secondary_dex_oat_dir(const std::string& dex_path, int uid,
     return true;
 }
 
-static int constexpr DEXOPTANALYZER_BIN_EXEC_ERROR = 200;
+// Return codes for identifying the reason why dexoptanalyzer was not invoked when processing
+// secondary dex files. This return codes are returned by the child process created for
+// analyzing secondary dex files in process_secondary_dex_dexopt.
 
-// Verifies the result of dexoptanalyzer executed for the apk_path.
+// The dexoptanalyzer was not invoked because of validation or IO errors.
+static int constexpr SECONDARY_DEX_DEXOPTANALYZER_SKIPPED = 200;
+// The dexoptanalyzer was not invoked because the dex file does not exist anymore.
+static int constexpr SECONDARY_DEX_DEXOPTANALYZER_SKIPPED_NO_FILE = 201;
+
+// Verifies the result of analyzing secondary dex files from process_secondary_dex_dexopt.
 // If the result is valid returns true and sets dexopt_needed_out to a valid value.
 // Returns false for errors or unexpected result values.
-static bool process_dexoptanalyzer_result(const std::string& dex_path, int result,
+// The result is expected to be either one of SECONDARY_DEX_* codes or a valid exit code
+// of dexoptanalyzer.
+static bool process_secondary_dexoptanalyzer_result(const std::string& dex_path, int result,
             int* dexopt_needed_out) {
     // The result values are defined in dexoptanalyzer.
     switch (result) {
-        case 0:  // no_dexopt_needed
+        case 0:  // dexoptanalyzer: no_dexopt_needed
             *dexopt_needed_out = NO_DEXOPT_NEEDED; return true;
-        case 1:  // dex2oat_from_scratch
+        case 1:  // dexoptanalyzer: dex2oat_from_scratch
             *dexopt_needed_out = DEX2OAT_FROM_SCRATCH; return true;
-        case 5:  // dex2oat_for_bootimage_odex
+        case 5:  // dexoptanalyzer: dex2oat_for_bootimage_odex
             *dexopt_needed_out = -DEX2OAT_FOR_BOOT_IMAGE; return true;
-        case 6:  // dex2oat_for_filter_odex
+        case 6:  // dexoptanalyzer: dex2oat_for_filter_odex
             *dexopt_needed_out = -DEX2OAT_FOR_FILTER; return true;
-        case 7:  // dex2oat_for_relocation_odex
+        case 7:  // dexoptanalyzer: dex2oat_for_relocation_odex
             *dexopt_needed_out = -DEX2OAT_FOR_RELOCATION; return true;
-        case 2:  // dex2oat_for_bootimage_oat
-        case 3:  // dex2oat_for_filter_oat
-        case 4:  // dex2oat_for_relocation_oat
+        case 2:  // dexoptanalyzer: dex2oat_for_bootimage_oat
+        case 3:  // dexoptanalyzer: dex2oat_for_filter_oat
+        case 4:  // dexoptanalyzer: dex2oat_for_relocation_oat
             LOG(ERROR) << "Dexoptnalyzer return the status of an oat file."
                     << " Expected odex file status for secondary dex " << dex_path
                     << " : dexoptanalyzer result=" << result;
             return false;
+        case SECONDARY_DEX_DEXOPTANALYZER_SKIPPED_NO_FILE:
+            // If the file does not exist there's no need for dexopt.
+            *dexopt_needed_out = NO_DEXOPT_NEEDED;
+            return true;
+        case SECONDARY_DEX_DEXOPTANALYZER_SKIPPED:
+            return false;
         default:
-            LOG(ERROR) << "Unexpected result for dexoptanalyzer " << dex_path
-                    << " exec_dexoptanalyzer result=" << result;
+            LOG(ERROR) << "Unexpected result from analyzing secondary dex " << dex_path
+                    << " result=" << result;
             return false;
     }
+}
+
+enum SecondaryDexAccess {
+    kSecondaryDexAccessReadOk = 0,
+    kSecondaryDexAccessDoesNotExist = 1,
+    kSecondaryDexAccessPermissionError = 2,
+    kSecondaryDexAccessIOError = 3
+};
+
+static SecondaryDexAccess check_secondary_dex_access(const std::string& dex_path) {
+    // Check if the path exists and can be read. If not, there's nothing to do.
+    if (access(dex_path.c_str(), R_OK) == 0) {
+        return kSecondaryDexAccessReadOk;
+    } else {
+        if (errno == ENOENT) {
+            LOG(INFO) << "Secondary dex does not exist: " <<  dex_path;
+            return kSecondaryDexAccessDoesNotExist;
+        } else {
+            PLOG(ERROR) << "Could not access secondary dex " << dex_path;
+            return errno == EACCES
+                ? kSecondaryDexAccessPermissionError
+                : kSecondaryDexAccessIOError;
+        }
+    }
+}
+
+static bool is_file_public(const std::string& filename) {
+    struct stat file_stat;
+    if (stat(filename.c_str(), &file_stat) == 0) {
+        return (file_stat.st_mode & S_IROTH) != 0;
+    }
+    return false;
+}
+
+// Create the oat file structure for the secondary dex 'dex_path' and assign
+// the individual path component to the 'out_' parameters.
+static bool create_secondary_dex_oat_layout(const std::string& dex_path, const std::string& isa,
+        char* out_oat_dir, char* out_oat_isa_dir, char* out_oat_path) {
+    size_t dirIndex = dex_path.rfind('/');
+    if (dirIndex == std::string::npos) {
+        LOG(ERROR) << "Unexpected dir structure for dex file " << dex_path;
+        return false;
+    }
+    // TODO(calin): we have similar computations in at lest 3 other places
+    // (InstalldNativeService, otapropt and dexopt). Unify them and get rid of snprintf by
+    // using string append.
+    std::string apk_dir = dex_path.substr(0, dirIndex);
+    snprintf(out_oat_dir, PKG_PATH_MAX, "%s/oat", apk_dir.c_str());
+    snprintf(out_oat_isa_dir, PKG_PATH_MAX, "%s/%s", out_oat_dir, isa.c_str());
+
+    if (!create_oat_out_path(dex_path.c_str(), isa.c_str(), out_oat_dir,
+            /*is_secondary_dex*/true, out_oat_path)) {
+        LOG(ERROR) << "Could not create oat path for secondary dex " << dex_path;
+        return false;
+    }
+    return true;
+}
+
+// Validate that the dexopt_flags contain a valid storage flag and convert that to an installd
+// recognized storage flags (FLAG_STORAGE_CE or FLAG_STORAGE_DE).
+static bool validate_dexopt_storage_flags(int dexopt_flags, int* out_storage_flag) {
+    if ((dexopt_flags & DEXOPT_STORAGE_CE) != 0) {
+        *out_storage_flag = FLAG_STORAGE_CE;
+        if ((dexopt_flags & DEXOPT_STORAGE_DE) != 0) {
+            LOG(ERROR) << "Ambiguous secondary dex storage flag. Both, CE and DE, flags are set";
+            return false;
+        }
+    } else if ((dexopt_flags & DEXOPT_STORAGE_DE) != 0) {
+        *out_storage_flag = FLAG_STORAGE_DE;
+    } else {
+        LOG(ERROR) << "Secondary dex storage flag must be set";
+        return false;
+    }
+    return true;
 }
 
 // Processes the dex_path as a secondary dex files and return true if the path dex file should
@@ -1557,125 +1654,106 @@ static bool process_dexoptanalyzer_result(const std::string& dex_path, int resul
 //   - is_public_out: whether or not the oat file should not be made public
 //   - dexopt_needed_out: valid OatFileAsssitant::DexOptNeeded
 //   - oat_dir_out: the oat dir path where the oat file should be stored
-//   - dex_path_out: the real path of the dex file
-static bool process_secondary_dex_dexopt(const char* original_dex_path, const char* pkgname,
+static bool process_secondary_dex_dexopt(const std::string& dex_path, const char* pkgname,
         int dexopt_flags, const char* volume_uuid, int uid, const char* instruction_set,
         const char* compiler_filter, bool* is_public_out, int* dexopt_needed_out,
-        std::string* oat_dir_out, std::string* dex_path_out, bool downgrade,
-        const char* class_loader_context) {
+        std::string* oat_dir_out, bool downgrade, const char* class_loader_context) {
+    LOG(DEBUG) << "Processing secondary dex path " << dex_path;
     int storage_flag;
-
-    if ((dexopt_flags & DEXOPT_STORAGE_CE) != 0) {
-        storage_flag = FLAG_STORAGE_CE;
-        if ((dexopt_flags & DEXOPT_STORAGE_DE) != 0) {
-            LOG(ERROR) << "Ambiguous secondary dex storage flag. Both, CE and DE, flags are set";
-            return false;
-        }
-    } else if ((dexopt_flags & DEXOPT_STORAGE_DE) != 0) {
-        storage_flag = FLAG_STORAGE_DE;
-    } else {
-        LOG(ERROR) << "Secondary dex storage flag must be set";
+    if (!validate_dexopt_storage_flags(dexopt_flags, &storage_flag)) {
         return false;
     }
-
-    {
-        // As opposed to the primary apk, secondary dex files might contain symlinks.
-        // Resolve the path before passing it to the validate method to
-        // make sure the verification is done on the real location.
-        UniqueCPtr<char> dex_real_path_cstr(realpath(original_dex_path, nullptr));
-        if (dex_real_path_cstr == nullptr) {
-            PLOG(ERROR) << "Could not get the real path of the secondary dex file "
-                    << original_dex_path;
-            return false;
-        } else {
-            dex_path_out->assign(dex_real_path_cstr.get());
-        }
-    }
-    const std::string& dex_path = *dex_path_out;
-    if (!validate_dex_path_size(dex_path)) {
+    // Compute the oat dir as it's not easy to extract it from the child computation.
+    char oat_path[PKG_PATH_MAX];
+    char oat_dir[PKG_PATH_MAX];
+    char oat_isa_dir[PKG_PATH_MAX];
+    if (!create_secondary_dex_oat_layout(
+            dex_path, instruction_set, oat_dir, oat_isa_dir, oat_path)) {
+        LOG(ERROR) << "Could not create secondary odex layout: " << dex_path;
         return false;
     }
-    if (!validate_secondary_dex_path(pkgname, dex_path, volume_uuid, uid, storage_flag)) {
-        LOG(ERROR) << "Could not validate secondary dex path " << dex_path;
-        return false;
-    }
-
-    // Check if the path exist. If not, there's nothing to do.
-    struct stat dex_path_stat;
-    if (stat(dex_path.c_str(), &dex_path_stat) != 0) {
-        if (errno == ENOENT) {
-            // Secondary dex files might be deleted any time by the app.
-            // Nothing to do if that's the case
-            ALOGV("Secondary dex does not exist %s", dex_path.c_str());
-            return NO_DEXOPT_NEEDED;
-        } else {
-            PLOG(ERROR) << "Could not access secondary dex " << dex_path;
-        }
-    }
-
-    // Check if we should make the oat file public.
-    // Note that if the dex file is not public the compiled code cannot be made public.
-    *is_public_out = ((dexopt_flags & DEXOPT_PUBLIC) != 0) &&
-            ((dex_path_stat.st_mode & S_IROTH) != 0);
-
-    // Prepare the oat directories.
-    if (!prepare_secondary_dex_oat_dir(dex_path, uid, instruction_set, oat_dir_out)) {
-        return false;
-    }
-
-    // Analyze profiles.
-    bool profile_was_updated = analyze_profiles(uid, dex_path, /*is_secondary_dex*/true);
-
-    unique_fd oat_file_fd;
-    unique_fd vdex_file_fd;
-    unique_fd zip_fd;
-    zip_fd.reset(open(dex_path.c_str(), O_RDONLY));
-    if (zip_fd.get() < 0) {
-        PLOG(ERROR) << "installd cannot open " << dex_path << " for input during dexopt";
-        return false;
-    }
-    if (!maybe_open_oat_and_vdex_file(dex_path,
-                                      *oat_dir_out,
-                                      instruction_set,
-                                      true /* is_secondary_dex */,
-                                      &oat_file_fd,
-                                      &vdex_file_fd)) {
-      return false;
-    }
+    oat_dir_out->assign(oat_dir);
 
     pid_t pid = fork();
     if (pid == 0) {
         // child -- drop privileges before continuing.
         drop_capabilities(uid);
-        // Run dexoptanalyzer to get dexopt_needed code.
+
+        // Validate the path structure.
+        if (!validate_secondary_dex_path(pkgname, dex_path, volume_uuid, uid, storage_flag)) {
+            LOG(ERROR) << "Could not validate secondary dex path " << dex_path;
+            _exit(SECONDARY_DEX_DEXOPTANALYZER_SKIPPED);
+        }
+
+        // Open the dex file.
+        unique_fd zip_fd;
+        zip_fd.reset(open(dex_path.c_str(), O_RDONLY));
+        if (zip_fd.get() < 0) {
+            if (errno == ENOENT) {
+                _exit(SECONDARY_DEX_DEXOPTANALYZER_SKIPPED_NO_FILE);
+            } else {
+                _exit(SECONDARY_DEX_DEXOPTANALYZER_SKIPPED);
+            }
+        }
+
+        // Prepare the oat directories.
+        if (!prepare_secondary_dex_oat_dir(dex_path, uid, instruction_set)) {
+            _exit(SECONDARY_DEX_DEXOPTANALYZER_SKIPPED);
+        }
+
+        // Open the vdex/oat files if any.
+        unique_fd oat_file_fd;
+        unique_fd vdex_file_fd;
+        if (!maybe_open_oat_and_vdex_file(dex_path,
+                                          *oat_dir_out,
+                                          instruction_set,
+                                          true /* is_secondary_dex */,
+                                          &oat_file_fd,
+                                          &vdex_file_fd)) {
+            _exit(SECONDARY_DEX_DEXOPTANALYZER_SKIPPED);
+        }
+
+        // Analyze profiles.
+        bool profile_was_updated = analyze_profiles(uid, dex_path, /*is_secondary_dex*/true);
+
+        // Run dexoptanalyzer to get dexopt_needed code. This is not expected to return.
         exec_dexoptanalyzer(dex_path,
                             vdex_file_fd.get(),
                             oat_file_fd.get(),
                             zip_fd.get(),
                             instruction_set,
-                            compiler_filter,
-                            profile_was_updated,
-                            downgrade, class_loader_context);
-        exit(DEXOPTANALYZER_BIN_EXEC_ERROR);
+                            compiler_filter, profile_was_updated,
+                            downgrade,
+                            class_loader_context);
+        PLOG(ERROR) << "Failed to exec dexoptanalyzer";
+        _exit(SECONDARY_DEX_DEXOPTANALYZER_SKIPPED);
     }
 
     /* parent */
-
     int result = wait_child(pid);
     if (!WIFEXITED(result)) {
         LOG(ERROR) << "dexoptanalyzer failed for path " << dex_path << ": " << result;
         return false;
     }
     result = WEXITSTATUS(result);
-    bool success = process_dexoptanalyzer_result(dex_path, result, dexopt_needed_out);
+    // Check that we successfully executed dexoptanalyzer.
+    bool success = process_secondary_dexoptanalyzer_result(dex_path, result, dexopt_needed_out);
+
+    LOG(DEBUG) << "Processed secondary dex file " << dex_path << " result=" << result;
+
     // Run dexopt only if needed or forced.
-    // Note that dexoptanalyzer is executed even if force compilation is enabled.
-    // We ignore its valid dexopNeeded result, but still check (in process_dexoptanalyzer_result)
-    // that we only get results for odex files (apk_dir/oat/isa/code.odex) and not
-    // for oat files from dalvik-cache.
-    if (success && ((dexopt_flags & DEXOPT_FORCE) != 0)) {
+    // Note that dexoptanalyzer is executed even if force compilation is enabled (because it
+    // makes the code simpler; force compilation is only needed during tests).
+    if (success &&
+        (result != SECONDARY_DEX_DEXOPTANALYZER_SKIPPED_NO_FILE) &&
+        ((dexopt_flags & DEXOPT_FORCE) != 0)) {
         *dexopt_needed_out = DEX2OAT_FROM_SCRATCH;
     }
+
+    // Check if we should make the oat file public.
+    // Note that if the dex file is not public the compiled code cannot be made public.
+    // It is ok to check this flag outside in the parent process.
+    *is_public_out = ((dexopt_flags & DEXOPT_PUBLIC) != 0) && is_file_public(dex_path);
 
     return success;
 }
@@ -1708,13 +1786,11 @@ int dexopt(const char* dex_path, uid_t uid, const char* pkgname, const char* ins
 
     // Check if we're dealing with a secondary dex file and if we need to compile it.
     std::string oat_dir_str;
-    std::string dex_real_path;
     if (is_secondary_dex) {
         if (process_secondary_dex_dexopt(dex_path, pkgname, dexopt_flags, volume_uuid, uid,
                 instruction_set, compiler_filter, &is_public, &dexopt_needed, &oat_dir_str,
-                &dex_real_path, downgrade, class_loader_context)) {
+                downgrade, class_loader_context)) {
             oat_dir = oat_dir_str.c_str();
-            dex_path = dex_real_path.c_str();
             if (dexopt_needed == NO_DEXOPT_NEEDED) {
                 return 0;  // Nothing to do, report success.
             }
@@ -1852,29 +1928,13 @@ static bool unlink_if_exists(const std::string& file) {
     return false;
 }
 
-// Create the oat file structure for the secondary dex 'dex_path' and assign
-// the individual path component to the 'out_' parameters.
-static bool create_secondary_dex_oat_layout(const std::string& dex_path, const std::string& isa,
-        /*out*/char* out_oat_dir, /*out*/char* out_oat_isa_dir, /*out*/char* out_oat_path) {
-    size_t dirIndex = dex_path.rfind('/');
-    if (dirIndex == std::string::npos) {
-        LOG(ERROR) << "Unexpected dir structure for dex file " << dex_path;
-        return false;
-    }
-    // TODO(calin): we have similar computations in at lest 3 other places
-    // (InstalldNativeService, otapropt and dexopt). Unify them and get rid of snprintf by
-    // use string append.
-    std::string apk_dir = dex_path.substr(0, dirIndex);
-    snprintf(out_oat_dir, PKG_PATH_MAX, "%s/oat", apk_dir.c_str());
-    snprintf(out_oat_isa_dir, PKG_PATH_MAX, "%s/%s", out_oat_dir, isa.c_str());
-
-    if (!create_oat_out_path(dex_path.c_str(), isa.c_str(), out_oat_dir,
-            /*is_secondary_dex*/true, out_oat_path)) {
-        LOG(ERROR) << "Could not create oat path for secondary dex " << dex_path;
-        return false;
-    }
-    return true;
-}
+enum ReconcileSecondaryDexResult {
+    kReconcileSecondaryDexExists = 0,
+    kReconcileSecondaryDexCleanedUp = 1,
+    kReconcileSecondaryDexValidationError = 2,
+    kReconcileSecondaryDexCleanUpError = 3,
+    kReconcileSecondaryDexAccessIOError = 4,
+};
 
 // Reconcile the secondary dex 'dex_path' and its generated oat files.
 // Return true if all the parameters are valid and the secondary dex file was
@@ -1888,36 +1948,15 @@ bool reconcile_secondary_dex_file(const std::string& dex_path,
         const std::string& pkgname, int uid, const std::vector<std::string>& isas,
         const std::unique_ptr<std::string>& volume_uuid, int storage_flag,
         /*out*/bool* out_secondary_dex_exists) {
-    // Set out to false to start with, just in case we have validation errors.
-    *out_secondary_dex_exists = false;
-    if (!validate_dex_path_size(dex_path)) {
-        return false;
-    }
-
+    *out_secondary_dex_exists = false;  // start by assuming the file does not exist.
     if (isas.size() == 0) {
         LOG(ERROR) << "reconcile_secondary_dex_file called with empty isas vector";
         return false;
     }
 
-    const char* volume_uuid_cstr = volume_uuid == nullptr ? nullptr : volume_uuid->c_str();
-
-    // Note that we cannot validate the package path here because the file might not exist
-    // and we cannot call realpath to resolve system symlinks. Since /data/user/0 symlinks to
-    // /data/data/ a lot of validations will fail if we attempt to check the package path.
-    // It is still ok to be more relaxed because any file removal is done after forking and
-    // dropping capabilities.
-    if (!validate_secondary_dex_path(pkgname.c_str(), dex_path.c_str(), volume_uuid_cstr,
-            uid, storage_flag, /*validate_package_path*/ false)) {
-        LOG(ERROR) << "Could not validate secondary dex path " << dex_path;
-        return false;
-    }
-
-    if (access(dex_path.c_str(), F_OK) == 0) {
-        // The path exists, nothing to do. The odex files (if any) will be left untouched.
-        *out_secondary_dex_exists = true;
-        return true;
-    } else if (errno != ENOENT) {
-        PLOG(ERROR) << "Failed to check access to secondary dex " << dex_path;
+    if (storage_flag != FLAG_STORAGE_CE && storage_flag != FLAG_STORAGE_DE) {
+        LOG(ERROR) << "reconcile_secondary_dex_file called with invalid storage_flag: "
+                << storage_flag;
         return false;
     }
 
@@ -1925,23 +1964,39 @@ bool reconcile_secondary_dex_file(const std::string& dex_path,
     // of the package user id. So we fork and drop capabilities in the child.
     pid_t pid = fork();
     if (pid == 0) {
-        // The secondary dex does not exist anymore. Clear any generated files.
+        /* child -- drop privileges before continuing */
+        drop_capabilities(uid);
+
+        const char* volume_uuid_cstr = volume_uuid == nullptr ? nullptr : volume_uuid->c_str();
+        if (!validate_secondary_dex_path(pkgname.c_str(), dex_path.c_str(), volume_uuid_cstr,
+                uid, storage_flag)) {
+            LOG(ERROR) << "Could not validate secondary dex path " << dex_path;
+            _exit(kReconcileSecondaryDexValidationError);
+        }
+
+        SecondaryDexAccess access_check = check_secondary_dex_access(dex_path);
+        switch (access_check) {
+            case kSecondaryDexAccessDoesNotExist:
+                 // File does not exist. Proceed with cleaning.
+                break;
+            case kSecondaryDexAccessReadOk: _exit(kReconcileSecondaryDexExists);
+            case kSecondaryDexAccessIOError: _exit(kReconcileSecondaryDexAccessIOError);
+            case kSecondaryDexAccessPermissionError: _exit(kReconcileSecondaryDexValidationError);
+            default:
+                LOG(ERROR) << "Unexpected result from check_secondary_dex_access: " << access_check;
+                _exit(kReconcileSecondaryDexValidationError);
+        }
+
+        // The secondary dex does not exist anymore or it's. Clear any generated files.
         char oat_path[PKG_PATH_MAX];
         char oat_dir[PKG_PATH_MAX];
         char oat_isa_dir[PKG_PATH_MAX];
         bool result = true;
-        /* child -- drop privileges before continuing */
-        drop_capabilities(uid);
         for (size_t i = 0; i < isas.size(); i++) {
-            if (!create_secondary_dex_oat_layout(dex_path,
-                                                 isas[i],
-                                                 oat_dir,
-                                                 oat_isa_dir,
-                                                 oat_path)) {
-                LOG(ERROR) << "Could not create secondary odex layout: "
-                           << dex_path;
-                result = false;
-                continue;
+            if (!create_secondary_dex_oat_layout(
+                    dex_path,isas[i], oat_dir, oat_isa_dir, oat_path)) {
+                LOG(ERROR) << "Could not create secondary odex layout: " << dex_path;
+                _exit(kReconcileSecondaryDexValidationError);
             }
 
             // Delete oat/vdex/art files.
@@ -1966,11 +2021,127 @@ bool reconcile_secondary_dex_file(const std::string& dex_path,
             result = rmdir_if_empty(oat_isa_dir) && result;
             result = rmdir_if_empty(oat_dir) && result;
         }
-        result ? _exit(0) : _exit(1);
+        if (!result) {
+            PLOG(ERROR) << "Failed to clean secondary dex artifacts for location " << dex_path;
+        }
+        _exit(result ? kReconcileSecondaryDexCleanedUp : kReconcileSecondaryDexAccessIOError);
     }
 
     int return_code = wait_child(pid);
-    return return_code == 0;
+    if (!WIFEXITED(return_code)) {
+        LOG(WARNING) << "reconcile dex failed for location " << dex_path << ": " << return_code;
+    } else {
+        return_code = WEXITSTATUS(return_code);
+    }
+
+    LOG(DEBUG) << "Reconcile secondary dex path " << dex_path << " result=" << return_code;
+
+    switch (return_code) {
+        case kReconcileSecondaryDexCleanedUp:
+        case kReconcileSecondaryDexValidationError:
+            // If we couldn't validate assume the dex file does not exist.
+            // This will purge the entry from the PM records.
+            *out_secondary_dex_exists = false;
+            return true;
+        case kReconcileSecondaryDexExists:
+            *out_secondary_dex_exists = true;
+            return true;
+        case kReconcileSecondaryDexAccessIOError:
+            // We had an access IO error.
+            // Return false so that we can try again.
+            // The value of out_secondary_dex_exists does not matter in this case and by convention
+            // is set to false.
+            *out_secondary_dex_exists = false;
+            return false;
+        default:
+            LOG(ERROR) << "Unexpected code from reconcile_secondary_dex_file: " << return_code;
+            *out_secondary_dex_exists = false;
+            return false;
+    }
+}
+
+// Compute and return the hash (SHA-256) of the secondary dex file at dex_path.
+// Returns true if all parameters are valid and the hash successfully computed and stored in
+// out_secondary_dex_hash.
+// Also returns true with an empty hash if the file does not currently exist or is not accessible to
+// the app.
+// For any other errors (e.g. if any of the parameters are invalid) returns false.
+bool hash_secondary_dex_file(const std::string& dex_path, const std::string& pkgname, int uid,
+        const std::unique_ptr<std::string>& volume_uuid, int storage_flag,
+        std::vector<uint8_t>* out_secondary_dex_hash) {
+    out_secondary_dex_hash->clear();
+
+    const char* volume_uuid_cstr = volume_uuid == nullptr ? nullptr : volume_uuid->c_str();
+
+    if (storage_flag != FLAG_STORAGE_CE && storage_flag != FLAG_STORAGE_DE) {
+        LOG(ERROR) << "hash_secondary_dex_file called with invalid storage_flag: "
+                << storage_flag;
+        return false;
+    }
+
+    // Pipe to get the hash result back from our child process.
+    unique_fd pipe_read, pipe_write;
+    if (!Pipe(&pipe_read, &pipe_write)) {
+        PLOG(ERROR) << "Failed to create pipe";
+        return false;
+    }
+
+    // Fork so that actual access to the files is done in the app's own UID, to ensure we only
+    // access data the app itself can access.
+    pid_t pid = fork();
+    if (pid == 0) {
+        // child -- drop privileges before continuing
+        drop_capabilities(uid);
+        pipe_read.reset();
+
+        if (!validate_secondary_dex_path(pkgname, dex_path, volume_uuid_cstr, uid, storage_flag)) {
+            LOG(ERROR) << "Could not validate secondary dex path " << dex_path;
+            _exit(1);
+        }
+
+        unique_fd fd(TEMP_FAILURE_RETRY(open(dex_path.c_str(), O_RDONLY | O_CLOEXEC | O_NOFOLLOW)));
+        if (fd == -1) {
+            if (errno == EACCES || errno == ENOENT) {
+                // Not treated as an error.
+                _exit(0);
+            }
+            PLOG(ERROR) << "Failed to open secondary dex " << dex_path;
+            _exit(1);
+        }
+
+        SHA256_CTX ctx;
+        SHA256_Init(&ctx);
+
+        std::vector<uint8_t> buffer(65536);
+        while (true) {
+            ssize_t bytes_read = TEMP_FAILURE_RETRY(read(fd, buffer.data(), buffer.size()));
+            if (bytes_read == 0) {
+                break;
+            } else if (bytes_read == -1) {
+                PLOG(ERROR) << "Failed to read secondary dex " << dex_path;
+                _exit(1);
+            }
+
+            SHA256_Update(&ctx, buffer.data(), bytes_read);
+        }
+
+        std::array<uint8_t, SHA256_DIGEST_LENGTH> hash;
+        SHA256_Final(hash.data(), &ctx);
+        if (!WriteFully(pipe_write, hash.data(), hash.size())) {
+            _exit(1);
+        }
+
+        _exit(0);
+    }
+
+    // parent
+    pipe_write.reset();
+
+    out_secondary_dex_hash->resize(SHA256_DIGEST_LENGTH);
+    if (!ReadFully(pipe_read, out_secondary_dex_hash->data(), out_secondary_dex_hash->size())) {
+        out_secondary_dex_hash->clear();
+    }
+    return wait_child(pid) == 0;
 }
 
 // Helper for move_ab, so that we can have common failure-case cleanup.
@@ -2226,6 +2397,43 @@ bool create_cache_path_default(char path[PKG_PATH_MAX], const char *src,
         strlcpy(path, res, PKG_PATH_MAX);
         return true;
     }
+}
+
+bool create_profile_snapshot(int32_t app_id, const std::string& package_name,
+        const std::string& code_path) {
+    int app_shared_gid = multiuser_get_shared_gid(/*user_id*/ 0, app_id);
+
+    unique_fd snapshot_fd = open_spnashot_profile(AID_SYSTEM, package_name, code_path);
+    if (snapshot_fd < 0) {
+        return false;
+    }
+
+    std::vector<unique_fd> profiles_fd;
+    unique_fd reference_profile_fd;
+    open_profile_files(app_shared_gid, package_name, /*is_secondary_dex*/ false, &profiles_fd,
+            &reference_profile_fd);
+    if (profiles_fd.empty() || (reference_profile_fd.get() < 0)) {
+        return false;
+    }
+
+    profiles_fd.push_back(std::move(reference_profile_fd));
+
+    pid_t pid = fork();
+    if (pid == 0) {
+        /* child -- drop privileges before continuing */
+        drop_capabilities(app_shared_gid);
+        run_profman_merge(profiles_fd, snapshot_fd);
+        exit(42);   /* only get here on exec failure */
+    }
+
+    /* parent */
+    int return_code = wait_child(pid);
+    if (!WIFEXITED(return_code)) {
+        LOG(WARNING) << "profman failed for " << package_name << ":" << code_path;
+        return false;
+    }
+
+    return true;
 }
 
 }  // namespace installd

@@ -6,6 +6,7 @@
 #include <pdx/client.h>
 #include <pdx/status.h>
 #include <private/dvr/buffer_hub_client.h>
+#include <private/dvr/buffer_hub_queue_parcelable.h>
 #include <private/dvr/bufferhub_rpc.h>
 #include <private/dvr/epoll_file_descriptor.h>
 #include <private/dvr/ring_buffer.h>
@@ -54,6 +55,11 @@ class BufferHubQueue : public pdx::Client {
   pdx::Status<pdx::LocalChannelHandle> CreateConsumerQueueHandle(
       bool silent = false);
 
+  // Creates a new consumer in parcelable form for immediate transport over
+  // Binder.
+  pdx::Status<ConsumerQueueParcelable> CreateConsumerQueueParcelable(
+      bool silent = false);
+
   // Returns the number of buffers avaiable for dequeue.
   size_t count() const { return available_buffers_.size(); }
 
@@ -68,7 +74,8 @@ class BufferHubQueue : public pdx::Client {
     return available_buffers_.size() >= kMaxQueueCapacity;
   }
 
-  explicit operator bool() const { return epoll_fd_.IsValid(); }
+  // Returns whether the buffer queue is connected to bufferhubd.
+  bool is_connected() const { return !!GetChannel(); }
 
   int GetBufferId(size_t slot) const {
     return (slot < buffers_.size() && buffers_[slot]) ? buffers_[slot]->id()
@@ -336,6 +343,11 @@ class ProducerQueue : public pdx::ClientBase<ProducerQueue, BufferHubQueue> {
                             size_t slot, uint64_t index) {
     return BufferHubQueue::Enqueue({buffer, slot, index});
   }
+
+  // Takes out the current producer queue as a binder parcelable object. Note
+  // that the queue must be empty to be exportable. After successful export, the
+  // producer queue client should no longer be used.
+  pdx::Status<ProducerQueueParcelable> TakeAsParcelable();
 
  private:
   friend BASE;

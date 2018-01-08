@@ -16,6 +16,7 @@
 
 #pragma once
 
+#include "BufferLayerConsumer.h"
 #include "Client.h"
 #include "Layer.h"
 #include "DisplayHardware/HWComposer.h"
@@ -26,14 +27,10 @@
 #include "RenderEngine/Mesh.h"
 #include "RenderEngine/Texture.h"
 #include "SurfaceFlinger.h"
-#include "SurfaceFlingerConsumer.h"
 #include "Transform.h"
 
 #include <gui/ISurfaceComposerClient.h>
 #include <gui/LayerState.h>
-
-#include <EGL/egl.h>
-#include <EGL/eglext.h>
 
 #include <ui/FrameStats.h>
 #include <ui/GraphicBuffer.h>
@@ -51,13 +48,13 @@
 namespace android {
 
 /*
- * A new BufferQueue and a new SurfaceFlingerConsumer are created when the
+ * A new BufferQueue and a new BufferLayerConsumer are created when the
  * BufferLayer is first referenced.
  *
  * This also implements onFrameAvailable(), which notifies SurfaceFlinger
  * that new data has arrived.
  */
-class BufferLayer : public Layer, public SurfaceFlingerConsumer::ContentsChangedListener {
+class BufferLayer : public Layer, public BufferLayerConsumer::ContentsChangedListener {
 public:
     BufferLayer(SurfaceFlinger* flinger, const sp<Client>& client, const String8& name, uint32_t w,
                 uint32_t h, uint32_t flags);
@@ -105,12 +102,7 @@ public:
     void onDraw(const RenderArea& renderArea, const Region& clip,
                 bool useIdentityTransform) const override;
 
-#ifdef USE_HWC2
     void onLayerDisplayed(const sp<Fence>& releaseFence) override;
-#else
-    void onLayerDisplayed(const sp<const DisplayDevice>& hw,
-                          HWComposer::HWCLayerInterface* layer) override;
-#endif
 
     void abandon() override;
     bool shouldPresentNow(const DispSync& dispSync) const override;
@@ -124,10 +116,8 @@ public:
 public:
     bool onPreComposition(nsecs_t refreshStartTime) override;
 
-#ifdef USE_HWC2
     // If a buffer was replaced this frame, release the former buffer
     void releasePendingBuffer(nsecs_t dequeueReadyTime);
-#endif
 
     /*
      * latchBuffer - called each time the screen is redrawn and returns whether
@@ -139,12 +129,7 @@ public:
     bool isBufferLatched() const override { return mRefreshPending; }
     void setDefaultBufferSize(uint32_t w, uint32_t h) override;
 
-#ifdef USE_HWC2
     void setPerFrameData(const sp<const DisplayDevice>& displayDevice) override;
-#else
-    void setAcquireFence(const sp<const DisplayDevice>& hw,
-                         HWComposer::HWCLayerInterface& layer) override;
-#endif
 
     bool isOpaque(const Layer::State& s) const override;
 
@@ -152,7 +137,7 @@ private:
     void onFirstRef() override;
 
     // Interface implementation for
-    // SurfaceFlingerConsumer::ContentsChangedListener
+    // BufferLayerConsumer::ContentsChangedListener
     void onFrameAvailable(const BufferItem& item) override;
     void onFrameReplaced(const BufferItem& item) override;
     void onSidebandStreamChanged() override;
@@ -185,7 +170,7 @@ public:
     sp<IGraphicBufferProducer> getProducer() const;
 
 private:
-    sp<SurfaceFlingerConsumer> mSurfaceFlingerConsumer;
+    sp<BufferLayerConsumer> mConsumer;
 
     // Check all of the local sync points to ensure that all transactions
     // which need to have been applied prior to the frame which is about to
