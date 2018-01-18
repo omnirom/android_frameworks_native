@@ -21,6 +21,7 @@
 
 #include <gui/BufferQueueDefs.h>
 #include <gui/ConsumerBase.h>
+#include <gui/HdrMetadata.h>
 
 #include <ui/FenceTime.h>
 #include <ui/GraphicBuffer.h>
@@ -120,6 +121,10 @@ public:
     // getDataSpace retrieves the DataSpace associated with the texture image
     // set by the most recent call to updateTexImage.
     android_dataspace getCurrentDataSpace();
+
+    // getCurrentHdrMetadata retrieves the HDR metadata associated with the
+    // texture image set by the most recent call to updateTexImage.
+    const HdrMetadata& getCurrentHdrMetadata() const;
 
     // getFrameNumber retrieves the frame number associated with the texture
     // image set by the most recent call to updateTexImage.
@@ -223,7 +228,7 @@ private:
 
         const sp<GraphicBuffer>& graphicBuffer() { return mGraphicBuffer; }
         const native_handle* graphicBufferHandle() {
-            return mGraphicBuffer == NULL ? NULL : mGraphicBuffer->handle;
+            return mGraphicBuffer == nullptr ? nullptr : mGraphicBuffer->handle;
         }
 
         const RE::Image& image() const { return mImage; }
@@ -260,7 +265,7 @@ private:
     // computeCurrentTransformMatrixLocked computes the transform matrix for the
     // current texture.  It uses mCurrentTransform and the current GraphicBuffer
     // to compute this matrix and stores it in mCurrentTransformMatrix.
-    // mCurrentTextureImage must not be NULL.
+    // mCurrentTextureImage must not be nullptr.
     void computeCurrentTransformMatrixLocked();
 
     // doFenceWaitLocked inserts a wait command into the RenderEngine command
@@ -315,6 +320,10 @@ private:
     // mCurrentDataSpace is the dataspace for the current texture. It
     // gets set each time updateTexImage is called.
     android_dataspace mCurrentDataSpace;
+
+    // mCurrentHdrMetadata is the HDR metadata for the current texture. It
+    // gets set each time updateTexImage is called.
+    HdrMetadata mCurrentHdrMetadata;
 
     // mCurrentFrameNumber is the frame counter for the current texture.
     // It gets set each time updateTexImage is called.
