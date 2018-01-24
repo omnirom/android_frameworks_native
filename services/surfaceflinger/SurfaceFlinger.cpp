@@ -136,6 +136,7 @@ uint64_t SurfaceFlinger::maxVirtualDisplaySize;
 bool SurfaceFlinger::hasSyncFramework;
 bool SurfaceFlinger::useVrFlinger;
 int64_t SurfaceFlinger::maxFrameBufferAcquiredBuffers;
+// TODO(courtneygo): Rename hasWideColorDisplay to clarify its actual meaning.
 bool SurfaceFlinger::hasWideColorDisplay;
 
 
@@ -368,21 +369,10 @@ void SurfaceFlinger::destroyDisplay(const sp<IBinder>& display) {
     setTransactionFlags(eDisplayTransactionNeeded);
 }
 
-void SurfaceFlinger::createBuiltinDisplayLocked(DisplayDevice::DisplayType type) {
-    ALOGV("createBuiltinDisplayLocked(%d)", type);
-    ALOGW_IF(mBuiltinDisplays[type],
-            "Overwriting display token for display type %d", type);
-    mBuiltinDisplays[type] = new BBinder();
-    // All non-virtual displays are currently considered secure.
-    DisplayDeviceState info(type, true);
-    mCurrentState.displays.add(mBuiltinDisplays[type], info);
-    mInterceptor.saveDisplayCreation(info);
-}
-
 sp<IBinder> SurfaceFlinger::getBuiltInDisplay(int32_t id) {
     if (uint32_t(id) >= DisplayDevice::NUM_BUILTIN_DISPLAY_TYPES) {
         ALOGE("getDefaultDisplay: id=%d is not a valid default display id", id);
-        return NULL;
+        return nullptr;
     }
     return mBuiltinDisplays[id];
 }
@@ -531,7 +521,7 @@ private:
             }
         }
 
-        if (callback != NULL) {
+        if (callback != nullptr) {
             callback->onVSyncEvent(when);
         }
     }
@@ -618,6 +608,14 @@ void SurfaceFlinger::init() {
             "Starting with vr flinger active is not currently supported.");
     getBE().mHwc.reset(new HWComposer(getBE().mHwcServiceName));
     getBE().mHwc->registerCallback(this, getBE().mComposerSequenceId);
+    // Process any initial hotplug and resulting display changes.
+    processDisplayHotplugEventsLocked();
+    LOG_ALWAYS_FATAL_IF(!getBE().mHwc->isConnected(HWC_DISPLAY_PRIMARY),
+            "Registered composer callback but didn't create the default primary display");
+
+    // make the default display GLContext current so that we can create textures
+    // when creating Layers (which may happens before we render something)
+    getDefaultDisplayDeviceLocked()->makeCurrent();
 
     if (useVrFlinger) {
         auto vrFlingerRequestDisplayCallback = [this] (bool requestDisplay) {
@@ -737,7 +735,7 @@ status_t SurfaceFlinger::getSupportedFrameTimestamps(
 
 status_t SurfaceFlinger::getDisplayConfigs(const sp<IBinder>& display,
         Vector<DisplayInfo>* configs) {
-    if ((configs == NULL) || (display.get() == NULL)) {
+    if (configs == nullptr || display.get() == nullptr) {
         return BAD_VALUE;
     }
 
@@ -761,7 +759,7 @@ status_t SurfaceFlinger::getDisplayConfigs(const sp<IBinder>& display,
         static int getDensityFromProperty(char const* propName) {
             char property[PROPERTY_VALUE_MAX];
             int density = 0;
-            if (property_get(propName, property, NULL) > 0) {
+            if (property_get(propName, property, nullptr) > 0) {
                 density = atoi(property);
             }
             return density;
@@ -801,7 +799,7 @@ status_t SurfaceFlinger::getDisplayConfigs(const sp<IBinder>& display,
 
             // TODO: this needs to go away (currently needed only by webkit)
             sp<const DisplayDevice> hw(getDefaultDisplayDeviceLocked());
-            info.orientation = hw->getOrientation();
+            info.orientation = hw ? hw->getOrientation() : 0;
         } else {
             // TODO: where should this value come from?
             static const int TV_DENSITY = 213;
@@ -842,7 +840,7 @@ status_t SurfaceFlinger::getDisplayConfigs(const sp<IBinder>& display,
 
 status_t SurfaceFlinger::getDisplayStats(const sp<IBinder>& /* display */,
         DisplayStatInfo* stats) {
-    if (stats == NULL) {
+    if (stats == nullptr) {
         return BAD_VALUE;
     }
 
@@ -854,13 +852,13 @@ status_t SurfaceFlinger::getDisplayStats(const sp<IBinder>& /* display */,
 }
 
 int SurfaceFlinger::getActiveConfig(const sp<IBinder>& display) {
-    if (display == NULL) {
-        ALOGE("%s : display is NULL", __func__);
+    if (display == nullptr) {
+        ALOGE("%s : display is nullptr", __func__);
         return BAD_VALUE;
     }
 
     sp<const DisplayDevice> device(getDisplayDevice(display));
-    if (device != NULL) {
+    if (device != nullptr) {
         return device->getActiveConfig();
     }
 
@@ -905,7 +903,7 @@ status_t SurfaceFlinger::setActiveConfig(const sp<IBinder>& display, int mode) {
                 return true;
             }
             sp<DisplayDevice> hw(mFlinger.getDisplayDevice(mDisplay));
-            if (hw == NULL) {
+            if (hw == nullptr) {
                 ALOGE("Attempt to set active config = %d for null display %p",
                         mMode, mDisplay.get());
             } else if (hw->getDisplayType() >= DisplayDevice::DISPLAY_VIRTUAL) {
@@ -1266,94 +1264,25 @@ void SurfaceFlinger::getCompositorTiming(CompositorTiming* compositorTiming) {
     *compositorTiming = getBE().mCompositorTiming;
 }
 
-void SurfaceFlinger::createDefaultDisplayDevice() {
-    const DisplayDevice::DisplayType type = DisplayDevice::DISPLAY_PRIMARY;
-    wp<IBinder> token = mBuiltinDisplays[type];
+void SurfaceFlinger::onHotplugReceived(int32_t sequenceId, hwc2_display_t display,
+                                       HWC2::Connection connection) {
+    ALOGV("onHotplugReceived(%d, %" PRIu64 ", %s)", sequenceId, display,
+          connection == HWC2::Connection::Connected ? "connected" : "disconnected");
 
-    // All non-virtual displays are currently considered secure.
-    const bool isSecure = true;
-
-    sp<IGraphicBufferProducer> producer;
-    sp<IGraphicBufferConsumer> consumer;
-    BufferQueue::createBufferQueue(&producer, &consumer);
-
-    sp<FramebufferSurface> fbs = new FramebufferSurface(*getBE().mHwc, type, consumer);
-
-    bool hasWideColorModes = false;
-    std::vector<android_color_mode_t> modes = getHwComposer().getColorModes(type);
-    for (android_color_mode_t colorMode : modes) {
-        switch (colorMode) {
-            case HAL_COLOR_MODE_DISPLAY_P3:
-            case HAL_COLOR_MODE_ADOBE_RGB:
-            case HAL_COLOR_MODE_DCI_P3:
-                hasWideColorModes = true;
-                break;
-            default:
-                break;
-        }
+    // Ignore events that do not have the right sequenceId.
+    if (sequenceId != getBE().mComposerSequenceId) {
+        return;
     }
-    bool useWideColorMode = hasWideColorModes && hasWideColorDisplay && !mForceNativeColorMode;
-    sp<DisplayDevice> hw = new DisplayDevice(this, DisplayDevice::DISPLAY_PRIMARY, type, isSecure,
-                                             token, fbs, producer, useWideColorMode);
-    mDisplays.add(token, hw);
-    android_color_mode defaultColorMode = HAL_COLOR_MODE_NATIVE;
-    if (useWideColorMode) {
-        defaultColorMode = HAL_COLOR_MODE_SRGB;
-    }
-    setActiveColorModeInternal(hw, defaultColorMode);
-    hw->setCompositionDataSpace(HAL_DATASPACE_UNKNOWN);
-
-    // Add the primary display token to mDrawingState so we don't try to
-    // recreate the DisplayDevice for the primary display.
-    mDrawingState.displays.add(token, DisplayDeviceState(type, true));
-
-    // make the GLContext current so that we can create textures when creating
-    // Layers (which may happens before we render something)
-    hw->makeCurrent();
-}
-
-void SurfaceFlinger::onHotplugReceived(int32_t sequenceId,
-        hwc2_display_t display, HWC2::Connection connection,
-        bool primaryDisplay) {
-    ALOGV("onHotplugReceived(%d, %" PRIu64 ", %s, %s)",
-          sequenceId, display,
-          connection == HWC2::Connection::Connected ?
-                  "connected" : "disconnected",
-          primaryDisplay ? "primary" : "external");
 
     // Only lock if we're not on the main thread. This function is normally
     // called on a hwbinder thread, but for the primary display it's called on
     // the main thread with the state lock already held, so don't attempt to
     // acquire it here.
-    ConditionalLock lock(mStateLock,
-            std::this_thread::get_id() != mMainThreadId);
+    ConditionalLock lock(mStateLock, std::this_thread::get_id() != mMainThreadId);
 
-    if (primaryDisplay) {
-        getBE().mHwc->onHotplug(display, connection);
-        if (!mBuiltinDisplays[DisplayDevice::DISPLAY_PRIMARY].get()) {
-            createBuiltinDisplayLocked(DisplayDevice::DISPLAY_PRIMARY);
-        }
-        createDefaultDisplayDevice();
-    } else {
-        if (sequenceId != getBE().mComposerSequenceId) {
-            return;
-        }
-        if (getBE().mHwc->isUsingVrComposer()) {
-            ALOGE("External displays are not supported by the vr hardware composer.");
-            return;
-        }
-        getBE().mHwc->onHotplug(display, connection);
-        auto type = DisplayDevice::DISPLAY_EXTERNAL;
-        if (connection == HWC2::Connection::Connected) {
-            createBuiltinDisplayLocked(type);
-        } else {
-            mCurrentState.displays.removeItem(mBuiltinDisplays[type]);
-            mBuiltinDisplays[type].clear();
-        }
-        setTransactionFlags(eDisplayTransactionNeeded);
+    mPendingHotplugEvents.emplace_back(HotplugEvent{display, connection});
 
-        // Defer EventThread notification until SF has updated mDisplays.
-    }
+    setTransactionFlags(eDisplayTransactionNeeded);
 }
 
 void SurfaceFlinger::onRefreshReceived(int sequenceId,
@@ -1668,7 +1597,7 @@ void SurfaceFlinger::postComposition(nsecs_t refreshStartTime)
 
     getBE().mGlCompositionDoneTimeline.updateSignalTimes();
     std::shared_ptr<FenceTime> glCompositionDoneFenceTime;
-    if (getBE().mHwc->hasClientComposition(HWC_DISPLAY_PRIMARY)) {
+    if (hw && getBE().mHwc->hasClientComposition(HWC_DISPLAY_PRIMARY)) {
         glCompositionDoneFenceTime =
                 std::make_shared<FenceTime>(hw->getClientTargetAcquireFence());
         getBE().mGlCompositionDoneTimeline.push(glCompositionDoneFenceTime);
@@ -1713,7 +1642,7 @@ void SurfaceFlinger::postComposition(nsecs_t refreshStartTime)
     }
 
     if (!hasSyncFramework) {
-        if (hw->isDisplayOn()) {
+        if (getBE().mHwc->isConnected(HWC_DISPLAY_PRIMARY) && hw->isDisplayOn()) {
             enableHardwareVsync();
         }
     }
@@ -1724,7 +1653,7 @@ void SurfaceFlinger::postComposition(nsecs_t refreshStartTime)
         if (presentFenceTime->isValid()) {
             mAnimFrameTracker.setActualPresentFence(
                     std::move(presentFenceTime));
-        } else {
+        } else if (getBE().mHwc->isConnected(HWC_DISPLAY_PRIMARY)) {
             // The HWC doesn't support present fences, so use the refresh
             // timestamp instead.
             nsecs_t presentTime =
@@ -1734,7 +1663,8 @@ void SurfaceFlinger::postComposition(nsecs_t refreshStartTime)
         mAnimFrameTracker.advanceFrame();
     }
 
-    if (hw->getPowerMode() == HWC_POWER_MODE_OFF) {
+    if (getBE().mHwc->isConnected(HWC_DISPLAY_PRIMARY) &&
+            hw->getPowerMode() == HWC_POWER_MODE_OFF) {
         return;
     }
 
@@ -2077,9 +2007,11 @@ void SurfaceFlinger::postFramebuffer()
     mDebugInSwapBuffers = 0;
 
     // |mStateLock| not needed as we are on the main thread
-    uint32_t flipCount = getDefaultDisplayDeviceLocked()->getPageFlipCount();
-    if (flipCount % LOG_FRAME_STATS_PERIOD == 0) {
-        logFrameStats();
+    if (getBE().mHwc->isConnected(HWC_DISPLAY_PRIMARY)) {
+        uint32_t flipCount = getDefaultDisplayDeviceLocked()->getPageFlipCount();
+        if (flipCount % LOG_FRAME_STATS_PERIOD == 0) {
+            logFrameStats();
+        }
     }
 }
 
@@ -2112,6 +2044,245 @@ void SurfaceFlinger::handleTransaction(uint32_t transactionFlags)
     // here the transaction has been committed
 }
 
+DisplayDevice::DisplayType SurfaceFlinger::determineDisplayType(hwc2_display_t display,
+        HWC2::Connection connection) const {
+    // Figure out whether the event is for the primary display or an
+    // external display by matching the Hwc display id against one for a
+    // connected display. If we did not find a match, we then check what
+    // displays are not already connected to determine the type. If we don't
+    // have a connected primary display, we assume the new display is meant to
+    // be the primary display, and then if we don't have an external display,
+    // we assume it is that.
+    const auto primaryDisplayId =
+            getBE().mHwc->getHwcDisplayId(DisplayDevice::DISPLAY_PRIMARY);
+    const auto externalDisplayId =
+            getBE().mHwc->getHwcDisplayId(DisplayDevice::DISPLAY_EXTERNAL);
+    if (primaryDisplayId && primaryDisplayId == display) {
+        return DisplayDevice::DISPLAY_PRIMARY;
+    } else if (externalDisplayId && externalDisplayId == display) {
+        return  DisplayDevice::DISPLAY_EXTERNAL;
+    } else if (connection == HWC2::Connection::Connected && !primaryDisplayId) {
+        return DisplayDevice::DISPLAY_PRIMARY;
+    } else if (connection == HWC2::Connection::Connected && !externalDisplayId) {
+        return DisplayDevice::DISPLAY_EXTERNAL;
+    }
+
+    return DisplayDevice::DISPLAY_ID_INVALID;
+}
+
+void SurfaceFlinger::processDisplayHotplugEventsLocked() {
+    for (const auto& event : mPendingHotplugEvents) {
+        auto displayType = determineDisplayType(event.display, event.connection);
+        if (displayType == DisplayDevice::DISPLAY_ID_INVALID) {
+            ALOGW("Unable to determine the display type for display %" PRIu64, event.display);
+            continue;
+        }
+
+        if (getBE().mHwc->isUsingVrComposer() && displayType == DisplayDevice::DISPLAY_EXTERNAL) {
+            ALOGE("External displays are not supported by the vr hardware composer.");
+            continue;
+        }
+
+        getBE().mHwc->onHotplug(event.display, displayType, event.connection);
+
+        if (event.connection == HWC2::Connection::Connected) {
+            ALOGV("Creating built in display %d", displayType);
+            ALOGW_IF(mBuiltinDisplays[displayType],
+                    "Overwriting display token for display type %d", displayType);
+            mBuiltinDisplays[displayType] = new BBinder();
+            // All non-virtual displays are currently considered secure.
+            DisplayDeviceState info(displayType, true);
+            info.displayName = displayType == DisplayDevice::DISPLAY_PRIMARY ?
+                    "Built-in Screen" : "External Screen";
+            mCurrentState.displays.add(mBuiltinDisplays[displayType], info);
+            mInterceptor.saveDisplayCreation(info);
+        } else {
+            ALOGV("Removing built in display %d", displayType);
+
+            ssize_t idx = mCurrentState.displays.indexOfKey(mBuiltinDisplays[displayType]);
+            if (idx >= 0) {
+                const DisplayDeviceState& info(mCurrentState.displays.valueAt(idx));
+                mInterceptor.saveDisplayDeletion(info.displayId);
+                mCurrentState.displays.removeItemsAt(idx);
+            }
+            mBuiltinDisplays[displayType].clear();
+        }
+
+        processDisplayChangesLocked();
+    }
+
+    mPendingHotplugEvents.clear();
+}
+
+void SurfaceFlinger::processDisplayChangesLocked() {
+    // here we take advantage of Vector's copy-on-write semantics to
+    // improve performance by skipping the transaction entirely when
+    // know that the lists are identical
+    const KeyedVector<wp<IBinder>, DisplayDeviceState>& curr(mCurrentState.displays);
+    const KeyedVector<wp<IBinder>, DisplayDeviceState>& draw(mDrawingState.displays);
+    if (!curr.isIdenticalTo(draw)) {
+        mVisibleRegionsDirty = true;
+        const size_t cc = curr.size();
+        size_t dc = draw.size();
+
+        // find the displays that were removed
+        // (ie: in drawing state but not in current state)
+        // also handle displays that changed
+        // (ie: displays that are in both lists)
+        for (size_t i = 0; i < dc;) {
+            const ssize_t j = curr.indexOfKey(draw.keyAt(i));
+            if (j < 0) {
+                // in drawing state but not in current state
+                // Call makeCurrent() on the primary display so we can
+                // be sure that nothing associated with this display
+                // is current.
+                const sp<const DisplayDevice> defaultDisplay(getDefaultDisplayDeviceLocked());
+                if (defaultDisplay != nullptr) defaultDisplay->makeCurrent();
+                sp<DisplayDevice> hw(getDisplayDeviceLocked(draw.keyAt(i)));
+                if (hw != nullptr) hw->disconnect(getHwComposer());
+                if (draw[i].type < DisplayDevice::NUM_BUILTIN_DISPLAY_TYPES)
+                    mEventThread->onHotplugReceived(draw[i].type, false);
+                mDisplays.removeItem(draw.keyAt(i));
+            } else {
+                // this display is in both lists. see if something changed.
+                const DisplayDeviceState& state(curr[j]);
+                const wp<IBinder>& display(curr.keyAt(j));
+                const sp<IBinder> state_binder = IInterface::asBinder(state.surface);
+                const sp<IBinder> draw_binder = IInterface::asBinder(draw[i].surface);
+                if (state_binder != draw_binder) {
+                    // changing the surface is like destroying and
+                    // recreating the DisplayDevice, so we just remove it
+                    // from the drawing state, so that it get re-added
+                    // below.
+                    sp<DisplayDevice> hw(getDisplayDeviceLocked(display));
+                    if (hw != nullptr) hw->disconnect(getHwComposer());
+                    mDisplays.removeItem(display);
+                    mDrawingState.displays.removeItemsAt(i);
+                    dc--;
+                    // at this point we must loop to the next item
+                    continue;
+                }
+
+                const sp<DisplayDevice> disp(getDisplayDeviceLocked(display));
+                if (disp != nullptr) {
+                    if (state.layerStack != draw[i].layerStack) {
+                        disp->setLayerStack(state.layerStack);
+                    }
+                    if ((state.orientation != draw[i].orientation) ||
+                        (state.viewport != draw[i].viewport) || (state.frame != draw[i].frame)) {
+                        disp->setProjection(state.orientation, state.viewport, state.frame);
+                    }
+                    if (state.width != draw[i].width || state.height != draw[i].height) {
+                        disp->setDisplaySize(state.width, state.height);
+                    }
+                }
+            }
+            ++i;
+        }
+
+        // find displays that were added
+        // (ie: in current state but not in drawing state)
+        for (size_t i = 0; i < cc; i++) {
+            if (draw.indexOfKey(curr.keyAt(i)) < 0) {
+                const DisplayDeviceState& state(curr[i]);
+
+                sp<DisplaySurface> dispSurface;
+                sp<IGraphicBufferProducer> producer;
+                sp<IGraphicBufferProducer> bqProducer;
+                sp<IGraphicBufferConsumer> bqConsumer;
+                BufferQueue::createBufferQueue(&bqProducer, &bqConsumer);
+
+                int32_t hwcId = -1;
+                if (state.isVirtualDisplay()) {
+                    // Virtual displays without a surface are dormant:
+                    // they have external state (layer stack, projection,
+                    // etc.) but no internal state (i.e. a DisplayDevice).
+                    if (state.surface != nullptr) {
+                        // Allow VR composer to use virtual displays.
+                        if (mUseHwcVirtualDisplays || getBE().mHwc->isUsingVrComposer()) {
+                            int width = 0;
+                            int status = state.surface->query(NATIVE_WINDOW_WIDTH, &width);
+                            ALOGE_IF(status != NO_ERROR, "Unable to query width (%d)", status);
+                            int height = 0;
+                            status = state.surface->query(NATIVE_WINDOW_HEIGHT, &height);
+                            ALOGE_IF(status != NO_ERROR, "Unable to query height (%d)", status);
+                            int intFormat = 0;
+                            status = state.surface->query(NATIVE_WINDOW_FORMAT, &intFormat);
+                            ALOGE_IF(status != NO_ERROR, "Unable to query format (%d)", status);
+                            auto format = static_cast<android_pixel_format_t>(intFormat);
+
+                            getBE().mHwc->allocateVirtualDisplay(width, height, &format, &hwcId);
+                        }
+
+                        // TODO: Plumb requested format back up to consumer
+
+                        sp<VirtualDisplaySurface> vds =
+                                new VirtualDisplaySurface(*getBE().mHwc, hwcId, state.surface,
+                                                          bqProducer, bqConsumer,
+                                                          state.displayName);
+
+                        dispSurface = vds;
+                        producer = vds;
+                    }
+                } else {
+                    ALOGE_IF(state.surface != nullptr,
+                             "adding a supported display, but rendering "
+                             "surface is provided (%p), ignoring it",
+                             state.surface.get());
+
+                    hwcId = state.type;
+                    dispSurface = new FramebufferSurface(*getBE().mHwc, hwcId, bqConsumer);
+                    producer = bqProducer;
+                }
+
+                const wp<IBinder>& display(curr.keyAt(i));
+
+                if (dispSurface != nullptr) {
+                    bool useWideColorMode = hasWideColorDisplay;
+                    if (!mForceNativeColorMode) {
+                        bool hasWideColorModes = false;
+                        std::vector<android_color_mode_t> modes =
+                                getHwComposer().getColorModes(state.type);
+                        for (android_color_mode_t colorMode : modes) {
+                            switch (colorMode) {
+                                case HAL_COLOR_MODE_DISPLAY_P3:
+                                case HAL_COLOR_MODE_ADOBE_RGB:
+                                case HAL_COLOR_MODE_DCI_P3:
+                                    hasWideColorModes = true;
+                                    break;
+                                default:
+                                    break;
+                            }
+                        }
+                        useWideColorMode = hasWideColorModes && hasWideColorDisplay;
+                    }
+
+                    sp<DisplayDevice> hw =
+                            new DisplayDevice(this, state.type, hwcId, state.isSecure, display,
+                                              dispSurface, producer, useWideColorMode);
+
+                    android_color_mode defaultColorMode = HAL_COLOR_MODE_NATIVE;
+                    if (useWideColorMode) {
+                        defaultColorMode = HAL_COLOR_MODE_SRGB;
+                    }
+                    setActiveColorModeInternal(hw, defaultColorMode);
+                    hw->setCompositionDataSpace(HAL_DATASPACE_UNKNOWN);
+                    hw->setLayerStack(state.layerStack);
+                    hw->setProjection(state.orientation, state.viewport, state.frame);
+                    hw->setDisplayName(state.displayName);
+
+                    mDisplays.add(display, hw);
+                    if (!state.isVirtualDisplay()) {
+                        mEventThread->onHotplugReceived(state.type, true);
+                    }
+                }
+            }
+        }
+    }
+
+    mDrawingState.displays = mCurrentState.displays;
+}
+
 void SurfaceFlinger::handleTransactionLocked(uint32_t transactionFlags)
 {
     // Notify all layers of available frames
@@ -2140,161 +2311,8 @@ void SurfaceFlinger::handleTransactionLocked(uint32_t transactionFlags)
      */
 
     if (transactionFlags & eDisplayTransactionNeeded) {
-        // here we take advantage of Vector's copy-on-write semantics to
-        // improve performance by skipping the transaction entirely when
-        // know that the lists are identical
-        const KeyedVector<  wp<IBinder>, DisplayDeviceState>& curr(mCurrentState.displays);
-        const KeyedVector<  wp<IBinder>, DisplayDeviceState>& draw(mDrawingState.displays);
-        if (!curr.isIdenticalTo(draw)) {
-            mVisibleRegionsDirty = true;
-            const size_t cc = curr.size();
-                  size_t dc = draw.size();
-
-            // find the displays that were removed
-            // (ie: in drawing state but not in current state)
-            // also handle displays that changed
-            // (ie: displays that are in both lists)
-            for (size_t i=0 ; i<dc ;) {
-                const ssize_t j = curr.indexOfKey(draw.keyAt(i));
-                if (j < 0) {
-                    // in drawing state but not in current state
-                    if (!draw[i].isMainDisplay()) {
-                        // Call makeCurrent() on the primary display so we can
-                        // be sure that nothing associated with this display
-                        // is current.
-                        const sp<const DisplayDevice> defaultDisplay(getDefaultDisplayDeviceLocked());
-                        defaultDisplay->makeCurrent();
-                        sp<DisplayDevice> hw(getDisplayDeviceLocked(draw.keyAt(i)));
-                        if (hw != NULL)
-                            hw->disconnect(getHwComposer());
-                        if (draw[i].type < DisplayDevice::NUM_BUILTIN_DISPLAY_TYPES)
-                            mEventThread->onHotplugReceived(draw[i].type, false);
-                        mDisplays.removeItem(draw.keyAt(i));
-                    } else {
-                        ALOGW("trying to remove the main display");
-                    }
-                } else {
-                    // this display is in both lists. see if something changed.
-                    const DisplayDeviceState& state(curr[j]);
-                    const wp<IBinder>& display(curr.keyAt(j));
-                    const sp<IBinder> state_binder = IInterface::asBinder(state.surface);
-                    const sp<IBinder> draw_binder = IInterface::asBinder(draw[i].surface);
-                    if (state_binder != draw_binder) {
-                        // changing the surface is like destroying and
-                        // recreating the DisplayDevice, so we just remove it
-                        // from the drawing state, so that it get re-added
-                        // below.
-                        sp<DisplayDevice> hw(getDisplayDeviceLocked(display));
-                        if (hw != NULL)
-                            hw->disconnect(getHwComposer());
-                        mDisplays.removeItem(display);
-                        mDrawingState.displays.removeItemsAt(i);
-                        dc--;
-                        // at this point we must loop to the next item
-                        continue;
-                    }
-
-                    const sp<DisplayDevice> disp(getDisplayDeviceLocked(display));
-                    if (disp != NULL) {
-                        if (state.layerStack != draw[i].layerStack) {
-                            disp->setLayerStack(state.layerStack);
-                        }
-                        if ((state.orientation != draw[i].orientation)
-                                || (state.viewport != draw[i].viewport)
-                                || (state.frame != draw[i].frame))
-                        {
-                            disp->setProjection(state.orientation,
-                                    state.viewport, state.frame);
-                        }
-                        if (state.width != draw[i].width || state.height != draw[i].height) {
-                            disp->setDisplaySize(state.width, state.height);
-                        }
-                    }
-                }
-                ++i;
-            }
-
-            // find displays that were added
-            // (ie: in current state but not in drawing state)
-            for (size_t i=0 ; i<cc ; i++) {
-                if (draw.indexOfKey(curr.keyAt(i)) < 0) {
-                    const DisplayDeviceState& state(curr[i]);
-
-                    sp<DisplaySurface> dispSurface;
-                    sp<IGraphicBufferProducer> producer;
-                    sp<IGraphicBufferProducer> bqProducer;
-                    sp<IGraphicBufferConsumer> bqConsumer;
-                    BufferQueue::createBufferQueue(&bqProducer, &bqConsumer);
-
-                    int32_t hwcId = -1;
-                    if (state.isVirtualDisplay()) {
-                        // Virtual displays without a surface are dormant:
-                        // they have external state (layer stack, projection,
-                        // etc.) but no internal state (i.e. a DisplayDevice).
-                        if (state.surface != NULL) {
-
-                            // Allow VR composer to use virtual displays.
-                            if (mUseHwcVirtualDisplays || getBE().mHwc->isUsingVrComposer()) {
-                                int width = 0;
-                                int status = state.surface->query(
-                                        NATIVE_WINDOW_WIDTH, &width);
-                                ALOGE_IF(status != NO_ERROR,
-                                        "Unable to query width (%d)", status);
-                                int height = 0;
-                                status = state.surface->query(
-                                        NATIVE_WINDOW_HEIGHT, &height);
-                                ALOGE_IF(status != NO_ERROR,
-                                        "Unable to query height (%d)", status);
-                                int intFormat = 0;
-                                status = state.surface->query(
-                                        NATIVE_WINDOW_FORMAT, &intFormat);
-                                ALOGE_IF(status != NO_ERROR,
-                                        "Unable to query format (%d)", status);
-                                auto format = static_cast<android_pixel_format_t>(
-                                        intFormat);
-
-                                getBE().mHwc->allocateVirtualDisplay(width, height, &format,
-                                        &hwcId);
-                            }
-
-                            // TODO: Plumb requested format back up to consumer
-
-                            sp<VirtualDisplaySurface> vds =
-                                    new VirtualDisplaySurface(*getBE().mHwc,
-                                            hwcId, state.surface, bqProducer,
-                                            bqConsumer, state.displayName);
-
-                            dispSurface = vds;
-                            producer = vds;
-                        }
-                    } else {
-                        ALOGE_IF(state.surface!=NULL,
-                                "adding a supported display, but rendering "
-                                "surface is provided (%p), ignoring it",
-                                state.surface.get());
-
-                        hwcId = state.type;
-                        dispSurface = new FramebufferSurface(*getBE().mHwc, hwcId, bqConsumer);
-                        producer = bqProducer;
-                    }
-
-                    const wp<IBinder>& display(curr.keyAt(i));
-                    if (dispSurface != NULL) {
-                        sp<DisplayDevice> hw =
-                                new DisplayDevice(this, state.type, hwcId, state.isSecure, display,
-                                                  dispSurface, producer, hasWideColorDisplay);
-                        hw->setLayerStack(state.layerStack);
-                        hw->setProjection(state.orientation,
-                                state.viewport, state.frame);
-                        hw->setDisplayName(state.displayName);
-                        mDisplays.add(display, hw);
-                        if (!state.isVirtualDisplay()) {
-                            mEventThread->onHotplugReceived(state.type, true);
-                        }
-                    }
-                }
-            }
-        }
+        processDisplayChangesLocked();
+        processDisplayHotplugEventsLocked();
     }
 
     if (transactionFlags & (eTraversalNeeded|eDisplayTransactionNeeded)) {
@@ -2334,25 +2352,31 @@ void SurfaceFlinger::handleTransactionLocked(uint32_t transactionFlags)
                 for (size_t dpy=0 ; dpy<mDisplays.size() ; dpy++) {
                     sp<const DisplayDevice> hw(mDisplays[dpy]);
                     if (layer->belongsToDisplay(hw->getLayerStack(), hw->isPrimary())) {
-                        if (disp == NULL) {
+                        if (disp == nullptr) {
                             disp = std::move(hw);
                         } else {
-                            disp = NULL;
+                            disp = nullptr;
                             break;
                         }
                     }
                 }
             }
-            if (disp == NULL) {
-                // NOTE: TEMPORARY FIX ONLY. Real fix should cause layers to
-                // redraw after transform hint changes. See bug 8508397.
 
-                // could be null when this layer is using a layerStack
-                // that is not visible on any display. Also can occur at
-                // screen off/on times.
-                disp = getDefaultDisplayDeviceLocked();
+            if (transactionFlags & eDisplayTransactionNeeded) {
+                if (disp == nullptr) {
+                    // NOTE: TEMPORARY FIX ONLY. Real fix should cause layers to
+                    // redraw after transform hint changes. See bug 8508397.
+
+                    // could be null when this layer is using a layerStack
+                    // that is not visible on any display. Also can occur at
+                    // screen off/on times.
+                    disp = getDefaultDisplayDeviceLocked();
+                }
+                layer->updateTransformHint(disp);
             }
-            layer->updateTransformHint(disp);
+            if (disp != nullptr) {
+                layer->updateTransformHint(disp);
+            }
 
             first = false;
         });
@@ -2938,16 +2962,16 @@ void SurfaceFlinger::setTransactionState(
     for (size_t i=0 ; i<count ; i++) {
         const ComposerState& s(state[i]);
         // Here we need to check that the interface we're given is indeed
-        // one of our own. A malicious client could give us a NULL
+        // one of our own. A malicious client could give us a nullptr
         // IInterface, or one of its own or even one of our own but a
         // different type. All these situations would cause us to crash.
         //
         // NOTE: it would be better to use RTTI as we could directly check
         // that we have a Client*. however, RTTI is disabled in Android.
-        if (s.client != NULL) {
+        if (s.client != nullptr) {
             sp<IBinder> binder = IInterface::asBinder(s.client);
-            if (binder != NULL) {
-                if (binder->queryLocalInterface(ISurfaceComposerClient::descriptor) != NULL) {
+            if (binder != nullptr) {
+                if (binder->queryLocalInterface(ISurfaceComposerClient::descriptor) != nullptr) {
                     sp<Client> client( static_cast<Client *>(s.client.get()) );
                     transactionFlags |= setClientStateLocked(client, s.state);
                 }
@@ -3321,7 +3345,7 @@ status_t SurfaceFlinger::onLayerRemoved(const sp<Client>& client, const sp<IBind
     // called by a client when it wants to remove a Layer
     status_t err = NO_ERROR;
     sp<Layer> l(client->getLayerUser(handle));
-    if (l != NULL) {
+    if (l != nullptr) {
         mInterceptor.saveSurfaceDeletion(l);
         err = removeLayer(l);
         ALOGE_IF(err<0 && err != NAME_NOT_FOUND,
@@ -3486,7 +3510,7 @@ void SurfaceFlinger::setPowerMode(const sp<IBinder>& display, int mode) {
                     mDisplay(disp) { mMode = mode; }
         virtual bool handler() {
             sp<DisplayDevice> hw(mFlinger.getDisplayDevice(mDisplay));
-            if (hw == NULL) {
+            if (hw == nullptr) {
                 ALOGE("Attempt to set power mode = %d for null display %p",
                         mMode, mDisplay.get());
             } else if (hw->getDisplayType() >= DisplayDevice::DISPLAY_VIRTUAL) {
@@ -3888,9 +3912,11 @@ void SurfaceFlinger::dumpAllLocked(const Vector<String16>& args, size_t& index,
 
     getBE().mRenderEngine->dump(result);
 
-    hw->undefinedRegion.dump(result, "undefinedRegion");
-    result.appendFormat("  orientation=%d, isDisplayOn=%d\n",
-            hw->getOrientation(), hw->isDisplayOn());
+    if (hw) {
+        hw->undefinedRegion.dump(result, "undefinedRegion");
+        result.appendFormat("  orientation=%d, isDisplayOn=%d\n",
+                hw->getOrientation(), hw->isDisplayOn());
+    }
     result.appendFormat(
             "  last eglSwapBuffers() time: %f us\n"
             "  last transaction time     : %f us\n"
@@ -3975,7 +4001,7 @@ SurfaceFlinger::getLayerSortedByZForHwcDisplay(int id) {
             break;
         }
     }
-    if (dpy == NULL) {
+    if (dpy == nullptr) {
         ALOGE("getLayerSortedByZForHwcDisplay: invalid hwc display id %d", id);
         // Just use the primary display so we have something to return
         dpy = getBuiltInDisplay(DisplayDevice::DISPLAY_PRIMARY);
@@ -4242,7 +4268,7 @@ status_t SurfaceFlinger::onTransact(
                 reply->writeBool(hasWideColorDisplay);
                 return NO_ERROR;
             }
-            case 1025: { // tracing
+            case 1025: { // Set layer tracing
                 n = data.readInt32();
                 if (n) {
                     ALOGV("LayerTracing enabled");
@@ -4254,6 +4280,10 @@ status_t SurfaceFlinger::onTransact(
                     status_t err = mTracing.disable();
                     reply->writeInt32(err);
                 }
+                return NO_ERROR;
+            }
+            case 1026: { // Get layer tracing status
+                reply->writeBool(mTracing.isEnabled());
                 return NO_ERROR;
             }
         }
@@ -4303,7 +4333,7 @@ status_t SurfaceFlinger::captureScreen(const sp<IBinder>& display, sp<GraphicBuf
 }
 
 status_t SurfaceFlinger::captureLayers(const sp<IBinder>& layerHandleBinder,
-                                       sp<GraphicBuffer>* outBuffer, const Rect& sourceCrop, 
+                                       sp<GraphicBuffer>* outBuffer, const Rect& sourceCrop,
                                        float frameScale) {
     ATRACE_CALL();
 
@@ -4397,6 +4427,9 @@ status_t SurfaceFlinger::captureScreenCommon(RenderArea& renderArea,
     int syncFd = -1;
     std::optional<status_t> captureResult;
 
+    const int uid = IPCThreadState::self()->getCallingUid();
+    const bool forSystem = uid == AID_GRAPHICS || uid == AID_SYSTEM;
+
     sp<LambdaMessage> message = new LambdaMessage([&]() {
         // If there is a refresh pending, bug out early and tell the binder thread to try again
         // after the refresh.
@@ -4413,7 +4446,7 @@ status_t SurfaceFlinger::captureScreenCommon(RenderArea& renderArea,
         {
             Mutex::Autolock _l(mStateLock);
             result = captureScreenImplLocked(renderArea, traverseLayers, (*outBuffer).get(),
-                                             useIdentityTransform, &fd);
+                                             useIdentityTransform, forSystem, &fd);
         }
 
         {
@@ -4510,6 +4543,7 @@ status_t SurfaceFlinger::captureScreenImplLocked(const RenderArea& renderArea,
                                                  TraverseLayersFunction traverseLayers,
                                                  ANativeWindowBuffer* buffer,
                                                  bool useIdentityTransform,
+                                                 bool forSystem,
                                                  int* outSyncFd) {
     ATRACE_CALL();
 
@@ -4519,7 +4553,10 @@ status_t SurfaceFlinger::captureScreenImplLocked(const RenderArea& renderArea,
         secureLayerIsVisible = secureLayerIsVisible || (layer->isVisible() && layer->isSecure());
     });
 
-    if (secureLayerIsVisible) {
+    // We allow the system server to take screenshots of secure layers for
+    // use in situations like the Screen-rotation animation and place
+    // the impetus on WindowManager to not persist them.
+    if (secureLayerIsVisible && !forSystem) {
         ALOGW("FB is protected: PERMISSION_DENIED");
         return PERMISSION_DENIED;
     }

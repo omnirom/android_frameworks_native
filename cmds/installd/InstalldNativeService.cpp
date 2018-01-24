@@ -37,6 +37,7 @@
 #include <unistd.h>
 
 #include <android-base/logging.h>
+#include <android-base/properties.h>
 #include <android-base/stringprintf.h>
 #include <android-base/strings.h>
 #include <android-base/unique_fd.h>
@@ -71,6 +72,7 @@ namespace installd {
 
 static constexpr const char* kCpPath = "/system/bin/cp";
 static constexpr const char* kXattrDefault = "user.default";
+static constexpr const char* kPropHasReserved = "vold.has_reserved";
 
 static constexpr const int MIN_RESTRICTED_HOME_SDK_VERSION = 24; // > M
 
@@ -81,6 +83,8 @@ static constexpr const char* CODE_CACHE_DIR_POSTFIX = "/code_cache";
 static constexpr const char *kIdMapPath = "/system/bin/idmap";
 static constexpr const char* IDMAP_PREFIX = "/data/resource-cache/";
 static constexpr const char* IDMAP_SUFFIX = "@idmap";
+
+static constexpr const char* kPropApkVerityMode = "ro.apk_verity.mode";
 
 // NOTE: keep in sync with Installer
 static constexpr int FLAG_CLEAR_CACHE_ONLY = 1 << 8;
@@ -302,6 +306,9 @@ static int prepare_app_dir(const std::string& path, mode_t target_mode, uid_t ui
  */
 static int prepare_app_quota(const std::unique_ptr<std::string>& uuid, const std::string& device,
         uid_t uid) {
+    // Skip when reserved blocks are protecting us against abusive apps
+    if (android::base::GetBoolProperty(kPropHasReserved, false)) return 0;
+    // Skip when device no quotas present
     if (device.empty()) return 0;
 
     struct dqblk dq;
@@ -2351,6 +2358,17 @@ binder::Status InstalldNativeService::deleteOdex(const std::string& apkPath,
     return res ? ok() : error();
 }
 
+binder::Status InstalldNativeService::installApkVerity(const std::string& /*filePath*/,
+        const ::android::base::unique_fd& /*verityInput*/) {
+    ENFORCE_UID(AID_SYSTEM);
+    if (!android::base::GetBoolProperty(kPropApkVerityMode, false)) {
+        return ok();
+    }
+    // TODO: Append verity to filePath then issue ioctl to enable
+    // it and hide the tree.  See b/30972906.
+    return error("not implemented yet");
+}
+
 binder::Status InstalldNativeService::reconcileSecondaryDexFile(
         const std::string& dexPath, const std::string& packageName, int32_t uid,
         const std::vector<std::string>& isas, const std::unique_ptr<std::string>& volumeUuid,
@@ -2417,14 +2435,18 @@ binder::Status InstalldNativeService::invalidateMounts() {
                 mQuotaReverseMounts[target] = source;
 
                 // ext4 only enables DQUOT_USAGE_ENABLED by default, so we
-                // need to kick it again to enable DQUOT_LIMITS_ENABLED.
-                if (quotactl(QCMD(Q_QUOTAON, USRQUOTA), source.c_str(), QFMT_VFS_V1, nullptr) != 0
-                        && errno != EBUSY) {
-                    PLOG(ERROR) << "Failed to enable USRQUOTA on " << source;
-                }
-                if (quotactl(QCMD(Q_QUOTAON, GRPQUOTA), source.c_str(), QFMT_VFS_V1, nullptr) != 0
-                        && errno != EBUSY) {
-                    PLOG(ERROR) << "Failed to enable GRPQUOTA on " << source;
+                // need to kick it again to enable DQUOT_LIMITS_ENABLED. We
+                // only need hard limits enabled when we're not being protected
+                // by reserved blocks.
+                if (!android::base::GetBoolProperty(kPropHasReserved, false)) {
+                    if (quotactl(QCMD(Q_QUOTAON, USRQUOTA), source.c_str(), QFMT_VFS_V1,
+                            nullptr) != 0 && errno != EBUSY) {
+                        PLOG(ERROR) << "Failed to enable USRQUOTA on " << source;
+                    }
+                    if (quotactl(QCMD(Q_QUOTAON, GRPQUOTA), source.c_str(), QFMT_VFS_V1,
+                            nullptr) != 0 && errno != EBUSY) {
+                        PLOG(ERROR) << "Failed to enable GRPQUOTA on " << source;
+                    }
                 }
             }
         }

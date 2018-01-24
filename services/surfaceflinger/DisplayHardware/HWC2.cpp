@@ -52,24 +52,13 @@ namespace {
 class ComposerCallbackBridge : public Hwc2::IComposerCallback {
 public:
     ComposerCallbackBridge(ComposerCallback* callback, int32_t sequenceId)
-            : mCallback(callback), mSequenceId(sequenceId),
-              mHasPrimaryDisplay(false) {}
+            : mCallback(callback), mSequenceId(sequenceId) {}
 
     Return<void> onHotplug(Hwc2::Display display,
                            IComposerCallback::Connection conn) override
     {
         HWC2::Connection connection = static_cast<HWC2::Connection>(conn);
-        if (!mHasPrimaryDisplay) {
-            LOG_ALWAYS_FATAL_IF(connection != HWC2::Connection::Connected,
-                    "Initial onHotplug callback should be "
-                    "primary display connected");
-            mHasPrimaryDisplay = true;
-            mCallback->onHotplugReceived(mSequenceId, display,
-                                         connection, true);
-        } else {
-            mCallback->onHotplugReceived(mSequenceId, display,
-                                         connection, false);
-        }
+        mCallback->onHotplugReceived(mSequenceId, display, connection);
         return Void();
     }
 
@@ -85,12 +74,9 @@ public:
         return Void();
     }
 
-    bool HasPrimaryDisplay() { return mHasPrimaryDisplay; }
-
 private:
     ComposerCallback* mCallback;
     int32_t mSequenceId;
-    bool mHasPrimaryDisplay;
 };
 
 } // namespace anonymous
@@ -117,8 +103,6 @@ void Device::registerCallback(ComposerCallback* callback, int32_t sequenceId) {
     sp<ComposerCallbackBridge> callbackBridge(
             new ComposerCallbackBridge(callback, sequenceId));
     mComposer->registerCallback(callbackBridge);
-    LOG_ALWAYS_FATAL_IF(!callbackBridge->HasPrimaryDisplay(),
-            "Registered composer callback but didn't get primary display");
 }
 
 // Required by HWC2 device
@@ -467,7 +451,6 @@ Error Display::supportsDoze(bool* outSupport) const
 Error Display::getHdrCapabilities(
         std::unique_ptr<HdrCapabilities>* outCapabilities) const
 {
-    uint32_t numTypes = 0;
     float maxLuminance = -1.0f;
     float maxAverageLuminance = -1.0f;
     float minLuminance = -1.0f;
@@ -480,7 +463,6 @@ Error Display::getHdrCapabilities(
     for (auto type : intTypes) {
         types.push_back(static_cast<int32_t>(type));
     }
-    numTypes = types.size();
     if (error != Error::None) {
         return error;
     }

@@ -127,20 +127,6 @@ DisplayDevice::DisplayDevice(
     mPowerMode = (mType >= DisplayDevice::DISPLAY_VIRTUAL) ?
                   HWC_POWER_MODE_NORMAL : HWC_POWER_MODE_OFF;
 
-    // Name the display.  The name will be replaced shortly if the display
-    // was created with createDisplay().
-    switch (mType) {
-        case DISPLAY_PRIMARY:
-            mDisplayName = "Built-in Screen";
-            break;
-        case DISPLAY_EXTERNAL:
-            mDisplayName = "HDMI Screen";
-            break;
-        default:
-            mDisplayName = "Virtual Screen";    // e.g. Overlay #n
-            break;
-    }
-
     // initialize the display orientation transform.
     setProjection(DisplayState::eOrientationDefault, mViewport, mFrame);
 
@@ -160,7 +146,7 @@ void DisplayDevice::disconnect(HWComposer& hwc) {
 }
 
 bool DisplayDevice::isValid() const {
-    return mFlinger != NULL;
+    return mFlinger != nullptr;
 }
 
 int DisplayDevice::getWidth() const {

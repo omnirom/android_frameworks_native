@@ -46,9 +46,7 @@ public:
     virtual void onFrameCommitted();
     virtual void dumpAsString(String8& result) const;
 
-    // Cannot resize a buffers in a FramebufferSurface. Only works with virtual
-    // displays.
-    virtual void resizeBuffers(const uint32_t /*w*/, const uint32_t /*h*/) { };
+    virtual void resizeBuffers(const uint32_t width, const uint32_t height);
 
     virtual const sp<Fence>& getClientTargetAcquireFence() const override;
 
@@ -80,7 +78,7 @@ private:
     // on/off.
     android_dataspace mDataSpace;
 
-    // mCurrentBuffer is the current buffer or NULL to indicate that there is
+    // mCurrentBuffer is the current buffer or nullptr to indicate that there is
     // no current buffer.
     sp<GraphicBuffer> mCurrentBuffer;
 
