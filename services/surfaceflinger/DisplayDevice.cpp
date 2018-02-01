@@ -76,7 +76,8 @@ DisplayDevice::DisplayDevice(
         const wp<IBinder>& displayToken,
         const sp<DisplaySurface>& displaySurface,
         const sp<IGraphicBufferProducer>& producer,
-        bool supportWideColor)
+        bool supportWideColor,
+        bool supportHdr)
     : lastCompositionHadVisibleLayers(false),
       mFlinger(flinger),
       mType(type),
@@ -100,6 +101,8 @@ DisplayDevice::DisplayDevice(
 
     mActiveColorMode = HAL_COLOR_MODE_NATIVE;
     mDisplayHasWideColor = supportWideColor;
+    mDisplayHasHdr = supportHdr;
+
     /*
      * Create our display's surface
      */
@@ -203,7 +206,7 @@ status_t DisplayDevice::prepareFrame(HWComposer& hwc) {
 }
 
 void DisplayDevice::swapBuffers(HWComposer& hwc) const {
-    if (hwc.hasClientComposition(mHwcDisplayId)) {
+    if (hwc.hasClientComposition(mHwcDisplayId) || hwc.hasFlipClientTargetRequest(mHwcDisplayId)) {
         mSurface.swapBuffers();
     }
 

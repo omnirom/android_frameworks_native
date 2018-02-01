@@ -66,6 +66,8 @@ class RenderEngine {
                                         uint32_t* status) = 0;
     virtual void unbindFramebuffer(uint32_t texName, uint32_t fbName) = 0;
 
+    static bool overrideUseContextPriorityFromConfig(bool useContextPriority);
+
 protected:
     RenderEngine();
 
@@ -136,6 +138,7 @@ public:
                                     const half4& color) = 0;
     virtual void setColorMode(android_color_mode mode) = 0;
     virtual void setSourceDataSpace(android_dataspace source) = 0;
+    virtual void setSourceY410BT2020(bool enable) = 0;
     virtual void setWideColor(bool hasWideColor) = 0;
     virtual bool usesWideColor() = 0;
     virtual void setupLayerTexturing(const Texture& texture) = 0;
