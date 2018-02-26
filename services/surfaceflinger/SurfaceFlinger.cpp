@@ -4370,6 +4370,32 @@ status_t SurfaceFlinger::onTransact(
                 reply->writeBool(mTracing.isEnabled());
                 return NO_ERROR;
             }
+            case 10000: { // Get frame stats of specific layer
+                Layer* rightLayer = nullptr;
+                bool isSurfaceView = false;
+                FrameStats frameStats;
+                size_t arraySize = 0;
+                String8 activityName = String8(data.readString16());
+                String8 surfaceView = String8("SurfaceView -");
+                mCurrentState.traverseInZOrder([&](Layer* layer) {
+                    if (!isSurfaceView && layer->getName().contains(activityName)) {
+                        rightLayer = layer;
+                        if (strncmp(layer->getName().string(), surfaceView.string(),
+                                surfaceView.size()) == 0) {
+                            isSurfaceView = true;
+                        }
+                    }
+                });
+                if (rightLayer != nullptr) {
+                    rightLayer->getFrameStats(&frameStats);
+                    arraySize = frameStats.actualPresentTimesNano.size();
+                }
+                reply->writeInt32(arraySize);
+                if (arraySize > 0) {
+                    reply->write(frameStats.actualPresentTimesNano.array(), 8*arraySize);
+                }
+                return NO_ERROR;
+            }
         }
     }
     return err;
