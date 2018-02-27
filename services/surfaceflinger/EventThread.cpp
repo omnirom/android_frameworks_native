@@ -43,6 +43,10 @@ namespace android {
 
 // ---------------------------------------------------------------------------
 
+EventThread::~EventThread() = default;
+
+namespace impl {
+
 EventThread::EventThread(VSyncSource* src, SurfaceFlinger& flinger, bool interceptVSyncs,
                          const char* threadName)
       : mVSyncSource(src), mFlinger(flinger), mInterceptVSyncs(interceptVSyncs) {
@@ -84,7 +88,7 @@ void EventThread::setPhaseOffset(nsecs_t phaseOffset) {
     mVSyncSource->setPhaseOffset(phaseOffset);
 }
 
-sp<EventThread::Connection> EventThread::createEventConnection() const {
+sp<BnDisplayEventConnection> EventThread::createEventConnection() const {
     return new Connection(const_cast<EventThread*>(this));
 }
 
@@ -96,8 +100,7 @@ status_t EventThread::registerDisplayEventConnection(
     return NO_ERROR;
 }
 
-void EventThread::removeDisplayEventConnection(const wp<EventThread::Connection>& connection) {
-    std::lock_guard<std::mutex> lock(mMutex);
+void EventThread::removeDisplayEventConnectionLocked(const wp<EventThread::Connection>& connection) {
     mDisplayEventConnections.remove(connection);
 }
 
@@ -191,7 +194,7 @@ void EventThread::threadMain() NO_THREAD_SAFETY_ANALYSIS {
                 // handle any other error on the pipe as fatal. the only
                 // reasonable thing to do is to clean-up this connection.
                 // The most common error we'll get here is -EPIPE.
-                removeDisplayEventConnection(signalConnections[i]);
+                removeDisplayEventConnectionLocked(signalConnections[i]);
             }
         }
     }
@@ -404,4 +407,5 @@ status_t EventThread::Connection::postEvent(const DisplayEventReceiver::Event& e
 
 // ---------------------------------------------------------------------------
 
+} // namespace impl
 } // namespace android

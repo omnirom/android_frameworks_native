@@ -179,6 +179,16 @@ enum {
      * with GRALLOC_USAGE_PROTECTED usage bits on.
      */
     NATIVE_WINDOW_CONSUMER_IS_PROTECTED = 19,
+
+    /*
+     * Returns data space for the buffers.
+     */
+    NATIVE_WINDOW_DATASPACE = 20,
+
+    /*
+     * Returns maxBufferCount set by BufferQueueConsumer
+     */
+    NATIVE_WINDOW_MAX_BUFFER_COUNT = 21,
 };
 
 /* Valid operations for the (*perform)() hook.
