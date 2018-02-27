@@ -20,6 +20,7 @@
 #include <hwbinder/IPCThreadState.h>
 #include <ui/Gralloc2.h>
 
+#include <inttypes.h>
 #include <log/log.h>
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wzero-length-array"
@@ -30,7 +31,38 @@ namespace android {
 
 namespace Gralloc2 {
 
+namespace {
+
 static constexpr Error kTransactionError = Error::NO_RESOURCES;
+
+uint64_t getValid10UsageBits() {
+    static const uint64_t valid10UsageBits = []() -> uint64_t {
+        using hardware::graphics::common::V1_0::BufferUsage;
+        uint64_t bits = 0;
+        for (const auto bit : hardware::hidl_enum_iterator<BufferUsage>()) {
+            bits = bits | bit;
+        }
+        // TODO(b/72323293): Remove this mask for EXTERNAL_DISP.
+        bits = bits | (1 << 13);
+
+        return bits;
+    }();
+    return valid10UsageBits;
+}
+
+uint64_t getValid11UsageBits() {
+    static const uint64_t valid11UsageBits = []() -> uint64_t {
+        using hardware::graphics::common::V1_1::BufferUsage;
+        uint64_t bits = 0;
+        for (const auto bit : hardware::hidl_enum_iterator<BufferUsage>()) {
+            bits = bits | bit;
+        }
+        return bits;
+    }();
+    return valid11UsageBits;
+}
+
+}  // anonymous namespace
 
 void Mapper::preload() {
     android::hardware::preloadPassthroughService<hardware::graphics::mapper::V2_0::IMapper>();
@@ -38,7 +70,7 @@ void Mapper::preload() {
 
 Mapper::Mapper()
 {
-    mMapper = IMapper::getService();
+    mMapper = hardware::graphics::mapper::V2_0::IMapper::getService();
     if (mMapper == nullptr) {
         LOG_ALWAYS_FATAL("gralloc-mapper is missing");
     }
@@ -47,24 +79,56 @@ Mapper::Mapper()
     }
 
     // IMapper 2.1 is optional
-    mMapperV2_1 = hardware::graphics::mapper::V2_1::IMapper::castFrom(mMapper);
+    mMapperV2_1 = IMapper::castFrom(mMapper);
+}
+
+Gralloc2::Error Mapper::validateBufferDescriptorInfo(
+        const IMapper::BufferDescriptorInfo& descriptorInfo) const {
+    uint64_t validUsageBits = getValid10UsageBits();
+    if (mMapperV2_1 != nullptr) {
+        validUsageBits = validUsageBits | getValid11UsageBits();
+    }
+
+    if (descriptorInfo.usage & ~validUsageBits) {
+        ALOGE("buffer descriptor contains invalid usage bits 0x%" PRIx64,
+              descriptorInfo.usage & ~validUsageBits);
+        return Error::BAD_VALUE;
+    }
+    return Error::NONE;
 }
 
 Error Mapper::createDescriptor(
         const IMapper::BufferDescriptorInfo& descriptorInfo,
         BufferDescriptor* outDescriptor) const
 {
-    Error error;
-    auto ret = mMapper->createDescriptor(descriptorInfo,
-            [&](const auto& tmpError, const auto& tmpDescriptor)
-            {
-                error = tmpError;
-                if (error != Error::NONE) {
-                    return;
-                }
+    Error error = validateBufferDescriptorInfo(descriptorInfo);
+    if (error != Error::NONE) {
+        return error;
+    }
 
-                *outDescriptor = tmpDescriptor;
-            });
+    auto hidl_cb = [&](const auto& tmpError, const auto& tmpDescriptor)
+                   {
+                       error = tmpError;
+                       if (error != Error::NONE) {
+                           return;
+                       }
+
+                       *outDescriptor = tmpDescriptor;
+                   };
+
+    hardware::Return<void> ret;
+    if (mMapperV2_1 != nullptr) {
+        ret = mMapperV2_1->createDescriptor_2_1(descriptorInfo, hidl_cb);
+    } else {
+        const hardware::graphics::mapper::V2_0::IMapper::BufferDescriptorInfo info = {
+            descriptorInfo.width,
+            descriptorInfo.height,
+            descriptorInfo.layerCount,
+            static_cast<hardware::graphics::common::V1_0::PixelFormat>(descriptorInfo.format),
+            descriptorInfo.usage,
+        };
+        ret = mMapper->createDescriptor(info, hidl_cb);
+    }
 
     return (ret.isOk()) ? error : kTransactionError;
 }

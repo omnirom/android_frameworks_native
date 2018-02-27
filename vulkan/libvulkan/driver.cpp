@@ -19,14 +19,16 @@
 #include <string.h>
 #include <sys/prctl.h>
 
+#include <dlfcn.h>
 #include <algorithm>
 #include <array>
-#include <dlfcn.h>
 #include <new>
 
 #include <log/log.h>
 
 #include <android/dlext.h>
+#include <android/hardware/configstore/1.0/ISurfaceFlingerConfigs.h>
+#include <configstore/Utils.h>
 #include <cutils/properties.h>
 #include <graphicsenv/GraphicsEnv.h>
 #include <utils/Vector.h>
@@ -35,6 +37,9 @@
 
 #include "driver.h"
 #include "stubhal.h"
+
+using namespace android::hardware::configstore;
+using namespace android::hardware::configstore::V1_0;
 
 // TODO(b/37049319) Get this from a header once one exists
 extern "C" {
@@ -94,6 +99,7 @@ class CreateInfoWrapper {
     ~CreateInfoWrapper();
 
     VkResult Validate();
+    void DowngradeApiVersion();
 
     const std::bitset<ProcHook::EXTENSION_COUNT>& GetHookExtensions() const;
     const std::bitset<ProcHook::EXTENSION_COUNT>& GetHalExtensions() const;
@@ -130,6 +136,8 @@ class CreateInfoWrapper {
         VkInstanceCreateInfo instance_info_;
         VkDeviceCreateInfo dev_info_;
     };
+
+    VkApplicationInfo application_info_;
 
     ExtensionFilter extension_filter_;
 
@@ -537,6 +545,15 @@ void CreateInfoWrapper::FilterExtension(const char* name) {
     }
 }
 
+void CreateInfoWrapper::DowngradeApiVersion() {
+    // If pApplicationInfo is NULL, apiVersion is assumed to be 1.0:
+    if (instance_info_.pApplicationInfo) {
+        application_info_ = *instance_info_.pApplicationInfo;
+        instance_info_.pApplicationInfo = &application_info_;
+        application_info_.apiVersion = VK_API_VERSION_1_0;
+    }
+}
+
 VKAPI_ATTR void* DefaultAllocate(void*,
                                  size_t size,
                                  size_t alignment,
@@ -814,6 +831,14 @@ VkResult EnumerateDeviceExtensionProperties(
         VK_KHR_INCREMENTAL_PRESENT_EXTENSION_NAME,
         VK_KHR_INCREMENTAL_PRESENT_SPEC_VERSION});
 
+    bool hdrBoardConfig =
+        getBool<ISurfaceFlingerConfigs, &ISurfaceFlingerConfigs::hasHDRDisplay>(
+            false);
+    if (hdrBoardConfig) {
+        loader_extensions.push_back({VK_EXT_HDR_METADATA_EXTENSION_NAME,
+                                     VK_EXT_HDR_METADATA_SPEC_VERSION});
+    }
+
     VkPhysicalDevicePresentationPropertiesANDROID presentation_properties;
     if (QueryPresentationProperties(physicalDevice, &presentation_properties) &&
         presentation_properties.sharedImage) {
@@ -890,6 +915,33 @@ VkResult CreateInstance(const VkInstanceCreateInfo* pCreateInfo,
         return VK_ERROR_OUT_OF_HOST_MEMORY;
 
     data->hook_extensions |= wrapper.GetHookExtensions();
+
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wold-style-cast"
+    uint32_t api_version = ((pCreateInfo->pApplicationInfo)
+                                ? pCreateInfo->pApplicationInfo->apiVersion
+                                : VK_API_VERSION_1_0);
+    uint32_t api_major_version = VK_VERSION_MAJOR(api_version);
+    uint32_t api_minor_version = VK_VERSION_MINOR(api_version);
+    uint32_t icd_api_version;
+    PFN_vkEnumerateInstanceVersion pfn_enumerate_instance_version =
+        reinterpret_cast<PFN_vkEnumerateInstanceVersion>(
+            Hal::Device().GetInstanceProcAddr(NULL,
+                                              "vkEnumerateInstanceVersion"));
+    if (!pfn_enumerate_instance_version) {
+        icd_api_version = VK_API_VERSION_1_0;
+    } else {
+        result = (*pfn_enumerate_instance_version)(&icd_api_version);
+    }
+    uint32_t icd_api_major_version = VK_VERSION_MAJOR(icd_api_version);
+    uint32_t icd_api_minor_version = VK_VERSION_MINOR(icd_api_version);
+
+    if ((icd_api_major_version == 1) && (icd_api_minor_version == 0) &&
+        ((api_major_version > 1) || (api_minor_version > 0))) {
+        api_version = VK_API_VERSION_1_0;
+        wrapper.DowngradeApiVersion();
+    }
+#pragma clang diagnostic pop
 
     // call into the driver
     VkInstance instance;
@@ -1047,17 +1099,54 @@ VkResult EnumeratePhysicalDeviceGroups(
     VkInstance instance,
     uint32_t* pPhysicalDeviceGroupCount,
     VkPhysicalDeviceGroupProperties* pPhysicalDeviceGroupProperties) {
+    VkResult result = VK_SUCCESS;
     const auto& data = GetData(instance);
 
-    VkResult result = data.driver.EnumeratePhysicalDeviceGroups(
-        instance, pPhysicalDeviceGroupCount, pPhysicalDeviceGroupProperties);
-    if ((result == VK_SUCCESS || result == VK_INCOMPLETE) &&
-        *pPhysicalDeviceGroupCount && pPhysicalDeviceGroupProperties) {
-        for (uint32_t i = 0; i < *pPhysicalDeviceGroupCount; i++) {
-            for (uint32_t j = 0;
-                 j < pPhysicalDeviceGroupProperties->physicalDeviceCount; j++) {
-                SetData(pPhysicalDeviceGroupProperties->physicalDevices[j],
+    if (!data.driver.EnumeratePhysicalDeviceGroups) {
+        uint32_t device_count = 0;
+        result = EnumeratePhysicalDevices(instance, &device_count, nullptr);
+        if (result < 0)
+            return result;
+        if (!pPhysicalDeviceGroupProperties) {
+            *pPhysicalDeviceGroupCount = device_count;
+            return result;
+        }
+
+        device_count = std::min(device_count, *pPhysicalDeviceGroupCount);
+        if (!device_count) {
+            *pPhysicalDeviceGroupCount = 0;
+            return result;
+        }
+
+        android::Vector<VkPhysicalDevice> devices;
+        devices.resize(device_count);
+
+        result = EnumeratePhysicalDevices(instance, &device_count,
+                                          devices.editArray());
+        if (result < 0)
+            return result;
+
+        devices.resize(device_count);
+        *pPhysicalDeviceGroupCount = device_count;
+        for (uint32_t i = 0; i < device_count; ++i) {
+            pPhysicalDeviceGroupProperties[i].physicalDeviceCount = 1;
+            pPhysicalDeviceGroupProperties[i].physicalDevices[0] = devices[i];
+            pPhysicalDeviceGroupProperties[i].subsetAllocation = 0;
+        }
+    } else {
+        result = data.driver.EnumeratePhysicalDeviceGroups(
+            instance, pPhysicalDeviceGroupCount,
+            pPhysicalDeviceGroupProperties);
+        if ((result == VK_SUCCESS || result == VK_INCOMPLETE) &&
+            *pPhysicalDeviceGroupCount && pPhysicalDeviceGroupProperties) {
+            for (uint32_t i = 0; i < *pPhysicalDeviceGroupCount; i++) {
+                for (uint32_t j = 0;
+                     j < pPhysicalDeviceGroupProperties[i].physicalDeviceCount;
+                     j++) {
+                    SetData(
+                        pPhysicalDeviceGroupProperties[i].physicalDevices[j],
                         data);
+                }
             }
         }
     }

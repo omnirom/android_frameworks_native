@@ -227,9 +227,6 @@ public:
     // If fences from sync Framework are supported.
     static bool hasSyncFramework;
 
-    // Instruct the Render Engine to use EGL_IMG_context_priority is available.
-    static bool useContextPriority;
-
     // The offset in nanoseconds to use when DispSync timestamps present fence
     // signaling time.
     static int64_t dispSyncPresentTimeOffset;
@@ -318,6 +315,9 @@ private:
     friend class Layer;
     friend class BufferLayer;
     friend class MonitoredProducer;
+
+    // For unit tests
+    friend class TestableSurfaceFlinger;
 
     // This value is specified in number of frames.  Log frame stats at most
     // every half hour.
@@ -610,7 +610,8 @@ private:
     // Given a dataSpace, returns the appropriate color_mode to use
     // to display that dataSpace.
     android_color_mode pickColorMode(android_dataspace dataSpace) const;
-    android_dataspace bestTargetDataSpace(android_dataspace a, android_dataspace b) const;
+    android_dataspace bestTargetDataSpace(android_dataspace a, android_dataspace b,
+            bool hasHdr) const;
 
     mat4 computeSaturationMatrix() const;
 
