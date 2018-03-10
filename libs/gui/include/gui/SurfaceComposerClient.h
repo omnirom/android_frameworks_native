@@ -136,8 +136,8 @@ public:
 
         int mStatus = NO_ERROR;
 
-        layer_state_t* getLayerStateLocked(const sp<SurfaceControl>& sc);
-        DisplayState& getDisplayStateLocked(const sp<IBinder>& token);
+        layer_state_t* getLayerState(const sp<SurfaceControl>& sc);
+        DisplayState& getDisplayState(const sp<IBinder>& token);
 
     public:
         Transaction() = default;
@@ -228,6 +228,8 @@ public:
         // arrives. As some elements normally apply immediately, this enables
         // freezing the total geometry of a surface until a resize is completed.
         Transaction& setGeometryAppliesWithResize(const sp<SurfaceControl>& sc);
+
+        Transaction& destroySurface(const sp<SurfaceControl>& sc);
 
         status_t setDisplaySurface(const sp<IBinder>& token,
                 const sp<IGraphicBufferProducer>& bufferProducer);

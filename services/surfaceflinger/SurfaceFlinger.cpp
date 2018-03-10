@@ -410,12 +410,11 @@ void SurfaceFlinger::bootFinished()
 
 void SurfaceFlinger::deleteTextureAsync(uint32_t texture) {
     class MessageDestroyGLTexture : public MessageBase {
-        RenderEngine& engine;
+        RE::RenderEngine& engine;
         uint32_t texture;
     public:
-        MessageDestroyGLTexture(RenderEngine& engine, uint32_t texture)
-            : engine(engine), texture(texture) {
-        }
+        MessageDestroyGLTexture(RE::RenderEngine& engine, uint32_t texture)
+              : engine(engine), texture(texture) {}
         virtual bool handler() {
             engine.deleteTextures(1, &texture);
             return true;
@@ -575,25 +574,30 @@ void SurfaceFlinger::init() {
     Mutex::Autolock _l(mStateLock);
 
     // start the EventThread
-
-    mEventThreadSource = std::make_unique<DispSyncSource>(
-            &mPrimaryDispSync, SurfaceFlinger::vsyncPhaseOffsetNs, true, "app");
-    mEventThread = std::make_unique<EventThread>(
-            mEventThreadSource.get(), *this, false, "sfEventThread");
-    mSfEventThreadSource = std::make_unique<DispSyncSource>(
-            &mPrimaryDispSync, SurfaceFlinger::sfVsyncPhaseOffsetNs, true, "sf");
-    mSFEventThread = std::make_unique<EventThread>(
-            mSfEventThreadSource.get(), *this, true, "appEventThread");
+    mEventThreadSource =
+            std::make_unique<DispSyncSource>(&mPrimaryDispSync, SurfaceFlinger::vsyncPhaseOffsetNs,
+                                             true, "app");
+    mEventThread = std::make_unique<impl::EventThread>(mEventThreadSource.get(), *this, false,
+                                                       "appEventThread");
+    mSfEventThreadSource =
+            std::make_unique<DispSyncSource>(&mPrimaryDispSync,
+                                             SurfaceFlinger::sfVsyncPhaseOffsetNs, true, "sf");
+    mSFEventThread = std::make_unique<impl::EventThread>(mSfEventThreadSource.get(), *this, true,
+                                                         "sfEventThread");
     mEventQueue.setEventThread(mSFEventThread.get());
 
     // Get a RenderEngine for the given display / config (can't fail)
-    getBE().mRenderEngine = RenderEngine::create(HAL_PIXEL_FORMAT_RGBA_8888,
-            hasWideColorDisplay ? RenderEngine::WIDE_COLOR_SUPPORT : 0);
+    getBE().mRenderEngine =
+            RE::impl::RenderEngine::create(HAL_PIXEL_FORMAT_RGBA_8888,
+                                           hasWideColorDisplay
+                                                   ? RE::RenderEngine::WIDE_COLOR_SUPPORT
+                                                   : 0);
     LOG_ALWAYS_FATAL_IF(getBE().mRenderEngine == nullptr, "couldn't create RenderEngine");
 
     LOG_ALWAYS_FATAL_IF(mVrFlingerRequestsDisplay,
             "Starting with vr flinger active is not currently supported.");
-    getBE().mHwc.reset(new HWComposer(getBE().mHwcServiceName));
+    getBE().mHwc.reset(
+            new HWComposer(std::make_unique<Hwc2::impl::Composer>(getBE().mHwcServiceName)));
     getBE().mHwc->registerCallback(this, getBE().mComposerSequenceId);
     // Process any initial hotplug and resulting display changes.
     processDisplayHotplugEventsLocked();
@@ -1065,8 +1069,9 @@ status_t SurfaceFlinger::enableVSyncInjections(bool enable) {
             ALOGV("VSync Injections enabled");
             if (mVSyncInjector.get() == nullptr) {
                 mVSyncInjector = std::make_unique<InjectVSyncSource>();
-                mInjectorEventThread = std::make_unique<EventThread>(
-                        mVSyncInjector.get(), *this, false, "injEvThread");
+                mInjectorEventThread =
+                        std::make_unique<impl::EventThread>(mVSyncInjector.get(), *this, false,
+                                                            "injEventThread");
             }
             mEventQueue.setEventThread(mInjectorEventThread.get());
         } else {
@@ -1284,6 +1289,11 @@ void SurfaceFlinger::onHotplugReceived(int32_t sequenceId, hwc2_display_t displa
 
     mPendingHotplugEvents.emplace_back(HotplugEvent{display, connection});
 
+    if (std::this_thread::get_id() == mMainThreadId) {
+        // Process all pending hot plug events immediately if we are on the main thread.
+        processDisplayHotplugEventsLocked();
+    }
+
     setTransactionFlags(eDisplayTransactionNeeded);
 }
 
@@ -1342,7 +1352,8 @@ void SurfaceFlinger::updateVrFlinger() {
 
     resetDisplayState();
     getBE().mHwc.reset(); // Delete the current instance before creating the new one
-    getBE().mHwc.reset(new HWComposer(vrFlingerRequestsDisplay ? "vr" : getBE().mHwcServiceName));
+    getBE().mHwc.reset(new HWComposer(std::make_unique<Hwc2::impl::Composer>(
+            vrFlingerRequestsDisplay ? "vr" : getBE().mHwcServiceName)));
     getBE().mHwc->registerCallback(this, ++getBE().mComposerSequenceId);
 
     LOG_ALWAYS_FATAL_IF(!getBE().mHwc->getComposer()->isRemote(),
@@ -1471,7 +1482,7 @@ void SurfaceFlinger::doDebugFlashRegions()
 
                 // and draw the dirty region
                 const int32_t height = hw->getHeight();
-                RenderEngine& engine(getRenderEngine());
+                auto& engine(getRenderEngine());
                 engine.fillRegionWithColor(dirtyRegion, height, 1, 0, 1, 1);
 
                 hw->swapBuffers(getHwComposer());
@@ -2854,7 +2865,7 @@ bool SurfaceFlinger::doComposeSurfaces(const sp<const DisplayDevice>& displayDev
 
 void SurfaceFlinger::drawWormhole(const sp<const DisplayDevice>& displayDevice, const Region& region) const {
     const int32_t height = displayDevice->getHeight();
-    RenderEngine& engine(getRenderEngine());
+    auto& engine(getRenderEngine());
     engine.fillRegionWithColor(region, height, 0, 0, 0, 0);
 }
 
@@ -2895,7 +2906,11 @@ status_t SurfaceFlinger::addClientLayer(const sp<Client>& client,
 
 status_t SurfaceFlinger::removeLayer(const sp<Layer>& layer, bool topLevelOnly) {
     Mutex::Autolock _l(mStateLock);
+    return removeLayerLocked(mStateLock, layer, topLevelOnly);
+}
 
+status_t SurfaceFlinger::removeLayerLocked(const Mutex&, const sp<Layer>& layer,
+                                           bool topLevelOnly) {
     if (layer->isPendingRemoval()) {
         return NO_ERROR;
     }
@@ -2959,14 +2974,40 @@ uint32_t SurfaceFlinger::setTransactionFlags(uint32_t flags) {
     return old;
 }
 
+bool SurfaceFlinger::containsAnyInvalidClientState(const Vector<ComposerState>& states) {
+    for (const ComposerState& state : states) {
+        // Here we need to check that the interface we're given is indeed
+        // one of our own. A malicious client could give us a nullptr
+        // IInterface, or one of its own or even one of our own but a
+        // different type. All these situations would cause us to crash.
+        if (state.client == nullptr) {
+            return true;
+        }
+
+        sp<IBinder> binder = IInterface::asBinder(state.client);
+        if (binder == nullptr) {
+            return true;
+        }
+
+        if (binder->queryLocalInterface(ISurfaceComposerClient::descriptor) == nullptr) {
+            return true;
+        }
+    }
+    return false;
+}
+
 void SurfaceFlinger::setTransactionState(
-        const Vector<ComposerState>& state,
+        const Vector<ComposerState>& states,
         const Vector<DisplayState>& displays,
         uint32_t flags)
 {
     ATRACE_CALL();
     Mutex::Autolock _l(mStateLock);
     uint32_t transactionFlags = 0;
+
+    if (containsAnyInvalidClientState(states)) {
+        return;
+    }
 
     if (flags & eAnimation) {
         // For window updates that are part of an animation we must wait for
@@ -2984,31 +3025,20 @@ void SurfaceFlinger::setTransactionState(
         }
     }
 
-    size_t count = displays.size();
-    for (size_t i=0 ; i<count ; i++) {
-        const DisplayState& s(displays[i]);
-        transactionFlags |= setDisplayStateLocked(s);
+    for (const DisplayState& display : displays) {
+        transactionFlags |= setDisplayStateLocked(display);
     }
 
-    count = state.size();
-    for (size_t i=0 ; i<count ; i++) {
-        const ComposerState& s(state[i]);
-        // Here we need to check that the interface we're given is indeed
-        // one of our own. A malicious client could give us a nullptr
-        // IInterface, or one of its own or even one of our own but a
-        // different type. All these situations would cause us to crash.
-        //
-        // NOTE: it would be better to use RTTI as we could directly check
-        // that we have a Client*. however, RTTI is disabled in Android.
-        if (s.client != nullptr) {
-            sp<IBinder> binder = IInterface::asBinder(s.client);
-            if (binder != nullptr) {
-                if (binder->queryLocalInterface(ISurfaceComposerClient::descriptor) != nullptr) {
-                    sp<Client> client( static_cast<Client *>(s.client.get()) );
-                    transactionFlags |= setClientStateLocked(client, s.state);
-                }
-            }
-        }
+    for (const ComposerState& state : states) {
+        transactionFlags |= setClientStateLocked(state);
+    }
+
+    // Iterate through all layers again to determine if any need to be destroyed. Marking layers
+    // as destroyed should only occur after setting all other states. This is to allow for a
+    // child re-parent to happen before marking its original parent as destroyed (which would
+    // then mark the child as destroyed).
+    for (const ComposerState& state : states) {
+        setDestroyStateLocked(state);
     }
 
     // If a synchronous transaction is explicitly requested without any changes, force a transaction
@@ -3022,7 +3052,7 @@ void SurfaceFlinger::setTransactionState(
 
     if (transactionFlags) {
         if (mInterceptor.isEnabled()) {
-            mInterceptor.saveTransaction(state, mCurrentState.displays, displays, flags);
+            mInterceptor.saveTransaction(states, mCurrentState.displays, displays, flags);
         }
 
         // this triggers the transaction
@@ -3099,10 +3129,10 @@ uint32_t SurfaceFlinger::setDisplayStateLocked(const DisplayState& s)
     return flags;
 }
 
-uint32_t SurfaceFlinger::setClientStateLocked(
-        const sp<Client>& client,
-        const layer_state_t& s)
-{
+uint32_t SurfaceFlinger::setClientStateLocked(const ComposerState& composerState) {
+    const layer_state_t& s = composerState.state;
+    sp<Client> client(static_cast<Client*>(composerState.client.get()));
+
     sp<Layer> layer(client->getLayerUser(s.surface));
     if (layer == nullptr) {
         return 0;
@@ -3251,6 +3281,25 @@ uint32_t SurfaceFlinger::setClientStateLocked(
         // changed, we don't want this to cause any more work
     }
     return flags;
+}
+
+void SurfaceFlinger::setDestroyStateLocked(const ComposerState& composerState) {
+    const layer_state_t& state = composerState.state;
+    sp<Client> client(static_cast<Client*>(composerState.client.get()));
+
+    sp<Layer> layer(client->getLayerUser(state.surface));
+    if (layer == nullptr) {
+        return;
+    }
+
+    if (layer->isPendingRemoval()) {
+        ALOGW("Attempting to destroy on removed layer: %s", layer->getName().string());
+        return;
+    }
+
+    if (state.what & layer_state_t::eDestroySurface) {
+        removeLayerLocked(mStateLock, layer);
+    }
 }
 
 status_t SurfaceFlinger::createLayer(
@@ -4516,7 +4565,7 @@ void SurfaceFlinger::renderScreenImplLocked(const RenderArea& renderArea,
                                             bool useIdentityTransform) {
     ATRACE_CALL();
 
-    RenderEngine& engine(getRenderEngine());
+    auto& engine(getRenderEngine());
 
     // get screen geometry
     const auto raWidth = renderArea.getWidth();
@@ -4595,7 +4644,7 @@ status_t SurfaceFlinger::captureScreenImplLocked(const RenderArea& renderArea,
 
     // this binds the given EGLImage as a framebuffer for the
     // duration of this scope.
-    RenderEngine::BindNativeBufferAsFramebuffer bufferBond(getRenderEngine(), buffer);
+    RE::BindNativeBufferAsFramebuffer bufferBond(getRenderEngine(), buffer);
     if (bufferBond.getStatus() != NO_ERROR) {
         ALOGE("got ANWB binding error while taking screenshot");
         return INVALID_OPERATION;

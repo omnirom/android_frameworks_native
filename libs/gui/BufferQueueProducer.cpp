@@ -1121,6 +1121,9 @@ int BufferQueueProducer::query(int what, int *outValue) {
         case NATIVE_WINDOW_CONSUMER_IS_PROTECTED:
             value = static_cast<int32_t>(mCore->mConsumerIsProtected);
             break;
+        case NATIVE_WINDOW_MAX_BUFFER_COUNT:
+            value = static_cast<int32_t>(mCore->mMaxBufferCount);
+            break;
         default:
             return BAD_VALUE;
     }
@@ -1331,6 +1334,7 @@ void BufferQueueProducer::allocateBuffers(uint32_t width, uint32_t height,
         uint32_t allocHeight = 0;
         PixelFormat allocFormat = PIXEL_FORMAT_UNKNOWN;
         uint64_t allocUsage = 0;
+        std::string allocName;
         { // Autolock scope
             Mutex::Autolock lock(mCore->mMutex);
             mCore->waitWhileAllocatingLocked();
@@ -1350,6 +1354,7 @@ void BufferQueueProducer::allocateBuffers(uint32_t width, uint32_t height,
             allocHeight = height > 0 ? height : mCore->mDefaultHeight;
             allocFormat = format != 0 ? format : mCore->mDefaultBufferFormat;
             allocUsage = usage | mCore->mConsumerUsageBits;
+            allocName.assign(mCore->mConsumerName.string(), mCore->mConsumerName.size());
 
             mCore->mIsAllocating = true;
         } // Autolock scope
@@ -1358,7 +1363,7 @@ void BufferQueueProducer::allocateBuffers(uint32_t width, uint32_t height,
         for (size_t i = 0; i <  newBufferCount; ++i) {
             sp<GraphicBuffer> graphicBuffer = new GraphicBuffer(
                     allocWidth, allocHeight, allocFormat, BQ_LAYER_COUNT,
-                    allocUsage, {mConsumerName.string(), mConsumerName.size()});
+                    allocUsage, allocName);
 
             status_t result = graphicBuffer->initCheck();
 

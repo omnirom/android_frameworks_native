@@ -84,12 +84,7 @@ private:
 
 // Device methods
 
-Device::Device(const std::string& serviceName)
-  : mComposer(std::make_unique<Hwc2::Composer>(serviceName)),
-    mCapabilities(),
-    mDisplays(),
-    mRegisteredCallback(false)
-{
+Device::Device(std::unique_ptr<android::Hwc2::Composer> composer) : mComposer(std::move(composer)) {
     loadCapabilities();
 }
 
@@ -622,9 +617,11 @@ Error Display::presentOrValidate(uint32_t* outNumTypes, uint32_t* outNumRequests
 // For use by Device
 
 void Display::setConnected(bool connected) {
-    if (!mIsConnected && connected && mType == DisplayType::Physical) {
+    if (!mIsConnected && connected) {
         mComposer.setClientTargetSlotCount(mId);
-        loadConfigs();
+        if (mType == DisplayType::Physical) {
+            loadConfigs();
+        }
     }
     mIsConnected = connected;
 }

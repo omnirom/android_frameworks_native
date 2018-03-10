@@ -26,8 +26,8 @@
  */
 
 #include <cutils/compiler.h>
+#include <cutils/atomic.h>
 
-#include <utils/Atomic.h>
 #include <utils/Errors.h>
 #include <utils/KeyedVector.h>
 #include <utils/RefBase.h>
@@ -83,16 +83,23 @@ namespace android {
 // ---------------------------------------------------------------------------
 
 class Client;
-class DisplayEventConnection;
-class EventThread;
-class Layer;
 class ColorLayer;
-class Surface;
-class RenderEngine;
+class DisplayEventConnection;
 class EventControlThread;
-class VSyncSource;
+class EventThread;
 class InjectVSyncSource;
+class Layer;
+class Surface;
 class SurfaceFlingerBE;
+class VSyncSource;
+
+namespace impl {
+class EventThread;
+} // namespace impl
+
+namespace RE {
+class RenderEngine;
+}
 
 typedef std::function<void(const LayerVector::Visitor&)> TraverseLayersFunction;
 
@@ -139,7 +146,7 @@ public:
     const std::string mHwcServiceName; // "default" for real use, something else for testing.
 
     // constant members (no synchronization needed for access)
-    std::unique_ptr<RenderEngine> mRenderEngine;
+    std::unique_ptr<RE::RenderEngine> mRenderEngine;
     EGLContext mEGLContext;
     EGLDisplay mEGLDisplay;
 
@@ -301,9 +308,7 @@ public:
     // TODO: this should be made accessible only to HWComposer
     const Vector< sp<Layer> >& getLayerSortedByZForHwcDisplay(int id);
 
-    RenderEngine& getRenderEngine() const {
-        return *getBE().mRenderEngine;
-    }
+    RE::RenderEngine& getRenderEngine() const { return *getBE().mRenderEngine; }
 
     bool authenticateSurfaceTextureLocked(
         const sp<IGraphicBufferProducer>& bufferProducer) const;
@@ -311,7 +316,7 @@ public:
 private:
     friend class Client;
     friend class DisplayEventConnection;
-    friend class EventThread;
+    friend class impl::EventThread;
     friend class Layer;
     friend class BufferLayer;
     friend class MonitoredProducer;
@@ -468,8 +473,10 @@ private:
     // Can only be called from the main thread or with mStateLock held
     uint32_t setTransactionFlags(uint32_t flags);
     void commitTransaction();
-    uint32_t setClientStateLocked(const sp<Client>& client, const layer_state_t& s);
+    bool containsAnyInvalidClientState(const Vector<ComposerState>& states);
+    uint32_t setClientStateLocked(const ComposerState& composerState);
     uint32_t setDisplayStateLocked(const DisplayState& s);
+    void setDestroyStateLocked(const ComposerState& composerState);
 
     /* ------------------------------------------------------------------------
      * Layer management
@@ -501,6 +508,7 @@ private:
 
     // remove a layer from SurfaceFlinger immediately
     status_t removeLayer(const sp<Layer>& layer, bool topLevelOnly = false);
+    status_t removeLayerLocked(const Mutex&, const sp<Layer>& layer, bool topLevelOnly = false);
 
     // add a layer to SurfaceFlinger
     status_t addClientLayer(const sp<Client>& client,

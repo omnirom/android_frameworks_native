@@ -79,8 +79,8 @@ static_assert(DEXOPT_SECONDARY_DEX  == 1 << 5, "DEXOPT_SECONDARY_DEX unexpected.
 static_assert(DEXOPT_FORCE          == 1 << 6, "DEXOPT_FORCE unexpected.");
 static_assert(DEXOPT_STORAGE_CE     == 1 << 7, "DEXOPT_STORAGE_CE unexpected.");
 static_assert(DEXOPT_STORAGE_DE     == 1 << 8, "DEXOPT_STORAGE_DE unexpected.");
-static_assert(DEXOPT_DISABLE_HIDDEN_API_CHECKS == 1 << 10,
-        "DEXOPT_DISABLE_HIDDEN_API_CHECKS unexpected");
+static_assert(DEXOPT_ENABLE_HIDDEN_API_CHECKS == 1 << 10,
+        "DEXOPT_ENABLE_HIDDEN_API_CHECKS unexpected");
 
 static_assert(DEXOPT_MASK           == 0x5fe, "DEXOPT_MASK unexpected.");
 
@@ -352,7 +352,7 @@ private:
 
         std::string preopted_boot_art_path = StringPrintf("/system/framework/%s/boot.art", isa);
         if (access(preopted_boot_art_path.c_str(), F_OK) == 0) {
-          return PatchoatBootImage(art_path, isa);
+          return PatchoatBootImage(isa_path, isa);
         } else {
           // No preopted boot image. Try to compile.
           return Dex2oatBootImage(boot_classpath_, art_path, oat_path, isa);
@@ -421,14 +421,14 @@ private:
         CHECK_EQ(0, closedir(c_dir)) << "Unable to close directory.";
     }
 
-    bool PatchoatBootImage(const std::string& art_path, const char* isa) const {
+    bool PatchoatBootImage(const std::string& output_dir, const char* isa) const {
         // This needs to be kept in sync with ART, see art/runtime/gc/space/image_space.cc.
 
         std::vector<std::string> cmd;
         cmd.push_back("/system/bin/patchoat");
 
         cmd.push_back("--input-image-location=/system/framework/boot.art");
-        cmd.push_back(StringPrintf("--output-image-file=%s", art_path.c_str()));
+        cmd.push_back(StringPrintf("--output-image-directory=%s", output_dir.c_str()));
 
         cmd.push_back(StringPrintf("--instruction-set=%s", isa));
 
@@ -582,7 +582,8 @@ private:
                       parameters_.downgrade,
                       parameters_.target_sdk_version,
                       parameters_.profile_name,
-                      parameters_.dex_metadata_path);
+                      parameters_.dex_metadata_path,
+                      parameters_.compilation_reason);
     }
 
     int RunPreopt() {
