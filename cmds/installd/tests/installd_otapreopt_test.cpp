@@ -39,8 +39,8 @@ static const char* ParseNull(const char* arg) {
 class OTAPreoptTest : public testing::Test {
 protected:
     virtual void SetUp() {
-        setenv("ANDROID_LOG_TAGS", "*:v", 1);
-        android::base::InitLogging(nullptr);
+        setenv("ANDROID_LOG_TAGS", "*:f", 1);
+        android::base::InitLogging(nullptr, android::base::StderrLogger);
     }
 
     void verifyPackageParameters(const OTAPreoptParameters& params,
@@ -68,7 +68,7 @@ protected:
         if (version > 1) {
             ASSERT_STREQ(params.se_info, ParseNull(args[i++]));
         } else {
-            ASSERT_STREQ(params.se_info, nullptr);
+            ASSERT_EQ(params.se_info, nullptr);
         }
         if (version > 2) {
             ASSERT_EQ(params.downgrade, ParseBool(args[i++]));
@@ -88,7 +88,12 @@ protected:
         if (version > 5) {
             ASSERT_STREQ(params.dex_metadata_path, ParseNull(args[i++]));
         } else {
-            ASSERT_STREQ(params.dex_metadata_path, nullptr);
+            ASSERT_EQ(params.dex_metadata_path, nullptr);
+        }
+        if (version > 6) {
+            ASSERT_STREQ(params.compilation_reason, ParseNull(args[i++]));
+        } else {
+            ASSERT_STREQ(params.compilation_reason, "ab-ota");
         }
     }
 
@@ -100,6 +105,7 @@ protected:
             case 4: return "4";
             case 5: return "5";
             case 6: return "6";
+            case 7: return "7";
         }
         return nullptr;
     }
@@ -137,6 +143,9 @@ protected:
         }
         if (version > 5) {
             args.push_back("dex_metadata.dm");  // dex_metadata_path
+        }
+        if (version > 6) {
+            args.push_back("ab-ota-test");  // compilation_reason
         }
         args.push_back(nullptr);  // we have to end with null.
         return args;
@@ -176,6 +185,10 @@ TEST_F(OTAPreoptTest, ReadArgumentsV5) {
 
 TEST_F(OTAPreoptTest, ReadArgumentsV6) {
     VerifyReadArguments(6, true);
+}
+
+TEST_F(OTAPreoptTest, ReadArgumentsV7) {
+    VerifyReadArguments(7, true);
 }
 
 TEST_F(OTAPreoptTest, ReadArgumentsFailToManyArgs) {

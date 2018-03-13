@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017 The Android Open Source Project
+ * Copyright (C) 2018 The Android Open Source Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,29 +14,16 @@
  * limitations under the License.
  */
 
-#include "hwc2on1adapter/MiniFence.h"
-
-#include <unistd.h>
+#include "MockComposer.h"
 
 namespace android {
+namespace Hwc2 {
+namespace mock {
 
-const sp<MiniFence> MiniFence::NO_FENCE = sp<MiniFence>(new MiniFence);
+// Explicit default instantiation is recommended.
+Composer::Composer() = default;
+Composer::~Composer() = default;
 
-MiniFence::MiniFence() :
-    mFenceFd(-1) {
-}
-
-MiniFence::MiniFence(int fenceFd) :
-    mFenceFd(fenceFd) {
-}
-
-MiniFence::~MiniFence() {
-    if (mFenceFd != -1) {
-        close(mFenceFd);
-    }
-}
-
-int MiniFence::dup() const {
-    return ::dup(mFenceFd);
-}
-}
+} // namespace mock
+} // namespace Hwc2
+} // namespace android

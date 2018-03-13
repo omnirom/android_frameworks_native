@@ -36,7 +36,6 @@ static_libraries = [
 
 cc_test {
     srcs: [
-        "dvr_buffer_queue-test.cpp",
         "dvr_display_manager-test.cpp",
         "dvr_named_buffer-test.cpp",
     ],
