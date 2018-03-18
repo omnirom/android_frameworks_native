@@ -49,6 +49,7 @@
 #include "MonitoredProducer.h"
 #include "SurfaceFlinger.h"
 #include "clz.h"
+#include "gralloc_priv.h"
 
 #include "DisplayHardware/HWComposer.h"
 
@@ -860,6 +861,11 @@ void Layer::computeGeometry(const RenderArea& renderArea, Mesh& mesh,
 bool Layer::isSecure() const {
     const Layer::State& s(mDrawingState);
     return (s.flags & layer_state_t::eLayerSecure);
+}
+
+bool Layer::isSecureDisplay() const {
+    const sp<GraphicBuffer>& activeBuffer(mActiveBuffer);
+    return activeBuffer && (activeBuffer->getUsage() & GRALLOC_USAGE_PRIVATE_SECURE_DISPLAY);
 }
 
 void Layer::setVisibleRegion(const Region& visibleRegion) {
