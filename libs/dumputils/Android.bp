@@ -12,24 +12,23 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-cc_test {
-    name: "libsurfaceflinger_unittest",
-    tags: ["test"],
-    defaults: ["libsurfaceflinger_defaults"],
-    test_suites: ["device-tests"],
-    srcs: [
-        ":libsurfaceflinger_sources",
-        "DisplayTransactionTest.cpp",
-        "MockComposer.cpp",
-        "MockEventThread.cpp",
-        "MockGraphicBufferConsumer.cpp",
-        "MockGraphicBufferProducer.cpp",
-        "MockRenderEngine.cpp",
+cc_library {
+    name: "libdumputils",
+
+    shared_libs: [
+        "libbase",
+        "libbinder",
+        "libhidlbase",
+        "libhidltransport",
+        "liblog",
+        "libutils",
     ],
-    static_libs: [
-        "libgmock",
-    ],
-    header_libs: [
-        "libsurfaceflinger_headers",
+
+    srcs: ["dump_utils.cpp"],
+
+    cflags: ["-Wall", "-Werror"],
+
+    export_include_dirs: [
+        "include",
     ],
 }

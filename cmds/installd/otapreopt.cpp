@@ -81,8 +81,10 @@ static_assert(DEXOPT_STORAGE_CE     == 1 << 7, "DEXOPT_STORAGE_CE unexpected.");
 static_assert(DEXOPT_STORAGE_DE     == 1 << 8, "DEXOPT_STORAGE_DE unexpected.");
 static_assert(DEXOPT_ENABLE_HIDDEN_API_CHECKS == 1 << 10,
         "DEXOPT_ENABLE_HIDDEN_API_CHECKS unexpected");
+static_assert(DEXOPT_GENERATE_COMPACT_DEX == 1 << 11, "DEXOPT_GENERATE_COMPACT_DEX unexpected");
 
-static_assert(DEXOPT_MASK           == 0x5fe, "DEXOPT_MASK unexpected.");
+static_assert(DEXOPT_MASK           == (0xdfe | DEXOPT_IDLE_BACKGROUND_JOB),
+              "DEXOPT_MASK unexpected.");
 
 
 
@@ -568,6 +570,7 @@ private:
     // Run dexopt with the parameters of parameters_.
     // TODO(calin): embed the profile name in the parameters.
     int Dexopt() {
+        std::string dummy;
         return dexopt(parameters_.apk_path,
                       parameters_.uid,
                       parameters_.pkgName,
@@ -583,7 +586,8 @@ private:
                       parameters_.target_sdk_version,
                       parameters_.profile_name,
                       parameters_.dex_metadata_path,
-                      parameters_.compilation_reason);
+                      parameters_.compilation_reason,
+                      &dummy);
     }
 
     int RunPreopt() {

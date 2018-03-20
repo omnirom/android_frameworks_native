@@ -112,6 +112,7 @@ static binder::Status ok() {
 }
 
 static binder::Status exception(uint32_t code, const std::string& msg) {
+    LOG(ERROR) << msg << " (" << code << ")";
     return binder::Status::fromExceptionCode(code, String8(msg.c_str()));
 }
 
@@ -1970,10 +1971,11 @@ binder::Status InstalldNativeService::dexopt(const std::string& apkPath, int32_t
     const char* profile_name = getCStr(profileName);
     const char* dm_path = getCStr(dexMetadataPath);
     const char* compilation_reason = getCStr(compilationReason);
+    std::string error_msg;
     int res = android::installd::dexopt(apk_path, uid, pkgname, instruction_set, dexoptNeeded,
             oat_dir, dexFlags, compiler_filter, volume_uuid, class_loader_context, se_info,
-            downgrade, targetSdkVersion, profile_name, dm_path, compilation_reason);
-    return res ? error(res, "Failed to dexopt") : ok();
+            downgrade, targetSdkVersion, profile_name, dm_path, compilation_reason, &error_msg);
+    return res ? error(res, error_msg) : ok();
 }
 
 binder::Status InstalldNativeService::markBootComplete(const std::string& instructionSet) {
