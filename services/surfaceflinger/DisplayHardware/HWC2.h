@@ -23,8 +23,10 @@
 #undef HWC2_INCLUDE_STRINGIFICATION
 #undef HWC2_USE_CPP11
 
-#include <ui/HdrCapabilities.h>
+#include <gui/HdrMetadata.h>
 #include <math/mat4.h>
+#include <ui/GraphicsTypes.h>
+#include <ui/HdrCapabilities.h>
 
 #include <utils/Log.h>
 #include <utils/StrongPointer.h>
@@ -208,7 +210,7 @@ public:
     [[clang::warn_unused_result]] Error getChangedCompositionTypes(
             std::unordered_map<Layer*, Composition>* outTypes);
     [[clang::warn_unused_result]] Error getColorModes(
-            std::vector<android_color_mode_t>* outModes) const;
+            std::vector<android::ColorMode>* outModes) const;
 
     // Doesn't call into the HWC2 device, so no errors are possible
     std::vector<std::shared_ptr<const Config>> getConfigs() const;
@@ -232,7 +234,7 @@ public:
             uint32_t slot, const android::sp<android::GraphicBuffer>& target,
             const android::sp<android::Fence>& acquireFence,
             android_dataspace_t dataspace);
-    [[clang::warn_unused_result]] Error setColorMode(android_color_mode_t mode);
+    [[clang::warn_unused_result]] Error setColorMode(android::ColorMode mode);
     [[clang::warn_unused_result]] Error setColorTransform(
             const android::mat4& matrix, android_color_transform_t hint);
     [[clang::warn_unused_result]] Error setOutputBuffer(
@@ -306,6 +308,7 @@ public:
     [[clang::warn_unused_result]] Error setCompositionType(Composition type);
     [[clang::warn_unused_result]] Error setDataspace(
             android_dataspace_t dataspace);
+    [[clang::warn_unused_result]] Error setHdrMetadata(const android::HdrMetadata& metadata);
     [[clang::warn_unused_result]] Error setDisplayFrame(
             const android::Rect& frame);
     [[clang::warn_unused_result]] Error setPlaneAlpha(float alpha);
@@ -329,6 +332,7 @@ private:
     hwc2_display_t mDisplayId;
     hwc2_layer_t mId;
     android_dataspace mDataSpace = HAL_DATASPACE_UNKNOWN;
+    android::HdrMetadata mHdrMetadata;
     std::function<void(Layer*)> mLayerDestroyedListener;
 };
 
