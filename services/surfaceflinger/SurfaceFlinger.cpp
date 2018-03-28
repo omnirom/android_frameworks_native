@@ -77,6 +77,7 @@
 #include "SurfaceFlinger.h"
 #include "clz.h"
 
+#include "DisplayUtils.h"
 #include "DisplayHardware/ComposerHal.h"
 #include "DisplayHardware/FramebufferSurface.h"
 #include "DisplayHardware/HWComposer.h"
@@ -2234,6 +2235,7 @@ void SurfaceFlinger::processDisplayChangesLocked() {
                     if (state.surface != nullptr) {
                         // Allow VR composer to use virtual displays.
                         if (mUseHwcVirtualDisplays || getBE().mHwc->isUsingVrComposer()) {
+                            DisplayUtils *displayUtils = DisplayUtils::getInstance();
                             int width = 0;
                             int status = state.surface->query(NATIVE_WINDOW_WIDTH, &width);
                             ALOGE_IF(status != NO_ERROR, "Unable to query width (%d)", status);
@@ -2245,18 +2247,28 @@ void SurfaceFlinger::processDisplayChangesLocked() {
                             ALOGE_IF(status != NO_ERROR, "Unable to query format (%d)", status);
                             auto format = static_cast<android_pixel_format_t>(intFormat);
 
-                            getBE().mHwc->allocateVirtualDisplay(width, height, &format, &hwcId);
+                            if (maxVirtualDisplaySize == 0 ||
+                                 ( (uint64_t)width <= maxVirtualDisplaySize &&
+                                 (uint64_t)height <= maxVirtualDisplaySize)) {
+                                int usage = 0;
+                                // Replace with native_window_get_consumer_usage ?
+                                status = state.surface->query(
+                                         NATIVE_WINDOW_CONSUMER_USAGE_BITS, &usage);
+                                ALOGW_IF(status != NO_ERROR, "Unable to query usage (%d)", status);
+                                if ( (status == NO_ERROR) &&
+                                     displayUtils->canAllocateHwcDisplayIdForVDS(usage)) {
+                                    getBE().mHwc->allocateVirtualDisplay(
+                                            width, height, &format, &hwcId);
+                                 }
+                            }
                         }
 
                         // TODO: Plumb requested format back up to consumer
-
-                        sp<VirtualDisplaySurface> vds =
-                                new VirtualDisplaySurface(*getBE().mHwc, hwcId, state.surface,
-                                                          bqProducer, bqConsumer,
-                                                          state.displayName);
-
-                        dispSurface = vds;
-                        producer = vds;
+                        DisplayUtils::getInstance()->initVDSInstance(*getBE().mHwc,
+                                                        hwcId, state.surface,
+                                                        dispSurface, producer,
+                                                        bqProducer, bqConsumer,
+                                                        state.displayName, state.isSecure);
                     }
                 } else {
                     ALOGE_IF(state.surface != nullptr,
@@ -2853,6 +2865,10 @@ bool SurfaceFlinger::doComposeSurfaces(const sp<const DisplayDevice>& displayDev
     } else {
         // we're not using h/w composer
         for (auto& layer : displayDevice->getVisibleLayersSortedByZ()) {
+            if(DisplayUtils::getInstance()->skipColorLayer(layer->getTypeId())) {
+                // Skipping color layer for WFD direct streaming case
+                continue;
+            }
             const Region clip(bounds.intersect(
                     displayTransform.transform(layer->visibleRegion)));
             if (!clip.isEmpty()) {
@@ -3412,7 +3428,8 @@ status_t SurfaceFlinger::createBufferLayer(const sp<Client>& client,
         break;
     }
 
-    sp<BufferLayer> layer = new BufferLayer(this, client, name, w, h, flags);
+    sp<BufferLayer> layer = DisplayUtils::getInstance()->getBufferLayerInstance(
+                            this, client, name, w, h, flags);
     status_t err = layer->setBuffers(w, h, format, flags);
     if (err == NO_ERROR) {
         *handle = layer->getHandle();

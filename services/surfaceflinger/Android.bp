@@ -124,6 +124,10 @@ filegroup {
         "SurfaceInterceptor.cpp",
         "SurfaceTracing.cpp",
         "Transform.cpp",
+        "DisplayUtils.cpp",
+        "ExSurfaceFlinger/ExSurfaceFlinger.cpp",
+        "ExSurfaceFlinger/ExVirtualDisplaySurface.cpp",
+        "ExSurfaceFlinger/ExBufferLayer.cpp"
     ],
 }
 
@@ -141,6 +145,9 @@ cc_library_shared {
     include_dirs: [
         "external/vulkan-validation-layers/libs/vkjson",
         "frameworks/native/vulkan/include",
+        "hardware/qcom/display/include",
+        "hardware/qcom/display/gralloc",
+        "hardware/qcom/display/libqdutils",
     ],
     cppflags: [
         "-fwhole-program-vtables", // requires ThinLTO
@@ -157,6 +164,10 @@ cc_binary {
     srcs: ["main_surfaceflinger.cpp"],
     whole_static_libs: [
         "libsigchain",
+    ],
+    include_dirs: [
+        "hardware/qcom/display/include",
+        "hardware/qcom/display/gralloc",
     ],
     shared_libs: [
         "android.frameworks.displayservice@1.0",
