@@ -333,6 +333,8 @@ public:
      */
     bool isSecure() const;
 
+    bool isSecureDisplay() const;
+
     /*
      * isVisible - true if this layer is visible, false otherwise
      */
