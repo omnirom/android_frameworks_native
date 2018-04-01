@@ -66,6 +66,10 @@ class SurfaceFlinger;
 class LayerDebugInfo;
 class LayerBE;
 
+namespace impl {
+class SurfaceInterceptor;
+}
+
 // ---------------------------------------------------------------------------
 
 struct CompositionInfo {
@@ -203,8 +207,8 @@ public:
         Region requestedTransparentRegion;
         android_dataspace dataSpace;
 
-        uint32_t appId;
-        uint32_t type;
+        int32_t appId;
+        int32_t type;
 
         // If non-null, a Surface this Surface's Z-order is interpreted relative to.
         wp<Layer> zOrderRelativeOf;
@@ -285,9 +289,9 @@ public:
     void deferTransactionUntil(const sp<IBinder>& barrierHandle, uint64_t frameNumber);
     void deferTransactionUntil(const sp<Layer>& barrierLayer, uint64_t frameNumber);
     bool setOverrideScalingMode(int32_t overrideScalingMode);
-    void setInfo(uint32_t type, uint32_t appId);
+    void setInfo(int32_t type, int32_t appId);
     bool reparentChildren(const sp<IBinder>& layer);
-    void reparentChildrenForDrawing(const sp<Layer>& layer);
+    void setChildrenDrawingParent(const sp<Layer>& layer);
     bool reparent(const sp<IBinder>& newParentHandle);
     bool detachChildren();
 
@@ -328,6 +332,8 @@ public:
      * screenshots or VNC servers.
      */
     bool isSecure() const;
+
+    bool isSecureDisplay() const;
 
     /*
      * isVisible - true if this layer is visible, false otherwise
@@ -595,7 +601,7 @@ protected:
 
     virtual void onFirstRef();
 
-    friend class SurfaceInterceptor;
+    friend class impl::SurfaceInterceptor;
 
     void commitTransaction(const State& stateToCommit);
 

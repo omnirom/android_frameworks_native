@@ -49,6 +49,7 @@
 #include "MonitoredProducer.h"
 #include "SurfaceFlinger.h"
 #include "clz.h"
+#include "gralloc_priv.h"
 
 #include "DisplayHardware/HWComposer.h"
 
@@ -587,8 +588,10 @@ void Layer::setGeometry(const sp<const DisplayDevice>& displayDevice, uint32_t z
     sp<Layer> parent = mDrawingParent.promote();
     if (parent.get()) {
         auto& parentState = parent->getDrawingState();
-        type = parentState.type;
-        appId = parentState.appId;
+        if (parentState.type >= 0 || parentState.appId >= 0) {
+            type = parentState.type;
+            appId = parentState.appId;
+        }
     }
 
     error = hwcLayer->setInfo(type, appId);
@@ -626,15 +629,9 @@ void Layer::setGeometry(const sp<const DisplayDevice>& displayDevice, uint32_t z
         transform = Transform(invTransform) * tr * bufferOrientation;
     }
 
-    // STOPSHIP (b/72106793): If we have less than 25% scaling, HWC usually needs to use the rotator
-    // to handle it. However, there is one guaranteed frame of jank when we switch to using the
-    // rotator. In the meantime, we force GL composition instead until we have a better fix for the
-    // HWC issue.
-    bool extremeScaling = abs(t[0][0]) <= 0.25 || abs(t[1][1]) <= 0.25;
-
     // this gives us only the "orientation" component of the transform
     const uint32_t orientation = transform.getOrientation();
-    if (orientation & Transform::ROT_INVALID || extremeScaling) {
+    if (orientation & Transform::ROT_INVALID) {
         // we can only handle simple transformation
         hwcInfo.forceClientComposition = true;
     } else {
@@ -860,6 +857,11 @@ void Layer::computeGeometry(const RenderArea& renderArea, Mesh& mesh,
 bool Layer::isSecure() const {
     const Layer::State& s(mDrawingState);
     return (s.flags & layer_state_t::eLayerSecure);
+}
+
+bool Layer::isSecureDisplay() const {
+    const sp<GraphicBuffer>& activeBuffer(mActiveBuffer);
+    return activeBuffer && (activeBuffer->getUsage() & GRALLOC_USAGE_PRIVATE_SECURE_DISPLAY);
 }
 
 void Layer::setVisibleRegion(const Region& visibleRegion) {
@@ -1313,7 +1315,7 @@ bool Layer::setOverrideScalingMode(int32_t scalingMode) {
     return true;
 }
 
-void Layer::setInfo(uint32_t type, uint32_t appId) {
+void Layer::setInfo(int32_t type, int32_t appId) {
     mCurrentState.appId = appId;
     mCurrentState.type = type;
     mCurrentState.modified = true;
@@ -1594,7 +1596,7 @@ bool Layer::reparentChildren(const sp<IBinder>& newParentHandle) {
     return true;
 }
 
-void Layer::reparentChildrenForDrawing(const sp<Layer>& newParent) {
+void Layer::setChildrenDrawingParent(const sp<Layer>& newParent) {
     for (const sp<Layer>& child : mDrawingChildren) {
         child->mDrawingParent = newParent;
     }
@@ -1919,6 +1921,8 @@ void Layer::writeToProto(LayerProto* layerInfo, LayerVector::StateSet stateSet) 
 
     layerInfo->set_queued_frames(getQueuedFrameCount());
     layerInfo->set_refresh_pending(isBufferLatched());
+    layerInfo->set_window_type(state.type);
+    layerInfo->set_app_id(state.appId);
 }
 
 // ---------------------------------------------------------------------------
