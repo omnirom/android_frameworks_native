@@ -25,7 +25,7 @@
 
 #include <gui/HdrMetadata.h>
 #include <math/mat4.h>
-#include <ui/GraphicsTypes.h>
+#include <ui/GraphicTypes.h>
 #include <ui/HdrCapabilities.h>
 
 #include <utils/Log.h>
@@ -96,7 +96,7 @@ public:
 
     uint32_t getMaxVirtualDisplayCount() const;
     Error createVirtualDisplay(uint32_t width, uint32_t height,
-            android_pixel_format_t* format, Display** outDisplay);
+            android::ui::PixelFormat* format, Display** outDisplay);
     void destroyDisplay(hwc2_display_t displayId);
 
     void onHotplug(hwc2_display_t displayId, Connection connection);
@@ -211,7 +211,7 @@ public:
     [[clang::warn_unused_result]] Error getChangedCompositionTypes(
             std::unordered_map<Layer*, Composition>* outTypes);
     [[clang::warn_unused_result]] Error getColorModes(
-            std::vector<android::ColorMode>* outModes) const;
+            std::vector<android::ui::ColorMode>* outModes) const;
 
     // Doesn't call into the HWC2 device, so no errors are possible
     std::vector<std::shared_ptr<const Config>> getConfigs() const;
@@ -234,8 +234,9 @@ public:
     [[clang::warn_unused_result]] Error setClientTarget(
             uint32_t slot, const android::sp<android::GraphicBuffer>& target,
             const android::sp<android::Fence>& acquireFence,
-            android_dataspace_t dataspace);
-    [[clang::warn_unused_result]] Error setColorMode(android::ColorMode mode);
+            android::ui::Dataspace dataspace);
+    [[clang::warn_unused_result]] Error setColorMode(
+            android::ui::ColorMode mode);
     [[clang::warn_unused_result]] Error setColorTransform(
             const android::mat4& matrix, android_color_transform_t hint);
     [[clang::warn_unused_result]] Error setOutputBuffer(
@@ -246,8 +247,8 @@ public:
     [[clang::warn_unused_result]] Error validate(uint32_t* outNumTypes,
             uint32_t* outNumRequests);
     [[clang::warn_unused_result]] Error presentOrValidate(uint32_t* outNumTypes,
-                                                 uint32_t* outNumRequests,
-                                                          android::sp<android::Fence>* outPresentFence, uint32_t* state);
+            uint32_t* outNumRequests,
+            android::sp<android::Fence>* outPresentFence, uint32_t* state);
 
     // Other Display methods
 
@@ -310,7 +311,7 @@ public:
     [[clang::warn_unused_result]] Error setColor(hwc_color_t color);
     [[clang::warn_unused_result]] Error setCompositionType(Composition type);
     [[clang::warn_unused_result]] Error setDataspace(
-            android_dataspace_t dataspace);
+            android::ui::Dataspace dataspace);
     [[clang::warn_unused_result]] Error setHdrMetadata(const android::HdrMetadata& metadata);
     [[clang::warn_unused_result]] Error setDisplayFrame(
             const android::Rect& frame);
@@ -334,7 +335,7 @@ private:
 
     hwc2_display_t mDisplayId;
     hwc2_layer_t mId;
-    android_dataspace mDataSpace = HAL_DATASPACE_UNKNOWN;
+    android::ui::Dataspace mDataSpace = android::ui::Dataspace::UNKNOWN;
     android::HdrMetadata mHdrMetadata;
     std::function<void(Layer*)> mLayerDestroyedListener;
 };

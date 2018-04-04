@@ -55,6 +55,7 @@
 #include "DisplayDevice.h"
 #include "DispSync.h"
 #include "FrameTracker.h"
+#include "LayerStats.h"
 #include "LayerVector.h"
 #include "MessageQueue.h"
 #include "SurfaceInterceptor.h"
@@ -115,7 +116,8 @@ enum {
     eTransactionNeeded        = 0x01,
     eTraversalNeeded          = 0x02,
     eDisplayTransactionNeeded = 0x04,
-    eTransactionMask          = 0x07
+    eDisplayLayerStackChanged = 0x08,
+    eTransactionMask          = 0x0f,
 };
 
 // A thin interface to abstract creating instances of Surface (gui/Surface.h) to
@@ -413,9 +415,9 @@ private:
             Vector<DisplayInfo>* configs);
     virtual int getActiveConfig(const sp<IBinder>& display);
     virtual status_t getDisplayColorModes(const sp<IBinder>& display,
-            Vector<ColorMode>* configs);
-    virtual ColorMode getActiveColorMode(const sp<IBinder>& display);
-    virtual status_t setActiveColorMode(const sp<IBinder>& display, ColorMode colorMode);
+            Vector<ui::ColorMode>* configs);
+    virtual ui::ColorMode getActiveColorMode(const sp<IBinder>& display);
+    virtual status_t setActiveColorMode(const sp<IBinder>& display, ui::ColorMode colorMode);
     virtual void setPowerMode(const sp<IBinder>& display, int mode);
     virtual status_t setActiveConfig(const sp<IBinder>& display, int id);
     virtual status_t clearAnimationFrameStats();
@@ -471,7 +473,7 @@ private:
                               bool stateLockHeld);
 
     // Called on the main thread in response to setActiveColorMode()
-    void setActiveColorModeInternal(const sp<DisplayDevice>& hw, ColorMode colorMode);
+    void setActiveColorModeInternal(const sp<DisplayDevice>& hw, ui::ColorMode colorMode);
 
     // Returns whether the transaction actually modified any state
     bool handleMessageTransaction();
@@ -644,8 +646,8 @@ private:
 
     // Given a dataSpace, returns the appropriate color_mode to use
     // to display that dataSpace.
-    ColorMode pickColorMode(android_dataspace dataSpace) const;
-    android_dataspace bestTargetDataSpace(android_dataspace a, android_dataspace b,
+    ui::ColorMode pickColorMode(ui::Dataspace dataSpace) const;
+    ui::Dataspace bestTargetDataSpace(ui::Dataspace a, ui::Dataspace b,
             bool hasHdr) const;
 
     mat4 computeSaturationMatrix() const;
@@ -654,6 +656,7 @@ private:
     void doComposition();
     void doDebugFlashRegions();
     void doTracing(const char* where);
+    void logLayerStats();
     void doDisplayComposition(const sp<const DisplayDevice>& displayDevice, const Region& dirtyRegion);
 
     // compose surfaces for display hw. this fails if using GL and the surface
@@ -720,6 +723,7 @@ private:
     void dumpBufferingStats(String8& result) const;
     void dumpWideColorInfo(String8& result) const;
     LayersProto dumpProtoInfo(LayerVector::StateSet stateSet) const;
+    LayersProto dumpVisibleLayersProtoInfo(int32_t hwcId) const;
 
     bool isLayerTripleBufferingDisabled() const {
         return this->mLayerTripleBufferingDisabled;
@@ -806,6 +810,7 @@ private:
     std::unique_ptr<SurfaceInterceptor> mInterceptor =
             std::make_unique<impl::SurfaceInterceptor>(this);
     SurfaceTracing mTracing;
+    LayerStats mLayerStats;
     bool mUseHwcVirtualDisplays = false;
 
     // Restrict layers to use two buffers in their bufferqueues.
