@@ -1787,6 +1787,8 @@ void SurfaceFlinger::postComposition(nsecs_t refreshStartTime)
         mAnimFrameTracker.advanceFrame();
     }
 
+    dumpDrawCycle(false);
+
     if (getBE().mHwc->isConnected(HWC_DISPLAY_PRIMARY) &&
             hw->getPowerMode() == HWC_POWER_MODE_OFF) {
         return;
@@ -2053,6 +2055,8 @@ void SurfaceFlinger::setUpHWComposer() {
     }
 
     mPreviousColorMatrix = colorMatrix;
+
+    dumpDrawCycle(true);
 
     for (size_t displayId = 0; displayId < mDisplays.size(); ++displayId) {
         auto& displayDevice = mDisplays[displayId];

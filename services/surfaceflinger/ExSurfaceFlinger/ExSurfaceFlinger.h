@@ -58,6 +58,19 @@ protected:
     static bool AllowHDRFallBack() { return sAllowHDRFallBack; }
     Mutex mExtAnimationLock;
     Condition mExtAnimationCond;
+    static bool regionDump;
+    virtual status_t doDump(int fd, const Vector<String16>& args, bool asProto);
+    virtual void dumpDrawCycle(bool prePrepare);
+
+    struct {
+      Mutex lock;
+      const char *name = "/data/misc/display/dumpsys.txt";
+      bool running = false;
+      bool noLimit = false;
+      bool replaceAfterCommit = false;
+      long int position = 0;
+    } mFileDump;
+
 };
 
 }; //namespace android
