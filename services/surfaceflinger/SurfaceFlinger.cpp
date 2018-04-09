@@ -910,8 +910,10 @@ void SurfaceFlinger::setActiveConfigInternal(const sp<DisplayDevice>& hw, int mo
         return;
     }
 
-    hw->setActiveConfig(mode);
-    getHwComposer().setActiveConfig(type, mode);
+    status_t status = getHwComposer().setActiveConfig(type, mode);
+    if (status == NO_ERROR) {
+        hw->setActiveConfig(mode);
+    }
 }
 
 status_t SurfaceFlinger::setActiveConfig(const sp<IBinder>& display, int mode) {
@@ -2275,6 +2277,17 @@ sp<DisplayDevice> SurfaceFlinger::setupNewDisplayDeviceInternal(
     hw->setLayerStack(state.layerStack);
     hw->setProjection(state.orientation, state.viewport, state.frame);
     hw->setDisplayName(state.displayName);
+
+    // When a new display device is added, update the active
+    // config by querying HWC otherwise the default config
+    // (config 0) will be used.
+    if (hwcId >= DisplayDevice::DISPLAY_PRIMARY &&
+        hwcId < DisplayDevice::NUM_BUILTIN_DISPLAY_TYPES) {
+        int activeConfig = getBE().mHwc->getActiveConfig(hwcId)->getId();
+        if (activeConfig >= 0) {
+            hw->setActiveConfig(activeConfig);
+        }
+    }
 
     return hw;
 }
