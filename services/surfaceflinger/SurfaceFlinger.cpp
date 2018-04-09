@@ -4713,6 +4713,7 @@ status_t SurfaceFlinger::captureLayers(const sp<IBinder>& layerHandleBinder,
         }
         bool getWideColorSupport() const override { return false; }
         ColorMode getActiveColorMode() const override { return ColorMode::NATIVE; }
+        std::string getType() const override { return "LayerRenderArea"; }
 
     private:
         const sp<Layer> mLayer;
@@ -4894,9 +4895,28 @@ void SurfaceFlinger::renderScreenImplLocked(const RenderArea& renderArea,
     // make sure to clear all GL error flags
     engine.checkErrors();
 
+    uint32_t rotation = renderArea.getRotationFlags();
+    DisplayRenderArea* displayRenderArea = NULL;
+
+    if(renderArea.getType() == "DisplayRenderArea")
+    displayRenderArea = static_cast<DisplayRenderArea*> (const_cast<RenderArea *> (&renderArea));
+
+    if (displayRenderArea) {
+        int32_t hw_h = displayRenderArea->getHeight();
+        if (DisplayDevice::DISPLAY_PRIMARY == displayRenderArea->getDisplayType()) {
+            rotation = (Transform::orientation_flags)
+                       (rotation ^ displayRenderArea->getPanelMountFlip());
+            if (displayRenderArea->getPanelMountFlip() == Transform::orientation_flags::ROT_180) {
+                sourceCrop.top = hw_h - sourceCrop.top;
+                sourceCrop.bottom = hw_h - sourceCrop.bottom;
+                yswap = false;
+            }
+        }
+    }
+
     // set-up our viewport
     engine.setViewportAndProjection(reqWidth, reqHeight, sourceCrop, raHeight, yswap,
-                                    renderArea.getRotationFlags());
+                                    (Transform::orientation_flags)rotation);
     engine.disableTexturing();
 
     // redraw the screen entirely...
