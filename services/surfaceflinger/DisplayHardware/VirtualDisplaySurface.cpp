@@ -315,6 +315,13 @@ status_t VirtualDisplaySurface::dequeueBuffer(Source source,
         PixelFormat format, uint64_t usage, int* sslot, sp<Fence>* fence) {
     LOG_FATAL_IF(mDisplayId < 0, "mDisplayId=%d but should not be < 0.", mDisplayId);
 
+    // Exclude video encoder usage flag from scratch buffer usage flags.
+    if (source == SOURCE_SCRATCH) {
+        usage &= ~(GRALLOC_USAGE_HW_VIDEO_ENCODER);
+        VDS_LOGV("dequeueBuffer(%s): updated scratch buffer usage flags=%#" PRIx64,
+                dbgSourceStr(source), usage);
+    }
+
     status_t result =
             mSource[source]->dequeueBuffer(sslot, fence, mSinkBufferWidth, mSinkBufferHeight,
                                            format, usage, nullptr, nullptr);
