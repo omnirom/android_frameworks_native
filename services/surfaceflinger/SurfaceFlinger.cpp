@@ -2035,9 +2035,11 @@ void SurfaceFlinger::postFramebuffer()
             // The layer buffer from the previous frame (if any) is released
             // by HWC only when the release fence from this frame (if any) is
             // signaled.  Always get the release fence from HWC first.
-            auto hwcLayer = layer->getHwcLayer(hwcId);
-            sp<Fence> releaseFence = getBE().mHwc->getLayerReleaseFence(hwcId, hwcLayer);
-
+            sp<Fence> releaseFence = Fence::NO_FENCE;
+            if (hwcId >= 0) {
+                auto hwcLayer = layer->getHwcLayer(hwcId);
+                releaseFence = getBE().mHwc->getLayerReleaseFence(hwcId, hwcLayer);
+            }
             // If the layer was client composited in the previous frame, we
             // need to merge with the previous client target acquire fence.
             // Since we do not track that, always merge with the current
