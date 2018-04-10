@@ -1989,8 +1989,9 @@ void SurfaceFlinger::setUpHWComposer() {
     if (CC_UNLIKELY(mGeometryInvalid)) {
         mGeometryInvalid = false;
         for (size_t dpy=0 ; dpy<mDisplays.size() ; dpy++) {
-            sp<const DisplayDevice> displayDevice(mDisplays[dpy]);
+            sp<DisplayDevice> displayDevice(mDisplays[dpy]);
             const auto hwcId = displayDevice->getHwcDisplayId();
+            displayDevice->setColorMatrix(!isIdentity);
             if (hwcId >= 0) {
                 const Vector<sp<Layer>>& currentLayers(
                         displayDevice->getVisibleLayersSortedByZ());
@@ -2007,6 +2008,7 @@ void SurfaceFlinger::setUpHWComposer() {
                     layer->setGeometry(displayDevice, i);
                     if (mDebugDisableHWC || mDebugRegion || (hwcId !=0 && !isIdentity)) {
                         layer->forceClientComposition(hwcId);
+                        layer->setColorInversionData(displayDevice);
                     }
                 }
             }

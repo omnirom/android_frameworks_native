@@ -105,7 +105,8 @@ DisplayDevice::DisplayDevice(
       mHasHdr10(false),
       mHasHLG(false),
       mHasDolbyVision(false),
-      mSupportedPerFrameMetadata(supportedPerFrameMetadata)
+      mSupportedPerFrameMetadata(supportedPerFrameMetadata),
+      mDisplayHasColorMatrix(false)
 {
     // clang-format on
     for (Hdr hdrType : hdrCapabilities.getSupportedHdrTypes()) {
