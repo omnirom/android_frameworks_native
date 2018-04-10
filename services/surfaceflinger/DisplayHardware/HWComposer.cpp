@@ -179,7 +179,7 @@ bool HWComposer::onVsync(hwc2_display_t displayId, int64_t timestamp,
 }
 
 status_t HWComposer::allocateVirtualDisplay(uint32_t width, uint32_t height,
-        android_pixel_format_t* format, int32_t *outId) {
+        ui::PixelFormat* format, int32_t *outId) {
     if (mRemainingHwcVirtualDisplays == 0) {
         ALOGE("allocateVirtualDisplay: No remaining virtual displays");
         return NO_MEMORY;
@@ -311,8 +311,8 @@ std::shared_ptr<const HWC2::Display::Config>
     return config;
 }
 
-std::vector<ColorMode> HWComposer::getColorModes(int32_t displayId) const {
-    std::vector<ColorMode> modes;
+std::vector<ui::ColorMode> HWComposer::getColorModes(int32_t displayId) const {
+    std::vector<ui::ColorMode> modes;
 
     if (!isValidDisplay(displayId)) {
         ALOGE("getColorModes: Attempted to access invalid display %d",
@@ -324,13 +324,13 @@ std::vector<ColorMode> HWComposer::getColorModes(int32_t displayId) const {
     if (error != HWC2::Error::None) {
         ALOGE("getColorModes failed for display %d: %s (%d)", displayId,
                 to_string(error).c_str(), static_cast<int32_t>(error));
-        return std::vector<ColorMode>();
+        return std::vector<ui::ColorMode>();
     }
 
     return modes;
 }
 
-status_t HWComposer::setActiveColorMode(int32_t displayId, ColorMode mode) {
+status_t HWComposer::setActiveColorMode(int32_t displayId, ui::ColorMode mode) {
     if (!isValidDisplay(displayId)) {
         ALOGE("setActiveColorMode: Display %d is not valid", displayId);
         return BAD_INDEX;
@@ -387,7 +387,7 @@ void HWComposer::setVsyncEnabled(int32_t displayId, HWC2::Vsync enabled) {
 
 status_t HWComposer::setClientTarget(int32_t displayId, uint32_t slot,
         const sp<Fence>& acquireFence, const sp<GraphicBuffer>& target,
-        android_dataspace_t dataspace) {
+        ui::Dataspace dataspace) {
     if (!isValidDisplay(displayId)) {
         return BAD_INDEX;
     }

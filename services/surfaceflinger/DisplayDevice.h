@@ -21,6 +21,8 @@
 
 #include <stdlib.h>
 
+#include <math/mat4.h>
+
 #include <ui/Region.h>
 
 #include <binder/IBinder.h>
@@ -31,7 +33,7 @@
 
 #include <gui/ISurfaceComposer.h>
 #include <hardware/hwcomposer_defs.h>
-#include <ui/GraphicsTypes.h>
+#include <ui/GraphicTypes.h>
 #include "RenderArea.h"
 #include "RenderEngine/Surface.h"
 
@@ -128,7 +130,7 @@ public:
     bool                    isPrimary() const { return mType == DISPLAY_PRIMARY; }
     int32_t                 getHwcDisplayId() const { return mHwcDisplayId; }
     const wp<IBinder>&      getDisplayToken() const { return mDisplayToken; }
-
+    uint32_t                getPanelMountFlip() const { return mPanelMountFlip; }
     // We pass in mustRecompose so we can keep VirtualDisplaySurface's state
     // machine happy without actually queueing a buffer if nothing has changed
     status_t beginFrame(bool mustRecompose) const;
@@ -161,9 +163,11 @@ public:
     void setPowerMode(int mode);
     bool isDisplayOn() const;
 
-    ColorMode getActiveColorMode() const;
-    void setActiveColorMode(ColorMode mode);
-    void setCompositionDataSpace(android_dataspace dataspace);
+    ui::ColorMode getActiveColorMode() const;
+    void setActiveColorMode(ui::ColorMode mode);
+    android_color_transform_t getColorTransform() const;
+    void setColorTransform(const mat4& transform);
+    void setCompositionDataSpace(ui::Dataspace dataspace);
 
     /* ------------------------------------------------------------------------
      * Display active config management.
@@ -213,7 +217,7 @@ private:
     /*
      * Transaction state
      */
-    static status_t orientationToTransfrom(int orientation,
+    status_t orientationToTransfrom(int orientation,
             int w, int h, Transform* tr);
 
     // The identifier of the active layer stack for this display. Several displays
@@ -235,8 +239,12 @@ private:
     int mPowerMode;
     // Current active config
     int mActiveConfig;
+    // Panel's mount flip, H, V or 180 (HV)
+    uint32_t mPanelMountFlip;
     // current active color mode
-    ColorMode mActiveColorMode;
+    ui::ColorMode mActiveColorMode;
+    // Current color transform
+    android_color_transform_t mColorTransform;
 
     // Need to know if display is wide-color capable or not.
     // Initialized by SurfaceFlinger when the DisplayDevice is created.
@@ -285,9 +293,12 @@ public:
     bool needsFiltering() const override { return mDevice->needsFiltering(); }
     Rect getSourceCrop() const override { return mSourceCrop; }
     bool getWideColorSupport() const override { return mDevice->getWideColorSupport(); }
-    ColorMode getActiveColorMode() const override {
+    ui::ColorMode getActiveColorMode() const override {
         return mDevice->getActiveColorMode();
     }
+    int32_t getDisplayType() { return mDevice->getDisplayType(); }
+    uint32_t getPanelMountFlip() { return mDevice->getPanelMountFlip(); }
+    std::string getType() const override { return "DisplayRenderArea"; }
 
 private:
     const sp<const DisplayDevice> mDevice;

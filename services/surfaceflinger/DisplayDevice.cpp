@@ -49,13 +49,12 @@
 #include <android/hardware/configstore/1.0/ISurfaceFlingerConfigs.h>
 #include <configstore/Utils.h>
 
-// ----------------------------------------------------------------------------
-using namespace android;
-// ----------------------------------------------------------------------------
+namespace android {
 
 // retrieve triple buffer setting from configstore
 using namespace android::hardware::configstore;
 using namespace android::hardware::configstore::V1_0;
+using android::ui::ColorMode;
 
 /*
  * Initialize the display to the specified values.
@@ -98,10 +97,17 @@ DisplayDevice::DisplayDevice(
       mPowerMode(initialPowerMode),
       mActiveConfig(0),
       mActiveColorMode(ColorMode::NATIVE),
+      mColorTransform(HAL_COLOR_TRANSFORM_IDENTITY),
       mDisplayHasWideColor(supportWideColor),
       mDisplayHasHdr(supportHdr)
 {
     // clang-format on
+    char property[PROPERTY_VALUE_MAX];
+
+    mPanelMountFlip = 0;
+    // 1: H-Flip, 2: V-Flip, 3: 180 (HV Flip)
+    property_get("vendor.display.panel_mountflip", property, "0");
+    mPanelMountFlip = atoi(property);
 
     // initialize the display orientation transform.
     setProjection(DisplayState::eOrientationDefault, mViewport, mFrame);
@@ -268,9 +274,19 @@ ColorMode DisplayDevice::getActiveColorMode() const {
     return mActiveColorMode;
 }
 
-void DisplayDevice::setCompositionDataSpace(android_dataspace dataspace) {
+void DisplayDevice::setColorTransform(const mat4& transform) {
+    const bool isIdentity = (transform == mat4());
+    mColorTransform =
+            isIdentity ? HAL_COLOR_TRANSFORM_IDENTITY : HAL_COLOR_TRANSFORM_ARBITRARY_MATRIX;
+}
+
+android_color_transform_t DisplayDevice::getColorTransform() const {
+    return mColorTransform;
+}
+
+void DisplayDevice::setCompositionDataSpace(ui::Dataspace dataspace) {
     ANativeWindow* const window = mNativeWindow.get();
-    native_window_set_buffers_data_space(window, dataspace);
+    native_window_set_buffers_data_space(window, static_cast<android_dataspace>(dataspace));
 }
 
 // ----------------------------------------------------------------------------
@@ -321,6 +337,11 @@ status_t DisplayDevice::orientationToTransfrom(
     default:
         return BAD_VALUE;
     }
+
+    if (DISPLAY_PRIMARY == mHwcDisplayId) {
+        flags = flags ^ getPanelMountFlip();
+    }
+
     tr->set(flags, w, h);
     return NO_ERROR;
 }
@@ -453,8 +474,11 @@ void DisplayDevice::dump(String8& result) const {
                         mScissor.top, mScissor.right, mScissor.bottom, tr[0][0], tr[1][0], tr[2][0],
                         tr[0][1], tr[1][1], tr[2][1], tr[0][2], tr[1][2], tr[2][2]);
     auto const surface = static_cast<Surface*>(window);
-    android_dataspace dataspace = surface->getBuffersDataSpace();
-    result.appendFormat("   dataspace: %s (%d)\n", dataspaceDetails(dataspace).c_str(), dataspace);
+    ui::Dataspace dataspace = surface->getBuffersDataSpace();
+    result.appendFormat("   wideColor=%d, hdr=%d, colorMode=%s, dataspace: %s (%d)\n",
+                        mDisplayHasWideColor, mDisplayHasHdr,
+                        decodeColorMode(mActiveColorMode).c_str(),
+                        dataspaceDetails(static_cast<android_dataspace>(dataspace)).c_str(), dataspace);
 
     String8 surfaceDump;
     mDisplaySurface->dumpAsString(surfaceDump);
@@ -474,3 +498,5 @@ DisplayDeviceState::DisplayDeviceState(DisplayDevice::DisplayType type, bool isS
     viewport.makeInvalid();
     frame.makeInvalid();
 }
+
+}  // namespace android

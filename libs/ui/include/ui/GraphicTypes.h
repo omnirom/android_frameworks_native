@@ -19,8 +19,14 @@
 #include <android/hardware/graphics/common/1.1/types.h>
 #include <system/graphics.h>
 
+// android::ui::* in this header file will alias different types as
+// the HIDL interface is updated.
 namespace android {
+namespace ui {
 
 using android::hardware::graphics::common::V1_0::ColorMode;
+using android::hardware::graphics::common::V1_1::Dataspace;
+using android::hardware::graphics::common::V1_1::PixelFormat;
 
+}  // namespace ui
 }  // namespace android
