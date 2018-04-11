@@ -33,6 +33,7 @@
 #include <utils/RefBase.h>
 #include <utils/SortedVector.h>
 #include <utils/threads.h>
+#include <utils/Trace.h>
 
 #include <ui/FenceTime.h>
 #include <ui/PixelFormat.h>
@@ -54,6 +55,7 @@
 #include "Barrier.h"
 #include "DisplayDevice.h"
 #include "DispSync.h"
+#include "EventThread.h"
 #include "FrameTracker.h"
 #include "LayerStats.h"
 #include "LayerVector.h"
@@ -61,6 +63,7 @@
 #include "SurfaceInterceptor.h"
 #include "SurfaceTracing.h"
 #include "StartPropertySetThread.h"
+#include "VSyncModulator.h"
 
 #include "DisplayHardware/HWC2.h"
 #include "DisplayHardware/HWComposer.h"
@@ -118,6 +121,12 @@ enum {
     eDisplayTransactionNeeded = 0x04,
     eDisplayLayerStackChanged = 0x08,
     eTransactionMask          = 0x0f,
+};
+
+enum class DisplayColorSetting : int32_t {
+    MANAGED = 0,
+    UNMANAGED = 1,
+    ENHANCED = 2,
 };
 
 // A thin interface to abstract creating instances of Surface (gui/Surface.h) to
@@ -473,7 +482,9 @@ private:
                               bool stateLockHeld);
 
     // Called on the main thread in response to setActiveColorMode()
-    void setActiveColorModeInternal(const sp<DisplayDevice>& hw, ui::ColorMode colorMode);
+    void setActiveColorModeInternal(const sp<DisplayDevice>& hw,
+                                    ui::ColorMode colorMode,
+                                    ui::Dataspace dataSpace);
 
     // Returns whether the transaction actually modified any state
     bool handleMessageTransaction();
@@ -501,6 +512,7 @@ private:
     uint32_t peekTransactionFlags();
     // Can only be called from the main thread or with mStateLock held
     uint32_t setTransactionFlags(uint32_t flags);
+    uint32_t setTransactionFlags(uint32_t flags, VSyncModulator::TransactionStart transactionStart);
     void commitTransaction();
     bool containsAnyInvalidClientState(const Vector<ComposerState>& states);
     uint32_t setClientStateLocked(const ComposerState& composerState);
@@ -646,9 +658,10 @@ private:
 
     // Given a dataSpace, returns the appropriate color_mode to use
     // to display that dataSpace.
-    ui::ColorMode pickColorMode(ui::Dataspace dataSpace) const;
-    ui::Dataspace bestTargetDataSpace(ui::Dataspace a, ui::Dataspace b,
-            bool hasHdr) const;
+    ui::Dataspace getBestDataspace(const sp<const DisplayDevice>& displayDevice) const;
+    void pickColorMode(const sp<DisplayDevice>& displayDevice,
+                       ui::ColorMode* outMode,
+                       ui::Dataspace* outDataSpace) const;
 
     mat4 computeSaturationMatrix() const;
 
@@ -774,6 +787,8 @@ private:
     std::unique_ptr<EventControlThread> mEventControlThread;
     sp<IBinder> mBuiltinDisplays[DisplayDevice::NUM_BUILTIN_DISPLAY_TYPES];
 
+    VSyncModulator mVsyncModulator;
+
     // Can only accessed from the main thread, these members
     // don't need synchronization
     State mDrawingState{LayerVector::StateSet::Drawing};
@@ -849,7 +864,6 @@ private:
 
     size_t mNumLayers;
 
-
     // Verify that transaction is being called by an approved process:
     // either AID_GRAPHICS or AID_SYSTEM.
     status_t CheckTransactCodeCredentials(uint32_t code);
@@ -859,8 +873,12 @@ private:
     static bool useVrFlinger;
     std::thread::id mMainThreadId;
 
-    float mSaturation = 1.0f;
-    bool mForceNativeColorMode = false;
+    DisplayColorSetting mDisplayColorSetting = DisplayColorSetting::MANAGED;
+    // Applied on sRGB layers when the render intent is non-colorimetric.
+    mat4 mLegacySrgbSaturationMatrix;
+    // Applied globally.
+    float mGlobalSaturationFactor = 1.0f;
+    bool mBuiltinDisplaySupportsEnhance = false;
 
     using CreateBufferQueueFunction =
             std::function<void(sp<IGraphicBufferProducer>* /* outProducer */,
