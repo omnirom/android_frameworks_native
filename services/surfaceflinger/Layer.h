@@ -366,7 +366,8 @@ public:
     bool isPendingRemoval() const { return mPendingRemoval; }
 
     void writeToProto(LayerProto* layerInfo,
-                      LayerVector::StateSet stateSet = LayerVector::StateSet::Drawing);
+                      LayerVector::StateSet stateSet = LayerVector::StateSet::Drawing,
+                      bool enableRegionDump = true);
 
     void writeToProto(LayerProto* layerInfo, int32_t hwcId);
 

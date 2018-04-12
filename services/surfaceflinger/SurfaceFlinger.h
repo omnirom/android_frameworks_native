@@ -719,7 +719,8 @@ private:
     void listLayersLocked(const Vector<String16>& args, size_t& index, String8& result) const;
     void dumpStatsLocked(const Vector<String16>& args, size_t& index, String8& result) const;
     void clearStatsLocked(const Vector<String16>& args, size_t& index, String8& result);
-    void dumpAllLocked(const Vector<String16>& args, size_t& index, String8& result) const;
+    void dumpAllLocked(const Vector<String16>& args, size_t& index, String8& result,
+                                                                 bool enableRegionDump) const;
     bool startDdmConnection();
     void appendSfConfigString(String8& result) const;
     void checkScreenshot(size_t w, size_t s, size_t h, void const* vaddr,
@@ -735,7 +736,7 @@ private:
             std::vector<OccupancyTracker::Segment>&& history);
     void dumpBufferingStats(String8& result) const;
     void dumpWideColorInfo(String8& result) const;
-    LayersProto dumpProtoInfo(LayerVector::StateSet stateSet) const;
+    LayersProto dumpProtoInfo(LayerVector::StateSet stateSet, bool enableRegionDump = true) const;
     LayersProto dumpVisibleLayersProtoInfo(int32_t hwcId) const;
 
     bool isLayerTripleBufferingDisabled() const {

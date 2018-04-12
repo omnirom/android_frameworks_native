@@ -3867,6 +3867,7 @@ status_t SurfaceFlinger::doDump(int fd, const Vector<String16>& args, bool asPro
         }
 
         bool dumpAll = true;
+        bool enableRegionDump = false;
         size_t index = 0;
         size_t numArgs = args.size();
 
@@ -3952,10 +3953,16 @@ status_t SurfaceFlinger::doDump(int fd, const Vector<String16>& args, bool asPro
                 mLayerStats.dump(result);
                 dumpAll = false;
             }
+
+            if ((index < numArgs) &&
+                (args[index] == String16("--region-dump"))) {
+                index++;
+                enableRegionDump = true;
+            }
         }
 
         if (dumpAll) {
-            dumpAllLocked(args, index, result);
+            dumpAllLocked(args, index, result, enableRegionDump);
         }
 
         if (locked) {
@@ -4147,13 +4154,14 @@ void SurfaceFlinger::dumpWideColorInfo(String8& result) const {
     result.append("\n");
 }
 
-LayersProto SurfaceFlinger::dumpProtoInfo(LayerVector::StateSet stateSet) const {
+LayersProto SurfaceFlinger::dumpProtoInfo(LayerVector::StateSet stateSet,
+                                          bool enableRegionDump) const {
     LayersProto layersProto;
     const bool useDrawing = stateSet == LayerVector::StateSet::Drawing;
     const State& state = useDrawing ? mDrawingState : mCurrentState;
     state.traverseInZOrder([&](Layer* layer) {
         LayerProto* layerProto = layersProto.add_layers();
-        layer->writeToProto(layerProto, stateSet);
+        layer->writeToProto(layerProto, stateSet, enableRegionDump);
     });
 
     return layersProto;
@@ -4183,7 +4191,7 @@ LayersProto SurfaceFlinger::dumpVisibleLayersProtoInfo(int32_t hwcId) const {
 }
 
 void SurfaceFlinger::dumpAllLocked(const Vector<String16>& args, size_t& index,
-        String8& result) const
+        String8& result, bool enableRegionDump) const
 {
     bool colorize = false;
     if (index < args.size()
@@ -4249,7 +4257,7 @@ void SurfaceFlinger::dumpAllLocked(const Vector<String16>& args, size_t& index,
                         mGraphicBufferProducerList.size(), mMaxGraphicBufferProducerListSize);
     colorizer.reset(result);
 
-    LayersProto layersProto = dumpProtoInfo(LayerVector::StateSet::Current);
+    LayersProto layersProto = dumpProtoInfo(LayerVector::StateSet::Current, enableRegionDump);
     auto layerTree = LayerProtoParser::generateLayerTree(layersProto);
     result.append(LayerProtoParser::layersToString(std::move(layerTree)).c_str());
     result.append("\n");
