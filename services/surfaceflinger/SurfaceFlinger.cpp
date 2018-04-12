@@ -1980,6 +1980,8 @@ void SurfaceFlinger::setUpHWComposer() {
         }
     }
 
+    mat4 colorMatrix = mColorMatrix * computeSaturationMatrix() * mDaltonizer();
+    bool isIdentity = (colorMatrix == mat4());
     // build the h/w work list
     if (CC_UNLIKELY(mGeometryInvalid)) {
         mGeometryInvalid = false;
@@ -1999,7 +2001,7 @@ void SurfaceFlinger::setUpHWComposer() {
                     }
 
                     layer->setGeometry(displayDevice, i);
-                    if (mDebugDisableHWC || mDebugRegion) {
+                    if (mDebugDisableHWC || mDebugRegion || (hwcId !=0 && !isIdentity)) {
                         layer->forceClientComposition(hwcId);
                     }
                 }
@@ -2007,8 +2009,6 @@ void SurfaceFlinger::setUpHWComposer() {
         }
     }
 
-
-    mat4 colorMatrix = mColorMatrix * computeSaturationMatrix() * mDaltonizer();
 
     // Set the per-frame data
     for (size_t displayId = 0; displayId < mDisplays.size(); ++displayId) {
@@ -2925,8 +2925,8 @@ bool SurfaceFlinger::doComposeSurfaces(const sp<const DisplayDevice>& displayDev
     const auto hwcId = displayDevice->getHwcDisplayId();
     const bool hasClientComposition = getBE().mHwc->hasClientComposition(hwcId);
     const bool hasDeviceComposition = getBE().mHwc->hasDeviceComposition(hwcId);
-    const bool skipClientColorTransform = getBE().mHwc->hasCapability(
-        HWC2::Capability::SkipClientColorTransform);
+    const bool skipClientColorTransform = (getBE().mHwc->hasCapability(
+        HWC2::Capability::SkipClientColorTransform) && (hwcId == 0));
     ATRACE_INT("hasClientComposition", hasClientComposition);
 
     mat4 oldColorMatrix;
