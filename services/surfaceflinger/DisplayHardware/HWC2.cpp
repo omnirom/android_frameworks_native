@@ -133,6 +133,7 @@ Error Device::createVirtualDisplay(uint32_t width, uint32_t height,
     *outDisplay = display.get();
     *format = static_cast<android_pixel_format_t>(intFormat);
     mDisplays.emplace(displayId, std::move(display));
+    mComposer->setClientTargetSlotCount((*outDisplay)->getId());
     ALOGI("Created virtual display");
     return Error::None;
 }
