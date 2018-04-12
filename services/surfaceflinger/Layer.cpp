@@ -1649,6 +1649,21 @@ bool Layer::detachChildren() {
     return true;
 }
 
+// Dataspace::UNKNOWN, Dataspace::SRGB, Dataspace::SRGB_LINEAR,
+// Dataspace::V0_SRGB and Dataspace::V0_SRGB_LINEAR are considered legacy
+// SRGB data space for now.
+// Note that Dataspace::V0_SRGB and Dataspace::V0_SRGB_LINEAR are not legacy
+// data space, however since framework doesn't distinguish them out of legacy
+// SRGB, we have to treat them as the same for now.
+bool Layer::isLegacySrgbDataSpace() const {
+    // TODO(lpy) b/77652630, need to figure out when UNKNOWN can be treated as SRGB.
+    return mDrawingState.dataSpace == ui::Dataspace::UNKNOWN ||
+        mDrawingState.dataSpace == ui::Dataspace::SRGB ||
+        mDrawingState.dataSpace == ui::Dataspace::SRGB_LINEAR ||
+        mDrawingState.dataSpace == ui::Dataspace::V0_SRGB ||
+        mDrawingState.dataSpace == ui::Dataspace::V0_SRGB_LINEAR;
+}
+
 void Layer::setParent(const sp<Layer>& layer) {
     mCurrentParent = layer;
 }
@@ -1853,7 +1868,8 @@ void Layer::commitChildList() {
     mDrawingParent = mCurrentParent;
 }
 
-void Layer::writeToProto(LayerProto* layerInfo, LayerVector::StateSet stateSet) {
+void Layer::writeToProto(LayerProto* layerInfo, LayerVector::StateSet stateSet,
+                         bool enableRegionDump) {
     const bool useDrawing = stateSet == LayerVector::StateSet::Drawing;
     const LayerVector& children = useDrawing ? mDrawingChildren : mCurrentChildren;
     const State& state = useDrawing ? mDrawingState : mCurrentState;
@@ -1876,10 +1892,12 @@ void Layer::writeToProto(LayerProto* layerInfo, LayerVector::StateSet stateSet) 
         }
     }
 
-    LayerProtoHelper::writeToProto(state.activeTransparentRegion,
-                                   layerInfo->mutable_transparent_region());
-    LayerProtoHelper::writeToProto(visibleRegion, layerInfo->mutable_visible_region());
-    LayerProtoHelper::writeToProto(surfaceDamageRegion, layerInfo->mutable_damage_region());
+    if (enableRegionDump) {
+        LayerProtoHelper::writeToProto(state.activeTransparentRegion,
+                                       layerInfo->mutable_transparent_region());
+        LayerProtoHelper::writeToProto(visibleRegion, layerInfo->mutable_visible_region());
+        LayerProtoHelper::writeToProto(surfaceDamageRegion, layerInfo->mutable_damage_region());
+    }
 
     layerInfo->set_layer_stack(getLayerStack());
     layerInfo->set_z(state.z);
