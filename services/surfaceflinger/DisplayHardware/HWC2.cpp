@@ -135,6 +135,7 @@ Error Device::createVirtualDisplay(uint32_t width, uint32_t height,
     display->setConnected(true);
     *outDisplay = display.get();
     mDisplays.emplace(displayId, std::move(display));
+    mComposer->setClientTargetSlotCount((*outDisplay)->getId());
     ALOGI("Created virtual display");
     return Error::None;
 }
