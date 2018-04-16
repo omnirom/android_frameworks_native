@@ -463,6 +463,9 @@ private:
     virtual void handleDPTransactionIfNeeded(
                      const Vector<DisplayState>& /*displays*/) { }
 
+    virtual void setDisplayAnimating(const sp<const DisplayDevice>& /*hw*/,
+                                     const int32_t& /*dpy*/) { }
+
     /* ------------------------------------------------------------------------
      * Message handling
      */

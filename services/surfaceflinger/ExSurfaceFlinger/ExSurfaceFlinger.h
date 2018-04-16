@@ -44,12 +44,15 @@ protected:
     friend class Layer;
     virtual void handleDPTransactionIfNeeded(
                      const Vector<DisplayState>& displays);
+    virtual void setDisplayAnimating(const sp<const DisplayDevice>& hw,
+                                     const int32_t& dpy);
     virtual bool IsHWCDisabled() { return mDebugDisableHWC; }
     virtual ~ExSurfaceFlinger();
 
     bool mDebugLogs;
     bool isDebug() { return mDebugLogs; }
     bool mDisableExtAnimation;
+    bool mAnimating = false;
 
     static bool sAllowHDRFallBack;
     static bool AllowHDRFallBack() { return sAllowHDRFallBack; }
@@ -59,4 +62,4 @@ protected:
 
 }; //namespace android
 
-#endif //ANDROID_EX_SURFACE_FLINGER_H
+#endif // ANDROID_EX_SURFACE_FLINGER_H
