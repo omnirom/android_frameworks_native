@@ -1980,6 +1980,8 @@ void SurfaceFlinger::setUpHWComposer() {
         }
     }
 
+    mat4 colorMatrix = mColorMatrix * computeSaturationMatrix() * mDaltonizer();
+    bool isIdentity = (colorMatrix == mat4());
     // build the h/w work list
     if (CC_UNLIKELY(mGeometryInvalid)) {
         mGeometryInvalid = false;
@@ -1989,6 +1991,7 @@ void SurfaceFlinger::setUpHWComposer() {
             if (hwcId >= 0) {
                 const Vector<sp<Layer>>& currentLayers(
                         displayDevice->getVisibleLayersSortedByZ());
+                setDisplayAnimating(displayDevice, dpy);
                 for (size_t i = 0; i < currentLayers.size(); i++) {
                     const auto& layer = currentLayers[i];
                     if (!layer->hasHwcLayer(hwcId)) {
@@ -1999,7 +2002,7 @@ void SurfaceFlinger::setUpHWComposer() {
                     }
 
                     layer->setGeometry(displayDevice, i);
-                    if (mDebugDisableHWC || mDebugRegion) {
+                    if (mDebugDisableHWC || mDebugRegion || (hwcId !=0 && !isIdentity)) {
                         layer->forceClientComposition(hwcId);
                     }
                 }
@@ -2007,8 +2010,6 @@ void SurfaceFlinger::setUpHWComposer() {
         }
     }
 
-
-    mat4 colorMatrix = mColorMatrix * computeSaturationMatrix() * mDaltonizer();
 
     // Set the per-frame data
     for (size_t displayId = 0; displayId < mDisplays.size(); ++displayId) {
@@ -2106,9 +2107,11 @@ void SurfaceFlinger::postFramebuffer()
             // The layer buffer from the previous frame (if any) is released
             // by HWC only when the release fence from this frame (if any) is
             // signaled.  Always get the release fence from HWC first.
-            auto hwcLayer = layer->getHwcLayer(hwcId);
-            sp<Fence> releaseFence = getBE().mHwc->getLayerReleaseFence(hwcId, hwcLayer);
-
+            sp<Fence> releaseFence = Fence::NO_FENCE;
+            if (hwcId >= 0) {
+                auto hwcLayer = layer->getHwcLayer(hwcId);
+                releaseFence = getBE().mHwc->getLayerReleaseFence(hwcId, hwcLayer);
+            }
             // If the layer was client composited in the previous frame, we
             // need to merge with the previous client target acquire fence.
             // Since we do not track that, always merge with the current
@@ -2451,10 +2454,9 @@ void SurfaceFlinger::processDisplayChangesLocked() {
                             if (maxVirtualDisplaySize == 0 ||
                                  ( (uint64_t)width <= maxVirtualDisplaySize &&
                                  (uint64_t)height <= maxVirtualDisplaySize)) {
-                                int usage = 0;
+                                uint64_t usage = 0;
                                 // Replace with native_window_get_consumer_usage ?
-                                status = state.surface->query(
-                                         NATIVE_WINDOW_CONSUMER_USAGE_BITS, &usage);
+                                status = state.surface->getConsumerUsage(&usage);
                                 ALOGW_IF(status != NO_ERROR, "Unable to query usage (%d)", status);
                                 if ( (status == NO_ERROR) &&
                                      displayUtils->canAllocateHwcDisplayIdForVDS(usage)) {
@@ -2925,8 +2927,8 @@ bool SurfaceFlinger::doComposeSurfaces(const sp<const DisplayDevice>& displayDev
     const auto hwcId = displayDevice->getHwcDisplayId();
     const bool hasClientComposition = getBE().mHwc->hasClientComposition(hwcId);
     const bool hasDeviceComposition = getBE().mHwc->hasDeviceComposition(hwcId);
-    const bool skipClientColorTransform = getBE().mHwc->hasCapability(
-        HWC2::Capability::SkipClientColorTransform);
+    const bool skipClientColorTransform = (getBE().mHwc->hasCapability(
+        HWC2::Capability::SkipClientColorTransform) && (hwcId == 0));
     ATRACE_INT("hasClientComposition", hasClientComposition);
 
     mat4 oldColorMatrix;
@@ -3025,7 +3027,7 @@ bool SurfaceFlinger::doComposeSurfaces(const sp<const DisplayDevice>& displayDev
                     case HWC2::Composition::SolidColor: {
                         const Layer::State& state(layer->getDrawingState());
                         if (layer->getClearClientTarget(hwcId) && !firstLayer &&
-                                layer->isOpaque(state) && (state.color.a == 1.0f)
+                                layer->isOpaque(state) && (layer->getAlpha() == 1.0f)
                                 && hasClientComposition) {
                             // never clear the very first layer since we're
                             // guaranteed the FB is already cleared
