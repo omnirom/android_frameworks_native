@@ -23,17 +23,16 @@
 
 #include <math/mat4.h>
 
-#include <ui/Region.h>
-
 #include <binder/IBinder.h>
+#include <gui/ISurfaceComposer.h>
+#include <hardware/hwcomposer_defs.h>
+#include <ui/GraphicTypes.h>
+#include <ui/Region.h>
 #include <utils/RefBase.h>
 #include <utils/Mutex.h>
 #include <utils/String8.h>
 #include <utils/Timers.h>
 
-#include <gui/ISurfaceComposer.h>
-#include <hardware/hwcomposer_defs.h>
-#include <ui/GraphicTypes.h>
 #include "RenderArea.h"
 #include "RenderEngine/Surface.h"
 
@@ -86,6 +85,7 @@ public:
             int displayHeight,
             bool hasWideColorGamut,
             const HdrCapabilities& hdrCapabilities,
+            const int32_t supportedPerFrameMetadata,
             int initialPowerMode);
     // clang-format on
 
@@ -131,6 +131,9 @@ public:
     int32_t                 getHwcDisplayId() const { return mHwcDisplayId; }
     const wp<IBinder>&      getDisplayToken() const { return mDisplayToken; }
     uint32_t                getPanelMountFlip() const { return mPanelMountFlip; }
+
+    int32_t getSupportedPerFrameMetadata() const { return mSupportedPerFrameMetadata; }
+
     // We pass in mustRecompose so we can keep VirtualDisplaySurface's state
     // machine happy without actually queueing a buffer if nothing has changed
     status_t beginFrame(bool mustRecompose) const;
@@ -261,6 +264,8 @@ private:
     bool mHasHdr10;
     bool mHasHLG;
     bool mHasDolbyVision;
+
+    const int32_t mSupportedPerFrameMetadata;
 };
 
 struct DisplayDeviceState {
