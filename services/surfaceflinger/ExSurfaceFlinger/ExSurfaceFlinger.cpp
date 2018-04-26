@@ -33,10 +33,13 @@
 #include <cutils/properties.h>
 #include <ui/GraphicBufferAllocator.h>
 #include <vendor/display/config/1.1/IDisplayConfig.h>
+#include <sys/stat.h>
+#include <sys/types.h>
 
 namespace android {
 
 bool ExSurfaceFlinger::sAllowHDRFallBack = false;
+bool ExSurfaceFlinger::regionDump = false;
 
 ExSurfaceFlinger::ExSurfaceFlinger() {
     char property[PROPERTY_VALUE_MAX] = {0};
@@ -120,6 +123,130 @@ void ExSurfaceFlinger::setDisplayAnimating(const sp<const DisplayDevice>& hw,
 
     disp_config_v1_1->setDisplayAnimating(dpy, hasScreenshot);
     mAnimating = hasScreenshot;
+}
+
+status_t ExSurfaceFlinger::doDump(int fd, const Vector<String16>& args, bool asProto) {
+    // Format: adb shell dumpsys SurfaceFlinger --file --no-limit
+    size_t numArgs = args.size();
+    status_t err = NO_ERROR;
+
+    if (!numArgs || ((args[0] != String16("--file")) &&
+        (args[0] != String16("--allocated_buffers")))) {
+        return SurfaceFlinger::doDump(fd, args, asProto);
+    }
+
+    if (args[0] == String16("--allocated_buffers")) {
+        String8 dumpsys;
+        GraphicBufferAllocator& alloc(GraphicBufferAllocator::get());
+        alloc.dump(dumpsys);
+        write(fd, dumpsys.string(), dumpsys.size());
+        return NO_ERROR;
+    }
+
+    if (numArgs >= 3 && (args[2] == String16("--region-dump"))){
+        regionDump = true;
+    }
+
+    Mutex::Autolock _l(mFileDump.lock);
+
+    // Same command is used to start and end dump.
+    mFileDump.running = !mFileDump.running;
+
+    if (mFileDump.running) {
+        // Create an empty file or erase existing file.
+        if (mkdir("/data/misc/display", S_IRWXU | S_IRWXG | S_IRWXO) != 0) {
+            if (errno != EEXIST) {
+                ALOGE("Error creating /data/misc/display directory: %s", strerror(errno));
+                return errno;
+            }
+        }
+        std::fstream fs;
+        fs.open(mFileDump.name, std::ios::out);
+        if (!fs) {
+            mFileDump.running = false;
+            err = UNKNOWN_ERROR;
+        } else {
+            mFileDump.position = 0;
+            if (numArgs >= 2 && (args[1] == String16("--no-limit"))) {
+            mFileDump.noLimit = true;
+        } else {
+            mFileDump.noLimit = false;
+        }
+      }
+    }
+
+    String8 result;
+    result += mFileDump.running ? "Start" : "End";
+    result += mFileDump.noLimit ? " unlimited" : " fixed limit";
+    result += " dumpsys to file : ";
+    result += mFileDump.name;
+    result += "\n";
+
+    write(fd, result.string(), result.size());
+
+    return NO_ERROR;
+}
+
+void ExSurfaceFlinger::dumpDrawCycle(bool prePrepare) {
+    Mutex::Autolock _l(mFileDump.lock);
+
+    // User might stop dump collection in middle of prepare & commit.
+    // Collect dumpsys again after commit and replace.
+    if (!mFileDump.running && !mFileDump.replaceAfterCommit) {
+        regionDump = false;
+        return;
+    }
+
+    Vector<String16> args;
+    size_t index = 0;
+    String8 dumpsys;
+
+    dumpAllLocked(args, index, dumpsys, regionDump);
+
+    char timeStamp[32];
+    char dataSize[32];
+    char hms[32];
+    long millis;
+    struct timeval tv;
+    struct tm *ptm;
+
+    gettimeofday(&tv, NULL);
+    ptm = localtime(&tv.tv_sec);
+    strftime (hms, sizeof (hms), "%H:%M:%S", ptm);
+    millis = tv.tv_usec / 1000;
+    snprintf(timeStamp, sizeof(timeStamp), "Timestamp: %s.%03ld", hms, millis);
+    snprintf(dataSize, sizeof(dataSize), "Size: %8zu", dumpsys.size());
+
+    std::fstream fs;
+    fs.open(mFileDump.name, std::ios::in | std::ios::out);
+    if (!fs) {
+        ALOGE("Failed to open %s file for dumpsys", mFileDump.name);
+        return;
+    }
+
+    // Format:
+    //    | start code | after commit? | time stamp | dump size | dump data |
+    fs.seekp(mFileDump.position, std::ios::beg);
+
+    fs << "#@#@-- DUMPSYS START --@#@#" << std::endl;
+    fs << "PostCommit: " << ( prePrepare ? "false" : "true" ) << std::endl;
+    fs << timeStamp << std::endl;
+    fs << dataSize << std::endl;
+    fs << dumpsys << std::endl;
+
+    if (prePrepare) {
+        mFileDump.replaceAfterCommit = true;
+    } else {
+        mFileDump.replaceAfterCommit = false;
+        // Reposition only after commit.
+        // Keep file size to appx 20 MB limit by default, wrap around if exceeds.
+        mFileDump.position = fs.tellp();
+        if (!mFileDump.noLimit && (mFileDump.position > (20 * 1024 * 1024))) {
+            mFileDump.position = 0;
+        }
+    }
+
+    fs.close();
 }
 
 }; // namespace android
