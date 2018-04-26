@@ -636,10 +636,12 @@ void Layer::setGeometry(const sp<const DisplayDevice>& displayDevice, uint32_t z
     if (orientation & Transform::ROT_INVALID) {
         // we can only handle simple transformation
         hwcInfo.forceClientComposition = true;
+        hwcInfo.invalidRotation = true;
     } else {
         auto transform = static_cast<HWC2::Transform>(orientation);
         hwcInfo.transform = transform;
         auto error = hwcLayer->setTransform(transform);
+        hwcInfo.invalidRotation = false;
         ALOGE_IF(error != HWC2::Error::None,
                  "[%s] Failed to set transform %s: "
                  "%s (%d)",
@@ -2015,6 +2017,15 @@ void Layer::writeToProto(LayerProto* layerInfo, int32_t hwcId) {
     } else {
         layerInfo->set_is_protected(false);
     }
+}
+
+void Layer::setColorInversionData(const sp<const DisplayDevice>& displayDevice)
+{
+  auto hwcId = displayDevice->getHwcDisplayId();
+  bool externalDisplay = (hwcId == DisplayDevice::DISPLAY_EXTERNAL);
+  auto& hwcInfo = getBE().mHwcLayers[hwcId];
+  mColorInversionOnExternal = externalDisplay && displayDevice->hasColorMatrix() &&
+                              !hwcInfo.invalidRotation;
 }
 
 // ---------------------------------------------------------------------------
