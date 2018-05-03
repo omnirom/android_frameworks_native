@@ -109,7 +109,8 @@ DisplayDevice::DisplayDevice(
       mDisplayHasColorMatrix(false)
 {
     // clang-format on
-    for (Hdr hdrType : hdrCapabilities.getSupportedHdrTypes()) {
+    std::vector<Hdr> types = hdrCapabilities.getSupportedHdrTypes();
+    for (Hdr hdrType : types) {
         switch (hdrType) {
             case Hdr::HDR10:
                 mHasHdr10 = true;
@@ -131,6 +132,26 @@ DisplayDevice::DisplayDevice(
     // 1: H-Flip, 2: V-Flip, 3: 180 (HV Flip)
     property_get("vendor.display.panel_mountflip", property, "0");
     mPanelMountFlip = atoi(property);
+
+    float minLuminance = hdrCapabilities.getDesiredMinLuminance();
+    float maxLuminance = hdrCapabilities.getDesiredMaxLuminance();
+    float maxAverageLuminance = hdrCapabilities.getDesiredMaxAverageLuminance();
+
+    minLuminance = minLuminance <= 0.0 ? sDefaultMinLumiance : minLuminance;
+    maxLuminance = maxLuminance <= 0.0 ? sDefaultMaxLumiance : maxLuminance;
+    maxAverageLuminance = maxAverageLuminance <= 0.0 ? sDefaultMaxLumiance : maxAverageLuminance;
+    if (this->hasWideColorGamut()) {
+        // insert HDR10/HLG as we will force client composition for HDR10/HLG
+        // layers
+        if (!hasHDR10Support()) {
+          types.push_back(Hdr::HDR10);
+        }
+
+        if (!hasHLGSupport()) {
+          types.push_back(Hdr::HLG);
+        }
+    }
+    mHdrCapabilities = HdrCapabilities(types, maxLuminance, maxAverageLuminance, minLuminance);
 
     // initialize the display orientation transform.
     setProjection(DisplayState::eOrientationDefault, mViewport, mFrame);
