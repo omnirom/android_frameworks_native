@@ -3970,7 +3970,8 @@ status_t SurfaceFlinger::doDump(int fd, const Vector<String16>& args, bool asPro
 
         if (dumpAll) {
             if (asProto) {
-                LayersProto layersProto = dumpProtoInfo(LayerVector::StateSet::Current);
+                LayersProto layersProto = dumpProtoInfo(LayerVector::StateSet::Current,
+                        enableRegionDump);
                 result.append(layersProto.SerializeAsString().c_str(), layersProto.ByteSize());
             } else {
                 dumpAllLocked(args, index, result, enableRegionDump);
