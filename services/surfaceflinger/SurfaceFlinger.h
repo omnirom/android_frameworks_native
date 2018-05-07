@@ -313,8 +313,6 @@ public:
 
     // force full composition on all displays
     void repaintEverything();
-    // Can only be called from the main thread or with mStateLock held
-    void repaintEverythingLocked();
 
     // returns the default Display
     sp<const DisplayDevice> getDefaultDisplayDevice() const {
@@ -394,6 +392,7 @@ private:
     virtual status_t onTransact(uint32_t code, const Parcel& data,
         Parcel* reply, uint32_t flags);
     virtual status_t dump(int fd, const Vector<String16>& args) { return priorityDump(fd, args); }
+    virtual status_t doDump(int fd, const Vector<String16>& args, bool asProto);
 
     /* ------------------------------------------------------------------------
      * ISurfaceComposer interface
@@ -732,6 +731,7 @@ private:
     void logFrameStats();
 
     void dumpStaticScreenStats(String8& result) const;
+    virtual void dumpDrawCycle(bool /* prePrepare */ ) { }
     // Not const because each Layer needs to query Fences and cache timestamps.
     void dumpFrameEventsLocked(String8& result);
 
@@ -745,7 +745,6 @@ private:
     bool isLayerTripleBufferingDisabled() const {
         return this->mLayerTripleBufferingDisabled;
     }
-    status_t doDump(int fd, const Vector<String16>& args, bool asProto);
 
     /* ------------------------------------------------------------------------
      * VrFlinger

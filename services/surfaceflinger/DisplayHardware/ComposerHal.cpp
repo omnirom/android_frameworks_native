@@ -32,11 +32,6 @@ namespace android {
 using hardware::Return;
 using hardware::hidl_vec;
 using hardware::hidl_handle;
-using namespace hardware::graphics::common;
-using namespace hardware::graphics::composer;
-using PerFrameMetadata = hardware::graphics::composer::V2_2::IComposerClient::PerFrameMetadata;
-using PerFrameMetadataKey =
-        hardware::graphics::composer::V2_2::IComposerClient::PerFrameMetadataKey;
 
 namespace Hwc2 {
 
@@ -126,7 +121,7 @@ Composer::CommandWriter::~CommandWriter()
 void Composer::CommandWriter::setLayerInfo(uint32_t type, uint32_t appId)
 {
     constexpr uint16_t kSetLayerInfoLength = 2;
-    beginCommand(static_cast<hardware::graphics::composer::V2_1::IComposerClient::Command>(
+    beginCommand(static_cast<V2_1::IComposerClient::Command>(
                          IVrComposerClient::VrCommand::SET_LAYER_INFO),
                  kSetLayerInfoLength);
     write(type);
@@ -138,7 +133,7 @@ void Composer::CommandWriter::setClientTargetMetadata(
         const IVrComposerClient::BufferMetadata& metadata)
 {
     constexpr uint16_t kSetClientTargetMetadataLength = 7;
-    beginCommand(static_cast<hardware::graphics::composer::V2_1::IComposerClient::Command>(
+    beginCommand(static_cast<V2_1::IComposerClient::Command>(
                          IVrComposerClient::VrCommand::SET_CLIENT_TARGET_METADATA),
                  kSetClientTargetMetadataLength);
     writeBufferMetadata(metadata);
@@ -149,7 +144,7 @@ void Composer::CommandWriter::setLayerBufferMetadata(
         const IVrComposerClient::BufferMetadata& metadata)
 {
     constexpr uint16_t kSetLayerBufferMetadataLength = 7;
-    beginCommand(static_cast<hardware::graphics::composer::V2_1::IComposerClient::Command>(
+    beginCommand(static_cast<V2_1::IComposerClient::Command>(
                          IVrComposerClient::VrCommand::SET_LAYER_BUFFER_METADATA),
                  kSetLayerBufferMetadataLength);
     writeBufferMetadata(metadata);
@@ -171,7 +166,7 @@ Composer::Composer(const std::string& serviceName)
     : mWriter(kWriterInitialSize),
       mIsUsingVrComposer(serviceName == std::string("vr"))
 {
-    mComposer = IComposer::getService(serviceName);
+    mComposer = V2_1::IComposer::getService(serviceName);
 
     if (mComposer == nullptr) {
         LOG_ALWAYS_FATAL("failed to get hwcomposer service");
@@ -189,7 +184,7 @@ Composer::Composer(const std::string& serviceName)
     }
 
     // 2.2 support is optional
-    sp<V2_2::IComposer> composer_2_2 = V2_2::IComposer::castFrom(mComposer);
+    sp<IComposer> composer_2_2 = IComposer::castFrom(mComposer);
     if (composer_2_2 != nullptr) {
         mClient_2_2 = IComposerClient::castFrom(mClient);
         LOG_ALWAYS_FATAL_IF(mClient_2_2 == nullptr, "IComposer 2.2 did not return IComposerClient 2.2");
@@ -271,7 +266,7 @@ Error Composer::createVirtualDisplay(uint32_t width, uint32_t height,
                 });
     } else {
         mClient->createVirtualDisplay(width, height,
-                static_cast<V1_0::PixelFormat>(*format), bufferSlotCount,
+                static_cast<types::V1_0::PixelFormat>(*format), bufferSlotCount,
                 [&](const auto& tmpError, const auto& tmpDisplay,
                     const auto& tmpFormat) {
                     error = tmpError;
@@ -368,7 +363,7 @@ Error Composer::getColorModes(Display display,
                     if (error != Error::NONE) {
                         return;
                     }
-                    for (V1_0::ColorMode colorMode : tmpModes) {
+                    for (types::V1_0::ColorMode colorMode : tmpModes) {
                         outModes->push_back(static_cast<ColorMode>(colorMode));
                     }
                 });
@@ -533,7 +528,7 @@ Error Composer::setClientTarget(Display display, uint32_t slot,
             .height = target->getHeight(),
             .stride = target->getStride(),
             .layerCount = target->getLayerCount(),
-            .format = static_cast<V1_0::PixelFormat>(target->getPixelFormat()),
+            .format = static_cast<types::V1_0::PixelFormat>(target->getPixelFormat()),
             .usage = target->getUsage(),
         };
         mWriter.setClientTargetMetadata(metadata);
@@ -556,7 +551,7 @@ Error Composer::setColorMode(Display display, ColorMode mode,
         ret = mClient_2_2->setColorMode_2_2(display, mode, renderIntent);
     } else {
         ret = mClient->setColorMode(display,
-                static_cast<V1_0::ColorMode>(mode));
+                static_cast<types::V1_0::ColorMode>(mode));
     }
     return unwrapRet(ret);
 }
@@ -577,15 +572,12 @@ Error Composer::setOutputBuffer(Display display, const native_handle_t* buffer,
     return Error::NONE;
 }
 
-Error Composer::setPowerMode(Display display, IComposerClient::PowerMode mode)
-{
-    hardware::Return<Error> ret(Error::UNSUPPORTED);
+Error Composer::setPowerMode(Display display, IComposerClient::PowerMode mode) {
+    Return<Error> ret(Error::UNSUPPORTED);
     if (mClient_2_2) {
         ret = mClient_2_2->setPowerMode_2_2(display, mode);
     } else if (mode != IComposerClient::PowerMode::ON_SUSPEND) {
-        ret = mClient->setPowerMode(display,
-                                    static_cast<hardware::graphics::composer::V2_1::
-                                                        IComposerClient::PowerMode>(mode));
+        ret = mClient->setPowerMode(display, static_cast<V2_1::IComposerClient::PowerMode>(mode));
     }
 
     return unwrapRet(ret);
@@ -663,7 +655,7 @@ Error Composer::setLayerBuffer(Display display, Layer layer,
             .height = buffer->getHeight(),
             .stride = buffer->getStride(),
             .layerCount = buffer->getLayerCount(),
-            .format = static_cast<V1_0::PixelFormat>(buffer->getPixelFormat()),
+            .format = static_cast<types::V1_0::PixelFormat>(buffer->getPixelFormat()),
             .usage = buffer->getUsage(),
         };
         mWriter.setLayerBufferMetadata(metadata);
@@ -720,47 +712,6 @@ Error Composer::setLayerDataspace(Display display, Layer layer,
     mWriter.selectDisplay(display);
     mWriter.selectLayer(layer);
     mWriter.setLayerDataspace(dataspace);
-    return Error::NONE;
-}
-
-Error Composer::setLayerHdrMetadata(Display display, Layer layer, const HdrMetadata& metadata) {
-    if (!mClient_2_2) {
-        return Error::UNSUPPORTED;
-    }
-
-    mWriter.selectDisplay(display);
-    mWriter.selectLayer(layer);
-
-    std::vector<PerFrameMetadata> composerMetadata;
-    if (metadata.validTypes & HdrMetadata::SMPTE2086) {
-        composerMetadata
-                .insert(composerMetadata.end(),
-                        {{PerFrameMetadataKey::DISPLAY_RED_PRIMARY_X,
-                          metadata.smpte2086.displayPrimaryRed.x},
-                         {PerFrameMetadataKey::DISPLAY_RED_PRIMARY_Y,
-                          metadata.smpte2086.displayPrimaryRed.y},
-                         {PerFrameMetadataKey::DISPLAY_GREEN_PRIMARY_X,
-                          metadata.smpte2086.displayPrimaryGreen.x},
-                         {PerFrameMetadataKey::DISPLAY_GREEN_PRIMARY_Y,
-                          metadata.smpte2086.displayPrimaryGreen.y},
-                         {PerFrameMetadataKey::DISPLAY_BLUE_PRIMARY_X,
-                          metadata.smpte2086.displayPrimaryBlue.x},
-                         {PerFrameMetadataKey::DISPLAY_BLUE_PRIMARY_Y,
-                          metadata.smpte2086.displayPrimaryBlue.y},
-                         {PerFrameMetadataKey::WHITE_POINT_X, metadata.smpte2086.whitePoint.x},
-                         {PerFrameMetadataKey::WHITE_POINT_Y, metadata.smpte2086.whitePoint.y},
-                         {PerFrameMetadataKey::MAX_LUMINANCE, metadata.smpte2086.maxLuminance},
-                         {PerFrameMetadataKey::MIN_LUMINANCE, metadata.smpte2086.minLuminance}});
-    }
-    if (metadata.validTypes & HdrMetadata::CTA861_3) {
-        composerMetadata.insert(composerMetadata.end(),
-                                {{PerFrameMetadataKey::MAX_CONTENT_LIGHT_LEVEL,
-                                  metadata.cta8613.maxContentLightLevel},
-                                 {PerFrameMetadataKey::MAX_FRAME_AVERAGE_LIGHT_LEVEL,
-                                  metadata.cta8613.maxFrameAverageLightLevel}});
-    }
-
-    mWriter.setLayerPerFrameMetadata(composerMetadata);
     return Error::NONE;
 }
 
@@ -934,6 +885,18 @@ Error Composer::execute()
 
 // Composer HAL 2.2
 
+Error Composer::setLayerPerFrameMetadata(Display display, Layer layer,
+        const std::vector<IComposerClient::PerFrameMetadata>& perFrameMetadatas) {
+    if (!mClient_2_2) {
+        return Error::UNSUPPORTED;
+    }
+
+    mWriter.selectDisplay(display);
+    mWriter.selectLayer(layer);
+    mWriter.setLayerPerFrameMetadata(perFrameMetadatas);
+    return Error::NONE;
+}
+
 Error Composer::getPerFrameMetadataKeys(
         Display display, std::vector<IComposerClient::PerFrameMetadataKey>* outKeys) {
     if (!mClient_2_2) {
@@ -1007,9 +970,7 @@ Error CommandReader::parse()
     uint16_t length = 0;
 
     while (!isEmpty()) {
-        auto command_2_1 =
-                reinterpret_cast<hardware::graphics::composer::V2_1::IComposerClient::Command*>(
-                        &command);
+        auto command_2_1 = reinterpret_cast<V2_1::IComposerClient::Command*>(&command);
         if (!beginCommand(command_2_1, &length)) {
             break;
         }

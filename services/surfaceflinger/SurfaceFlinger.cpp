@@ -107,6 +107,7 @@ using namespace android::hardware::configstore;
 using namespace android::hardware::configstore::V1_0;
 using ui::ColorMode;
 using ui::Dataspace;
+using ui::Hdr;
 using ui::RenderIntent;
 
 namespace {
@@ -1121,21 +1122,27 @@ status_t SurfaceFlinger::getHdrCapabilities(const sp<IBinder>& display,
         return BAD_VALUE;
     }
 
-    std::unique_ptr<HdrCapabilities> capabilities =
-            getBE().mHwc->getHdrCapabilities(displayDevice->getHwcDisplayId());
-    if (capabilities) {
-        if (displayDevice->hasWideColorGamut() && !displayDevice->hasHdr10()) {
-            // insert HDR10 as we will force client composition for HDR10
+    HdrCapabilities capabilities;
+    int status = getBE().mHwc->getHdrCapabilities(
+        displayDevice->getHwcDisplayId(), &capabilities);
+    if (status == NO_ERROR) {
+        if (displayDevice->hasWideColorGamut()) {
+            std::vector<Hdr> types = capabilities.getSupportedHdrTypes();
+            // insert HDR10/HLG as we will force client composition for HDR10/HLG
             // layers
-            std::vector<int32_t> types = capabilities->getSupportedHdrTypes();
-            types.push_back(HAL_HDR_HDR10);
+            if (!displayDevice->hasHDR10Support()) {
+                types.push_back(Hdr::HDR10);
+            }
+            if (!displayDevice->hasHLGSupport()) {
+                types.push_back(Hdr::HLG);
+            }
 
             *outCapabilities = HdrCapabilities(types,
-                    capabilities->getDesiredMaxLuminance(),
-                    capabilities->getDesiredMaxAverageLuminance(),
-                    capabilities->getDesiredMinLuminance());
+                    capabilities.getDesiredMaxLuminance(),
+                    capabilities.getDesiredMaxAverageLuminance(),
+                    capabilities.getDesiredMinLuminance());
         } else {
-            *outCapabilities = std::move(*capabilities);
+            *outCapabilities = std::move(capabilities);
         }
     } else {
         return BAD_VALUE;
@@ -1390,7 +1397,7 @@ void SurfaceFlinger::onRefreshReceived(int sequenceId,
     if (sequenceId != getBE().mComposerSequenceId) {
         return;
     }
-    repaintEverythingLocked();
+    repaintEverything();
 }
 
 void SurfaceFlinger::setVsyncEnabled(int disp, int enabled) {
@@ -1784,6 +1791,8 @@ void SurfaceFlinger::postComposition(nsecs_t refreshStartTime)
         mAnimFrameTracker.advanceFrame();
     }
 
+    dumpDrawCycle(false);
+
     if (getBE().mHwc->isConnected(HWC_DISPLAY_PRIMARY) &&
             hw->getPowerMode() == HWC_POWER_MODE_OFF) {
         return;
@@ -1904,17 +1913,23 @@ ui::Dataspace SurfaceFlinger::getBestDataspace(
             case Dataspace::V0_SCRGB_LINEAR:
                 // return immediately
                 return Dataspace::V0_SCRGB_LINEAR;
+            case Dataspace::DISPLAY_P3:
+                bestDataspace = Dataspace::DISPLAY_P3;
+                break;
+            // Historically, HDR dataspaces are ignored by SurfaceFlinger. But
+            // since SurfaceFlinger simulates HDR support now, it should honor
+            // them unless there is also native support.
             case Dataspace::BT2020_PQ:
             case Dataspace::BT2020_ITU_PQ:
-                // Historically, HDR dataspaces are ignored by SurfaceFlinger. But
-                // since SurfaceFlinger simulates HDR support now, it should honor
-                // them unless there is also native support.
-                if (!displayDevice->hasHdr10()) {
+                if (!displayDevice->hasHDR10Support()) {
                     return Dataspace::V0_SCRGB_LINEAR;
                 }
                 break;
-            case Dataspace::DISPLAY_P3:
-                bestDataspace = Dataspace::DISPLAY_P3;
+            case Dataspace::BT2020_HLG:
+            case Dataspace::BT2020_ITU_HLG:
+                if (!displayDevice->hasHLGSupport()) {
+                    return Dataspace::V0_SCRGB_LINEAR;
+                }
                 break;
             default:
                 break;
@@ -1952,7 +1967,7 @@ void SurfaceFlinger::setUpHWComposer() {
     ALOGV("setUpHWComposer");
 
     for (size_t dpy=0 ; dpy<mDisplays.size() ; dpy++) {
-        bool dirty = !mDisplays[dpy]->getDirtyRegion(false).isEmpty();
+        bool dirty = !mDisplays[dpy]->getDirtyRegion(mRepaintEverything).isEmpty();
         bool empty = mDisplays[dpy]->getVisibleLayersSortedByZ().size() == 0;
         bool wasEmpty = !mDisplays[dpy]->lastCompositionHadVisibleLayers;
 
@@ -1986,8 +2001,9 @@ void SurfaceFlinger::setUpHWComposer() {
     if (CC_UNLIKELY(mGeometryInvalid)) {
         mGeometryInvalid = false;
         for (size_t dpy=0 ; dpy<mDisplays.size() ; dpy++) {
-            sp<const DisplayDevice> displayDevice(mDisplays[dpy]);
+            sp<DisplayDevice> displayDevice(mDisplays[dpy]);
             const auto hwcId = displayDevice->getHwcDisplayId();
+            displayDevice->setColorMatrix(!isIdentity);
             if (hwcId >= 0) {
                 const Vector<sp<Layer>>& currentLayers(
                         displayDevice->getVisibleLayersSortedByZ());
@@ -2004,6 +2020,7 @@ void SurfaceFlinger::setUpHWComposer() {
                     layer->setGeometry(displayDevice, i);
                     if (mDebugDisableHWC || mDebugRegion || (hwcId !=0 && !isIdentity)) {
                         layer->forceClientComposition(hwcId);
+                        layer->setColorInversionData(displayDevice);
                     }
                 }
             }
@@ -2028,7 +2045,12 @@ void SurfaceFlinger::setUpHWComposer() {
         for (auto& layer : displayDevice->getVisibleLayersSortedByZ()) {
             if ((layer->getDataSpace() == Dataspace::BT2020_PQ ||
                  layer->getDataSpace() == Dataspace::BT2020_ITU_PQ) &&
-                    !displayDevice->hasHdr10()) {
+                    !displayDevice->hasHDR10Support()) {
+                layer->forceClientComposition(hwcId);
+            }
+            if ((layer->getDataSpace() == Dataspace::BT2020_HLG ||
+                 layer->getDataSpace() == Dataspace::BT2020_ITU_HLG) &&
+                    !displayDevice->hasHLGSupport()) {
                 layer->forceClientComposition(hwcId);
             }
 
@@ -2050,6 +2072,8 @@ void SurfaceFlinger::setUpHWComposer() {
     }
 
     mPreviousColorMatrix = colorMatrix;
+
+    dumpDrawCycle(true);
 
     for (size_t displayId = 0; displayId < mDisplays.size(); ++displayId) {
         auto& displayDevice = mDisplays[displayId];
@@ -2172,7 +2196,7 @@ void SurfaceFlinger::handleTransaction(uint32_t transactionFlags)
     // with mStateLock held to guarantee that mCurrentState won't change
     // until the transaction is committed.
 
-    mVsyncModulator.setTransactionStart(VSyncModulator::TransactionStart::NORMAL);
+    mVsyncModulator.onTransactionHandled();
     transactionFlags = getTransactionFlags(eTransactionMask);
     handleTransactionLocked(transactionFlags);
 
@@ -2283,13 +2307,8 @@ sp<DisplayDevice> SurfaceFlinger::setupNewDisplayDeviceInternal(
         }
     }
 
-    bool hasHdr10 = false;
-    std::unique_ptr<HdrCapabilities> hdrCapabilities = getHwComposer().getHdrCapabilities(hwcId);
-    if (hdrCapabilities) {
-        const std::vector<int32_t> types = hdrCapabilities->getSupportedHdrTypes();
-        auto iter = std::find(types.cbegin(), types.cend(), HAL_HDR_HDR10);
-        hasHdr10 = iter != types.cend();
-    }
+    HdrCapabilities hdrCapabilities;
+    getHwComposer().getHdrCapabilities(hwcId, &hdrCapabilities);
 
     auto nativeWindowSurface = mCreateNativeWindowSurface(producer);
     auto nativeWindow = nativeWindowSurface->getNativeWindow();
@@ -2322,7 +2341,9 @@ sp<DisplayDevice> SurfaceFlinger::setupNewDisplayDeviceInternal(
     sp<DisplayDevice> hw =
             new DisplayDevice(this, state.type, hwcId, state.isSecure, display, nativeWindow,
                               dispSurface, std::move(renderSurface), displayWidth, displayHeight,
-                              hasWideColorGamut, hasHdr10, initialPowerMode);
+                              hasWideColorGamut, hdrCapabilities,
+                              getHwComposer().getSupportedPerFrameMetadata(hwcId),
+                              initialPowerMode);
 
     if (maxFrameBufferAcquiredBuffers >= 3) {
         nativeWindowSurface->preallocateBuffers();
@@ -3767,7 +3788,7 @@ void SurfaceFlinger::setPowerModeInternal(const sp<DisplayDevice>& hw,
 
         mVisibleRegionsDirty = true;
         mHasPoweredOff = true;
-        repaintEverythingLocked();
+        repaintEverything();
 
         struct sched_param param = {0};
         param.sched_priority = 1;
@@ -4722,20 +4743,9 @@ status_t SurfaceFlinger::onTransact(
     return err;
 }
 
-void SurfaceFlinger::repaintEverythingLocked() {
-    android_atomic_or(1, &mRepaintEverything);
-    for (size_t dpy = 0; dpy < mDisplays.size(); dpy++) {
-        const sp<DisplayDevice>& displayDevice(mDisplays[dpy]);
-        const Rect bounds(displayDevice->getBounds());
-        displayDevice->dirtyRegion.orSelf(Region(bounds));
-    }
-    signalTransaction();
-}
-
 void SurfaceFlinger::repaintEverything() {
-    ConditionalLock _l(mStateLock,
-            std::this_thread::get_id() != mMainThreadId);
-    repaintEverythingLocked();
+    android_atomic_or(1, &mRepaintEverything);
+    signalTransaction();
 }
 
 // A simple RAII class to disconnect from an ANativeWindow* when it goes out of scope
@@ -4779,7 +4789,7 @@ status_t SurfaceFlinger::captureLayers(const sp<IBinder>& layerHandleBinder,
     public:
         LayerRenderArea(SurfaceFlinger* flinger, const sp<Layer>& layer, const Rect crop,
                         int32_t reqWidth, int32_t reqHeight, bool childrenOnly)
-              : RenderArea(reqHeight, reqWidth),
+              : RenderArea(reqHeight, reqWidth, CaptureFill::CLEAR),
                 mLayer(layer),
                 mCrop(crop),
                 mFlinger(flinger),
@@ -5035,8 +5045,9 @@ void SurfaceFlinger::renderScreenImplLocked(const RenderArea& renderArea,
                                     (Transform::orientation_flags)rotation);
     engine.disableTexturing();
 
+    const float alpha = RenderArea::getCaptureFillValue(renderArea.getCaptureFill());
     // redraw the screen entirely...
-    engine.clearWithColor(0, 0, 0, 1);
+    engine.clearWithColor(0, 0, 0, alpha);
 
     traverseLayers([&](Layer* layer) {
         if (layer->isSecureDisplay()) {

@@ -23,6 +23,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <sys/types.h>
+#include <algorithm>
 
 #include <cutils/compiler.h>
 #include <cutils/native_handle.h>
@@ -635,10 +636,12 @@ void Layer::setGeometry(const sp<const DisplayDevice>& displayDevice, uint32_t z
     if (orientation & Transform::ROT_INVALID) {
         // we can only handle simple transformation
         hwcInfo.forceClientComposition = true;
+        hwcInfo.invalidRotation = true;
     } else {
         auto transform = static_cast<HWC2::Transform>(orientation);
         hwcInfo.transform = transform;
         auto error = hwcLayer->setTransform(transform);
+        hwcInfo.invalidRotation = false;
         ALOGE_IF(error != HWC2::Error::None,
                  "[%s] Failed to set transform %s: "
                  "%s (%d)",
@@ -1594,7 +1597,7 @@ bool Layer::reparentChildren(const sp<IBinder>& newParentHandle) {
 
         sp<Client> client(child->mClientRef.promote());
         if (client != nullptr) {
-            client->setParentLayer(newParent);
+            client->updateParent(newParent);
         }
     }
     mCurrentChildren.clear();
@@ -1630,7 +1633,7 @@ bool Layer::reparent(const sp<IBinder>& newParentHandle) {
     sp<Client> newParentClient(newParent->mClientRef.promote());
 
     if (client != newParentClient) {
-        client->setParentLayer(newParent);
+        client->updateParent(newParent);
     }
 
     return true;
@@ -1649,19 +1652,9 @@ bool Layer::detachChildren() {
     return true;
 }
 
-// Dataspace::UNKNOWN, Dataspace::SRGB, Dataspace::SRGB_LINEAR,
-// Dataspace::V0_SRGB and Dataspace::V0_SRGB_LINEAR are considered legacy
-// SRGB data space for now.
-// Note that Dataspace::V0_SRGB and Dataspace::V0_SRGB_LINEAR are not legacy
-// data space, however since framework doesn't distinguish them out of legacy
-// SRGB, we have to treat them as the same for now.
 bool Layer::isLegacySrgbDataSpace() const {
-    // TODO(lpy) b/77652630, need to figure out when UNKNOWN can be treated as SRGB.
-    return mDrawingState.dataSpace == ui::Dataspace::UNKNOWN ||
-        mDrawingState.dataSpace == ui::Dataspace::SRGB ||
-        mDrawingState.dataSpace == ui::Dataspace::SRGB_LINEAR ||
-        mDrawingState.dataSpace == ui::Dataspace::V0_SRGB ||
-        mDrawingState.dataSpace == ui::Dataspace::V0_SRGB_LINEAR;
+    return mDrawingState.dataSpace == ui::Dataspace::SRGB ||
+        mDrawingState.dataSpace == ui::Dataspace::SRGB_LINEAR;
 }
 
 void Layer::setParent(const sp<Layer>& layer) {
@@ -1793,27 +1786,79 @@ void Layer::traverseInReverseZOrder(LayerVector::StateSet stateSet,
     }
 }
 
-/**
- * Traverse only children in z order, ignoring relative layers.
- */
-void Layer::traverseChildrenInZOrder(LayerVector::StateSet stateSet,
-                                     const LayerVector::Visitor& visitor) {
+LayerVector Layer::makeChildrenTraversalList(LayerVector::StateSet stateSet,
+                                             const std::vector<Layer*>& layersInTree) {
+    LOG_ALWAYS_FATAL_IF(stateSet == LayerVector::StateSet::Invalid,
+                        "makeTraversalList received invalid stateSet");
     const bool useDrawing = stateSet == LayerVector::StateSet::Drawing;
     const LayerVector& children = useDrawing ? mDrawingChildren : mCurrentChildren;
+    const State& state = useDrawing ? mDrawingState : mCurrentState;
+
+    LayerVector traverse;
+    for (const wp<Layer>& weakRelative : state.zOrderRelatives) {
+        sp<Layer> strongRelative = weakRelative.promote();
+        // Only add relative layers that are also descendents of the top most parent of the tree.
+        // If a relative layer is not a descendent, then it should be ignored.
+        if (std::binary_search(layersInTree.begin(), layersInTree.end(), strongRelative.get())) {
+            traverse.add(strongRelative);
+        }
+    }
+
+    for (const sp<Layer>& child : children) {
+        const State& childState = useDrawing ? child->mDrawingState : child->mCurrentState;
+        // If a layer has a relativeOf layer, only ignore if the layer it's relative to is a
+        // descendent of the top most parent of the tree. If it's not a descendent, then just add
+        // the child here since it won't be added later as a relative.
+        if (std::binary_search(layersInTree.begin(), layersInTree.end(),
+                               childState.zOrderRelativeOf.promote().get())) {
+            continue;
+        }
+        traverse.add(child);
+    }
+
+    return traverse;
+}
+
+void Layer::traverseChildrenInZOrderInner(const std::vector<Layer*>& layersInTree,
+                                          LayerVector::StateSet stateSet,
+                                          const LayerVector::Visitor& visitor) {
+    const LayerVector list = makeChildrenTraversalList(stateSet, layersInTree);
 
     size_t i = 0;
-    for (; i < children.size(); i++) {
-        const auto& relative = children[i];
+    for (; i < list.size(); i++) {
+        const auto& relative = list[i];
         if (relative->getZ() >= 0) {
             break;
         }
-        relative->traverseChildrenInZOrder(stateSet, visitor);
+        relative->traverseChildrenInZOrderInner(layersInTree, stateSet, visitor);
     }
+
     visitor(this);
-    for (; i < children.size(); i++) {
-        const auto& relative = children[i];
-        relative->traverseChildrenInZOrder(stateSet, visitor);
+    for (; i < list.size(); i++) {
+        const auto& relative = list[i];
+        relative->traverseChildrenInZOrderInner(layersInTree, stateSet, visitor);
     }
+}
+
+std::vector<Layer*> Layer::getLayersInTree(LayerVector::StateSet stateSet) {
+    const bool useDrawing = stateSet == LayerVector::StateSet::Drawing;
+    const LayerVector& children = useDrawing ? mDrawingChildren : mCurrentChildren;
+
+    std::vector<Layer*> layersInTree = {this};
+    for (size_t i = 0; i < children.size(); i++) {
+        const auto& child = children[i];
+        std::vector<Layer*> childLayers = child->getLayersInTree(stateSet);
+        layersInTree.insert(layersInTree.end(), childLayers.cbegin(), childLayers.cend());
+    }
+
+    return layersInTree;
+}
+
+void Layer::traverseChildrenInZOrder(LayerVector::StateSet stateSet,
+                                     const LayerVector::Visitor& visitor) {
+    std::vector<Layer*> layersInTree = getLayersInTree(stateSet);
+    std::sort(layersInTree.begin(), layersInTree.end());
+    traverseChildrenInZOrderInner(layersInTree, stateSet, visitor);
 }
 
 Transform Layer::getTransform() const {
@@ -1972,6 +2017,15 @@ void Layer::writeToProto(LayerProto* layerInfo, int32_t hwcId) {
     } else {
         layerInfo->set_is_protected(false);
     }
+}
+
+void Layer::setColorInversionData(const sp<const DisplayDevice>& displayDevice)
+{
+  auto hwcId = displayDevice->getHwcDisplayId();
+  bool externalDisplay = (hwcId == DisplayDevice::DISPLAY_EXTERNAL);
+  auto& hwcInfo = getBE().mHwcLayers[hwcId];
+  mColorInversionOnExternal = externalDisplay && displayDevice->hasColorMatrix() &&
+                              !hwcInfo.invalidRotation;
 }
 
 // ---------------------------------------------------------------------------

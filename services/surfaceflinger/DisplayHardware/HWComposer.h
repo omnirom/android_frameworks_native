@@ -24,7 +24,6 @@
 
 #include <ui/Fence.h>
 #include <ui/GraphicTypes.h>
-
 #include <utils/BitSet.h>
 #include <utils/Condition.h>
 #include <utils/Mutex.h>
@@ -134,8 +133,10 @@ public:
     // it can call this to clear the shared pointers in the release fence map
     void clearReleaseFences(int32_t displayId);
 
-    // Returns the HDR capabilities of the given display
-    std::unique_ptr<HdrCapabilities> getHdrCapabilities(int32_t displayId);
+    // Fetches the HDR capabilities of the given display
+    status_t getHdrCapabilities(int32_t displayId, HdrCapabilities* outCapabilities);
+
+    int32_t getSupportedPerFrameMetadata(int32_t displayId) const;
 
     // Returns the available RenderIntent of the given display.
     std::vector<ui::RenderIntent> getRenderIntents(int32_t displayId, ui::ColorMode colorMode) const;

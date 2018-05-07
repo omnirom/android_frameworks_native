@@ -55,6 +55,7 @@ namespace android {
 using namespace android::hardware::configstore;
 using namespace android::hardware::configstore::V1_0;
 using android::ui::ColorMode;
+using android::ui::Hdr;
 using android::ui::RenderIntent;
 
 /*
@@ -77,7 +78,8 @@ DisplayDevice::DisplayDevice(
         int displayWidth,
         int displayHeight,
         bool hasWideColorGamut,
-        bool hasHdr10,
+        const HdrCapabilities& hdrCapabilities,
+        const int32_t supportedPerFrameMetadata,
         int initialPowerMode)
     : lastCompositionHadVisibleLayers(false),
       mFlinger(flinger),
@@ -100,9 +102,29 @@ DisplayDevice::DisplayDevice(
       mActiveColorMode(ColorMode::NATIVE),
       mColorTransform(HAL_COLOR_TRANSFORM_IDENTITY),
       mHasWideColorGamut(hasWideColorGamut),
-      mHasHdr10(hasHdr10)
+      mHasHdr10(false),
+      mHasHLG(false),
+      mHasDolbyVision(false),
+      mSupportedPerFrameMetadata(supportedPerFrameMetadata),
+      mDisplayHasColorMatrix(false)
 {
     // clang-format on
+    for (Hdr hdrType : hdrCapabilities.getSupportedHdrTypes()) {
+        switch (hdrType) {
+            case Hdr::HDR10:
+                mHasHdr10 = true;
+                break;
+            case Hdr::HLG:
+                mHasHLG = true;
+                break;
+            case Hdr::DOLBY_VISION:
+                mHasDolbyVision = true;
+                break;
+            default:
+                ALOGE("UNKNOWN HDR capability: %d", static_cast<int32_t>(hdrType));
+        }
+    }
+
     char property[PROPERTY_VALUE_MAX];
 
     mPanelMountFlip = 0;

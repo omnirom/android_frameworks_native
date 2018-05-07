@@ -37,32 +37,35 @@ namespace android {
 
 namespace Hwc2 {
 
-using android::frameworks::vr::composer::V1_0::IVrComposerClient;
+using frameworks::vr::composer::V1_0::IVrComposerClient;
 
-using android::hardware::graphics::common::V1_0::ColorTransform;
-using android::hardware::graphics::common::V1_0::Hdr;
-using android::hardware::graphics::common::V1_0::Transform;
-using android::hardware::graphics::common::V1_1::ColorMode;
-using android::hardware::graphics::common::V1_1::Dataspace;
-using android::hardware::graphics::common::V1_1::PixelFormat;
-using android::hardware::graphics::common::V1_1::RenderIntent;
+namespace types = hardware::graphics::common;
 
-using android::hardware::graphics::composer::V2_1::Config;
-using android::hardware::graphics::composer::V2_1::Display;
-using android::hardware::graphics::composer::V2_1::Error;
-using android::hardware::graphics::composer::V2_1::IComposer;
-using android::hardware::graphics::composer::V2_1::IComposerCallback;
-using android::hardware::graphics::composer::V2_1::Layer;
-using android::hardware::graphics::composer::V2_2::IComposerClient;
+namespace V2_1 = hardware::graphics::composer::V2_1;
+namespace V2_2 = hardware::graphics::composer::V2_2;
 
-using android::hardware::graphics::composer::V2_2::CommandReaderBase;
-using android::hardware::graphics::composer::V2_2::CommandWriterBase;
+using types::V1_0::ColorTransform;
+using types::V1_0::Hdr;
+using types::V1_0::Transform;
 
-using android::hardware::kSynchronizedReadWrite;
-using android::hardware::MessageQueue;
-using android::hardware::MQDescriptorSync;
-using android::hardware::hidl_vec;
-using android::hardware::hidl_handle;
+using types::V1_1::ColorMode;
+using types::V1_1::Dataspace;
+using types::V1_1::PixelFormat;
+using types::V1_1::RenderIntent;
+
+using V2_1::Config;
+using V2_1::Display;
+using V2_1::Error;
+using V2_1::IComposerCallback;
+using V2_1::Layer;
+
+using V2_2::CommandReaderBase;
+using V2_2::CommandWriterBase;
+using V2_2::IComposer;
+using V2_2::IComposerClient;
+
+using PerFrameMetadata = IComposerClient::PerFrameMetadata;
+using PerFrameMetadataKey = IComposerClient::PerFrameMetadataKey;
 
 class Composer {
 public:
@@ -160,8 +163,6 @@ public:
     virtual Error setLayerCompositionType(Display display, Layer layer,
                                           IComposerClient::Composition type) = 0;
     virtual Error setLayerDataspace(Display display, Layer layer, Dataspace dataspace) = 0;
-    virtual Error setLayerHdrMetadata(Display display, Layer layer,
-                                      const HdrMetadata& metadata) = 0;
     virtual Error setLayerDisplayFrame(Display display, Layer layer,
                                        const IComposerClient::Rect& frame) = 0;
     virtual Error setLayerPlaneAlpha(Display display, Layer layer, float alpha) = 0;
@@ -176,6 +177,9 @@ public:
     virtual Error setLayerInfo(Display display, Layer layer, uint32_t type, uint32_t appId) = 0;
 
     // Composer HAL 2.2
+    virtual Error setLayerPerFrameMetadata(
+            Display display, Layer layer,
+            const std::vector<IComposerClient::PerFrameMetadata>& perFrameMetadatas) = 0;
     virtual Error getPerFrameMetadataKeys(
             Display display, std::vector<IComposerClient::PerFrameMetadataKey>* outKeys) = 0;
     virtual Error getRenderIntents(Display display, ColorMode colorMode,
@@ -353,7 +357,6 @@ public:
     Error setLayerCompositionType(Display display, Layer layer,
                                   IComposerClient::Composition type) override;
     Error setLayerDataspace(Display display, Layer layer, Dataspace dataspace) override;
-    Error setLayerHdrMetadata(Display display, Layer layer, const HdrMetadata& metadata) override;
     Error setLayerDisplayFrame(Display display, Layer layer,
                                const IComposerClient::Rect& frame) override;
     Error setLayerPlaneAlpha(Display display, Layer layer, float alpha) override;
@@ -368,6 +371,9 @@ public:
     Error setLayerInfo(Display display, Layer layer, uint32_t type, uint32_t appId) override;
 
     // Composer HAL 2.2
+    Error setLayerPerFrameMetadata(
+            Display display, Layer layer,
+            const std::vector<IComposerClient::PerFrameMetadata>& perFrameMetadatas) override;
     Error getPerFrameMetadataKeys(
             Display display, std::vector<IComposerClient::PerFrameMetadataKey>* outKeys) override;
     Error getRenderIntents(Display display, ColorMode colorMode,
@@ -396,8 +402,9 @@ private:
     // this function to execute the command queue.
     Error execute();
 
-    sp<IComposer> mComposer;
-    sp<hardware::graphics::composer::V2_1::IComposerClient> mClient;
+    sp<V2_1::IComposer> mComposer;
+
+    sp<V2_1::IComposerClient> mClient;
     sp<IComposerClient> mClient_2_2;
 
     // 64KiB minus a small space for metadata such as read/write pointers

@@ -32,6 +32,7 @@
 
 #include <algorithm>
 #include <inttypes.h>
+#include <set>
 
 using android::Fence;
 using android::FloatRect;
@@ -53,6 +54,11 @@ using android::ui::PixelFormat;
 using android::ui::RenderIntent;
 
 namespace {
+
+inline bool hasMetadataKey(const std::set<Hwc2::PerFrameMetadataKey>& keys,
+                           const Hwc2::PerFrameMetadataKey& key) {
+    return keys.find(key) != keys.end();
+}
 
 class ComposerCallbackBridge : public Hwc2::IComposerCallback {
 public:
@@ -371,6 +377,42 @@ Error Display::getColorModes(std::vector<ColorMode>* outModes) const
     return static_cast<Error>(intError);
 }
 
+Error Display::getSupportedPerFrameMetadata(int32_t* outSupportedPerFrameMetadata) const
+{
+    *outSupportedPerFrameMetadata = 0;
+    std::vector<Hwc2::PerFrameMetadataKey> tmpKeys;
+    auto intError = mComposer.getPerFrameMetadataKeys(mId, &tmpKeys);
+    auto error = static_cast<Error>(intError);
+    if (error != Error::None) {
+        return error;
+    }
+
+    // Check whether a specific metadata type is supported. A metadata type is considered
+    // supported if and only if all required fields are supported.
+
+    // SMPTE2086
+    std::set<Hwc2::PerFrameMetadataKey> keys(tmpKeys.begin(), tmpKeys.end());
+    if (hasMetadataKey(keys, Hwc2::PerFrameMetadataKey::DISPLAY_RED_PRIMARY_X) &&
+        hasMetadataKey(keys, Hwc2::PerFrameMetadataKey::DISPLAY_RED_PRIMARY_Y) &&
+        hasMetadataKey(keys, Hwc2::PerFrameMetadataKey::DISPLAY_GREEN_PRIMARY_X) &&
+        hasMetadataKey(keys, Hwc2::PerFrameMetadataKey::DISPLAY_GREEN_PRIMARY_Y) &&
+        hasMetadataKey(keys, Hwc2::PerFrameMetadataKey::DISPLAY_BLUE_PRIMARY_X) &&
+        hasMetadataKey(keys, Hwc2::PerFrameMetadataKey::DISPLAY_BLUE_PRIMARY_Y) &&
+        hasMetadataKey(keys, Hwc2::PerFrameMetadataKey::WHITE_POINT_X) &&
+        hasMetadataKey(keys, Hwc2::PerFrameMetadataKey::WHITE_POINT_Y) &&
+        hasMetadataKey(keys, Hwc2::PerFrameMetadataKey::MAX_LUMINANCE) &&
+        hasMetadataKey(keys, Hwc2::PerFrameMetadataKey::MIN_LUMINANCE)) {
+        *outSupportedPerFrameMetadata |= HdrMetadata::Type::SMPTE2086;
+    }
+    // CTA861_3
+    if (hasMetadataKey(keys, Hwc2::PerFrameMetadataKey::MAX_CONTENT_LIGHT_LEVEL) &&
+        hasMetadataKey(keys, Hwc2::PerFrameMetadataKey::MAX_FRAME_AVERAGE_LIGHT_LEVEL)) {
+        *outSupportedPerFrameMetadata |= HdrMetadata::Type::CTA861_3;
+    }
+
+    return Error::None;
+}
+
 Error Display::getRenderIntents(ColorMode colorMode,
         std::vector<RenderIntent>* outRenderIntents) const
 {
@@ -449,26 +491,21 @@ Error Display::supportsDoze(bool* outSupport) const
     return Error::None;
 }
 
-Error Display::getHdrCapabilities(
-        std::unique_ptr<HdrCapabilities>* outCapabilities) const
+Error Display::getHdrCapabilities(HdrCapabilities* outCapabilities) const
 {
     float maxLuminance = -1.0f;
     float maxAverageLuminance = -1.0f;
     float minLuminance = -1.0f;
-    std::vector<Hwc2::Hdr> intTypes;
-    auto intError = mComposer.getHdrCapabilities(mId, &intTypes,
+    std::vector<Hwc2::Hdr> types;
+    auto intError = mComposer.getHdrCapabilities(mId, &types,
             &maxLuminance, &maxAverageLuminance, &minLuminance);
     auto error = static_cast<HWC2::Error>(intError);
 
-    std::vector<int32_t> types;
-    for (auto type : intTypes) {
-        types.push_back(static_cast<int32_t>(type));
-    }
     if (error != Error::None) {
         return error;
     }
 
-    *outCapabilities = std::make_unique<HdrCapabilities>(std::move(types),
+    *outCapabilities = HdrCapabilities(std::move(types),
             maxLuminance, maxAverageLuminance, minLuminance);
     return Error::None;
 }
@@ -790,13 +827,49 @@ Error Layer::setDataspace(Dataspace dataspace)
     return static_cast<Error>(intError);
 }
 
-Error Layer::setHdrMetadata(const android::HdrMetadata& metadata) {
+Error Layer::setPerFrameMetadata(const int32_t supportedPerFrameMetadata,
+        const android::HdrMetadata& metadata)
+{
     if (metadata == mHdrMetadata) {
         return Error::None;
     }
 
     mHdrMetadata = metadata;
-    auto intError = mComposer.setLayerHdrMetadata(mDisplayId, mId, metadata);
+    int validTypes = mHdrMetadata.validTypes & supportedPerFrameMetadata;
+    std::vector<Hwc2::PerFrameMetadata> perFrameMetadatas;
+    if (validTypes & HdrMetadata::SMPTE2086) {
+        perFrameMetadatas.insert(perFrameMetadatas.end(),
+                                 {{Hwc2::PerFrameMetadataKey::DISPLAY_RED_PRIMARY_X,
+                                         mHdrMetadata.smpte2086.displayPrimaryRed.x},
+                                   {Hwc2::PerFrameMetadataKey::DISPLAY_RED_PRIMARY_Y,
+                                         mHdrMetadata.smpte2086.displayPrimaryRed.y},
+                                   {Hwc2::PerFrameMetadataKey::DISPLAY_GREEN_PRIMARY_X,
+                                         mHdrMetadata.smpte2086.displayPrimaryGreen.x},
+                                   {Hwc2::PerFrameMetadataKey::DISPLAY_GREEN_PRIMARY_Y,
+                                         mHdrMetadata.smpte2086.displayPrimaryGreen.y},
+                                   {Hwc2::PerFrameMetadataKey::DISPLAY_BLUE_PRIMARY_X,
+                                         mHdrMetadata.smpte2086.displayPrimaryBlue.x},
+                                   {Hwc2::PerFrameMetadataKey::DISPLAY_BLUE_PRIMARY_Y,
+                                         mHdrMetadata.smpte2086.displayPrimaryBlue.y},
+                                   {Hwc2::PerFrameMetadataKey::WHITE_POINT_X,
+                                         mHdrMetadata.smpte2086.whitePoint.x},
+                                   {Hwc2::PerFrameMetadataKey::WHITE_POINT_Y,
+                                         mHdrMetadata.smpte2086.whitePoint.y},
+                                   {Hwc2::PerFrameMetadataKey::MAX_LUMINANCE,
+                                         mHdrMetadata.smpte2086.maxLuminance},
+                                   {Hwc2::PerFrameMetadataKey::MIN_LUMINANCE,
+                                         mHdrMetadata.smpte2086.minLuminance}});
+    }
+
+    if (validTypes & HdrMetadata::CTA861_3) {
+        perFrameMetadatas.insert(perFrameMetadatas.end(),
+                                 {{Hwc2::PerFrameMetadataKey::MAX_CONTENT_LIGHT_LEVEL,
+                                         mHdrMetadata.cta8613.maxContentLightLevel},
+                                   {Hwc2::PerFrameMetadataKey::MAX_FRAME_AVERAGE_LIGHT_LEVEL,
+                                         mHdrMetadata.cta8613.maxFrameAverageLightLevel}});
+    }
+
+    auto intError = mComposer.setLayerPerFrameMetadata(mDisplayId, mId, perFrameMetadatas);
     return static_cast<Error>(intError);
 }
 
