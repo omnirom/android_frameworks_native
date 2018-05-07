@@ -1973,7 +1973,7 @@ void SurfaceFlinger::setUpHWComposer() {
         }
     }
 
-    mat4 colorMatrix = mColorMatrix * computeSaturationMatrix() * mDaltonizer();
+    mat4 colorMatrix = mDrawingState.colorMatrix;
     bool isIdentity = (colorMatrix == mat4());
     // build the h/w work list
     if (CC_UNLIKELY(mGeometryInvalid)) {
