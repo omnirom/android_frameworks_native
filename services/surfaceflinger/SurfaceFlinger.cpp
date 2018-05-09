@@ -1126,12 +1126,16 @@ status_t SurfaceFlinger::getHdrCapabilities(const sp<IBinder>& display,
     int status = getBE().mHwc->getHdrCapabilities(
         displayDevice->getHwcDisplayId(), &capabilities);
     if (status == NO_ERROR) {
-        if (displayDevice->hasWideColorGamut() &&
-            !displayDevice->hasHDR10Support()) {
-            // insert HDR10 as we will force client composition for HDR10
-            // layers
+        if (displayDevice->hasWideColorGamut()) {
             std::vector<Hdr> types = capabilities.getSupportedHdrTypes();
-            types.push_back(Hdr::HDR10);
+            // insert HDR10/HLG as we will force client composition for HDR10/HLG
+            // layers
+            if (!displayDevice->hasHDR10Support()) {
+                types.push_back(Hdr::HDR10);
+            }
+            if (!displayDevice->hasHLGSupport()) {
+                types.push_back(Hdr::HLG);
+            }
 
             *outCapabilities = HdrCapabilities(types,
                     capabilities.getDesiredMaxLuminance(),
@@ -1787,6 +1791,8 @@ void SurfaceFlinger::postComposition(nsecs_t refreshStartTime)
         mAnimFrameTracker.advanceFrame();
     }
 
+    dumpDrawCycle(false);
+
     if (getBE().mHwc->isConnected(HWC_DISPLAY_PRIMARY) &&
             hw->getPowerMode() == HWC_POWER_MODE_OFF) {
         return;
@@ -1907,17 +1913,23 @@ ui::Dataspace SurfaceFlinger::getBestDataspace(
             case Dataspace::V0_SCRGB_LINEAR:
                 // return immediately
                 return Dataspace::V0_SCRGB_LINEAR;
+            case Dataspace::DISPLAY_P3:
+                bestDataspace = Dataspace::DISPLAY_P3;
+                break;
+            // Historically, HDR dataspaces are ignored by SurfaceFlinger. But
+            // since SurfaceFlinger simulates HDR support now, it should honor
+            // them unless there is also native support.
             case Dataspace::BT2020_PQ:
             case Dataspace::BT2020_ITU_PQ:
-                // Historically, HDR dataspaces are ignored by SurfaceFlinger. But
-                // since SurfaceFlinger simulates HDR support now, it should honor
-                // them unless there is also native support.
                 if (!displayDevice->hasHDR10Support()) {
                     return Dataspace::V0_SCRGB_LINEAR;
                 }
                 break;
-            case Dataspace::DISPLAY_P3:
-                bestDataspace = Dataspace::DISPLAY_P3;
+            case Dataspace::BT2020_HLG:
+            case Dataspace::BT2020_ITU_HLG:
+                if (!displayDevice->hasHLGSupport()) {
+                    return Dataspace::V0_SCRGB_LINEAR;
+                }
                 break;
             default:
                 break;
@@ -1989,8 +2001,9 @@ void SurfaceFlinger::setUpHWComposer() {
     if (CC_UNLIKELY(mGeometryInvalid)) {
         mGeometryInvalid = false;
         for (size_t dpy=0 ; dpy<mDisplays.size() ; dpy++) {
-            sp<const DisplayDevice> displayDevice(mDisplays[dpy]);
+            sp<DisplayDevice> displayDevice(mDisplays[dpy]);
             const auto hwcId = displayDevice->getHwcDisplayId();
+            displayDevice->setColorMatrix(!isIdentity);
             if (hwcId >= 0) {
                 const Vector<sp<Layer>>& currentLayers(
                         displayDevice->getVisibleLayersSortedByZ());
@@ -2007,6 +2020,7 @@ void SurfaceFlinger::setUpHWComposer() {
                     layer->setGeometry(displayDevice, i);
                     if (mDebugDisableHWC || mDebugRegion || (hwcId !=0 && !isIdentity)) {
                         layer->forceClientComposition(hwcId);
+                        layer->setColorInversionData(displayDevice);
                     }
                 }
             }
@@ -2034,6 +2048,11 @@ void SurfaceFlinger::setUpHWComposer() {
                     !displayDevice->hasHDR10Support()) {
                 layer->forceClientComposition(hwcId);
             }
+            if ((layer->getDataSpace() == Dataspace::BT2020_HLG ||
+                 layer->getDataSpace() == Dataspace::BT2020_ITU_HLG) &&
+                    !displayDevice->hasHLGSupport()) {
+                layer->forceClientComposition(hwcId);
+            }
 
             if (layer->getForceClientComposition(hwcId)) {
                 ALOGV("[%s] Requesting Client composition", layer->getName().string());
@@ -2053,6 +2072,8 @@ void SurfaceFlinger::setUpHWComposer() {
     }
 
     mPreviousColorMatrix = colorMatrix;
+
+    dumpDrawCycle(true);
 
     for (size_t displayId = 0; displayId < mDisplays.size(); ++displayId) {
         auto& displayDevice = mDisplays[displayId];
@@ -2320,7 +2341,9 @@ sp<DisplayDevice> SurfaceFlinger::setupNewDisplayDeviceInternal(
     sp<DisplayDevice> hw =
             new DisplayDevice(this, state.type, hwcId, state.isSecure, display, nativeWindow,
                               dispSurface, std::move(renderSurface), displayWidth, displayHeight,
-                              hasWideColorGamut, hdrCapabilities, initialPowerMode);
+                              hasWideColorGamut, hdrCapabilities,
+                              getHwComposer().getSupportedPerFrameMetadata(hwcId),
+                              initialPowerMode);
 
     if (maxFrameBufferAcquiredBuffers >= 3) {
         nativeWindowSurface->preallocateBuffers();

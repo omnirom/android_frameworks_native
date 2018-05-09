@@ -198,7 +198,8 @@ void BufferLayer::onDraw(const RenderArea& renderArea, const Region& clip,
         // is probably going to have something visibly wrong.
     }
 
-    bool blackOutLayer = isProtected() || (isSecure() && !renderArea.isSecure()) || isHDRLayer();
+    bool blackOutLayer = isProtected() || (isSecure() && !renderArea.isSecure()) ||
+                         (isHDRLayer() && !isColorInversion());
 
     auto& engine(mFlinger->getRenderEngine());
 
@@ -655,7 +656,7 @@ void BufferLayer::setPerFrameData(const sp<const DisplayDevice>& displayDevice) 
     }
 
     const HdrMetadata& metadata = mConsumer->getCurrentHdrMetadata();
-    error = hwcLayer->setHdrMetadata(metadata);
+    error = hwcLayer->setPerFrameMetadata(displayDevice->getSupportedPerFrameMetadata(), metadata);
     if (error != HWC2::Error::None && error != HWC2::Error::Unsupported) {
         ALOGE("[%s] Failed to set hdrMetadata: %s (%d)", mName.string(),
               to_string(error).c_str(), static_cast<int32_t>(error));
