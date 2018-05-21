@@ -46,6 +46,7 @@ cc_defaults {
         "libpdx_default_transport",
         "libprotobuf-cpp-lite",
         "libsync",
+        "libtimestats_proto",
         "libui",
         "libutils",
         "libvulkan",
@@ -125,6 +126,7 @@ filegroup {
         "SurfaceFlinger.cpp",
         "SurfaceInterceptor.cpp",
         "SurfaceTracing.cpp",
+        "TimeStats/TimeStats.cpp",
         "Transform.cpp",
         "DisplayUtils.cpp",
         "ExSurfaceFlinger/ExSurfaceFlinger.cpp",
@@ -184,6 +186,7 @@ cc_binary {
         "liblayers_proto",
         "liblog",
         "libsurfaceflinger",
+        "libtimestats_proto",
         "libutils",
     ],
     static_libs: [
@@ -225,5 +228,6 @@ cc_library_shared {
 
 subdirs = [
     "layerproto",
+    "TimeStats/timestatsproto",
     "tests",
 ]

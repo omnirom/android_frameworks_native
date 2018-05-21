@@ -63,6 +63,7 @@
 #include "SurfaceInterceptor.h"
 #include "SurfaceTracing.h"
 #include "StartPropertySetThread.h"
+#include "TimeStats/TimeStats.h"
 #include "VSyncModulator.h"
 
 #include "DisplayHardware/HWC2.h"
@@ -375,12 +376,19 @@ private:
             // always uses the Drawing StateSet.
             layersSortedByZ = other.layersSortedByZ;
             displays = other.displays;
+            colorMatrixChanged = other.colorMatrixChanged;
+            if (colorMatrixChanged) {
+                colorMatrix = other.colorMatrix;
+            }
             return *this;
         }
 
         const LayerVector::StateSet stateSet = LayerVector::StateSet::Invalid;
         LayerVector layersSortedByZ;
         DefaultKeyedVector< wp<IBinder>, DisplayDeviceState> displays;
+
+        bool colorMatrixChanged = true;
+        mat4 colorMatrix;
 
         void traverseInZOrder(const LayerVector::Visitor& visitor) const;
         void traverseInReverseZOrder(const LayerVector::Visitor& visitor) const;
@@ -486,7 +494,8 @@ private:
     // Called on the main thread in response to setActiveColorMode()
     void setActiveColorModeInternal(const sp<DisplayDevice>& hw,
                                     ui::ColorMode colorMode,
-                                    ui::Dataspace dataSpace);
+                                    ui::Dataspace dataSpace,
+                                    ui::RenderIntent renderIntent);
 
     // Returns whether the transaction actually modified any state
     bool handleMessageTransaction();
@@ -658,14 +667,18 @@ private:
             nsecs_t compositeToPresentLatency);
     void rebuildLayerStacks();
 
-    // Given a dataSpace, returns the appropriate color_mode to use
-    // to display that dataSpace.
-    ui::Dataspace getBestDataspace(const sp<const DisplayDevice>& displayDevice) const;
+    ui::Dataspace getBestDataspace(const sp<const DisplayDevice>& displayDevice,
+                                   ui::Dataspace* outHdrDataSpace) const;
+
+    // Returns the appropriate ColorMode, Dataspace and RenderIntent for the
+    // DisplayDevice. The function only returns the supported ColorMode,
+    // Dataspace and RenderIntent.
     void pickColorMode(const sp<DisplayDevice>& displayDevice,
                        ui::ColorMode* outMode,
-                       ui::Dataspace* outDataSpace) const;
-
-    mat4 computeSaturationMatrix() const;
+                       ui::Dataspace* outDataSpace,
+                       ui::RenderIntent* outRenderIntent) const;
+    ui::RenderIntent pickRenderIntent(const sp<DisplayDevice>& displayDevice,
+                                      ui::ColorMode colorMode) const;
 
     void setUpHWComposer();
     void doComposition();
@@ -754,6 +767,8 @@ private:
     // Check to see if we should handoff to vr flinger.
     void updateVrFlinger();
 
+    void updateColorMatrixLocked();
+
     /* ------------------------------------------------------------------------
      * Attributes
      */
@@ -766,6 +781,11 @@ private:
     bool mTransactionPending;
     bool mAnimTransactionPending;
     SortedVector< sp<Layer> > mLayersPendingRemoval;
+
+    // global color transform states
+    Daltonizer mDaltonizer;
+    float mGlobalSaturationFactor = 1.0f;
+    mat4 mClientColorMatrix;
 
     // Can't be unordered_set because wp<> isn't hashable
     std::set<wp<IBinder>> mGraphicBufferProducerList;
@@ -829,6 +849,7 @@ private:
             std::make_unique<impl::SurfaceInterceptor>(this);
     SurfaceTracing mTracing;
     LayerStats mLayerStats;
+    TimeStats& mTimeStats = TimeStats::getInstance();
     bool mUseHwcVirtualDisplays = false;
 
     // Restrict layers to use two buffers in their bufferqueues.
@@ -856,12 +877,6 @@ private:
 
     bool mInjectVSyncs;
 
-    Daltonizer mDaltonizer;
-
-    mat4 mPreviousColorMatrix;
-    mat4 mColorMatrix;
-    bool mHasColorMatrix;
-
     // Static screen stats
     bool mHasPoweredOff;
 
@@ -879,8 +894,6 @@ private:
     DisplayColorSetting mDisplayColorSetting = DisplayColorSetting::MANAGED;
     // Applied on sRGB layers when the render intent is non-colorimetric.
     mat4 mLegacySrgbSaturationMatrix;
-    // Applied globally.
-    float mGlobalSaturationFactor = 1.0f;
     bool mBuiltinDisplaySupportsEnhance = false;
 
     using CreateBufferQueueFunction =

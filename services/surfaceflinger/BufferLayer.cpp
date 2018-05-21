@@ -317,6 +317,9 @@ bool BufferLayer::onPostComposition(const std::shared_ptr<FenceTime>& glDoneFenc
     nsecs_t desiredPresentTime = mConsumer->getTimestamp();
     mFrameTracker.setDesiredPresentTime(desiredPresentTime);
 
+    const std::string layerName(getName().c_str());
+    mTimeStats.setDesiredTime(layerName, mCurrentFrameNumber, desiredPresentTime);
+
     std::shared_ptr<FenceTime> frameReadyFence = mConsumer->getCurrentFenceTime();
     if (frameReadyFence->isValid()) {
         mFrameTracker.setFrameReadyFence(std::move(frameReadyFence));
@@ -327,12 +330,15 @@ bool BufferLayer::onPostComposition(const std::shared_ptr<FenceTime>& glDoneFenc
     }
 
     if (presentFence->isValid()) {
+        mTimeStats.setPresentFence(layerName, mCurrentFrameNumber, presentFence);
         mFrameTracker.setActualPresentFence(std::shared_ptr<FenceTime>(presentFence));
     } else {
         // The HWC doesn't support present fences, so use the refresh
         // timestamp instead.
-        mFrameTracker.setActualPresentTime(
-                mFlinger->getHwComposer().getRefreshTimestamp(HWC_DISPLAY_PRIMARY));
+        const nsecs_t actualPresentTime =
+                mFlinger->getHwComposer().getRefreshTimestamp(HWC_DISPLAY_PRIMARY);
+        mTimeStats.setPresentTime(layerName, mCurrentFrameNumber, actualPresentTime);
+        mFrameTracker.setActualPresentTime(actualPresentTime);
     }
 
     mFrameTracker.advanceFrame();
@@ -442,6 +448,7 @@ Region BufferLayer::latchBuffer(bool& recomputeVisibleRegions, nsecs_t latchTime
         // and return early
         if (queuedBuffer) {
             Mutex::Autolock lock(mQueueItemLock);
+            mTimeStats.removeTimeRecord(getName().c_str(), mQueueItems[0].mFrameNumber);
             mQueueItems.removeAt(0);
             android_atomic_dec(&mQueuedFrames);
         }
@@ -455,6 +462,7 @@ Region BufferLayer::latchBuffer(bool& recomputeVisibleRegions, nsecs_t latchTime
             Mutex::Autolock lock(mQueueItemLock);
             mQueueItems.clear();
             android_atomic_and(0, &mQueuedFrames);
+            mTimeStats.clearLayerRecord(getName().c_str());
         }
 
         // Once we have hit this state, the shadow queue may no longer
@@ -475,6 +483,7 @@ Region BufferLayer::latchBuffer(bool& recomputeVisibleRegions, nsecs_t latchTime
         // Remove any stale buffers that have been dropped during
         // updateTexImage
         while (mQueuedFrames > 0 && mQueueItems[0].mFrameNumber != currentFrameNumber) {
+            mTimeStats.removeTimeRecord(getName().c_str(), mQueueItems[0].mFrameNumber);
             mQueueItems.removeAt(0);
             android_atomic_dec(&mQueuedFrames);
         }
@@ -483,6 +492,10 @@ Region BufferLayer::latchBuffer(bool& recomputeVisibleRegions, nsecs_t latchTime
             ALOGE("[%s] mQueuedFrames is zero !!!", mName.string());
             return outDirtyRegion;
         }
+
+        const std::string layerName(getName().c_str());
+        mTimeStats.setAcquireFence(layerName, currentFrameNumber, mQueueItems[0].mFenceTime);
+        mTimeStats.setLatchTime(layerName, currentFrameNumber, latchTime);
 
         mQueueItems.removeAt(0);
     }
@@ -521,11 +534,9 @@ Region BufferLayer::latchBuffer(bool& recomputeVisibleRegions, nsecs_t latchTime
         recomputeVisibleRegions = true;
     }
 
-    // Dataspace::V0_SRGB and Dataspace::V0_SRGB_LINEAR are not legacy
-    // data space, however since framework doesn't distinguish them out of
-    // legacy SRGB, we have to treat them as the same for now.
-    // UNKNOWN is treated as legacy SRGB when the connected api is EGL.
     ui::Dataspace dataSpace = mConsumer->getCurrentDataSpace();
+    // treat modern dataspaces as legacy dataspaces whenever possible, until
+    // we can trust the buffer producers
     switch (dataSpace) {
         case ui::Dataspace::V0_SRGB:
             dataSpace = ui::Dataspace::SRGB;
@@ -533,10 +544,17 @@ Region BufferLayer::latchBuffer(bool& recomputeVisibleRegions, nsecs_t latchTime
         case ui::Dataspace::V0_SRGB_LINEAR:
             dataSpace = ui::Dataspace::SRGB_LINEAR;
             break;
-        case ui::Dataspace::UNKNOWN:
-            if (mConsumer->getCurrentApi() == NATIVE_WINDOW_API_EGL) {
-                dataSpace = ui::Dataspace::SRGB;
-            }
+        case ui::Dataspace::V0_JFIF:
+            dataSpace = ui::Dataspace::JFIF;
+            break;
+        case ui::Dataspace::V0_BT601_625:
+            dataSpace = ui::Dataspace::BT601_625;
+            break;
+        case ui::Dataspace::V0_BT601_525:
+            dataSpace = ui::Dataspace::BT601_525;
+            break;
+        case ui::Dataspace::V0_BT709:
+            dataSpace = ui::Dataspace::BT709;
             break;
         default:
             break;

@@ -80,7 +80,7 @@ protected:
     virtual void setupLayerTexturing(const Texture& texture);
     virtual void setupLayerBlackedOut();
     virtual void setupFillWithColor(float r, float g, float b, float a);
-    virtual mat4 setupColorTransform(const mat4& colorTransform);
+    virtual void setupColorTransform(const mat4& colorTransform);
     virtual void disableTexturing();
     virtual void disableBlending();
 
@@ -98,7 +98,18 @@ protected:
     // Currently only supporting sRGB, BT2020 and DisplayP3 color spaces
     const bool mPlatformHasWideColor = false;
     mat4 mSrgbToDisplayP3;
-    mat4 mBt2020ToDisplayP3;
+    mat4 mDisplayP3ToSrgb;
+    mat3 mSrgbToXyz;
+    mat3 mBt2020ToXyz;
+    mat3 mDisplayP3ToXyz;
+    mat4 mXyzToDisplayP3;
+    mat4 mXyzToBt2020;
+
+private:
+    // A data space is considered HDR data space if it has BT2020 color space
+    // with PQ or HLG transfer function.
+    bool isHdrDataSpace(const ui::Dataspace dataSpace) const;
+    bool needsXYZTransformMatrix() const;
 };
 
 // ---------------------------------------------------------------------------

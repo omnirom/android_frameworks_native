@@ -125,13 +125,17 @@ ProgramCache::Key ProgramCache::computeKey(const Description& description) {
                  description.mPremultipliedAlpha ? Key::BLEND_PREMULT : Key::BLEND_NORMAL)
             .set(Key::OPACITY_MASK,
                  description.mOpaque ? Key::OPACITY_OPAQUE : Key::OPACITY_TRANSLUCENT)
-            .set(Key::COLOR_MATRIX_MASK,
-                 description.mColorMatrixEnabled ? Key::COLOR_MATRIX_ON : Key::COLOR_MATRIX_OFF);
+            .set(Key::Key::INPUT_TRANSFORM_MATRIX_MASK,
+                 description.hasInputTransformMatrix() ?
+                     Key::INPUT_TRANSFORM_MATRIX_ON : Key::INPUT_TRANSFORM_MATRIX_OFF)
+            .set(Key::Key::OUTPUT_TRANSFORM_MATRIX_MASK,
+                 description.hasOutputTransformMatrix() || description.hasColorMatrix() ?
+                     Key::OUTPUT_TRANSFORM_MATRIX_ON : Key::OUTPUT_TRANSFORM_MATRIX_OFF);
 
     needs.set(Key::Y410_BT2020_MASK,
               description.mY410BT2020 ? Key::Y410_BT2020_ON : Key::Y410_BT2020_OFF);
 
-    if (needs.hasColorMatrix()) {
+    if (needs.hasTransformMatrix() || (needs.getInputTF() != needs.getOutputTF())) {
         switch (description.mInputTransferFunction) {
             case Description::TransferFunction::LINEAR:
             default:
@@ -247,7 +251,7 @@ void ProgramCache::generateOOTF(Formatter& fs, const Key& needs) {
                     const float maxMasteringLumi = 1000.0;
                     const float maxContentLumi = 1000.0;
                     const float maxInLumi = min(maxMasteringLumi, maxContentLumi);
-                    const float maxOutLumi = displayMaxLuminance;
+                    float maxOutLumi = displayMaxLuminance;
 
                     // Calculate Y value in XYZ color space.
                     float colorY = CalculateY(color);
@@ -265,18 +269,18 @@ void ProgramCache::generateOOTF(Formatter& fs, const Key& needs) {
                         // three control points
                         const float x0 = 10.0;
                         const float y0 = 17.0;
-                        const float x1 = maxOutLumi * 0.75;
-                        const float y1 = x1;
-                        const float x2 = x1 + (maxInLumi - x1) / 2.0;
-                        const float y2 = y1 + (maxOutLumi - y1) * 0.75;
+                        float x1 = maxOutLumi * 0.75;
+                        float y1 = x1;
+                        float x2 = x1 + (maxInLumi - x1) / 2.0;
+                        float y2 = y1 + (maxOutLumi - y1) * 0.75;
 
                         // horizontal distances between the last three control points
-                        const float h12 = x2 - x1;
-                        const float h23 = maxInLumi - x2;
+                        float h12 = x2 - x1;
+                        float h23 = maxInLumi - x2;
                         // tangents at the last three control points
-                        const float m1 = (y2 - y1) / h12;
-                        const float m3 = (maxOutLumi - y2) / h23;
-                        const float m2 = (m1 + m3) / 2.0;
+                        float m1 = (y2 - y1) / h12;
+                        float m3 = (maxOutLumi - y2) / h23;
+                        float m2 = (m1 + m3) / 2.0;
 
                         if (nits < x0) {
                             // scale [0.0, x0] to [0.0, y0] linearly
@@ -284,7 +288,7 @@ void ProgramCache::generateOOTF(Formatter& fs, const Key& needs) {
                             nits *= slope;
                         } else if (nits < x1) {
                             // scale [x0, x1] to [y0, y1] linearly
-                            const float slope = (y1 - y0) / (x1 - x0);
+                            float slope = (y1 - y0) / (x1 - x0);
                             nits = y0 + (nits - x0) * slope;
                         } else if (nits < x2) {
                             // scale [x1, x2] to [y1, y2] using Hermite interp
@@ -441,11 +445,42 @@ String8 ProgramCache::generateFragmentShader(const Key& needs) {
             )__SHADER__";
     }
 
-    if (needs.hasColorMatrix()) {
-        fs << "uniform mat4 colorMatrix;";
+    if (needs.hasTransformMatrix() || (needs.getInputTF() != needs.getOutputTF())) {
         // Currently, only the OOTF of BT2020 PQ needs display maximum luminance.
         if (needs.getInputTF() == Key::INPUT_TF_ST2084) {
-            fs << "uniform float displayMaxLuminance";
+            fs << "uniform float displayMaxLuminance;";
+        }
+
+        if (needs.hasInputTransformMatrix()) {
+            fs << "uniform mat3 inputTransformMatrix;";
+            fs << R"__SHADER__(
+                highp vec3 InputTransform(const highp vec3 color) {
+                    return inputTransformMatrix * color;
+                }
+            )__SHADER__";
+        } else {
+            fs << R"__SHADER__(
+                highp vec3 InputTransform(const highp vec3 color) {
+                    return color;
+                }
+            )__SHADER__";
+        }
+
+        // the transformation from a wider colorspace to a narrower one can
+        // result in >1.0 or <0.0 pixel values
+        if (needs.hasOutputTransformMatrix()) {
+            fs << "uniform mat4 outputTransformMatrix;";
+            fs << R"__SHADER__(
+                highp vec3 OutputTransform(const highp vec3 color) {
+                    return clamp(vec3(outputTransformMatrix * vec4(color, 1.0)), 0.0, 1.0);
+                }
+            )__SHADER__";
+        } else {
+            fs << R"__SHADER__(
+                highp vec3 OutputTransform(const highp vec3 color) {
+                    return clamp(color, 0.0, 1.0);
+                }
+            )__SHADER__";
         }
 
         generateEOTF(fs, needs);
@@ -476,18 +511,13 @@ String8 ProgramCache::generateFragmentShader(const Key& needs) {
         }
     }
 
-    if (needs.hasColorMatrix()) {
+    if (needs.hasTransformMatrix() || (needs.getInputTF() != needs.getOutputTF())) {
         if (!needs.isOpaque() && needs.isPremultiplied()) {
             // un-premultiply if needed before linearization
             // avoid divide by 0 by adding 0.5/256 to the alpha channel
             fs << "gl_FragColor.rgb = gl_FragColor.rgb / (gl_FragColor.a + 0.0019);";
         }
-        fs << "vec4 transformed = colorMatrix * vec4(OOTF(EOTF(gl_FragColor.rgb)), 1);";
-        // the transformation from a wider colorspace to a narrower one can
-        // result in >1.0 or <0.0 pixel values
-        fs << "transformed.rgb = clamp(transformed.rgb, 0.0, 1.0);";
-        // We assume the last row is always {0,0,0,1} and we skip the division by w
-        fs << "gl_FragColor.rgb = OETF(transformed.rgb);";
+        fs << "gl_FragColor.rgb = OETF(OutputTransform(OOTF(InputTransform(EOTF(gl_FragColor.rgb)))));";
         if (!needs.isOpaque() && needs.isPremultiplied()) {
             // and re-premultiply if needed after gamma correction
             fs << "gl_FragColor.rgb = gl_FragColor.rgb * (gl_FragColor.a + 0.0019);";
