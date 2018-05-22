@@ -77,6 +77,7 @@
 #include <string>
 #include <thread>
 #include <utility>
+#include <bitset>
 #include "RenderArea.h"
 
 #include <layerproto/LayerProtoHeader.h>
@@ -834,6 +835,8 @@ private:
     DefaultKeyedVector< wp<IBinder>, sp<DisplayDevice> > mDisplays;
 
     // don't use a lock for these, we don't care
+    std::bitset<DisplayDevice::NUM_BUILTIN_DISPLAY_TYPES> mActiveDisplays;
+    std::bitset<DisplayDevice::NUM_BUILTIN_DISPLAY_TYPES> mBuiltInBitmask;
     int mDebugRegion;
     int mDebugDDMS;
     int mDebugDisableHWC;
