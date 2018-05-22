@@ -636,14 +636,21 @@ void SurfaceFlinger::init() {
     mEventThreadSource =
             std::make_unique<DispSyncSource>(&mPrimaryDispSync, SurfaceFlinger::vsyncPhaseOffsetNs,
                                              true, "app");
-    mEventThread = std::make_unique<impl::EventThread>(mEventThreadSource.get(), *this, false,
+    mEventThread = std::make_unique<impl::EventThread>(mEventThreadSource.get(),
+                                                       [this]() { resyncWithRateLimit(); },
+                                                       impl::EventThread::InterceptVSyncsCallback(),
                                                        "appEventThread");
     mSfEventThreadSource =
             std::make_unique<DispSyncSource>(&mPrimaryDispSync,
                                              SurfaceFlinger::sfVsyncPhaseOffsetNs, true, "sf");
 
-    mSFEventThread = std::make_unique<impl::EventThread>(mSfEventThreadSource.get(), *this, true,
-                                                         "sfEventThread");
+    mSFEventThread =
+            std::make_unique<impl::EventThread>(mSfEventThreadSource.get(),
+                                                [this]() { resyncWithRateLimit(); },
+                                                [this](nsecs_t timestamp) {
+                                                    mInterceptor->saveVSyncEvent(timestamp);
+                                                },
+                                                "sfEventThread");
     mEventQueue->setEventThread(mSFEventThread.get());
     mVsyncModulator.setEventThread(mSFEventThread.get());
 
@@ -1134,9 +1141,11 @@ status_t SurfaceFlinger::enableVSyncInjections(bool enable) {
             ALOGV("VSync Injections enabled");
             if (mVSyncInjector.get() == nullptr) {
                 mVSyncInjector = std::make_unique<InjectVSyncSource>();
-                mInjectorEventThread =
-                        std::make_unique<impl::EventThread>(mVSyncInjector.get(), *this, false,
-                                                            "injEventThread");
+                mInjectorEventThread = std::make_unique<
+                        impl::EventThread>(mVSyncInjector.get(),
+                                           [this]() { resyncWithRateLimit(); },
+                                           impl::EventThread::InterceptVSyncsCallback(),
+                                           "injEventThread");
             }
             mEventQueue->setEventThread(mInjectorEventThread.get());
         } else {
@@ -1875,7 +1884,7 @@ Dataspace SurfaceFlinger::getBestDataspace(
     *outHdrDataSpace = Dataspace::UNKNOWN;
 
     for (const auto& layer : displayDevice->getVisibleLayersSortedByZ()) {
-        switch (layer->getDataSpace()) {
+        switch (layer->getDrawingState().dataSpace) {
             case Dataspace::V0_SCRGB:
             case Dataspace::V0_SCRGB_LINEAR:
                 bestDataSpace = Dataspace::V0_SCRGB_LINEAR;
@@ -2099,13 +2108,13 @@ void SurfaceFlinger::setUpHWComposer() {
                     "display %zd: %d", displayId, result);
         }
         for (auto& layer : displayDevice->getVisibleLayersSortedByZ()) {
-            if ((layer->getDataSpace() == Dataspace::BT2020_PQ ||
-                 layer->getDataSpace() == Dataspace::BT2020_ITU_PQ) &&
+            if ((layer->getDrawingState().dataSpace == Dataspace::BT2020_PQ ||
+                 layer->getDrawingState().dataSpace == Dataspace::BT2020_ITU_PQ) &&
                     !displayDevice->hasHDR10Support()) {
                 layer->forceClientComposition(hwcId);
             }
-            if ((layer->getDataSpace() == Dataspace::BT2020_HLG ||
-                 layer->getDataSpace() == Dataspace::BT2020_ITU_HLG) &&
+            if ((layer->getDrawingState().dataSpace == Dataspace::BT2020_HLG ||
+                 layer->getDrawingState().dataSpace == Dataspace::BT2020_ITU_HLG) &&
                     !displayDevice->hasHLGSupport()) {
                 layer->forceClientComposition(hwcId);
             }
@@ -2419,6 +2428,9 @@ sp<DisplayDevice> SurfaceFlinger::setupNewDisplayDeviceInternal(
     }
     setActiveColorModeInternal(hw, defaultColorMode, defaultDataSpace,
                                RenderIntent::COLORIMETRIC);
+    if (state.type < DisplayDevice::DISPLAY_VIRTUAL) {
+        hw->setActiveConfig(getHwComposer().getActiveConfigIndex(state.type));
+    }
     hw->setLayerStack(state.layerStack);
     hw->setProjection(state.orientation, state.viewport, state.frame);
     hw->setDisplayName(state.displayName);
