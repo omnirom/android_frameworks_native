@@ -1540,10 +1540,16 @@ void Layer::dumpFrameEvents(String8& result) {
 void Layer::onDisconnect() {
     Mutex::Autolock lock(mFrameEventHistoryMutex);
     mFrameEventHistory.onDisconnect();
+    mTimeStats.onDisconnect(getName().c_str());
 }
 
 void Layer::addAndGetFrameTimestamps(const NewFrameEventsEntry* newTimestamps,
                                      FrameEventHistoryDelta* outDelta) {
+    if (newTimestamps) {
+        mTimeStats.setPostTime(getName().c_str(), newTimestamps->frameNumber,
+                               newTimestamps->postedTime);
+    }
+
     Mutex::Autolock lock(mFrameEventHistoryMutex);
     if (newTimestamps) {
         // If there are any unsignaled fences in the aquire timeline at this
@@ -1652,9 +1658,10 @@ bool Layer::detachChildren() {
     return true;
 }
 
-bool Layer::isLegacySrgbDataSpace() const {
-    return mDrawingState.dataSpace == ui::Dataspace::SRGB ||
-        mDrawingState.dataSpace == ui::Dataspace::SRGB_LINEAR;
+bool Layer::isLegacyDataSpace() const {
+    // return true when no higher bits are set
+    return !(mDrawingState.dataSpace & (ui::Dataspace::STANDARD_MASK |
+                ui::Dataspace::TRANSFER_MASK | ui::Dataspace::RANGE_MASK));
 }
 
 void Layer::setParent(const sp<Layer>& layer) {
