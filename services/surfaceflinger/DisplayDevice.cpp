@@ -250,16 +250,8 @@ DisplayDevice::DisplayDevice(
       mHasHdr10(false),
       mHasHLG(false),
       mHasDolbyVision(false),
-<<<<<<< HEAD
       mSupportedPerFrameMetadata(supportedPerFrameMetadata),
-      mDisplayHasColorMatrix(false),
-      mHasBT2100PQColorimetric(false),
-      mHasBT2100PQEnhance(false),
-      mHasBT2100HLGColorimetric(false),
-      mHasBT2100HLGEnhance(false)
-=======
-      mSupportedPerFrameMetadata(supportedPerFrameMetadata)
->>>>>>> origin/p-fs-release
+      mDisplayHasColorMatrix(false)
 {
     // clang-format on
     populateColorModes(hwcColorModes);

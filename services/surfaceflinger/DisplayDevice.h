@@ -295,15 +295,7 @@ private:
     bool mHasDolbyVision;
     HdrCapabilities mHdrCapabilities;
     const int32_t mSupportedPerFrameMetadata;
-<<<<<<< HEAD
     bool mDisplayHasColorMatrix;
-    // Whether h/w composer has BT2100_PQ and BT2100_HLG color mode with
-    // colorimetrical tone mapping or enhanced tone mapping.
-    bool mHasBT2100PQColorimetric;
-    bool mHasBT2100PQEnhance;
-    bool mHasBT2100HLGColorimetric;
-    bool mHasBT2100HLGEnhance;
-=======
 
     // Mappings from desired Dataspace/RenderIntent to the supported
     // Dataspace/ColorMode/RenderIntent.
@@ -324,7 +316,6 @@ private:
             const ui::ColorMode mode, const ui::RenderIntent intent);
 
     std::unordered_map<ColorModeKey, ColorModeValue> mColorModes;
->>>>>>> origin/p-fs-release
 };
 
 struct DisplayDeviceState {

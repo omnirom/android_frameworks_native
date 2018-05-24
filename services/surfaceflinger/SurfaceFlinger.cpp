@@ -5064,25 +5064,6 @@ void SurfaceFlinger::renderScreenImplLocked(const RenderArea& renderArea,
     // make sure to clear all GL error flags
     engine.checkErrors();
 
-<<<<<<< HEAD
-    uint32_t rotation = renderArea.getRotationFlags();
-    DisplayRenderArea* displayRenderArea = NULL;
-
-    if(renderArea.getType() == "DisplayRenderArea")
-    displayRenderArea = static_cast<DisplayRenderArea*> (const_cast<RenderArea *> (&renderArea));
-
-    if (displayRenderArea) {
-        int32_t hw_h = displayRenderArea->getHeight();
-        if (DisplayDevice::DISPLAY_PRIMARY == displayRenderArea->getDisplayType()) {
-            rotation = (Transform::orientation_flags)
-                       (rotation ^ displayRenderArea->getPanelMountFlip());
-            if (displayRenderArea->getPanelMountFlip() == Transform::orientation_flags::ROT_180) {
-                sourceCrop.top = hw_h - sourceCrop.top;
-                sourceCrop.bottom = hw_h - sourceCrop.bottom;
-                yswap = false;
-            }
-        }
-=======
     Transform::orientation_flags rotation = renderArea.getRotationFlags();
     if (mPrimaryDisplayOrientation != DisplayState::eOrientationDefault) {
         // convert hw orientation into flag presentation
@@ -5112,16 +5093,10 @@ void SurfaceFlinger::renderScreenImplLocked(const RenderArea& renderArea,
         }
         rotation = static_cast<Transform::orientation_flags>
                    ((rotation_rot_90 ^ hw_rot_90) | (rotation_flip_hv ^ hw_flip_hv));
->>>>>>> origin/p-fs-release
     }
-
     // set-up our viewport
     engine.setViewportAndProjection(reqWidth, reqHeight, sourceCrop, raHeight, yswap,
-<<<<<<< HEAD
-                                    (Transform::orientation_flags)rotation);
-=======
                                     rotation);
->>>>>>> origin/p-fs-release
     engine.disableTexturing();
 
     const float alpha = RenderArea::getCaptureFillValue(renderArea.getCaptureFill());
