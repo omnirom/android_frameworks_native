@@ -317,8 +317,7 @@ SurfaceFlinger::SurfaceFlinger() : SurfaceFlinger(SkipInitialization) {
     mLayerTripleBufferingDisabled = atoi(value);
     ALOGI_IF(mLayerTripleBufferingDisabled, "Disabling Triple Buffering");
 
-    // TODO (b/74616334): Reduce the default value once we isolate the leak
-    const size_t defaultListSize = 4 * MAX_LAYERS;
+    const size_t defaultListSize = MAX_LAYERS;
     auto listSize = property_get_int32("debug.sf.max_igbp_list_size", int32_t(defaultListSize));
     mMaxGraphicBufferProducerListSize = (listSize > 0) ? size_t(listSize) : defaultListSize;
 
@@ -3017,10 +3016,8 @@ bool SurfaceFlinger::doComposeSurfaces(const sp<const DisplayDevice>& displayDev
     ATRACE_INT("hasClientComposition", hasClientComposition);
 
     bool applyColorMatrix = false;
-    bool applyLegacyColorMatrix = false;
-    mat4 colorMatrix;
-    mat4 legacyColorMatrix;
-    const mat4* currentColorMatrix = nullptr;
+    bool needsLegacyColorMatrix = false;
+    bool legacyColorMatrixApplied = false;
 
     if (hasClientComposition) {
         ALOGV("hasClientComposition");
@@ -3039,19 +3036,12 @@ bool SurfaceFlinger::doComposeSurfaces(const sp<const DisplayDevice>& displayDev
 
         applyColorMatrix = !hasDeviceComposition && !skipClientColorTransform;
         if (applyColorMatrix) {
-            colorMatrix = mDrawingState.colorMatrix;
+            getRenderEngine().setupColorTransform(mDrawingState.colorMatrix);
         }
 
-        applyLegacyColorMatrix = (mDisplayColorSetting == DisplayColorSetting::ENHANCED &&
+        needsLegacyColorMatrix = (mDisplayColorSetting == DisplayColorSetting::ENHANCED &&
                 outputDataspace != Dataspace::UNKNOWN &&
                 outputDataspace != Dataspace::SRGB);
-        if (applyLegacyColorMatrix) {
-            if (applyColorMatrix) {
-                legacyColorMatrix = colorMatrix * mLegacySrgbSaturationMatrix;
-            } else {
-                legacyColorMatrix = mLegacySrgbSaturationMatrix;
-            }
-        }
 
         if (!displayDevice->makeCurrent()) {
             ALOGW("DisplayDevice::makeCurrent failed. Aborting surface composition for display %s",
@@ -3139,18 +3129,14 @@ bool SurfaceFlinger::doComposeSurfaces(const sp<const DisplayDevice>& displayDev
                 }
                 case HWC2::Composition::Client: {
                     // switch color matrices lazily
-                    if (layer->isLegacyDataSpace()) {
-                        if (applyLegacyColorMatrix && currentColorMatrix != &legacyColorMatrix) {
-                            // TODO(b/78891890) Legacy sRGB saturation matrix should be set
-                            // separately.
-                            getRenderEngine().setupColorTransform(legacyColorMatrix);
-                            currentColorMatrix = &legacyColorMatrix;
+                    if (layer->isLegacyDataSpace() && needsLegacyColorMatrix) {
+                        if (!legacyColorMatrixApplied) {
+                            getRenderEngine().setSaturationMatrix(mLegacySrgbSaturationMatrix);
+                            legacyColorMatrixApplied = true;
                         }
-                    } else {
-                        if (applyColorMatrix && currentColorMatrix != &colorMatrix) {
-                            getRenderEngine().setupColorTransform(colorMatrix);
-                            currentColorMatrix = &colorMatrix;
-                        }
+                    } else if (legacyColorMatrixApplied) {
+                        getRenderEngine().setSaturationMatrix(mat4());
+                        legacyColorMatrixApplied = false;
                     }
 
                     layer->draw(renderArea, clip);
@@ -3165,8 +3151,11 @@ bool SurfaceFlinger::doComposeSurfaces(const sp<const DisplayDevice>& displayDev
         firstLayer = false;
     }
 
-    if (applyColorMatrix || applyLegacyColorMatrix) {
+    if (applyColorMatrix) {
         getRenderEngine().setupColorTransform(mat4());
+    }
+    if (needsLegacyColorMatrix && legacyColorMatrixApplied) {
+        getRenderEngine().setSaturationMatrix(mat4());
     }
 
     // disable scissor at the end of the frame
@@ -3204,12 +3193,14 @@ status_t SurfaceFlinger::addClientLayer(const sp<Client>& client,
             parent->addChild(lbc);
         }
 
-        mGraphicBufferProducerList.insert(IInterface::asBinder(gbc).get());
-        // TODO (b/74616334): Change this back to a fatal assert once the leak is fixed
-        ALOGE_IF(mGraphicBufferProducerList.size() > mMaxGraphicBufferProducerListSize,
-                 "Suspected IGBP leak: %zu IGBPs (%zu max), %zu Layers",
-                 mGraphicBufferProducerList.size(), mMaxGraphicBufferProducerListSize,
-                 mNumLayers);
+        if (gbc != nullptr) {
+            mGraphicBufferProducerList.insert(IInterface::asBinder(gbc).get());
+            LOG_ALWAYS_FATAL_IF(mGraphicBufferProducerList.size() >
+                                        mMaxGraphicBufferProducerListSize,
+                                "Suspected IGBP leak: %zu IGBPs (%zu max), %zu Layers",
+                                mGraphicBufferProducerList.size(),
+                                mMaxGraphicBufferProducerListSize, mNumLayers);
+        }
         mLayersAdded = true;
         mNumLayers++;
     }
@@ -4910,12 +4901,6 @@ status_t SurfaceFlinger::captureLayers(const sp<IBinder>& layerHandleBinder,
                 return mCrop;
             }
         }
-        bool getWideColorSupport() const override { return false; }
-        Dataspace getDataSpace() const override { return Dataspace::UNKNOWN; }
-        float getDisplayMaxLuminance() const override {
-            return DisplayDevice::sDefaultMaxLumiance;
-        }
-
         class ReparentForDrawing {
         public:
             const sp<Layer>& oldParent;
@@ -5115,12 +5100,9 @@ void SurfaceFlinger::renderScreenImplLocked(const RenderArea& renderArea,
         ALOGE("Invalid crop rect: b = %d (> %d)", sourceCrop.bottom, raHeight);
     }
 
-    Dataspace outputDataspace = Dataspace::UNKNOWN;
-    if (renderArea.getWideColorSupport()) {
-        outputDataspace = renderArea.getDataSpace();
-    }
-    engine.setOutputDataSpace(outputDataspace);
-    engine.setDisplayMaxLuminance(renderArea.getDisplayMaxLuminance());
+    // assume ColorMode::SRGB / RenderIntent::COLORIMETRIC
+    engine.setOutputDataSpace(Dataspace::SRGB);
+    engine.setDisplayMaxLuminance(DisplayDevice::sDefaultMaxLumiance);
 
     // make sure to clear all GL error flags
     engine.checkErrors();
