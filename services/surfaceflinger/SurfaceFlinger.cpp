@@ -1994,8 +1994,6 @@ void SurfaceFlinger::setUpHWComposer() {
         }
     }
 
-    mat4 colorMatrix = mDrawingState.colorMatrix;
-    bool isIdentity = (colorMatrix == mat4());
     // build the h/w work list
     if (CC_UNLIKELY(mGeometryInvalid)) {
         mGeometryInvalid = false;
@@ -2017,7 +2015,7 @@ void SurfaceFlinger::setUpHWComposer() {
                     }
 
                     layer->setGeometry(displayDevice, i);
-                    if (mDebugDisableHWC || mDebugRegion || (hwcId !=0 && !isIdentity)) {
+                    if (mDebugDisableHWC || mDebugRegion) {
                         layer->forceClientComposition(hwcId);
                         layer->setColorInversionData(displayDevice);
                     }
@@ -2965,8 +2963,8 @@ bool SurfaceFlinger::doComposeSurfaces(const sp<const DisplayDevice>& displayDev
                 displayDevice->getHdrCapabilities().getDesiredMaxLuminance());
 
         const bool hasDeviceComposition = getBE().mHwc->hasDeviceComposition(hwcId);
-        const bool skipClientColorTransform = (getBE().mHwc->hasCapability(
-            HWC2::Capability::SkipClientColorTransform) && (hwcId == 0));
+        const bool skipClientColorTransform = getBE().mHwc->hasCapability(
+            HWC2::Capability::SkipClientColorTransform);
 
         applyColorMatrix = !hasDeviceComposition && !skipClientColorTransform;
         if (applyColorMatrix) {
