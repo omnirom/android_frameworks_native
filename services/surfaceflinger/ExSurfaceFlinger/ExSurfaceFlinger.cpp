@@ -153,19 +153,13 @@ status_t ExSurfaceFlinger::doDump(int fd, const Vector<String16>& args, bool asP
     mFileDump.running = !mFileDump.running;
 
     if (mFileDump.running) {
-        // Create an empty file or erase existing file.
-        if (mkdir("/data/misc/display", S_IRWXU | S_IRWXG | S_IRWXO) != 0) {
-            if (errno != EEXIST) {
-                ALOGE("Error creating /data/misc/display directory: %s", strerror(errno));
-                return errno;
-            }
-        }
-        std::fstream fs;
-        fs.open(mFileDump.name, std::ios::out);
-        if (!fs) {
+        std::ofstream ofs;
+        ofs.open(mFileDump.name, std::ofstream::out | std::ofstream::trunc);
+        if (!ofs) {
             mFileDump.running = false;
             err = UNKNOWN_ERROR;
         } else {
+            ofs.close();
             mFileDump.position = 0;
             if (numArgs >= 2 && (args[1] == String16("--no-limit"))) {
             mFileDump.noLimit = true;
@@ -218,7 +212,7 @@ void ExSurfaceFlinger::dumpDrawCycle(bool prePrepare) {
     snprintf(dataSize, sizeof(dataSize), "Size: %8zu", dumpsys.size());
 
     std::fstream fs;
-    fs.open(mFileDump.name, std::ios::in | std::ios::out);
+    fs.open(mFileDump.name, std::ios::app);
     if (!fs) {
         ALOGE("Failed to open %s file for dumpsys", mFileDump.name);
         return;
