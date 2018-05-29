@@ -252,8 +252,7 @@ DisplayDevice::DisplayDevice(
       mHasHdr10(false),
       mHasHLG(false),
       mHasDolbyVision(false),
-      mSupportedPerFrameMetadata(supportedPerFrameMetadata),
-      mDisplayHasColorMatrix(false)
+      mSupportedPerFrameMetadata(supportedPerFrameMetadata)
 {
     // clang-format on
     populateColorModes(hwcColorModes);

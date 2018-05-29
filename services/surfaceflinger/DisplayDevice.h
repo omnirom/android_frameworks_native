@@ -218,8 +218,6 @@ public:
      */
     uint32_t getPageFlipCount() const;
     void dump(String8& result) const;
-    void setColorMatrix(const bool colorMatrix) {mDisplayHasColorMatrix = colorMatrix;}
-    bool hasColorMatrix() const {return mDisplayHasColorMatrix;}
 
 private:
     /*
@@ -295,7 +293,6 @@ private:
     bool mHasDolbyVision;
     HdrCapabilities mHdrCapabilities;
     const int32_t mSupportedPerFrameMetadata;
-    bool mDisplayHasColorMatrix;
 
     // Mappings from desired Dataspace/RenderIntent to the supported
     // Dataspace/ColorMode/RenderIntent.
