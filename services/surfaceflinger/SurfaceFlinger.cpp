@@ -1937,25 +1937,25 @@ void SurfaceFlinger::pickColorMode(const sp<DisplayDevice>& displayDevice,
     Dataspace hdrDataSpace;
     Dataspace bestDataSpace = getBestDataspace(displayDevice, &hdrDataSpace);
 
+    // respect hdrDataSpace only when there is modern HDR support
+    const bool isHdr = hdrDataSpace != Dataspace::UNKNOWN &&
+        displayDevice->hasModernHdrSupport(hdrDataSpace);
+    if (isHdr) {
+        bestDataSpace = hdrDataSpace;
+    }
+
     RenderIntent intent;
     switch (mDisplayColorSetting) {
         case DisplayColorSetting::MANAGED:
         case DisplayColorSetting::UNMANAGED:
-            intent = RenderIntent::COLORIMETRIC;
+            intent = isHdr ? RenderIntent::TONE_MAP_COLORIMETRIC : RenderIntent::COLORIMETRIC;
             break;
         case DisplayColorSetting::ENHANCED:
-            intent = RenderIntent::ENHANCE;
+            intent = isHdr ? RenderIntent::TONE_MAP_ENHANCE : RenderIntent::ENHANCE;
             break;
         default: // vendor display color setting
             intent = static_cast<RenderIntent>(mDisplayColorSetting);
             break;
-    }
-
-    // respect hdrDataSpace only when there is modern HDR support
-    if (hdrDataSpace != Dataspace::UNKNOWN && displayDevice->hasModernHdrSupport(hdrDataSpace)) {
-        bestDataSpace = hdrDataSpace;
-        intent = mDisplayColorSetting == DisplayColorSetting::ENHANCED ?
-            RenderIntent::TONE_MAP_ENHANCE : RenderIntent::TONE_MAP_COLORIMETRIC;
     }
 
     displayDevice->getBestColorMode(bestDataSpace, intent, outDataSpace, outMode, outRenderIntent);
@@ -1994,15 +1994,12 @@ void SurfaceFlinger::setUpHWComposer() {
         }
     }
 
-    mat4 colorMatrix = mDrawingState.colorMatrix;
-    bool isIdentity = (colorMatrix == mat4());
     // build the h/w work list
     if (CC_UNLIKELY(mGeometryInvalid)) {
         mGeometryInvalid = false;
         for (size_t dpy=0 ; dpy<mDisplays.size() ; dpy++) {
-            sp<DisplayDevice> displayDevice(mDisplays[dpy]);
+            sp<const DisplayDevice> displayDevice(mDisplays[dpy]);
             const auto hwcId = displayDevice->getHwcDisplayId();
-            displayDevice->setColorMatrix(!isIdentity);
             if (hwcId >= 0) {
                 const Vector<sp<Layer>>& currentLayers(
                         displayDevice->getVisibleLayersSortedByZ());
@@ -2017,9 +2014,8 @@ void SurfaceFlinger::setUpHWComposer() {
                     }
 
                     layer->setGeometry(displayDevice, i);
-                    if (mDebugDisableHWC || mDebugRegion || (hwcId !=0 && !isIdentity)) {
+                    if (mDebugDisableHWC || mDebugRegion) {
                         layer->forceClientComposition(hwcId);
-                        layer->setColorInversionData(displayDevice);
                     }
                 }
             }
@@ -2965,8 +2961,8 @@ bool SurfaceFlinger::doComposeSurfaces(const sp<const DisplayDevice>& displayDev
                 displayDevice->getHdrCapabilities().getDesiredMaxLuminance());
 
         const bool hasDeviceComposition = getBE().mHwc->hasDeviceComposition(hwcId);
-        const bool skipClientColorTransform = (getBE().mHwc->hasCapability(
-            HWC2::Capability::SkipClientColorTransform) && (hwcId == 0));
+        const bool skipClientColorTransform = getBE().mHwc->hasCapability(
+            HWC2::Capability::SkipClientColorTransform);
 
         applyColorMatrix = !hasDeviceComposition && !skipClientColorTransform;
         if (applyColorMatrix) {

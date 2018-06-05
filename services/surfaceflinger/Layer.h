@@ -116,8 +116,7 @@ public:
                 forceClientComposition(false),
                 compositionType(HWC2::Composition::Invalid),
                 clearClientTarget(false),
-                transform(HWC2::Transform::None),
-                invalidRotation(true) {}
+                transform(HWC2::Transform::None) {}
 
         HWComposer* hwc;
         HWC2::Layer* layer;
@@ -128,7 +127,6 @@ public:
         FloatRect sourceCrop;
         HWComposerBufferCache bufferCache;
         HWC2::Transform transform;
-        bool invalidRotation;
     };
 
     // A layer can be attached to multiple displays when operating in mirror mode
@@ -374,7 +372,6 @@ public:
 
     void writeToProto(LayerProto* layerInfo, int32_t hwcId);
 
-    bool isColorInversion() const { return mColorInversionOnExternal; }
 protected:
     /*
      * onDraw - draws the surface.
@@ -560,7 +557,6 @@ public:
                                   FrameEventHistoryDelta* outDelta);
 
     virtual bool getTransformToDisplayInverse() const { return false; }
-    void setColorInversionData(const sp<const DisplayDevice>& displayDevice);
 
     Transform getTransform() const;
 
@@ -785,7 +781,6 @@ protected:
     std::atomic<uint64_t> mLastFrameNumberReceived;
     bool mAutoRefresh;
     bool mFreezeGeometryUpdates;
-    bool mColorInversionOnExternal = false;
 
     // Child list about to be committed/used for editing.
     LayerVector mCurrentChildren;
