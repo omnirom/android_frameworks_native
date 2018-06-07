@@ -186,7 +186,6 @@ public:
         uint32_t layerStack;
 
         uint8_t flags;
-        uint8_t mask;
         uint8_t reserved[2];
         int32_t sequence; // changes when visible regions can change
         bool modified;
@@ -381,6 +380,8 @@ protected:
 
 public:
     virtual void setDefaultBufferSize(uint32_t /*w*/, uint32_t /*h*/) {}
+
+    virtual bool isHdrY410() const { return false; }
 
     void setGeometry(const sp<const DisplayDevice>& displayDevice, uint32_t z);
     void forceClientComposition(int32_t hwcId);
@@ -593,6 +594,7 @@ public:
     // SurfaceFlinger to complete a transaction.
     void commitChildList();
     int32_t getZ() const;
+    void pushPendingState();
 
 protected:
     // constant
@@ -675,7 +677,6 @@ protected:
     // Returns false if the relevant frame has already been latched
     bool addSyncPoint(const std::shared_ptr<SyncPoint>& point);
 
-    void pushPendingState();
     void popPendingState(State* stateToCommit);
     bool applyPendingStates(State* stateToCommit);
 
