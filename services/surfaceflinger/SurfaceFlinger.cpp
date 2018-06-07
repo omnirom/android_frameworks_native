@@ -3195,7 +3195,7 @@ status_t SurfaceFlinger::addClientLayer(const sp<Client>& client,
 
         if (gbc != nullptr) {
             mGraphicBufferProducerList.insert(IInterface::asBinder(gbc).get());
-            LOG_ALWAYS_FATAL_IF(mGraphicBufferProducerList.size() >
+            ALOGE_IF(mGraphicBufferProducerList.size() >
                                         mMaxGraphicBufferProducerListSize,
                                 "Suspected IGBP leak: %zu IGBPs (%zu max), %zu Layers",
                                 mGraphicBufferProducerList.size(),
