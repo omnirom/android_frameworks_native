@@ -89,6 +89,8 @@
 #include <cutils/compiler.h>
 
 #include <android/hardware/configstore/1.0/ISurfaceFlingerConfigs.h>
+#include <android/hardware/configstore/1.1/ISurfaceFlingerConfigs.h>
+#include <android/hardware/configstore/1.1/types.h>
 #include <configstore/Utils.h>
 
 #include <layerproto/LayerProtoParser.h>
@@ -159,29 +161,18 @@ bool useTrebleTestingOverride() {
     return std::string(value) == "true";
 }
 
-DisplayColorSetting toDisplayColorSetting(int value) {
-    switch(value) {
-        case 0:
-            return DisplayColorSetting::MANAGED;
-        case 1:
-            return DisplayColorSetting::UNMANAGED;
-        case 2:
-            return DisplayColorSetting::ENHANCED;
-        default:
-            return DisplayColorSetting::MANAGED;
-    }
-}
-
 std::string decodeDisplayColorSetting(DisplayColorSetting displayColorSetting) {
     switch(displayColorSetting) {
         case DisplayColorSetting::MANAGED:
-            return std::string("Natural Mode");
+            return std::string("Managed");
         case DisplayColorSetting::UNMANAGED:
-            return std::string("Saturated Mode");
+            return std::string("Unmanaged");
         case DisplayColorSetting::ENHANCED:
-            return std::string("Auto Color Mode");
+            return std::string("Enhanced");
+        default:
+            return std::string("Unknown ") +
+                std::to_string(static_cast<int>(displayColorSetting));
     }
-    return std::string("Unknown Display Color Setting");
 }
 
 NativeWindowSurface::~NativeWindowSurface() = default;
@@ -282,6 +273,26 @@ SurfaceFlinger::SurfaceFlinger() : SurfaceFlinger(SkipInitialization) {
 
     hasWideColorDisplay =
             getBool<ISurfaceFlingerConfigs, &ISurfaceFlingerConfigs::hasWideColorDisplay>(false);
+
+    V1_1::DisplayOrientation primaryDisplayOrientation =
+        getDisplayOrientation< V1_1::ISurfaceFlingerConfigs, &V1_1::ISurfaceFlingerConfigs::primaryDisplayOrientation>(
+            V1_1::DisplayOrientation::ORIENTATION_0);
+
+    switch (primaryDisplayOrientation) {
+        case V1_1::DisplayOrientation::ORIENTATION_90:
+            mPrimaryDisplayOrientation = DisplayState::eOrientation90;
+            break;
+        case V1_1::DisplayOrientation::ORIENTATION_180:
+            mPrimaryDisplayOrientation = DisplayState::eOrientation180;
+            break;
+        case V1_1::DisplayOrientation::ORIENTATION_270:
+            mPrimaryDisplayOrientation = DisplayState::eOrientation270;
+            break;
+        default:
+            mPrimaryDisplayOrientation = DisplayState::eOrientationDefault;
+            break;
+    }
+    ALOGV("Primary Display Orientation is set to %2d.", mPrimaryDisplayOrientation);
 
     mPrimaryDispSync.init(SurfaceFlinger::hasSyncFramework, SurfaceFlinger::dispSyncPresentTimeOffset);
 
@@ -636,14 +647,21 @@ void SurfaceFlinger::init() {
     mEventThreadSource =
             std::make_unique<DispSyncSource>(&mPrimaryDispSync, SurfaceFlinger::vsyncPhaseOffsetNs,
                                              true, "app");
-    mEventThread = std::make_unique<impl::EventThread>(mEventThreadSource.get(), *this, false,
+    mEventThread = std::make_unique<impl::EventThread>(mEventThreadSource.get(),
+                                                       [this]() { resyncWithRateLimit(); },
+                                                       impl::EventThread::InterceptVSyncsCallback(),
                                                        "appEventThread");
     mSfEventThreadSource =
             std::make_unique<DispSyncSource>(&mPrimaryDispSync,
                                              SurfaceFlinger::sfVsyncPhaseOffsetNs, true, "sf");
 
-    mSFEventThread = std::make_unique<impl::EventThread>(mSfEventThreadSource.get(), *this, true,
-                                                         "sfEventThread");
+    mSFEventThread =
+            std::make_unique<impl::EventThread>(mSfEventThreadSource.get(),
+                                                [this]() { resyncWithRateLimit(); },
+                                                [this](nsecs_t timestamp) {
+                                                    mInterceptor->saveVSyncEvent(timestamp);
+                                                },
+                                                "sfEventThread");
     mEventQueue->setEventThread(mSFEventThread.get());
     mVsyncModulator.setEventThread(mSFEventThread.get());
 
@@ -732,9 +750,7 @@ void SurfaceFlinger::readPersistentProperties() {
     ALOGV("Saturation is set to %.2f", mGlobalSaturationFactor);
 
     property_get("persist.sys.sf.native_mode", value, "0");
-    mDisplayColorSetting = toDisplayColorSetting(atoi(value));
-    ALOGV("Display Color Setting is set to %s.",
-          decodeDisplayColorSetting(mDisplayColorSetting).c_str());
+    mDisplayColorSetting = static_cast<DisplayColorSetting>(atoi(value));
 }
 
 void SurfaceFlinger::startBootAnim() {
@@ -888,6 +904,11 @@ status_t SurfaceFlinger::getDisplayConfigs(const sp<IBinder>& display,
 
         // All non-virtual displays are currently considered secure.
         info.secure = true;
+
+        if (type == DisplayDevice::DISPLAY_PRIMARY &&
+            mPrimaryDisplayOrientation & DisplayState::eOrientationSwapMask) {
+            std::swap(info.w, info.h);
+        }
 
         configs->push_back(info);
     }
@@ -1134,9 +1155,11 @@ status_t SurfaceFlinger::enableVSyncInjections(bool enable) {
             ALOGV("VSync Injections enabled");
             if (mVSyncInjector.get() == nullptr) {
                 mVSyncInjector = std::make_unique<InjectVSyncSource>();
-                mInjectorEventThread =
-                        std::make_unique<impl::EventThread>(mVSyncInjector.get(), *this, false,
-                                                            "injEventThread");
+                mInjectorEventThread = std::make_unique<
+                        impl::EventThread>(mVSyncInjector.get(),
+                                           [this]() { resyncWithRateLimit(); },
+                                           impl::EventThread::InterceptVSyncsCallback(),
+                                           "injEventThread");
             }
             mEventQueue->setEventThread(mInjectorEventThread.get());
         } else {
@@ -1864,7 +1887,6 @@ void SurfaceFlinger::rebuildLayerStacks() {
 // can only be one of
 //  - Dataspace::SRGB (use legacy dataspace and let HWC saturate when colors are enhanced)
 //  - Dataspace::DISPLAY_P3
-//  - Dataspace::V0_SCRGB_LINEAR
 // The returned HDR data space is one of
 //  - Dataspace::UNKNOWN
 //  - Dataspace::BT2020_HLG
@@ -1878,12 +1900,8 @@ Dataspace SurfaceFlinger::getBestDataspace(
         switch (layer->getDataSpace()) {
             case Dataspace::V0_SCRGB:
             case Dataspace::V0_SCRGB_LINEAR:
-                bestDataSpace = Dataspace::V0_SCRGB_LINEAR;
-                break;
             case Dataspace::DISPLAY_P3:
-                if (bestDataSpace == Dataspace::SRGB) {
-                    bestDataSpace = Dataspace::DISPLAY_P3;
-                }
+                bestDataSpace = Dataspace::DISPLAY_P3;
                 break;
             case Dataspace::BT2020_PQ:
             case Dataspace::BT2020_ITU_PQ:
@@ -1919,104 +1937,28 @@ void SurfaceFlinger::pickColorMode(const sp<DisplayDevice>& displayDevice,
     Dataspace hdrDataSpace;
     Dataspace bestDataSpace = getBestDataspace(displayDevice, &hdrDataSpace);
 
-    if (hdrDataSpace == Dataspace::BT2020_PQ) {
-        // Hardware composer can handle BT2100 ColorMode only when
-        // - colorimetrical tone mapping is supported, or
-        // - Auto mode is turned on and enhanced tone mapping is supported.
-        if (displayDevice->hasBT2100PQColorimetricSupport() ||
-            (mDisplayColorSetting == DisplayColorSetting::ENHANCED &&
-             displayDevice->hasBT2100PQEnhanceSupport())) {
-            *outMode = ColorMode::BT2100_PQ;
-            *outDataSpace = Dataspace::BT2020_PQ;
-        } else if (displayDevice->hasHDR10Support()) {
-            // Legacy HDR support.  HDR layers are treated as UNKNOWN layers.
-            hdrDataSpace = Dataspace::UNKNOWN;
-        } else {
-            // Simulate PQ through RenderEngine, pick DISPLAY_P3 color mode.
-            *outMode = ColorMode::DISPLAY_P3;
-            *outDataSpace = Dataspace::DISPLAY_P3;
-        }
-    } else if (hdrDataSpace == Dataspace::BT2020_HLG) {
-        if (displayDevice->hasBT2100HLGColorimetricSupport() ||
-            (mDisplayColorSetting == DisplayColorSetting::ENHANCED &&
-             displayDevice->hasBT2100HLGEnhanceSupport())) {
-            *outMode = ColorMode::BT2100_HLG;
-            *outDataSpace = Dataspace::BT2020_HLG;
-        } else if (displayDevice->hasHLGSupport()) {
-            // Legacy HDR support.  HDR layers are treated as UNKNOWN layers.
-            hdrDataSpace = Dataspace::UNKNOWN;
-        } else {
-            // Simulate HLG through RenderEngine, pick DISPLAY_P3 color mode.
-            *outMode = ColorMode::DISPLAY_P3;
-            *outDataSpace = Dataspace::DISPLAY_P3;
-        }
+    // respect hdrDataSpace only when there is modern HDR support
+    const bool isHdr = hdrDataSpace != Dataspace::UNKNOWN &&
+        displayDevice->hasModernHdrSupport(hdrDataSpace);
+    if (isHdr) {
+        bestDataSpace = hdrDataSpace;
     }
 
-    // At this point, there's no HDR layer.
-    if (hdrDataSpace == Dataspace::UNKNOWN) {
-        switch (bestDataSpace) {
-            case Dataspace::DISPLAY_P3:
-            case Dataspace::V0_SCRGB_LINEAR:
-                *outMode = ColorMode::DISPLAY_P3;
-                *outDataSpace = Dataspace::DISPLAY_P3;
-                break;
-            default:
-                *outMode = ColorMode::SRGB;
-                *outDataSpace = Dataspace::SRGB;
-                break;
-        }
-    }
-    *outRenderIntent = pickRenderIntent(displayDevice, *outMode);
-}
-
-RenderIntent SurfaceFlinger::pickRenderIntent(const sp<DisplayDevice>& displayDevice,
-                                              ColorMode colorMode) const {
-    // Native Mode means the display is not color managed, and whichever
-    // render intent is picked doesn't matter, thus return
-    // RenderIntent::COLORIMETRIC as default here.
-    if (mDisplayColorSetting == DisplayColorSetting::UNMANAGED) {
-        return RenderIntent::COLORIMETRIC;
+    RenderIntent intent;
+    switch (mDisplayColorSetting) {
+        case DisplayColorSetting::MANAGED:
+        case DisplayColorSetting::UNMANAGED:
+            intent = isHdr ? RenderIntent::TONE_MAP_COLORIMETRIC : RenderIntent::COLORIMETRIC;
+            break;
+        case DisplayColorSetting::ENHANCED:
+            intent = isHdr ? RenderIntent::TONE_MAP_ENHANCE : RenderIntent::ENHANCE;
+            break;
+        default: // vendor display color setting
+            intent = static_cast<RenderIntent>(mDisplayColorSetting);
+            break;
     }
 
-    // In Auto Color Mode, we want to strech to panel color space, right now
-    // only the built-in display supports it.
-    if (mDisplayColorSetting == DisplayColorSetting::ENHANCED &&
-        mBuiltinDisplaySupportsEnhance &&
-        displayDevice->getDisplayType() == DisplayDevice::DISPLAY_PRIMARY) {
-        switch (colorMode) {
-            case ColorMode::DISPLAY_P3:
-            case ColorMode::SRGB:
-                return RenderIntent::ENHANCE;
-            // In Auto Color Mode, BT2100_PQ and BT2100_HLG will only be picked
-            // when TONE_MAP_ENHANCE or TONE_MAP_COLORIMETRIC is supported.
-            // If TONE_MAP_ENHANCE is not supported, fall back to TONE_MAP_COLORIMETRIC.
-            case ColorMode::BT2100_PQ:
-                return displayDevice->hasBT2100PQEnhanceSupport() ?
-                    RenderIntent::TONE_MAP_ENHANCE : RenderIntent::TONE_MAP_COLORIMETRIC;
-            case ColorMode::BT2100_HLG:
-                return displayDevice->hasBT2100HLGEnhanceSupport() ?
-                    RenderIntent::TONE_MAP_ENHANCE : RenderIntent::TONE_MAP_COLORIMETRIC;
-            // This statement shouldn't be reached, switch cases will always
-            // cover all possible ColorMode returned by pickColorMode.
-            default:
-                return RenderIntent::COLORIMETRIC;
-        }
-    }
-
-    // Either enhance is not supported or we are in natural mode.
-
-    // Natural Mode means it's color managed and the color must be right,
-    // thus we pick RenderIntent::COLORIMETRIC as render intent for non-HDR
-    // content and pick RenderIntent::TONE_MAP_COLORIMETRIC for HDR content.
-    switch (colorMode) {
-        // In Natural Color Mode, BT2100_PQ and BT2100_HLG will only be picked
-        // when TONE_MAP_COLORIMETRIC is supported.
-        case ColorMode::BT2100_PQ:
-        case ColorMode::BT2100_HLG:
-            return RenderIntent::TONE_MAP_COLORIMETRIC;
-        default:
-            return RenderIntent::COLORIMETRIC;
-    }
+    displayDevice->getBestColorMode(bestDataSpace, intent, outDataSpace, outMode, outRenderIntent);
 }
 
 void SurfaceFlinger::setUpHWComposer() {
@@ -2052,15 +1994,12 @@ void SurfaceFlinger::setUpHWComposer() {
         }
     }
 
-    mat4 colorMatrix = mDrawingState.colorMatrix;
-    bool isIdentity = (colorMatrix == mat4());
     // build the h/w work list
     if (CC_UNLIKELY(mGeometryInvalid)) {
         mGeometryInvalid = false;
         for (size_t dpy=0 ; dpy<mDisplays.size() ; dpy++) {
-            sp<DisplayDevice> displayDevice(mDisplays[dpy]);
+            sp<const DisplayDevice> displayDevice(mDisplays[dpy]);
             const auto hwcId = displayDevice->getHwcDisplayId();
-            displayDevice->setColorMatrix(!isIdentity);
             if (hwcId >= 0) {
                 const Vector<sp<Layer>>& currentLayers(
                         displayDevice->getVisibleLayersSortedByZ());
@@ -2075,9 +2014,8 @@ void SurfaceFlinger::setUpHWComposer() {
                     }
 
                     layer->setGeometry(displayDevice, i);
-                    if (mDebugDisableHWC || mDebugRegion || (hwcId !=0 && !isIdentity)) {
+                    if (mDebugDisableHWC || mDebugRegion) {
                         layer->forceClientComposition(hwcId);
-                        layer->setColorInversionData(displayDevice);
                     }
                 }
             }
@@ -2337,7 +2275,7 @@ sp<DisplayDevice> SurfaceFlinger::setupNewDisplayDeviceInternal(
         const wp<IBinder>& display, int hwcId, const DisplayDeviceState& state,
         const sp<DisplaySurface>& dispSurface, const sp<IGraphicBufferProducer>& producer) {
     bool hasWideColorGamut = false;
-    std::unordered_map<ColorMode, std::vector<RenderIntent>> hdrAndRenderIntents;
+    std::unordered_map<ColorMode, std::vector<RenderIntent>> hwcColorModes;
 
     if (hasWideColorDisplay) {
         std::vector<ColorMode> modes = getHwComposer().getColorModes(hwcId);
@@ -2354,18 +2292,7 @@ sp<DisplayDevice> SurfaceFlinger::setupNewDisplayDeviceInternal(
 
             std::vector<RenderIntent> renderIntents = getHwComposer().getRenderIntents(hwcId,
                                                                                        colorMode);
-            if (state.type == DisplayDevice::DISPLAY_PRIMARY) {
-                for (auto intent : renderIntents) {
-                    if (intent == RenderIntent::ENHANCE) {
-                        mBuiltinDisplaySupportsEnhance = true;
-                        break;
-                    }
-                }
-            }
-
-            if (colorMode == ColorMode::BT2100_PQ || colorMode == ColorMode::BT2100_HLG) {
-                hdrAndRenderIntents.emplace(colorMode, renderIntents);
-            }
+            hwcColorModes.emplace(colorMode, renderIntents);
         }
     }
 
@@ -2405,7 +2332,7 @@ sp<DisplayDevice> SurfaceFlinger::setupNewDisplayDeviceInternal(
                               dispSurface, std::move(renderSurface), displayWidth, displayHeight,
                               hasWideColorGamut, hdrCapabilities,
                               getHwComposer().getSupportedPerFrameMetadata(hwcId),
-                              hdrAndRenderIntents, initialPowerMode);
+                              hwcColorModes, initialPowerMode);
 
     if (maxFrameBufferAcquiredBuffers >= 3) {
         nativeWindowSurface->preallocateBuffers();
@@ -2415,10 +2342,13 @@ sp<DisplayDevice> SurfaceFlinger::setupNewDisplayDeviceInternal(
     Dataspace defaultDataSpace = Dataspace::UNKNOWN;
     if (hasWideColorGamut) {
         defaultColorMode = ColorMode::SRGB;
-        defaultDataSpace = Dataspace::V0_SRGB;
+        defaultDataSpace = Dataspace::SRGB;
     }
     setActiveColorModeInternal(hw, defaultColorMode, defaultDataSpace,
                                RenderIntent::COLORIMETRIC);
+    if (state.type < DisplayDevice::DISPLAY_VIRTUAL) {
+        hw->setActiveConfig(getHwComposer().getActiveConfigIndex(state.type));
+    }
     hw->setLayerStack(state.layerStack);
     hw->setProjection(state.orientation, state.viewport, state.frame);
     hw->setDisplayName(state.displayName);
@@ -3031,17 +2961,18 @@ bool SurfaceFlinger::doComposeSurfaces(const sp<const DisplayDevice>& displayDev
                 displayDevice->getHdrCapabilities().getDesiredMaxLuminance());
 
         const bool hasDeviceComposition = getBE().mHwc->hasDeviceComposition(hwcId);
-        const bool skipClientColorTransform = (getBE().mHwc->hasCapability(
-            HWC2::Capability::SkipClientColorTransform) && (hwcId == 0));
+        const bool skipClientColorTransform = getBE().mHwc->hasCapability(
+            HWC2::Capability::SkipClientColorTransform);
 
         applyColorMatrix = !hasDeviceComposition && !skipClientColorTransform;
         if (applyColorMatrix) {
             getRenderEngine().setupColorTransform(mDrawingState.colorMatrix);
         }
 
-        needsLegacyColorMatrix = (mDisplayColorSetting == DisplayColorSetting::ENHANCED &&
-                outputDataspace != Dataspace::UNKNOWN &&
-                outputDataspace != Dataspace::SRGB);
+        needsLegacyColorMatrix =
+            (displayDevice->getActiveRenderIntent() >= RenderIntent::ENHANCE &&
+             outputDataspace != Dataspace::UNKNOWN &&
+             outputDataspace != Dataspace::SRGB);
 
         if (!displayDevice->makeCurrent()) {
             ALOGW("DisplayDevice::makeCurrent failed. Aborting surface composition for display %s",
@@ -4222,7 +4153,8 @@ void SurfaceFlinger::dumpBufferingStats(String8& result) const {
 
 void SurfaceFlinger::dumpWideColorInfo(String8& result) const {
     result.appendFormat("hasWideColorDisplay: %d\n", hasWideColorDisplay);
-    result.appendFormat("DisplayColorSetting: %d\n", mDisplayColorSetting);
+    result.appendFormat("DisplayColorSetting: %s\n",
+            decodeDisplayColorSetting(mDisplayColorSetting).c_str());
 
     // TODO: print out if wide-color mode is active or not
 
@@ -4751,15 +4683,7 @@ status_t SurfaceFlinger::onTransact(
                 return NO_ERROR;
             }
             case 1023: { // Set native mode
-                int32_t value = data.readInt32();
-                if (value > 2) {
-                    return BAD_VALUE;
-                }
-                if (value == 2 && !mBuiltinDisplaySupportsEnhance) {
-                    return BAD_VALUE;
-                }
-
-                mDisplayColorSetting = toDisplayColorSetting(value);
+                mDisplayColorSetting = static_cast<DisplayColorSetting>(data.readInt32());
                 invalidateHwcGeometry();
                 repaintEverything();
                 return NO_ERROR;
@@ -4788,20 +4712,27 @@ status_t SurfaceFlinger::onTransact(
             }
             // Is a DisplayColorSetting supported?
             case 1027: {
-                int32_t value = data.readInt32();
-                switch (value) {
-                    case 0:
-                        reply->writeBool(hasWideColorDisplay);
-                        return NO_ERROR;
-                    case 1:
-                        reply->writeBool(true);
-                        return NO_ERROR;
-                    case 2:
-                        reply->writeBool(mBuiltinDisplaySupportsEnhance);
-                        return NO_ERROR;
-                    default:
-                        return BAD_VALUE;
+                sp<const DisplayDevice> hw(getDefaultDisplayDevice());
+                if (!hw) {
+                    return NAME_NOT_FOUND;
                 }
+
+                DisplayColorSetting setting = static_cast<DisplayColorSetting>(data.readInt32());
+                switch (setting) {
+                    case DisplayColorSetting::MANAGED:
+                        reply->writeBool(hasWideColorDisplay);
+                        break;
+                    case DisplayColorSetting::UNMANAGED:
+                        reply->writeBool(true);
+                        break;
+                    case DisplayColorSetting::ENHANCED:
+                        reply->writeBool(hw->hasRenderIntent(RenderIntent::ENHANCE));
+                        break;
+                    default: // vendor display color setting
+                        reply->writeBool(hw->hasRenderIntent(static_cast<RenderIntent>(setting)));
+                        break;
+                }
+                return NO_ERROR;
             }
             case 10000: { // Get frame stats of specific layer
                 Layer* rightLayer = nullptr;
@@ -4993,7 +4924,7 @@ status_t SurfaceFlinger::captureScreenCommon(RenderArea& renderArea,
                                              bool useIdentityTransform) {
     ATRACE_CALL();
 
-    renderArea.updateDimensions();
+    renderArea.updateDimensions(mPrimaryDisplayOrientation);
 
     const uint32_t usage = GRALLOC_USAGE_SW_READ_OFTEN | GRALLOC_USAGE_SW_WRITE_OFTEN |
             GRALLOC_USAGE_HW_RENDER | GRALLOC_USAGE_HW_TEXTURE;
@@ -5077,13 +5008,35 @@ void SurfaceFlinger::renderScreenImplLocked(const RenderArea& renderArea,
     const auto reqHeight = renderArea.getReqHeight();
     Rect sourceCrop = renderArea.getSourceCrop();
 
-    const bool filtering = static_cast<int32_t>(reqWidth) != raWidth ||
-            static_cast<int32_t>(reqHeight) != raHeight;
+    bool filtering = false;
+    if (mPrimaryDisplayOrientation & DisplayState::eOrientationSwapMask) {
+        filtering = static_cast<int32_t>(reqWidth) != raHeight ||
+                static_cast<int32_t>(reqHeight) != raWidth;
+    } else {
+        filtering = static_cast<int32_t>(reqWidth) != raWidth ||
+                static_cast<int32_t>(reqHeight) != raHeight;
+    }
 
     // if a default or invalid sourceCrop is passed in, set reasonable values
     if (sourceCrop.width() == 0 || sourceCrop.height() == 0 || !sourceCrop.isValid()) {
         sourceCrop.setLeftTop(Point(0, 0));
         sourceCrop.setRightBottom(Point(raWidth, raHeight));
+    } else if (mPrimaryDisplayOrientation != DisplayState::eOrientationDefault) {
+        Transform tr;
+        uint32_t flags = 0x00;
+        switch (mPrimaryDisplayOrientation) {
+            case DisplayState::eOrientation90:
+                flags = Transform::ROT_90;
+                break;
+            case DisplayState::eOrientation180:
+                flags = Transform::ROT_180;
+                break;
+            case DisplayState::eOrientation270:
+                flags = Transform::ROT_270;
+                break;
+        }
+        tr.set(flags, raWidth, raHeight);
+        sourceCrop = tr.transform(sourceCrop);
     }
 
     // ensure that sourceCrop is inside screen
@@ -5107,28 +5060,39 @@ void SurfaceFlinger::renderScreenImplLocked(const RenderArea& renderArea,
     // make sure to clear all GL error flags
     engine.checkErrors();
 
-    uint32_t rotation = renderArea.getRotationFlags();
-    DisplayRenderArea* displayRenderArea = NULL;
-
-    if(renderArea.getType() == "DisplayRenderArea")
-    displayRenderArea = static_cast<DisplayRenderArea*> (const_cast<RenderArea *> (&renderArea));
-
-    if (displayRenderArea) {
-        int32_t hw_h = displayRenderArea->getHeight();
-        if (DisplayDevice::DISPLAY_PRIMARY == displayRenderArea->getDisplayType()) {
-            rotation = (Transform::orientation_flags)
-                       (rotation ^ displayRenderArea->getPanelMountFlip());
-            if (displayRenderArea->getPanelMountFlip() == Transform::orientation_flags::ROT_180) {
-                sourceCrop.top = hw_h - sourceCrop.top;
-                sourceCrop.bottom = hw_h - sourceCrop.bottom;
-                yswap = false;
-            }
+    Transform::orientation_flags rotation = renderArea.getRotationFlags();
+    if (mPrimaryDisplayOrientation != DisplayState::eOrientationDefault) {
+        // convert hw orientation into flag presentation
+        // here inverse transform needed
+        uint8_t hw_rot_90  = 0x00;
+        uint8_t hw_flip_hv = 0x00;
+        switch (mPrimaryDisplayOrientation) {
+            case DisplayState::eOrientation90:
+                hw_rot_90 = Transform::ROT_90;
+                hw_flip_hv = Transform::ROT_180;
+                break;
+            case DisplayState::eOrientation180:
+                hw_flip_hv = Transform::ROT_180;
+                break;
+            case DisplayState::eOrientation270:
+                hw_rot_90  = Transform::ROT_90;
+                break;
         }
-    }
 
+        // transform flags operation
+        // 1) flip H V if both have ROT_90 flag
+        // 2) XOR these flags
+        uint8_t rotation_rot_90  = rotation & Transform::ROT_90;
+        uint8_t rotation_flip_hv = rotation & Transform::ROT_180;
+        if (rotation_rot_90 & hw_rot_90) {
+            rotation_flip_hv = (~rotation_flip_hv) & Transform::ROT_180;
+        }
+        rotation = static_cast<Transform::orientation_flags>
+                   ((rotation_rot_90 ^ hw_rot_90) | (rotation_flip_hv ^ hw_flip_hv));
+    }
     // set-up our viewport
     engine.setViewportAndProjection(reqWidth, reqHeight, sourceCrop, raHeight, yswap,
-                                    (Transform::orientation_flags)rotation);
+                                    rotation);
     engine.disableTexturing();
 
     const float alpha = RenderArea::getCaptureFillValue(renderArea.getCaptureFill());

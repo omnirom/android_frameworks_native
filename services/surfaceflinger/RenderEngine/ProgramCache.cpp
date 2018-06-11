@@ -345,11 +345,46 @@ void ProgramCache::generateToneMappingProcess(Formatter& fs, const Key& needs) {
             }
             break;
         default:
-            // TODO(73825729) We need to revert the tone mapping in
-            // hardware composer properly.
+            // inverse tone map; the output luminance can be up to maxOutLumi.
             fs << R"__SHADER__(
                 highp vec3 ToneMap(highp vec3 color) {
-                    return color;
+                    const float maxOutLumi = 3000.0;
+
+                    const float x0 = 5.0;
+                    const float y0 = 2.5;
+                    float x1 = displayMaxLuminance * 0.7;
+                    float y1 = maxOutLumi * 0.15;
+                    float x2 = displayMaxLuminance * 0.9;
+                    float y2 = maxOutLumi * 0.45;
+                    float x3 = displayMaxLuminance;
+                    float y3 = maxOutLumi;
+
+                    float c1 = y1 / 3.0;
+                    float c2 = y2 / 2.0;
+                    float c3 = y3 / 1.5;
+
+                    float nits = color.y;
+
+                    float scale;
+                    if (nits <= x0) {
+                        // scale [0.0, x0] to [0.0, y0] linearly
+                        const float slope = y0 / x0;
+                        nits *= slope;
+                    } else if (nits <= x1) {
+                        // scale [x0, x1] to [y0, y1] using a curve
+                        float t = (nits - x0) / (x1 - x0);
+                        nits = (1.0 - t) * (1.0 - t) * y0 + 2.0 * (1.0 - t) * t * c1 + t * t * y1;
+                    } else if (nits <= x2) {
+                        // scale [x1, x2] to [y1, y2] using a curve
+                        float t = (nits - x1) / (x2 - x1);
+                        nits = (1.0 - t) * (1.0 - t) * y1 + 2.0 * (1.0 - t) * t * c2 + t * t * y2;
+                    } else {
+                        // scale [x2, x3] to [y2, y3] using a curve
+                        float t = (nits - x2) / (x3 - x2);
+                        nits = (1.0 - t) * (1.0 - t) * y2 + 2.0 * (1.0 - t) * t * c3 + t * t * y3;
+                    }
+
+                    return color * (nits / max(1e-6, color.y));
                 }
             )__SHADER__";
             break;
@@ -422,13 +457,13 @@ void ProgramCache::generateOETF(Formatter& fs, const Key& needs) {
         case Key::OUTPUT_TF_ST2084:
             fs << R"__SHADER__(
                 vec3 OETF(const vec3 linear) {
-                    const float m1 = (2610.0 / 4096.0) / 4.0;
-                    const float m2 = (2523.0 / 4096.0) * 128.0;
-                    const float c1 = (3424.0 / 4096.0);
-                    const float c2 = (2413.0 / 4096.0) * 32.0;
-                    const float c3 = (2392.0 / 4096.0) * 32.0;
+                    const highp float m1 = (2610.0 / 4096.0) / 4.0;
+                    const highp float m2 = (2523.0 / 4096.0) * 128.0;
+                    const highp float c1 = (3424.0 / 4096.0);
+                    const highp float c2 = (2413.0 / 4096.0) * 32.0;
+                    const highp float c3 = (2392.0 / 4096.0) * 32.0;
 
-                    vec3 tmp = pow(linear, vec3(m1));
+                    highp vec3 tmp = pow(linear, vec3(m1));
                     tmp = (c1 + c2 * tmp) / (1.0 + c3 * tmp);
                     return pow(tmp, vec3(m2));
                 }
