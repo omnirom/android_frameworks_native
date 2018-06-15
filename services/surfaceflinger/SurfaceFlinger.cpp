@@ -4778,6 +4778,13 @@ status_t SurfaceFlinger::onTransact(
                 }
                 return NO_ERROR;
             }
+            case 20000: {
+              int disp = data.readInt32();
+              int mode = data.readInt32();
+              ALOGI("Debug: Set display = %d, power mode = %d", disp, mode);
+              setPowerMode(getBuiltInDisplay(disp), mode);
+              return NO_ERROR;
+            }
         }
     }
     return err;
