@@ -64,7 +64,7 @@ protected:
 
     struct {
       Mutex lock;
-      const char *name = "/data/misc/display/dumpsys.txt";
+      const char *name = "/data/misc/wmtrace/dumpsys.txt";
       bool running = false;
       bool noLimit = false;
       bool replaceAfterCommit = false;
