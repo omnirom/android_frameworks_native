@@ -105,9 +105,6 @@ public:
     // error occurs then SIGNAL_TIME_INVALID is returned.
     nsecs_t getSignalTime() const;
 
-
-    status_t dump() const;
-
     enum class Status {
         Invalid,     // Fence is invalid
         Unsignaled,  // Fence is valid but has not yet signaled

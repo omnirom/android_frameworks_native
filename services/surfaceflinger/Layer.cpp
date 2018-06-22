@@ -99,8 +99,9 @@ Layer::Layer(SurfaceFlinger* flinger, const sp<Client>& client, const String8& n
         mQueueItems(),
         mLastFrameNumberReceived(0),
         mAutoRefresh(false),
-        mFreezeGeometryUpdates(false) {
-
+        mFreezeGeometryUpdates(false),
+        mCurrentChildren(LayerVector::StateSet::Current),
+        mDrawingChildren(LayerVector::StateSet::Drawing) {
     mCurrentCrop.makeInvalid();
 
     uint32_t layerFlags = 0;
@@ -124,7 +125,6 @@ Layer::Layer(SurfaceFlinger* flinger, const sp<Client>& client, const String8& n
     mCurrentState.layerStack = 0;
     mCurrentState.sequence = 0;
     mCurrentState.requested = mCurrentState.active;
-    mCurrentState.dataSpace = ui::Dataspace::UNKNOWN;
     mCurrentState.appId = 0;
     mCurrentState.type = 0;
 
@@ -139,7 +139,6 @@ Layer::Layer(SurfaceFlinger* flinger, const sp<Client>& client, const String8& n
     CompositorTiming compositorTiming;
     flinger->getCompositorTiming(&compositorTiming);
     mFrameEventHistory.initializeCompositorTiming(compositorTiming);
-
 }
 
 void Layer::onFirstRef() {}
@@ -636,12 +635,10 @@ void Layer::setGeometry(const sp<const DisplayDevice>& displayDevice, uint32_t z
     if (orientation & Transform::ROT_INVALID) {
         // we can only handle simple transformation
         hwcInfo.forceClientComposition = true;
-        hwcInfo.invalidRotation = true;
     } else {
         auto transform = static_cast<HWC2::Transform>(orientation);
         hwcInfo.transform = transform;
         auto error = hwcLayer->setTransform(transform);
-        hwcInfo.invalidRotation = false;
         ALOGE_IF(error != HWC2::Error::None,
                  "[%s] Failed to set transform %s: "
                  "%s (%d)",
@@ -929,10 +926,7 @@ void Layer::pushPendingState() {
 }
 
 void Layer::popPendingState(State* stateToCommit) {
-    auto oldFlags = stateToCommit->flags;
     *stateToCommit = mPendingStates[0];
-    stateToCommit->flags =
-            (oldFlags & ~stateToCommit->mask) | (stateToCommit->flags & stateToCommit->mask);
 
     mPendingStates.removeAt(0);
     ATRACE_INT(mTransactionName.string(), mPendingStates.size());
@@ -1279,7 +1273,6 @@ bool Layer::setFlags(uint8_t flags, uint8_t mask) {
     if (mCurrentState.flags == newFlags) return false;
     mCurrentState.sequence++;
     mCurrentState.flags = newFlags;
-    mCurrentState.mask = mask;
     mCurrentState.modified = true;
     setTransactionFlags(eTransactionNeeded);
     return true;
@@ -1334,19 +1327,6 @@ bool Layer::setLayerStack(uint32_t layerStack) {
     mCurrentState.modified = true;
     setTransactionFlags(eTransactionNeeded);
     return true;
-}
-
-bool Layer::setDataSpace(ui::Dataspace dataSpace) {
-    if (mCurrentState.dataSpace == dataSpace) return false;
-    mCurrentState.sequence++;
-    mCurrentState.dataSpace = dataSpace;
-    mCurrentState.modified = true;
-    setTransactionFlags(eTransactionNeeded);
-    return true;
-}
-
-ui::Dataspace Layer::getDataSpace() const {
-    return mCurrentState.dataSpace;
 }
 
 uint32_t Layer::getLayerStack() const {
@@ -1441,7 +1421,7 @@ LayerDebugInfo Layer::getLayerDebugInfo() const {
     info.mColor = ds.color;
     info.mFlags = ds.flags;
     info.mPixelFormat = getPixelFormat();
-    info.mDataSpace = static_cast<android_dataspace>(getDataSpace());
+    info.mDataSpace = static_cast<android_dataspace>(mCurrentDataSpace);
     info.mMatrix[0][0] = ds.active.transform[0][0];
     info.mMatrix[0][1] = ds.active.transform[0][1];
     info.mMatrix[1][0] = ds.active.transform[1][0];
@@ -1660,7 +1640,7 @@ bool Layer::detachChildren() {
 
 bool Layer::isLegacyDataSpace() const {
     // return true when no higher bits are set
-    return !(mDrawingState.dataSpace & (ui::Dataspace::STANDARD_MASK |
+    return !(mCurrentDataSpace & (ui::Dataspace::STANDARD_MASK |
                 ui::Dataspace::TRANSFER_MASK | ui::Dataspace::RANGE_MASK));
 }
 
@@ -1703,7 +1683,7 @@ __attribute__((no_sanitize("unsigned-integer-overflow"))) LayerVector Layer::mak
         return children;
     }
 
-    LayerVector traverse;
+    LayerVector traverse(stateSet);
     for (const wp<Layer>& weakRelative : state.zOrderRelatives) {
         sp<Layer> strongRelative = weakRelative.promote();
         if (strongRelative != nullptr) {
@@ -1801,7 +1781,7 @@ LayerVector Layer::makeChildrenTraversalList(LayerVector::StateSet stateSet,
     const LayerVector& children = useDrawing ? mDrawingChildren : mCurrentChildren;
     const State& state = useDrawing ? mDrawingState : mCurrentState;
 
-    LayerVector traverse;
+    LayerVector traverse(stateSet);
     for (const wp<Layer>& weakRelative : state.zOrderRelatives) {
         sp<Layer> strongRelative = weakRelative.promote();
         // Only add relative layers that are also descendents of the top most parent of the tree.
@@ -1971,7 +1951,10 @@ void Layer::writeToProto(LayerProto* layerInfo, LayerVector::StateSet stateSet,
 
     layerInfo->set_is_opaque(isOpaque(state));
     layerInfo->set_invalidate(contentDirty);
-    layerInfo->set_dataspace(dataspaceDetails(static_cast<android_dataspace>(getDataSpace())));
+
+    // XXX (b/79210409) mCurrentDataSpace is not protected
+    layerInfo->set_dataspace(dataspaceDetails(static_cast<android_dataspace>(mCurrentDataSpace)));
+
     layerInfo->set_pixel_format(decodePixelFormat(getPixelFormat()));
     LayerProtoHelper::writeToProto(getColor(), layerInfo->mutable_color());
     LayerProtoHelper::writeToProto(state.color, layerInfo->mutable_requested_color());
@@ -1990,6 +1973,7 @@ void Layer::writeToProto(LayerProto* layerInfo, LayerVector::StateSet stateSet,
         layerInfo->set_z_order_relative_of(zOrderRelativeOf->sequence);
     }
 
+    // XXX getBE().compositionInfo.mBuffer is not protected
     auto buffer = getBE().compositionInfo.mBuffer;
     if (buffer != nullptr) {
         LayerProtoHelper::writeToProto(buffer, layerInfo->mutable_active_buffer());
@@ -2024,15 +2008,6 @@ void Layer::writeToProto(LayerProto* layerInfo, int32_t hwcId) {
     } else {
         layerInfo->set_is_protected(false);
     }
-}
-
-void Layer::setColorInversionData(const sp<const DisplayDevice>& displayDevice)
-{
-  auto hwcId = displayDevice->getHwcDisplayId();
-  bool externalDisplay = (hwcId == DisplayDevice::DISPLAY_EXTERNAL);
-  auto& hwcInfo = getBE().mHwcLayers[hwcId];
-  mColorInversionOnExternal = externalDisplay && displayDevice->hasColorMatrix() &&
-                              !hwcInfo.invalidRotation;
 }
 
 // ---------------------------------------------------------------------------

@@ -112,7 +112,10 @@ namespace impl {
 using ui::Dataspace;
 
 GLES20RenderEngine::GLES20RenderEngine(uint32_t featureFlags)
-      : mVpWidth(0), mVpHeight(0), mPlatformHasWideColor((featureFlags & WIDE_COLOR_SUPPORT) != 0) {
+      : RenderEngine(featureFlags),
+        mVpWidth(0),
+        mVpHeight(0),
+        mPlatformHasWideColor((featureFlags & WIDE_COLOR_SUPPORT) != 0) {
     glGetIntegerv(GL_MAX_TEXTURE_SIZE, &mMaxTextureSize);
     glGetIntegerv(GL_MAX_VIEWPORT_DIMS, mMaxViewportDims);
 
@@ -147,6 +150,7 @@ GLES20RenderEngine::GLES20RenderEngine(uint32_t featureFlags)
         mSrgbToXyz = srgb.getRGBtoXYZ();
         mDisplayP3ToXyz = displayP3.getRGBtoXYZ();
         mBt2020ToXyz = bt2020.getRGBtoXYZ();
+        mXyzToSrgb = mat4(srgb.getXYZtoRGB());
         mXyzToDisplayP3 = mat4(displayP3.getXYZtoRGB());
         mXyzToBt2020 = mat4(bt2020.getXYZtoRGB());
     }
@@ -347,13 +351,16 @@ void GLES20RenderEngine::drawMesh(const Mesh& mesh) {
                     break;
             }
 
-            // The supported output color spaces are Display P3 and BT2020.
+            // The supported output color spaces are BT2020, Display P3 and standard RGB.
             switch (outputStandard) {
                 case Dataspace::STANDARD_BT2020:
                     wideColorState.setOutputTransformMatrix(mXyzToBt2020);
                     break;
-                default:
+                case Dataspace::STANDARD_DCI_P3:
                     wideColorState.setOutputTransformMatrix(mXyzToDisplayP3);
+                    break;
+                default:
+                    wideColorState.setOutputTransformMatrix(mXyzToSrgb);
                     break;
             }
         } else if (inputStandard != outputStandard) {

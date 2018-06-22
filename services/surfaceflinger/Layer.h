@@ -116,8 +116,7 @@ public:
                 forceClientComposition(false),
                 compositionType(HWC2::Composition::Invalid),
                 clearClientTarget(false),
-                transform(HWC2::Transform::None),
-                invalidRotation(true) {}
+                transform(HWC2::Transform::None) {}
 
         HWComposer* hwc;
         HWC2::Layer* layer;
@@ -128,7 +127,6 @@ public:
         FloatRect sourceCrop;
         HWComposerBufferCache bufferCache;
         HWC2::Transform transform;
-        bool invalidRotation;
     };
 
     // A layer can be attached to multiple displays when operating in mirror mode
@@ -188,7 +186,6 @@ public:
         uint32_t layerStack;
 
         uint8_t flags;
-        uint8_t mask;
         uint8_t reserved[2];
         int32_t sequence; // changes when visible regions can change
         bool modified;
@@ -211,7 +208,6 @@ public:
         // dependent.
         Region activeTransparentRegion;
         Region requestedTransparentRegion;
-        ui::Dataspace dataSpace;
 
         int32_t appId;
         int32_t type;
@@ -289,8 +285,6 @@ public:
     bool setTransparentRegionHint(const Region& transparent);
     bool setFlags(uint8_t flags, uint8_t mask);
     bool setLayerStack(uint32_t layerStack);
-    bool setDataSpace(ui::Dataspace dataSpace);
-    ui::Dataspace getDataSpace() const;
     uint32_t getLayerStack() const;
     void deferTransactionUntil(const sp<IBinder>& barrierHandle, uint64_t frameNumber);
     void deferTransactionUntil(const sp<Layer>& barrierLayer, uint64_t frameNumber);
@@ -300,6 +294,8 @@ public:
     void setChildrenDrawingParent(const sp<Layer>& layer);
     bool reparent(const sp<IBinder>& newParentHandle);
     bool detachChildren();
+
+    ui::Dataspace getDataSpace() const { return mCurrentDataSpace; }
 
     // Before color management is introduced, contents on Android have to be
     // desaturated in order to match what they appears like visually.
@@ -375,7 +371,6 @@ public:
 
     void writeToProto(LayerProto* layerInfo, int32_t hwcId);
 
-    bool isColorInversion() const { return mColorInversionOnExternal; }
 protected:
     /*
      * onDraw - draws the surface.
@@ -385,6 +380,8 @@ protected:
 
 public:
     virtual void setDefaultBufferSize(uint32_t /*w*/, uint32_t /*h*/) {}
+
+    virtual bool isHdrY410() const { return false; }
 
     void setGeometry(const sp<const DisplayDevice>& displayDevice, uint32_t z);
     void forceClientComposition(int32_t hwcId);
@@ -561,7 +558,6 @@ public:
                                   FrameEventHistoryDelta* outDelta);
 
     virtual bool getTransformToDisplayInverse() const { return false; }
-    void setColorInversionData(const sp<const DisplayDevice>& displayDevice);
 
     Transform getTransform() const;
 
@@ -598,6 +594,7 @@ public:
     // SurfaceFlinger to complete a transaction.
     void commitChildList();
     int32_t getZ() const;
+    void pushPendingState();
 
 protected:
     // constant
@@ -680,7 +677,6 @@ protected:
     // Returns false if the relevant frame has already been latched
     bool addSyncPoint(const std::shared_ptr<SyncPoint>& point);
 
-    void pushPendingState();
     void popPendingState(State* stateToCommit);
     bool applyPendingStates(State* stateToCommit);
 
@@ -753,6 +749,7 @@ protected:
     int mActiveBufferSlot;
     sp<GraphicBuffer> mActiveBuffer;
     sp<NativeHandle> mSidebandStream;
+    ui::Dataspace mCurrentDataSpace = ui::Dataspace::UNKNOWN;
     Rect mCurrentCrop;
     uint32_t mCurrentTransform;
     // We encode unset as -1.
@@ -785,7 +782,6 @@ protected:
     std::atomic<uint64_t> mLastFrameNumberReceived;
     bool mAutoRefresh;
     bool mFreezeGeometryUpdates;
-    bool mColorInversionOnExternal = false;
 
     // Child list about to be committed/used for editing.
     LayerVector mCurrentChildren;

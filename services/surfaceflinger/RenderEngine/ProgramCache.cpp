@@ -14,10 +14,13 @@
  * limitations under the License.
  */
 
+#define ATRACE_TAG ATRACE_TAG_GRAPHICS
+
 #include <GLES2/gl2.h>
 #include <GLES2/gl2ext.h>
 
 #include <utils/String8.h>
+#include <utils/Trace.h>
 
 #include "Description.h"
 #include "Program.h"
@@ -75,15 +78,11 @@ Formatter& dedent(Formatter& f) {
 
 ANDROID_SINGLETON_STATIC_INSTANCE(ProgramCache)
 
-ProgramCache::ProgramCache() {
-    // Until surfaceflinger has a dependable blob cache on the filesystem,
-    // generate shaders on initialization so as to avoid jank.
-    primeCache();
-}
+ProgramCache::ProgramCache() {}
 
 ProgramCache::~ProgramCache() {}
 
-void ProgramCache::primeCache() {
+void ProgramCache::primeCache(bool hasWideColor) {
     uint32_t shaderCount = 0;
     uint32_t keyMask = Key::BLEND_MASK | Key::OPACITY_MASK | Key::ALPHA_MASK | Key::TEXTURE_MASK;
     // Prime the cache for all combinations of the above masks,
@@ -104,6 +103,27 @@ void ProgramCache::primeCache() {
             shaderCount++;
         }
     }
+
+    // Prime for sRGB->P3 conversion
+    if (hasWideColor) {
+        Key shaderKey;
+        shaderKey.set(Key::BLEND_MASK | Key::TEXTURE_MASK | Key::OUTPUT_TRANSFORM_MATRIX_MASK |
+                              Key::INPUT_TF_MASK | Key::OUTPUT_TF_MASK,
+                      Key::BLEND_PREMULT | Key::TEXTURE_EXT | Key::OUTPUT_TRANSFORM_MATRIX_ON |
+                              Key::INPUT_TF_SRGB | Key::OUTPUT_TF_SRGB);
+        for (int i = 0; i < 4; i++) {
+            shaderKey.set(Key::OPACITY_MASK,
+                          (i & 1) ? Key::OPACITY_OPAQUE : Key::OPACITY_TRANSLUCENT);
+            shaderKey.set(Key::ALPHA_MASK, (i & 2) ? Key::ALPHA_LT_ONE : Key::ALPHA_EQ_ONE);
+            Program* program = mCache.valueFor(shaderKey);
+            if (program == nullptr) {
+                program = generateProgram(shaderKey);
+                mCache.add(shaderKey, program);
+                shaderCount++;
+            }
+        }
+    }
+
     nsecs_t timeAfter = systemTime();
     float compileTimeMs = static_cast<float>(timeAfter - timeBefore) / 1.0E6;
     ALOGD("shader cache generated - %u shaders in %f ms\n", shaderCount, compileTimeMs);
@@ -345,11 +365,46 @@ void ProgramCache::generateToneMappingProcess(Formatter& fs, const Key& needs) {
             }
             break;
         default:
-            // TODO(73825729) We need to revert the tone mapping in
-            // hardware composer properly.
+            // inverse tone map; the output luminance can be up to maxOutLumi.
             fs << R"__SHADER__(
                 highp vec3 ToneMap(highp vec3 color) {
-                    return color;
+                    const float maxOutLumi = 3000.0;
+
+                    const float x0 = 5.0;
+                    const float y0 = 2.5;
+                    float x1 = displayMaxLuminance * 0.7;
+                    float y1 = maxOutLumi * 0.15;
+                    float x2 = displayMaxLuminance * 0.9;
+                    float y2 = maxOutLumi * 0.45;
+                    float x3 = displayMaxLuminance;
+                    float y3 = maxOutLumi;
+
+                    float c1 = y1 / 3.0;
+                    float c2 = y2 / 2.0;
+                    float c3 = y3 / 1.5;
+
+                    float nits = color.y;
+
+                    float scale;
+                    if (nits <= x0) {
+                        // scale [0.0, x0] to [0.0, y0] linearly
+                        const float slope = y0 / x0;
+                        nits *= slope;
+                    } else if (nits <= x1) {
+                        // scale [x0, x1] to [y0, y1] using a curve
+                        float t = (nits - x0) / (x1 - x0);
+                        nits = (1.0 - t) * (1.0 - t) * y0 + 2.0 * (1.0 - t) * t * c1 + t * t * y1;
+                    } else if (nits <= x2) {
+                        // scale [x1, x2] to [y1, y2] using a curve
+                        float t = (nits - x1) / (x2 - x1);
+                        nits = (1.0 - t) * (1.0 - t) * y1 + 2.0 * (1.0 - t) * t * c2 + t * t * y2;
+                    } else {
+                        // scale [x2, x3] to [y2, y3] using a curve
+                        float t = (nits - x2) / (x3 - x2);
+                        nits = (1.0 - t) * (1.0 - t) * y2 + 2.0 * (1.0 - t) * t * c3 + t * t * y3;
+                    }
+
+                    return color * (nits / max(1e-6, color.y));
                 }
             )__SHADER__";
             break;
@@ -422,13 +477,13 @@ void ProgramCache::generateOETF(Formatter& fs, const Key& needs) {
         case Key::OUTPUT_TF_ST2084:
             fs << R"__SHADER__(
                 vec3 OETF(const vec3 linear) {
-                    const float m1 = (2610.0 / 4096.0) / 4.0;
-                    const float m2 = (2523.0 / 4096.0) * 128.0;
-                    const float c1 = (3424.0 / 4096.0);
-                    const float c2 = (2413.0 / 4096.0) * 32.0;
-                    const float c3 = (2392.0 / 4096.0) * 32.0;
+                    const highp float m1 = (2610.0 / 4096.0) / 4.0;
+                    const highp float m2 = (2523.0 / 4096.0) * 128.0;
+                    const highp float c1 = (3424.0 / 4096.0);
+                    const highp float c2 = (2413.0 / 4096.0) * 32.0;
+                    const highp float c3 = (2392.0 / 4096.0) * 32.0;
 
-                    vec3 tmp = pow(linear, vec3(m1));
+                    highp vec3 tmp = pow(linear, vec3(m1));
                     tmp = (c1 + c2 * tmp) / (1.0 + c3 * tmp);
                     return pow(tmp, vec3(m2));
                 }
@@ -596,6 +651,8 @@ String8 ProgramCache::generateFragmentShader(const Key& needs) {
 }
 
 Program* ProgramCache::generateProgram(const Key& needs) {
+    ATRACE_CALL();
+
     // vertex shader
     String8 vs = generateVertexShader(needs);
 
@@ -619,8 +676,8 @@ void ProgramCache::useProgram(const Description& description) {
         mCache.add(needs, program);
         time += systemTime();
 
-        // ALOGD(">>> generated new program: needs=%08X, time=%u ms (%d programs)",
-        //        needs.mNeeds, uint32_t(ns2ms(time)), mCache.size());
+        ALOGV(">>> generated new program: needs=%08X, time=%u ms (%zu programs)", needs.mKey,
+              uint32_t(ns2ms(time)), mCache.size());
     }
 
     // here we have a suitable program for this description
