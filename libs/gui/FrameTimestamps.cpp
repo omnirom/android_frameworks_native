@@ -369,6 +369,10 @@ void ConsumerFrameEventHistory::addQueue(const NewFrameEventsEntry& newEntry) {
     newTimestamps.requestedPresentTime = newEntry.requestedPresentTime;
     newTimestamps.acquireFence = newEntry.acquireFence;
     newTimestamps.valid = true;
+    if (mQueueOffset >= MAX_FRAME_HISTORY) {
+        ALOGE_IF(mProducerWantsEvents, "addQueue: QueueOffset is out of bound");
+        return;
+    }
     mFrames[mQueueOffset] = newTimestamps;
 
     // Note: We avoid sending the acquire fence back to the caller since
