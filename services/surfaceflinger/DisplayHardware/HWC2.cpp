@@ -153,7 +153,7 @@ void Device::destroyDisplay(hwc2_display_t displayId)
     mDisplays.erase(displayId);
 }
 
-void Device::onHotplug(hwc2_display_t displayId, Connection connection) {
+Error Device::onHotplug(hwc2_display_t displayId, Connection connection) {
     if (connection == Connection::Connected) {
         // If we get a hotplug connected event for a display we already have,
         // destroy the display and recreate it. This will force us to requery
@@ -174,7 +174,7 @@ void Device::onHotplug(hwc2_display_t displayId, Connection connection) {
             ALOGE("getDisplayType(%" PRIu64 ") failed: %s (%d). "
                     "Aborting hotplug attempt.",
                     displayId, to_string(error).c_str(), intError);
-            return;
+            return Error::NoResources;
         }
 
         auto newDisplay = std::make_unique<Display>(
@@ -192,6 +192,7 @@ void Device::onHotplug(hwc2_display_t displayId, Connection connection) {
                   displayId);
         }
     }
+    return Error::None;
 }
 
 // Other Device methods
