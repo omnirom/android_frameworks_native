@@ -251,7 +251,7 @@ void VirtualDisplaySurface::onFrameCommitted() {
         int sslot = mapProducer2SourceSlot(SOURCE_SINK, mOutputProducerSlot);
         QueueBufferOutput qbo;
         VDS_LOGV("onFrameCommitted: queue sink sslot=%d", sslot);
-        if (mMustRecompose) {
+        if (retireFence->isValid() && mMustRecompose) {
             status_t result = mSource[SOURCE_SINK]->queueBuffer(sslot,
                     QueueBufferInput(
                         systemTime(), false /* isAutoTimestamp */,
