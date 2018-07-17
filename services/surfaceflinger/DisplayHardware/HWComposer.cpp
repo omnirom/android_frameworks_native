@@ -131,23 +131,27 @@ void HWComposer::validateChange(HWC2::Composition from, HWC2::Composition to) {
     }
 }
 
-void HWComposer::onHotplug(hwc2_display_t displayId, int32_t displayType,
+bool HWComposer::onHotplug(hwc2_display_t displayId, int32_t displayType,
                            HWC2::Connection connection) {
     if (displayType >= HWC_NUM_PHYSICAL_DISPLAY_TYPES) {
         ALOGE("Invalid display type of %d", displayType);
-        return;
+        return false;
     }
 
     ALOGV("hotplug: %" PRIu64 ", %s %s", displayId,
             displayType == DisplayDevice::DISPLAY_PRIMARY ? "primary" : "external",
             to_string(connection).c_str());
-    mHwcDevice->onHotplug(displayId, connection);
+    auto error =  mHwcDevice->onHotplug(displayId, connection);
+    if (error != HWC2::Error::None) {
+        return false;
+    }
     // Disconnect is handled through HWComposer::disconnectDisplay via
     // SurfaceFlinger's onHotplugReceived callback handling
     if (connection == HWC2::Connection::Connected) {
         mDisplayData[displayType].hwcDisplay = mHwcDevice->getDisplayById(displayId);
         mHwcDisplaySlots[displayId] = displayType;
     }
+    return true;
 }
 
 bool HWComposer::onVsync(hwc2_display_t displayId, int64_t timestamp,
