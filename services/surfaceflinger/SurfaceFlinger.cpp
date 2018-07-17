@@ -2243,7 +2243,9 @@ void SurfaceFlinger::processDisplayHotplugEventsLocked() {
             continue;
         }
 
-        getBE().mHwc->onHotplug(event.display, displayType, event.connection);
+        if (!getBE().mHwc->onHotplug(event.display, displayType, event.connection)) {
+            continue;
+        }
 
         if (event.connection == HWC2::Connection::Connected) {
             if (!mBuiltinDisplays[displayType].get()) {

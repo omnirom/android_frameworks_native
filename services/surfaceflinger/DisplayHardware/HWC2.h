@@ -97,7 +97,7 @@ public:
             android::ui::PixelFormat* format, Display** outDisplay);
     void destroyDisplay(hwc2_display_t displayId);
 
-    void onHotplug(hwc2_display_t displayId, Connection connection);
+    Error onHotplug(hwc2_display_t displayId, Connection connection);
 
     // Other Device methods
 
