@@ -2354,6 +2354,17 @@ sp<DisplayDevice> SurfaceFlinger::setupNewDisplayDeviceInternal(
     hw->setProjection(state.orientation, state.viewport, state.frame);
     hw->setDisplayName(state.displayName);
 
+    // When a new display device is added, update the active
+    // config by querying HWC otherwise the default config
+    // (config 0) will be used.
+    if (hwcId >= DisplayDevice::DISPLAY_PRIMARY &&
+        hwcId < DisplayDevice::NUM_BUILTIN_DISPLAY_TYPES) {
+        int activeConfig = getBE().mHwc->getActiveConfig(hwcId)->getId();
+        if (activeConfig >= 0) {
+            hw->setActiveConfig(activeConfig);
+        }
+    }
+
     return hw;
 }
 
