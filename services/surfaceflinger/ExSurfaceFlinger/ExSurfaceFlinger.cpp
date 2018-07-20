@@ -32,7 +32,6 @@
 #include <fstream>
 #include <cutils/properties.h>
 #include <ui/GraphicBufferAllocator.h>
-#include <vendor/display/config/1.1/IDisplayConfig.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 
@@ -67,6 +66,18 @@ ExSurfaceFlinger::ExSurfaceFlinger() {
        (!strncmp(property, "1", PROPERTY_VALUE_MAX ) ||
         (!strncasecmp(property,"true", PROPERTY_VALUE_MAX )))) {
        sAllowHDRFallBack = true;
+    }
+
+    using vendor::display::config::V1_2::IDisplayConfig;
+    mDisplayConfig = IDisplayConfig::getService();
+    if (mDisplayConfig != NULL) {
+        if (!mDisplayConfig->setDisplayIndex(IDisplayConfig::DisplayTypeExt::DISPLAY_BUILTIN,
+                 HWC_DISPLAY_BUILTIN_2, (HWC_DISPLAY_VIRTUAL - HWC_DISPLAY_BUILTIN_2)) &&
+            !mDisplayConfig->setDisplayIndex(IDisplayConfig::DisplayTypeExt::DISPLAY_PLUGGABLE,
+                 HWC_DISPLAY_EXTERNAL, (HWC_DISPLAY_BUILTIN_2 - HWC_DISPLAY_EXTERNAL)) &&
+            !mDisplayConfig->setDisplayIndex(IDisplayConfig::DisplayTypeExt::DISPLAY_VIRTUAL,
+                 HWC_DISPLAY_VIRTUAL, 1)) {
+        }
     }
 }
 
