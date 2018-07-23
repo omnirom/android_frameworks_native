@@ -2307,9 +2307,6 @@ sp<DisplayDevice> SurfaceFlinger::setupNewDisplayDeviceInternal(
                 case ColorMode::DISPLAY_P3:
                 case ColorMode::ADOBE_RGB:
                 case ColorMode::DCI_P3:
-                case ColorMode::BT2020:
-                case ColorMode::BT2100_PQ:
-                case ColorMode::BT2100_HLG:
                     hasWideColorGamut = true;
                     break;
                 default:
