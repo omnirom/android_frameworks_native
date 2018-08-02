@@ -39,6 +39,7 @@
 #include "RenderEngine/Surface.h"
 
 #include <memory>
+#include <string>
 
 struct ANativeWindow;
 
@@ -80,7 +81,7 @@ public:
     DisplayDevice(
             const sp<SurfaceFlinger>& flinger,
             DisplayType type,
-            int32_t hwcId,
+            int32_t id,
             bool isSecure,
             const wp<IBinder>& displayToken,
             const sp<ANativeWindow>& nativeWindow,
@@ -134,7 +135,8 @@ public:
     uint32_t                getLayerStack() const { return mLayerStack; }
     int32_t                 getDisplayType() const { return mType; }
     bool                    isPrimary() const { return mType == DISPLAY_PRIMARY; }
-    int32_t                 getHwcDisplayId() const { return mHwcDisplayId; }
+    bool                    isVirtual() const { return mType == DISPLAY_VIRTUAL; }
+    int32_t                 getId() const { return mId; }
     const wp<IBinder>&      getDisplayToken() const { return mDisplayToken; }
     uint32_t                getPanelMountFlip() const { return mPanelMountFlip; }
 
@@ -180,8 +182,8 @@ public:
     }
     inline Rect bounds() const { return getBounds(); }
 
-    void setDisplayName(const String8& displayName);
-    const String8& getDisplayName() const { return mDisplayName; }
+    void setDisplayName(const std::string& displayName);
+    const std::string& getDisplayName() const { return mDisplayName; }
 
     bool makeCurrent() const;
     void setViewportAndProjection() const;
@@ -193,7 +195,7 @@ public:
      */
     int getPowerMode() const;
     void setPowerMode(int mode);
-    bool isDisplayOn() const;
+    bool isPoweredOn() const;
 
     ui::ColorMode getActiveColorMode() const;
     void setActiveColorMode(ui::ColorMode mode);
@@ -225,7 +227,7 @@ private:
      */
     sp<SurfaceFlinger> mFlinger;
     DisplayType mType;
-    int32_t mHwcDisplayId;
+    int32_t mId;
     wp<IBinder> mDisplayToken;
 
     // ANativeWindow this display is rendering into
@@ -236,7 +238,7 @@ private:
     int             mDisplayWidth;
     int             mDisplayHeight;
     mutable uint32_t mPageFlipCount;
-    String8         mDisplayName;
+    std::string     mDisplayName;
     bool            mIsSecure;
 
     /*
@@ -316,15 +318,9 @@ private:
 };
 
 struct DisplayDeviceState {
-    DisplayDeviceState() = default;
-    DisplayDeviceState(DisplayDevice::DisplayType type, bool isSecure);
+    bool isVirtual() const { return type >= DisplayDevice::DISPLAY_VIRTUAL; }
 
-    bool isValid() const { return type >= 0; }
-    bool isMainDisplay() const { return type == DisplayDevice::DISPLAY_PRIMARY; }
-    bool isVirtualDisplay() const { return type >= DisplayDevice::DISPLAY_VIRTUAL; }
-
-    static std::atomic<int32_t> nextDisplayId;
-    int32_t displayId = nextDisplayId++;
+    int32_t sequenceId = sNextSequenceId++;
     DisplayDevice::DisplayType type = DisplayDevice::DISPLAY_ID_INVALID;
     sp<IGraphicBufferProducer> surface;
     uint32_t layerStack = DisplayDevice::NO_LAYER_STACK;
@@ -333,8 +329,11 @@ struct DisplayDeviceState {
     uint8_t orientation = 0;
     uint32_t width = 0;
     uint32_t height = 0;
-    String8 displayName;
+    std::string displayName;
     bool isSecure = false;
+
+private:
+    static std::atomic<int32_t> sNextSequenceId;
 };
 
 class DisplayRenderArea : public RenderArea {

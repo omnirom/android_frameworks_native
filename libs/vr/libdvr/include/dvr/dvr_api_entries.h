@@ -181,3 +181,20 @@ DVR_V1_API_ENTRY(ReadBufferQueueReleaseBuffer);
 DVR_V1_API_ENTRY(PoseClientGetDataReader);
 DVR_V1_API_ENTRY(PoseClientDataCapture);
 DVR_V1_API_ENTRY(PoseClientDataReaderDestroy);
+
+// Tracking
+DVR_V1_API_ENTRY(TrackingCameraCreate);
+DVR_V1_API_ENTRY(TrackingCameraDestroy);
+DVR_V1_API_ENTRY(TrackingCameraStart);
+DVR_V1_API_ENTRY(TrackingCameraStop);
+
+DVR_V1_API_ENTRY(TrackingFeatureExtractorCreate);
+DVR_V1_API_ENTRY(TrackingFeatureExtractorDestroy);
+DVR_V1_API_ENTRY(TrackingFeatureExtractorStart);
+DVR_V1_API_ENTRY(TrackingFeatureExtractorStop);
+DVR_V1_API_ENTRY(TrackingFeatureExtractorProcessBuffer);
+
+DVR_V1_API_ENTRY(TrackingSensorsCreate);
+DVR_V1_API_ENTRY(TrackingSensorsDestroy);
+DVR_V1_API_ENTRY(TrackingSensorsStart);
+DVR_V1_API_ENTRY(TrackingSensorsStop);

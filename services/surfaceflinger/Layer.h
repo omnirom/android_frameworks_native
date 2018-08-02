@@ -38,6 +38,7 @@
 
 #include "Client.h"
 #include "FrameTracker.h"
+#include "LayerBE.h"
 #include "LayerVector.h"
 #include "MonitoredProducer.h"
 #include "SurfaceFlinger.h"
@@ -73,70 +74,6 @@ class SurfaceInterceptor;
 }
 
 // ---------------------------------------------------------------------------
-
-struct CompositionInfo {
-    HWC2::Composition compositionType;
-    sp<GraphicBuffer> mBuffer = nullptr;
-    int mBufferSlot = BufferQueue::INVALID_BUFFER_SLOT;
-    struct {
-        HWComposer* hwc;
-        sp<Fence> fence;
-        HWC2::BlendMode blendMode;
-        Rect displayFrame;
-        float alpha;
-        FloatRect sourceCrop;
-        HWC2::Transform transform;
-        int z;
-        int type;
-        int appId;
-        Region visibleRegion;
-        Region surfaceDamage;
-        sp<NativeHandle> sidebandStream;
-        android_dataspace dataspace;
-        hwc_color_t color;
-    } hwc;
-    struct {
-        RE::RenderEngine* renderEngine;
-        Mesh* mesh;
-    } renderEngine;
-};
-
-class LayerBE {
-public:
-    LayerBE();
-
-    // The mesh used to draw the layer in GLES composition mode
-    Mesh mMesh;
-
-    // HWC items, accessed from the main thread
-    struct HWCInfo {
-        HWCInfo()
-              : hwc(nullptr),
-                layer(nullptr),
-                forceClientComposition(false),
-                compositionType(HWC2::Composition::Invalid),
-                clearClientTarget(false),
-                transform(HWC2::Transform::None) {}
-
-        HWComposer* hwc;
-        HWC2::Layer* layer;
-        bool forceClientComposition;
-        HWC2::Composition compositionType;
-        bool clearClientTarget;
-        Rect displayFrame;
-        FloatRect sourceCrop;
-        HWComposerBufferCache bufferCache;
-        HWC2::Transform transform;
-    };
-
-    // A layer can be attached to multiple displays when operating in mirror mode
-    // (a.k.a: when several displays are attached with equal layerStack). In this
-    // case we need to keep track. In non-mirror mode, a layer will have only one
-    // HWCInfo. This map key is a display layerStack.
-    std::unordered_map<int32_t, HWCInfo> mHwcLayers;
-
-    CompositionInfo compositionInfo;
-};
 
 class Layer : public virtual RefBase {
     static int32_t sSequence;
@@ -258,7 +195,7 @@ public:
     // Set a 2x2 transformation matrix on the layer. This transform
     // will be applied after parent transforms, but before any final
     // producer specified transform.
-    bool setMatrix(const layer_state_t::matrix22_t& matrix);
+    bool setMatrix(const layer_state_t::matrix22_t& matrix, bool allowNonRectPreservingTransforms);
 
     // This second set of geometry attributes are controlled by
     // setGeometryAppliesWithResize, and their default mode is to be
@@ -362,6 +299,11 @@ public:
      */
     virtual bool isFixedSize() const { return true; }
 
+    // Most layers aren't created from the main thread, and therefore need to
+    // grab the SF state lock to access HWC, but ContainerLayer does, so we need
+    // to avoid grabbing the lock again to avoid deadlock
+    virtual bool isCreatedFromMainThread() const { return false; }
+
 
     bool isPendingRemoval() const { return mPendingRemoval; }
 
@@ -369,7 +311,7 @@ public:
                       LayerVector::StateSet stateSet = LayerVector::StateSet::Drawing,
                       bool enableRegionDump = true);
 
-    void writeToProto(LayerProto* layerInfo, int32_t hwcId);
+    void writeToProto(LayerProto* layerInfo, int32_t displayId);
 
 protected:
     /*
@@ -383,18 +325,18 @@ public:
 
     virtual bool isHdrY410() const { return false; }
 
-    void setGeometry(const sp<const DisplayDevice>& displayDevice, uint32_t z);
-    void forceClientComposition(int32_t hwcId);
-    bool getForceClientComposition(int32_t hwcId);
-    virtual void setPerFrameData(const sp<const DisplayDevice>& displayDevice) = 0;
+    void setGeometry(const sp<const DisplayDevice>& display, uint32_t z);
+    void forceClientComposition(int32_t displayId);
+    bool getForceClientComposition(int32_t displayId);
+    virtual void setPerFrameData(const sp<const DisplayDevice>& display) = 0;
 
     // callIntoHwc exists so we can update our local state and call
     // acceptDisplayChanges without unnecessarily updating the device's state
-    void setCompositionType(int32_t hwcId, HWC2::Composition type, bool callIntoHwc = true);
-    HWC2::Composition getCompositionType(int32_t hwcId) const;
-    void setClearClientTarget(int32_t hwcId, bool clear);
-    bool getClearClientTarget(int32_t hwcId) const;
-    void updateCursorPosition(const sp<const DisplayDevice>& hw);
+    void setCompositionType(int32_t displayId, HWC2::Composition type, bool callIntoHwc = true);
+    HWC2::Composition getCompositionType(int32_t displayId) const;
+    void setClearClientTarget(int32_t displayId, bool clear);
+    bool getClearClientTarget(int32_t displayId) const;
+    void updateCursorPosition(const sp<const DisplayDevice>& display);
 
     /*
      * called after page-flip
@@ -435,6 +377,16 @@ public:
     void draw(const RenderArea& renderArea, const Region& clip) const;
     void draw(const RenderArea& renderArea, bool useIdentityTransform) const;
     void draw(const RenderArea& renderArea) const;
+
+    /*
+     * drawNow uses the renderEngine to draw the layer.  This is different than the
+     * draw function as with the FE/BE split, the draw function runs in the FE and
+     * sets up state for the BE to do the actual drawing.  drawNow is used to tell
+     * the layer to skip the state setup and just go ahead and draw the layer.  This
+     * is used for screen captures which happens separately from the frame
+     * compositing path.
+     */
+    virtual void drawNow(const RenderArea& renderArea, bool useIdentityTransform) const = 0;
 
     /*
      * doTransaction - process the transaction. This is a good place to figure
@@ -493,7 +445,7 @@ public:
 
     // Updates the transform hint in our SurfaceFlingerConsumer to match
     // the current orientation of the display device.
-    void updateTransformHint(const sp<const DisplayDevice>& hw) const;
+    void updateTransformHint(const sp<const DisplayDevice>& display) const;
 
     /*
      * returns the rectangle that crops the content of the layer and scales it
@@ -512,19 +464,25 @@ public:
 
     // -----------------------------------------------------------------------
 
-    bool createHwcLayer(HWComposer* hwc, int32_t hwcId);
-    bool destroyHwcLayer(int32_t hwcId);
+    bool createHwcLayer(HWComposer* hwc, int32_t displayId);
+    bool destroyHwcLayer(int32_t displayId);
     void destroyAllHwcLayers();
 
-    bool hasHwcLayer(int32_t hwcId) {
-        return getBE().mHwcLayers.count(hwcId) > 0;
-    }
+    bool hasHwcLayer(int32_t displayId) { return getBE().mHwcLayers.count(displayId) > 0; }
 
-    HWC2::Layer* getHwcLayer(int32_t hwcId) {
-        if (getBE().mHwcLayers.count(hwcId) == 0) {
+    HWC2::Layer* getHwcLayer(int32_t displayId) {
+        if (getBE().mHwcLayers.count(displayId) == 0) {
             return nullptr;
         }
-        return getBE().mHwcLayers[hwcId].layer;
+        return getBE().mHwcLayers[displayId].layer;
+    }
+
+    bool setHwcLayer(int32_t hwcId) {
+        if (getBE().mHwcLayers.count(hwcId) == 0) {
+            return false;
+        }
+        getBE().compositionInfo.hwc.hwcLayer = getBE().mHwcLayers[hwcId].layer;
+        return true;
     }
 
     // -----------------------------------------------------------------------
@@ -542,7 +500,7 @@ public:
 
     /* always call base class first */
     static void miniDumpHeader(String8& result);
-    void miniDump(String8& result, int32_t hwcId) const;
+    void miniDump(String8& result, int32_t displayId) const;
     void dumpFrameStats(String8& result) const;
     void dumpFrameEvents(String8& result);
     void clearFrameStats();
@@ -626,12 +584,12 @@ protected:
 
     uint32_t getEffectiveUsage(uint32_t usage) const;
 
-    FloatRect computeCrop(const sp<const DisplayDevice>& hw) const;
+    virtual FloatRect computeCrop(const sp<const DisplayDevice>& display) const;
     // Compute the initial crop as specified by parent layers and the
     // SurfaceControl for this layer. Does not include buffer crop from the
     // IGraphicBufferProducer client, as that should not affect child clipping.
     // Returns in screen space.
-    Rect computeInitialCrop(const sp<const DisplayDevice>& hw) const;
+    Rect computeInitialCrop(const sp<const DisplayDevice>& display) const;
 
     // drawing
     void clearWithOpenGL(const RenderArea& renderArea, float r, float g, float b,

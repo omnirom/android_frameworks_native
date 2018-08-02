@@ -64,15 +64,17 @@ public:
         return mFlinger->createDisplay(displayName, secure);
     }
 
-    auto destroyDisplay(const sp<IBinder>& display) { return mFlinger->destroyDisplay(display); }
+    auto destroyDisplay(const sp<IBinder>& displayToken) {
+        return mFlinger->destroyDisplay(displayToken);
+    }
 
     auto resetDisplayState() { return mFlinger->resetDisplayState(); }
 
-    auto setupNewDisplayDeviceInternal(const wp<IBinder>& display, int hwcId,
+    auto setupNewDisplayDeviceInternal(const wp<IBinder>& displayToken, int32_t displayId,
                                        const DisplayDeviceState& state,
                                        const sp<DisplaySurface>& dispSurface,
                                        const sp<IGraphicBufferProducer>& producer) {
-        return mFlinger->setupNewDisplayDeviceInternal(display, hwcId, state, dispSurface,
+        return mFlinger->setupNewDisplayDeviceInternal(displayToken, displayId, state, dispSurface,
                                                        producer);
     }
 
@@ -89,8 +91,9 @@ public:
 
     auto onInitializeDisplays() { return mFlinger->onInitializeDisplays(); }
 
-    auto setPowerModeInternal(const sp<DisplayDevice>& hw, int mode, bool stateLockHeld = false) {
-        return mFlinger->setPowerModeInternal(hw, mode, stateLockHeld);
+    auto setPowerModeInternal(const sp<DisplayDevice>& display, int mode,
+                              bool stateLockHeld = false) {
+        return mFlinger->setPowerModeInternal(display, mode, stateLockHeld);
     }
 
     /* ------------------------------------------------------------------------
@@ -111,7 +114,7 @@ public:
 
     auto& mutableHasWideColorDisplay() { return SurfaceFlinger::hasWideColorDisplay; }
 
-    auto& mutableBuiltinDisplays() { return mFlinger->mBuiltinDisplays; }
+    auto& mutableDisplayTokens() { return mFlinger->mDisplayTokens; }
     auto& mutableCurrentState() { return mFlinger->mCurrentState; }
     auto& mutableDisplays() { return mFlinger->mDisplays; }
     auto& mutableDisplayColorSetting() { return mFlinger->mDisplayColorSetting; }
@@ -149,12 +152,18 @@ public:
      * Wrapper classes for Read-write access to private data to set up
      * preconditions and assert post-conditions.
      */
+    class FakePowerAdvisor : public Hwc2::PowerAdvisor {
+    public:
+        FakePowerAdvisor() = default;
+        ~FakePowerAdvisor() override = default;
+        void setExpensiveRenderingExpected(hwc2_display_t, bool) override { }
+    };
 
     struct HWC2Display : public HWC2::Display {
-        HWC2Display(Hwc2::Composer& composer,
+        HWC2Display(Hwc2::Composer& composer, Hwc2::PowerAdvisor& advisor,
                     const std::unordered_set<HWC2::Capability>& capabilities, hwc2_display_t id,
                     HWC2::DisplayType type)
-              : HWC2::Display(composer, capabilities, id, type) {}
+              : HWC2::Display(composer, advisor, capabilities, id, type) {}
         ~HWC2Display() {
             // Prevents a call to disable vsyncs.
             mType = HWC2::DisplayType::Invalid;
@@ -211,14 +220,28 @@ public:
             return *this;
         }
 
-        auto& addCapability(HWC2::Capability cap) {
-            mCapabilities.emplace(cap);
+        auto& setCapabilities(const std::unordered_set<HWC2::Capability>* capabilities) {
+            mCapabilities = capabilities;
+            return *this;
+        }
+
+        auto& setPowerAdvisor(Hwc2::PowerAdvisor* powerAdvisor) {
+            mPowerAdvisor = powerAdvisor;
             return *this;
         }
 
         void inject(TestableSurfaceFlinger* flinger, Hwc2::Composer* composer) {
-            auto display = std::make_unique<HWC2Display>(*composer, mCapabilities, mHwcDisplayId,
-                                                         mHwcDisplayType);
+            static FakePowerAdvisor defaultPowerAdvisor;
+            if (mPowerAdvisor == nullptr) mPowerAdvisor = &defaultPowerAdvisor;
+            static const std::unordered_set<HWC2::Capability> defaultCapabilities;
+            if (mCapabilities == nullptr) mCapabilities = &defaultCapabilities;
+
+            // Caution - Make sure that any values passed by reference here do
+            // not refer to an instance owned by FakeHwcDisplayInjector. This
+            // class has temporary lifetime, while the constructed HWC2::Display
+            // is much longer lived.
+            auto display = std::make_unique<HWC2Display>(*composer, *mPowerAdvisor, *mCapabilities,
+                                                         mHwcDisplayId, mHwcDisplayType);
 
             auto config = HWC2::Display::Config::Builder(*display, mActiveConfig);
             config.setWidth(mWidth);
@@ -230,7 +253,7 @@ public:
             display->mutableIsConnected() = true;
 
             ASSERT_TRUE(flinger->mutableHwcDisplayData().size() > static_cast<size_t>(mType));
-            flinger->mutableHwcDisplayData()[mType].reset();
+            flinger->mutableHwcDisplayData()[mType] = HWComposer::DisplayData();
             flinger->mutableHwcDisplayData()[mType].hwcDisplay = display.get();
             flinger->mutableHwcDisplaySlots().emplace(mHwcDisplayId, mType);
 
@@ -247,14 +270,15 @@ public:
         int32_t mDpiX = DEFAULT_DPI;
         int32_t mDpiY = DEFAULT_DPI;
         int32_t mActiveConfig = DEFAULT_ACTIVE_CONFIG;
-        std::unordered_set<HWC2::Capability> mCapabilities;
+        const std::unordered_set<HWC2::Capability>* mCapabilities = nullptr;
+        Hwc2::PowerAdvisor* mPowerAdvisor = nullptr;
     };
 
     class FakeDisplayDeviceInjector {
     public:
         FakeDisplayDeviceInjector(TestableSurfaceFlinger& flinger, DisplayDevice::DisplayType type,
-                                  int hwcId)
-              : mFlinger(flinger), mType(type), mHwcId(hwcId) {}
+                                  int32_t displayId)
+              : mFlinger(flinger), mType(type), mDisplayId(displayId) {}
 
         sp<IBinder> token() const { return mDisplayToken; }
 
@@ -274,7 +298,7 @@ public:
             return mFlinger.mutableCurrentState().displays.valueFor(mDisplayToken);
         }
 
-        auto& mutableDisplayDevice() { return mFlinger.mutableDisplays().valueFor(mDisplayToken); }
+        auto& mutableDisplayDevice() { return mFlinger.mutableDisplays()[mDisplayToken]; }
 
         auto& setNativeWindow(const sp<ANativeWindow>& nativeWindow) {
             mNativeWindow = nativeWindow;
@@ -299,18 +323,20 @@ public:
         sp<DisplayDevice> inject() {
             std::unordered_map<ui::ColorMode, std::vector<ui::RenderIntent>> hdrAndRenderIntents;
             sp<DisplayDevice> device =
-                    new DisplayDevice(mFlinger.mFlinger.get(), mType, mHwcId, mSecure, mDisplayToken,
-                                      mNativeWindow, mDisplaySurface, std::move(mRenderSurface), 0,
-                                      0, false, HdrCapabilities(), 0, hdrAndRenderIntents,
-                                      HWC_POWER_MODE_NORMAL);
-            mFlinger.mutableDisplays().add(mDisplayToken, device);
+                    new DisplayDevice(mFlinger.mFlinger.get(), mType, mDisplayId, mSecure,
+                                      mDisplayToken, mNativeWindow, mDisplaySurface,
+                                      std::move(mRenderSurface), 0, 0, false, HdrCapabilities(), 0,
+                                      hdrAndRenderIntents, HWC_POWER_MODE_NORMAL);
+            mFlinger.mutableDisplays().emplace(mDisplayToken, device);
 
-            DisplayDeviceState state(mType, mSecure);
+            DisplayDeviceState state;
+            state.type = mType;
+            state.isSecure = mSecure;
             mFlinger.mutableCurrentState().displays.add(mDisplayToken, state);
             mFlinger.mutableDrawingState().displays.add(mDisplayToken, state);
 
             if (mType >= DisplayDevice::DISPLAY_PRIMARY && mType < DisplayDevice::DISPLAY_VIRTUAL) {
-                mFlinger.mutableBuiltinDisplays()[mType] = mDisplayToken;
+                mFlinger.mutableDisplayTokens()[mType] = mDisplayToken;
             }
 
             return device;
@@ -320,7 +346,7 @@ public:
         TestableSurfaceFlinger& mFlinger;
         sp<BBinder> mDisplayToken = new BBinder();
         DisplayDevice::DisplayType mType;
-        int mHwcId;
+        const int32_t mDisplayId;
         sp<ANativeWindow> mNativeWindow;
         sp<DisplaySurface> mDisplaySurface;
         std::unique_ptr<RE::Surface> mRenderSurface;

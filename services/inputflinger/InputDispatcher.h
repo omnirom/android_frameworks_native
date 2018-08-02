@@ -299,7 +299,7 @@ public:
      *
      * This method may be called on any thread (usually by the input manager).
      */
-    virtual int32_t injectInputEvent(const InputEvent* event, int32_t displayId,
+    virtual int32_t injectInputEvent(const InputEvent* event,
             int32_t injectorPid, int32_t injectorUid, int32_t syncMode, int32_t timeoutMillis,
             uint32_t policyFlags) = 0;
 
@@ -383,7 +383,7 @@ public:
     virtual void notifySwitch(const NotifySwitchArgs* args);
     virtual void notifyDeviceReset(const NotifyDeviceResetArgs* args);
 
-    virtual int32_t injectInputEvent(const InputEvent* event, int32_t displayId,
+    virtual int32_t injectInputEvent(const InputEvent* event,
             int32_t injectorPid, int32_t injectorUid, int32_t syncMode, int32_t timeoutMillis,
             uint32_t policyFlags);
 
@@ -406,7 +406,7 @@ private:
         T* prev;
 
     protected:
-        inline Link() : next(NULL), prev(NULL) { }
+        inline Link() : next(nullptr), prev(nullptr) { }
     };
 
     struct InjectionState {
@@ -441,7 +441,7 @@ private:
 
         bool dispatchInProgress; // initially false, set to true while dispatching
 
-        inline bool isInjected() const { return injectionState != NULL; }
+        inline bool isInjected() const { return injectionState != nullptr; }
 
         void release();
 
@@ -474,6 +474,7 @@ private:
     struct KeyEntry : EventEntry {
         int32_t deviceId;
         uint32_t source;
+        int32_t displayId;
         int32_t action;
         int32_t flags;
         int32_t keyCode;
@@ -494,8 +495,8 @@ private:
         nsecs_t interceptKeyWakeupTime; // used with INTERCEPT_KEY_RESULT_TRY_AGAIN_LATER
 
         KeyEntry(nsecs_t eventTime,
-                int32_t deviceId, uint32_t source, uint32_t policyFlags, int32_t action,
-                int32_t flags, int32_t keyCode, int32_t scanCode, int32_t metaState,
+                int32_t deviceId, uint32_t source, int32_t displayId, uint32_t policyFlags,
+                int32_t action, int32_t flags, int32_t keyCode, int32_t scanCode, int32_t metaState,
                 int32_t repeatCount, nsecs_t downTime);
         virtual void appendDescription(std::string& msg) const;
         void recycle();
@@ -508,6 +509,7 @@ private:
         nsecs_t eventTime;
         int32_t deviceId;
         uint32_t source;
+        int32_t displayId;
         int32_t action;
         int32_t actionButton;
         int32_t flags;
@@ -517,17 +519,15 @@ private:
         float xPrecision;
         float yPrecision;
         nsecs_t downTime;
-        int32_t displayId;
         uint32_t pointerCount;
         PointerProperties pointerProperties[MAX_POINTERS];
         PointerCoords pointerCoords[MAX_POINTERS];
 
         MotionEntry(nsecs_t eventTime,
-                int32_t deviceId, uint32_t source, uint32_t policyFlags,
+                int32_t deviceId, uint32_t source, int32_t displayId, uint32_t policyFlags,
                 int32_t action, int32_t actionButton, int32_t flags,
                 int32_t metaState, int32_t buttonState, int32_t edgeFlags,
-                float xPrecision, float yPrecision, nsecs_t downTime,
-                int32_t displayId, uint32_t pointerCount,
+                float xPrecision, float yPrecision, nsecs_t downTime, uint32_t pointerCount,
                 const PointerProperties* pointerProperties, const PointerCoords* pointerCoords,
                 float xOffset, float yOffset);
         virtual void appendDescription(std::string& msg) const;
@@ -614,7 +614,7 @@ private:
         T* tail;
         uint32_t entryCount;
 
-        inline Queue() : head(NULL), tail(NULL), entryCount(0) {
+        inline Queue() : head(nullptr), tail(nullptr), entryCount(0) {
         }
 
         inline bool isEmpty() const {
@@ -629,7 +629,7 @@ private:
             } else {
                 head = entry;
             }
-            entry->next = NULL;
+            entry->next = nullptr;
             tail = entry;
         }
 
@@ -641,7 +641,7 @@ private:
             } else {
                 tail = entry;
             }
-            entry->prev = NULL;
+            entry->prev = nullptr;
             head = entry;
         }
 
@@ -664,9 +664,9 @@ private:
             T* entry = head;
             head = entry->next;
             if (head) {
-                head->prev = NULL;
+                head->prev = nullptr;
             } else {
-                tail = NULL;
+                tail = nullptr;
             }
             return entry;
         }
@@ -754,6 +754,7 @@ private:
         struct KeyMemento {
             int32_t deviceId;
             uint32_t source;
+            int32_t displayId;
             int32_t keyCode;
             int32_t scanCode;
             int32_t metaState;
@@ -765,11 +766,11 @@ private:
         struct MotionMemento {
             int32_t deviceId;
             uint32_t source;
+            int32_t displayId;
             int32_t flags;
             float xPrecision;
             float yPrecision;
             nsecs_t downTime;
-            int32_t displayId;
             uint32_t pointerCount;
             PointerProperties pointerProperties[MAX_POINTERS];
             PointerCoords pointerCoords[MAX_POINTERS];
@@ -932,6 +933,9 @@ private:
     };
     // Maps the key code replaced, device id tuple to the key code it was replaced with
     KeyedVector<KeyReplacement, int32_t> mReplacedKeys;
+    // Process certain Meta + Key combinations
+    void accelerateMetaShortcuts(const int32_t deviceId, const int32_t action,
+            int32_t& keyCode, int32_t& metaState);
 
     // Deferred command processing.
     bool haveCommandsLocked() const;

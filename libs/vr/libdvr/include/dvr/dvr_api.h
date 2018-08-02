@@ -10,6 +10,7 @@
 #include <dvr/dvr_display_types.h>
 #include <dvr/dvr_hardware_composer_types.h>
 #include <dvr/dvr_pose.h>
+#include <dvr/dvr_tracking_types.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -49,6 +50,12 @@ typedef int32_t DvrGlobalBufferKey;
 
 typedef struct DvrSurfaceAttributeValue DvrSurfaceAttributeValue;
 typedef struct DvrSurfaceAttribute DvrSurfaceAttribute;
+
+typedef struct DvrReadBuffer DvrReadBuffer;
+typedef struct DvrTrackingCamera DvrTrackingCamera;
+typedef struct DvrTrackingFeatureExtractor DvrTrackingFeatureExtractor;
+typedef struct DvrTrackingSensors DvrTrackingSensors;
+typedef struct DvrWriteBufferQueue DvrWriteBufferQueue;
 
 // Note: To avoid breaking others during active development, only modify this
 // struct by appending elements to the end.
@@ -366,6 +373,38 @@ typedef DvrHwcRecti (*DvrHwcFrameGetLayerDamagedRegionPtr)(DvrHwcFrame* frame,
 // dvr_performance.h
 typedef int (*DvrPerformanceSetSchedulerPolicyPtr)(
     pid_t task_id, const char* scheduler_policy);
+
+// dvr_tracking.h
+typedef int (*DvrTrackingCameraCreatePtr)(DvrTrackingCamera** out_camera);
+typedef void (*DvrTrackingCameraDestroyPtr)(DvrTrackingCamera* camera);
+typedef int (*DvrTrackingCameraStartPtr)(DvrTrackingCamera* camera,
+                                         DvrWriteBufferQueue* write_queue);
+typedef int (*DvrTrackingCameraStopPtr)(DvrTrackingCamera* camera);
+
+typedef int (*DvrTrackingFeatureExtractorCreatePtr)(
+    DvrTrackingFeatureExtractor** out_extractor);
+typedef void (*DvrTrackingFeatureExtractorDestroyPtr)(
+    DvrTrackingFeatureExtractor* extractor);
+typedef void (*DvrTrackingFeatureCallback)(void* context,
+                                           const DvrTrackingFeatures* event);
+typedef int (*DvrTrackingFeatureExtractorStartPtr)(
+    DvrTrackingFeatureExtractor* extractor,
+    DvrTrackingFeatureCallback callback, void* context);
+typedef int (*DvrTrackingFeatureExtractorStopPtr)(
+    DvrTrackingFeatureExtractor* extractor);
+typedef int (*DvrTrackingFeatureExtractorProcessBufferPtr)(
+    DvrTrackingFeatureExtractor* extractor, DvrReadBuffer* buffer,
+    const DvrTrackingBufferMetadata* metadata, bool* out_skipped);
+
+typedef void (*DvrTrackingSensorEventCallback)(void* context,
+                                               DvrTrackingSensorEvent* event);
+typedef int (*DvrTrackingSensorsCreatePtr)(DvrTrackingSensors** out_sensors,
+                                           const char* mode);
+typedef void (*DvrTrackingSensorsDestroyPtr)(DvrTrackingSensors* sensors);
+typedef int (*DvrTrackingSensorsStartPtr)(
+    DvrTrackingSensors* sensors, DvrTrackingSensorEventCallback callback,
+    void* context);
+typedef int (*DvrTrackingSensorsStopPtr)(DvrTrackingSensors* sensors);
 
 // The buffer metadata that an Android Surface (a.k.a. ANativeWindow)
 // will populate. A DvrWriteBufferQueue must be created with this metadata iff

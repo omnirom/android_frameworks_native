@@ -37,6 +37,8 @@
 #include <set>
 #include <vector>
 
+#include "DisplayIdentification.h"
+
 extern "C" int clock_nanosleep(clockid_t clock_id, int flags,
                            const struct timespec *request,
                            struct timespec *remain);
@@ -74,6 +76,9 @@ public:
     void registerCallback(HWC2::ComposerCallback* callback,
                           int32_t sequenceId);
 
+    bool getDisplayIdentificationData(hwc2_display_t hwcDisplayId, uint8_t* outPort,
+                                      DisplayIdentificationData* outData) const;
+
     bool hasCapability(HWC2::Capability capability) const;
 
     // Attempts to allocate a virtual display. If the virtual display is created
@@ -87,7 +92,7 @@ public:
     void destroyLayer(int32_t displayId, HWC2::Layer* layer);
 
     // Asks the HAL what it can do
-    status_t prepare(DisplayDevice& displayDevice);
+    status_t prepare(DisplayDevice& display);
 
     status_t setClientTarget(int32_t displayId, uint32_t slot,
             const sp<Fence>& acquireFence,
@@ -147,9 +152,9 @@ public:
 
     // Returns true if successful, false otherwise. The
     // DisplayDevice::DisplayType of the display is returned as an output param.
-    bool onVsync(hwc2_display_t displayId, int64_t timestamp,
-                 int32_t* outDisplay);
-    bool onHotplug(hwc2_display_t displayId, int32_t displayType, HWC2::Connection connection);
+    bool onVsync(hwc2_display_t hwcDisplayId, int64_t timestamp, int32_t* outDisplay);
+    std::optional<DisplayId> onHotplug(hwc2_display_t hwcDisplayId, int32_t displayType,
+                                       HWC2::Connection connection);
 
     void setVsyncEnabled(int32_t displayId, HWC2::Vsync enabled);
 
@@ -183,31 +188,26 @@ private:
     // For unit tests
     friend TestableSurfaceFlinger;
 
-    static const int32_t VIRTUAL_DISPLAY_ID_BASE = HWC_DISPLAY_VIRTUAL;
-
     bool isValidDisplay(int32_t displayId) const;
     static void validateChange(HWC2::Composition from, HWC2::Composition to);
 
     struct cb_context;
 
     struct DisplayData {
-        DisplayData();
-        ~DisplayData();
-        void reset();
-
-        bool hasClientComposition;
-        bool hasDeviceComposition;
-        HWC2::Display* hwcDisplay;
+        bool isVirtual = false;
+        bool hasClientComposition = false;
+        bool hasDeviceComposition = false;
+        HWC2::Display* hwcDisplay = nullptr;
         HWC2::DisplayRequest displayRequests;
-        sp<Fence> lastPresentFence;  // signals when the last set op retires
+        sp<Fence> lastPresentFence = Fence::NO_FENCE; // signals when the last set op retires
         std::unordered_map<HWC2::Layer*, sp<Fence>> releaseFences;
-        buffer_handle_t outbufHandle;
-        sp<Fence> outbufAcquireFence;
+        buffer_handle_t outbufHandle = nullptr;
+        sp<Fence> outbufAcquireFence = Fence::NO_FENCE;
         mutable std::unordered_map<int32_t,
                 std::shared_ptr<const HWC2::Display::Config>> configMap;
 
         // protected by mVsyncLock
-        HWC2::Vsync vsyncEnabled;
+        HWC2::Vsync vsyncEnabled = HWC2::Vsync::Disable;
 
         bool validateWasSkipped;
         HWC2::Error presentError;

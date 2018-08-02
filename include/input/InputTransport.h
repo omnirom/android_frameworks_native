@@ -212,6 +212,7 @@ public:
             uint32_t seq,
             int32_t deviceId,
             int32_t source,
+            int32_t displayId,
             int32_t action,
             int32_t flags,
             int32_t keyCode,
@@ -305,7 +306,7 @@ public:
      * Other errors probably indicate that the channel is broken.
      */
     status_t consume(InputEventFactoryInterface* factory, bool consumeBatches,
-            nsecs_t frameTime, uint32_t* outSeq, InputEvent** outEvent, int32_t* displayId);
+            nsecs_t frameTime, uint32_t* outSeq, InputEvent** outEvent);
 
     status_t consume(InputEventFactoryInterface* factory, bool consumeBatches,
             nsecs_t frameTime, uint32_t* outSeq, InputEvent** outEvent, int32_t* displayId,
@@ -466,14 +467,13 @@ private:
     Vector<SeqChain> mSeqChains;
 
     status_t consumeBatch(InputEventFactoryInterface* factory,
-            nsecs_t frameTime, uint32_t* outSeq, InputEvent** outEvent, int32_t* displayId);
+            nsecs_t frameTime, uint32_t* outSeq, InputEvent** outEvent);
     status_t consumeBatch(InputEventFactoryInterface* factory,
             nsecs_t frameTime, uint32_t* outSeq, InputEvent** outEvent, int32_t* displayId,
             int* touchMoveNumber);
 
     status_t consumeSamples(InputEventFactoryInterface* factory,
-            Batch& batch, size_t count, uint32_t* outSeq, InputEvent** outEvent,
-            int32_t* displayId);
+            Batch& batch, size_t count, uint32_t* outSeq, InputEvent** outEvent);
 
     void updateTouchState(InputMessage& msg);
     void resampleTouchState(nsecs_t frameTime, MotionEvent* event,

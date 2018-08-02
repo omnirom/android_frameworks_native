@@ -17,6 +17,8 @@
 #ifndef ANDROID_SF_VIRTUAL_DISPLAY_SURFACE_H
 #define ANDROID_SF_VIRTUAL_DISPLAY_SURFACE_H
 
+#include <string>
+
 #include "DisplaySurface.h"
 #include "HWComposerBufferCache.h"
 
@@ -79,7 +81,7 @@ public:
             const sp<IGraphicBufferProducer>& sink,
             const sp<IGraphicBufferProducer>& bqProducer,
             const sp<IGraphicBufferConsumer>& bqConsumer,
-            const String8& name);
+            const std::string& name);
 
     //
     // DisplaySurface interface
@@ -156,7 +158,7 @@ private:
     //
     HWComposer& mHwc;
     const int32_t mDisplayId;
-    const String8 mDisplayName;
+    const std::string mDisplayName;
     sp<IGraphicBufferProducer> mSource[2]; // indexed by SOURCE_*
     uint32_t mDefaultOutputFormat;
 

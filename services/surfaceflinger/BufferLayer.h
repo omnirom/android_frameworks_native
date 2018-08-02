@@ -102,6 +102,7 @@ public:
      */
     void onDraw(const RenderArea& renderArea, const Region& clip,
                 bool useIdentityTransform) const override;
+    void drawNow(const RenderArea& renderArea, bool useIdentityTransform) const;
 
     void onLayerDisplayed(const sp<Fence>& releaseFence) override;
 
@@ -132,7 +133,7 @@ public:
 
     bool isHdrY410() const override;
 
-    void setPerFrameData(const sp<const DisplayDevice>& displayDevice) override;
+    void setPerFrameData(const sp<const DisplayDevice>& display) override;
 
     bool isOpaque(const Layer::State& s) const override;
     virtual bool isHDRLayer() const { return false; }

@@ -118,6 +118,7 @@ static const TracingCategory k_categories[] = {
     { "adb",        "ADB",              ATRACE_TAG_ADB, { } },
     { "vibrator",   "Vibrator",         ATRACE_TAG_VIBRATOR, { } },
     { "aidl",       "AIDL calls",       ATRACE_TAG_AIDL, { } },
+    { "nnapi",      "NNAPI",            ATRACE_TAG_NNAPI, { } },
     { k_coreServiceCategory, "Core services", 0, { } },
     { k_pdxServiceCategory, "PDX services", 0, { } },
     { "sched",      "CPU Scheduling",   0, {
@@ -200,7 +201,7 @@ static const TracingCategory k_categories[] = {
         { REQ,      "events/vmscan/mm_vmscan_direct_reclaim_end/enable" },
         { REQ,      "events/vmscan/mm_vmscan_kswapd_wake/enable" },
         { REQ,      "events/vmscan/mm_vmscan_kswapd_sleep/enable" },
-        { REQ,      "events/lowmemorykiller/enable" },
+        { OPT,      "events/lowmemorykiller/enable" },
     } },
     { "regulators",  "Voltage and Current Regulators", 0, {
         { REQ,      "events/regulator/enable" },
@@ -208,6 +209,7 @@ static const TracingCategory k_categories[] = {
     { "binder_driver", "Binder Kernel driver", 0, {
         { REQ,      "events/binder/binder_transaction/enable" },
         { REQ,      "events/binder/binder_transaction_received/enable" },
+        { REQ,      "events/binder/binder_transaction_alloc_buf/enable" },
         { OPT,      "events/binder/binder_set_priority/enable" },
     } },
     { "binder_lock", "Binder global lock trace", 0, {
@@ -259,6 +261,9 @@ static const char* k_currentTracerPath =
 
 static const char* k_printTgidPath =
     "options/print-tgid";
+
+static const char* k_recordTgidPath =
+    "options/record-tgid";
 
 static const char* k_funcgraphAbsTimePath =
     "options/funcgraph-abstime";
@@ -522,8 +527,14 @@ static bool setClock()
 
 static bool setPrintTgidEnableIfPresent(bool enable)
 {
+    // Pre-4.13 this was options/print-tgid as an android-specific option.
+    // In 4.13+ this is an upstream option called options/record-tgid
+    // Both options produce the same ftrace format change
     if (fileExists(k_printTgidPath)) {
         return setKernelOptionEnable(k_printTgidPath, enable);
+    }
+    if (fileExists(k_recordTgidPath)) {
+        return setKernelOptionEnable(k_recordTgidPath, enable);
     }
     return true;
 }
@@ -1285,9 +1296,7 @@ int main(int argc, char **argv)
         if (!onlyUserspace)
             ok = clearTrace();
 
-        if (!onlyUserspace)
-            writeClockSyncMarker();
-
+        writeClockSyncMarker();
         if (ok && !async && !traceStream) {
             // Sleep to allow the trace to be captured.
             struct timespec timeLeft;

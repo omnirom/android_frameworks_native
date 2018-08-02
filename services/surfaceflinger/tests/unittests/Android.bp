@@ -14,16 +14,17 @@
 
 cc_test {
     name: "libsurfaceflinger_unittest",
-    tags: ["test"],
     defaults: ["libsurfaceflinger_defaults"],
     test_suites: ["device-tests"],
     srcs: [
         ":libsurfaceflinger_sources",
+        "DisplayIdentificationTest.cpp",
         "DisplayTransactionTest.cpp",
         "EventControlThreadTest.cpp",
         "EventThreadTest.cpp",
         "mock/DisplayHardware/MockComposer.cpp",
         "mock/DisplayHardware/MockDisplaySurface.cpp",
+        "mock/DisplayHardware/MockPowerAdvisor.cpp",
         "mock/gui/MockGraphicBufferConsumer.cpp",
         "mock/gui/MockGraphicBufferProducer.cpp",
         "mock/MockEventControlThread.cpp",

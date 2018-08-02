@@ -302,12 +302,18 @@ public:
 
     inline void setSource(int32_t source) { mSource = source; }
 
+    inline int32_t getDisplayId() const { return mDisplayId; }
+
+    inline void setDisplayId(int32_t displayId) { mDisplayId = displayId; }
+
+
 protected:
-    void initialize(int32_t deviceId, int32_t source);
+    void initialize(int32_t deviceId, int32_t source, int32_t displayId);
     void initialize(const InputEvent& from);
 
     int32_t mDeviceId;
     int32_t mSource;
+    int32_t mDisplayId;
 };
 
 /*
@@ -339,10 +345,11 @@ public:
 
     static const char* getLabel(int32_t keyCode);
     static int32_t getKeyCodeFromLabel(const char* label);
-    
+
     void initialize(
             int32_t deviceId,
             int32_t source,
+            int32_t displayId,
             int32_t action,
             int32_t flags,
             int32_t keyCode,
@@ -556,6 +563,7 @@ public:
     void initialize(
             int32_t deviceId,
             int32_t source,
+            int32_t displayId,
             int32_t action,
             int32_t actionButton,
             int32_t flags,

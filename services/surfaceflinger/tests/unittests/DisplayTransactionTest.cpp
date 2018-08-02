@@ -207,11 +207,11 @@ bool DisplayTransactionTest::hasTransactionFlagSet(int flag) {
 }
 
 bool DisplayTransactionTest::hasDisplayDevice(sp<IBinder> displayToken) {
-    return mFlinger.mutableDisplays().indexOfKey(displayToken) >= 0;
+    return mFlinger.mutableDisplays().count(displayToken) == 1;
 }
 
 sp<DisplayDevice> DisplayTransactionTest::getDisplayDevice(sp<IBinder> displayToken) {
-    return mFlinger.mutableDisplays().valueFor(displayToken);
+    return mFlinger.mutableDisplays()[displayToken];
 }
 
 bool DisplayTransactionTest::hasCurrentDisplayState(sp<IBinder> displayToken) {
@@ -234,8 +234,8 @@ const DisplayDeviceState& DisplayTransactionTest::getDrawingDisplayState(sp<IBin
  *
  */
 
-template <DisplayDevice::DisplayType type, DisplayDevice::DisplayType hwcId, int width, int height,
-          Critical critical, Async async, Secure secure, int grallocUsage>
+template <DisplayDevice::DisplayType type, DisplayDevice::DisplayType displayId, int width,
+          int height, Critical critical, Async async, Secure secure, int grallocUsage>
 struct DisplayVariant {
     // The display width and height
     static constexpr int WIDTH = width;
@@ -245,7 +245,9 @@ struct DisplayVariant {
 
     // The type for this display
     static constexpr DisplayDevice::DisplayType TYPE = type;
-    static constexpr DisplayDevice::DisplayType HWCOMPOSER_ID = hwcId;
+    static_assert(TYPE != DisplayDevice::DISPLAY_ID_INVALID);
+
+    static constexpr DisplayDevice::DisplayType DISPLAY_ID = displayId;
 
     // When creating native window surfaces for the framebuffer, whether those should be critical
     static constexpr Critical CRITICAL = critical;
@@ -257,7 +259,7 @@ struct DisplayVariant {
     static constexpr Secure SECURE = secure;
 
     static auto makeFakeExistingDisplayInjector(DisplayTransactionTest* test) {
-        auto injector = FakeDisplayDeviceInjector(test->mFlinger, TYPE, HWCOMPOSER_ID);
+        auto injector = FakeDisplayDeviceInjector(test->mFlinger, TYPE, DISPLAY_ID);
         injector.setSecure(static_cast<bool>(SECURE));
         return injector;
     }
@@ -353,6 +355,8 @@ struct HwcDisplayVariant {
                     getDisplayAttribute(HWC_DISPLAY_ID, HWC_ACTIVE_CONFIG_ID,
                                         IComposerClient::Attribute::DPI_Y, _))
                 .WillOnce(DoAll(SetArgPointee<3>(DEFAULT_DPI), Return(Error::NONE)));
+        EXPECT_CALL(*test->mComposer, getDisplayIdentificationData(HWC_DISPLAY_ID, _, _))
+                .WillRepeatedly(Return(Error::UNSUPPORTED));
     }
 
     // Called by tests to set up HWC call expectations
@@ -382,11 +386,6 @@ struct PhysicalDisplayVariant
         public HwcDisplayVariant<hwcDisplayId, HWC2::DisplayType::Physical,
                                  DisplayVariant<type, type, width, height, critical, Async::FALSE,
                                                 Secure::TRUE, GRALLOC_USAGE_PHYSICAL_DISPLAY>> {};
-
-// An invalid display
-using InvalidDisplayVariant =
-        DisplayVariant<DisplayDevice::DISPLAY_ID_INVALID, DisplayDevice::DISPLAY_ID_INVALID, 0, 0,
-                       Critical::FALSE, Async::FALSE, Secure::FALSE, 0>;
 
 // A primary display is a physical display that is critical
 using PrimaryDisplayVariant =
@@ -684,9 +683,7 @@ using HdrCta861_3_DisplayCase =
         Case<PrimaryDisplayVariant, WideColorNotSupportedVariant<PrimaryDisplayVariant>,
              HdrNotSupportedVariant<PrimaryDisplayVariant>,
              Cta861_3_PerFrameMetadataSupportVariant<PrimaryDisplayVariant>>;
-using InvalidDisplayCase = Case<InvalidDisplayVariant, WideColorSupportNotConfiguredVariant,
-                                NonHwcDisplayHdrSupportVariant,
-                                NoPerFrameMetadataSupportVariant<InvalidDisplayVariant>>;
+
 /* ------------------------------------------------------------------------
  *
  * SurfaceFlinger::onHotplugReceived
@@ -694,8 +691,8 @@ using InvalidDisplayCase = Case<InvalidDisplayVariant, WideColorSupportNotConfig
 
 TEST_F(DisplayTransactionTest, hotplugEnqueuesEventsForDisplayTransaction) {
     constexpr int currentSequenceId = 123;
-    constexpr hwc2_display_t displayId1 = 456;
-    constexpr hwc2_display_t displayId2 = 654;
+    constexpr hwc2_display_t hwcDisplayId1 = 456;
+    constexpr hwc2_display_t hwcDisplayId2 = 654;
 
     // --------------------------------------------------------------------
     // Preconditions
@@ -718,8 +715,8 @@ TEST_F(DisplayTransactionTest, hotplugEnqueuesEventsForDisplayTransaction) {
     // Invocation
 
     // Simulate two hotplug events (a connect and a disconnect)
-    mFlinger.onHotplugReceived(currentSequenceId, displayId1, HWC2::Connection::Connected);
-    mFlinger.onHotplugReceived(currentSequenceId, displayId2, HWC2::Connection::Disconnected);
+    mFlinger.onHotplugReceived(currentSequenceId, hwcDisplayId1, HWC2::Connection::Connected);
+    mFlinger.onHotplugReceived(currentSequenceId, hwcDisplayId2, HWC2::Connection::Disconnected);
 
     // --------------------------------------------------------------------
     // Postconditions
@@ -730,9 +727,9 @@ TEST_F(DisplayTransactionTest, hotplugEnqueuesEventsForDisplayTransaction) {
     // All events should be in the pending event queue.
     const auto& pendingEvents = mFlinger.mutablePendingHotplugEvents();
     ASSERT_EQ(2u, pendingEvents.size());
-    EXPECT_EQ(displayId1, pendingEvents[0].display);
+    EXPECT_EQ(hwcDisplayId1, pendingEvents[0].hwcDisplayId);
     EXPECT_EQ(HWC2::Connection::Connected, pendingEvents[0].connection);
-    EXPECT_EQ(displayId2, pendingEvents[1].display);
+    EXPECT_EQ(hwcDisplayId2, pendingEvents[1].hwcDisplayId);
     EXPECT_EQ(HWC2::Connection::Disconnected, pendingEvents[1].connection);
 }
 
@@ -1032,7 +1029,10 @@ void SetupNewDisplayDeviceInternalTest::setupNewDisplayDeviceInternalTest() {
     // --------------------------------------------------------------------
     // Invocation
 
-    auto state = DisplayDeviceState(Case::Display::TYPE, static_cast<bool>(Case::Display::SECURE));
+    DisplayDeviceState state;
+    state.type = Case::Display::TYPE;
+    state.isSecure = static_cast<bool>(Case::Display::SECURE);
+
     auto device = mFlinger.setupNewDisplayDeviceInternal(displayToken, Case::Display::TYPE, state,
                                                          displaySurface, producer);
 
@@ -1160,13 +1160,23 @@ void HandleTransactionLockedTest::setupCommonCallExpectationsForConnectProcessin
     Case::PerFrameMetadataSupport::setupComposerCallExpectations(this);
 
     EXPECT_CALL(*mSurfaceInterceptor, saveDisplayCreation(_)).Times(1);
-    EXPECT_CALL(*mEventThread, onHotplugReceived(Case::Display::TYPE, true)).Times(1);
+    EXPECT_CALL(*mEventThread,
+                onHotplugReceived(Case::Display::TYPE == DisplayDevice::DISPLAY_PRIMARY
+                                          ? EventThread::DisplayType::Primary
+                                          : EventThread::DisplayType::External,
+                                  true))
+            .Times(1);
 }
 
 template <typename Case>
 void HandleTransactionLockedTest::setupCommonCallExpectationsForDisconnectProcessing() {
     EXPECT_CALL(*mSurfaceInterceptor, saveDisplayDeletion(_)).Times(1);
-    EXPECT_CALL(*mEventThread, onHotplugReceived(Case::Display::TYPE, false)).Times(1);
+    EXPECT_CALL(*mEventThread,
+                onHotplugReceived(Case::Display::TYPE == DisplayDevice::DISPLAY_PRIMARY
+                                          ? EventThread::DisplayType::Primary
+                                          : EventThread::DisplayType::External,
+                                  false))
+            .Times(1);
 }
 
 template <typename Case>
@@ -1197,7 +1207,7 @@ void HandleTransactionLockedTest::verifyPhysicalDisplayIsConnected() {
     static_assert(0 <= Case::Display::TYPE &&
                           Case::Display::TYPE < DisplayDevice::NUM_BUILTIN_DISPLAY_TYPES,
                   "Must use a valid physical display type index for the fixed-size array");
-    auto& displayToken = mFlinger.mutableBuiltinDisplays()[Case::Display::TYPE];
+    auto& displayToken = mFlinger.mutableDisplayTokens()[Case::Display::TYPE];
     ASSERT_TRUE(displayToken != nullptr);
 
     verifyDisplayIsConnected<Case>(displayToken);
@@ -1303,7 +1313,7 @@ void HandleTransactionLockedTest::processesHotplugDisconnectCommon() {
     // The display should not be set up as a built-in display.
     ASSERT_TRUE(0 <= Case::Display::TYPE &&
                 Case::Display::TYPE < DisplayDevice::NUM_BUILTIN_DISPLAY_TYPES);
-    auto displayToken = mFlinger.mutableBuiltinDisplays()[Case::Display::TYPE];
+    auto displayToken = mFlinger.mutableDisplayTokens()[Case::Display::TYPE];
     EXPECT_TRUE(displayToken == nullptr);
 
     // The existing token should have been removed
@@ -1396,7 +1406,7 @@ TEST_F(HandleTransactionLockedTest, processesHotplugConnectThenDisconnectPrimary
     // The display should not be set up as a primary built-in display.
     ASSERT_TRUE(0 <= Case::Display::TYPE &&
                 Case::Display::TYPE < DisplayDevice::NUM_BUILTIN_DISPLAY_TYPES);
-    auto displayToken = mFlinger.mutableBuiltinDisplays()[Case::Display::TYPE];
+    auto displayToken = mFlinger.mutableDisplayTokens()[Case::Display::TYPE];
     EXPECT_TRUE(displayToken == nullptr);
 }
 
@@ -1439,7 +1449,7 @@ TEST_F(HandleTransactionLockedTest, processesHotplugDisconnectThenConnectPrimary
     static_assert(0 <= Case::Display::TYPE &&
                           Case::Display::TYPE < DisplayDevice::NUM_BUILTIN_DISPLAY_TYPES,
                   "Display type must be a built-in display");
-    EXPECT_NE(existing.token(), mFlinger.mutableBuiltinDisplays()[Case::Display::TYPE]);
+    EXPECT_NE(existing.token(), mFlinger.mutableDisplayTokens()[Case::Display::TYPE]);
 
     // A new display should be connected in its place
 
@@ -1468,7 +1478,11 @@ TEST_F(HandleTransactionLockedTest, processesVirtualDisplayAdded) {
     // A virtual display was added to the current state, and it has a
     // surface(producer)
     sp<BBinder> displayToken = new BBinder();
-    DisplayDeviceState info(Case::Display::TYPE, static_cast<bool>(Case::Display::SECURE));
+
+    DisplayDeviceState info;
+    info.type = Case::Display::TYPE;
+    info.isSecure = static_cast<bool>(Case::Display::SECURE);
+
     sp<mock::GraphicBufferProducer> surface{new mock::GraphicBufferProducer()};
     info.surface = surface;
     mFlinger.mutableCurrentState().displays.add(displayToken, info);
@@ -1532,7 +1546,11 @@ TEST_F(HandleTransactionLockedTest, processesVirtualDisplayAddedWithNoSurface) {
     // A virtual display was added to the current state, but it does not have a
     // surface.
     sp<BBinder> displayToken = new BBinder();
-    DisplayDeviceState info(Case::Display::TYPE, static_cast<bool>(Case::Display::SECURE));
+
+    DisplayDeviceState info;
+    info.type = Case::Display::TYPE;
+    info.isSecure =  static_cast<bool>(Case::Display::SECURE);
+
     mFlinger.mutableCurrentState().displays.add(displayToken, info);
 
     // --------------------------------------------------------------------
@@ -1809,40 +1827,6 @@ TEST_F(DisplayTransactionTest, setDisplayStateLockedDoesNothingWithUnknownDispla
 
     // The display token still doesn't match anything known.
     EXPECT_FALSE(hasCurrentDisplayState(displayToken));
-}
-
-TEST_F(DisplayTransactionTest, setDisplayStateLockedDoesNothingWithInvalidDisplay) {
-    using Case = InvalidDisplayCase;
-
-    // --------------------------------------------------------------------
-    // Preconditions
-
-    // An invalid display is set up
-    auto display = Case::Display::makeFakeExistingDisplayInjector(this);
-    display.inject();
-
-    // The invalid display has some state
-    display.mutableCurrentDisplayState().layerStack = 654u;
-
-    // The requested display state tries to change the display state.
-    DisplayState state;
-    state.what = DisplayState::eLayerStackChanged;
-    state.token = display.token();
-    state.layerStack = 456;
-
-    // --------------------------------------------------------------------
-    // Invocation
-
-    uint32_t flags = mFlinger.setDisplayStateLocked(state);
-
-    // --------------------------------------------------------------------
-    // Postconditions
-
-    // The returned flags are empty
-    EXPECT_EQ(0u, flags);
-
-    // The current display layer stack value is unchanged.
-    EXPECT_EQ(654u, getCurrentDisplayState(display.token()).layerStack);
 }
 
 TEST_F(DisplayTransactionTest, setDisplayStateLockedDoesNothingWhenNoChanges) {
@@ -2671,7 +2655,7 @@ TEST_F(SetPowerModeInternalTest, setPowerModeInternalDoesNothingIfNoChange) {
     auto display = Case::Display::makeFakeExistingDisplayInjector(this);
     display.inject();
 
-    // The diplay is already set to HWC_POWER_MODE_NORMAL
+    // The display is already set to HWC_POWER_MODE_NORMAL
     display.mutableDisplayDevice()->setPowerMode(HWC_POWER_MODE_NORMAL);
 
     // --------------------------------------------------------------------
@@ -2685,7 +2669,7 @@ TEST_F(SetPowerModeInternalTest, setPowerModeInternalDoesNothingIfNoChange) {
     EXPECT_EQ(HWC_POWER_MODE_NORMAL, display.mutableDisplayDevice()->getPowerMode());
 }
 
-TEST_F(SetPowerModeInternalTest, setPowerModeInternalJustSetsInternalStateIfVirtualDisplay) {
+TEST_F(SetPowerModeInternalTest, setPowerModeInternalDoesNothingIfVirtualDisplay) {
     using Case = HwcVirtualDisplayCase;
 
     // --------------------------------------------------------------------
@@ -2700,13 +2684,13 @@ TEST_F(SetPowerModeInternalTest, setPowerModeInternalJustSetsInternalStateIfVirt
     auto display = Case::Display::makeFakeExistingDisplayInjector(this);
     display.inject();
 
-    // The display is set to HWC_POWER_MODE_OFF
-    getDisplayDevice(display.token())->setPowerMode(HWC_POWER_MODE_OFF);
+    // The display is set to HWC_POWER_MODE_NORMAL
+    getDisplayDevice(display.token())->setPowerMode(HWC_POWER_MODE_NORMAL);
 
     // --------------------------------------------------------------------
     // Invocation
 
-    mFlinger.setPowerModeInternal(display.mutableDisplayDevice(), HWC_POWER_MODE_NORMAL);
+    mFlinger.setPowerModeInternal(display.mutableDisplayDevice(), HWC_POWER_MODE_OFF);
 
     // --------------------------------------------------------------------
     // Postconditions

@@ -19,6 +19,7 @@ cc_library_headers {
 
 cc_defaults {
     name: "libgui_defaults",
+    double_loadable: true,
     clang: true,
     cflags: [
         "-Wall",
@@ -67,9 +68,6 @@ cc_defaults {
     ],
 
     product_variables: {
-        brillo: {
-            cflags: ["-DHAVE_NO_SURFACE_FLINGER"],
-        },
         eng: {
             cppflags: [
                 "-UDEBUG_ONLY_CODE",
@@ -120,6 +118,7 @@ cc_defaults {
         "android.hardware.graphics.common@1.1",
         "libsync",
         "libbinder",
+        "libbufferhub",
         "libbufferhubqueue",  // TODO(b/70046255): Remove this once BufferHub is integrated into libgui.
         "libpdx_default_transport",
         "libcutils",
@@ -146,6 +145,7 @@ cc_defaults {
                 "BufferHubProducer.cpp",
             ],
             exclude_shared_libs: [
+                "libbufferhub",
                 "libbufferhubqueue",
                 "libpdx_default_transport",
             ],

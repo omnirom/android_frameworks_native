@@ -116,7 +116,7 @@ inline sp<IInterface> BnInterface<INTERFACE>::queryLocalInterface(
         const String16& _descriptor)
 {
     if (_descriptor == INTERFACE::descriptor) return this;
-    return NULL;
+    return nullptr;
 }
 
 template<typename INTERFACE>
@@ -142,7 +142,7 @@ inline IBinder* BpInterface<INTERFACE>::onAsBinder()
 {
     return remote();
 }
-    
+
 // ----------------------------------------------------------------------
 
 }; // namespace android
