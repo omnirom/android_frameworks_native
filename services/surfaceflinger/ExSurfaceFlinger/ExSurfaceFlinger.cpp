@@ -91,9 +91,13 @@ void ExSurfaceFlinger::handleDPTransactionIfNeeded(
     if (mDisableExtAnimation) {
         size_t count = displays.size();
         for (size_t i=0 ; i<count ; i++) {
-            const DisplayState& s(displays[i]);
-            if (getDisplayType(s.token) != DisplayDevice::DISPLAY_PRIMARY) {
-                const uint32_t what = s.what;
+            const DisplayState& displayState(displays[i]);
+            const auto display = getDisplayDevice(displayState.token);
+            if (!display) {
+                continue;
+            }
+            if (display->getDisplayType() != DisplayDevice::DISPLAY_PRIMARY) {
+                const uint32_t what = displayState.what;
                 /* Invalidate and wait on eDisplayProjectionChanged to trigger a draw cycle so that
                  * it can fix one incorrect frame on the External, when we
                  * disable external animation

@@ -33,17 +33,17 @@
 namespace android {
 
 #define VDS_LOGE(msg, ...) ALOGE("[%s] " msg, \
-        mDisplayName.string(), ##__VA_ARGS__)
+        mDisplayName.c_str(), ##__VA_ARGS__)
 #define VDS_LOGW_IF(cond, msg, ...) ALOGW_IF(cond, "[%s] " msg, \
-        mDisplayName.string(), ##__VA_ARGS__)
+        mDisplayName.c_str(), ##__VA_ARGS__)
 #define VDS_LOGV(msg, ...) ALOGV("[%s] " msg, \
-        mDisplayName.string(), ##__VA_ARGS__)
+        mDisplayName.c_str(), ##__VA_ARGS__)
 
 ExVirtualDisplaySurface::ExVirtualDisplaySurface(HWComposer& hwc, int32_t dispId,
         const sp<IGraphicBufferProducer>& sink,
         const sp<IGraphicBufferProducer>& bqProducer,
         const sp<IGraphicBufferConsumer>& bqConsumer,
-        const String8& name,
+        const std::string &name,
         bool secure)
 :   VirtualDisplaySurface(hwc, dispId, sink, bqProducer, bqConsumer, name),
    mSecure(secure) {

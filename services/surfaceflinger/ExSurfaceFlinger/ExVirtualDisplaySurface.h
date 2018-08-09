@@ -29,6 +29,8 @@
 #ifndef ANDROID_EX_VIRTUAL_DISPLAY_SURFACE_H
 #define ANDROID_EX_VIRTUAL_DISPLAY_SURFACE_H
 
+#include <string>
+
 #include <DisplayHardware/VirtualDisplaySurface.h>
 
 namespace android {
@@ -39,7 +41,7 @@ public:
             const sp<IGraphicBufferProducer>& sink,
             const sp<IGraphicBufferProducer>& bqProducer,
             const sp<IGraphicBufferConsumer>& bqConsumer,
-            const String8& name,
+            const std::string &name,
             bool secure);
 
 private:

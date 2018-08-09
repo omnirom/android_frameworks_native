@@ -84,7 +84,7 @@ BufferLayer* DisplayUtils::getBufferLayerInstance(SurfaceFlinger* flinger,
 void DisplayUtils::initVDSInstance(HWComposer & hwc, int32_t hwcDisplayId,
         sp<IGraphicBufferProducer> currentStateSurface, sp<DisplaySurface> &dispSurface,
         sp<IGraphicBufferProducer> &producer, sp<IGraphicBufferProducer> bqProducer,
-        sp<IGraphicBufferConsumer> bqConsumer, String8 currentStateDisplayName,
+        sp<IGraphicBufferConsumer> bqConsumer, const std::string &currentStateDisplayName,
         bool currentStateIsSecure)
 {
     if (sUseExtendedImpls) {

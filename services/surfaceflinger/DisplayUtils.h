@@ -33,6 +33,8 @@
 #include <sys/types.h>
 #include <cutils/properties.h>
 
+#include <string>
+
 #include "BufferLayer.h"
 #include "SurfaceFlinger.h"
 #include "DisplayHardware/VirtualDisplaySurface.h"
@@ -56,7 +58,7 @@ class DisplayUtils {
     void initVDSInstance(HWComposer & hwc, int32_t hwcDisplayId,
             sp<IGraphicBufferProducer> currentStateSurface, sp<DisplaySurface> &dispSurface,
             sp<IGraphicBufferProducer> &producer, sp<IGraphicBufferProducer> bqProducer,
-            sp<IGraphicBufferConsumer> bqConsumer, String8 currentStateDisplayName,
+            sp<IGraphicBufferConsumer> bqConsumer, const std::string &currentStateDisplayName,
             bool currentStateIsSecure);
     bool canAllocateHwcDisplayIdForVDS(uint64_t usage);
     bool skipColorLayer(const char* layerType);

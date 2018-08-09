@@ -354,7 +354,7 @@ SurfaceFlinger::SurfaceFlinger() : SurfaceFlinger(SkipInitialization) {
 
     property_get("debug.sf.enable_hwc_vds", value, "0");
     mUseHwcVirtualDisplays = atoi(value);
-    ALOGI_IF(!mUseHwcVirtualDisplays, "Enabling HWC virtual displays");
+    ALOGI_IF(mUseHwcVirtualDisplays, "Enabling HWC virtual displays");
 
     property_get("ro.sf.disable_triple_buffer", value, "1");
     mLayerTripleBufferingDisabled = atoi(value);
@@ -2424,8 +2424,8 @@ DisplayDevice::DisplayType SurfaceFlinger::determineDisplayType(hwc2_display_t h
         return DisplayDevice::DISPLAY_EXTERNAL;
     } else if (connection == HWC2::Connection::Connected && !primaryHwcDisplayId) {
         return DisplayDevice::DISPLAY_PRIMARY;
-    } else if ((display >= 0)&& (display < DisplayDevice::NUM_BUILTIN_DISPLAY_TYPES)) {
-        return (DisplayDevice::DisplayType)display;
+    } else if (connection == HWC2::Connection::Connected && !externalHwcDisplayId) {
+        return DisplayDevice::DISPLAY_EXTERNAL;
     }
 
     return DisplayDevice::DISPLAY_ID_INVALID;
@@ -2907,7 +2907,9 @@ void SurfaceFlinger::computeVisibleRegions(const sp<const DisplayDevice>& displa
     mDrawingState.traverseInReverseZOrder([&](Layer* layer) {
         if (layer->isSecureDisplay()) {
             bIgnoreLayer = true;
-            if (!displayDevice->getHwcDisplayId()) {
+            const int32_t displayId = display->getId();
+            const auto hwcDisplayId = getHwComposer().getHwcDisplayId(displayId);
+            if (!hwcDisplayId) {
                 layerOfInterest = layer;
             }
             return;
@@ -2921,6 +2923,7 @@ void SurfaceFlinger::computeVisibleRegions(const sp<const DisplayDevice>& displa
         // only consider the layers on the given layer stack
         if (!layer->belongsToDisplay(display->getLayerStack(), display->isPrimary())) {
             return;
+        }
 
         if (bIgnoreLayer && layerOfInterest != layer) {
             Region visibleNonTransRegion;
@@ -3996,8 +3999,8 @@ void SurfaceFlinger::setPowerModeInternal(const sp<DisplayDevice>& display, int 
         mInterceptor->savePowerModeUpdate(mCurrentState.displays.valueAt(idx).sequenceId, mode);
     }
 
-    mActiveDisplays[type] = (mode != HWC_POWER_MODE_OFF && mode != HWC_POWER_MODE_DOZE_SUSPEND);
     int32_t type = display->getDisplayType();
+    mActiveDisplays[type] = (mode != HWC_POWER_MODE_OFF && mode != HWC_POWER_MODE_DOZE_SUSPEND);
     if (currentMode == HWC_POWER_MODE_OFF) {
         // Turn on the display
         getHwComposer().setPowerMode(type, mode);
