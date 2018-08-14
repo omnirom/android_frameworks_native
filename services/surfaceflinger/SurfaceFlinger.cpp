@@ -113,6 +113,33 @@ using ui::Hdr;
 using ui::RenderIntent;
 
 namespace {
+
+#pragma clang diagnostic push
+#pragma clang diagnostic error "-Wswitch-enum"
+
+bool isWideColorMode(const ColorMode colorMode) {
+    switch (colorMode) {
+        case ColorMode::DISPLAY_P3:
+        case ColorMode::ADOBE_RGB:
+        case ColorMode::DCI_P3:
+        case ColorMode::BT2020:
+        case ColorMode::BT2100_PQ:
+        case ColorMode::BT2100_HLG:
+            return true;
+        case ColorMode::NATIVE:
+        case ColorMode::STANDARD_BT601_625:
+        case ColorMode::STANDARD_BT601_625_UNADJUSTED:
+        case ColorMode::STANDARD_BT601_525:
+        case ColorMode::STANDARD_BT601_525_UNADJUSTED:
+        case ColorMode::STANDARD_BT709:
+        case ColorMode::SRGB:
+            return false;
+    }
+    return false;
+}
+
+#pragma clang diagnostic pop
+
 class ConditionalLock {
 public:
     ConditionalLock(Mutex& mutex, bool lock) : mMutex(mutex), mLocked(lock) {
@@ -125,6 +152,7 @@ private:
     Mutex& mMutex;
     bool mLocked;
 };
+
 }  // namespace anonymous
 
 // ---------------------------------------------------------------------------
@@ -223,6 +251,8 @@ SurfaceFlinger::SurfaceFlinger(SurfaceFlinger::SkipInitializationTag)
         mVisibleRegionsDirty(false),
         mGeometryInvalid(false),
         mAnimCompositionPending(false),
+        mActiveDisplays(0),
+        mBuiltInBitmask(0),
         mDebugRegion(0),
         mDebugDDMS(0),
         mDebugDisableHWC(0),
@@ -736,6 +766,10 @@ void SurfaceFlinger::init() {
     mLegacySrgbSaturationMatrix = getBE().mHwc->getDataspaceSaturationMatrix(HWC_DISPLAY_PRIMARY,
             Dataspace::SRGB_LINEAR);
 
+    mBuiltInBitmask.set(HWC_DISPLAY_PRIMARY);
+    for (int disp = HWC_DISPLAY_BUILTIN_2; disp <= HWC_DISPLAY_BUILTIN_4; disp++) {
+      mBuiltInBitmask.set(disp);
+    }
     ALOGV("Done initializing");
 }
 
@@ -1731,7 +1765,19 @@ void SurfaceFlinger::postComposition(nsecs_t refreshStartTime)
     }
 
     getBE().mDisplayTimeline.updateSignalTimes();
-    sp<Fence> presentFence = getBE().mHwc->getPresentFence(HWC_DISPLAY_PRIMARY);
+
+    std::bitset<DisplayDevice::NUM_BUILTIN_DISPLAY_TYPES> activeBuiltInDisplays;
+    activeBuiltInDisplays = mActiveDisplays & mBuiltInBitmask;
+
+    size_t disp_id = HWC_DISPLAY_PRIMARY;
+    for (size_t disp = 0; disp < activeBuiltInDisplays.size(); disp++) {
+      if (mActiveDisplays.test(disp)) {
+        disp_id = disp;
+        break;
+      }
+    }
+
+    sp<Fence> presentFence = getBE().mHwc->getPresentFence(disp_id);
     auto presentFenceTime = std::make_shared<FenceTime>(presentFence);
     getBE().mDisplayTimeline.push(presentFenceTime);
 
@@ -2223,8 +2269,8 @@ DisplayDevice::DisplayType SurfaceFlinger::determineDisplayType(hwc2_display_t d
         return  DisplayDevice::DISPLAY_EXTERNAL;
     } else if (connection == HWC2::Connection::Connected && !primaryDisplayId) {
         return DisplayDevice::DISPLAY_PRIMARY;
-    } else if (connection == HWC2::Connection::Connected && !externalDisplayId) {
-        return DisplayDevice::DISPLAY_EXTERNAL;
+    } else if ((display >= 0)&& (display < DisplayDevice::NUM_BUILTIN_DISPLAY_TYPES)) {
+        return (DisplayDevice::DisplayType)display;
     }
 
     return DisplayDevice::DISPLAY_ID_INVALID;
@@ -2243,7 +2289,9 @@ void SurfaceFlinger::processDisplayHotplugEventsLocked() {
             continue;
         }
 
-        getBE().mHwc->onHotplug(event.display, displayType, event.connection);
+        if (!getBE().mHwc->onHotplug(event.display, displayType, event.connection)) {
+            continue;
+        }
 
         if (event.connection == HWC2::Connection::Connected) {
             if (!mBuiltinDisplays[displayType].get()) {
@@ -2283,17 +2331,8 @@ sp<DisplayDevice> SurfaceFlinger::setupNewDisplayDeviceInternal(
     if (hasWideColorDisplay) {
         std::vector<ColorMode> modes = getHwComposer().getColorModes(hwcId);
         for (ColorMode colorMode : modes) {
-            switch (colorMode) {
-                case ColorMode::DISPLAY_P3:
-                case ColorMode::ADOBE_RGB:
-                case ColorMode::DCI_P3:
-                case ColorMode::BT2020:
-                case ColorMode::BT2100_PQ:
-                case ColorMode::BT2100_HLG:
-                    hasWideColorGamut = true;
-                    break;
-                default:
-                    break;
+            if (isWideColorMode(colorMode)) {
+                hasWideColorGamut = true;
             }
 
             std::vector<RenderIntent> renderIntents = getHwComposer().getRenderIntents(hwcId,
@@ -3769,10 +3808,12 @@ void SurfaceFlinger::setPowerModeInternal(const sp<DisplayDevice>& hw,
         mInterceptor->savePowerModeUpdate(mCurrentState.displays.valueAt(idx).displayId, mode);
     }
 
+    mActiveDisplays[type] = (mode != HWC_POWER_MODE_OFF && mode != HWC_POWER_MODE_DOZE_SUSPEND);
+
     if (currentMode == HWC_POWER_MODE_OFF) {
         // Turn on the display
         getHwComposer().setPowerMode(type, mode);
-        if (type == DisplayDevice::DISPLAY_PRIMARY &&
+        if (mActiveDisplays.any() &&
             mode != HWC_POWER_MODE_DOZE_SUSPEND) {
             // FIXME: eventthread only knows about the main display right now
             mEventThread->onScreenAcquired();
@@ -3795,8 +3836,7 @@ void SurfaceFlinger::setPowerModeInternal(const sp<DisplayDevice>& hw,
             ALOGW("Couldn't set SCHED_OTHER on display off");
         }
 
-        if (type == DisplayDevice::DISPLAY_PRIMARY &&
-            currentMode != HWC_POWER_MODE_DOZE_SUSPEND) {
+        if (mActiveDisplays.none()) {
             disableHardwareVsync(true); // also cancels any in-progress resync
 
             // FIXME: eventthread only knows about the main display right now
@@ -3810,15 +3850,14 @@ void SurfaceFlinger::setPowerModeInternal(const sp<DisplayDevice>& hw,
                mode == HWC_POWER_MODE_NORMAL) {
         // Update display while dozing
         getHwComposer().setPowerMode(type, mode);
-        if (type == DisplayDevice::DISPLAY_PRIMARY &&
-            currentMode == HWC_POWER_MODE_DOZE_SUSPEND) {
+        if (mActiveDisplays.any()) {
             // FIXME: eventthread only knows about the main display right now
             mEventThread->onScreenAcquired();
             resyncToHardwareVsync(true);
         }
     } else if (mode == HWC_POWER_MODE_DOZE_SUSPEND) {
         // Leave display going to doze
-        if (type == DisplayDevice::DISPLAY_PRIMARY) {
+        if (mActiveDisplays.none()) {
             disableHardwareVsync(true); // also cancels any in-progress resync
             // FIXME: eventthread only knows about the main display right now
             mEventThread->onScreenReleased();
@@ -4761,6 +4800,13 @@ status_t SurfaceFlinger::onTransact(
                     reply->write(frameStats.actualPresentTimesNano.array(), 8*arraySize);
                 }
                 return NO_ERROR;
+            }
+            case 20000: {
+              int disp = data.readInt32();
+              int mode = data.readInt32();
+              ALOGI("Debug: Set display = %d, power mode = %d", disp, mode);
+              setPowerMode(getBuiltInDisplay(disp), mode);
+              return NO_ERROR;
             }
         }
     }
