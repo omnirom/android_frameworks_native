@@ -90,31 +90,46 @@ void ExSurfaceFlinger::handleDPTransactionIfNeeded(
      */
     if (mDisableExtAnimation) {
         size_t count = displays.size();
+        bool primary_orient_changed = false;
         for (size_t i=0 ; i<count ; i++) {
             const DisplayState& s(displays[i]);
-            if (getDisplayType(s.token) != DisplayDevice::DISPLAY_PRIMARY) {
+            if (getDisplayType(s.token) == DisplayDevice::DISPLAY_PRIMARY &&
+                !(s.orientation & DisplayState::eOrientationUnchanged)) {
+                primary_orient_changed = true;
+                break;
+            }
+        }
+        for (size_t i=0 ; i<count ; i++) {
+            const DisplayState& s(displays[i]);
+            int type = getDisplayType(s.token);
+            if ((type != DisplayDevice::DISPLAY_ID_INVALID &&
+                type != DisplayDevice::DISPLAY_PRIMARY) &&
+                type < DisplayDevice::NUM_BUILTIN_DISPLAY_TYPES) {
                 const uint32_t what = s.what;
                 /* Invalidate and wait on eDisplayProjectionChanged to trigger a draw cycle so that
                  * it can fix one incorrect frame on the External, when we
                  * disable external animation
                  */
-                if (what & DisplayState::eDisplayProjectionChanged) {
+                if (what & DisplayState::eDisplayProjectionChanged && primary_orient_changed) {
                     Mutex::Autolock lock(mExtAnimationLock);
                     invalidateHwcGeometry();
                     android_atomic_or(1, &mRepaintEverything);
                     signalRefresh();
-                    mExtAnimationCond.waitRelative(mExtAnimationLock, 1000000000);
+                    status_t err = mExtAnimationCond.waitRelative(mExtAnimationLock, 1000000000);
+                    if (err == -ETIMEDOUT) {
+                        ALOGW("External animation signal timed out!");
+                    }
                 }
             }
         }
     }
 }
 
-void ExSurfaceFlinger::setDisplayAnimating(const sp<const DisplayDevice>& hw,
-                                           const int32_t& dpy) {
+void ExSurfaceFlinger::setDisplayAnimating(const sp<const DisplayDevice>& hw __unused) {
     static android::sp<vendor::display::config::V1_1::IDisplayConfig> disp_config_v1_1 =
                                         vendor::display::config::V1_1::IDisplayConfig::getService();
 
+    int32_t dpy = hw->getDisplayType();
     if (disp_config_v1_1 == NULL || dpy == HWC_DISPLAY_PRIMARY || !mDisableExtAnimation) {
         return;
     }
@@ -252,6 +267,14 @@ void ExSurfaceFlinger::dumpDrawCycle(bool prePrepare) {
     }
 
     fs.close();
+}
+
+void ExSurfaceFlinger::handleMessageRefresh() {
+    SurfaceFlinger::handleMessageRefresh();
+    if (mDisableExtAnimation && mAnimating) {
+        Mutex::Autolock lock(mExtAnimationLock);
+        mExtAnimationCond.signal();
+    }
 }
 
 }; // namespace android

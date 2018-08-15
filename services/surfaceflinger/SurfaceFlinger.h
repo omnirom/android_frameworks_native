@@ -472,9 +472,8 @@ private:
      */
     virtual void handleDPTransactionIfNeeded(
                      const Vector<DisplayState>& /*displays*/) { }
-
-    virtual void setDisplayAnimating(const sp<const DisplayDevice>& /*hw*/,
-                                     const int32_t& /*dpy*/) { }
+    virtual void setDisplayAnimating(const sp<const DisplayDevice>& /*hw*/) { }
+    virtual void handleMessageRefresh();
 
     /* ------------------------------------------------------------------------
      * Message handling
@@ -505,8 +504,6 @@ private:
 
     // Returns whether a new buffer has been latched (see handlePageFlip())
     bool handleMessageInvalidate();
-
-    void handleMessageRefresh();
 
     void handleTransaction(uint32_t transactionFlags);
     void handleTransactionLocked(uint32_t transactionFlags);
