@@ -2448,8 +2448,6 @@ void SurfaceFlinger::processDisplayHotplugEventsLocked() {
                 getBE().mHwc->onHotplug(event.hwcDisplayId, displayType, event.connection);
         if (displayId) {
             ALOGV("Display %" PRIu64 " has stable ID %" PRIu64, event.hwcDisplayId, *displayId);
-        } else {
-            continue;
         }
 
         if (event.connection == HWC2::Connection::Connected) {
