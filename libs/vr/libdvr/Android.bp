@@ -44,7 +44,6 @@ srcs = [
     "dvr_pose.cpp",
     "dvr_surface.cpp",
     "dvr_tracking.cpp",
-    "dvr_vsync.cpp",
 ]
 
 static_libs = [
@@ -74,7 +73,7 @@ shared_libs = [
 ]
 
 cc_library_shared {
-    name: "libdvr",
+    name: "libdvr.google",
     owner: "google",
     cflags: cflags,
     header_libs: ["libdvr_headers"],
@@ -89,7 +88,7 @@ cc_library_shared {
 // restricting function access in the shared lib makes it inconvenient to use in
 // test code.
 cc_library_static {
-    name: "libdvr_static",
+    name: "libdvr_static.google",
     owner: "google",
     cflags: cflags,
     header_libs: ["libdvr_headers"],

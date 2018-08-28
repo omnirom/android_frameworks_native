@@ -55,23 +55,22 @@
 
 #include "Barrier.h"
 #include "DisplayDevice.h"
-#include "DispSync.h"
-#include "EventThread.h"
 #include "FrameTracker.h"
+#include "LayerBE.h"
 #include "LayerStats.h"
 #include "LayerVector.h"
-#include "MessageQueue.h"
+#include "StartPropertySetThread.h"
 #include "SurfaceInterceptor.h"
 #include "SurfaceTracing.h"
-#include "StartPropertySetThread.h"
-#include "TimeStats/TimeStats.h"
-#include "LayerBE.h"
-#include "VSyncModulator.h"
 
 #include "DisplayHardware/HWC2.h"
 #include "DisplayHardware/HWComposer.h"
-
 #include "Effects/Daltonizer.h"
+#include "Scheduler/DispSync.h"
+#include "Scheduler/EventThread.h"
+#include "Scheduler/MessageQueue.h"
+#include "Scheduler/VSyncModulator.h"
+#include "TimeStats/TimeStats.h"
 
 #include <map>
 #include <mutex>
@@ -102,6 +101,7 @@ class Layer;
 class Surface;
 class SurfaceFlingerBE;
 class VSyncSource;
+struct CompositionInfo;
 
 namespace impl {
 class EventThread;
@@ -284,13 +284,13 @@ public:
     // FramebufferSurface
     static int64_t maxFrameBufferAcquiredBuffers;
 
-    // Indicate if platform supports color management on its
-    // wide-color display. This is typically found on devices
-    // with wide gamut (e.g. Display-P3) display.
-    // This also allows devices with wide-color displays that don't
-    // want to support color management to disable color management.
+    // Indicate if a device has wide color gamut display. This is typically
+    // found on devices with wide color gamut (e.g. Display-P3) display.
     static bool hasWideColorDisplay;
     friend class ExSurfaceFlinger;
+
+    // Indicate if device wants color management on its display.
+    static bool useColorManagement;
 
     static char const* getServiceName() ANDROID_API {
         return "SurfaceFlinger";
@@ -361,6 +361,8 @@ private:
     friend class impl::EventThread;
     friend class Layer;
     friend class BufferLayer;
+    friend class BufferQueueLayer;
+    friend class BufferStateLayer;
     friend class MonitoredProducer;
 
     // For unit tests
@@ -437,6 +439,7 @@ private:
     virtual status_t captureLayers(const sp<IBinder>& parentHandle, sp<GraphicBuffer>* outBuffer,
                                    const Rect& sourceCrop, float frameScale, bool childrenOnly);
     virtual status_t getDisplayStats(const sp<IBinder>& displayToken, DisplayStatInfo* stats);
+    virtual status_t getDisplayViewport(const sp<IBinder>& display, Rect* outViewport);
     virtual status_t getDisplayConfigs(const sp<IBinder>& displayToken,
                                        Vector<DisplayInfo>* configs);
     virtual int getActiveConfig(const sp<IBinder>& displayToken);
@@ -545,10 +548,14 @@ private:
             int32_t windowType, int32_t ownerUid, sp<IBinder>* handle,
             sp<IGraphicBufferProducer>* gbp, sp<Layer>* parent);
 
-    status_t createBufferLayer(const sp<Client>& client, const String8& name,
-            uint32_t w, uint32_t h, uint32_t flags, PixelFormat& format,
-            sp<IBinder>* outHandle, sp<IGraphicBufferProducer>* outGbp,
-            sp<Layer>* outLayer);
+    status_t createBufferQueueLayer(const sp<Client>& client, const String8& name, uint32_t w,
+                                    uint32_t h, uint32_t flags, PixelFormat& format,
+                                    sp<IBinder>* outHandle, sp<IGraphicBufferProducer>* outGbp,
+                                    sp<Layer>* outLayer);
+
+    status_t createBufferStateLayer(const sp<Client>& client, const String8& name, uint32_t w,
+                                    uint32_t h, uint32_t flags, sp<IBinder>* outHandle,
+                                    sp<Layer>* outLayer);
 
     status_t createColorLayer(const sp<Client>& client, const String8& name,
             uint32_t w, uint32_t h, uint32_t flags, sp<IBinder>* outHandle,
@@ -684,15 +691,14 @@ private:
      * prior to any CompositionInfo handling and is not dependent on data in
      * CompositionInfo
      */
-    void beginFrame();
+    void beginFrame(const sp<DisplayDevice>& display);
     /* prepareFrame - This function will call into the DisplayDevice to prepare a
      * frame after CompositionInfo has been programmed.   This provides a mechanism
      * to prepare the hardware composer
      */
-    void prepareFrame();
-    void setUpHWComposer(const CompositionInfo& compositionInfo);
-    void doComposition();
-    void doDebugFlashRegions();
+    void prepareFrame(const sp<DisplayDevice>& display);
+    void doComposition(const sp<DisplayDevice>& display, bool repainEverything);
+    void doDebugFlashRegions(const sp<DisplayDevice>& display, bool repaintEverything);
     void doTracing(const char* where);
     void logLayerStats();
     void doDisplayComposition(const sp<const DisplayDevice>& display, const Region& dirtyRegion);
@@ -700,7 +706,8 @@ private:
     // This fails if using GL and the surface has been destroyed.
     bool doComposeSurfaces(const sp<const DisplayDevice>& display);
 
-    void postFramebuffer();
+    void postFramebuffer(const sp<DisplayDevice>& display);
+    void postFrame();
     void drawWormhole(const sp<const DisplayDevice>& display, const Region& region) const;
 
     /* ------------------------------------------------------------------------
@@ -809,11 +816,6 @@ private:
     // access must be protected by mInvalidateLock
     volatile int32_t mRepaintEverything;
 
-    // helper methods
-    void configureHwcCommonData(const CompositionInfo& compositionInfo) const;
-    void configureDeviceComposition(const CompositionInfo& compositionInfo) const;
-    void configureSidebandComposition(const CompositionInfo& compositionInfo) const;
-
     // constant members (no synchronization needed for access)
     nsecs_t mBootTime;
     bool mGpuToCpuSupported;
@@ -864,9 +866,9 @@ private:
     int mDebugDisableHWC;
     int mDebugDisableTransformHint;
     volatile nsecs_t mDebugInSwapBuffers;
-    nsecs_t mLastSwapBufferTime;
     volatile nsecs_t mDebugInTransaction;
     nsecs_t mLastTransactionTime;
+    nsecs_t mPostFramebufferTime;
     bool mForceFullDamage;
     bool mPropagateBackpressure = true;
     std::unique_ptr<SurfaceInterceptor> mInterceptor =
@@ -883,7 +885,7 @@ private:
     // these are thread safe
     mutable std::unique_ptr<MessageQueue> mEventQueue{std::make_unique<impl::MessageQueue>()};
     FrameTracker mAnimFrameTracker;
-    DispSync mPrimaryDispSync;
+    std::unique_ptr<DispSync> mPrimaryDispSync;
     int mPrimaryDisplayOrientation = DisplayState::eOrientationDefault;
 
     // protected by mDestroyedLayerLock;

@@ -40,6 +40,10 @@ using std::min;
 
 namespace android {
 
+DispSync::~DispSync() = default;
+
+namespace impl {
+
 // Setting this to true enables verbose tracing that can be used to debug
 // vsync event model or phase issues.
 static const bool kTraceDetailedInfo = false;
@@ -236,14 +240,6 @@ public:
         return BAD_VALUE;
     }
 
-    // This method is only here to handle the !SurfaceFlinger::hasSyncFramework
-    // case.
-    bool hasAnyEventListeners() {
-        if (kTraceDetailedInfo) ATRACE_CALL();
-        Mutex::Autolock lock(mMutex);
-        return !mEventListeners.empty();
-    }
-
 private:
     struct EventListener {
         const char* mName;
@@ -407,22 +403,18 @@ void DispSync::init(bool hasSyncFramework, int64_t dispSyncPresentTimeOffset) {
     reset();
     beginResync();
 
-    if (kTraceDetailedInfo) {
-        // If we're not getting present fences then the ZeroPhaseTracer
-        // would prevent HW vsync event from ever being turned off.
-        // Even if we're just ignoring the fences, the zero-phase tracing is
-        // not needed because any time there is an event registered we will
-        // turn on the HW vsync events.
-        if (!mIgnorePresentFences && kEnableZeroPhaseTracer) {
-            mZeroPhaseTracer = std::make_unique<ZeroPhaseTracer>();
-            addEventListener("ZeroPhaseTracer", 0, mZeroPhaseTracer.get());
-        }
+    if (kTraceDetailedInfo && kEnableZeroPhaseTracer) {
+        mZeroPhaseTracer = std::make_unique<ZeroPhaseTracer>();
+        addEventListener("ZeroPhaseTracer", 0, mZeroPhaseTracer.get());
     }
 }
 
 void DispSync::reset() {
     Mutex::Autolock lock(mMutex);
+    resetLocked();
+}
 
+void DispSync::resetLocked() {
     mPhase = 0;
     mReferenceTime = 0;
     mModelUpdated = false;
@@ -434,6 +426,10 @@ void DispSync::reset() {
 
 bool DispSync::addPresentFence(const std::shared_ptr<FenceTime>& fenceTime) {
     Mutex::Autolock lock(mMutex);
+
+    if (mIgnorePresentFences) {
+        return true;
+    }
 
     mPresentFences[mPresentSampleOffset] = fenceTime;
     mPresentSampleOffset = (mPresentSampleOffset + 1) % NUM_PRESENT_SAMPLES;
@@ -480,12 +476,10 @@ bool DispSync::addResyncSample(nsecs_t timestamp) {
     }
 
     if (mIgnorePresentFences) {
-        // If we don't have the sync framework we will never have
-        // addPresentFence called.  This means we have no way to know whether
+        // If we're ignoring the present fences we have no way to know whether
         // or not we're synchronized with the HW vsyncs, so we just request
-        // that the HW vsync events be turned on whenever we need to generate
-        // SW vsync events.
-        return mThread->hasAnyEventListeners();
+        // that the HW vsync events be turned on.
+        return true;
     }
 
     // Check against kErrorThreshold / 2 to add some hysteresis before having to
@@ -521,9 +515,22 @@ status_t DispSync::changePhaseOffset(Callback* callback, nsecs_t phase) {
 
 void DispSync::setPeriod(nsecs_t period) {
     Mutex::Autolock lock(mMutex);
-    mPeriod = period;
+    mPeriodBase = mPeriod = period;
     mPhase = 0;
     mReferenceTime = 0;
+    mThread->updateModel(mPeriod, mPhase, mReferenceTime);
+}
+
+void DispSync::scalePeriod(uint32_t multiplier, uint32_t divisor) {
+    Mutex::Autolock lock(mMutex);
+
+    // if only 1 of the properties is updated, we will get to this
+    // point "attempting" to set the scale to 1 when it is already
+    // 1.  Check that special case so that we don't do a useless
+    // update of the model.
+    if ((multiplier == 1) && (divisor == 1) && (mPeriod == mPeriodBase)) return;
+
+    mPeriod = mPeriodBase * multiplier / divisor;
     mThread->updateModel(mPeriod, mPhase, mReferenceTime);
 }
 
@@ -551,7 +558,7 @@ void DispSync::updateModelLocked() {
 
         // Exclude the min and max from the average
         durationSum -= minDuration + maxDuration;
-        mPeriod = durationSum / (mNumResyncSamples - 3);
+        mPeriodBase = mPeriod = durationSum / (mNumResyncSamples - 3);
 
         ALOGV("[%s] mPeriod = %" PRId64, mName, ns2us(mPeriod));
 
@@ -659,6 +666,14 @@ nsecs_t DispSync::computeNextRefresh(int periodOffset) const {
     return (((now - phase) / mPeriod) + periodOffset + 1) * mPeriod + phase;
 }
 
+void DispSync::setIgnorePresentFences(bool ignore) {
+    Mutex::Autolock lock(mMutex);
+    if (mIgnorePresentFences != ignore) {
+        mIgnorePresentFences = ignore;
+        resetLocked();
+    }
+}
+
 void DispSync::dump(String8& result) const {
     Mutex::Autolock lock(mMutex);
     result.appendFormat("present fences are %s\n", mIgnorePresentFences ? "ignored" : "used");
@@ -708,5 +723,7 @@ void DispSync::dump(String8& result) const {
 
     result.appendFormat("current monotonic time: %" PRId64 "\n", now);
 }
+
+} // namespace impl
 
 } // namespace android

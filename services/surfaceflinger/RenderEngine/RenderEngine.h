@@ -24,10 +24,10 @@
 
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
-#include <Transform.h>
 #include <android-base/unique_fd.h>
-#include <gui/SurfaceControl.h>
 #include <math/mat4.h>
+#include <ui/GraphicTypes.h>
+#include <ui/Transform.h>
 
 #define EGL_NO_CONFIG ((EGLConfig)0)
 
@@ -56,7 +56,7 @@ class RenderEngine;
 class RenderEngine {
 public:
     enum FeatureFlag {
-        WIDE_COLOR_SUPPORT = 1 << 0 // Platform has a wide color display
+        USE_COLOR_MANAGEMENT = 1 << 0, // Device manages color
     };
 
     virtual ~RenderEngine() = 0;
@@ -68,6 +68,9 @@ public:
 
     // dump the extension strings. always call the base class.
     virtual void dump(String8& result) = 0;
+
+    virtual bool useNativeFenceSync() const = 0;
+    virtual bool useWaitSync() const = 0;
 
     virtual bool isCurrent() const = 0;
     virtual bool setCurrentSurface(const RE::Surface& surface) = 0;
@@ -103,7 +106,7 @@ public:
     // set-up
     virtual void checkErrors() const;
     virtual void setViewportAndProjection(size_t vpw, size_t vph, Rect sourceCrop, size_t hwh,
-                                          bool yswap, Transform::orientation_flags rotation) = 0;
+                                          bool yswap, ui::Transform::orientation_flags rotation) = 0;
     virtual void setupLayerBlending(bool premultipliedAlpha, bool opaque, bool disableTexture,
                                     const half4& color) = 0;
     virtual void setupLayerTexturing(const Texture& texture) = 0;
@@ -189,6 +192,9 @@ public:
 
     // dump the extension strings. always call the base class.
     void dump(String8& result) override;
+
+    bool useNativeFenceSync() const override;
+    bool useWaitSync() const override;
 
     bool isCurrent() const;
     bool setCurrentSurface(const RE::Surface& surface) override;

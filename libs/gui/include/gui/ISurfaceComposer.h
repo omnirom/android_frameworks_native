@@ -157,6 +157,9 @@ public:
     virtual status_t getDisplayStats(const sp<IBinder>& display,
             DisplayStatInfo* stats) = 0;
 
+    /* returns display viewport information of the given display */
+    virtual status_t getDisplayViewport(const sp<IBinder>& display, Rect* outViewport) = 0;
+
     /* indicates which of the configurations returned by getDisplayInfo is
      * currently active */
     virtual int getActiveConfig(const sp<IBinder>& display) = 0;
@@ -220,12 +223,12 @@ public:
 
 class BnSurfaceComposer: public BnInterface<ISurfaceComposer> {
 public:
-    enum {
+    enum ISurfaceComposerTag {
         // Note: BOOT_FINISHED must remain this value, it is called from
         // Java by ActivityManagerService.
         BOOT_FINISHED = IBinder::FIRST_CALL_TRANSACTION,
         CREATE_CONNECTION,
-        UNUSED, // formerly CREATE_GRAPHIC_BUFFER_ALLOC
+        CREATE_GRAPHIC_BUFFER_ALLOC_UNUSED, // unused, fails permissions check
         CREATE_DISPLAY_EVENT_CONNECTION,
         CREATE_DISPLAY,
         DESTROY_DISPLAY,
@@ -236,7 +239,7 @@ public:
         GET_DISPLAY_CONFIGS,
         GET_ACTIVE_CONFIG,
         SET_ACTIVE_CONFIG,
-        CONNECT_DISPLAY,
+        CONNECT_DISPLAY_UNUSED, // unused, fails permissions check
         CAPTURE_SCREEN,
         CAPTURE_LAYERS,
         CLEAR_ANIMATION_FRAME_STATS,
@@ -250,7 +253,8 @@ public:
         ENABLE_VSYNC_INJECTIONS,
         INJECT_VSYNC,
         GET_LAYER_DEBUG_INFO,
-        CREATE_SCOPED_CONNECTION
+        CREATE_SCOPED_CONNECTION,
+        GET_DISPLAY_VIEWPORT
     };
 
     virtual status_t onTransact(uint32_t code, const Parcel& data,
