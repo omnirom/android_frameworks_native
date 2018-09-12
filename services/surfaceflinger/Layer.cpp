@@ -239,6 +239,7 @@ bool Layer::createHwcLayer(HWComposer* hwc, int32_t hwcId) {
     LayerBE::HWCInfo& hwcInfo = getBE().mHwcLayers[hwcId];
     hwcInfo.hwc = hwc;
     hwcInfo.layer = layer;
+    mLayerId = layer->getId();
     layer->setLayerDestroyedListener(
             [this, hwcId](HWC2::Layer* /*layer*/) { getBE().mHwcLayers.erase(hwcId); });
     return true;
