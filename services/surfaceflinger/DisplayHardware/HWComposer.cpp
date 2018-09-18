@@ -163,11 +163,13 @@ std::optional<DisplayId> HWComposer::onHotplug(hwc2_display_t hwcDisplayId, int3
 
     std::optional<DisplayId> displayId;
 
-    uint8_t port;
-    DisplayIdentificationData data;
-    if (getDisplayIdentificationData(hwcDisplayId, &port, &data)) {
-        displayId = generateDisplayId(port, data);
-        ALOGE_IF(!displayId, "Failed to generate stable ID for display %" PRIu64, hwcDisplayId);
+    if (connection == HWC2::Connection::Connected) {
+        uint8_t port;
+        DisplayIdentificationData data;
+        if (getDisplayIdentificationData(hwcDisplayId, &port, &data)) {
+            displayId = generateDisplayId(port, data);
+            ALOGE_IF(!displayId, "Failed to generate stable ID for display %" PRIu64, hwcDisplayId);
+        }
     }
 
     // Disconnect is handled through HWComposer::disconnectDisplay via
@@ -420,7 +422,8 @@ status_t HWComposer::setClientTarget(int32_t displayId, uint32_t slot,
     return NO_ERROR;
 }
 
-status_t HWComposer::prepare(DisplayDevice& display) {
+status_t HWComposer::prepare(DisplayDevice& display,
+        std::vector<CompositionInfo>& compositionData) {
     ATRACE_CALL();
 
     Mutex::Autolock _l(mDisplayLock);
@@ -491,18 +494,20 @@ status_t HWComposer::prepare(DisplayDevice& display) {
 
     displayData.hasClientComposition = false;
     displayData.hasDeviceComposition = false;
-    for (auto& layer : display.getVisibleLayersSortedByZ()) {
-        auto hwcLayer = layer->getHwcLayer(displayId);
+    for (auto& compositionInfo : compositionData) {
+        auto hwcLayer = compositionInfo.hwc.hwcLayer;
 
-        if (changedTypes.count(hwcLayer) != 0) {
+        if (changedTypes.count(&*hwcLayer) != 0) {
             // We pass false so we only update our state and don't call back
             // into the HWC device
-            validateChange(layer->getCompositionType(displayId),
-                    changedTypes[hwcLayer]);
-            layer->setCompositionType(displayId, changedTypes[hwcLayer], false);
+            validateChange(compositionInfo.compositionType,
+                    changedTypes[&*hwcLayer]);
+            compositionInfo.compositionType = changedTypes[&*hwcLayer];
+            compositionInfo.layer->mLayer->setCompositionType(displayId,
+                    compositionInfo.compositionType, false);
         }
 
-        switch (layer->getCompositionType(displayId)) {
+        switch (compositionInfo.compositionType) {
             case HWC2::Composition::Client:
                 displayData.hasClientComposition = true;
                 break;
@@ -516,17 +521,19 @@ status_t HWComposer::prepare(DisplayDevice& display) {
                 break;
         }
 
-        if (layerRequests.count(hwcLayer) != 0 &&
-                layerRequests[hwcLayer] ==
+        if (layerRequests.count(&*hwcLayer) != 0 &&
+                layerRequests[&*hwcLayer] ==
                         HWC2::LayerRequest::ClearClientTarget) {
-            layer->setClearClientTarget(displayId, true);
+            compositionInfo.hwc.clearClientTarget = true;
+            compositionInfo.layer->mLayer->setClearClientTarget(displayId, true);
         } else {
-            if (layerRequests.count(hwcLayer) != 0) {
+            if (layerRequests.count(&*hwcLayer) != 0) {
                 LOG_DISPLAY_ERROR(displayId,
-                                  ("Unknown layer request " + to_string(layerRequests[hwcLayer]))
+                                  ("Unknown layer request " + to_string(layerRequests[&*hwcLayer]))
                                           .c_str());
             }
-            layer->setClearClientTarget(displayId, false);
+            compositionInfo.hwc.clearClientTarget = false;
+            compositionInfo.layer->mLayer->setClearClientTarget(displayId, false);
         }
     }
 
@@ -808,6 +815,17 @@ HWComposer::getHwcDisplayId(int32_t displayId) const {
         return {};
     }
     return mDisplayData[displayId].hwcDisplay->getId();
+}
+
+void HWComposer::setDisplayFrequencyScaleParameters(
+        HWC2::Device::FrequencyScaler frequencyScaler)
+{
+    mHwcDevice->setDisplayFrequencyScaleParameters(frequencyScaler);
+}
+
+HWC2::Device::FrequencyScaler HWComposer::getDisplayFrequencyScaleParameters()
+{
+    return mHwcDevice->getDisplayFrequencyScaleParameters();
 }
 
 } // namespace android

@@ -19,7 +19,7 @@
 #include <ui/Region.h>
 
 namespace android {
-namespace RE {
+namespace renderengine {
 namespace mock {
 
 // Explicit default instantiation is recommended.
@@ -32,6 +32,9 @@ Surface::~Surface() = default;
 Image::Image() = default;
 Image::~Image() = default;
 
+Framebuffer::Framebuffer() = default;
+Framebuffer::~Framebuffer() = default;
+
 } // namespace mock
-} // namespace RE
+} // namespace renderengine
 } // namespace android

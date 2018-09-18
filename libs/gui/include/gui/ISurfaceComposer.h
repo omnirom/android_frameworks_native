@@ -157,9 +157,6 @@ public:
     virtual status_t getDisplayStats(const sp<IBinder>& display,
             DisplayStatInfo* stats) = 0;
 
-    /* returns display viewport information of the given display */
-    virtual status_t getDisplayViewport(const sp<IBinder>& display, Rect* outViewport) = 0;
-
     /* indicates which of the configurations returned by getDisplayInfo is
      * currently active */
     virtual int getActiveConfig(const sp<IBinder>& display) = 0;
@@ -174,8 +171,25 @@ public:
     virtual status_t setActiveColorMode(const sp<IBinder>& display,
             ui::ColorMode colorMode) = 0;
 
-    /* Capture the specified screen. requires READ_FRAME_BUFFER permission
-     * This function will fail if there is a secure window on screen.
+    /**
+     * Capture the specified screen. This requires READ_FRAME_BUFFER
+     * permission.  This function will fail if there is a secure window on
+     * screen.
+     *
+     * This function can capture a subregion (the source crop) of the screen.
+     * The subregion can be optionally rotated.  It will also be scaled to
+     * match the size of the output buffer.
+     *
+     * At the moment, sourceCrop is ignored and is always set to the visible
+     * region (projected display viewport) of the screen.
+     *
+     * reqWidth and reqHeight specifies the size of the buffer.  When either
+     * of them is 0, they are set to the size of the logical display viewport.
+     *
+     * When useIdentityTransform is true, layer transformations are disabled.
+     *
+     * rotation specifies the rotation of the source crop (and the pixels in
+     * it) around its center.
      */
     virtual status_t captureScreen(const sp<IBinder>& display, sp<GraphicBuffer>* outBuffer,
                                    Rect sourceCrop, uint32_t reqWidth, uint32_t reqHeight,
@@ -217,6 +231,9 @@ public:
      * Requires the ACCESS_SURFACE_FLINGER permission.
      */
     virtual status_t getLayerDebugInfo(std::vector<LayerDebugInfo>* outLayers) const = 0;
+
+    virtual status_t getCompositionPreference(ui::Dataspace* dataSpace,
+                                              ui::PixelFormat* pixelFormat) const = 0;
 };
 
 // ----------------------------------------------------------------------------
@@ -254,7 +271,7 @@ public:
         INJECT_VSYNC,
         GET_LAYER_DEBUG_INFO,
         CREATE_SCOPED_CONNECTION,
-        GET_DISPLAY_VIEWPORT
+        GET_COMPOSITION_PREFERENCE,
     };
 
     virtual status_t onTransact(uint32_t code, const Parcel& data,

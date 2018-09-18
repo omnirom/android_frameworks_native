@@ -24,13 +24,12 @@
 #include "FrameTracker.h"
 #include "LayerVector.h"
 #include "MonitoredProducer.h"
-#include "RenderEngine/Mesh.h"
-#include "RenderEngine/Texture.h"
 #include "SurfaceFlinger.h"
 
 #include <gui/ISurfaceComposerClient.h>
 #include <gui/LayerState.h>
-
+#include <renderengine/Mesh.h>
+#include <renderengine/Texture.h>
 #include <ui/FrameStats.h>
 #include <ui/GraphicBuffer.h>
 #include <ui/PixelFormat.h>
@@ -79,7 +78,6 @@ public:
     // onDraw - draws the surface.
     void onDraw(const RenderArea& renderArea, const Region& clip,
                 bool useIdentityTransform) override;
-    void drawNow(const RenderArea& renderArea, bool useIdentityTransform);
 
     bool isHdrY410() const override;
 
@@ -185,7 +183,7 @@ private:
     bool mBufferLatched; // TODO: Use mActiveBuffer?
 
     // The texture used to draw the layer in GLES composition mode
-    mutable Texture mTexture;
+    mutable renderengine::Texture mTexture;
 
     bool mRefreshPending;
 };

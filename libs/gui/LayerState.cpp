@@ -14,6 +14,8 @@
  * limitations under the License.
  */
 
+#define LOG_TAG "LayerState"
+
 #include <utils/Errors.h>
 #include <binder/Parcel.h>
 #include <gui/ISurfaceComposerClient.h>
@@ -38,7 +40,6 @@ status_t layer_state_t::write(Parcel& output) const
     *reinterpret_cast<layer_state_t::matrix22_t *>(
             output.writeInplace(sizeof(layer_state_t::matrix22_t))) = matrix;
     output.write(crop_legacy);
-    output.write(finalCrop_legacy);
     output.writeStrongBinder(barrierHandle_legacy);
     output.writeStrongBinder(reparentHandle);
     output.writeUint64(frameNumber_legacy);
@@ -99,7 +100,6 @@ status_t layer_state_t::read(const Parcel& input)
         return BAD_VALUE;
     }
     input.read(crop_legacy);
-    input.read(finalCrop_legacy);
     barrierHandle_legacy = input.readStrongBinder();
     reparentHandle = input.readStrongBinder();
     frameNumber_legacy = input.readUint64();
@@ -248,10 +248,6 @@ void layer_state_t::merge(const layer_state_t& other) {
         barrierGbp_legacy = other.barrierGbp_legacy;
         frameNumber_legacy = other.frameNumber_legacy;
     }
-    if (other.what & eFinalCropChanged_legacy) {
-        what |= eFinalCropChanged_legacy;
-        finalCrop_legacy = other.finalCrop_legacy;
-    }
     if (other.what & eOverrideScalingModeChanged) {
         what |= eOverrideScalingModeChanged;
         overrideScalingMode = other.overrideScalingMode;
@@ -317,6 +313,12 @@ void layer_state_t::merge(const layer_state_t& other) {
     if (other.what & eSidebandStreamChanged) {
         what |= eSidebandStreamChanged;
         sidebandStream = other.sidebandStream;
+    }
+
+    if ((other.what & what) != other.what) {
+        ALOGE("Unmerged SurfaceComposer Transaction properties. LayerState::merge needs updating? "
+              "other.what=0x%X what=0x%X",
+              other.what, what);
     }
 }
 

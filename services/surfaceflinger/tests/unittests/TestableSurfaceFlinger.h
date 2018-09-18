@@ -17,13 +17,14 @@
 #pragma once
 
 #include "DisplayDevice.h"
+#include "Layer.h"
 #include "SurfaceFlinger.h"
 
 namespace android {
 
 class EventThread;
 
-namespace RE {
+namespace renderengine {
 class RenderEngine;
 }
 
@@ -36,7 +37,7 @@ public:
     // Extend this as needed for accessing SurfaceFlinger private (and public)
     // functions.
 
-    void setupRenderEngine(std::unique_ptr<RE::RenderEngine> renderEngine) {
+    void setupRenderEngine(std::unique_ptr<renderengine::RenderEngine> renderEngine) {
         mFlinger->getBE().mRenderEngine = std::move(renderEngine);
     }
 
@@ -55,6 +56,21 @@ public:
     }
 
     using HotplugEvent = SurfaceFlinger::HotplugEvent;
+
+    auto& mutableLayerCurrentState(sp<Layer> layer) { return layer->mCurrentState; }
+    auto& mutableLayerDrawingState(sp<Layer> layer) { return layer->mDrawingState; }
+
+    void setLayerSidebandStream(sp<Layer> layer, sp<NativeHandle> sidebandStream) {
+        layer->getBE().compositionInfo.hwc.sidebandStream = sidebandStream;
+    }
+
+    void setLayerCompositionType(sp<Layer> layer, HWC2::Composition type) {
+        layer->getBE().mHwcLayers[DisplayDevice::DISPLAY_PRIMARY].compositionType = type;
+    };
+
+    void setLayerPotentialCursor(sp<Layer> layer, bool potentialCursor) {
+        layer->mPotentialCursor = potentialCursor;
+    }
 
     /* ------------------------------------------------------------------------
      * Forwarding for functions being tested
@@ -96,6 +112,21 @@ public:
         return mFlinger->setPowerModeInternal(display, mode, stateLockHeld);
     }
 
+    auto onMessageReceived(int32_t what) { return mFlinger->onMessageReceived(what); }
+
+    auto captureScreenImplLocked(const RenderArea& renderArea,
+                                 TraverseLayersFunction traverseLayers, ANativeWindowBuffer* buffer,
+                                 bool useIdentityTransform, bool forSystem, int* outSyncFd) {
+        return mFlinger->captureScreenImplLocked(renderArea, traverseLayers, buffer,
+                                                 useIdentityTransform, forSystem, outSyncFd);
+    }
+
+    auto traverseLayersInDisplay(const sp<const DisplayDevice>& display, int32_t minLayerZ,
+                                 int32_t maxLayerZ, const LayerVector::Visitor& visitor) {
+        return mFlinger->SurfaceFlinger::traverseLayersInDisplay(display, minLayerZ, maxLayerZ,
+                                                                 visitor);
+    }
+
     /* ------------------------------------------------------------------------
      * Read-only access to private data to assert post-conditions.
      */
@@ -113,22 +144,25 @@ public:
      */
 
     auto& mutableHasWideColorDisplay() { return SurfaceFlinger::hasWideColorDisplay; }
+    auto& mutablePrimaryDisplayOrientation() { return SurfaceFlinger::primaryDisplayOrientation; }
     auto& mutableUseColorManagement() { return SurfaceFlinger::useColorManagement; }
 
-    auto& mutableDisplayTokens() { return mFlinger->mDisplayTokens; }
     auto& mutableCurrentState() { return mFlinger->mCurrentState; }
-    auto& mutableDisplays() { return mFlinger->mDisplays; }
     auto& mutableDisplayColorSetting() { return mFlinger->mDisplayColorSetting; }
+    auto& mutableDisplays() { return mFlinger->mDisplays; }
+    auto& mutableDisplayTokens() { return mFlinger->mDisplayTokens; }
     auto& mutableDrawingState() { return mFlinger->mDrawingState; }
     auto& mutableEventControlThread() { return mFlinger->mEventControlThread; }
     auto& mutableEventQueue() { return mFlinger->mEventQueue; }
     auto& mutableEventThread() { return mFlinger->mEventThread; }
+    auto& mutableGeometryInvalid() { return mFlinger->mGeometryInvalid; }
     auto& mutableHWVsyncAvailable() { return mFlinger->mHWVsyncAvailable; }
     auto& mutableInterceptor() { return mFlinger->mInterceptor; }
     auto& mutableMainThreadId() { return mFlinger->mMainThreadId; }
     auto& mutablePendingHotplugEvents() { return mFlinger->mPendingHotplugEvents; }
     auto& mutablePrimaryDispSync() { return mFlinger->mPrimaryDispSync; }
     auto& mutablePrimaryHWVsyncEnabled() { return mFlinger->mPrimaryHWVsyncEnabled; }
+    auto& mutableTexturePool() { return mFlinger->mTexturePool; }
     auto& mutableTransactionFlags() { return mFlinger->mTransactionFlags; }
     auto& mutableUseHwcVirtualDisplays() { return mFlinger->mUseHwcVirtualDisplays; }
 
@@ -174,6 +208,7 @@ public:
 
         auto& mutableIsConnected() { return this->mIsConnected; }
         auto& mutableConfigs() { return this->mConfigs; }
+        auto& mutableLayers() { return this->mLayers; }
     };
 
     class FakeHwcDisplayInjector {
@@ -313,7 +348,7 @@ public:
             return *this;
         }
 
-        auto& setRenderSurface(std::unique_ptr<RE::Surface> renderSurface) {
+        auto& setRenderSurface(std::unique_ptr<renderengine::Surface> renderSurface) {
             mRenderSurface = std::move(renderSurface);
             return *this;
         }
@@ -323,13 +358,25 @@ public:
             return *this;
         }
 
+        auto& setDisplaySize(int width, int height) {
+            mWidth = width;
+            mHeight = height;
+            return *this;
+        }
+
+        auto& setPowerMode(int mode) {
+            mPowerMode = mode;
+            return *this;
+        }
+
         sp<DisplayDevice> inject() {
             std::unordered_map<ui::ColorMode, std::vector<ui::RenderIntent>> hdrAndRenderIntents;
             sp<DisplayDevice> device =
                     new DisplayDevice(mFlinger.mFlinger.get(), mType, mDisplayId, mSecure,
                                       mDisplayToken, mNativeWindow, mDisplaySurface,
-                                      std::move(mRenderSurface), 0, 0, false, HdrCapabilities(), 0,
-                                      hdrAndRenderIntents, HWC_POWER_MODE_NORMAL);
+                                      std::move(mRenderSurface), mWidth, mHeight,
+                                      DisplayState::eOrientationDefault, false, HdrCapabilities(),
+                                      0, hdrAndRenderIntents, mPowerMode);
             mFlinger.mutableDisplays().emplace(mDisplayToken, device);
 
             DisplayDeviceState state;
@@ -352,8 +399,11 @@ public:
         const int32_t mDisplayId;
         sp<ANativeWindow> mNativeWindow;
         sp<DisplaySurface> mDisplaySurface;
-        std::unique_ptr<RE::Surface> mRenderSurface;
+        std::unique_ptr<renderengine::Surface> mRenderSurface;
         bool mSecure = false;
+        int mWidth = 0;
+        int mHeight = 0;
+        int mPowerMode = HWC_POWER_MODE_NORMAL;
     };
 
     sp<SurfaceFlinger> mFlinger = new SurfaceFlinger(SurfaceFlinger::SkipInitialization);

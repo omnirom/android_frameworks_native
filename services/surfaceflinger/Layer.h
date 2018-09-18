@@ -19,23 +19,26 @@
 
 #include <sys/types.h>
 
-#include <utils/RefBase.h>
-#include <utils/String8.h>
-#include <utils/Timers.h>
-
+#include <gui/BufferQueue.h>
+#include <gui/ISurfaceComposerClient.h>
+#include <gui/LayerState.h>
+#include <layerproto/LayerProtoHeader.h>
+#include <math/vec4.h>
+#include <renderengine/Mesh.h>
+#include <renderengine/Texture.h>
 #include <ui/FloatRect.h>
 #include <ui/FrameStats.h>
 #include <ui/GraphicBuffer.h>
 #include <ui/PixelFormat.h>
 #include <ui/Region.h>
 #include <ui/Transform.h>
+#include <utils/RefBase.h>
+#include <utils/String8.h>
+#include <utils/Timers.h>
 
-#include <gui/BufferQueue.h>
-#include <gui/ISurfaceComposerClient.h>
-#include <gui/LayerState.h>
-
-#include <list>
 #include <cstdint>
+#include <list>
+#include <vector>
 
 #include "Client.h"
 #include "FrameTracker.h"
@@ -45,15 +48,9 @@
 #include "SurfaceFlinger.h"
 #include "TimeStats/TimeStats.h"
 
-#include <layerproto/LayerProtoHeader.h>
 #include "DisplayHardware/HWComposer.h"
 #include "DisplayHardware/HWComposerBufferCache.h"
 #include "RenderArea.h"
-#include "RenderEngine/Mesh.h"
-#include "RenderEngine/Texture.h"
-
-#include <math/vec4.h>
-#include <vector>
 
 using namespace android::surfaceflinger;
 
@@ -79,6 +76,7 @@ class Layer : public virtual RefBase {
     static int32_t sSequence;
 
 public:
+    friend class LayerBE;
     LayerBE& getBE() { return mBE; }
     LayerBE& getBE() const { return mBE; }
     mutable bool contentDirty;
@@ -130,10 +128,6 @@ public:
         // Crop is expressed in layer space coordinate.
         Rect crop_legacy;
         Rect requestedCrop_legacy;
-
-        // finalCrop is expressed in display space coordinate.
-        Rect finalCrop_legacy;
-        Rect requestedFinalCrop_legacy;
 
         // If set, defers this state update until the identified Layer
         // receives a frame with the given frameNumber
@@ -227,8 +221,6 @@ public:
     virtual bool setPosition(float x, float y, bool immediate);
     // Buffer space
     virtual bool setCrop_legacy(const Rect& crop, bool immediate);
-    // Parent buffer space/display space
-    virtual bool setFinalCrop_legacy(const Rect& crop, bool immediate);
 
     // TODO(b/38182121): Could we eliminate the various latching modes by
     // using the layer hierarchy?
@@ -286,7 +278,8 @@ public:
         return getLayerStack() == layerStack && (!mPrimaryDisplayOnly || isPrimaryDisplay);
     }
 
-    void computeGeometry(const RenderArea& renderArea, Mesh& mesh, bool useIdentityTransform) const;
+    void computeGeometry(const RenderArea& renderArea, renderengine::Mesh& mesh,
+                         bool useIdentityTransform) const;
     FloatRect computeBounds(const Region& activeTransparentRegion) const;
     FloatRect computeBounds() const;
 
@@ -355,7 +348,6 @@ public:
         return s.activeTransparentRegion_legacy;
     }
     virtual Rect getCrop(const Layer::State& s) const { return s.crop_legacy; }
-    virtual Rect getFinalCrop(const Layer::State& s) const { return s.finalCrop_legacy; }
 
 protected:
     /*
@@ -420,17 +412,6 @@ public:
      */
     void draw(const RenderArea& renderArea, const Region& clip);
     void draw(const RenderArea& renderArea, bool useIdentityTransform);
-    void draw(const RenderArea& renderArea);
-
-    /*
-     * drawNow uses the renderEngine to draw the layer.  This is different than the
-     * draw function as with the FE/BE split, the draw function runs in the FE and
-     * sets up state for the BE to do the actual drawing.  drawNow is used to tell
-     * the layer to skip the state setup and just go ahead and draw the layer.  This
-     * is used for screen captures which happens separately from the frame
-     * compositing path.
-     */
-    virtual void drawNow(const RenderArea& renderArea, bool useIdentityTransform) = 0;
 
     /*
      * doTransaction - process the transaction. This is a good place to figure
@@ -527,11 +508,7 @@ public:
     }
 
     // -----------------------------------------------------------------------
-
     void clearWithOpenGL(const RenderArea& renderArea) const;
-    void setFiltering(bool filtering);
-    bool getFiltering() const;
-
 
     inline const State& getDrawingState() const { return mDrawingState; }
     inline const State& getCurrentState() const { return mCurrentState; }
@@ -618,6 +595,9 @@ protected:
     };
 
     friend class impl::SurfaceInterceptor;
+
+    // For unit tests
+    friend class TestableSurfaceFlinger;
 
     void commitTransaction(const State& stateToCommit);
 
@@ -748,8 +728,6 @@ protected:
     int32_t mOverrideScalingMode;
     std::atomic<uint64_t> mCurrentFrameNumber;
     bool mFrameLatencyNeeded;
-    // Whether filtering is forced on or not
-    bool mFiltering;
     // Whether filtering is needed b/c of the drawingstate
     bool mNeedsFiltering;
 

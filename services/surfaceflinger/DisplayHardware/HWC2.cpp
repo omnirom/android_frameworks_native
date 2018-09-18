@@ -185,6 +185,7 @@ Error Device::onHotplug(hwc2_display_t displayId, Connection connection) {
 
         auto newDisplay = std::make_unique<Display>(
                 *mComposer.get(), mPowerAdvisor, mCapabilities, displayId, displayType);
+        newDisplay->setFrequencyScaleParameters(mFrequencyScaler);
         newDisplay->setConnected(true);
         mDisplays.emplace(displayId, std::move(newDisplay));
     } else if (connection == Connection::Disconnected) {
@@ -223,6 +224,14 @@ void Device::loadCapabilities()
 Error Device::flushCommands()
 {
     return static_cast<Error>(mComposer->executeCommands());
+}
+
+void Device::setDisplayFrequencyScaleParameters(Device::FrequencyScaler frequencyScaler) {
+    mFrequencyScaler = frequencyScaler;
+}
+
+Device::FrequencyScaler Device::getDisplayFrequencyScaleParameters() {
+    return mFrequencyScaler;
 }
 
 // Display methods
@@ -264,6 +273,7 @@ Display::Config::Config(Display& display, hwc2_config_t id)
     mWidth(-1),
     mHeight(-1),
     mVsyncPeriod(-1),
+    mFrequencyScaler(display.mFrequencyScaler),
     mDpiX(-1),
     mDpiY(-1) {}
 
@@ -703,6 +713,10 @@ void Display::setConnected(bool connected) {
     mIsConnected = connected;
 }
 
+void Display::setFrequencyScaleParameters(Device::FrequencyScaler frequencyScaler) {
+    mFrequencyScaler = frequencyScaler;
+}
+
 int32_t Display::getAttribute(hwc2_config_t configId, Attribute attribute)
 {
     int32_t value = 0;
@@ -769,7 +783,8 @@ Layer::Layer(android::Hwc2::Composer& composer, const std::unordered_set<Capabil
   : mComposer(composer),
     mCapabilities(capabilities),
     mDisplayId(displayId),
-    mId(layerId)
+    mId(layerId),
+    mColorMatrix(android::mat4())
 {
     ALOGV("Created layer %" PRIu64 " on display %" PRIu64, layerId, displayId);
 }
@@ -974,6 +989,16 @@ Error Layer::setInfo(uint32_t type, uint32_t appId)
 {
   auto intError = mComposer.setLayerInfo(mDisplayId, mId, type, appId);
   return static_cast<Error>(intError);
+}
+
+// Composer HAL 2.3
+Error Layer::setColorTransform(const android::mat4& matrix) {
+    if (matrix == mColorMatrix) {
+        return Error::None;
+    }
+    mColorMatrix = matrix;
+    auto intError = mComposer.setLayerColorTransform(mDisplayId, mId, matrix.asArray());
+    return static_cast<Error>(intError);
 }
 
 } // namespace HWC2
