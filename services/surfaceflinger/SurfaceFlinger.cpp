@@ -3093,6 +3093,12 @@ bool SurfaceFlinger::doComposeSurfaces(const sp<const DisplayDevice>& displayDev
                     break;
                 }
                 case HWC2::Composition::Client: {
+                    if ((hwcId < 0) &&
+                        (DisplayUtils::getInstance()->skipColorLayer(layer->getTypeId()))) {
+                        // We are not using h/w composer.
+                        // Skip color (dim) layer for WFD direct streaming.
+                        continue;
+                    }
                     // switch color matrices lazily
                     if (layer->isLegacyDataSpace() && needsLegacyColorMatrix) {
                         if (!legacyColorMatrixApplied) {
