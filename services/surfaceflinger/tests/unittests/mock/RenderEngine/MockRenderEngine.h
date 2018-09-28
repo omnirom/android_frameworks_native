@@ -37,6 +37,8 @@ public:
     MOCK_METHOD0(createImage, std::unique_ptr<RE::Image>());
     MOCK_CONST_METHOD0(primeCache, void());
     MOCK_METHOD1(dump, void(String8&));
+    MOCK_CONST_METHOD0(useNativeFenceSync, bool());
+    MOCK_CONST_METHOD0(useWaitSync, bool());
     MOCK_CONST_METHOD0(isCurrent, bool());
     MOCK_METHOD1(setCurrentSurface, bool(const RE::Surface&));
     MOCK_METHOD0(resetCurrentSurface, void());
@@ -54,7 +56,7 @@ public:
     MOCK_METHOD5(readPixels, void(size_t, size_t, size_t, size_t, uint32_t*));
     MOCK_CONST_METHOD0(checkErrors, void());
     MOCK_METHOD6(setViewportAndProjection,
-                 void(size_t, size_t, Rect, size_t, bool, Transform::orientation_flags));
+                 void(size_t, size_t, Rect, size_t, bool, ui::Transform::orientation_flags));
     MOCK_METHOD4(setupLayerBlending, void(bool, bool, bool, const half4&));
     MOCK_METHOD1(setupLayerTexturing, void(const Texture&));
     MOCK_METHOD0(setupLayerBlackedOut, void());

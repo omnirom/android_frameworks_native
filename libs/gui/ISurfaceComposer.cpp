@@ -116,20 +116,20 @@ public:
         data.writeInt32(maxLayerZ);
         data.writeInt32(static_cast<int32_t>(useIdentityTransform));
         data.writeInt32(static_cast<int32_t>(rotation));
-        status_t err = remote()->transact(BnSurfaceComposer::CAPTURE_SCREEN, data, &reply);
-
-        if (err != NO_ERROR) {
-            return err;
+        status_t result = remote()->transact(BnSurfaceComposer::CAPTURE_SCREEN, data, &reply);
+        if (result != NO_ERROR) {
+            ALOGE("captureScreen failed to transact: %d", result);
+            return result;
         }
-
-        err = reply.readInt32();
-        if (err != NO_ERROR) {
-            return err;
+        result = reply.readInt32();
+        if (result != NO_ERROR) {
+            ALOGE("captureScreen failed to readInt32: %d", result);
+            return result;
         }
 
         *outBuffer = new GraphicBuffer();
         reply.read(**outBuffer);
-        return err;
+        return result;
     }
 
     virtual status_t captureLayers(const sp<IBinder>& layerHandleBinder,
@@ -141,21 +141,20 @@ public:
         data.write(sourceCrop);
         data.writeFloat(frameScale);
         data.writeBool(childrenOnly);
-        status_t err = remote()->transact(BnSurfaceComposer::CAPTURE_LAYERS, data, &reply);
-
-        if (err != NO_ERROR) {
-            return err;
+        status_t result = remote()->transact(BnSurfaceComposer::CAPTURE_LAYERS, data, &reply);
+        if (result != NO_ERROR) {
+            ALOGE("captureLayers failed to transact: %d", result);
+            return result;
         }
-
-        err = reply.readInt32();
-        if (err != NO_ERROR) {
-            return err;
+        result = reply.readInt32();
+        if (result != NO_ERROR) {
+            ALOGE("captureLayers failed to readInt32: %d", result);
+            return result;
         }
-
         *outBuffer = new GraphicBuffer();
         reply.read(**outBuffer);
 
-        return err;
+        return result;
     }
 
     virtual bool authenticateSurfaceTexture(
@@ -332,6 +331,34 @@ public:
         return result;
     }
 
+    virtual status_t getDisplayViewport(const sp<IBinder>& display, Rect* outViewport) {
+        Parcel data, reply;
+        status_t result = data.writeInterfaceToken(ISurfaceComposer::getInterfaceDescriptor());
+        if (result != NO_ERROR) {
+            ALOGE("getDisplayViewport failed to writeInterfaceToken: %d", result);
+            return result;
+        }
+        result = data.writeStrongBinder(display);
+        if (result != NO_ERROR) {
+            ALOGE("getDisplayViewport failed to writeStrongBinder: %d", result);
+            return result;
+        }
+        result = remote()->transact(BnSurfaceComposer::GET_DISPLAY_VIEWPORT, data, &reply);
+        if (result != NO_ERROR) {
+            ALOGE("getDisplayViewport failed to transact: %d", result);
+            return result;
+        }
+        result = reply.readInt32();
+        if (result == NO_ERROR) {
+            result = reply.read(*outViewport);
+            if (result != NO_ERROR) {
+                ALOGE("getDisplayViewport failed to read: %d", result);
+                return result;
+            }
+        }
+        return result;
+    }
+
     virtual int getActiveConfig(const sp<IBinder>& display)
     {
         Parcel data, reply;
@@ -344,10 +371,26 @@ public:
     virtual status_t setActiveConfig(const sp<IBinder>& display, int id)
     {
         Parcel data, reply;
-        data.writeInterfaceToken(ISurfaceComposer::getInterfaceDescriptor());
-        data.writeStrongBinder(display);
-        data.writeInt32(id);
-        remote()->transact(BnSurfaceComposer::SET_ACTIVE_CONFIG, data, &reply);
+        status_t result = data.writeInterfaceToken(ISurfaceComposer::getInterfaceDescriptor());
+        if (result != NO_ERROR) {
+            ALOGE("setActiveConfig failed to writeInterfaceToken: %d", result);
+            return result;
+        }
+        result = data.writeStrongBinder(display);
+        if (result != NO_ERROR) {
+            ALOGE("setActiveConfig failed to writeStrongBinder: %d", result);
+            return result;
+        }
+        result = data.writeInt32(id);
+        if (result != NO_ERROR) {
+            ALOGE("setActiveConfig failed to writeInt32: %d", result);
+            return result;
+        }
+        result = remote()->transact(BnSurfaceComposer::SET_ACTIVE_CONFIG, data, &reply);
+        if (result != NO_ERROR) {
+            ALOGE("setActiveConfig failed to transact: %d", result);
+            return result;
+        }
         return reply.readInt32();
     }
 
@@ -429,8 +472,16 @@ public:
 
     virtual status_t clearAnimationFrameStats() {
         Parcel data, reply;
-        data.writeInterfaceToken(ISurfaceComposer::getInterfaceDescriptor());
-        remote()->transact(BnSurfaceComposer::CLEAR_ANIMATION_FRAME_STATS, data, &reply);
+        status_t result = data.writeInterfaceToken(ISurfaceComposer::getInterfaceDescriptor());
+        if (result != NO_ERROR) {
+            ALOGE("clearAnimationFrameStats failed to writeInterfaceToken: %d", result);
+            return result;
+        }
+        result = remote()->transact(BnSurfaceComposer::CLEAR_ANIMATION_FRAME_STATS, data, &reply);
+        if (result != NO_ERROR) {
+            ALOGE("clearAnimationFrameStats failed to transact: %d", result);
+            return result;
+        }
         return reply.readInt32();
     }
 
@@ -721,6 +772,26 @@ status_t BnSurfaceComposer::onTransact(
             if (result == NO_ERROR) {
                 memcpy(reply->writeInplace(sizeof(DisplayStatInfo)),
                         &stats, sizeof(DisplayStatInfo));
+            }
+            return NO_ERROR;
+        }
+        case GET_DISPLAY_VIEWPORT: {
+            CHECK_INTERFACE(ISurfaceComposer, data, reply);
+            Rect outViewport;
+            sp<IBinder> display = nullptr;
+            status_t result = data.readStrongBinder(&display);
+            if (result != NO_ERROR) {
+                ALOGE("getDisplayViewport failed to readStrongBinder: %d", result);
+                return result;
+            }
+            result = getDisplayViewport(display, &outViewport);
+            result = reply->writeInt32(result);
+            if (result == NO_ERROR) {
+                result = reply->write(outViewport);
+                if (result != NO_ERROR) {
+                    ALOGE("getDisplayViewport failed to write: %d", result);
+                    return result;
+                }
             }
             return NO_ERROR;
         }

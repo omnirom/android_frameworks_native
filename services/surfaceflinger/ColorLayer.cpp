@@ -43,7 +43,7 @@ ColorLayer::ColorLayer(SurfaceFlinger* flinger, const sp<Client>& client, const 
 }
 
 void ColorLayer::onDraw(const RenderArea& renderArea, const Region& /* clip */,
-                        bool useIdentityTransform) const {
+                        bool useIdentityTransform) {
     half4 color = getColor();
     if (color.a > 0) {
         computeGeometry(renderArea, getBE().mMesh, useIdentityTransform);
@@ -54,7 +54,7 @@ void ColorLayer::onDraw(const RenderArea& renderArea, const Region& /* clip */,
     }
 }
 
-void ColorLayer::drawNow(const RenderArea& renderArea, bool useIdentityTransform) const {
+void ColorLayer::drawNow(const RenderArea& renderArea, bool useIdentityTransform) {
     CompositionInfo& compositionInfo = getBE().compositionInfo;
     auto& engine(mFlinger->getRenderEngine());
 
@@ -72,21 +72,52 @@ bool ColorLayer::isVisible() const {
 }
 
 void ColorLayer::setPerFrameData(const sp<const DisplayDevice>& display) {
-    const Transform& tr = display->getTransform();
+    const ui::Transform& tr = display->getTransform();
     const auto& viewport = display->getViewport();
     Region visible = tr.transform(visibleRegion.intersect(viewport));
     const auto displayId = display->getId();
+    if (!hasHwcLayer(displayId)) {
+        ALOGE("[%s] failed to setPerFrameData: no HWC layer found (%d)",
+              mName.string(), displayId);
+        return;
+    }
+    auto& hwcInfo = getBE().mHwcLayers[displayId];
+    auto& hwcLayer = hwcInfo.layer;
+    auto error = hwcLayer->setVisibleRegion(visible);
+    if (error != HWC2::Error::None) {
+        ALOGE("[%s] Failed to set visible region: %s (%d)", mName.string(),
+              to_string(error).c_str(), static_cast<int32_t>(error));
+        visible.dump(LOG_TAG);
+    }
     getBE().compositionInfo.hwc.visibleRegion = visible;
-    getBE().compositionInfo.hwc.dataspace = mCurrentDataSpace;
 
     setCompositionType(displayId, HWC2::Composition::SolidColor);
 
+    error = hwcLayer->setDataspace(mCurrentDataSpace);
+    if (error != HWC2::Error::None) {
+        ALOGE("[%s] Failed to set dataspace %d: %s (%d)", mName.string(), mCurrentDataSpace,
+              to_string(error).c_str(), static_cast<int32_t>(error));
+    }
+    getBE().compositionInfo.hwc.dataspace = mCurrentDataSpace;
+
     half4 color = getColor();
+    error = hwcLayer->setColor({static_cast<uint8_t>(std::round(255.0f * color.r)),
+                                static_cast<uint8_t>(std::round(255.0f * color.g)),
+                                static_cast<uint8_t>(std::round(255.0f * color.b)), 255});
+    if (error != HWC2::Error::None) {
+        ALOGE("[%s] Failed to set color: %s (%d)", mName.string(), to_string(error).c_str(),
+              static_cast<int32_t>(error));
+    }
     getBE().compositionInfo.hwc.color = { static_cast<uint8_t>(std::round(255.0f * color.r)),
                                       static_cast<uint8_t>(std::round(255.0f * color.g)),
                                       static_cast<uint8_t>(std::round(255.0f * color.b)), 255 };
 
     // Clear out the transform, because it doesn't make sense absent a source buffer
+    error = hwcLayer->setTransform(HWC2::Transform::None);
+    if (error != HWC2::Error::None) {
+        ALOGE("[%s] Failed to clear transform: %s (%d)", mName.string(), to_string(error).c_str(),
+              static_cast<int32_t>(error));
+    }
     getBE().compositionInfo.hwc.transform = HWC2::Transform::None;
 }
 

@@ -38,6 +38,7 @@
 #include <dlfcn.h>
 
 #include "DisplayUtils.h"
+#include "BufferQueueLayer.h"
 #include <ExSurfaceFlinger/ExBufferLayer.h>
 #include <ExSurfaceFlinger/ExSurfaceFlinger.h>
 #include <ExSurfaceFlinger/ExVirtualDisplaySurface.h>
@@ -77,7 +78,7 @@ BufferLayer* DisplayUtils::getBufferLayerInstance(SurfaceFlinger* flinger,
     if (sUseExtendedImpls) {
         return new ExBufferLayer(flinger, client, name, w, h, flags);
     } else {
-        return new BufferLayer(flinger, client, name, w, h, flags);
+        return new BufferQueueLayer(flinger, client, name, w, h, flags);
     }
 }
 

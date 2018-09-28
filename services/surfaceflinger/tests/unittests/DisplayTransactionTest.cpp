@@ -25,6 +25,7 @@
 #include "TestableSurfaceFlinger.h"
 #include "mock/DisplayHardware/MockComposer.h"
 #include "mock/DisplayHardware/MockDisplaySurface.h"
+#include "mock/MockDispSync.h"
 #include "mock/MockEventControlThread.h"
 #include "mock/MockEventThread.h"
 #include "mock/MockMessageQueue.h"
@@ -119,6 +120,7 @@ public:
     Hwc2::mock::Composer* mComposer = nullptr;
     mock::MessageQueue* mMessageQueue = new mock::MessageQueue();
     mock::SurfaceInterceptor* mSurfaceInterceptor = new mock::SurfaceInterceptor();
+    mock::DispSync* mPrimaryDispSync = new mock::DispSync();
 
     // These mocks are created only when expected to be created via a factory.
     sp<mock::GraphicBufferConsumer> mConsumer;
@@ -135,6 +137,7 @@ DisplayTransactionTest::DisplayTransactionTest() {
 
     // Default to no wide color display support configured
     mFlinger.mutableHasWideColorDisplay() = false;
+    mFlinger.mutableUseColorManagement() = false;
     mFlinger.mutableDisplayColorSetting() = DisplayColorSetting::UNMANAGED;
 
     // Default to using HWC virtual displays
@@ -154,6 +157,7 @@ DisplayTransactionTest::DisplayTransactionTest() {
     mFlinger.mutableEventQueue().reset(mMessageQueue);
     mFlinger.setupRenderEngine(std::unique_ptr<RE::RenderEngine>(mRenderEngine));
     mFlinger.mutableInterceptor().reset(mSurfaceInterceptor);
+    mFlinger.mutablePrimaryDispSync().reset(mPrimaryDispSync);
 
     injectMockComposer(0);
 }
@@ -452,6 +456,7 @@ struct WideColorSupportNotConfiguredVariant {
 
     static void injectConfigChange(DisplayTransactionTest* test) {
         test->mFlinger.mutableHasWideColorDisplay() = false;
+        test->mFlinger.mutableUseColorManagement() = false;
         test->mFlinger.mutableDisplayColorSetting() = DisplayColorSetting::UNMANAGED;
     }
 
@@ -470,6 +475,7 @@ struct WideColorP3ColorimetricSupportedVariant {
     static constexpr bool WIDE_COLOR_SUPPORTED = true;
 
     static void injectConfigChange(DisplayTransactionTest* test) {
+        test->mFlinger.mutableUseColorManagement() = true;
         test->mFlinger.mutableHasWideColorDisplay() = true;
         test->mFlinger.mutableDisplayColorSetting() = DisplayColorSetting::UNMANAGED;
     }
@@ -498,6 +504,7 @@ struct WideColorNotSupportedVariant {
     static constexpr bool WIDE_COLOR_SUPPORTED = false;
 
     static void injectConfigChange(DisplayTransactionTest* test) {
+        test->mFlinger.mutableUseColorManagement() = true;
         test->mFlinger.mutableHasWideColorDisplay() = true;
     }
 
@@ -577,7 +584,7 @@ struct HdrNotSupportedVariant {
 struct NonHwcPerFrameMetadataSupportVariant {
     static constexpr int PER_FRAME_METADATA_KEYS = 0;
     static void setupComposerCallExpectations(DisplayTransactionTest* test) {
-        EXPECT_CALL(*test->mComposer, getPerFrameMetadataKeys(_, _)).Times(0);
+        EXPECT_CALL(*test->mComposer, getPerFrameMetadataKeys(_)).Times(0);
     }
 };
 
@@ -585,9 +592,8 @@ template <typename Display>
 struct NoPerFrameMetadataSupportVariant {
     static constexpr int PER_FRAME_METADATA_KEYS = 0;
     static void setupComposerCallExpectations(DisplayTransactionTest* test) {
-        EXPECT_CALL(*test->mComposer, getPerFrameMetadataKeys(Display::HWC_DISPLAY_ID, _))
-                .WillOnce(DoAll(SetArgPointee<1>(std::vector<PerFrameMetadataKey>()),
-                                Return(Error::NONE)));
+        EXPECT_CALL(*test->mComposer, getPerFrameMetadataKeys(Display::HWC_DISPLAY_ID))
+                .WillOnce(Return(std::vector<PerFrameMetadataKey>()));
     }
 };
 
@@ -595,8 +601,8 @@ template <typename Display>
 struct Smpte2086PerFrameMetadataSupportVariant {
     static constexpr int PER_FRAME_METADATA_KEYS = HdrMetadata::Type::SMPTE2086;
     static void setupComposerCallExpectations(DisplayTransactionTest* test) {
-        EXPECT_CALL(*test->mComposer, getPerFrameMetadataKeys(Display::HWC_DISPLAY_ID, _))
-                .WillOnce(DoAll(SetArgPointee<1>(std::vector<PerFrameMetadataKey>({
+        EXPECT_CALL(*test->mComposer, getPerFrameMetadataKeys(Display::HWC_DISPLAY_ID))
+                .WillOnce(Return(std::vector<PerFrameMetadataKey>({
                                         PerFrameMetadataKey::DISPLAY_RED_PRIMARY_X,
                                         PerFrameMetadataKey::DISPLAY_RED_PRIMARY_Y,
                                         PerFrameMetadataKey::DISPLAY_GREEN_PRIMARY_X,
@@ -607,8 +613,7 @@ struct Smpte2086PerFrameMetadataSupportVariant {
                                         PerFrameMetadataKey::WHITE_POINT_Y,
                                         PerFrameMetadataKey::MAX_LUMINANCE,
                                         PerFrameMetadataKey::MIN_LUMINANCE,
-                                })),
-                                Return(Error::NONE)));
+                                })));
     }
 };
 
@@ -616,12 +621,11 @@ template <typename Display>
 struct Cta861_3_PerFrameMetadataSupportVariant {
     static constexpr int PER_FRAME_METADATA_KEYS = HdrMetadata::Type::CTA861_3;
     static void setupComposerCallExpectations(DisplayTransactionTest* test) {
-        EXPECT_CALL(*test->mComposer, getPerFrameMetadataKeys(Display::HWC_DISPLAY_ID, _))
-                .WillOnce(DoAll(SetArgPointee<1>(std::vector<PerFrameMetadataKey>({
+        EXPECT_CALL(*test->mComposer, getPerFrameMetadataKeys(Display::HWC_DISPLAY_ID))
+                .WillOnce(Return(std::vector<PerFrameMetadataKey>({
                                         PerFrameMetadataKey::MAX_CONTENT_LIGHT_LEVEL,
                                         PerFrameMetadataKey::MAX_FRAME_AVERAGE_LIGHT_LEVEL,
-                                })),
-                                Return(Error::NONE)));
+                                })));
     }
 };
 
@@ -657,7 +661,7 @@ using NonHwcVirtualDisplayCase =
 using SimpleHwcVirtualDisplayVariant = HwcVirtualDisplayVariant<1024, 768, Secure::TRUE>;
 using HwcVirtualDisplayCase =
         Case<SimpleHwcVirtualDisplayVariant, WideColorSupportNotConfiguredVariant,
-             HdrNotSupportedVariant<SimpleHwcVirtualDisplayVariant>,
+             HdrNotSupportedVariant<SimpleHwcVirtualDisplayVariant>, 
              NoPerFrameMetadataSupportVariant<SimpleHwcVirtualDisplayVariant>>;
 using WideColorP3ColorimetricDisplayCase =
         Case<PrimaryDisplayVariant, WideColorP3ColorimetricSupportedVariant<PrimaryDisplayVariant>,
@@ -964,6 +968,9 @@ TEST_F(DisplayTransactionTest, resetDisplayStateClearsState) {
 
     // The call clears the current render engine surface
     EXPECT_CALL(*mRenderEngine, resetCurrentSurface());
+
+    // The call ends any display resyncs
+    EXPECT_CALL(*mPrimaryDispSync, endResync()).Times(1);
 
     // --------------------------------------------------------------------
     // Invocation
@@ -1549,7 +1556,7 @@ TEST_F(HandleTransactionLockedTest, processesVirtualDisplayAddedWithNoSurface) {
 
     DisplayDeviceState info;
     info.type = Case::Display::TYPE;
-    info.isSecure =  static_cast<bool>(Case::Display::SECURE);
+    info.isSecure = static_cast<bool>(Case::Display::SECURE);
 
     mFlinger.mutableCurrentState().displays.add(displayToken, info);
 
@@ -2404,6 +2411,24 @@ struct EventThreadIsSupportedVariant : public EventThreadBaseSupportedVariant {
     }
 };
 
+struct DispSyncIsSupportedVariant {
+    static void setupBeginResyncCallExpectations(DisplayTransactionTest* test) {
+        EXPECT_CALL(*test->mPrimaryDispSync, reset()).Times(1);
+        EXPECT_CALL(*test->mPrimaryDispSync, setPeriod(DEFAULT_REFRESH_RATE)).Times(1);
+        EXPECT_CALL(*test->mPrimaryDispSync, beginResync()).Times(1);
+    }
+
+    static void setupEndResyncCallExpectations(DisplayTransactionTest* test) {
+        EXPECT_CALL(*test->mPrimaryDispSync, endResync()).Times(1);
+    }
+};
+
+struct DispSyncNotSupportedVariant {
+    static void setupBeginResyncCallExpectations(DisplayTransactionTest* /* test */) {}
+
+    static void setupEndResyncCallExpectations(DisplayTransactionTest* /* test */) {}
+};
+
 // --------------------------------------------------------------------
 // Note:
 //
@@ -2425,6 +2450,7 @@ struct TransitionOffToOnVariant
     static void setupCallExpectations(DisplayTransactionTest* test) {
         Case::setupComposerCallExpectations(test, IComposerClient::PowerMode::ON);
         Case::EventThread::setupAcquireAndEnableVsyncCallExpectations(test);
+        Case::DispSync::setupBeginResyncCallExpectations(test);
         Case::setupRepaintEverythingCallExpectations(test);
     }
 
@@ -2454,6 +2480,7 @@ struct TransitionOnToOffVariant
     template <typename Case>
     static void setupCallExpectations(DisplayTransactionTest* test) {
         Case::EventThread::setupReleaseAndDisableVsyncCallExpectations(test);
+        Case::DispSync::setupEndResyncCallExpectations(test);
         Case::setupComposerCallExpectations(test, IComposerClient::PowerMode::OFF);
     }
 
@@ -2489,6 +2516,7 @@ struct TransitionDozeSuspendToDozeVariant
     template <typename Case>
     static void setupCallExpectations(DisplayTransactionTest* test) {
         Case::EventThread::setupAcquireAndEnableVsyncCallExpectations(test);
+        Case::DispSync::setupBeginResyncCallExpectations(test);
         Case::setupComposerCallExpectations(test, Case::Doze::ACTUAL_POWER_MODE_FOR_DOZE);
     }
 };
@@ -2507,6 +2535,7 @@ struct TransitionDozeSuspendToOnVariant
     template <typename Case>
     static void setupCallExpectations(DisplayTransactionTest* test) {
         Case::EventThread::setupAcquireAndEnableVsyncCallExpectations(test);
+        Case::DispSync::setupBeginResyncCallExpectations(test);
         Case::setupComposerCallExpectations(test, IComposerClient::PowerMode::ON);
     }
 };
@@ -2516,6 +2545,7 @@ struct TransitionOnToDozeSuspendVariant
     template <typename Case>
     static void setupCallExpectations(DisplayTransactionTest* test) {
         Case::EventThread::setupReleaseAndDisableVsyncCallExpectations(test);
+        Case::DispSync::setupEndResyncCallExpectations(test);
         Case::setupComposerCallExpectations(test, Case::Doze::ACTUAL_POWER_MODE_FOR_DOZE_SUSPEND);
     }
 };
@@ -2538,11 +2568,12 @@ struct TransitionOnToUnknownVariant
 // --------------------------------------------------------------------
 
 template <typename DisplayVariant, typename DozeVariant, typename EventThreadVariant,
-          typename TransitionVariant>
+          typename DispSyncVariant, typename TransitionVariant>
 struct DisplayPowerCase {
     using Display = DisplayVariant;
     using Doze = DozeVariant;
     using EventThread = EventThreadVariant;
+    using DispSync = DispSyncVariant;
     using Transition = TransitionVariant;
 
     static auto injectDisplayWithInitialPowerMode(DisplayTransactionTest* test, int mode) {
@@ -2590,15 +2621,16 @@ struct DisplayPowerCase {
 // In addition to having event thread support, we emulate doze support.
 template <typename TransitionVariant>
 using PrimaryDisplayPowerCase = DisplayPowerCase<PrimaryDisplayVariant, DozeIsSupportedVariant,
-                                                 EventThreadIsSupportedVariant, TransitionVariant>;
+                                                 EventThreadIsSupportedVariant,
+                                                 DispSyncIsSupportedVariant, TransitionVariant>;
 
 // A sample configuration for the external display.
 // In addition to not having event thread support, we emulate not having doze
 // support.
 template <typename TransitionVariant>
-using ExternalDisplayPowerCase =
-        DisplayPowerCase<ExternalDisplayVariant, DozeNotSupportedVariant,
-                         EventThreadNotSupportedVariant, TransitionVariant>;
+using ExternalDisplayPowerCase = DisplayPowerCase<ExternalDisplayVariant, DozeNotSupportedVariant,
+                                                  EventThreadNotSupportedVariant,
+                                                  DispSyncNotSupportedVariant, TransitionVariant>;
 
 class SetPowerModeInternalTest : public DisplayTransactionTest {
 public:

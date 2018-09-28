@@ -28,7 +28,7 @@ cc_library_headers {
     ],
 }
 
-cc_library {
+cc_library_shared {
     name: "libbinder",
 
     // for vndbinder
@@ -120,7 +120,6 @@ cc_library {
         "liblog",
         "libcutils",
         "libutils",
-        "libutilscallstack",
     ],
 
     header_libs: [

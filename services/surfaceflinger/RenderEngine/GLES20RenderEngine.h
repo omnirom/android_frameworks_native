@@ -21,7 +21,6 @@
 #include <sys/types.h>
 
 #include <GLES2/gl2.h>
-#include <Transform.h>
 
 #include "Description.h"
 #include "ProgramCache.h"
@@ -67,7 +66,7 @@ public:
 protected:
     virtual void dump(String8& result);
     virtual void setViewportAndProjection(size_t vpw, size_t vph, Rect sourceCrop, size_t hwh,
-                                          bool yswap, Transform::orientation_flags rotation);
+                                          bool yswap, ui::Transform::orientation_flags rotation);
     virtual void setupLayerBlending(bool premultipliedAlpha, bool opaque, bool disableTexture,
                                     const half4& color) override;
 
@@ -95,8 +94,9 @@ protected:
     // Current output dataspace of the render engine
     ui::Dataspace mOutputDataSpace = ui::Dataspace::UNKNOWN;
 
-    // Currently only supporting sRGB, BT2020 and DisplayP3 color spaces
-    const bool mPlatformHasWideColor = false;
+    // Whether device supports color management, currently color management
+    // supports sRGB, DisplayP3 color spaces.
+    const bool mUseColorManagement = false;
     mat4 mSrgbToDisplayP3;
     mat4 mDisplayP3ToSrgb;
     mat3 mSrgbToXyz;

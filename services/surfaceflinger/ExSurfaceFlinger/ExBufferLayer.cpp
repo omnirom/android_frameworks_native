@@ -46,7 +46,7 @@ namespace android {
 
 ExBufferLayer::ExBufferLayer(SurfaceFlinger* flinger, const sp<Client>& client,
                  const String8& name, uint32_t w, uint32_t h, uint32_t flags)
-    : BufferLayer(flinger, client, name, w, h, flags) {
+    : BufferQueueLayer(flinger, client, name, w, h, flags) {
     char property[PROPERTY_VALUE_MAX] = {0};
 
     mDebugLogs = false;

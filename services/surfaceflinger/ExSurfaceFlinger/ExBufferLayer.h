@@ -33,14 +33,14 @@
 #include <sys/types.h>
 #include <cutils/properties.h>
 
-#include <BufferLayer.h>
+#include <BufferQueueLayer.h>
 #include "ExSurfaceFlinger.h"
 
 namespace android {
 
 class ExSurfaceFlinger;
 
-class ExBufferLayer : public BufferLayer
+class ExBufferLayer : public BufferQueueLayer
 {
 public:
     ExBufferLayer(SurfaceFlinger* flinger, const sp<Client>& client,
