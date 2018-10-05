@@ -54,7 +54,7 @@
 
 #include "DisplayHardware/HWComposer.h"
 
-#include "RenderEngine/RenderEngine.h"
+#include <renderengine/RenderEngine.h>
 
 #include <mutex>
 #include "LayerProtoHelper.h"
@@ -79,7 +79,6 @@ Layer::Layer(SurfaceFlinger* flinger, const sp<Client>& client, const String8& n
         mOverrideScalingMode(-1),
         mCurrentFrameNumber(0),
         mFrameLatencyNeeded(false),
-        mFiltering(false),
         mNeedsFiltering(false),
         mProtectedByApp(false),
         mClientRef(client),
@@ -104,8 +103,6 @@ Layer::Layer(SurfaceFlinger* flinger, const sp<Client>& client, const String8& n
     mCurrentState.flags = layerFlags;
     mCurrentState.active_legacy.transform.set(0, 0);
     mCurrentState.crop_legacy.makeInvalid();
-    mCurrentState.finalCrop_legacy.makeInvalid();
-    mCurrentState.requestedFinalCrop_legacy = mCurrentState.finalCrop_legacy;
     mCurrentState.requestedCrop_legacy = mCurrentState.crop_legacy;
     mCurrentState.z = 0;
     mCurrentState.color.a = 1.0f;
@@ -288,7 +285,7 @@ static FloatRect reduce(const FloatRect& win, const Region& exclude) {
 }
 
 Rect Layer::computeScreenBounds(bool reduceTransparentRegion) const {
-    const Layer::State& s(getDrawingState());
+    const State& s(getDrawingState());
     Rect win(getActiveWidth(s), getActiveHeight(s));
 
     Rect crop = getCrop(s);
@@ -298,11 +295,6 @@ Rect Layer::computeScreenBounds(bool reduceTransparentRegion) const {
 
     ui::Transform t = getTransform();
     win = t.transform(win);
-
-    Rect finalCrop = getFinalCrop(s);
-    if (!finalCrop.isEmpty()) {
-        win.intersect(finalCrop, &win);
-    }
 
     const sp<Layer>& p = mDrawingParent.promote();
     // Now we need to calculate the parent bounds, so we can clip ourselves to those.
@@ -328,12 +320,12 @@ Rect Layer::computeScreenBounds(bool reduceTransparentRegion) const {
 }
 
 FloatRect Layer::computeBounds() const {
-    const Layer::State& s(getDrawingState());
+    const State& s(getDrawingState());
     return computeBounds(getActiveTransparentRegion(s));
 }
 
 FloatRect Layer::computeBounds(const Region& activeTransparentRegion) const {
-    const Layer::State& s(getDrawingState());
+    const State& s(getDrawingState());
     Rect win(getActiveWidth(s), getActiveHeight(s));
 
     Rect crop = getCrop(s);
@@ -352,13 +344,9 @@ FloatRect Layer::computeBounds(const Region& activeTransparentRegion) const {
 
     ui::Transform t = s.active_legacy.transform;
 
-    if (p != nullptr || !s.finalCrop_legacy.isEmpty()) {
+    if (p != nullptr) {
         floatWin = t.transform(floatWin);
         floatWin = floatWin.intersect(parentBounds);
-
-        if (!s.finalCrop_legacy.isEmpty()) {
-            floatWin = floatWin.intersect(s.finalCrop_legacy.toFloatRect());
-        }
         floatWin = t.inverse().transform(floatWin);
     }
 
@@ -388,12 +376,6 @@ Rect Layer::computeInitialCrop(const sp<const DisplayDevice>& display) const {
     activeCrop = t.transform(activeCrop);
     if (!activeCrop.intersect(display->getViewport(), &activeCrop)) {
         activeCrop.clear();
-    }
-    Rect finalCrop = getFinalCrop(s);
-    if (!finalCrop.isEmpty()) {
-        if (!activeCrop.intersect(finalCrop, &activeCrop)) {
-            activeCrop.clear();
-        }
     }
 
     const auto& p = mDrawingParent.promote();
@@ -495,14 +477,24 @@ void Layer::setGeometry(const sp<const DisplayDevice>& display, uint32_t z) {
     }
     auto& hwcInfo = getBE().mHwcLayers[displayId];
 
+    // Device or Cursor layers
+    if (mPotentialCursor) {
+        ALOGV("[%s] Requesting Cursor composition", mName.string());
+        setCompositionType(displayId, HWC2::Composition::Cursor);
+    } else {
+        ALOGV("[%s] Requesting Device composition", mName.string());
+        setCompositionType(displayId, HWC2::Composition::Device);
+    }
+
+    // Need to program geometry parts
+    getBE().compositionInfo.hwc.skipGeometry = false;
+
     // enable this layer
     hwcInfo.forceClientComposition = false;
 
     if (isSecure() && !display->isSecure()) {
         hwcInfo.forceClientComposition = true;
     }
-
-    auto& hwcLayer = hwcInfo.layer;
 
     // this gives us only the "orientation" component of the transform
     const State& s(getDrawingState());
@@ -511,12 +503,6 @@ void Layer::setGeometry(const sp<const DisplayDevice>& display, uint32_t z) {
         blendMode =
                 mPremultipliedAlpha ? HWC2::BlendMode::Premultiplied : HWC2::BlendMode::Coverage;
     }
-    auto error = hwcLayer->setBlendMode(blendMode);
-    ALOGE_IF(error != HWC2::Error::None,
-             "[%s] Failed to set blend mode %s:"
-             " %s (%d)",
-             mName.string(), to_string(blendMode).c_str(), to_string(error).c_str(),
-             static_cast<int32_t>(error));
     getBE().compositionInfo.hwc.blendMode = blendMode;
 
     // apply the layer's transform, followed by the display's global transform
@@ -551,50 +537,19 @@ void Layer::setGeometry(const sp<const DisplayDevice>& display, uint32_t z) {
     // computeBounds returns a FloatRect to provide more accuracy during the
     // transformation. We then round upon constructing 'frame'.
     Rect frame{t.transform(computeBounds(activeTransparentRegion))};
-    Rect finalCrop = getFinalCrop(s);
-    if (!finalCrop.isEmpty()) {
-        if (!frame.intersect(finalCrop, &frame)) {
-            frame.clear();
-        }
-    }
     if (!frame.intersect(display->getViewport(), &frame)) {
         frame.clear();
     }
     const ui::Transform& tr = display->getTransform();
     Rect transformedFrame = tr.transform(frame);
-    error = hwcLayer->setDisplayFrame(transformedFrame);
-    if (error != HWC2::Error::None) {
-        ALOGE("[%s] Failed to set display frame [%d, %d, %d, %d]: %s (%d)", mName.string(),
-              transformedFrame.left, transformedFrame.top, transformedFrame.right,
-              transformedFrame.bottom, to_string(error).c_str(), static_cast<int32_t>(error));
-    } else {
-        hwcInfo.displayFrame = transformedFrame;
-    }
     getBE().compositionInfo.hwc.displayFrame = transformedFrame;
 
     FloatRect sourceCrop = computeCrop(display);
-    error = hwcLayer->setSourceCrop(sourceCrop);
-    if (error != HWC2::Error::None) {
-        ALOGE("[%s] Failed to set source crop [%.3f, %.3f, %.3f, %.3f]: "
-              "%s (%d)",
-              mName.string(), sourceCrop.left, sourceCrop.top, sourceCrop.right, sourceCrop.bottom,
-              to_string(error).c_str(), static_cast<int32_t>(error));
-    } else {
-        hwcInfo.sourceCrop = sourceCrop;
-    }
     getBE().compositionInfo.hwc.sourceCrop = sourceCrop;
 
     float alpha = static_cast<float>(getAlpha());
-    error = hwcLayer->setPlaneAlpha(alpha);
-    ALOGE_IF(error != HWC2::Error::None,
-             "[%s] Failed to set plane alpha %.3f: "
-             "%s (%d)",
-             mName.string(), alpha, to_string(error).c_str(), static_cast<int32_t>(error));
     getBE().compositionInfo.hwc.alpha = alpha;
 
-    error = hwcLayer->setZOrder(z);
-    ALOGE_IF(error != HWC2::Error::None, "[%s] Failed to set Z %u: %s (%d)", mName.string(), z,
-             to_string(error).c_str(), static_cast<int32_t>(error));
     getBE().compositionInfo.hwc.z = z;
 
     int type = s.type;
@@ -607,10 +562,6 @@ void Layer::setGeometry(const sp<const DisplayDevice>& display, uint32_t z) {
             appId = parentState.appId;
         }
     }
-
-    error = hwcLayer->setInfo(type, appId);
-    ALOGE_IF(error != HWC2::Error::None, "[%s] Failed to set info (%d)", mName.string(),
-             static_cast<int32_t>(error));
 
     getBE().compositionInfo.hwc.type = type;
     getBE().compositionInfo.hwc.appId = appId;
@@ -651,16 +602,9 @@ void Layer::setGeometry(const sp<const DisplayDevice>& display, uint32_t z) {
     if (orientation & ui::Transform::ROT_INVALID) {
         // we can only handle simple transformation
         hwcInfo.forceClientComposition = true;
-        getBE().mHwcLayers[displayId].compositionType = HWC2::Composition::Client;
     } else {
         auto transform = static_cast<HWC2::Transform>(orientation);
         hwcInfo.transform = transform;
-        auto error = hwcLayer->setTransform(transform);
-        ALOGE_IF(error != HWC2::Error::None,
-                 "[%s] Failed to set transform %s: "
-                 "%s (%d)",
-                 mName.string(), to_string(transform).c_str(), to_string(error).c_str(),
-                 static_cast<int32_t>(error));
         getBE().compositionInfo.hwc.transform = transform;
     }
 }
@@ -704,10 +648,6 @@ void Layer::updateCursorPosition(const sp<const DisplayDevice>& display) {
     Rect bounds = reduce(win, getActiveTransparentRegion(s));
     Rect frame(getTransform().transform(bounds));
     frame.intersect(display->getViewport(), &frame);
-    Rect finalCrop = getFinalCrop(s);
-    if (!finalCrop.isEmpty()) {
-        frame.intersect(finalCrop, &frame);
-    }
     auto& displayTransform = display->getTransform();
     auto position = displayTransform.transform(frame);
 
@@ -733,10 +673,6 @@ void Layer::draw(const RenderArea& renderArea, bool useIdentityTransform) {
     onDraw(renderArea, Region(renderArea.getBounds()), useIdentityTransform);
 }
 
-void Layer::draw(const RenderArea& renderArea) {
-    onDraw(renderArea, Region(renderArea.getBounds()), false);
-}
-
 void Layer::clearWithOpenGL(const RenderArea& renderArea, float red, float green, float blue,
                             float alpha) const {
     auto& engine(mFlinger->getRenderEngine());
@@ -749,40 +685,27 @@ void Layer::clearWithOpenGL(const RenderArea& renderArea) const {
     clearWithOpenGL(renderArea, 0, 0, 0, 0);
 }
 
-void Layer::setCompositionType(int32_t displayId, HWC2::Composition type, bool callIntoHwc) {
+void Layer::setCompositionType(int32_t displayId, HWC2::Composition type, bool /*callIntoHwc*/) {
     if (getBE().mHwcLayers.count(displayId) == 0) {
         ALOGE("setCompositionType called without a valid HWC layer");
         return;
-    }
-    auto& hwcInfo = getBE().mHwcLayers[displayId];
-    auto& hwcLayer = hwcInfo.layer;
-    ALOGV("setCompositionType(%" PRIx64 ", %s, %d)", (hwcLayer)->getId(), to_string(type).c_str(),
-          static_cast<int>(callIntoHwc));
-    if (hwcInfo.compositionType != type) {
-        ALOGV("    actually setting");
-        hwcInfo.compositionType = type;
-        if (callIntoHwc) {
-            auto error = (hwcLayer)->setCompositionType(type);
-            ALOGE_IF(error != HWC2::Error::None,
-                     "[%s] Failed to set "
-                     "composition type %s: %s (%d)",
-                     mName.string(), to_string(type).c_str(), to_string(error).c_str(),
-                     static_cast<int32_t>(error));
+    } else {
+        if (getBE().mHwcLayers[displayId].compositionType != type) {
+            ALOGV("setCompositionType: Changing compositionType from %s to %s",
+                    to_string(getBE().mHwcLayers[displayId].compositionType).c_str(),
+                    to_string(type).c_str());
+            getBE().mHwcLayers[displayId].compositionType = type;
         }
     }
 }
 
 HWC2::Composition Layer::getCompositionType(int32_t displayId) const {
-    if (displayId == DisplayDevice::DISPLAY_ID_INVALID) {
+    if (getBE().mHwcLayers.count(displayId) == 0) {
         // If we're querying the composition type for a display that does not
         // have a HWC counterpart, then it will always be Client
         return HWC2::Composition::Client;
     }
-    if (getBE().mHwcLayers.count(displayId) == 0) {
-        ALOGE("getCompositionType called with an invalid HWC layer");
-        return HWC2::Composition::Invalid;
-    }
-    return getBE().mHwcLayers.at(displayId).compositionType;
+    return getBE().mHwcLayers[displayId].compositionType;
 }
 
 void Layer::setClearClientTarget(int32_t displayId, bool clear) {
@@ -813,38 +736,14 @@ bool Layer::addSyncPoint(const std::shared_ptr<SyncPoint>& point) {
     return true;
 }
 
-void Layer::setFiltering(bool filtering) {
-    mFiltering = filtering;
-}
-
-bool Layer::getFiltering() const {
-    return mFiltering;
-}
-
 // ----------------------------------------------------------------------------
 // local state
 // ----------------------------------------------------------------------------
 
-static void boundPoint(vec2* point, const Rect& crop) {
-    if (point->x < crop.left) {
-        point->x = crop.left;
-    }
-    if (point->x > crop.right) {
-        point->x = crop.right;
-    }
-    if (point->y < crop.top) {
-        point->y = crop.top;
-    }
-    if (point->y > crop.bottom) {
-        point->y = crop.bottom;
-    }
-}
-
-void Layer::computeGeometry(const RenderArea& renderArea, Mesh& mesh,
+void Layer::computeGeometry(const RenderArea& renderArea,
+                            renderengine::Mesh& mesh,
                             bool useIdentityTransform) const {
-    const Layer::State& s(getDrawingState());
     const ui::Transform renderAreaTransform(renderArea.getTransform());
-    const uint32_t height = renderArea.getHeight();
     FloatRect win = computeBounds();
 
     vec2 lt = vec2(win.left, win.top);
@@ -860,26 +759,15 @@ void Layer::computeGeometry(const RenderArea& renderArea, Mesh& mesh,
         rt = layerTransform.transform(rt);
     }
 
-    Rect finalCrop = getFinalCrop(s);
-    if (!finalCrop.isEmpty()) {
-        boundPoint(&lt, finalCrop);
-        boundPoint(&lb, finalCrop);
-        boundPoint(&rb, finalCrop);
-        boundPoint(&rt, finalCrop);
-    }
-
-    Mesh::VertexArray<vec2> position(mesh.getPositionArray<vec2>());
+    renderengine::Mesh::VertexArray<vec2> position(mesh.getPositionArray<vec2>());
     position[0] = renderAreaTransform.transform(lt);
     position[1] = renderAreaTransform.transform(lb);
     position[2] = renderAreaTransform.transform(rb);
     position[3] = renderAreaTransform.transform(rt);
-    for (size_t i = 0; i < 4; i++) {
-        position[i].y = height - position[i].y;
-    }
 }
 
 bool Layer::isSecure() const {
-    const Layer::State& s(mDrawingState);
+    const State& s(mDrawingState);
     return (s.flags & layer_state_t::eLayerSecure);
 }
 
@@ -1007,7 +895,7 @@ bool Layer::applyPendingStates(State* stateToCommit) {
 }
 
 uint32_t Layer::doTransactionResize(uint32_t flags, State* stateToCommit) {
-    const Layer::State& s(getDrawingState());
+    const State& s(getDrawingState());
 
     const bool sizeChanged = (stateToCommit->requested_legacy.w != s.requested_legacy.w) ||
             (stateToCommit->requested_legacy.h != s.requested_legacy.h);
@@ -1029,10 +917,6 @@ uint32_t Layer::doTransactionResize(uint32_t flags, State* stateToCommit) {
                  s.active_legacy.w, s.active_legacy.h, s.crop_legacy.left, s.crop_legacy.top,
                  s.crop_legacy.right, s.crop_legacy.bottom, s.crop_legacy.getWidth(),
                  s.crop_legacy.getHeight(), s.requested_legacy.w, s.requested_legacy.h);
-
-        // record the new size, form this point on, when the client request
-        // a buffer, it'll get the new size.
-        setDefaultBufferSize(stateToCommit->requested_legacy.w, stateToCommit->requested_legacy.h);
     }
 
     // Don't let Layer::doTransaction update the drawing state
@@ -1067,7 +951,7 @@ uint32_t Layer::doTransactionResize(uint32_t flags, State* stateToCommit) {
     // latching configuration. See Layer.h for a detailed discussion of
     // how geometry latching is controlled.
     if (!(flags & eDontUpdateGeometryState)) {
-        Layer::State& editCurrentState(getCurrentState());
+        State& editCurrentState(getCurrentState());
 
         // If mFreezeGeometryUpdates is true we are in the setGeometryAppliesWithResize
         // mode, which causes attributes which normally latch regardless of scaling mode,
@@ -1100,14 +984,14 @@ uint32_t Layer::doTransaction(uint32_t flags) {
     ATRACE_CALL();
 
     pushPendingState();
-    Layer::State c = getCurrentState();
+    State c = getCurrentState();
     if (!applyPendingStates(&c)) {
         return 0;
     }
 
     flags = doTransactionResize(flags, &c);
 
-    const Layer::State& s(getDrawingState());
+    const State& s(getDrawingState());
 
     if (getActiveGeometry(c) != getActiveGeometry(s)) {
         // invalidate and recompute the visible regions if needed
@@ -1269,6 +1153,10 @@ bool Layer::setSize(uint32_t w, uint32_t h) {
     mCurrentState.requested_legacy.h = h;
     mCurrentState.modified = true;
     setTransactionFlags(eTransactionNeeded);
+
+    // record the new size, from this point on, when the client request
+    // a buffer, it'll get the new size.
+    setDefaultBufferSize(mCurrentState.requested_legacy.w, mCurrentState.requested_legacy.h);
     return true;
 }
 bool Layer::setAlpha(float alpha) {
@@ -1341,20 +1229,6 @@ bool Layer::setCrop_legacy(const Rect& crop, bool immediate) {
     return true;
 }
 
-bool Layer::setFinalCrop_legacy(const Rect& crop, bool immediate) {
-    if (mCurrentState.requestedFinalCrop_legacy == crop) return false;
-    mCurrentState.sequence++;
-    mCurrentState.requestedFinalCrop_legacy = crop;
-    if (immediate && !mFreezeGeometryUpdates) {
-        mCurrentState.finalCrop_legacy = crop;
-    }
-    mFreezeGeometryUpdates = mFreezeGeometryUpdates || !immediate;
-
-    mCurrentState.modified = true;
-    setTransactionFlags(eTransactionNeeded);
-    return true;
-}
-
 bool Layer::setOverrideScalingMode(int32_t scalingMode) {
     if (scalingMode == mOverrideScalingMode) return false;
     mOverrideScalingMode = scalingMode;
@@ -1408,7 +1282,7 @@ void Layer::deferTransactionUntil_legacy(const sp<IBinder>& barrierHandle, uint6
 // ----------------------------------------------------------------------------
 
 bool Layer::isHiddenByPolicy() const {
-    const Layer::State& s(mDrawingState);
+    const State& s(mDrawingState);
     const auto& parent = mDrawingParent.promote();
     if (parent != nullptr && parent->isHiddenByPolicy()) {
         return true;
@@ -1451,7 +1325,7 @@ void Layer::updateTransformHint(const sp<const DisplayDevice>& display) const {
 // TODO(marissaw): add new layer state info to layer debugging
 LayerDebugInfo Layer::getLayerDebugInfo() const {
     LayerDebugInfo info;
-    const Layer::State& ds = getDrawingState();
+    const State& ds = getDrawingState();
     info.mName = getName();
     sp<Layer> parent = getParent();
     info.mParentName = (parent == nullptr ? std::string("none") : parent->getName().string());
@@ -1466,7 +1340,6 @@ LayerDebugInfo Layer::getLayerDebugInfo() const {
     info.mWidth = ds.active_legacy.w;
     info.mHeight = ds.active_legacy.h;
     info.mCrop = ds.crop_legacy;
-    info.mFinalCrop = ds.finalCrop_legacy;
     info.mColor = ds.color;
     info.mFlags = ds.flags;
     info.mPixelFormat = getPixelFormat();
@@ -1529,7 +1402,7 @@ void Layer::miniDump(String8& result, int32_t displayId) const {
 
     result.appendFormat(" %s\n", name.string());
 
-    const Layer::State& layerState(getDrawingState());
+    const State& layerState(getDrawingState());
     const LayerBE::HWCInfo& hwcInfo = getBE().mHwcLayers.at(displayId);
     if (layerState.zOrderRelativeOf != nullptr || mDrawingParent != nullptr) {
         result.appendFormat("  rel %6d | ", layerState.z);
@@ -1542,6 +1415,12 @@ void Layer::miniDump(String8& result, int32_t displayId) const {
     result.appendFormat("%4d %4d %4d %4d | ", frame.left, frame.top, frame.right, frame.bottom);
     const FloatRect& crop = hwcInfo.sourceCrop;
     result.appendFormat("%6.1f %6.1f %6.1f %6.1f\n", crop.left, crop.top, crop.right, crop.bottom);
+
+    result.append("- - - - - - - - - - - - - - - -\n");
+
+    std::string compositionInfoStr;
+    getBE().compositionInfo.dump(compositionInfoStr, "compositionInfo");
+    result.append(compositionInfoStr.c_str());
 
     result.append("- - - - - - - - - - - - - - - -");
     result.append("- - - - - - - - - - - - - - - -");
@@ -2001,7 +1880,6 @@ void Layer::writeToProto(LayerProto* layerInfo, LayerVector::StateSet stateSet,
     size->set_h(state.active_legacy.h);
 
     LayerProtoHelper::writeToProto(state.crop_legacy, layerInfo->mutable_crop());
-    LayerProtoHelper::writeToProto(state.finalCrop_legacy, layerInfo->mutable_final_crop());
 
     layerInfo->set_is_opaque(isOpaque(state));
     layerInfo->set_invalidate(contentDirty);

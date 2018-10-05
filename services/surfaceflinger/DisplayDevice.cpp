@@ -18,6 +18,8 @@
 #undef LOG_TAG
 #define LOG_TAG "DisplayDevice"
 
+#include "DisplayDevice.h"
+
 #include <array>
 #include <unordered_set>
 
@@ -26,30 +28,23 @@
 #include <string.h>
 #include <math.h>
 
+#include <android/hardware/configstore/1.0/ISurfaceFlingerConfigs.h>
+#include <configstore/Utils.h>
 #include <cutils/properties.h>
-
-#include <utils/RefBase.h>
-#include <utils/Log.h>
-
+#include <gui/Surface.h>
+#include <hardware/gralloc.h>
+#include <renderengine/RenderEngine.h>
 #include <ui/DebugUtils.h>
 #include <ui/DisplayInfo.h>
 #include <ui/PixelFormat.h>
-
-#include <gui/Surface.h>
-
-#include <hardware/gralloc.h>
+#include <utils/RefBase.h>
+#include <utils/Log.h>
 
 #include "DisplayHardware/DisplaySurface.h"
 #include "DisplayHardware/HWComposer.h"
 #include "DisplayHardware/HWC2.h"
-#include "RenderEngine/RenderEngine.h"
-
-#include "DisplayDevice.h"
 #include "SurfaceFlinger.h"
 #include "Layer.h"
-
-#include <android/hardware/configstore/1.0/ISurfaceFlingerConfigs.h>
-#include <configstore/Utils.h>
 
 namespace android {
 
@@ -220,9 +215,10 @@ DisplayDevice::DisplayDevice(
         const wp<IBinder>& displayToken,
         const sp<ANativeWindow>& nativeWindow,
         const sp<DisplaySurface>& displaySurface,
-        std::unique_ptr<RE::Surface> renderSurface,
+        std::unique_ptr<renderengine::Surface> renderSurface,
         int displayWidth,
         int displayHeight,
+        int displayInstallOrientation,
         bool hasWideColorGamut,
         const HdrCapabilities& hdrCapabilities,
         const int32_t supportedPerFrameMetadata,
@@ -238,6 +234,7 @@ DisplayDevice::DisplayDevice(
       mSurface{std::move(renderSurface)},
       mDisplayWidth(displayWidth),
       mDisplayHeight(displayHeight),
+      mDisplayInstallOrientation(displayInstallOrientation),
       mPageFlipCount(0),
       mIsSecure(isSecure),
       mLayerStack(NO_LAYER_STACK),
@@ -346,8 +343,9 @@ status_t DisplayDevice::beginFrame(bool mustRecompose) const {
     return mDisplaySurface->beginFrame(mustRecompose);
 }
 
-status_t DisplayDevice::prepareFrame(HWComposer& hwc) {
-    status_t error = hwc.prepare(*this);
+status_t DisplayDevice::prepareFrame(HWComposer& hwc,
+        std::vector<CompositionInfo>& compositionData) {
+    status_t error = hwc.prepare(*this, compositionData);
     if (error != NO_ERROR) {
         return error;
     }
@@ -395,8 +393,7 @@ void DisplayDevice::setViewportAndProjection() const {
     size_t w = mDisplayWidth;
     size_t h = mDisplayHeight;
     Rect sourceCrop(0, 0, w, h);
-    mFlinger->getRenderEngine().setViewportAndProjection(w, h, sourceCrop, h,
-        false, ui::Transform::ROT_0);
+    mFlinger->getRenderEngine().setViewportAndProjection(w, h, sourceCrop, ui::Transform::ROT_0);
 }
 
 const sp<Fence>& DisplayDevice::getClientTargetAcquireFence() const {
@@ -620,9 +617,8 @@ void DisplayDevice::setProjection(int orientation,
     // need to take care of primary display rotation for mGlobalTransform
     // for case if the panel is not installed aligned with device orientation
     if (mType == DisplayType::DISPLAY_PRIMARY) {
-        int primaryDisplayOrientation = mFlinger->getPrimaryDisplayOrientation();
         DisplayDevice::orientationToTransfrom(
-                (orientation + primaryDisplayOrientation) % (DisplayState::eOrientation270 + 1),
+                (orientation + mDisplayInstallOrientation) % (DisplayState::eOrientation270 + 1),
                 w, h, &R);
     }
 

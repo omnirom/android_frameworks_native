@@ -14,14 +14,14 @@
  * limitations under the License.
  */
 
+#include <renderengine/private/Description.h>
+
 #include <stdint.h>
-#include <string.h>
 
 #include <utils/TypeHelpers.h>
 
-#include "Description.h"
-
 namespace android {
+namespace renderengine {
 
 void Description::setPremultipliedAlpha(bool premultipliedAlpha) {
     mPremultipliedAlpha = premultipliedAlpha;
@@ -95,4 +95,5 @@ void Description::setDisplayMaxLuminance(const float maxLuminance) {
     mDisplayMaxLuminance = maxLuminance;
 }
 
-} /* namespace android */
+}  // namespace renderengine
+}  // namespace android

@@ -19,14 +19,14 @@
 #include <stdint.h>
 #include <sys/types.h>
 
+#include <renderengine/Mesh.h>
+#include <renderengine/RenderEngine.h>
+#include <renderengine/Texture.h>
 #include <ui/Region.h>
-
-#include "SurfaceFlinger.h"
 
 #include "DisplayHardware/HWComposer.h"
 #include "DisplayHardware/HWComposerBufferCache.h"
-#include "RenderEngine/Mesh.h"
-#include "RenderEngine/Texture.h"
+#include "SurfaceFlinger.h"
 
 namespace android {
 
@@ -34,12 +34,15 @@ class LayerBE;
 
 struct CompositionInfo {
     std::string layerName;
-    HWC2::Composition compositionType;
+    HWC2::Composition compositionType = HWC2::Composition::Invalid;
+    bool firstClear = false;
     sp<GraphicBuffer> mBuffer = nullptr;
     int mBufferSlot = BufferQueue::INVALID_BUFFER_SLOT;
     std::shared_ptr<LayerBE> layer;
     struct {
         std::shared_ptr<HWC2::Layer> hwcLayer;
+        bool skipGeometry = true;
+        int32_t displayId = -1;
         sp<Fence> fence;
         HWC2::BlendMode blendMode = HWC2::BlendMode::Invalid;
         Rect displayFrame;
@@ -59,21 +62,20 @@ struct CompositionInfo {
         HdrMetadata hdrMetadata;
     } hwc;
     struct {
-        Mesh* mesh;
         bool blackoutLayer = false;
         bool clearArea = false;
         bool preMultipliedAlpha = false;
         bool opaque = false;
         bool disableTexture = false;
         half4 color;
-        Texture texture;
         bool useIdentityTransform = false;
         bool Y410BT2020 = false;
     } re;
 
     void dump(const char* tag) const;
-    void dumpHwc(const char* tag) const;
-    void dumpRe(const char* tag) const;
+    void dump(std::string& result, const char* tag = nullptr) const;
+    void dumpHwc(std::string& result, const char* tag = nullptr) const;
+    void dumpRe(std::string& result, const char* tag = nullptr) const;
 };
 
 class LayerBE {
@@ -85,16 +87,20 @@ public:
     friend class ColorLayer;
     friend class SurfaceFlinger;
 
+    // For unit tests
+    friend class TestableSurfaceFlinger;
+
     LayerBE(Layer* layer, std::string layerName);
     explicit LayerBE(const LayerBE& layer);
 
     void onLayerDisplayed(const sp<Fence>& releaseFence);
-    Mesh& getMesh() { return mMesh; }
+    void clear(renderengine::RenderEngine& renderEngine);
+    renderengine::Mesh& getMesh() { return mMesh; }
 
-private:
     Layer*const mLayer;
+private:
     // The mesh used to draw the layer in GLES composition mode
-    Mesh mMesh;
+    renderengine::Mesh mMesh;
 
     // HWC items, accessed from the main thread
     struct HWCInfo {

@@ -240,9 +240,6 @@ SurfaceComposerClient::Transaction& SurfaceComposerClient::Transaction::setSize(
     s->w = w;
     s->h = h;
 
-    // Resizing a surface makes the transaction synchronous.
-    mForceSynchronous = true;
-
     return *this;
 }
 
@@ -353,18 +350,6 @@ SurfaceComposerClient::Transaction& SurfaceComposerClient::Transaction::setCrop_
     }
     s->what |= layer_state_t::eCropChanged_legacy;
     s->crop_legacy = crop;
-    return *this;
-}
-
-SurfaceComposerClient::Transaction& SurfaceComposerClient::Transaction::setFinalCrop_legacy(
-        const sp<SurfaceControl>& sc, const Rect& crop) {
-    layer_state_t* s = getLayerState(sc);
-    if (!s) {
-        mStatus = BAD_INDEX;
-        return *this;
-    }
-    s->what |= layer_state_t::eFinalCropChanged_legacy;
-    s->finalCrop_legacy = crop;
     return *this;
 }
 
@@ -842,10 +827,6 @@ status_t SurfaceComposerClient::getDisplayInfo(const sp<IBinder>& display,
     return NO_ERROR;
 }
 
-status_t SurfaceComposerClient::getDisplayViewport(const sp<IBinder>& display, Rect* outViewport) {
-    return ComposerService::getComposerService()->getDisplayViewport(display, outViewport);
-}
-
 int SurfaceComposerClient::getActiveConfig(const sp<IBinder>& display) {
     return ComposerService::getComposerService()->getActiveConfig(display);
 }
@@ -871,6 +852,11 @@ status_t SurfaceComposerClient::setActiveColorMode(const sp<IBinder>& display,
 void SurfaceComposerClient::setDisplayPowerMode(const sp<IBinder>& token,
         int mode) {
     ComposerService::getComposerService()->setPowerMode(token, mode);
+}
+
+status_t SurfaceComposerClient::getCompositionPreference(ui::Dataspace* dataSpace,
+                                                         ui::PixelFormat* pixelFormat) {
+    return ComposerService::getComposerService()->getCompositionPreference(dataSpace, pixelFormat);
 }
 
 status_t SurfaceComposerClient::clearAnimationFrameStats() {

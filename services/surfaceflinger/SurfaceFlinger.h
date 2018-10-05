@@ -69,6 +69,7 @@
 #include "Scheduler/DispSync.h"
 #include "Scheduler/EventThread.h"
 #include "Scheduler/MessageQueue.h"
+#include "Scheduler/Scheduler.h"
 #include "Scheduler/VSyncModulator.h"
 #include "TimeStats/TimeStats.h"
 
@@ -107,7 +108,7 @@ namespace impl {
 class EventThread;
 } // namespace impl
 
-namespace RE {
+namespace renderengine {
 class RenderEngine;
 }
 
@@ -176,7 +177,7 @@ public:
     const std::string mHwcServiceName; // "default" for real use, something else for testing.
 
     // constant members (no synchronization needed for access)
-    std::unique_ptr<RE::RenderEngine> mRenderEngine;
+    std::unique_ptr<renderengine::RenderEngine> mRenderEngine;
     EGLContext mEGLContext;
     EGLDisplay mEGLDisplay;
 
@@ -227,7 +228,8 @@ public:
     // instances. Each hardware composer instance gets a different sequence id.
     int32_t mComposerSequenceId;
 
-    std::vector<CompositionInfo> mCompositionInfo;
+    std::unordered_map<int32_t, std::vector<CompositionInfo>> mCompositionInfo;
+    std::unordered_map<int32_t, std::vector<CompositionInfo>> mEndOfFrameCompositionInfo;
 };
 
 
@@ -289,8 +291,18 @@ public:
     static bool hasWideColorDisplay;
     friend class ExSurfaceFlinger;
 
+    static int primaryDisplayOrientation;
+
     // Indicate if device wants color management on its display.
     static bool useColorManagement;
+
+    static bool useContextPriority;
+
+    // The data space and pixel format that SurfaceFlinger expects hardware composer
+    // to composite efficiently. Meaning under most scenarios, hardware composer
+    // will accept layers with the data space and pixel format.
+    static ui::Dataspace compositionDataSpace;
+    static ui::PixelFormat compositionPixelFormat;
 
     static char const* getServiceName() ANDROID_API {
         return "SurfaceFlinger";
@@ -348,12 +360,10 @@ public:
     // TODO: this should be made accessible only to HWComposer
     const Vector< sp<Layer> >& getLayerSortedByZForHwcDisplay(int id);
 
-    RE::RenderEngine& getRenderEngine() const { return *getBE().mRenderEngine; }
+    renderengine::RenderEngine& getRenderEngine() const { return *getBE().mRenderEngine; }
 
     bool authenticateSurfaceTextureLocked(
         const sp<IGraphicBufferProducer>& bufferProducer) const;
-
-    int getPrimaryDisplayOrientation() const { return mPrimaryDisplayOrientation; }
 
 private:
     friend class Client;
@@ -439,7 +449,6 @@ private:
     virtual status_t captureLayers(const sp<IBinder>& parentHandle, sp<GraphicBuffer>* outBuffer,
                                    const Rect& sourceCrop, float frameScale, bool childrenOnly);
     virtual status_t getDisplayStats(const sp<IBinder>& displayToken, DisplayStatInfo* stats);
-    virtual status_t getDisplayViewport(const sp<IBinder>& display, Rect* outViewport);
     virtual status_t getDisplayConfigs(const sp<IBinder>& displayToken,
                                        Vector<DisplayInfo>* configs);
     virtual int getActiveConfig(const sp<IBinder>& displayToken);
@@ -456,6 +465,8 @@ private:
     virtual status_t enableVSyncInjections(bool enable);
     virtual status_t injectVSync(nsecs_t when);
     virtual status_t getLayerDebugInfo(std::vector<LayerDebugInfo>* outLayers) const;
+    status_t getCompositionPreference(ui::Dataspace* outDataSpace,
+                                      ui::PixelFormat* outPixelFormat) const override;
 
 
     /* ------------------------------------------------------------------------
@@ -561,6 +572,10 @@ private:
             uint32_t w, uint32_t h, uint32_t flags, sp<IBinder>* outHandle,
             sp<Layer>* outLayer);
 
+    status_t createContainerLayer(const sp<Client>& client, const String8& name,
+            uint32_t w, uint32_t h, uint32_t flags, sp<IBinder>* outHandle,
+            sp<Layer>* outLayer);
+
     String8 getUniqueLayerName(const String8& name);
 
     // called in response to the window-manager calling
@@ -590,7 +605,7 @@ private:
     void startBootAnim();
 
     void renderScreenImplLocked(const RenderArea& renderArea, TraverseLayersFunction traverseLayers,
-                                bool yswap, bool useIdentityTransform);
+                                bool useIdentityTransform);
     status_t captureScreenCommon(RenderArea& renderArea, TraverseLayersFunction traverseLayers,
                                  sp<GraphicBuffer>* outBuffer,
                                  bool useIdentityTransform);
@@ -697,6 +712,7 @@ private:
      * to prepare the hardware composer
      */
     void prepareFrame(const sp<DisplayDevice>& display);
+    void setUpHWComposer(const CompositionInfo& compositionInfo);
     void doComposition(const sp<DisplayDevice>& display, bool repainEverything);
     void doDebugFlashRegions(const sp<DisplayDevice>& display, bool repaintEverything);
     void doTracing(const char* where);
@@ -708,7 +724,7 @@ private:
 
     void postFramebuffer(const sp<DisplayDevice>& display);
     void postFrame();
-    void drawWormhole(const sp<const DisplayDevice>& display, const Region& region) const;
+    void drawWormhole(const Region& region) const;
 
     /* ------------------------------------------------------------------------
      * Display management
@@ -770,6 +786,7 @@ private:
     void dumpBufferingStats(String8& result) const;
     void dumpDisplayIdentificationData(String8& result) const;
     void dumpWideColorInfo(String8& result) const;
+    void dumpFrameCompositionInfo(String8& result) const;
     LayersProto dumpProtoInfo(LayerVector::StateSet stateSet, bool enableRegionDump = true) const;
     LayersProto dumpVisibleLayersProtoInfo(const DisplayDevice& display) const;
 
@@ -815,6 +832,11 @@ private:
 
     // access must be protected by mInvalidateLock
     volatile int32_t mRepaintEverything;
+
+    // helper methods
+    void configureHwcCommonData(const CompositionInfo& compositionInfo) const;
+    void configureDeviceComposition(const CompositionInfo& compositionInfo) const;
+    void configureSidebandComposition(const CompositionInfo& compositionInfo) const;
 
     // constant members (no synchronization needed for access)
     nsecs_t mBootTime;
@@ -886,7 +908,6 @@ private:
     mutable std::unique_ptr<MessageQueue> mEventQueue{std::make_unique<impl::MessageQueue>()};
     FrameTracker mAnimFrameTracker;
     std::unique_ptr<DispSync> mPrimaryDispSync;
-    int mPrimaryDisplayOrientation = DisplayState::eOrientationDefault;
 
     // protected by mDestroyedLayerLock;
     mutable Mutex mDestroyedLayerLock;
@@ -942,6 +963,11 @@ private:
     CreateNativeWindowSurfaceFunction mCreateNativeWindowSurface;
 
     SurfaceFlingerBE mBE;
+
+    bool mUseScheduler = false;
+    std::unique_ptr<Scheduler> mScheduler;
+    sp<Scheduler::ConnectionHandle> mAppConnectionHandle;
+    sp<Scheduler::ConnectionHandle> mSfConnectionHandle;
 };
 }; // namespace android
 

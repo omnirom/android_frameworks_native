@@ -79,9 +79,6 @@ public:
     static status_t getDisplayInfo(const sp<IBinder>& display,
             DisplayInfo* info);
 
-    // Get the display viewport for the given display
-    static status_t getDisplayViewport(const sp<IBinder>& display, Rect* outViewport);
-
     // Get the index of the current active configuration (relative to the list
     // returned by getDisplayInfo)
     static int getActiveConfig(const sp<IBinder>& display);
@@ -103,6 +100,10 @@ public:
 
     /* Triggers screen on/off or low power mode and waits for it to complete */
     static void setDisplayPowerMode(const sp<IBinder>& display, int mode);
+
+    //
+    static status_t getCompositionPreference(ui::Dataspace* dataSpace,
+                                             ui::PixelFormat* pixelFormat);
 
     // ------------------------------------------------------------------------
     // surface creation / destruction
@@ -204,7 +205,6 @@ public:
         Transaction& setMatrix(const sp<SurfaceControl>& sc,
                 float dsdx, float dtdx, float dtdy, float dsdy);
         Transaction& setCrop_legacy(const sp<SurfaceControl>& sc, const Rect& crop);
-        Transaction& setFinalCrop_legacy(const sp<SurfaceControl>& sc, const Rect& crop);
         Transaction& setLayerStack(const sp<SurfaceControl>& sc, uint32_t layerStack);
         // Defers applying any changes made in this transaction until the Layer
         // identified by handle reaches the given frameNumber. If the Layer identified

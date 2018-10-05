@@ -61,6 +61,7 @@ class NativeHandle;
 class Region;
 class String8;
 class TestableSurfaceFlinger;
+struct CompositionInfo;
 
 namespace Hwc2 {
 class Composer;
@@ -92,7 +93,8 @@ public:
     void destroyLayer(int32_t displayId, HWC2::Layer* layer);
 
     // Asks the HAL what it can do
-    status_t prepare(DisplayDevice& display);
+    status_t prepare(DisplayDevice& display,
+            std::vector<CompositionInfo>& compositionData);
 
     status_t setClientTarget(int32_t displayId, uint32_t slot,
             const sp<Fence>& acquireFence,
@@ -184,6 +186,14 @@ public:
     android::Hwc2::Composer* getComposer() const { return mHwcDevice->getComposer(); }
 
     std::optional<hwc2_display_t> getHwcDisplayId(int32_t displayId) const;
+
+    // ------------------------------------------------------------------------
+    // These functions set and get the frequencyScaler.  The frequencyScaler holds
+    // a multiplier and divisor for virtually scaling the panel frequency in
+    // software.  This is used to simulate different panel frequencies when
+    // panel hardware is not available.
+    void setDisplayFrequencyScaleParameters(HWC2::Device::FrequencyScaler frequencyScaler);
+    HWC2::Device::FrequencyScaler getDisplayFrequencyScaleParameters();
 private:
     // For unit tests
     friend TestableSurfaceFlinger;
