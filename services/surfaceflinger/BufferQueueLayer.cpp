@@ -21,24 +21,9 @@
 
 namespace android {
 
-BufferQueueLayer::BufferQueueLayer(SurfaceFlinger* flinger, const sp<Client>& client,
-                                   const String8& name, uint32_t w, uint32_t h, uint32_t flags)
-      : BufferLayer(flinger, client, name, w, h, flags),
-        mConsumer(nullptr),
-        mProducer(nullptr),
-        mFormat(PIXEL_FORMAT_NONE),
-        mPreviousFrameNumber(0),
-        mUpdateTexImageFailed(false),
-        mQueueItemLock(),
-        mQueueItemCondition(),
-        mQueueItems(),
-        mLastFrameNumberReceived(0),
-        mAutoRefresh(false),
-        mActiveBufferSlot(BufferQueue::INVALID_BUFFER_SLOT),
-        mQueuedFrames(0),
-        mSidebandStreamChanged(false) {
-    mCurrentState.requested_legacy = mCurrentState.active_legacy;
-}
+BufferQueueLayer::BufferQueueLayer(const LayerCreationArgs& args) : BufferLayer(args) {}
+
+BufferQueueLayer::~BufferQueueLayer() = default;
 
 // -----------------------------------------------------------------------
 // Interface implementation for Layer
@@ -207,8 +192,9 @@ bool BufferQueueLayer::getSidebandStreamChanged() const {
 }
 
 std::optional<Region> BufferQueueLayer::latchSidebandStream(bool& recomputeVisibleRegions) {
-    if (android_atomic_acquire_cas(true, false, &mSidebandStreamChanged) == 0) {
-        // mSidebandStreamChanged was true
+    bool sidebandStreamChanged = true;
+    if (mSidebandStreamChanged.compare_exchange_strong(sidebandStreamChanged, false)) {
+        // mSidebandStreamChanged was changed to false
         // replicated in LayerBE until FE/BE is ready to be synchronized
         getBE().compositionInfo.hwc.sidebandStream = mConsumer->getSidebandStream();
         if (getBE().compositionInfo.hwc.sidebandStream != nullptr) {
@@ -235,7 +221,8 @@ status_t BufferQueueLayer::bindTextureImage() const {
     return mConsumer->bindTextureImage();
 }
 
-status_t BufferQueueLayer::updateTexImage(bool& recomputeVisibleRegions, nsecs_t latchTime) {
+status_t BufferQueueLayer::updateTexImage(bool& recomputeVisibleRegions, nsecs_t latchTime,
+                                          const sp<Fence>& releaseFence) {
     // This boolean is used to make sure that SurfaceFlinger's shadow copy
     // of the buffer queue isn't modified when the buffer queue is returning
     // BufferItem's that weren't actually queued. This can happen in shared
@@ -246,7 +233,7 @@ status_t BufferQueueLayer::updateTexImage(bool& recomputeVisibleRegions, nsecs_t
                     getTransformToDisplayInverse(), mFreezeGeometryUpdates);
     status_t updateResult =
             mConsumer->updateTexImage(&r, *mFlinger->mPrimaryDispSync, &mAutoRefresh, &queuedBuffer,
-                                      mLastFrameNumberReceived);
+                                      mLastFrameNumberReceived, releaseFence);
     if (updateResult == BufferQueue::PRESENT_LATER) {
         // Producer doesn't want buffer to be displayed yet.  Signal a
         // layer update so we check again at the next opportunity.
@@ -259,7 +246,7 @@ status_t BufferQueueLayer::updateTexImage(bool& recomputeVisibleRegions, nsecs_t
             Mutex::Autolock lock(mQueueItemLock);
             mTimeStats.removeTimeRecord(getName().c_str(), mQueueItems[0].mFrameNumber);
             mQueueItems.removeAt(0);
-            android_atomic_dec(&mQueuedFrames);
+            mQueuedFrames--;
         }
         return BAD_VALUE;
     } else if (updateResult != NO_ERROR || mUpdateTexImageFailed) {
@@ -270,7 +257,7 @@ status_t BufferQueueLayer::updateTexImage(bool& recomputeVisibleRegions, nsecs_t
         if (queuedBuffer) {
             Mutex::Autolock lock(mQueueItemLock);
             mQueueItems.clear();
-            android_atomic_and(0, &mQueuedFrames);
+            mQueuedFrames = 0;
             mTimeStats.clearLayerRecord(getName().c_str());
         }
 
@@ -294,7 +281,7 @@ status_t BufferQueueLayer::updateTexImage(bool& recomputeVisibleRegions, nsecs_t
         while (mQueueItems[0].mFrameNumber != currentFrameNumber) {
             mTimeStats.removeTimeRecord(getName().c_str(), mQueueItems[0].mFrameNumber);
             mQueueItems.removeAt(0);
-            android_atomic_dec(&mQueuedFrames);
+            mQueuedFrames--;
         }
 
         const std::string layerName(getName().c_str());
@@ -306,7 +293,7 @@ status_t BufferQueueLayer::updateTexImage(bool& recomputeVisibleRegions, nsecs_t
 
     // Decrement the queued-frames count.  Signal another event if we
     // have more frames pending.
-    if ((queuedBuffer && android_atomic_dec(&mQueuedFrames) > 1) || mAutoRefresh) {
+    if ((queuedBuffer && mQueuedFrames.fetch_sub(1) > 1) || mAutoRefresh) {
         mFlinger->signalLayerUpdate();
     }
 
@@ -367,7 +354,7 @@ void BufferQueueLayer::onFrameAvailable(const BufferItem& item) {
         }
 
         mQueueItems.push_back(item);
-        android_atomic_inc(&mQueuedFrames);
+        mQueuedFrames++;
 
         // Wake up any pending callbacks
         mLastFrameNumberReceived = item.mFrameNumber;
@@ -404,8 +391,9 @@ void BufferQueueLayer::onFrameReplaced(const BufferItem& item) {
 }
 
 void BufferQueueLayer::onSidebandStreamChanged() {
-    if (android_atomic_release_cas(false, true, &mSidebandStreamChanged) == 0) {
-        // mSidebandStreamChanged was false
+    bool sidebandStreamChanged = false;
+    if (mSidebandStreamChanged.compare_exchange_strong(sidebandStreamChanged, true)) {
+        // mSidebandStreamChanged was changed to true
         mFlinger->signalLayerUpdate();
     }
 }

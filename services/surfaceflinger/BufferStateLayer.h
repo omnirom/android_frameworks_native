@@ -29,8 +29,8 @@ namespace android {
 
 class BufferStateLayer : public BufferLayer {
 public:
-    BufferStateLayer(SurfaceFlinger* flinger, const sp<Client>& client, const String8& name,
-                     uint32_t w, uint32_t h, uint32_t flags);
+    explicit BufferStateLayer(const LayerCreationArgs&);
+    ~BufferStateLayer() override;
 
     // -----------------------------------------------------------------------
     // Interface implementation for Layer
@@ -115,7 +115,8 @@ private:
     void setFilteringEnabled(bool enabled) override;
 
     status_t bindTextureImage() const override;
-    status_t updateTexImage(bool& recomputeVisibleRegions, nsecs_t latchTime) override;
+    status_t updateTexImage(bool& recomputeVisibleRegions, nsecs_t latchTime,
+                            const sp<Fence>& releaseFence) override;
 
     status_t updateActiveBuffer() override;
     status_t updateFrameNumber(nsecs_t latchTime) override;
@@ -125,13 +126,15 @@ private:
 private:
     void onFirstRef() override;
 
+    static const std::array<float, 16> IDENTITY_MATRIX;
+
     std::unique_ptr<renderengine::Image> mTextureImage;
 
-    std::array<float, 16> mTransformMatrix;
+    std::array<float, 16> mTransformMatrix{IDENTITY_MATRIX};
 
-    std::atomic<bool> mSidebandStreamChanged;
+    std::atomic<bool> mSidebandStreamChanged{false};
 
-    uint32_t mFrameNumber;
+    uint32_t mFrameNumber{0};
 
     // TODO(marissaw): support sticky transform for LEGACY camera mode
 };

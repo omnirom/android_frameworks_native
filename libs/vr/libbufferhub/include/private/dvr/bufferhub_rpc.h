@@ -38,8 +38,8 @@ class NativeBufferHandle {
       opaque_ints_.push_back(buffer.handle()->data[fd_count + i]);
     }
   }
-  NativeBufferHandle(NativeBufferHandle&& other) = default;
-  NativeBufferHandle& operator=(NativeBufferHandle&& other) = default;
+  NativeBufferHandle(NativeBufferHandle&& other) noexcept = default;
+  NativeBufferHandle& operator=(NativeBufferHandle&& other) noexcept = default;
 
   // Imports the native handle into the given IonBuffer instance.
   int Import(IonBuffer* buffer) {
@@ -110,16 +110,18 @@ class BufferDescription {
         acquire_fence_fd_(acquire_fence_fd.Borrow()),
         release_fence_fd_(release_fence_fd.Borrow()) {}
 
-  BufferDescription(BufferDescription&& other) = default;
-  BufferDescription& operator=(BufferDescription&& other) = default;
+  BufferDescription(BufferDescription&& other) noexcept = default;
+  BufferDescription& operator=(BufferDescription&& other) noexcept = default;
 
-  // ID of the buffer client. All BufferHubBuffer clients derived from the same
-  // buffer in bufferhubd share the same buffer id.
+  // ID of the buffer client. All BufferHub clients derived from the same buffer
+  // in bufferhubd share the same buffer id.
   int id() const { return id_; }
-  // Channel ID of the buffer client. Each BufferHubBuffer client has its system
+
+  // Channel ID of the buffer client. Each BufferHub client has its system
   // unique channel id.
   int buffer_cid() const { return buffer_cid_; }
-  // State mask of the buffer client. Each BufferHubBuffer client backed by the
+
+  // State mask of the buffer client. Each BufferHub client backed by the
   // same buffer channel has uniqued state bit among its siblings. For a
   // producer buffer the bit must be kProducerStateBit; for a consumer the bit
   // must be one of the kConsumerStateMask.
@@ -159,8 +161,8 @@ class FenceHandle {
   FenceHandle() = default;
   explicit FenceHandle(int fence) : fence_{fence} {}
   explicit FenceHandle(FileHandleType&& fence) : fence_{std::move(fence)} {}
-  FenceHandle(FenceHandle&&) = default;
-  FenceHandle& operator=(FenceHandle&&) = default;
+  FenceHandle(FenceHandle&&) noexcept = default;
+  FenceHandle& operator=(FenceHandle&&) noexcept = default;
 
   explicit operator bool() const { return fence_.IsValid(); }
 
@@ -312,7 +314,6 @@ struct BufferHubRPC {
     kOpProducerGain,
     kOpConsumerAcquire,
     kOpConsumerRelease,
-    kOpConsumerSetIgnore,
     kOpProducerBufferDetach,
     kOpConsumerBufferDetach,
     kOpDetachedBufferCreate,
@@ -346,7 +347,6 @@ struct BufferHubRPC {
   PDX_REMOTE_METHOD(ConsumerAcquire, kOpConsumerAcquire, LocalFence(Void));
   PDX_REMOTE_METHOD(ConsumerRelease, kOpConsumerRelease,
                     void(LocalFence release_fence));
-  PDX_REMOTE_METHOD(ConsumerSetIgnore, kOpConsumerSetIgnore, void(bool ignore));
   PDX_REMOTE_METHOD(ProducerBufferDetach, kOpProducerBufferDetach,
                     LocalChannelHandle(Void));
 

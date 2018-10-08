@@ -398,9 +398,9 @@ GLES20RenderEngine::GLES20RenderEngine(uint32_t featureFlags)
         mDisplayP3ToSrgb = mat4(ColorSpaceConnector(displayP3, srgb).getTransform());
 
         // no chromatic adaptation needed since all color spaces use D65 for their white points.
-        mSrgbToXyz = srgb.getRGBtoXYZ();
-        mDisplayP3ToXyz = displayP3.getRGBtoXYZ();
-        mBt2020ToXyz = bt2020.getRGBtoXYZ();
+        mSrgbToXyz = mat4(srgb.getRGBtoXYZ());
+        mDisplayP3ToXyz = mat4(displayP3.getRGBtoXYZ());
+        mBt2020ToXyz = mat4(bt2020.getRGBtoXYZ());
         mXyzToSrgb = mat4(srgb.getXYZtoRGB());
         mXyzToDisplayP3 = mat4(displayP3.getXYZtoRGB());
         mXyzToBt2020 = mat4(bt2020.getXYZtoRGB());
@@ -444,12 +444,17 @@ bool GLES20RenderEngine::setCurrentSurface(const Surface& surface) {
         if (success && glSurface.getAsync()) {
             eglSwapInterval(mEGLDisplay, 0);
         }
+        if (success) {
+            mSurfaceHeight = glSurface.getHeight();
+        }
     }
+
     return success;
 }
 
 void GLES20RenderEngine::resetCurrentSurface() {
     eglMakeCurrent(mEGLDisplay, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
+    mSurfaceHeight = 0;
 }
 
 base::unique_fd GLES20RenderEngine::flush() {
@@ -563,8 +568,12 @@ void GLES20RenderEngine::fillRegionWithColor(const Region& region, float red, fl
     drawMesh(mesh);
 }
 
-void GLES20RenderEngine::setScissor(uint32_t left, uint32_t bottom, uint32_t right, uint32_t top) {
-    glScissor(left, bottom, right, top);
+void GLES20RenderEngine::setScissor(const Rect& region) {
+    // Invert y-coordinate to map to GL-space.
+    int32_t canvasHeight = mRenderToFbo ? mFboHeight : mSurfaceHeight;
+    int32_t glBottom = canvasHeight - region.bottom;
+
+    glScissor(region.left, glBottom, region.getWidth(), region.getHeight());
     glEnable(GL_SCISSOR_TEST);
 }
 
@@ -592,10 +601,6 @@ void GLES20RenderEngine::bindExternalTextureImage(uint32_t texName,
     }
 }
 
-void GLES20RenderEngine::readPixels(size_t l, size_t b, size_t w, size_t h, uint32_t* pixels) {
-    glReadPixels(l, b, w, h, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
-}
-
 status_t GLES20RenderEngine::bindFrameBuffer(Framebuffer* framebuffer) {
     GLFramebuffer* glFramebuffer = static_cast<GLFramebuffer*>(framebuffer);
     EGLImageKHR eglImage = glFramebuffer->getEGLImage();
@@ -612,6 +617,7 @@ status_t GLES20RenderEngine::bindFrameBuffer(Framebuffer* framebuffer) {
                            GL_TEXTURE_2D, textureName, 0);
 
     mRenderToFbo = true;
+    mFboHeight = glFramebuffer->getBufferHeight();
 
     uint32_t glStatus = glCheckFramebufferStatus(GL_FRAMEBUFFER);
 
@@ -623,13 +629,14 @@ status_t GLES20RenderEngine::bindFrameBuffer(Framebuffer* framebuffer) {
 
 void GLES20RenderEngine::unbindFrameBuffer(Framebuffer* /* framebuffer */) {
     mRenderToFbo = false;
+    mFboHeight = 0;
 
     // back to main framebuffer
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
 
     // Workaround for b/77935566 to force the EGL driver to release the
     // screenshot buffer
-    setScissor(0, 0, 0, 0);
+    setScissor(Rect::EMPTY_RECT);
     clearWithColor(0.0, 0.0, 0.0, 0.0);
     disableScissor();
 }
@@ -673,19 +680,19 @@ void GLES20RenderEngine::setViewportAndProjection(size_t vpw, size_t vph, Rect s
     }
 
     glViewport(0, 0, vpw, vph);
-    mState.setProjectionMatrix(m);
+    mState.projectionMatrix = m;
     mVpWidth = vpw;
     mVpHeight = vph;
 }
 
 void GLES20RenderEngine::setupLayerBlending(bool premultipliedAlpha, bool opaque,
                                             bool disableTexture, const half4& color) {
-    mState.setPremultipliedAlpha(premultipliedAlpha);
-    mState.setOpaque(opaque);
-    mState.setColor(color);
+    mState.isPremultipliedAlpha = premultipliedAlpha;
+    mState.isOpaque = opaque;
+    mState.color = color;
 
     if (disableTexture) {
-        mState.disableTexture();
+        mState.textureEnabled = false;
     }
 
     if (color.a < 1.0f || !opaque) {
@@ -697,7 +704,7 @@ void GLES20RenderEngine::setupLayerBlending(bool premultipliedAlpha, bool opaque
 }
 
 void GLES20RenderEngine::setSourceY410BT2020(bool enable) {
-    mState.setY410BT2020(enable);
+    mState.isY410BT2020 = enable;
 }
 
 void GLES20RenderEngine::setSourceDataSpace(Dataspace source) {
@@ -709,7 +716,7 @@ void GLES20RenderEngine::setOutputDataSpace(Dataspace dataspace) {
 }
 
 void GLES20RenderEngine::setDisplayMaxLuminance(const float maxLuminance) {
-    mState.setDisplayMaxLuminance(maxLuminance);
+    mState.displayMaxLuminance = maxLuminance;
 }
 
 void GLES20RenderEngine::setupLayerTexturing(const Texture& texture) {
@@ -724,22 +731,24 @@ void GLES20RenderEngine::setupLayerTexturing(const Texture& texture) {
     glTexParameteri(target, GL_TEXTURE_MAG_FILTER, filter);
     glTexParameteri(target, GL_TEXTURE_MIN_FILTER, filter);
 
-    mState.setTexture(texture);
+    mState.texture = texture;
+    mState.textureEnabled = true;
 }
 
 void GLES20RenderEngine::setupLayerBlackedOut() {
     glBindTexture(GL_TEXTURE_2D, mProtectedTexName);
     Texture texture(Texture::TEXTURE_2D, mProtectedTexName);
     texture.setDimensions(1, 1); // FIXME: we should get that from somewhere
-    mState.setTexture(texture);
+    mState.texture = texture;
+    mState.textureEnabled = true;
 }
 
-void GLES20RenderEngine::setupColorTransform(const mat4& colorTransform) {
-    mState.setColorMatrix(colorTransform);
+void GLES20RenderEngine::setColorTransform(const mat4& colorTransform) {
+    mState.colorMatrix = colorTransform;
 }
 
 void GLES20RenderEngine::disableTexturing() {
-    mState.disableTexture();
+    mState.textureEnabled = false;
 }
 
 void GLES20RenderEngine::disableBlending() {
@@ -747,10 +756,10 @@ void GLES20RenderEngine::disableBlending() {
 }
 
 void GLES20RenderEngine::setupFillWithColor(float r, float g, float b, float a) {
-    mState.setPremultipliedAlpha(true);
-    mState.setOpaque(false);
-    mState.setColor(half4(r, g, b, a));
-    mState.disableTexture();
+    mState.isPremultipliedAlpha = true;
+    mState.isOpaque = false;
+    mState.color = half4(r, g, b, a);
+    mState.textureEnabled = false;
     glDisable(GL_BLEND);
 }
 
@@ -784,26 +793,26 @@ void GLES20RenderEngine::drawMesh(const Mesh& mesh) {
             // The supported input color spaces are standard RGB, Display P3 and BT2020.
             switch (inputStandard) {
                 case Dataspace::STANDARD_DCI_P3:
-                    managedState.setInputTransformMatrix(mDisplayP3ToXyz);
+                    managedState.inputTransformMatrix = mDisplayP3ToXyz;
                     break;
                 case Dataspace::STANDARD_BT2020:
-                    managedState.setInputTransformMatrix(mBt2020ToXyz);
+                    managedState.inputTransformMatrix = mBt2020ToXyz;
                     break;
                 default:
-                    managedState.setInputTransformMatrix(mSrgbToXyz);
+                    managedState.inputTransformMatrix = mSrgbToXyz;
                     break;
             }
 
             // The supported output color spaces are BT2020, Display P3 and standard RGB.
             switch (outputStandard) {
                 case Dataspace::STANDARD_BT2020:
-                    managedState.setOutputTransformMatrix(mXyzToBt2020);
+                    managedState.outputTransformMatrix = mXyzToBt2020;
                     break;
                 case Dataspace::STANDARD_DCI_P3:
-                    managedState.setOutputTransformMatrix(mXyzToDisplayP3);
+                    managedState.outputTransformMatrix = mXyzToDisplayP3;
                     break;
                 default:
-                    managedState.setOutputTransformMatrix(mXyzToSrgb);
+                    managedState.outputTransformMatrix = mXyzToSrgb;
                     break;
             }
         } else if (inputStandard != outputStandard) {
@@ -818,9 +827,9 @@ void GLES20RenderEngine::drawMesh(const Mesh& mesh) {
             // - sRGB
             // - Display P3
             if (outputStandard == Dataspace::STANDARD_BT709) {
-                managedState.setOutputTransformMatrix(mDisplayP3ToSrgb);
+                managedState.outputTransformMatrix = mDisplayP3ToSrgb;
             } else if (outputStandard == Dataspace::STANDARD_DCI_P3) {
-                managedState.setOutputTransformMatrix(mSrgbToDisplayP3);
+                managedState.outputTransformMatrix = mSrgbToDisplayP3;
             }
         }
 
@@ -830,32 +839,10 @@ void GLES20RenderEngine::drawMesh(const Mesh& mesh) {
         // - the input transfer function doesn't match the output transfer function.
         if (managedState.hasColorMatrix() || managedState.hasOutputTransformMatrix() ||
             inputTransfer != outputTransfer) {
-            switch (inputTransfer) {
-                case Dataspace::TRANSFER_ST2084:
-                    managedState.setInputTransferFunction(Description::TransferFunction::ST2084);
-                    break;
-                case Dataspace::TRANSFER_HLG:
-                    managedState.setInputTransferFunction(Description::TransferFunction::HLG);
-                    break;
-                case Dataspace::TRANSFER_LINEAR:
-                    managedState.setInputTransferFunction(Description::TransferFunction::LINEAR);
-                    break;
-                default:
-                    managedState.setInputTransferFunction(Description::TransferFunction::SRGB);
-                    break;
-            }
-
-            switch (outputTransfer) {
-                case Dataspace::TRANSFER_ST2084:
-                    managedState.setOutputTransferFunction(Description::TransferFunction::ST2084);
-                    break;
-                case Dataspace::TRANSFER_HLG:
-                    managedState.setOutputTransferFunction(Description::TransferFunction::HLG);
-                    break;
-                default:
-                    managedState.setOutputTransferFunction(Description::TransferFunction::SRGB);
-                    break;
-            }
+            managedState.inputTransferFunction =
+                Description::dataSpaceToTransferFunction(inputTransfer);
+            managedState.outputTransferFunction =
+                Description::dataSpaceToTransferFunction(outputTransfer);
         }
 
         ProgramCache::getInstance().useProgram(managedState);

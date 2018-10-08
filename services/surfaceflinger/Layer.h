@@ -72,14 +72,27 @@ class SurfaceInterceptor;
 
 // ---------------------------------------------------------------------------
 
+struct LayerCreationArgs {
+    LayerCreationArgs(SurfaceFlinger* flinger, const sp<Client>& client, const String8& name,
+                      uint32_t w, uint32_t h, uint32_t flags)
+          : flinger(flinger), client(client), name(name), w(w), h(h), flags(flags) {}
+
+    SurfaceFlinger* flinger;
+    const sp<Client>& client;
+    const String8& name;
+    uint32_t w;
+    uint32_t h;
+    uint32_t flags;
+};
+
 class Layer : public virtual RefBase {
-    static int32_t sSequence;
+    static std::atomic<int32_t> sSequence;
 
 public:
     friend class LayerBE;
     LayerBE& getBE() { return mBE; }
     LayerBE& getBE() const { return mBE; }
-    mutable bool contentDirty;
+    mutable bool contentDirty{false};
     // regions below are in window-manager space
     Region visibleRegion;
     Region coveredRegion;
@@ -89,7 +102,7 @@ public:
     // Layer serial number.  This gives layers an explicit ordering, so we
     // have a stable sort order when their layer stack and Z-order are
     // the same.
-    int32_t sequence;
+    int32_t sequence{sSequence++};
 
     enum { // flags for doTransaction()
         eDontUpdateGeometryState = 0x00000001,
@@ -168,10 +181,10 @@ public:
         int32_t api;
 
         sp<NativeHandle> sidebandStream;
+        mat4 colorTransform;
     };
 
-    Layer(SurfaceFlinger* flinger, const sp<Client>& client, const String8& name, uint32_t w,
-          uint32_t h, uint32_t flags);
+    explicit Layer(const LayerCreationArgs& args);
     virtual ~Layer();
 
     void setPrimaryDisplayOnly() { mPrimaryDisplayOnly = true; }
@@ -243,6 +256,9 @@ public:
     virtual void setChildrenDrawingParent(const sp<Layer>& layer);
     virtual bool reparent(const sp<IBinder>& newParentHandle);
     virtual bool detachChildren();
+    virtual bool setColorTransform(const mat4& matrix);
+    virtual const mat4& getColorTransform() const;
+    virtual bool hasColorTransform() const;
 
     // Used only to set BufferStateLayer state
     virtual bool setTransform(uint32_t /*transform*/) { return false; };
@@ -271,6 +287,7 @@ public:
     virtual void useSurfaceDamage() {}
     virtual void useEmptyDamage() {}
 
+    uint32_t getTransactionFlags() const { return mTransactionFlags; }
     uint32_t getTransactionFlags(uint32_t flags);
     uint32_t setTransactionFlags(uint32_t flags);
 
@@ -330,7 +347,7 @@ public:
     virtual bool isCreatedFromMainThread() const { return false; }
 
 
-    bool isPendingRemoval() const { return mPendingRemoval; }
+    bool isRemoved() const { return mRemoved; }
 
     void writeToProto(LayerProto* layerInfo,
                       LayerVector::StateSet stateSet = LayerVector::StateSet::Drawing,
@@ -449,7 +466,8 @@ public:
      * operation, so this should be set only if needed). Typically this is used
      * to figure out if the content or size of a surface has changed.
      */
-    virtual Region latchBuffer(bool& /*recomputeVisibleRegions*/, nsecs_t /*latchTime*/) {
+    virtual Region latchBuffer(bool& /*recomputeVisibleRegions*/, nsecs_t /*latchTime*/,
+                               const sp<Fence>& /*releaseFence*/) {
         return {};
     }
 
@@ -581,12 +599,12 @@ protected:
      */
     class LayerCleaner {
         sp<SurfaceFlinger> mFlinger;
-        wp<Layer> mLayer;
+        sp<Layer> mLayer;
 
     protected:
         ~LayerCleaner() {
             // destroy client resources
-            mFlinger->onLayerDestroyed(mLayer);
+            mFlinger->removeLayer(mLayer, true);
         }
 
     public:
@@ -692,7 +710,7 @@ protected:
     // -----------------------------------------------------------------------
     bool usingRelativeZ(LayerVector::StateSet stateSet);
 
-    bool mPremultipliedAlpha;
+    bool mPremultipliedAlpha{true};
     String8 mName;
     String8 mTransactionName; // A cached version of "TX - " + mName for systraces
 
@@ -701,7 +719,7 @@ protected:
     // these are protected by an external lock
     State mCurrentState;
     State mDrawingState;
-    volatile int32_t mTransactionFlags;
+    std::atomic<uint32_t> mTransactionFlags{0};
 
     // Accessed from main thread and binder threads
     Mutex mPendingStateMutex;
@@ -723,18 +741,18 @@ protected:
     sp<GraphicBuffer> mActiveBuffer;
     ui::Dataspace mCurrentDataSpace = ui::Dataspace::UNKNOWN;
     Rect mCurrentCrop;
-    uint32_t mCurrentTransform;
+    uint32_t mCurrentTransform{0};
     // We encode unset as -1.
-    int32_t mOverrideScalingMode;
-    std::atomic<uint64_t> mCurrentFrameNumber;
-    bool mFrameLatencyNeeded;
+    int32_t mOverrideScalingMode{-1};
+    std::atomic<uint64_t> mCurrentFrameNumber{0};
+    bool mFrameLatencyNeeded{false};
     // Whether filtering is needed b/c of the drawingstate
-    bool mNeedsFiltering;
+    bool mNeedsFiltering{false};
 
-    bool mPendingRemoval = false;
+    bool mRemoved{false};
 
     // page-flip thread (currently main thread)
-    bool mProtectedByApp; // application requires protected path to external sink
+    bool mProtectedByApp{false}; // application requires protected path to external sink
 
     // protected by mLock
     mutable Mutex mLock;
@@ -742,14 +760,14 @@ protected:
     const wp<Client> mClientRef;
 
     // This layer can be a cursor on some displays.
-    bool mPotentialCursor;
+    bool mPotentialCursor{false};
 
-    bool mFreezeGeometryUpdates;
+    bool mFreezeGeometryUpdates{false};
 
     // Child list about to be committed/used for editing.
-    LayerVector mCurrentChildren;
+    LayerVector mCurrentChildren{LayerVector::StateSet::Current};
     // Child list used for rendering.
-    LayerVector mDrawingChildren;
+    LayerVector mDrawingChildren{LayerVector::StateSet::Drawing};
 
     wp<Layer> mCurrentParent;
     wp<Layer> mDrawingParent;

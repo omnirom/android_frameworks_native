@@ -25,6 +25,7 @@
 
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
+#include <EGL/eglext_angle.h>
 
 #include <android/hardware_buffer.h>
 #include <private/android/AHardwareBufferHelpers.h>
@@ -561,6 +562,15 @@ static EGLBoolean processAttributes(egl_display_ptr dp, NativeWindowType window,
                     break;
                 }
             }
+
+            // If the driver doesn't understand it, we should map sRGB-encoded P3 to
+            // sRGB rather than just dropping the colorspace on the floor.
+            // For this format, the driver is expected to apply the sRGB
+            // transfer function during framebuffer operations.
+            if (!copyAttribute && attr[1] == EGL_GL_COLORSPACE_DISPLAY_P3_EXT) {
+                strippedAttribList->push_back(attr[0]);
+                strippedAttribList->push_back(EGL_GL_COLORSPACE_SRGB_KHR);
+            }
         }
         if (copyAttribute) {
             strippedAttribList->push_back(attr[0]);
@@ -711,12 +721,16 @@ EGLSurface eglCreateWindowSurface(  EGLDisplay dpy, EGLConfig config,
             return setError(EGL_BAD_NATIVE_WINDOW, EGL_NO_SURFACE);
         }
 
-        int result = native_window_api_connect(window, NATIVE_WINDOW_API_EGL);
-        if (result < 0) {
-            ALOGE("eglCreateWindowSurface: native_window_api_connect (win=%p) "
-                    "failed (%#x) (already connected to another API?)",
-                    window, result);
-            return setError(EGL_BAD_ALLOC, EGL_NO_SURFACE);
+        // NOTE: When using Vulkan backend, the Vulkan runtime makes all the
+        // native_window_* calls, so don't do them here.
+        if (cnx->angleBackend != EGL_PLATFORM_ANGLE_TYPE_VULKAN_ANGLE) {
+            int result = native_window_api_connect(window, NATIVE_WINDOW_API_EGL);
+            if (result < 0) {
+                ALOGE("eglCreateWindowSurface: native_window_api_connect (win=%p) "
+                      "failed (%#x) (already connected to another API?)",
+                      window, result);
+                return setError(EGL_BAD_ALLOC, EGL_NO_SURFACE);
+            }
         }
 
         EGLDisplay iDpy = dp->disp.dpy;
@@ -733,7 +747,7 @@ EGLSurface eglCreateWindowSurface(  EGLDisplay dpy, EGLConfig config,
         }
         attrib_list = strippedAttribList.data();
 
-        {
+        if (cnx->angleBackend != EGL_PLATFORM_ANGLE_TYPE_VULKAN_ANGLE) {
             int err = native_window_set_buffers_format(window, format);
             if (err != 0) {
                 ALOGE("error setting native window pixel format: %s (%d)",
@@ -741,16 +755,16 @@ EGLSurface eglCreateWindowSurface(  EGLDisplay dpy, EGLConfig config,
                 native_window_api_disconnect(window, NATIVE_WINDOW_API_EGL);
                 return setError(EGL_BAD_NATIVE_WINDOW, EGL_NO_SURFACE);
             }
-        }
 
-        android_dataspace dataSpace = dataSpaceFromEGLColorSpace(colorSpace);
-        if (dataSpace != HAL_DATASPACE_UNKNOWN) {
-            int err = native_window_set_buffers_data_space(window, dataSpace);
-            if (err != 0) {
-                ALOGE("error setting native window pixel dataSpace: %s (%d)",
-                      strerror(-err), err);
-                native_window_api_disconnect(window, NATIVE_WINDOW_API_EGL);
-                return setError(EGL_BAD_NATIVE_WINDOW, EGL_NO_SURFACE);
+            android_dataspace dataSpace = dataSpaceFromEGLColorSpace(colorSpace);
+            if (dataSpace != HAL_DATASPACE_UNKNOWN) {
+                err = native_window_set_buffers_data_space(window, dataSpace);
+                if (err != 0) {
+                    ALOGE("error setting native window pixel dataSpace: %s (%d)", strerror(-err),
+                          err);
+                    native_window_api_disconnect(window, NATIVE_WINDOW_API_EGL);
+                    return setError(EGL_BAD_NATIVE_WINDOW, EGL_NO_SURFACE);
+                }
             }
         }
 
@@ -769,8 +783,10 @@ EGLSurface eglCreateWindowSurface(  EGLDisplay dpy, EGLConfig config,
         }
 
         // EGLSurface creation failed
-        native_window_set_buffers_format(window, 0);
-        native_window_api_disconnect(window, NATIVE_WINDOW_API_EGL);
+        if (cnx->angleBackend != EGL_PLATFORM_ANGLE_TYPE_VULKAN_ANGLE) {
+            native_window_set_buffers_format(window, 0);
+            native_window_api_disconnect(window, NATIVE_WINDOW_API_EGL);
+        }
     }
     return EGL_NO_SURFACE;
 }
@@ -1362,9 +1378,11 @@ EGLBoolean eglSwapBuffersWithDamageKHR(EGLDisplay dpy, EGLSurface draw,
         }
     }
 
-    if (!sendSurfaceMetadata(s)) {
-        native_window_api_disconnect(s->getNativeWindow(), NATIVE_WINDOW_API_EGL);
-        return setError(EGL_BAD_NATIVE_WINDOW, (EGLBoolean)EGL_FALSE);
+    if (s->cnx->angleBackend != EGL_PLATFORM_ANGLE_TYPE_VULKAN_ANGLE) {
+        if (!sendSurfaceMetadata(s)) {
+            native_window_api_disconnect(s->getNativeWindow(), NATIVE_WINDOW_API_EGL);
+            return setError(EGL_BAD_NATIVE_WINDOW, (EGLBoolean)EGL_FALSE);
+        }
     }
 
     if (n_rects == 0) {
@@ -1385,7 +1403,10 @@ EGLBoolean eglSwapBuffersWithDamageKHR(EGLDisplay dpy, EGLSurface draw,
         androidRect.bottom = y;
         androidRects.push_back(androidRect);
     }
-    native_window_set_surface_damage(s->getNativeWindow(), androidRects.data(), androidRects.size());
+    if (s->cnx->angleBackend != EGL_PLATFORM_ANGLE_TYPE_VULKAN_ANGLE) {
+        native_window_set_surface_damage(s->getNativeWindow(), androidRects.data(),
+                                         androidRects.size());
+    }
 
     if (s->cnx->egl.eglSwapBuffersWithDamageKHR) {
         return s->cnx->egl.eglSwapBuffersWithDamageKHR(dp->disp.dpy, s->surface,

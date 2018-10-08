@@ -47,6 +47,7 @@
 #include "SensorRecord.h"
 #include "SensorRegistrationInfo.h"
 
+#include <ctime>
 #include <inttypes.h>
 #include <math.h>
 #include <sched.h>
@@ -306,7 +307,7 @@ const Sensor& SensorService::registerSensor(SensorInterface* s, bool isDebug, bo
     int handle = s->getSensor().getHandle();
     int type = s->getSensor().getType();
     if (mSensors.add(handle, s, isDebug, isVirtual)){
-        mRecentEvent.emplace(handle, new RecentEventLogger(type));
+        mRecentEvent.emplace(handle, new SensorServiceUtil::RecentEventLogger(type));
         return s->getSensor();
     } else {
         return mSensors.getNonSensor();
@@ -423,6 +424,11 @@ status_t SensorService::dump(int fd, const Vector<String16>& args) {
         } else {
             // Default dump the sensor list and debugging information.
             //
+            timespec curTime;
+            clock_gettime(CLOCK_REALTIME, &curTime);
+            struct tm* timeinfo = localtime(&(curTime.tv_sec));
+            result.appendFormat("Captured at: %02d:%02d:%02d.%03d\n", timeinfo->tm_hour,
+                                timeinfo->tm_min, timeinfo->tm_sec, (int)ns2ms(curTime.tv_nsec));
             result.append("Sensor Device:\n");
             result.append(SensorDevice::getInstance().dump().c_str());
 
@@ -651,16 +657,18 @@ bool SensorService::threadLoop() {
         // sending events to clients (incrementing SensorEventConnection::mWakeLockRefCount) should
         // not be interleaved with decrementing SensorEventConnection::mWakeLockRefCount and
         // releasing the wakelock.
-        bool bufferHasWakeUpEvent = false;
+        uint32_t wakeEvents = 0;
         for (int i = 0; i < count; i++) {
             if (isWakeUpSensorEvent(mSensorEventBuffer[i])) {
-                bufferHasWakeUpEvent = true;
-                break;
+                wakeEvents++;
             }
         }
 
-        if (bufferHasWakeUpEvent && !mWakeLockAcquired) {
-            setWakeLockAcquiredLocked(true);
+        if (wakeEvents > 0) {
+            if (!mWakeLockAcquired) {
+                setWakeLockAcquiredLocked(true);
+            }
+            device.writeWakeLockHandled(wakeEvents);
         }
         recordLastValueLocked(mSensorEventBuffer, count);
 

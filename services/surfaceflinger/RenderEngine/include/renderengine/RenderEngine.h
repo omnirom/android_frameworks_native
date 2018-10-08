@@ -96,12 +96,11 @@ public:
     virtual void fillRegionWithColor(const Region& region, float red, float green,
                                      float blue, float alpha) = 0;
 
-    virtual void setScissor(uint32_t left, uint32_t bottom, uint32_t right, uint32_t top) = 0;
+    virtual void setScissor(const Rect& region) = 0;
     virtual void disableScissor() = 0;
     virtual void genTextures(size_t count, uint32_t* names) = 0;
     virtual void deleteTextures(size_t count, uint32_t const* names) = 0;
     virtual void bindExternalTextureImage(uint32_t texName, const Image& image) = 0;
-    virtual void readPixels(size_t l, size_t b, size_t w, size_t h, uint32_t* pixels) = 0;
     // When binding a native buffer, it must be done before setViewportAndProjection
     // Returns NO_ERROR when binds successfully, NO_MEMORY when there's no memory for allocation.
     virtual status_t bindFrameBuffer(Framebuffer* framebuffer) = 0;
@@ -116,7 +115,9 @@ public:
     virtual void setupLayerTexturing(const Texture& texture) = 0;
     virtual void setupLayerBlackedOut() = 0;
     virtual void setupFillWithColor(float r, float g, float b, float a) = 0;
-    virtual void setupColorTransform(const mat4& /* colorTransform */) = 0;
+
+    // Set a color transform matrix that is applied in linear space right before OETF.
+    virtual void setColorTransform(const mat4& /* colorTransform */) = 0;
     virtual void disableTexturing() = 0;
     virtual void disableBlending() = 0;
 
@@ -164,7 +165,6 @@ public:
 
     bool useNativeFenceSync() const override;
     bool useWaitSync() const override;
-    void setupColorTransform(const mat4& /* colorTransform */) override {}
 
 protected:
     RenderEngine(uint32_t featureFlags);
