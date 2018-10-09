@@ -664,6 +664,7 @@ private:
     void preComposition(nsecs_t refreshStartTime);
     void postComposition(nsecs_t refreshStartTime);
     void forceResyncModel();
+    size_t getVsyncSource();
     void updateCompositorTiming(
             nsecs_t vsyncPhase, nsecs_t vsyncInterval, nsecs_t compositeTime,
             std::shared_ptr<FenceTime>& presentFenceTime);
@@ -846,6 +847,7 @@ private:
     // don't use a lock for these, we don't care
     std::bitset<DisplayDevice::NUM_BUILTIN_DISPLAY_TYPES> mActiveDisplays;
     std::bitset<DisplayDevice::NUM_BUILTIN_DISPLAY_TYPES> mBuiltInBitmask;
+    std::bitset<DisplayDevice::NUM_BUILTIN_DISPLAY_TYPES> mPluggableBitmask;
     std::mutex mVsyncPeriodMutex;
     std::vector<nsecs_t> vsyncPeriod;
     int mDebugRegion;
