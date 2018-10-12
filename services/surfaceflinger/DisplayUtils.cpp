@@ -72,13 +72,11 @@ SurfaceFlinger* DisplayUtils::getSFInstance() {
     }
 }
 
-BufferLayer* DisplayUtils::getBufferLayerInstance(SurfaceFlinger* flinger,
-                            const sp<Client>& client, const String8& name,
-                            uint32_t w, uint32_t h, uint32_t flags) {
+BufferLayer* DisplayUtils::getBufferLayerInstance(const LayerCreationArgs& args) {
     if (sUseExtendedImpls) {
-        return new ExBufferLayer(flinger, client, name, w, h, flags);
+        return new ExBufferLayer(args);
     } else {
-        return new BufferQueueLayer(flinger, client, name, w, h, flags);
+        return new BufferQueueLayer(args);
     }
 }
 

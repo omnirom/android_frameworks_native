@@ -4654,7 +4654,7 @@ void SurfaceFlinger::dumpAllLocked(const Vector<String16>& args, size_t& index,
     colorizer.reset(result);
 
     {
-        LayersProto layersProto = dumpProtoInfo(LayerVector::StateSet::Current);
+        LayersProto layersProto = dumpProtoInfo(LayerVector::StateSet::Current, enableRegionDump);
         auto layerTree = LayerProtoParser::generateLayerTree(layersProto);
         result.append(LayerProtoParser::layerTreeToString(layerTree).c_str());
         result.append("\n");

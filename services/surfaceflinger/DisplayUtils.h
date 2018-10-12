@@ -52,9 +52,7 @@ class DisplayUtils {
   public:
     static DisplayUtils* getInstance() ANDROID_API;
     SurfaceFlinger* getSFInstance() ANDROID_API;
-    BufferLayer* getBufferLayerInstance(SurfaceFlinger*, const sp<Client>&,
-                        const String8&, uint32_t,
-                        uint32_t, uint32_t);
+    BufferLayer* getBufferLayerInstance(const LayerCreationArgs& args);
     void initVDSInstance(HWComposer & hwc, int32_t hwcDisplayId,
             sp<IGraphicBufferProducer> currentStateSurface, sp<DisplaySurface> &dispSurface,
             sp<IGraphicBufferProducer> &producer, sp<IGraphicBufferProducer> bqProducer,
