@@ -71,6 +71,11 @@ ExBufferLayer::ExBufferLayer(SurfaceFlinger* flinger, const sp<Client>& client,
     }
 
     mScreenshot = (std::string(name).find("ScreenshotSurface") != std::string::npos);
+    const sp<const DisplayDevice> hw(mFlinger->getDefaultDisplayDevice());
+    mHasHDRCapabilities = hw->hasHDR10Support() ||
+                          hw->hasHLGSupport()   ||
+                          hw->hasDolbyVisionSupport();
+
 }
 
 ExBufferLayer::~ExBufferLayer() {
@@ -103,7 +108,7 @@ bool ExBufferLayer::isHDRLayer() const {
             (colorData.transfer == Transfer_SMPTE_ST2084 ||
             colorData.transfer == Transfer_HLG)) {
                 return (!ExSurfaceFlinger::AllowHDRFallBack() &&
-                        !mFlinger->IsHWCDisabled());
+                        !mFlinger->IsHWCDisabled() &&  mHasHDRCapabilities);
         }
     }
 
