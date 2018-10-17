@@ -1,12 +1,10 @@
-#include "consumer_channel.h"
-
-#include <log/log.h>
-#include <utils/Trace.h>
-
 #include <thread>
 
+#include <log/log.h>
 #include <private/dvr/bufferhub_rpc.h>
-#include "producer_channel.h"
+#include <private/dvr/consumer_channel.h>
+#include <private/dvr/producer_channel.h>
+#include <utils/Trace.h>
 
 using android::pdx::BorrowedHandle;
 using android::pdx::Channel;
@@ -92,11 +90,6 @@ bool ConsumerChannel::HandleMessage(Message& message) {
           *this, &ConsumerChannel::OnConsumerRelease, message);
       return true;
 
-    case BufferHubRPC::ConsumerSetIgnore::Opcode:
-      DispatchRemoteMethod<BufferHubRPC::ConsumerSetIgnore>(
-          *this, &ConsumerChannel::OnConsumerSetIgnore, message);
-      return true;
-
     default:
       return false;
   }
@@ -122,9 +115,8 @@ Status<LocalFence> ConsumerChannel::OnConsumerAcquire(Message& message) {
   if (acquired_ || released_) {
     ALOGE(
         "ConsumerChannel::OnConsumerAcquire: Acquire when not posted: "
-        "ignored=%d acquired=%d released=%d channel_id=%d buffer_id=%d",
-        ignored_, acquired_, released_, message.GetChannelId(),
-        producer->buffer_id());
+        "acquired=%d released=%d channel_id=%d buffer_id=%d",
+        acquired_, released_, message.GetChannelId(), producer->buffer_id());
     return ErrorStatus(EBUSY);
   } else {
     auto status = producer->OnConsumerAcquire(message);
@@ -146,9 +138,8 @@ Status<void> ConsumerChannel::OnConsumerRelease(Message& message,
   if (!acquired_ || released_) {
     ALOGE(
         "ConsumerChannel::OnConsumerRelease: Release when not acquired: "
-        "ignored=%d acquired=%d released=%d channel_id=%d buffer_id=%d",
-        ignored_, acquired_, released_, message.GetChannelId(),
-        producer->buffer_id());
+        "acquired=%d released=%d channel_id=%d buffer_id=%d",
+        acquired_, released_, message.GetChannelId(), producer->buffer_id());
     return ErrorStatus(EBUSY);
   } else {
     auto status =
@@ -162,36 +153,11 @@ Status<void> ConsumerChannel::OnConsumerRelease(Message& message,
   }
 }
 
-Status<void> ConsumerChannel::OnConsumerSetIgnore(Message&, bool ignored) {
-  ATRACE_NAME("ConsumerChannel::OnConsumerSetIgnore");
-  auto producer = GetProducer();
-  if (!producer)
-    return ErrorStatus(EPIPE);
-
-  ignored_ = ignored;
-  if (ignored_ && acquired_) {
-    // Update the producer if ignore is set after the consumer acquires the
-    // buffer.
-    ClearAvailable();
-    producer->OnConsumerIgnored();
-    acquired_ = false;
-    released_ = true;
-  }
-
-  return {};
-}
-
 bool ConsumerChannel::OnProducerPosted() {
-  if (ignored_) {
-    acquired_ = false;
-    released_ = true;
-    return false;
-  } else {
-    acquired_ = false;
-    released_ = false;
-    SignalAvailable();
-    return true;
-  }
+  acquired_ = false;
+  released_ = false;
+  SignalAvailable();
+  return true;
 }
 
 void ConsumerChannel::OnProducerClosed() {

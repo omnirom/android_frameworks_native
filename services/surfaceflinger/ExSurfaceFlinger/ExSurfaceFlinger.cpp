@@ -105,7 +105,7 @@ void ExSurfaceFlinger::handleDPTransactionIfNeeded(
                 if (what & DisplayState::eDisplayProjectionChanged) {
                     Mutex::Autolock lock(mExtAnimationLock);
                     invalidateHwcGeometry();
-                    android_atomic_or(1, &mRepaintEverything);
+                    mRepaintEverything = true;
                     signalRefresh();
                     mExtAnimationCond.waitRelative(mExtAnimationLock, 1000000000);
                 }

@@ -63,43 +63,24 @@
 
 namespace android {
 
-int32_t Layer::sSequence = 1;
+std::atomic<int32_t> Layer::sSequence{1};
 
-Layer::Layer(SurfaceFlinger* flinger, const sp<Client>& client, const String8& name, uint32_t w,
-             uint32_t h, uint32_t flags)
-      : contentDirty(false),
-        sequence(uint32_t(android_atomic_inc(&sSequence))),
-        mFlinger(flinger),
-        mPremultipliedAlpha(true),
-        mName(name),
-        mTransactionFlags(0),
-        mPendingStateMutex(),
-        mPendingStates(),
-        mCurrentTransform(0),
-        mOverrideScalingMode(-1),
-        mCurrentFrameNumber(0),
-        mFrameLatencyNeeded(false),
-        mNeedsFiltering(false),
-        mProtectedByApp(false),
-        mClientRef(client),
-        mPotentialCursor(false),
-        mFreezeGeometryUpdates(false),
-        mCurrentChildren(LayerVector::StateSet::Current),
-        mDrawingChildren(LayerVector::StateSet::Drawing),
-        mBE{this, name.string()} {
-
+Layer::Layer(const LayerCreationArgs& args)
+      : mFlinger(args.flinger),
+        mName(args.name),
+        mClientRef(args.client),
+        mBE{this, args.name.string()} {
     mCurrentCrop.makeInvalid();
 
     uint32_t layerFlags = 0;
-    if (flags & ISurfaceComposerClient::eHidden) layerFlags |= layer_state_t::eLayerHidden;
-    if (flags & ISurfaceComposerClient::eOpaque) layerFlags |= layer_state_t::eLayerOpaque;
-    if (flags & ISurfaceComposerClient::eSecure) layerFlags |= layer_state_t::eLayerSecure;
+    if (args.flags & ISurfaceComposerClient::eHidden) layerFlags |= layer_state_t::eLayerHidden;
+    if (args.flags & ISurfaceComposerClient::eOpaque) layerFlags |= layer_state_t::eLayerOpaque;
+    if (args.flags & ISurfaceComposerClient::eSecure) layerFlags |= layer_state_t::eLayerSecure;
 
-    mName = name;
     mTransactionName = String8("TX - ") + mName;
 
-    mCurrentState.active_legacy.w = w;
-    mCurrentState.active_legacy.h = h;
+    mCurrentState.active_legacy.w = args.w;
+    mCurrentState.active_legacy.h = args.h;
     mCurrentState.flags = layerFlags;
     mCurrentState.active_legacy.transform.set(0, 0);
     mCurrentState.crop_legacy.makeInvalid();
@@ -127,7 +108,7 @@ Layer::Layer(SurfaceFlinger* flinger, const sp<Client>& client, const String8& n
     mDrawingState = mCurrentState;
 
     CompositorTiming compositorTiming;
-    flinger->getCompositorTiming(&compositorTiming);
+    args.flinger->getCompositorTiming(&compositorTiming);
     mFrameEventHistory.initializeCompositorTiming(compositorTiming);
     mFrameTracker.setDisplayRefreshPeriod(compositorTiming.interval);
 }
@@ -138,12 +119,6 @@ Layer::~Layer() {
         c->detachLayer(this);
     }
 
-    for (auto& point : mRemoteSyncPoints) {
-        point->setTransactionApplied();
-    }
-    for (auto& point : mLocalSyncPoints) {
-        point->setFrameAvailable();
-    }
     mFrameTracker.logAndResetStats(mName);
 }
 
@@ -161,8 +136,6 @@ void Layer::onLayerDisplayed(const sp<Fence>& /*releaseFence*/) {}
 void Layer::onRemovedFromCurrentState() {
     // the layer is removed from SF mCurrentState to mLayersPendingRemoval
 
-    mPendingRemoval = true;
-
     if (mCurrentState.zOrderRelativeOf != nullptr) {
         sp<Layer> strongRelative = mCurrentState.zOrderRelativeOf.promote();
         if (strongRelative != nullptr) {
@@ -171,7 +144,7 @@ void Layer::onRemovedFromCurrentState() {
         }
         mCurrentState.zOrderRelativeOf = nullptr;
     }
-
+    
     for (const auto& child : mCurrentChildren) {
         child->onRemovedFromCurrentState();
     }
@@ -183,8 +156,13 @@ void Layer::onRemoved() {
 
     destroyAllHwcLayers();
 
-    for (const auto& child : mCurrentChildren) {
-        child->onRemoved();
+    mRemoved = true;
+
+    for (auto& point : mRemoteSyncPoints) {
+        point->setTransactionApplied();
+    }
+    for (auto& point : mLocalSyncPoints) {
+        point->setFrameAvailable();
     }
 }
 
@@ -1025,11 +1003,11 @@ void Layer::commitTransaction(const State& stateToCommit) {
 }
 
 uint32_t Layer::getTransactionFlags(uint32_t flags) {
-    return android_atomic_and(~flags, &mTransactionFlags) & flags;
+    return mTransactionFlags.fetch_and(~flags) & flags;
 }
 
 uint32_t Layer::setTransactionFlags(uint32_t flags) {
-    return android_atomic_or(flags, &mTransactionFlags);
+    return mTransactionFlags.fetch_or(flags);
 }
 
 bool Layer::setPosition(float x, float y, bool immediate) {
@@ -1569,6 +1547,25 @@ bool Layer::detachChildren() {
     }
 
     return true;
+}
+
+bool Layer::setColorTransform(const mat4& matrix) {
+    if (mCurrentState.colorTransform == matrix) {
+        return false;
+    }
+    ++mCurrentState.sequence;
+    mCurrentState.colorTransform = matrix;
+    setTransactionFlags(eTransactionNeeded);
+    return true;
+}
+
+const mat4& Layer::getColorTransform() const {
+    return getDrawingState().colorTransform;
+}
+
+bool Layer::hasColorTransform() const {
+    static const mat4 identityMatrix = mat4();
+    return getDrawingState().colorTransform != identityMatrix;
 }
 
 bool Layer::isLegacyDataSpace() const {

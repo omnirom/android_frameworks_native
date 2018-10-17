@@ -118,6 +118,10 @@ namespace dvr {
 class VrFlinger;
 } // namespace dvr
 
+namespace surfaceflinger {
+class NativeWindowSurface;
+} // namespace surfaceflinger
+
 // ---------------------------------------------------------------------------
 
 enum {
@@ -134,18 +138,6 @@ enum class DisplayColorSetting : int32_t {
     ENHANCED = 2,
 };
 
-// A thin interface to abstract creating instances of Surface (gui/Surface.h) to
-// use as a NativeWindow.
-class NativeWindowSurface {
-public:
-    virtual ~NativeWindowSurface();
-
-    // Gets the NativeWindow to use for the surface.
-    virtual sp<ANativeWindow> getNativeWindow() const = 0;
-
-    // Indicates that the surface should allocate its buffers now.
-    virtual void preallocateBuffers() = 0;
-};
 
 class SurfaceFlingerBE
 {
@@ -199,6 +191,9 @@ public:
     nsecs_t mFrameBuckets[NUM_BUCKETS];
     nsecs_t mTotalTime;
     std::atomic<nsecs_t> mLastSwapTime;
+
+    // Synchronization fence from a GL composition.
+    sp<Fence> flushFence = Fence::NO_FENCE;
 
     // Double- vs. triple-buffering stats
     struct BufferingStats {
@@ -444,8 +439,7 @@ private:
             ISurfaceComposer::VsyncSource vsyncSource = eVsyncSourceApp);
     virtual status_t captureScreen(const sp<IBinder>& displayToken, sp<GraphicBuffer>* outBuffer,
                                    Rect sourceCrop, uint32_t reqWidth, uint32_t reqHeight,
-                                   int32_t minLayerZ, int32_t maxLayerZ, bool useIdentityTransform,
-                                   ISurfaceComposer::Rotation rotation);
+                                   bool useIdentityTransform, ISurfaceComposer::Rotation rotation);
     virtual status_t captureLayers(const sp<IBinder>& parentHandle, sp<GraphicBuffer>* outBuffer,
                                    const Rect& sourceCrop, float frameScale, bool childrenOnly);
     virtual status_t getDisplayStats(const sp<IBinder>& displayToken, DisplayStatInfo* stats);
@@ -467,7 +461,6 @@ private:
     virtual status_t getLayerDebugInfo(std::vector<LayerDebugInfo>* outLayers) const;
     status_t getCompositionPreference(ui::Dataspace* outDataSpace,
                                       ui::PixelFormat* outPixelFormat) const override;
-
 
     /* ------------------------------------------------------------------------
      * DeathRecipient interface
@@ -582,11 +575,6 @@ private:
     // ISurfaceComposerClient::destroySurface()
     status_t onLayerRemoved(const sp<Client>& client, const sp<IBinder>& handle);
 
-    // called when all clients have released all their references to
-    // this layer meaning it is entirely safe to destroy all
-    // resources associated to this layer.
-    status_t onLayerDestroyed(const wp<Layer>& layer);
-
     // remove a layer from SurfaceFlinger immediately
     status_t removeLayer(const sp<Layer>& layer, bool topLevelOnly = false);
     status_t removeLayerLocked(const Mutex&, const sp<Layer>& layer, bool topLevelOnly = false);
@@ -613,8 +601,8 @@ private:
                                      TraverseLayersFunction traverseLayers,
                                      ANativeWindowBuffer* buffer, bool useIdentityTransform,
                                      bool forSystem, int* outSyncFd);
-    void traverseLayersInDisplay(const sp<const DisplayDevice>& display, int32_t minLayerZ,
-                                 int32_t maxLayerZ, const LayerVector::Visitor& visitor);
+    void traverseLayersInDisplay(const sp<const DisplayDevice>& display,
+                                 const LayerVector::Visitor& visitor);
 
     sp<StartPropertySetThread> mStartPropertySetThread = nullptr;
 
@@ -771,8 +759,6 @@ private:
                                                                  bool enableRegionDump) const;
     bool startDdmConnection();
     void appendSfConfigString(String8& result) const;
-    void checkScreenshot(size_t w, size_t s, size_t h, void const* vaddr,
-                         TraverseLayersFunction traverseLayers);
 
     void logFrameStats();
 
@@ -811,7 +797,7 @@ private:
     // access must be protected by mStateLock
     mutable Mutex mStateLock;
     State mCurrentState{LayerVector::StateSet::Current};
-    volatile int32_t mTransactionFlags;
+    std::atomic<int32_t> mTransactionFlags{0};
     Condition mTransactionCV;
     bool mTransactionPending;
     bool mAnimTransactionPending;
@@ -830,8 +816,7 @@ private:
     bool mLayersRemoved;
     bool mLayersAdded;
 
-    // access must be protected by mInvalidateLock
-    volatile int32_t mRepaintEverything;
+    std::atomic<bool> mRepaintEverything{false};
 
     // helper methods
     void configureHwcCommonData(const CompositionInfo& compositionInfo) const;
@@ -959,7 +944,8 @@ private:
     CreateBufferQueueFunction mCreateBufferQueue;
 
     using CreateNativeWindowSurfaceFunction =
-            std::function<std::unique_ptr<NativeWindowSurface>(const sp<IGraphicBufferProducer>&)>;
+            std::function<std::unique_ptr<surfaceflinger::NativeWindowSurface>(
+                    const sp<IGraphicBufferProducer>&)>;
     CreateNativeWindowSurfaceFunction mCreateNativeWindowSurface;
 
     SurfaceFlingerBE mBE;

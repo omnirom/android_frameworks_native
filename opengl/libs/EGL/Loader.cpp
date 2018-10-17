@@ -38,6 +38,18 @@
 
 extern "C" {
   android_namespace_t* android_get_exported_namespace(const char*);
+
+  // TODO(ianelliott@): Get this from an ANGLE header:
+  typedef enum ANGLEPreference {
+      ANGLE_NO_PREFERENCE = 0,
+      ANGLE_PREFER_NATIVE = 1,
+      ANGLE_PREFER_ANGLE = 2,
+  } ANGLEPreference;
+
+  // TODO(ianelliott@): Get this from an ANGLE header:
+  typedef bool (*fpANGLEUseForApplication)(const char* appName, const char* deviceMfr,
+                                           const char* deviceModel, ANGLEPreference developerOption,
+                                           ANGLEPreference appPreference);
 }
 
 // ----------------------------------------------------------------------------
@@ -455,6 +467,114 @@ static void* load_system_driver(const char* kind) {
     return dso;
 }
 
+static void* load_angle_from_namespace(const char* kind, android_namespace_t* ns) {
+    const android_dlextinfo dlextinfo = {
+            .flags = ANDROID_DLEXT_USE_NAMESPACE,
+            .library_namespace = ns,
+    };
+
+    std::string name = std::string("lib") + kind + "_angle.so";
+
+    void* so = do_android_dlopen_ext(name.c_str(), RTLD_LOCAL | RTLD_NOW, &dlextinfo);
+
+    if (so) {
+        ALOGD("dlopen_ext from APK (%s) success at %p", name.c_str(), so);
+        return so;
+    } else {
+        ALOGE("dlopen_ext(\"%s\") failed: %s", name.c_str(), dlerror());
+    }
+
+    return nullptr;
+}
+
+static ANGLEPreference getAnglePref(const char* app_pref) {
+    if (app_pref == nullptr)
+        return ANGLE_NO_PREFERENCE;
+
+    if (strcmp(app_pref, "angle") == 0) {
+        return ANGLE_PREFER_ANGLE;
+    } else if (strcmp(app_pref, "native") == 0) {
+        return ANGLE_PREFER_NATIVE;
+    }
+    return ANGLE_NO_PREFERENCE;
+}
+
+static void* load_angle(const char* kind, egl_connection_t* cnx) {
+    // Only attempt to load ANGLE libs
+    if (strcmp(kind, "EGL") != 0 && strcmp(kind, "GLESv2") != 0 && strcmp(kind, "GLESv1_CM") != 0)
+        return nullptr;
+
+    void* so = nullptr;
+    std::string name;
+    char prop[PROPERTY_VALUE_MAX];
+
+    android_namespace_t* ns = android_getAngleNamespace();
+    const char* app_name = android_getAngleAppName();
+    const char* app_pref = android_getAngleAppPref();
+    bool developer_opt_in = android_getAngleDeveloperOptIn();
+
+    // Determine whether or not to use ANGLE:
+    ANGLEPreference developer_option = developer_opt_in ? ANGLE_PREFER_ANGLE : ANGLE_NO_PREFERENCE;
+    bool use_angle = (developer_option == ANGLE_PREFER_ANGLE);
+
+    if (use_angle) {
+        ALOGV("User set \"Developer Options\" to force the use of ANGLE");
+    } else {
+        // The "Developer Options" value wasn't set to force the use of ANGLE.  Need to temporarily
+        // load ANGLE and call the updatable opt-in/out logic:
+        std::string app_name_str = app_name ? app_name : "";
+        char manufacturer[PROPERTY_VALUE_MAX];
+        char model[PROPERTY_VALUE_MAX];
+        property_get("ro.product.manufacturer", manufacturer, "UNSET");
+        property_get("ro.product.model", model, "UNSET");
+        ANGLEPreference app_preference = getAnglePref(android_getAngleAppPref());
+
+        so = load_angle_from_namespace("GLESv2", ns);
+        if (so) {
+            ALOGV("Temporarily loaded ANGLE's opt-in/out logic from namespace");
+            fpANGLEUseForApplication fp =
+                    (fpANGLEUseForApplication)dlsym(so, "ANGLEUseForApplication");
+            if (fp) {
+                use_angle = (fp)(app_name_str.c_str(), manufacturer, model, developer_option,
+                                 app_preference);
+                ALOGV("Result of opt-in/out logic is %s", use_angle ? "true" : "false");
+            }
+
+            ALOGV("Close temporarily-loaded ANGLE opt-in/out logic");
+            dlclose(so);
+            so = nullptr;
+        } else {
+            // We weren't able to load and call the updateable opt-in/out logic.
+            // If we can't load the library, there is no ANGLE available.
+            use_angle = false;
+            ALOGV("Could not temporarily-load the ANGLE opt-in/out logic, cannot use ANGLE.");
+        }
+    }
+    if (use_angle) {
+        so = load_angle_from_namespace(kind, ns);
+    }
+
+    if (so) {
+        ALOGV("Loaded ANGLE %s library for %s (instead of native)",
+              kind, app_name ? app_name : "nullptr");
+        property_get("debug.angle.backend", prop, "UNSET");
+        ALOGV("ANGLE's backend set to %s", prop);
+        property_get("debug.hwui.renderer", prop, "UNSET");
+        ALOGV("Skia's renderer set to %s", prop);
+        cnx->useAngle = true;
+        // Find and load vendor libEGL for ANGLE
+        if (!cnx->vendorEGL) {
+            cnx->vendorEGL = load_system_driver("EGL");
+        }
+        return so;
+    } else {
+        ALOGV("Loaded native %s library for %s (instead of ANGLE)",
+              kind, app_name ? app_name : "nullptr");
+    }
+
+    return nullptr;
+}
+
 static const char* HAL_SUBNAME_KEY_PROPERTIES[2] = {
     "ro.hardware.egl",
     "ro.board.platform",
@@ -486,10 +606,13 @@ void *Loader::load_driver(const char* kind,
     ATRACE_CALL();
 
     void* dso = nullptr;
+    dso = load_angle(kind, cnx);
 #ifndef __ANDROID_VNDK__
-    android_namespace_t* ns = android_getDriverNamespace();
-    if (ns) {
-        dso = load_updated_driver(kind, ns);
+    if (!dso) {
+        android_namespace_t* ns = android_getDriverNamespace();
+        if (ns) {
+            dso = load_updated_driver(kind, ns);
+        }
     }
 #endif
     if (!dso) {

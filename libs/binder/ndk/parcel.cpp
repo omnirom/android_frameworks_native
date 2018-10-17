@@ -27,13 +27,8 @@ using ::android::Parcel;
 using ::android::sp;
 using ::android::status_t;
 
-void AParcel_delete(AParcel** parcel) {
-    if (parcel == nullptr) {
-        return;
-    }
-
-    delete *parcel;
-    *parcel = nullptr;
+void AParcel_delete(AParcel* parcel) {
+    delete parcel;
 }
 
 binder_status_t AParcel_writeStrongBinder(AParcel* parcel, AIBinder* binder) {
@@ -61,6 +56,17 @@ binder_status_t AParcel_readNullableStrongBinder(const AParcel* parcel, AIBinder
     AIBinder_incStrong(ret.get());
     *binder = ret.get();
     return PruneStatusT(status);
+}
+binder_status_t AParcel_writeStatusHeader(AParcel* parcel, const AStatus* status) {
+    return PruneStatusT(status->get()->writeToParcel(parcel->get()));
+}
+binder_status_t AParcel_readStatusHeader(const AParcel* parcel, AStatus** status) {
+    ::android::binder::Status bstatus;
+    binder_status_t ret = PruneStatusT(bstatus.readFromParcel(*parcel->get()));
+    if (ret == EX_NONE) {
+        *status = new AStatus(std::move(bstatus));
+    }
+    return ret;
 }
 
 // See gen_parcel_helper.py. These auto-generated read/write methods use the same types for

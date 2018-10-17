@@ -185,8 +185,6 @@ void CompositionTest::captureScreenComposition() {
     LayerCase::setupForScreenCapture(this);
 
     const Rect sourceCrop(0, 0, DEFAULT_DISPLAY_WIDTH, DEFAULT_DISPLAY_HEIGHT);
-    constexpr int32_t minLayerZ = -1;
-    constexpr int32_t maxLayerZ = 1000;
     constexpr bool useIdentityTransform = true;
     constexpr bool forSystem = true;
 
@@ -194,7 +192,7 @@ void CompositionTest::captureScreenComposition() {
                                  DEFAULT_DISPLAY_HEIGHT, ui::Transform::ROT_0);
 
     auto traverseLayers = [this](const LayerVector::Visitor& visitor) {
-        return mFlinger.traverseLayersInDisplay(mDisplay, minLayerZ, maxLayerZ, visitor);
+        return mFlinger.traverseLayersInDisplay(mDisplay, visitor);
     };
 
     // TODO: Eliminate expensive/real allocation if possible.
@@ -327,7 +325,7 @@ struct BaseDisplayVariant {
         EXPECT_CALL(*test->mRenderEngine, setOutputDataSpace(ui::Dataspace::UNKNOWN)).Times(1);
         EXPECT_CALL(*test->mRenderEngine, setDisplayMaxLuminance(DEFAULT_DISPLAY_MAX_LUMINANCE))
                 .Times(1);
-        EXPECT_CALL(*test->mRenderEngine, setupColorTransform(_)).Times(2);
+        EXPECT_CALL(*test->mRenderEngine, setColorTransform(_)).Times(2);
         // These expectations retire on saturation as the code path these
         // expectations are for appears to make an extra call to them.
         // TODO: Investigate this extra call
@@ -480,11 +478,8 @@ struct BaseLayerProperties {
         EXPECT_CALL(*test->mRenderEngine, useNativeFenceSync()).WillRepeatedly(Return(true));
         EXPECT_CALL(*test->mRenderEngine, createImage())
                 .WillOnce(Return(ByMove(std::unique_ptr<renderengine::Image>(test->mReImage))));
-        EXPECT_CALL(*test->mRenderEngine, bindExternalTextureImage(DEFAULT_TEXTURE_ID, _)).Times(1);
-        EXPECT_CALL(*test->mRenderEngine, checkErrors()).Times(1);
-        EXPECT_CALL(*test->mReImage, setNativeWindowBuffer(_, false)).WillOnce(Return(true));
         bool ignoredRecomputeVisibleRegions;
-        layer->latchBuffer(ignoredRecomputeVisibleRegions, 0);
+        layer->latchBuffer(ignoredRecomputeVisibleRegions, 0, Fence::NO_FENCE);
         Mock::VerifyAndClear(test->mRenderEngine);
         Mock::VerifyAndClear(test->mReImage);
     }
@@ -776,9 +771,10 @@ struct ColorLayerVariant : public BaseLayerVariant<LayerProperties> {
 
     static FlingerLayerType createLayer(CompositionTest* test) {
         FlingerLayerType layer = Base::template createLayerWithFactory<ColorLayer>(test, [test]() {
-            return new ColorLayer(test->mFlinger.mFlinger.get(), sp<Client>(),
-                                  String8("test-layer"), LayerProperties::WIDTH,
-                                  LayerProperties::HEIGHT, LayerProperties::LAYER_FLAGS);
+            return new ColorLayer(LayerCreationArgs(test->mFlinger.mFlinger.get(), sp<Client>(),
+                                                    String8("test-layer"), LayerProperties::WIDTH,
+                                                    LayerProperties::HEIGHT,
+                                                    LayerProperties::LAYER_FLAGS));
         });
         return layer;
     }
@@ -813,10 +809,11 @@ struct BufferLayerVariant : public BaseLayerVariant<LayerProperties> {
 
         FlingerLayerType layer =
                 Base::template createLayerWithFactory<BufferQueueLayer>(test, [test]() {
-                    return new BufferQueueLayer(test->mFlinger.mFlinger.get(), sp<Client>(),
-                                                String8("test-layer"), LayerProperties::WIDTH,
-                                                LayerProperties::HEIGHT,
-                                                LayerProperties::LAYER_FLAGS);
+                    return new BufferQueueLayer(
+                            LayerCreationArgs(test->mFlinger.mFlinger.get(), sp<Client>(),
+                                              String8("test-layer"), LayerProperties::WIDTH,
+                                              LayerProperties::HEIGHT,
+                                              LayerProperties::LAYER_FLAGS));
                 });
 
         LayerProperties::setupLayerState(test, layer);

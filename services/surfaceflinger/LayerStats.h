@@ -38,7 +38,7 @@ public:
 private:
     // Traverse layer tree to get all visible layers' stats
     void traverseLayerTreeStatsLocked(
-            const std::vector<std::unique_ptr<LayerProtoParser::Layer>>& layerTree,
+            const std::vector<LayerProtoParser::Layer*>& layerTree,
             const LayerProtoParser::LayerGlobal& layerGlobal,
             std::vector<std::string>* const outLayerShapeVec);
     // Convert layer's top-left position into 8x8 percentage of the display
@@ -50,7 +50,7 @@ private:
     // Return the name of the composition type
     static const char* layerCompositionType(int32_t compositionType);
     // Return the name of the pixel format
-    static const char* layerPixelFormat(int32_t pixelFormat);
+    static std::string layerPixelFormat(int32_t pixelFormat);
     // Calculate scale ratios of layer's width/height with rotation information
     static std::string scaleRatioWH(const LayerProtoParser::Layer* layer);
     // Calculate scale ratio from source to destination and convert to string

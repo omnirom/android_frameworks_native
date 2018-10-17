@@ -43,8 +43,7 @@ class ExSurfaceFlinger;
 class ExBufferLayer : public BufferQueueLayer
 {
 public:
-    ExBufferLayer(SurfaceFlinger* flinger, const sp<Client>& client,
-            const String8& name, uint32_t w, uint32_t h, uint32_t flags);
+    ExBufferLayer(const LayerCreationArgs& args);
     virtual ~ExBufferLayer();
 
     virtual bool isHDRLayer() const;

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2011 The Android Open Source Project
+ * Copyright (C) 2018 The Android Open Source Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,29 +14,21 @@
  * limitations under the License.
  */
 
-#define LOG_TAG "InputApplication"
+#ifndef FRAMEWORKS_NATIVE_CMDS_INSTALLD_ART_HELPER_ART_IMAGE_VALUES_H
+#define FRAMEWORKS_NATIVE_CMDS_INSTALLD_ART_HELPER_ART_IMAGE_VALUES_H
 
-#include "InputApplication.h"
-
-#include <android/log.h>
+#include <cstdint>
 
 namespace android {
+namespace installd {
+namespace art {
 
-// --- InputApplicationHandle ---
+uint32_t GetImageBaseAddress();
+int32_t GetImageMinBaseAddressDelta();
+int32_t GetImageMaxBaseAddressDelta();
 
-InputApplicationHandle::InputApplicationHandle() :
-    mInfo(nullptr) {
-}
+}  // namespace art
+}  // namespace installd
+}  // namespace android
 
-InputApplicationHandle::~InputApplicationHandle() {
-    delete mInfo;
-}
-
-void InputApplicationHandle::releaseInfo() {
-    if (mInfo) {
-        delete mInfo;
-        mInfo = nullptr;
-    }
-}
-
-} // namespace android
+#endif  // FRAMEWORKS_NATIVE_CMDS_INSTALLD_ART_HELPER_ART_IMAGE_VALUES_H

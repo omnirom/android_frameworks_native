@@ -269,6 +269,10 @@ public:
 
         Transaction& destroySurface(const sp<SurfaceControl>& sc);
 
+        // Set a color transform matrix on the given layer on the built-in display.
+        Transaction& setColorTransform(const sp<SurfaceControl>& sc, const mat3& matrix,
+                                       const vec3& translation);
+
         status_t setDisplaySurface(const sp<IBinder>& token,
                 const sp<IGraphicBufferProducer>& bufferProducer);
 
@@ -326,8 +330,7 @@ public:
     // if cropping isn't required, callers may pass in a default Rect, e.g.:
     //   capture(display, producer, Rect(), reqWidth, ...);
     static status_t capture(const sp<IBinder>& display, Rect sourceCrop, uint32_t reqWidth,
-                            uint32_t reqHeight, int32_t minLayerZ, int32_t maxLayerZ,
-                            bool useIdentityTransform, uint32_t rotation,
+                            uint32_t reqHeight, bool useIdentityTransform, uint32_t rotation,
                             sp<GraphicBuffer>* outBuffer);
     static status_t captureLayers(const sp<IBinder>& layerHandle, Rect sourceCrop, float frameScale,
                                   sp<GraphicBuffer>* outBuffer);

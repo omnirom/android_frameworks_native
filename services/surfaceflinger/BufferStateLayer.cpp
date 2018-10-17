@@ -26,18 +26,17 @@
 
 namespace android {
 
-static const std::array<float, 16> IDENTITY_MATRIX{1, 0, 0, 0,
-                                                   0, 1, 0, 0,
-                                                   0, 0, 1, 0,
-                                                   0, 0, 0, 1};
+// clang-format off
+const std::array<float, 16> BufferStateLayer::IDENTITY_MATRIX{
+        1, 0, 0, 0,
+        0, 1, 0, 0,
+        0, 0, 1, 0,
+        0, 0, 0, 1
+};
+// clang-format on
 
-BufferStateLayer::BufferStateLayer(SurfaceFlinger* flinger, const sp<Client>& client,
-                                   const String8& name, uint32_t w, uint32_t h, uint32_t flags)
-      : BufferLayer(flinger, client, name, w, h, flags),
-        mSidebandStreamChanged(false),
-        mFrameNumber(0) {
-    mTransformMatrix = IDENTITY_MATRIX;
-}
+BufferStateLayer::BufferStateLayer(const LayerCreationArgs& args) : BufferLayer(args) {}
+BufferStateLayer::~BufferStateLayer() = default;
 
 // -----------------------------------------------------------------------
 // Interface implementation for Layer
@@ -378,7 +377,8 @@ status_t BufferStateLayer::bindTextureImage() const {
     return NO_ERROR;
 }
 
-status_t BufferStateLayer::updateTexImage(bool& /*recomputeVisibleRegions*/, nsecs_t latchTime) {
+status_t BufferStateLayer::updateTexImage(bool& /*recomputeVisibleRegions*/, nsecs_t latchTime,
+                                          const sp<Fence>& releaseFence) {
     const State& s(getDrawingState());
 
     if (!s.buffer) {
@@ -420,15 +420,12 @@ status_t BufferStateLayer::updateTexImage(bool& /*recomputeVisibleRegions*/, nse
     }
 
     // Handle sync fences
-    if (SyncFeatures::getInstance().useNativeFenceSync()) {
-        base::unique_fd fenceFd = engine.flush();
-        if (fenceFd == -1) {
-            ALOGE("failed to flush RenderEngine");
+    if (SyncFeatures::getInstance().useNativeFenceSync() && releaseFence != Fence::NO_FENCE) {
+        // TODO(alecmouri): Fail somewhere upstream if the fence is invalid.
+        if (!releaseFence->isValid()) {
             mTimeStats.clearLayerRecord(getName().c_str());
             return UNKNOWN_ERROR;
         }
-
-        sp<Fence> fence(new Fence(std::move(fenceFd)));
 
         // Check status of fences first because merging is expensive.
         // Merging an invalid fence with any other fence results in an
@@ -440,10 +437,10 @@ status_t BufferStateLayer::updateTexImage(bool& /*recomputeVisibleRegions*/, nse
             return BAD_VALUE;
         }
 
-        auto incomingStatus = fence->getStatus();
+        auto incomingStatus = releaseFence->getStatus();
         if (incomingStatus == Fence::Status::Invalid) {
             ALOGE("New fence has invalid state");
-            mDrawingState.acquireFence = fence;
+            mDrawingState.acquireFence = releaseFence;
             mTimeStats.clearLayerRecord(getName().c_str());
             return BAD_VALUE;
         }
@@ -453,12 +450,13 @@ status_t BufferStateLayer::updateTexImage(bool& /*recomputeVisibleRegions*/, nse
         if (currentStatus == incomingStatus) {
             char fenceName[32] = {};
             snprintf(fenceName, 32, "%.28s:%d", mName.string(), mFrameNumber);
-            sp<Fence> mergedFence = Fence::merge(fenceName, mDrawingState.acquireFence, fence);
+            sp<Fence> mergedFence =
+                    Fence::merge(fenceName, mDrawingState.acquireFence, releaseFence);
             if (!mergedFence.get()) {
                 ALOGE("failed to merge release fences");
                 // synchronization is broken, the best we can do is hope fences
                 // signal in order so the new fence will act like a union
-                mDrawingState.acquireFence = fence;
+                mDrawingState.acquireFence = releaseFence;
                 mTimeStats.clearLayerRecord(getName().c_str());
                 return BAD_VALUE;
             }
@@ -471,7 +469,7 @@ status_t BufferStateLayer::updateTexImage(bool& /*recomputeVisibleRegions*/, nse
             // by this point, they will have both signaled and only the timestamp
             // will be slightly off; any dependencies after this point will
             // already have been met.
-            mDrawingState.acquireFence = fence;
+            mDrawingState.acquireFence = releaseFence;
         }
     } else {
         // Bind the new buffer to the GL texture.

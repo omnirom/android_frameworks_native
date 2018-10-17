@@ -31,8 +31,8 @@ namespace android {
  */
 class BufferQueueLayer : public BufferLayer, public BufferLayerConsumer::ContentsChangedListener {
 public:
-    BufferQueueLayer(SurfaceFlinger* flinger, const sp<Client>& client, const String8& name,
-                     uint32_t w, uint32_t h, uint32_t flags);
+    explicit BufferQueueLayer(const LayerCreationArgs&);
+    ~BufferQueueLayer() override;
 
     // -----------------------------------------------------------------------
     // Interface implementation for Layer
@@ -90,7 +90,8 @@ private:
     void setFilteringEnabled(bool enabled) override;
 
     status_t bindTextureImage() const override;
-    status_t updateTexImage(bool& recomputeVisibleRegions, nsecs_t latchTime) override;
+    status_t updateTexImage(bool& recomputeVisibleRegions, nsecs_t latchTime,
+                            const sp<Fence>& releaseFence) override;
 
     status_t updateActiveBuffer() override;
     status_t updateFrameNumber(nsecs_t latchTime) override;
@@ -121,24 +122,24 @@ private:
     sp<BufferLayerConsumer> mConsumer;
     sp<IGraphicBufferProducer> mProducer;
 
-    PixelFormat mFormat;
+    PixelFormat mFormat{PIXEL_FORMAT_NONE};
 
     // Only accessed on the main thread.
-    uint64_t mPreviousFrameNumber;
-    bool mUpdateTexImageFailed;
+    uint64_t mPreviousFrameNumber{0};
+    bool mUpdateTexImageFailed{false};
 
     // Local copy of the queued contents of the incoming BufferQueue
     mutable Mutex mQueueItemLock;
     Condition mQueueItemCondition;
     Vector<BufferItem> mQueueItems;
-    std::atomic<uint64_t> mLastFrameNumberReceived;
+    std::atomic<uint64_t> mLastFrameNumberReceived{0};
 
-    bool mAutoRefresh;
-    int mActiveBufferSlot;
+    bool mAutoRefresh{false};
+    int mActiveBufferSlot{BufferQueue::INVALID_BUFFER_SLOT};
 
     // thread-safe
-    volatile int32_t mQueuedFrames;
-    volatile int32_t mSidebandStreamChanged; // used like an atomic boolean
+    std::atomic<int32_t> mQueuedFrames{0};
+    std::atomic<bool> mSidebandStreamChanged{false};
 };
 
 } // namespace android
