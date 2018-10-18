@@ -1581,6 +1581,7 @@ void SurfaceFlinger::calculateWorkingSet() {
             if (displayId >= 0) {
                 const Vector<sp<Layer>>& currentLayers(
                         display->getVisibleLayersSortedByZ());
+                setDisplayAnimating(display);
                 for (size_t i = 0; i < currentLayers.size(); i++) {
                     const auto& layer = currentLayers[i];
 
@@ -3273,6 +3274,13 @@ bool SurfaceFlinger::doComposeSurfaces(const sp<const DisplayDevice>& display) {
                     break;
                 }
                 case HWC2::Composition::Client: {
+                    const auto hwcDisplayId = getHwComposer().getHwcDisplayId(displayId);
+                    if ((hwcDisplayId < 0) &&
+                        (DisplayUtils::getInstance()->skipColorLayer(layer->getTypeId()))) {
+                        // We are not using h/w composer.
+                        // Skip color (dim) layer for WFD direct streaming.
+                        continue;
+                    }
                     if (layer->hasColorTransform()) {
                         mat4 tmpMatrix;
                         if (applyColorMatrix) {
@@ -3432,6 +3440,8 @@ void SurfaceFlinger::setTransactionState(
         uint32_t flags)
 {
     ATRACE_CALL();
+
+    handleDPTransactionIfNeeded(displays);
     Mutex::Autolock _l(mStateLock);
     uint32_t transactionFlags = 0;
 
