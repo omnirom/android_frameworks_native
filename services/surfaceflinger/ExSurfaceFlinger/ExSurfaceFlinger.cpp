@@ -221,7 +221,10 @@ void ExSurfaceFlinger::dumpDrawCycle(bool prePrepare) {
     size_t index = 0;
     String8 dumpsys;
 
-    dumpAllLocked(args, index, dumpsys, regionDump);
+    {
+        Mutex::Autolock lock(mStateLock);
+        dumpAllLocked(args, index, dumpsys, regionDump);
+    }
 
     char timeStamp[32];
     char dataSize[32];
