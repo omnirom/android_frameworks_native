@@ -343,8 +343,11 @@ public:
     void consumeEvent(int32_t expectedEventType, int32_t expectedDisplayId) {
         uint32_t consumeSeq;
         InputEvent* event;
+        int motionEventType;
+        int touchMoveNumber;
+        bool flag;
         status_t status = mConsumer->consume(&mEventFactory, false /*consumeBatches*/, -1,
-            &consumeSeq, &event);
+            &consumeSeq, &event, &motionEventType, &touchMoveNumber, &flag);
 
         ASSERT_EQ(OK, status)
                 << mName.c_str() << ": consumer consume should return OK.";
@@ -364,8 +367,11 @@ public:
     void assertNoEvents() {
         uint32_t consumeSeq;
         InputEvent* event;
+        int motionEventType;
+        int touchMoveNumber;
+        bool flag;
         status_t status = mConsumer->consume(&mEventFactory, false /*consumeBatches*/, -1,
-            &consumeSeq, &event);
+            &consumeSeq, &event, &motionEventType, &touchMoveNumber, &flag);
         ASSERT_NE(OK, status)
                 << mName.c_str()
                 << ": should not have received any events, so consume(..) should not return OK.";
