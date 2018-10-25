@@ -42,6 +42,12 @@
 
 #include "ExBufferLayer.h"
 
+#include <android/hardware/configstore/1.1/ISurfaceFlingerConfigs.h>
+#include <configstore/Utils.h>
+
+using android::hardware::configstore::getBool;
+using android::hardware::configstore::V1_0::ISurfaceFlingerConfigs;
+
 namespace android {
 
 ExBufferLayer::ExBufferLayer(SurfaceFlinger* flinger, const sp<Client>& client,
@@ -65,9 +71,18 @@ ExBufferLayer::ExBufferLayer(SurfaceFlinger* flinger, const sp<Client>& client,
     }
 
     mScreenshot = (std::string(name).find("ScreenshotSurface") != std::string::npos);
+    const sp<const DisplayDevice> hw(mFlinger->getDefaultDisplayDevice());
+    mHasHDRCapabilities = hw->hasHDR10Support() ||
+                          hw->hasHLGSupport()   ||
+                          hw->hasDolbyVisionSupport();
+
 }
 
 ExBufferLayer::~ExBufferLayer() {
+}
+
+bool ExBufferLayer::hasHdrDisplay() const {
+    return getBool<ISurfaceFlingerConfigs, &ISurfaceFlingerConfigs::hasHDRDisplay>(false);
 }
 
 bool ExBufferLayer::isHDRLayer() const {
@@ -93,7 +108,7 @@ bool ExBufferLayer::isHDRLayer() const {
             (colorData.transfer == Transfer_SMPTE_ST2084 ||
             colorData.transfer == Transfer_HLG)) {
                 return (!ExSurfaceFlinger::AllowHDRFallBack() &&
-                        !mFlinger->IsHWCDisabled());
+                        !mFlinger->IsHWCDisabled() &&  mHasHDRCapabilities);
         }
     }
 

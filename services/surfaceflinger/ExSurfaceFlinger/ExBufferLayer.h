@@ -48,6 +48,7 @@ public:
     virtual ~ExBufferLayer();
 
     virtual bool isHDRLayer() const;
+    virtual bool hasHdrDisplay() const;
     virtual bool isScreenshot() const { return mScreenshot; }
     virtual bool canAllowGPUForProtected() const;
 protected:
@@ -55,6 +56,7 @@ protected:
     bool isDebug() { return mDebugLogs; }
     bool mIsGPUAllowedForProtected;
     bool mScreenshot;
+    bool mHasHDRCapabilities;
 };
 
 }; // namespace android
