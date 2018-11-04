@@ -913,6 +913,13 @@ private:
     CreateNativeWindowSurfaceFunction mCreateNativeWindowSurface;
 
     SurfaceFlingerBE mBE;
+
+    bool mIsDolphinEnabled = false;
+    bool mDolphinFuncsEnabled = false;
+    void *mDolphinHandle = nullptr;
+    bool (*mDolphinInit)();
+    bool (*mDolphinMonitor)(int number);
+    void (*mDolphinRefresh)();
 };
 }; // namespace android
 
