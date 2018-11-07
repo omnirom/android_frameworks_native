@@ -1427,6 +1427,16 @@ void SurfaceFlinger::onRefreshReceived(int sequenceId,
         return;
     }
     repaintEverything();
+
+    if (mActiveDisplays.count() != 1) {
+      // Revisit this for multi displays.
+      return;
+    }
+    // Track Vsync Period before and after refresh.
+    const auto& activeConfig = getBE().mHwc->getActiveConfig(HWC_DISPLAY_PRIMARY);
+    const nsecs_t period = activeConfig->getVsyncPeriod();
+    vsyncPeriod = {};
+    vsyncPeriod.push_back(period);
 }
 
 void SurfaceFlinger::setVsyncEnabled(int disp, int enabled) {
@@ -1813,6 +1823,7 @@ void SurfaceFlinger::postComposition(nsecs_t refreshStartTime)
         }
     }
 
+    forceResyncModel();
     if (!hasSyncFramework) {
         if (getBE().mHwc->isConnected(HWC_DISPLAY_PRIMARY) && hw->isDisplayOn()) {
             enableHardwareVsync();
@@ -1861,6 +1872,34 @@ void SurfaceFlinger::postComposition(nsecs_t refreshStartTime)
         getBE().mTotalTime += elapsedTime;
     }
     getBE().mLastSwapTime = currentTime;
+}
+
+void SurfaceFlinger::forceResyncModel() {
+    if (!vsyncPeriod.size()) {
+        return;
+    }
+
+    const auto& activeConfig = getBE().mHwc->getActiveConfig(HWC_DISPLAY_PRIMARY);
+    const nsecs_t period = activeConfig->getVsyncPeriod();
+
+    // Model resync should happen at every fps change.
+    // Upon increase in vsync period start resync immediately.
+    // Upon decrease wait for one frame time for vsync to update.
+    // Post that resync can be triggered.
+
+    if (period > vsyncPeriod.at(vsyncPeriod.size() - 1)) {
+      resyncToHardwareVsync(true);
+      vsyncPeriod.push_back(period);
+    } else if (period < vsyncPeriod.at(vsyncPeriod.size() - 1)) {
+      // Wait for one more cycle to elapse
+      vsyncPeriod.push_back(period);
+    } else {
+      if (vsyncPeriod.size() != 1) {
+        // Vsync period changed. Trigger resync.
+        resyncToHardwareVsync(true);
+      }
+      vsyncPeriod = {};
+    }
 }
 
 void SurfaceFlinger::rebuildLayerStacks() {
