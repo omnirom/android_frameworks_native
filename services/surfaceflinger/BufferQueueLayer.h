@@ -55,7 +55,7 @@ public:
 
     int32_t getQueuedFrameCount() const override;
 
-    bool shouldPresentNow(const DispSync& dispSync) const override;
+    bool shouldPresentNow(nsecs_t expectedPresentTime) const override;
     // -----------------------------------------------------------------------
 
     // -----------------------------------------------------------------------
@@ -89,7 +89,7 @@ private:
 
     void setFilteringEnabled(bool enabled) override;
 
-    status_t bindTextureImage() const override;
+    status_t bindTextureImage() override;
     status_t updateTexImage(bool& recomputeVisibleRegions, nsecs_t latchTime,
                             const sp<Fence>& releaseFence) override;
 
