@@ -534,7 +534,7 @@ private:
     uint32_t peekTransactionFlags();
     // Can only be called from the main thread or with mStateLock held
     uint32_t setTransactionFlags(uint32_t flags);
-    uint32_t setTransactionFlags(uint32_t flags, VSyncModulator::TransactionStart transactionStart);
+    uint32_t setTransactionFlags(uint32_t flags, Scheduler::TransactionStart transactionStart);
     void commitTransaction();
     bool containsAnyInvalidClientState(const Vector<ComposerState>& states);
     uint32_t setClientStateLocked(const ComposerState& composerState);
@@ -673,12 +673,10 @@ private:
 
     void preComposition();
     void postComposition();
-    void updateCompositorTiming(
-            nsecs_t vsyncPhase, nsecs_t vsyncInterval, nsecs_t compositeTime,
-            std::shared_ptr<FenceTime>& presentFenceTime);
-    void setCompositorTimingSnapped(
-            nsecs_t vsyncPhase, nsecs_t vsyncInterval,
-            nsecs_t compositeToPresentLatency);
+    void updateCompositorTiming(const DisplayStatInfo& stats, nsecs_t compositeTime,
+                                std::shared_ptr<FenceTime>& presentFenceTime);
+    void setCompositorTimingSnapped(const DisplayStatInfo& stats,
+                                    nsecs_t compositeToPresentLatency);
     void rebuildLayerStacks();
 
     ui::Dataspace getBestDataspace(const sp<const DisplayDevice>& display,
@@ -702,7 +700,6 @@ private:
      * to prepare the hardware composer
      */
     void prepareFrame(const sp<DisplayDevice>& display);
-    void setUpHWComposer(const CompositionInfo& compositionInfo);
     void doComposition(const sp<DisplayDevice>& display, bool repainEverything);
     void doDebugFlashRegions(const sp<DisplayDevice>& display, bool repaintEverything);
     void doTracing(const char* where);
@@ -819,11 +816,6 @@ private:
     bool mLayersAdded;
 
     std::atomic<bool> mRepaintEverything{false};
-
-    // helper methods
-    void configureHwcCommonData(const CompositionInfo& compositionInfo) const;
-    void configureDeviceComposition(const CompositionInfo& compositionInfo) const;
-    void configureSidebandComposition(const CompositionInfo& compositionInfo) const;
 
     // constant members (no synchronization needed for access)
     nsecs_t mBootTime;

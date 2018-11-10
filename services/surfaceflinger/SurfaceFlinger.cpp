@@ -587,15 +587,14 @@ void SurfaceFlinger::init() {
 
     // start the EventThread
     if (mUseScheduler) {
-        mScheduler = std::make_unique<Scheduler>();
+        mScheduler = std::make_unique<Scheduler>(
+                [this](bool enabled) { setVsyncEnabled(HWC_DISPLAY_PRIMARY, enabled); });
         mAppConnectionHandle =
-                mScheduler->createConnection("appConnection", mPrimaryDispSync.get(),
-                                             SurfaceFlinger::vsyncPhaseOffsetNs,
+                mScheduler->createConnection("appConnection", SurfaceFlinger::vsyncPhaseOffsetNs,
                                              [this] { resyncWithRateLimit(); },
                                              impl::EventThread::InterceptVSyncsCallback());
         mSfConnectionHandle =
-                mScheduler->createConnection("sfConnection", mPrimaryDispSync.get(),
-                                             SurfaceFlinger::sfVsyncPhaseOffsetNs,
+                mScheduler->createConnection("sfConnection", SurfaceFlinger::sfVsyncPhaseOffsetNs,
                                              [this] { resyncWithRateLimit(); },
                                              [this](nsecs_t timestamp) {
                                                  mInterceptor->saveVSyncEvent(timestamp);
@@ -919,10 +918,13 @@ status_t SurfaceFlinger::getDisplayStats(const sp<IBinder>&, DisplayStatInfo* st
         return BAD_VALUE;
     }
 
-    // FIXME for now we always return stats for the primary display
-    memset(stats, 0, sizeof(*stats));
-    stats->vsyncTime = mPrimaryDispSync->computeNextRefresh(0);
-    stats->vsyncPeriod = mPrimaryDispSync->getPeriod();
+    // FIXME for now we always return stats for the primary display.
+    if (mUseScheduler) {
+        mScheduler->getDisplayStatInfo(stats);
+    } else {
+        stats->vsyncTime = mPrimaryDispSync->computeNextRefresh(0);
+        stats->vsyncPeriod = mPrimaryDispSync->getPeriod();
+    }
     return NO_ERROR;
 }
 
@@ -1256,13 +1258,17 @@ void SurfaceFlinger::resyncToHardwareVsync(bool makeAvailable) {
     const auto activeConfig = getHwComposer().getActiveConfig(displayId);
     const nsecs_t period = activeConfig->getVsyncPeriod();
 
-    mPrimaryDispSync->reset();
-    mPrimaryDispSync->setPeriod(period);
+    if (mUseScheduler) {
+        mScheduler->setVsyncPeriod(period);
+    } else {
+        mPrimaryDispSync->reset();
+        mPrimaryDispSync->setPeriod(period);
 
-    if (!mPrimaryHWVsyncEnabled) {
-        mPrimaryDispSync->beginResync();
-        mEventControlThread->setVsyncEnabled(true);
-        mPrimaryHWVsyncEnabled = true;
+        if (!mPrimaryHWVsyncEnabled) {
+            mPrimaryDispSync->beginResync();
+            mEventControlThread->setVsyncEnabled(true);
+            mPrimaryHWVsyncEnabled = true;
+        }
     }
 }
 
@@ -1310,19 +1316,22 @@ void SurfaceFlinger::onVsyncReceived(int32_t sequenceId, hwc2_display_t hwcDispl
         return;
     }
 
-    bool needsHwVsync = false;
-
-    { // Scope for the lock
-        Mutex::Autolock _l(mHWVsyncLock);
-        if (mPrimaryHWVsyncEnabled) {
-            needsHwVsync = mPrimaryDispSync->addResyncSample(timestamp);
-        }
-    }
-
-    if (needsHwVsync) {
-        enableHardwareVsync();
+    if (mUseScheduler) {
+        mScheduler->addResyncSample(timestamp);
     } else {
-        disableHardwareVsync(false);
+        bool needsHwVsync = false;
+        { // Scope for the lock
+            Mutex::Autolock _l(mHWVsyncLock);
+            if (mPrimaryHWVsyncEnabled) {
+                needsHwVsync = mPrimaryDispSync->addResyncSample(timestamp);
+            }
+        }
+
+        if (needsHwVsync) {
+            enableHardwareVsync();
+        } else {
+            disableHardwareVsync(false);
+        }
     }
 }
 
@@ -1374,7 +1383,11 @@ void SurfaceFlinger::setVsyncEnabled(int disp, int enabled) {
 
 // Note: it is assumed the caller holds |mStateLock| when this is called
 void SurfaceFlinger::resetDisplayState() {
-    disableHardwareVsync(true);
+    if (mUseScheduler) {
+        mScheduler->disableHardwareVsync(true);
+    } else {
+        disableHardwareVsync(true);
+    }
     // Clear the drawing state so that the logic inside of
     // handleTransactionLocked will fire. It will determine the delta between
     // mCurrentState and mDrawingState and re-apply all changes when we make the
@@ -1442,12 +1455,17 @@ void SurfaceFlinger::updateVrFlinger() {
 
     // The present fences returned from vr_hwc are not an accurate
     // representation of vsync times.
-    mPrimaryDispSync->setIgnorePresentFences(getBE().mHwc->isUsingVrComposer() ||
-                                             !hasSyncFramework);
+    if (mUseScheduler) {
+        mScheduler->setIgnorePresentFences(getBE().mHwc->isUsingVrComposer() || !hasSyncFramework);
+    } else {
+        mPrimaryDispSync->setIgnorePresentFences(getBE().mHwc->isUsingVrComposer() ||
+                                                 !hasSyncFramework);
+    }
 
     // Use phase of 0 since phase is not known.
     // Use latency of 0, which will snap to the ideal latency.
-    setCompositorTimingSnapped(0, period, 0);
+    DisplayStatInfo stats{0 /* vsyncTime */, period /* vsyncPeriod */};
+    setCompositorTimingSnapped(stats, 0);
 
     resyncToHardwareVsync(false);
 
@@ -1514,13 +1532,8 @@ void SurfaceFlinger::handleMessageRefresh() {
     preComposition();
     rebuildLayerStacks();
     calculateWorkingSet();
-
     for (const auto& [token, display] : mDisplays) {
-        const auto displayId = display->getId();
         beginFrame(display);
-        for (auto& compositionInfo : getBE().mCompositionInfo[displayId]) {
-            setUpHWComposer(compositionInfo);
-        }
         prepareFrame(display);
         doDebugFlashRegions(display, repaintEverything);
         doComposition(display, repaintEverything);
@@ -1747,9 +1760,8 @@ void SurfaceFlinger::preComposition()
     }
 }
 
-void SurfaceFlinger::updateCompositorTiming(
-        nsecs_t vsyncPhase, nsecs_t vsyncInterval, nsecs_t compositeTime,
-        std::shared_ptr<FenceTime>& presentFenceTime) {
+void SurfaceFlinger::updateCompositorTiming(const DisplayStatInfo& stats, nsecs_t compositeTime,
+                                            std::shared_ptr<FenceTime>& presentFenceTime) {
     // Update queue of past composite+present times and determine the
     // most recently known composite to present latency.
     getBE().mCompositePresentTimes.push({compositeTime, presentFenceTime});
@@ -1771,21 +1783,20 @@ void SurfaceFlinger::updateCompositorTiming(
         getBE().mCompositePresentTimes.pop();
     }
 
-    setCompositorTimingSnapped(
-            vsyncPhase, vsyncInterval, compositeToPresentLatency);
+    setCompositorTimingSnapped(stats, compositeToPresentLatency);
 }
 
-void SurfaceFlinger::setCompositorTimingSnapped(nsecs_t vsyncPhase,
-        nsecs_t vsyncInterval, nsecs_t compositeToPresentLatency) {
+void SurfaceFlinger::setCompositorTimingSnapped(const DisplayStatInfo& stats,
+                                                nsecs_t compositeToPresentLatency) {
     // Integer division and modulo round toward 0 not -inf, so we need to
     // treat negative and positive offsets differently.
-    nsecs_t idealLatency = (sfVsyncPhaseOffsetNs > 0) ?
-            (vsyncInterval - (sfVsyncPhaseOffsetNs % vsyncInterval)) :
-            ((-sfVsyncPhaseOffsetNs) % vsyncInterval);
+    nsecs_t idealLatency = (sfVsyncPhaseOffsetNs > 0)
+            ? (stats.vsyncPeriod - (sfVsyncPhaseOffsetNs % stats.vsyncPeriod))
+            : ((-sfVsyncPhaseOffsetNs) % stats.vsyncPeriod);
 
     // Just in case sfVsyncPhaseOffsetNs == -vsyncInterval.
     if (idealLatency <= 0) {
-        idealLatency = vsyncInterval;
+        idealLatency = stats.vsyncPeriod;
     }
 
     // Snap the latency to a value that removes scheduling jitter from the
@@ -1794,15 +1805,14 @@ void SurfaceFlinger::setCompositorTimingSnapped(nsecs_t vsyncPhase,
     // something (such as user input) to an accurate diasplay time.
     // Snapping also allows an app to precisely calculate sfVsyncPhaseOffsetNs
     // with (presentLatency % interval).
-    nsecs_t bias = vsyncInterval / 2;
-    int64_t extraVsyncs =
-            (compositeToPresentLatency - idealLatency + bias) / vsyncInterval;
-    nsecs_t snappedCompositeToPresentLatency = (extraVsyncs > 0) ?
-            idealLatency + (extraVsyncs * vsyncInterval) : idealLatency;
+    nsecs_t bias = stats.vsyncPeriod / 2;
+    int64_t extraVsyncs = (compositeToPresentLatency - idealLatency + bias) / stats.vsyncPeriod;
+    nsecs_t snappedCompositeToPresentLatency =
+            (extraVsyncs > 0) ? idealLatency + (extraVsyncs * stats.vsyncPeriod) : idealLatency;
 
     std::lock_guard<std::mutex> lock(getBE().mCompositorTimingLock);
-    getBE().mCompositorTiming.deadline = vsyncPhase - idealLatency;
-    getBE().mCompositorTiming.interval = vsyncInterval;
+    getBE().mCompositorTiming.deadline = stats.vsyncTime - idealLatency;
+    getBE().mCompositorTiming.interval = stats.vsyncPeriod;
     getBE().mCompositorTiming.presentLatency = snappedCompositeToPresentLatency;
 }
 
@@ -1836,14 +1846,18 @@ void SurfaceFlinger::postComposition()
     auto presentFenceTime = std::make_shared<FenceTime>(mPreviousPresentFence);
     getBE().mDisplayTimeline.push(presentFenceTime);
 
-    nsecs_t vsyncPhase = mPrimaryDispSync->computeNextRefresh(0);
-    nsecs_t vsyncInterval = mPrimaryDispSync->getPeriod();
+    DisplayStatInfo stats;
+    if (mUseScheduler) {
+        mScheduler->getDisplayStatInfo(&stats);
+    } else {
+        stats.vsyncTime = mPrimaryDispSync->computeNextRefresh(0);
+        stats.vsyncPeriod = mPrimaryDispSync->getPeriod();
+    }
 
     // We use the mRefreshStartTime which might be sampled a little later than
     // when we started doing work for this frame, but that should be okay
     // since updateCompositorTiming has snapping logic.
-    updateCompositorTiming(
-        vsyncPhase, vsyncInterval, mRefreshStartTime, presentFenceTime);
+    updateCompositorTiming(stats, mRefreshStartTime, presentFenceTime);
     CompositorTiming compositorTiming;
     {
         std::lock_guard<std::mutex> lock(getBE().mCompositorTimingLock);
@@ -1860,16 +1874,24 @@ void SurfaceFlinger::postComposition()
     });
 
     if (presentFenceTime->isValid()) {
-        if (mPrimaryDispSync->addPresentFence(presentFenceTime)) {
-            enableHardwareVsync();
+        if (mUseScheduler) {
+            mScheduler->addPresentFence(presentFenceTime);
         } else {
-            disableHardwareVsync(false);
+            if (mPrimaryDispSync->addPresentFence(presentFenceTime)) {
+                enableHardwareVsync();
+            } else {
+                disableHardwareVsync(false);
+            }
         }
     }
 
     if (!hasSyncFramework) {
         if (display && getHwComposer().isConnected(display->getId()) && display->isPoweredOn()) {
-            enableHardwareVsync();
+            if (mUseScheduler) {
+                mScheduler->enableHardwareVsync();
+            } else {
+                enableHardwareVsync();
+            }
         }
     }
 
@@ -1905,7 +1927,7 @@ void SurfaceFlinger::postComposition()
         mHasPoweredOff = false;
     } else {
         nsecs_t elapsedTime = currentTime - getBE().mLastSwapTime;
-        size_t numPeriods = static_cast<size_t>(elapsedTime / vsyncInterval);
+        size_t numPeriods = static_cast<size_t>(elapsedTime / stats.vsyncPeriod);
         if (numPeriods < SurfaceFlingerBE::NUM_BUCKETS - 1) {
             getBE().mFrameBuckets[numPeriods] += elapsedTime;
         } else {
@@ -2069,127 +2091,6 @@ void SurfaceFlinger::pickColorMode(const sp<DisplayDevice>& display, ColorMode* 
     display->getBestColorMode(bestDataSpace, intent, outDataSpace, outMode, outRenderIntent);
 }
 
-void SurfaceFlinger::configureSidebandComposition(const CompositionInfo& compositionInfo) const
-{
-    HWC2::Error error;
-    LOG_ALWAYS_FATAL_IF(compositionInfo.hwc.sidebandStream == nullptr,
-                        "CompositionType is sideband, but sideband stream is nullptr");
-    error = (compositionInfo.hwc.hwcLayer)
-                    ->setSidebandStream(compositionInfo.hwc.sidebandStream->handle());
-    if (error != HWC2::Error::None) {
-        ALOGE("[SF] Failed to set sideband stream %p: %s (%d)",
-                compositionInfo.hwc.sidebandStream->handle(), to_string(error).c_str(),
-                static_cast<int32_t>(error));
-    }
-}
-
-void SurfaceFlinger::configureHwcCommonData(const CompositionInfo& compositionInfo) const
-{
-    HWC2::Error error;
-
-    if (!compositionInfo.hwc.skipGeometry) {
-        error = (compositionInfo.hwc.hwcLayer)->setBlendMode(compositionInfo.hwc.blendMode);
-        ALOGE_IF(error != HWC2::Error::None,
-                 "[SF] Failed to set blend mode %s:"
-                 " %s (%d)",
-                 to_string(compositionInfo.hwc.blendMode).c_str(), to_string(error).c_str(),
-                 static_cast<int32_t>(error));
-
-        error = (compositionInfo.hwc.hwcLayer)->setDisplayFrame(compositionInfo.hwc.displayFrame);
-        ALOGE_IF(error != HWC2::Error::None,
-                "[SF] Failed to set the display frame [%d, %d, %d, %d] %s (%d)",
-                compositionInfo.hwc.displayFrame.left,
-                compositionInfo.hwc.displayFrame.right,
-                compositionInfo.hwc.displayFrame.top,
-                compositionInfo.hwc.displayFrame.bottom,
-                to_string(error).c_str(), static_cast<int32_t>(error));
-
-        error = (compositionInfo.hwc.hwcLayer)->setSourceCrop(compositionInfo.hwc.sourceCrop);
-        ALOGE_IF(error != HWC2::Error::None,
-                "[SF] Failed to set source crop [%.3f, %.3f, %.3f, %.3f]: %s (%d)",
-                compositionInfo.hwc.sourceCrop.left,
-                compositionInfo.hwc.sourceCrop.right,
-                compositionInfo.hwc.sourceCrop.top,
-                compositionInfo.hwc.sourceCrop.bottom,
-                to_string(error).c_str(), static_cast<int32_t>(error));
-
-        error = (compositionInfo.hwc.hwcLayer)->setPlaneAlpha(compositionInfo.hwc.alpha);
-        ALOGE_IF(error != HWC2::Error::None,
-                 "[SF] Failed to set plane alpha %.3f: "
-                 "%s (%d)",
-                 compositionInfo.hwc.alpha,
-                 to_string(error).c_str(), static_cast<int32_t>(error));
-
-
-        error = (compositionInfo.hwc.hwcLayer)->setZOrder(compositionInfo.hwc.z);
-        ALOGE_IF(error != HWC2::Error::None,
-                "[SF] Failed to set Z %u: %s (%d)",
-                compositionInfo.hwc.z,
-                to_string(error).c_str(), static_cast<int32_t>(error));
-
-        error = (compositionInfo.hwc.hwcLayer)
-                        ->setInfo(compositionInfo.hwc.type, compositionInfo.hwc.appId);
-        ALOGE_IF(error != HWC2::Error::None,
-                "[SF] Failed to set info (%d)",
-                static_cast<int32_t>(error));
-
-        error = (compositionInfo.hwc.hwcLayer)->setTransform(compositionInfo.hwc.transform);
-        ALOGE_IF(error != HWC2::Error::None,
-                 "[SF] Failed to set transform %s: "
-                 "%s (%d)",
-                 to_string(compositionInfo.hwc.transform).c_str(), to_string(error).c_str(),
-                 static_cast<int32_t>(error));
-    }
-
-    error = (compositionInfo.hwc.hwcLayer)->setCompositionType(compositionInfo.compositionType);
-    ALOGE_IF(error != HWC2::Error::None,
-            "[SF] Failed to set composition type: %s (%d)",
-                to_string(error).c_str(), static_cast<int32_t>(error));
-
-    error = (compositionInfo.hwc.hwcLayer)->setDataspace(compositionInfo.hwc.dataspace);
-    ALOGE_IF(error != HWC2::Error::None,
-            "[SF] Failed to set dataspace: %s (%d)",
-            to_string(error).c_str(), static_cast<int32_t>(error));
-
-    error = (compositionInfo.hwc.hwcLayer)->setPerFrameMetadata(
-            compositionInfo.hwc.supportedPerFrameMetadata, compositionInfo.hwc.hdrMetadata);
-    ALOGE_IF(error != HWC2::Error::None && error != HWC2::Error::Unsupported,
-            "[SF] Failed to set hdrMetadata: %s (%d)",
-            to_string(error).c_str(), static_cast<int32_t>(error));
-
-    if (compositionInfo.compositionType == HWC2::Composition::SolidColor) {
-        error = (compositionInfo.hwc.hwcLayer)->setColor(compositionInfo.hwc.color);
-        ALOGE_IF(error != HWC2::Error::None,
-                "[SF] Failed to set color: %s (%d)",
-                to_string(error).c_str(), static_cast<int32_t>(error));
-    }
-
-    error = (compositionInfo.hwc.hwcLayer)->setVisibleRegion(compositionInfo.hwc.visibleRegion);
-    ALOGE_IF(error != HWC2::Error::None,
-            "[SF] Failed to set visible region: %s (%d)",
-            to_string(error).c_str(), static_cast<int32_t>(error));
-
-    error = (compositionInfo.hwc.hwcLayer)->setSurfaceDamage(compositionInfo.hwc.surfaceDamage);
-    ALOGE_IF(error != HWC2::Error::None,
-            "[SF] Failed to set surface damage: %s (%d)",
-            to_string(error).c_str(), static_cast<int32_t>(error));
-
-    error = (compositionInfo.hwc.hwcLayer)->setColorTransform(compositionInfo.hwc.colorTransform);
-}
-
-void SurfaceFlinger::configureDeviceComposition(const CompositionInfo& compositionInfo) const
-{
-    HWC2::Error error;
-
-    if (compositionInfo.hwc.fence) {
-        error = (compositionInfo.hwc.hwcLayer)->setBuffer(compositionInfo.mBufferSlot,
-                compositionInfo.mBuffer, compositionInfo.hwc.fence);
-        ALOGE_IF(error != HWC2::Error::None,
-                "[SF] Failed to set buffer: %s (%d)",
-                to_string(error).c_str(), static_cast<int32_t>(error));
-    }
-}
-
 void SurfaceFlinger::beginFrame(const sp<DisplayDevice>& display)
 {
     bool dirty = !display->getDirtyRegion(false).isEmpty();
@@ -2235,42 +2136,6 @@ void SurfaceFlinger::prepareFrame(const sp<DisplayDevice>& display)
              display->getId(), result, strerror(-result));
 }
 
-void SurfaceFlinger::setUpHWComposer(const CompositionInfo& compositionInfo) {
-    ATRACE_CALL();
-    ALOGV("setUpHWComposer");
-
-    switch (compositionInfo.compositionType)
-    {
-        case HWC2::Composition::Invalid:
-            break;
-
-        case HWC2::Composition::Client:
-            if (compositionInfo.hwc.hwcLayer) {
-                auto error = (compositionInfo.hwc.hwcLayer)->
-                    setCompositionType(compositionInfo.compositionType);
-                ALOGE_IF(error != HWC2::Error::None,
-                        "[SF] Failed to set composition type: %s (%d)",
-                            to_string(error).c_str(), static_cast<int32_t>(error));
-            }
-            break;
-
-        case HWC2::Composition::Sideband:
-            configureHwcCommonData(compositionInfo);
-            configureSidebandComposition(compositionInfo);
-            break;
-
-        case HWC2::Composition::SolidColor:
-            configureHwcCommonData(compositionInfo);
-            break;
-
-        case HWC2::Composition::Device:
-        case HWC2::Composition::Cursor:
-            configureHwcCommonData(compositionInfo);
-            configureDeviceComposition(compositionInfo);
-            break;
-    }
-}
-
 void SurfaceFlinger::doComposition(const sp<DisplayDevice>& display, bool repaintEverything) {
     ATRACE_CALL();
     ALOGV("doComposition");
@@ -2313,14 +2178,15 @@ void SurfaceFlinger::postFramebuffer(const sp<DisplayDevice>& display)
         }
         display->onSwapBuffersCompleted();
         display->makeCurrent();
-        for (auto& compositionInfo : getBE().mCompositionInfo[displayId]) {
+        for (auto& layer : display->getVisibleLayersSortedByZ()) {
             sp<Fence> releaseFence = Fence::NO_FENCE;
+
             // The layer buffer from the previous frame (if any) is released
             // by HWC only when the release fence from this frame (if any) is
             // signaled.  Always get the release fence from HWC first.
-            auto hwcLayer = compositionInfo.hwc.hwcLayer;
-            if ((displayId >= 0) && hwcLayer) {
-                releaseFence = getBE().mHwc->getLayerReleaseFence(displayId, hwcLayer.get());
+            auto hwcLayer = layer->getHwcLayer(displayId);
+            if (displayId >= 0) {
+                releaseFence = getBE().mHwc->getLayerReleaseFence(displayId, hwcLayer);
             }
 
             // If the layer was client composited in the previous frame, we
@@ -2328,14 +2194,12 @@ void SurfaceFlinger::postFramebuffer(const sp<DisplayDevice>& display)
             // Since we do not track that, always merge with the current
             // client target acquire fence when it is available, even though
             // this is suboptimal.
-            if (compositionInfo.compositionType == HWC2::Composition::Client) {
+            if (layer->getCompositionType(displayId) == HWC2::Composition::Client) {
                 releaseFence = Fence::merge("LayerRelease", releaseFence,
                                             display->getClientTargetAcquireFence());
             }
 
-            if (compositionInfo.layer) {
-                compositionInfo.layer->onLayerDisplayed(releaseFence);
-            }
+            layer->getBE().onLayerDisplayed(releaseFence);
         }
 
         // We've got a list of layers needing fences, that are disjoint with
@@ -3084,7 +2948,8 @@ bool SurfaceFlinger::handlePageFlip()
     mDrawingState.traverseInZOrder([&](Layer* layer) {
         if (layer->hasReadyFrame()) {
             frameQueued = true;
-            if (layer->shouldPresentNow(*mPrimaryDispSync)) {
+            const nsecs_t expectedPresentTime = mPrimaryDispSync->expectedPresentTime();
+            if (layer->shouldPresentNow(expectedPresentTime)) {
                 mLayersWithQueuedFrames.push_back(layer);
             } else {
                 layer->useEmptyDamage();
@@ -3423,11 +3288,11 @@ uint32_t SurfaceFlinger::getTransactionFlags(uint32_t flags) {
 }
 
 uint32_t SurfaceFlinger::setTransactionFlags(uint32_t flags) {
-    return setTransactionFlags(flags, VSyncModulator::TransactionStart::NORMAL);
+    return setTransactionFlags(flags, Scheduler::TransactionStart::NORMAL);
 }
 
 uint32_t SurfaceFlinger::setTransactionFlags(uint32_t flags,
-        VSyncModulator::TransactionStart transactionStart) {
+                                             Scheduler::TransactionStart transactionStart) {
     uint32_t old = mTransactionFlags.fetch_or(flags);
     mVsyncModulator.setTransactionStart(transactionStart);
     if ((old & flags)==0) { // wake the server up
@@ -3520,9 +3385,8 @@ void SurfaceFlinger::setTransactionState(
         }
 
         // this triggers the transaction
-        const auto start = (flags & eEarlyWakeup)
-                ? VSyncModulator::TransactionStart::EARLY
-                : VSyncModulator::TransactionStart::NORMAL;
+        const auto start = (flags & eEarlyWakeup) ? Scheduler::TransactionStart::EARLY
+                                                  : Scheduler::TransactionStart::NORMAL;
         setTransactionFlags(transactionFlags, start);
 
         // if this is a synchronous transaction, wait for it to take effect
@@ -4045,7 +3909,8 @@ void SurfaceFlinger::onInitializeDisplays() {
 
     // Use phase of 0 since phase is not known.
     // Use latency of 0, which will snap to the ideal latency.
-    setCompositorTimingSnapped(0, period, 0);
+    DisplayStatInfo stats{0 /* vsyncTime */, period /* vsyncPeriod */};
+    setCompositorTimingSnapped(stats, 0);
 }
 
 void SurfaceFlinger::initializeDisplays() {
@@ -4113,8 +3978,11 @@ void SurfaceFlinger::setPowerModeInternal(const sp<DisplayDevice>& display, int 
         }
 
         if (mActiveDisplays.none()) {
-            disableHardwareVsync(true); // also cancels any in-progress resync
-
+            if (mUseScheduler) {
+                mScheduler->disableHardwareVsync(true);
+            } else {
+                disableHardwareVsync(true); // also cancels any in-progress resync
+            }
             // FIXME: eventthread only knows about the main display right now
             if (mUseScheduler) {
                 mScheduler->onScreenReleased(mAppConnectionHandle);
@@ -4142,7 +4010,11 @@ void SurfaceFlinger::setPowerModeInternal(const sp<DisplayDevice>& display, int 
     } else if (mode == HWC_POWER_MODE_DOZE_SUSPEND) {
         // Leave display going to doze
         if (mActiveDisplays.none()) {
-            disableHardwareVsync(true); // also cancels any in-progress resync
+            if (mUseScheduler) {
+                mScheduler->disableHardwareVsync(true);
+            } else {
+                disableHardwareVsync(true); // also cancels any in-progress resync
+            }
             // FIXME: eventthread only knows about the main display right now
             if (mUseScheduler) {
                 mScheduler->onScreenReleased(mAppConnectionHandle);
@@ -5098,6 +4970,7 @@ status_t SurfaceFlinger::onTransact(uint32_t code, const Parcel& data, Parcel* r
             // Needs to be shifted to proper binder interface when we productize
             case 1016: {
                 n = data.readInt32();
+                // TODO(b/113612090): Evaluate if this can be removed.
                 mPrimaryDispSync->setRefreshSkipCount(n);
                 return NO_ERROR;
             }
@@ -5226,9 +5099,17 @@ status_t SurfaceFlinger::onTransact(uint32_t code, const Parcel& data, Parcel* r
                 }
 
                 if ((frequencyScaler.multiplier == 1) && (frequencyScaler.divisor == 1)) {
-                    enableHardwareVsync();
+                    if (mUseScheduler) {
+                        mScheduler->enableHardwareVsync();
+                    } else {
+                        enableHardwareVsync();
+                    }
                 } else {
-                    disableHardwareVsync(true);
+                    if (mUseScheduler) {
+                        mScheduler->disableHardwareVsync(true);
+                    } else {
+                        disableHardwareVsync(true);
+                    }
                 }
                 mPrimaryDispSync->scalePeriod(frequencyScaler);
                 getBE().mHwc->setDisplayFrequencyScaleParameters(frequencyScaler);
