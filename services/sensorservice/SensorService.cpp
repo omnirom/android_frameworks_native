@@ -633,8 +633,13 @@ bool SensorService::threadLoop() {
     do {
         ssize_t count = device.poll(mSensorEventBuffer, numEventMax);
         if (count < 0) {
-            ALOGE("sensor poll failed (%s)", strerror(-count));
-            break;
+            if(count == DEAD_OBJECT && device.isReconnecting()) {
+                device.reconnect();
+                continue;
+            } else {
+                ALOGE("sensor poll failed (%s)", strerror(-count));
+                break;
+            }
         }
 
         // Reset sensors_event_t.flags to zero for all events in the buffer.
@@ -1285,6 +1290,15 @@ void SensorService::cleanupConnection(SensorEventConnection* c) {
             ALOGD_IF(DEBUG_CONNECTIONS, "... and it was the last connection");
             mActiveSensors.removeItemsAt(i, 1);
             mActiveVirtualSensors.erase(handle);
+
+            // If this is the last connection, then mark the RecentEventLogger as stale. This is
+            // critical for on-change events since the previous event is sent to a client if the
+            // sensor is already active. If two clients request the sensor at the same time, one
+            // of the clients would receive a stale event.
+            auto logger = mRecentEvent.find(handle);
+            if (logger != mRecentEvent.end()) {
+                logger->second->setLastEventStale();
+            }
             delete rec;
             size--;
         } else {
@@ -1351,10 +1365,11 @@ status_t SensorService::enable(const sp<SensorEventConnection>& connection,
                 auto logger = mRecentEvent.find(handle);
                 if (logger != mRecentEvent.end()) {
                     sensors_event_t event;
-                    // It is unlikely that this buffer is empty as the sensor is already active.
-                    // One possible corner case may be two applications activating an on-change
-                    // sensor at the same time.
-                    if(logger->second->populateLastEvent(&event)) {
+                    // Verify that the last sensor event was generated from the current activation
+                    // of the sensor. If not, it is possible for an on-change sensor to receive a
+                    // sensor event that is stale if two clients re-activate the sensor
+                    // simultaneously.
+                    if(logger->second->populateLastEventIfCurrent(&event)) {
                         event.sensor = handle;
                         if (event.version == sizeof(sensors_event_t)) {
                             if (isWakeUpSensorEvent(event) && !mWakeLockAcquired) {
