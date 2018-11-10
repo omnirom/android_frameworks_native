@@ -5138,16 +5138,6 @@ status_t SurfaceFlinger::captureScreen(const sp<IBinder>& display,
     const sp<const DisplayDevice> device(getDisplayDeviceLocked(display));
     if (CC_UNLIKELY(device == 0)) return BAD_VALUE;
 
-    const Rect& dispScissor = device->getScissor();
-    if (!dispScissor.isEmpty()) {
-        sourceCrop.set(dispScissor);
-        // adb shell screencap will default reqWidth and reqHeight to zeros.
-        if (reqWidth == 0 || reqHeight == 0) {
-            reqWidth = uint32_t(device->getViewport().width());
-            reqHeight = uint32_t(device->getViewport().height());
-        }
-    }
-
     DisplayRenderArea renderArea(device, sourceCrop, reqHeight, reqWidth, rotation,
                                  captureSecureLayers);
 
