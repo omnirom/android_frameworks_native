@@ -251,6 +251,7 @@ SurfaceFlinger::SurfaceFlinger(SurfaceFlinger::SkipInitializationTag)
         mVisibleRegionsDirty(false),
         mGeometryInvalid(false),
         mAnimCompositionPending(false),
+        mBootStage(BootStage::BOOTLOADER),
         mActiveDisplays(0),
         mBuiltInBitmask(0),
         mDebugRegion(0),
@@ -261,7 +262,6 @@ SurfaceFlinger::SurfaceFlinger(SurfaceFlinger::SkipInitializationTag)
         mLastSwapBufferTime(0),
         mDebugInTransaction(0),
         mLastTransactionTime(0),
-        mBootFinished(false),
         mForceFullDamage(false),
         mPrimaryDispSync("PrimaryDispSync"),
         mPrimaryHWVsyncEnabled(false),
@@ -513,6 +513,7 @@ void SurfaceFlinger::bootFinished()
 
     sp<LambdaMessage> readProperties = new LambdaMessage([&]() {
         readPersistentProperties();
+        mBootStage = BootStage::FINISHED;
     });
     postMessageAsync(readProperties);
 }
@@ -1533,7 +1534,7 @@ void SurfaceFlinger::onMessageReceived(int32_t what) {
             bool refreshNeeded = handleMessageTransaction();
             refreshNeeded |= handleMessageInvalidate();
             refreshNeeded |= mRepaintEverything;
-            if (refreshNeeded) {
+            if (refreshNeeded && CC_LIKELY(mBootStage != BootStage::BOOTLOADER)) {
                 // Signal a refresh if a transaction modified the window state,
                 // a new buffer was latched, or if HWC has requested a full
                 // repaint
@@ -2938,6 +2939,12 @@ bool SurfaceFlinger::handlePageFlip()
         signalLayerUpdate();
     }
 
+    // enter boot animation on first buffer latch
+    if (CC_UNLIKELY(mBootStage == BootStage::BOOTLOADER && newDataLatched)) {
+        ALOGI("Enter boot animation");
+        mBootStage = BootStage::BOOTANIMATION;
+    }
+
     // Only continue with the refresh if there is actually new work to do
     return !mLayersWithQueuedFrames.empty() && newDataLatched;
 }
@@ -2977,6 +2984,7 @@ bool SurfaceFlinger::doComposeSurfaces(const sp<const DisplayDevice>& displayDev
     const DisplayRenderArea renderArea(displayDevice);
     const auto hwcId = displayDevice->getHwcDisplayId();
     const bool hasClientComposition = getBE().mHwc->hasClientComposition(hwcId);
+    const bool hasFlipClientTargetReq = getBE().mHwc->hasFlipClientTargetRequest(hwcId);
     ATRACE_INT("hasClientComposition", hasClientComposition);
 
     bool applyColorMatrix = false;
@@ -3060,6 +3068,18 @@ bool SurfaceFlinger::doComposeSurfaces(const sp<const DisplayDevice>& displayDev
                 getBE().mRenderEngine->setScissor(scissor.left, height - scissor.bottom,
                         scissor.getWidth(), scissor.getHeight());
             }
+        }
+    } else if (hasFlipClientTargetReq) {
+        if (!displayDevice->makeCurrent()) {
+            ALOGW("DisplayDevice::makeCurrent failed. Aborting surface composition for display %s",
+                  displayDevice->getDisplayName().string());
+            getRenderEngine().resetCurrentSurface();
+
+            // |mStateLock| not needed as we are on the main thread
+            if(!getDefaultDisplayDeviceLocked()->makeCurrent()) {
+              ALOGE("DisplayDevice::makeCurrent on default display failed. Aborting.");
+            }
+            return false;
         }
     }
 
