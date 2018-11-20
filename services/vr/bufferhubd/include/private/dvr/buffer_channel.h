@@ -33,9 +33,6 @@ class BufferChannel : public BufferHubChannel {
   void HandleImpulse(pdx::Message& message) override;
 
  private:
-  // Creates a detached buffer from existing IonBuffers.
-  BufferChannel(BufferHubService* service, int buffer_id, int channel_id,
-                IonBuffer buffer, size_t user_metadata_size);
 
   // Allocates a new detached buffer.
   BufferChannel(BufferHubService* service, int buffer_id, uint32_t width,
@@ -55,7 +52,7 @@ class BufferChannel : public BufferHubChannel {
   std::shared_ptr<BufferNode> buffer_node_ = nullptr;
 
   // The state bit of this buffer. Must be one the lower 63 bits.
-  uint64_t buffer_state_bit_ = 0ULL;
+  uint64_t client_state_mask_ = 0ULL;
 };
 
 }  // namespace dvr

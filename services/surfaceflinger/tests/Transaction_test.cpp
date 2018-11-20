@@ -15,9 +15,12 @@
  */
 
 #include <algorithm>
+#include <chrono>
+#include <cinttypes>
 #include <functional>
 #include <limits>
 #include <ostream>
+#include <thread>
 
 #include <gtest/gtest.h>
 
@@ -30,6 +33,7 @@
 #include <gui/SurfaceComposerClient.h>
 #include <private/gui/ComposerService.h>
 
+#include <ui/ColorSpace.h>
 #include <ui/DisplayInfo.h>
 #include <ui/Rect.h>
 #include <utils/String8.h>
@@ -63,6 +67,7 @@ const Color Color::BLACK{0, 0, 0, 255};
 const Color Color::TRANSPARENT{0, 0, 0, 0};
 
 using android::hardware::graphics::common::V1_1::BufferUsage;
+using namespace std::chrono_literals;
 
 std::ostream& operator<<(std::ostream& os, const Color& color) {
     os << int(color.r) << ", " << int(color.g) << ", " << int(color.b) << ", " << int(color.a);
@@ -314,6 +319,10 @@ protected:
         ASSERT_EQ(NO_ERROR, mClient->initCheck()) << "failed to create SurfaceComposerClient";
 
         ASSERT_NO_FATAL_FAILURE(SetUpDisplay());
+
+        sp<ISurfaceComposer> sf(ComposerService::getComposerService());
+        sp<IBinder> binder = sf->getBuiltInDisplay(ISurfaceComposer::eDisplayIdMain);
+        ASSERT_NO_FATAL_FAILURE(sf->getColorManagement(&mColorManagementUsed));
     }
 
     virtual void TearDown() {
@@ -322,22 +331,32 @@ protected:
         mClient = 0;
     }
 
-    virtual sp<SurfaceControl> createLayer(const char* name, uint32_t width, uint32_t height,
+    virtual sp<SurfaceControl> createLayer(const sp<SurfaceComposerClient>& client,
+                                           const char* name, uint32_t width, uint32_t height,
                                            uint32_t flags = 0) {
         auto layer =
-                mClient->createSurface(String8(name), width, height, PIXEL_FORMAT_RGBA_8888, flags);
+                client->createSurface(String8(name), width, height, PIXEL_FORMAT_RGBA_8888, flags);
         EXPECT_NE(nullptr, layer.get()) << "failed to create SurfaceControl";
 
-        status_t error = Transaction()
-                                 .setLayerStack(layer, mDisplayLayerStack)
-                                 .setLayer(layer, mLayerZBase)
-                                 .apply();
+        Transaction t;
+        t.setLayerStack(layer, mDisplayLayerStack).setLayer(layer, mLayerZBase);
+        // If we are creating a color layer, set its crop since its size will be ignored.
+        if (flags == ISurfaceComposerClient::eFXSurfaceColor) {
+            t.setCrop_legacy(layer, Rect(0, 0, width, height));
+        }
+
+        status_t error = t.apply();
         if (error != NO_ERROR) {
             ADD_FAILURE() << "failed to initialize SurfaceControl";
             layer.clear();
         }
 
         return layer;
+    }
+
+    virtual sp<SurfaceControl> createLayer(const char* name, uint32_t width, uint32_t height,
+                                           uint32_t flags = 0) {
+        return createLayer(mClient, name, width, height, flags);
     }
 
     ANativeWindow_Buffer getBufferQueueLayerBuffer(const sp<SurfaceControl>& layer) {
@@ -470,6 +489,8 @@ protected:
     void setMatrixWithResizeHelper(uint32_t layerType);
 
     sp<SurfaceControl> mBlackBgSurface;
+    bool mColorManagementUsed;
+
 private:
     void SetUpDisplay() {
         mDisplay = mClient->getBuiltInDisplay(ISurfaceComposer::eDisplayIdMain);
@@ -495,6 +516,7 @@ private:
         // set layer stack (b/68888219)
         Transaction t;
         t.setDisplayLayerStack(mDisplay, mDisplayLayerStack);
+        t.setCrop_legacy(mBlackBgSurface, Rect(0, 0, mDisplayWidth, mDisplayHeight));
         t.setLayerStack(mBlackBgSurface, mDisplayLayerStack);
         t.setColor(mBlackBgSurface, half3{0, 0, 0});
         t.setLayer(mBlackBgSurface, mLayerZBase);
@@ -1946,7 +1968,7 @@ TEST_F(LayerTransactionTest, SetFenceBasic_BufferState) {
                               "test");
     fillGraphicBufferColor(buffer, Rect(0, 0, 32, 32), Color::RED);
 
-    sp<Fence> fence = new Fence(-1);
+    sp<Fence> fence = Fence::NO_FENCE;
 
     Transaction()
             .setBuffer(layer, buffer)
@@ -2064,6 +2086,47 @@ TEST_F(LayerTransactionTest, SetSidebandStreamNull_BufferState) {
     Transaction().setSidebandStream(layer, nullptr).apply();
 }
 
+class ColorTransformHelper {
+public:
+    static void DegammaColorSingle(half& s) {
+        if (s <= 0.03928f)
+            s = s / 12.92f;
+        else
+            s = pow((s + 0.055f) / 1.055f, 2.4f);
+    }
+
+    static void DegammaColor(half3& color) {
+        DegammaColorSingle(color.r);
+        DegammaColorSingle(color.g);
+        DegammaColorSingle(color.b);
+    }
+
+    static void GammaColorSingle(half& s) {
+        if (s <= 0.0031308f) {
+            s = s * 12.92f;
+        } else {
+            s = 1.055f * pow(s, (1.0f / 2.4f)) - 0.055f;
+        }
+    }
+
+    static void GammaColor(half3& color) {
+        GammaColorSingle(color.r);
+        GammaColorSingle(color.g);
+        GammaColorSingle(color.b);
+    }
+
+    static void applyMatrix(half3& color, const mat3& mat) {
+        half3 ret = half3(0);
+
+        for (int i = 0; i < 3; i++) {
+            for (int j = 0; j < 3; j++) {
+                ret[i] = ret[i] + color[j] * mat[j][i];
+            }
+        }
+        color = ret;
+    }
+};
+
 TEST_F(LayerTransactionTest, SetColorTransformBasic) {
     sp<SurfaceControl> colorLayer;
     ASSERT_NO_FATAL_FAILURE(
@@ -2076,20 +2139,657 @@ TEST_F(LayerTransactionTest, SetColorTransformBasic) {
     }
 
     const half3 color(50.0f / 255.0f, 100.0f / 255.0f, 150.0f / 255.0f);
-    const Color expected = {90, 90, 90, 255};
-    // this is handwavy, but the precison loss scaled by 255 (8-bit per
-    // channel) should be less than one
-    const uint8_t tolerance = 1;
+    half3 expected = color;
     mat3 matrix;
     matrix[0][0] = 0.3; matrix[1][0] = 0.59; matrix[2][0] = 0.11;
     matrix[0][1] = 0.3; matrix[1][1] = 0.59; matrix[2][1] = 0.11;
     matrix[0][2] = 0.3; matrix[1][2] = 0.59; matrix[2][2] = 0.11;
+
+    // degamma before applying the matrix
+    if (mColorManagementUsed) {
+        ColorTransformHelper::DegammaColor(expected);
+    }
+
+    ColorTransformHelper::applyMatrix(expected, matrix);
+
+    if (mColorManagementUsed) {
+        ColorTransformHelper::GammaColor(expected);
+    }
+
+    const Color expectedColor = {uint8_t(expected.r * 255), uint8_t(expected.g * 255),
+                                 uint8_t(expected.b * 255), 255};
+
+    // this is handwavy, but the precison loss scaled by 255 (8-bit per
+    // channel) should be less than one
+    const uint8_t tolerance = 1;
+
     Transaction().setColor(colorLayer, color)
         .setColorTransform(colorLayer, matrix, vec3()).apply();
     {
         SCOPED_TRACE("new color");
-        screenshot()->expectColor(Rect(0, 0, 32, 32), expected, tolerance);
+        screenshot()->expectColor(Rect(0, 0, 32, 32), expectedColor, tolerance);
     }
+}
+
+class ExpectedResult {
+public:
+    enum Transaction {
+        NOT_PRESENTED = 0,
+        PRESENTED,
+    };
+
+    enum Buffer {
+        NOT_ACQUIRED = 0,
+        ACQUIRED,
+    };
+
+    enum PreviousBuffer {
+        NOT_RELEASED = 0,
+        RELEASED,
+    };
+
+    void reset() {
+        mTransactionResult = ExpectedResult::Transaction::NOT_PRESENTED;
+        mExpectedSurfaceResults.clear();
+    }
+
+    void addSurface(ExpectedResult::Transaction transactionResult, const sp<SurfaceControl>& layer,
+                    ExpectedResult::Buffer bufferResult = NOT_ACQUIRED,
+                    ExpectedResult::PreviousBuffer previousBufferResult = NOT_RELEASED) {
+        mTransactionResult = transactionResult;
+        mExpectedSurfaceResults.emplace(std::piecewise_construct,
+                                        std::forward_as_tuple(layer->getHandle()),
+                                        std::forward_as_tuple(bufferResult, previousBufferResult));
+    }
+
+    void addSurfaces(ExpectedResult::Transaction transactionResult,
+                     const std::vector<sp<SurfaceControl>>& layers,
+                     ExpectedResult::Buffer bufferResult = NOT_ACQUIRED,
+                     ExpectedResult::PreviousBuffer previousBufferResult = NOT_RELEASED) {
+        for (const auto& layer : layers) {
+            addSurface(transactionResult, layer, bufferResult, previousBufferResult);
+        }
+    }
+
+    void verifyTransactionStats(const TransactionStats& transactionStats) const {
+        const auto& [latchTime, presentTime, surfaceStats] = transactionStats;
+        if (mTransactionResult == ExpectedResult::Transaction::PRESENTED) {
+            ASSERT_GE(latchTime, 0) << "bad latch time";
+            ASSERT_GE(presentTime, 0) << "bad present time";
+        } else {
+            ASSERT_EQ(presentTime, -1) << "transaction shouldn't have been presented";
+            ASSERT_EQ(latchTime, -1) << "unpresented transactions shouldn't be latched";
+        }
+
+        ASSERT_EQ(surfaceStats.size(), mExpectedSurfaceResults.size())
+                << "wrong number of surfaces";
+
+        for (const auto& stats : surfaceStats) {
+            const auto& expectedSurfaceResult = mExpectedSurfaceResults.find(stats.surfaceControl);
+            ASSERT_NE(expectedSurfaceResult, mExpectedSurfaceResults.end())
+                    << "unexpected surface control";
+            expectedSurfaceResult->second.verifySurfaceStats(stats, latchTime);
+        }
+    }
+
+private:
+    class ExpectedSurfaceResult {
+    public:
+        ExpectedSurfaceResult(ExpectedResult::Buffer bufferResult,
+                              ExpectedResult::PreviousBuffer previousBufferResult)
+              : mBufferResult(bufferResult), mPreviousBufferResult(previousBufferResult) {}
+
+        void verifySurfaceStats(const SurfaceStats& surfaceStats, nsecs_t latchTime) const {
+            const auto& [surfaceControl, acquireTime, releasePreviousBuffer] = surfaceStats;
+
+            ASSERT_EQ(acquireTime > 0, mBufferResult == ExpectedResult::Buffer::ACQUIRED)
+                    << "bad acquire time";
+            ASSERT_LE(acquireTime, latchTime) << "acquire time should be <= latch time";
+            ASSERT_EQ(releasePreviousBuffer,
+                      mPreviousBufferResult == ExpectedResult::PreviousBuffer::RELEASED)
+                    << "bad previous buffer released";
+        }
+
+    private:
+        ExpectedResult::Buffer mBufferResult;
+        ExpectedResult::PreviousBuffer mPreviousBufferResult;
+    };
+
+    struct IBinderHash {
+        std::size_t operator()(const sp<IBinder>& strongPointer) const {
+            return std::hash<IBinder*>{}(strongPointer.get());
+        }
+    };
+    ExpectedResult::Transaction mTransactionResult = ExpectedResult::Transaction::NOT_PRESENTED;
+    std::unordered_map<sp<IBinder>, ExpectedSurfaceResult, IBinderHash> mExpectedSurfaceResults;
+};
+
+class CallbackHelper {
+public:
+    static void function(void* callbackContext, const TransactionStats& transactionStats) {
+        if (!callbackContext) {
+            ALOGE("failed to get callback context");
+        }
+        CallbackHelper* helper = static_cast<CallbackHelper*>(callbackContext);
+        std::lock_guard lock(helper->mMutex);
+        helper->mTransactionStatsQueue.push(transactionStats);
+        helper->mConditionVariable.notify_all();
+    }
+
+    void getTransactionStats(TransactionStats* outStats) {
+        std::unique_lock lock(mMutex);
+
+        if (mTransactionStatsQueue.empty()) {
+            ASSERT_NE(mConditionVariable.wait_for(lock, std::chrono::seconds(3)),
+                      std::cv_status::timeout)
+                    << "did not receive callback";
+        }
+
+        *outStats = std::move(mTransactionStatsQueue.front());
+        mTransactionStatsQueue.pop();
+    }
+
+    void verifyFinalState() {
+        // Wait to see if there are extra callbacks
+        std::this_thread::sleep_for(500ms);
+
+        std::lock_guard lock(mMutex);
+        EXPECT_EQ(mTransactionStatsQueue.size(), 0) << "extra callbacks received";
+        mTransactionStatsQueue = {};
+    }
+
+    void* getContext() { return static_cast<void*>(this); }
+
+    std::mutex mMutex;
+    std::condition_variable mConditionVariable;
+    std::queue<TransactionStats> mTransactionStatsQueue;
+};
+
+class LayerCallbackTest : public LayerTransactionTest {
+protected:
+    virtual sp<SurfaceControl> createBufferStateLayer() {
+        return createLayer(mClient, "test", mWidth, mHeight,
+                           ISurfaceComposerClient::eFXSurfaceBufferState);
+    }
+
+    virtual void fillTransaction(Transaction& transaction, CallbackHelper* callbackHelper,
+                                 const sp<SurfaceControl>& layer = nullptr) {
+        if (layer) {
+            sp<GraphicBuffer> buffer =
+                    new GraphicBuffer(mWidth, mHeight, PIXEL_FORMAT_RGBA_8888, 1,
+                                      BufferUsage::CPU_READ_OFTEN | BufferUsage::CPU_WRITE_OFTEN |
+                                              BufferUsage::COMPOSER_OVERLAY |
+                                              BufferUsage::GPU_TEXTURE,
+                                      "test");
+            fillGraphicBufferColor(buffer, Rect(0, 0, mWidth, mHeight), Color::RED);
+
+            sp<Fence> fence = new Fence(-1);
+
+            transaction.setBuffer(layer, buffer)
+                    .setAcquireFence(layer, fence)
+                    .setSize(layer, mWidth, mHeight);
+        }
+
+        transaction.addTransactionCompletedCallback(callbackHelper->function,
+                                                    callbackHelper->getContext());
+    }
+
+    void waitForCallback(CallbackHelper& helper, const ExpectedResult& expectedResult,
+                         bool finalState = false) {
+        TransactionStats transactionStats;
+        ASSERT_NO_FATAL_FAILURE(helper.getTransactionStats(&transactionStats));
+        EXPECT_NO_FATAL_FAILURE(expectedResult.verifyTransactionStats(transactionStats));
+
+        if (finalState) {
+            ASSERT_NO_FATAL_FAILURE(helper.verifyFinalState());
+        }
+    }
+
+    void waitForCallbacks(CallbackHelper& helper,
+                          const std::vector<ExpectedResult>& expectedResults,
+                          bool finalState = false) {
+        for (const auto& expectedResult : expectedResults) {
+            waitForCallback(helper, expectedResult);
+        }
+        if (finalState) {
+            ASSERT_NO_FATAL_FAILURE(helper.verifyFinalState());
+        }
+    }
+
+    uint32_t mWidth = 32;
+    uint32_t mHeight = 32;
+};
+
+TEST_F(LayerCallbackTest, Basic) {
+    sp<SurfaceControl> layer;
+    ASSERT_NO_FATAL_FAILURE(layer = createBufferStateLayer());
+
+    Transaction transaction;
+    CallbackHelper callback;
+    fillTransaction(transaction, &callback, layer);
+
+    transaction.apply();
+
+    ExpectedResult expected;
+    expected.addSurface(ExpectedResult::Transaction::PRESENTED, layer);
+    EXPECT_NO_FATAL_FAILURE(waitForCallback(callback, expected, true));
+}
+
+TEST_F(LayerCallbackTest, NoBuffer) {
+    sp<SurfaceControl> layer;
+    ASSERT_NO_FATAL_FAILURE(layer = createBufferStateLayer());
+
+    Transaction transaction;
+    CallbackHelper callback;
+    fillTransaction(transaction, &callback);
+
+    transaction.setPosition(layer, mWidth, mHeight).apply();
+
+    ExpectedResult expected;
+    expected.addSurface(ExpectedResult::Transaction::NOT_PRESENTED, layer);
+    EXPECT_NO_FATAL_FAILURE(waitForCallback(callback, expected, true));
+}
+
+TEST_F(LayerCallbackTest, NoStateChange) {
+    Transaction transaction;
+    CallbackHelper callback;
+    fillTransaction(transaction, &callback);
+
+    transaction.apply();
+
+    ExpectedResult expected;
+    EXPECT_NO_FATAL_FAILURE(waitForCallback(callback, expected, true));
+}
+
+TEST_F(LayerCallbackTest, OffScreen) {
+    sp<SurfaceControl> layer;
+    ASSERT_NO_FATAL_FAILURE(layer = createBufferStateLayer());
+
+    Transaction transaction;
+    CallbackHelper callback;
+    fillTransaction(transaction, &callback, layer);
+
+    transaction.setPosition(layer, -100, -100).apply();
+
+    ExpectedResult expected;
+    expected.addSurface(ExpectedResult::Transaction::PRESENTED, layer);
+    EXPECT_NO_FATAL_FAILURE(waitForCallback(callback, expected, true));
+}
+
+TEST_F(LayerCallbackTest, Merge) {
+    sp<SurfaceControl> layer1, layer2;
+    ASSERT_NO_FATAL_FAILURE(layer1 = createBufferStateLayer());
+    ASSERT_NO_FATAL_FAILURE(layer2 = createBufferStateLayer());
+
+    Transaction transaction1, transaction2;
+    CallbackHelper callback1, callback2;
+    fillTransaction(transaction1, &callback1, layer1);
+    fillTransaction(transaction2, &callback2, layer2);
+
+    transaction2.setPosition(layer2, mWidth, mHeight).merge(std::move(transaction1)).apply();
+
+    ExpectedResult expected;
+    expected.addSurfaces(ExpectedResult::Transaction::PRESENTED, {layer1, layer2});
+    EXPECT_NO_FATAL_FAILURE(waitForCallback(callback1, expected, true));
+    EXPECT_NO_FATAL_FAILURE(waitForCallback(callback2, expected, true));
+}
+
+TEST_F(LayerCallbackTest, Merge_SameCallback) {
+    sp<SurfaceControl> layer1, layer2;
+    ASSERT_NO_FATAL_FAILURE(layer1 = createBufferStateLayer());
+    ASSERT_NO_FATAL_FAILURE(layer2 = createBufferStateLayer());
+
+    Transaction transaction1, transaction2;
+    CallbackHelper callback;
+    fillTransaction(transaction1, &callback, layer1);
+    fillTransaction(transaction2, &callback, layer2);
+
+    transaction2.merge(std::move(transaction1)).apply();
+
+    ExpectedResult expected;
+    expected.addSurfaces(ExpectedResult::Transaction::PRESENTED, {layer1, layer2});
+    EXPECT_NO_FATAL_FAILURE(waitForCallback(callback, expected));
+    EXPECT_NO_FATAL_FAILURE(waitForCallback(callback, expected, true));
+}
+
+TEST_F(LayerCallbackTest, Merge_SameLayer) {
+    sp<SurfaceControl> layer;
+    ASSERT_NO_FATAL_FAILURE(layer = createBufferStateLayer());
+
+    Transaction transaction1, transaction2;
+    CallbackHelper callback1, callback2;
+    fillTransaction(transaction1, &callback1, layer);
+    fillTransaction(transaction2, &callback2, layer);
+
+    transaction2.merge(std::move(transaction1)).apply();
+
+    ExpectedResult expected;
+    expected.addSurface(ExpectedResult::Transaction::PRESENTED, layer);
+    EXPECT_NO_FATAL_FAILURE(waitForCallback(callback1, expected, true));
+    EXPECT_NO_FATAL_FAILURE(waitForCallback(callback2, expected, true));
+}
+
+TEST_F(LayerCallbackTest, Merge_SingleBuffer) {
+    sp<SurfaceControl> layer1, layer2;
+    ASSERT_NO_FATAL_FAILURE(layer1 = createBufferStateLayer());
+    ASSERT_NO_FATAL_FAILURE(layer2 = createBufferStateLayer());
+
+    Transaction transaction1, transaction2;
+    CallbackHelper callback1, callback2;
+    fillTransaction(transaction1, &callback1, layer1);
+    fillTransaction(transaction2, &callback2);
+
+    transaction2.setPosition(layer2, mWidth, mHeight).merge(std::move(transaction1)).apply();
+
+    ExpectedResult expected;
+    expected.addSurfaces(ExpectedResult::Transaction::PRESENTED, {layer1, layer2});
+    EXPECT_NO_FATAL_FAILURE(waitForCallback(callback1, expected, true));
+    EXPECT_NO_FATAL_FAILURE(waitForCallback(callback2, expected, true));
+}
+
+TEST_F(LayerCallbackTest, Merge_DifferentClients) {
+    sp<SurfaceComposerClient> client1(new SurfaceComposerClient),
+            client2(new SurfaceComposerClient);
+
+    ASSERT_EQ(NO_ERROR, client1->initCheck()) << "failed to create SurfaceComposerClient";
+    ASSERT_EQ(NO_ERROR, client2->initCheck()) << "failed to create SurfaceComposerClient";
+
+    sp<SurfaceControl> layer1, layer2;
+    ASSERT_NO_FATAL_FAILURE(layer1 = createLayer(client1, "test", mWidth, mHeight,
+                                                 ISurfaceComposerClient::eFXSurfaceBufferState));
+    ASSERT_NO_FATAL_FAILURE(layer2 = createLayer(client2, "test", mWidth, mHeight,
+                                                 ISurfaceComposerClient::eFXSurfaceBufferState));
+
+    Transaction transaction1, transaction2;
+    CallbackHelper callback1, callback2;
+    fillTransaction(transaction1, &callback1, layer1);
+    fillTransaction(transaction2, &callback2, layer2);
+
+    transaction2.setPosition(layer2, mWidth, mHeight).merge(std::move(transaction1)).apply();
+
+    ExpectedResult expected;
+    expected.addSurfaces(ExpectedResult::Transaction::PRESENTED, {layer1, layer2});
+    EXPECT_NO_FATAL_FAILURE(waitForCallback(callback1, expected, true));
+    EXPECT_NO_FATAL_FAILURE(waitForCallback(callback2, expected, true));
+}
+
+TEST_F(LayerCallbackTest, MultipleTransactions) {
+    sp<SurfaceControl> layer;
+    ASSERT_NO_FATAL_FAILURE(layer = createBufferStateLayer());
+
+    Transaction transaction;
+    CallbackHelper callback;
+    for (size_t i = 0; i < 10; i++) {
+        fillTransaction(transaction, &callback, layer);
+
+        transaction.apply();
+
+        ExpectedResult expected;
+        expected.addSurface(ExpectedResult::Transaction::PRESENTED, layer,
+                            ExpectedResult::Buffer::NOT_ACQUIRED,
+                            (i == 0) ? ExpectedResult::PreviousBuffer::NOT_RELEASED
+                                     : ExpectedResult::PreviousBuffer::RELEASED);
+        EXPECT_NO_FATAL_FAILURE(waitForCallback(callback, expected));
+    }
+    ASSERT_NO_FATAL_FAILURE(callback.verifyFinalState());
+}
+
+TEST_F(LayerCallbackTest, MultipleTransactions_NoStateChange) {
+    sp<SurfaceControl> layer;
+    ASSERT_NO_FATAL_FAILURE(layer = createBufferStateLayer());
+
+    Transaction transaction;
+    CallbackHelper callback;
+    for (size_t i = 0; i < 10; i++) {
+        ExpectedResult expected;
+
+        if (i == 0) {
+            fillTransaction(transaction, &callback, layer);
+            expected.addSurface(ExpectedResult::Transaction::PRESENTED, layer);
+        } else {
+            fillTransaction(transaction, &callback);
+        }
+
+        transaction.apply();
+
+        EXPECT_NO_FATAL_FAILURE(waitForCallback(callback, expected));
+    }
+    ASSERT_NO_FATAL_FAILURE(callback.verifyFinalState());
+}
+
+TEST_F(LayerCallbackTest, MultipleTransactions_SameStateChange) {
+    sp<SurfaceControl> layer;
+    ASSERT_NO_FATAL_FAILURE(layer = createBufferStateLayer());
+
+    Transaction transaction;
+    CallbackHelper callback;
+    for (size_t i = 0; i < 10; i++) {
+        if (i == 0) {
+            fillTransaction(transaction, &callback, layer);
+        } else {
+            fillTransaction(transaction, &callback);
+        }
+
+        transaction.setPosition(layer, mWidth, mHeight).apply();
+
+        ExpectedResult expected;
+        expected.addSurface((i == 0) ? ExpectedResult::Transaction::PRESENTED
+                                     : ExpectedResult::Transaction::NOT_PRESENTED,
+                            layer);
+        EXPECT_NO_FATAL_FAILURE(waitForCallback(callback, expected, i == 0));
+    }
+    ASSERT_NO_FATAL_FAILURE(callback.verifyFinalState());
+}
+
+TEST_F(LayerCallbackTest, MultipleTransactions_Merge) {
+    sp<SurfaceControl> layer1, layer2;
+    ASSERT_NO_FATAL_FAILURE(layer1 = createBufferStateLayer());
+    ASSERT_NO_FATAL_FAILURE(layer2 = createBufferStateLayer());
+
+    Transaction transaction1, transaction2;
+    CallbackHelper callback1, callback2;
+    for (size_t i = 0; i < 10; i++) {
+        fillTransaction(transaction1, &callback1, layer1);
+        fillTransaction(transaction2, &callback2, layer2);
+
+        transaction2.setPosition(layer2, mWidth, mHeight).merge(std::move(transaction1)).apply();
+
+        ExpectedResult expected;
+        expected.addSurfaces(ExpectedResult::Transaction::PRESENTED, {layer1, layer2},
+                             ExpectedResult::Buffer::NOT_ACQUIRED,
+                             (i == 0) ? ExpectedResult::PreviousBuffer::NOT_RELEASED
+                                      : ExpectedResult::PreviousBuffer::RELEASED);
+        EXPECT_NO_FATAL_FAILURE(waitForCallback(callback1, expected));
+        EXPECT_NO_FATAL_FAILURE(waitForCallback(callback2, expected));
+    }
+    ASSERT_NO_FATAL_FAILURE(callback1.verifyFinalState());
+    ASSERT_NO_FATAL_FAILURE(callback2.verifyFinalState());
+}
+
+TEST_F(LayerCallbackTest, MultipleTransactions_Merge_DifferentClients) {
+    sp<SurfaceComposerClient> client1(new SurfaceComposerClient),
+            client2(new SurfaceComposerClient);
+    ASSERT_EQ(NO_ERROR, client1->initCheck()) << "failed to create SurfaceComposerClient";
+    ASSERT_EQ(NO_ERROR, client2->initCheck()) << "failed to create SurfaceComposerClient";
+
+    sp<SurfaceControl> layer1, layer2;
+    ASSERT_NO_FATAL_FAILURE(layer1 = createLayer(client1, "test", mWidth, mHeight,
+                                                 ISurfaceComposerClient::eFXSurfaceBufferState));
+    ASSERT_NO_FATAL_FAILURE(layer2 = createLayer(client2, "test", mWidth, mHeight,
+                                                 ISurfaceComposerClient::eFXSurfaceBufferState));
+
+    Transaction transaction1, transaction2;
+    CallbackHelper callback1, callback2;
+    for (size_t i = 0; i < 10; i++) {
+        fillTransaction(transaction1, &callback1, layer1);
+        fillTransaction(transaction2, &callback2, layer2);
+
+        transaction2.setPosition(layer2, mWidth, mHeight).merge(std::move(transaction1)).apply();
+
+        ExpectedResult expected;
+        expected.addSurfaces(ExpectedResult::Transaction::PRESENTED, {layer1, layer2},
+                             ExpectedResult::Buffer::NOT_ACQUIRED,
+                             (i == 0) ? ExpectedResult::PreviousBuffer::NOT_RELEASED
+                                      : ExpectedResult::PreviousBuffer::RELEASED);
+        EXPECT_NO_FATAL_FAILURE(waitForCallback(callback1, expected));
+        EXPECT_NO_FATAL_FAILURE(waitForCallback(callback2, expected));
+    }
+    ASSERT_NO_FATAL_FAILURE(callback1.verifyFinalState());
+    ASSERT_NO_FATAL_FAILURE(callback2.verifyFinalState());
+}
+
+TEST_F(LayerCallbackTest, MultipleTransactions_Merge_DifferentClients_NoStateChange) {
+    sp<SurfaceComposerClient> client1(new SurfaceComposerClient),
+            client2(new SurfaceComposerClient);
+    ASSERT_EQ(NO_ERROR, client1->initCheck()) << "failed to create SurfaceComposerClient";
+    ASSERT_EQ(NO_ERROR, client2->initCheck()) << "failed to create SurfaceComposerClient";
+
+    sp<SurfaceControl> layer1, layer2;
+    ASSERT_NO_FATAL_FAILURE(layer1 = createLayer(client1, "test", mWidth, mHeight,
+                                                 ISurfaceComposerClient::eFXSurfaceBufferState));
+    ASSERT_NO_FATAL_FAILURE(layer2 = createLayer(client2, "test", mWidth, mHeight,
+                                                 ISurfaceComposerClient::eFXSurfaceBufferState));
+
+    Transaction transaction1, transaction2;
+    CallbackHelper callback1, callback2;
+
+    // Normal call to set up test
+    fillTransaction(transaction1, &callback1, layer1);
+    fillTransaction(transaction2, &callback2, layer2);
+
+    transaction2.setPosition(layer2, mWidth, mHeight).merge(std::move(transaction1)).apply();
+
+    ExpectedResult expected;
+    expected.addSurfaces(ExpectedResult::Transaction::PRESENTED, {layer1, layer2});
+    EXPECT_NO_FATAL_FAILURE(waitForCallback(callback1, expected, true));
+    EXPECT_NO_FATAL_FAILURE(waitForCallback(callback2, expected, true));
+    expected.reset();
+
+    // Test
+    fillTransaction(transaction1, &callback1);
+    fillTransaction(transaction2, &callback2);
+
+    transaction2.merge(std::move(transaction1)).apply();
+
+    EXPECT_NO_FATAL_FAILURE(waitForCallback(callback1, expected, true));
+    EXPECT_NO_FATAL_FAILURE(waitForCallback(callback2, expected, true));
+}
+
+TEST_F(LayerCallbackTest, MultipleTransactions_Merge_DifferentClients_SameStateChange) {
+    sp<SurfaceComposerClient> client1(new SurfaceComposerClient),
+            client2(new SurfaceComposerClient);
+
+    ASSERT_EQ(NO_ERROR, client1->initCheck()) << "failed to create SurfaceComposerClient";
+    ASSERT_EQ(NO_ERROR, client2->initCheck()) << "failed to create SurfaceComposerClient";
+
+    sp<SurfaceControl> layer1, layer2;
+    ASSERT_NO_FATAL_FAILURE(layer1 = createLayer(client1, "test", mWidth, mHeight,
+                                                 ISurfaceComposerClient::eFXSurfaceBufferState));
+    ASSERT_NO_FATAL_FAILURE(layer2 = createLayer(client2, "test", mWidth, mHeight,
+                                                 ISurfaceComposerClient::eFXSurfaceBufferState));
+
+    Transaction transaction1, transaction2;
+    CallbackHelper callback1, callback2;
+
+    // Normal call to set up test
+    fillTransaction(transaction1, &callback1, layer1);
+    fillTransaction(transaction2, &callback2, layer2);
+
+    transaction2.setPosition(layer2, mWidth, mHeight).merge(std::move(transaction1)).apply();
+
+    ExpectedResult expected;
+    expected.addSurfaces(ExpectedResult::Transaction::PRESENTED, {layer1, layer2});
+    EXPECT_NO_FATAL_FAILURE(waitForCallback(callback1, expected, true));
+    EXPECT_NO_FATAL_FAILURE(waitForCallback(callback2, expected, true));
+    expected.reset();
+
+    // Test
+    fillTransaction(transaction1, &callback1);
+    fillTransaction(transaction2, &callback2);
+
+    transaction2.setPosition(layer2, mWidth, mHeight).merge(std::move(transaction1)).apply();
+
+    expected.addSurface(ExpectedResult::Transaction::NOT_PRESENTED, layer2);
+    EXPECT_NO_FATAL_FAILURE(waitForCallback(callback1, expected, true));
+    EXPECT_NO_FATAL_FAILURE(waitForCallback(callback2, expected, true));
+}
+
+TEST_F(LayerCallbackTest, MultipleTransactions_SingleFrame) {
+    sp<SurfaceControl> layer;
+    ASSERT_NO_FATAL_FAILURE(layer = createBufferStateLayer());
+
+    Transaction transaction;
+    CallbackHelper callback;
+    std::vector<ExpectedResult> expectedResults(50);
+    ExpectedResult::PreviousBuffer previousBufferResult =
+            ExpectedResult::PreviousBuffer::NOT_RELEASED;
+    for (auto& expected : expectedResults) {
+        expected.reset();
+        expected.addSurface(ExpectedResult::Transaction::PRESENTED, layer,
+                            ExpectedResult::Buffer::NOT_ACQUIRED, previousBufferResult);
+        previousBufferResult = ExpectedResult::PreviousBuffer::RELEASED;
+
+        fillTransaction(transaction, &callback, layer);
+
+        transaction.apply();
+        std::this_thread::sleep_for(200ms);
+    }
+    EXPECT_NO_FATAL_FAILURE(waitForCallbacks(callback, expectedResults, true));
+}
+
+TEST_F(LayerCallbackTest, MultipleTransactions_SingleFrame_NoStateChange) {
+    sp<SurfaceControl> layer;
+    ASSERT_NO_FATAL_FAILURE(layer = createBufferStateLayer());
+
+    Transaction transaction;
+    CallbackHelper callback;
+    std::vector<ExpectedResult> expectedResults(50);
+    bool first = true;
+    for (auto& expected : expectedResults) {
+        expected.reset();
+
+        if (first) {
+            fillTransaction(transaction, &callback, layer);
+            expected.addSurface(ExpectedResult::Transaction::PRESENTED, layer);
+            first = false;
+        } else {
+            fillTransaction(transaction, &callback);
+        }
+
+        transaction.apply();
+        std::this_thread::sleep_for(200ms);
+    }
+    EXPECT_NO_FATAL_FAILURE(waitForCallbacks(callback, expectedResults, true));
+}
+
+TEST_F(LayerCallbackTest, MultipleTransactions_SingleFrame_SameStateChange) {
+    sp<SurfaceControl> layer;
+    ASSERT_NO_FATAL_FAILURE(layer = createBufferStateLayer());
+
+    // Normal call to set up test
+    Transaction transaction;
+    CallbackHelper callback;
+    fillTransaction(transaction, &callback, layer);
+
+    transaction.setPosition(layer, mWidth, mHeight).apply();
+
+    ExpectedResult expectedResult;
+    expectedResult.addSurface(ExpectedResult::Transaction::PRESENTED, layer);
+    EXPECT_NO_FATAL_FAILURE(waitForCallback(callback, expectedResult, true));
+
+    // Test
+    std::vector<ExpectedResult> expectedResults(50);
+    for (auto& expected : expectedResults) {
+        expected.reset();
+        expected.addSurface(ExpectedResult::Transaction::NOT_PRESENTED, layer);
+
+        fillTransaction(transaction, &callback);
+
+        transaction.setPosition(layer, mWidth, mHeight).apply();
+
+        std::this_thread::sleep_for(200ms);
+    }
+    EXPECT_NO_FATAL_FAILURE(waitForCallbacks(callback, expectedResults, true));
 }
 
 class LayerUpdateTest : public LayerTransactionTest {
@@ -2330,17 +3030,19 @@ TEST_F(LayerUpdateTest, LayerWithNoBuffersResizesImmediately) {
             mClient->createSurface(String8("Buffered child"), 20, 20,
                                            PIXEL_FORMAT_RGBA_8888, 0, childNoBuffer.get());
     fillSurfaceRGBA8(childBuffer, 200, 200, 200);
-
-    SurfaceComposerClient::Transaction{}.show(childNoBuffer).show(childBuffer).apply(true);
-
+    SurfaceComposerClient::Transaction{}
+            .setCrop_legacy(childNoBuffer, Rect(0, 0, 10, 10))
+            .show(childNoBuffer)
+            .show(childBuffer)
+            .apply(true);
     {
         ScreenCapture::captureScreen(&sc);
         sc->expectChildColor(73, 73);
         sc->expectFGColor(74, 74);
     }
-
-    SurfaceComposerClient::Transaction{}.setSize(childNoBuffer, 20, 20).apply(true);
-
+    SurfaceComposerClient::Transaction{}
+            .setCrop_legacy(childNoBuffer, Rect(0, 0, 20, 20))
+            .apply(true);
     {
         ScreenCapture::captureScreen(&sc);
         sc->expectChildColor(73, 73);
@@ -2547,6 +3249,37 @@ TEST_F(ChildLayerTest, ReparentChildren) {
         // layer is at (0, 0)).
         mCapture->expectBGColor(9, 9);
         mCapture->expectChildColor(10, 10);
+    }
+}
+
+TEST_F(ChildLayerTest, ChildrenSurviveParentDestruction) {
+    sp<SurfaceControl> mGrandChild =
+        mClient->createSurface(String8("Grand Child"), 10, 10,
+                PIXEL_FORMAT_RGBA_8888, 0, mChild.get());
+    fillSurfaceRGBA8(mGrandChild, 111, 111, 111);
+
+    {
+        SCOPED_TRACE("Grandchild visible");
+        ScreenCapture::captureScreen(&mCapture);
+        mCapture->checkPixel(64, 64, 111, 111, 111);
+    }
+
+    mChild->clear();
+
+    {
+        SCOPED_TRACE("After destroying child");
+        ScreenCapture::captureScreen(&mCapture);
+        mCapture->expectFGColor(64, 64);
+    }
+
+    asTransaction([&](Transaction& t) {
+         t.reparent(mGrandChild, mFGSurfaceControl->getHandle());
+    });
+
+    {
+        SCOPED_TRACE("After reparenting grandchild");
+        ScreenCapture::captureScreen(&mCapture);
+        mCapture->checkPixel(64, 64, 111, 111, 111);
     }
 }
 
@@ -2842,6 +3575,221 @@ TEST_F(ChildLayerTest, ChildLayerRelativeLayer) {
         mCapture->expectChildColor(0, 0);
         mCapture->expectChildColor(9, 9);
         mCapture->checkPixel(10, 10, 255, 255, 255);
+    }
+}
+class BoundlessLayerTest : public LayerUpdateTest {
+protected:
+    std::unique_ptr<ScreenCapture> mCapture;
+};
+
+// Verify setting a size on a buffer layer has no effect.
+TEST_F(BoundlessLayerTest, BufferLayerIgnoresSize) {
+    sp<SurfaceControl> bufferLayer =
+            mClient->createSurface(String8("BufferLayer"), 45, 45, PIXEL_FORMAT_RGBA_8888, 0,
+                                   mFGSurfaceControl.get());
+    ASSERT_TRUE(bufferLayer != nullptr);
+    ASSERT_TRUE(bufferLayer->isValid());
+    ASSERT_NO_FATAL_FAILURE(fillBufferQueueLayerColor(bufferLayer, Color::BLACK, 30, 30));
+    asTransaction([&](Transaction& t) { t.show(bufferLayer); });
+    {
+        mCapture = screenshot();
+        // Top left of background must now be visible
+        mCapture->expectBGColor(0, 0);
+        // Foreground Surface bounds must be color layer
+        mCapture->expectColor(Rect(64, 64, 94, 94), Color::BLACK);
+        // Buffer layer should not extend past buffer bounds
+        mCapture->expectFGColor(95, 95);
+    }
+}
+
+// Verify a boundless color layer will fill its parent bounds. The parent has a buffer size
+// which will crop the color layer.
+TEST_F(BoundlessLayerTest, BoundlessColorLayerFillsParentBufferBounds) {
+    sp<SurfaceControl> colorLayer =
+            mClient->createSurface(String8("ColorLayer"), 0, 0, PIXEL_FORMAT_RGBA_8888,
+                                   ISurfaceComposerClient::eFXSurfaceColor,
+                                   mFGSurfaceControl.get());
+    ASSERT_TRUE(colorLayer != nullptr);
+    ASSERT_TRUE(colorLayer->isValid());
+    asTransaction([&](Transaction& t) {
+        t.setColor(colorLayer, half3{0, 0, 0});
+        t.show(colorLayer);
+    });
+    {
+        mCapture = screenshot();
+        // Top left of background must now be visible
+        mCapture->expectBGColor(0, 0);
+        // Foreground Surface bounds must be color layer
+        mCapture->expectColor(Rect(64, 64, 128, 128), Color::BLACK);
+        // Color layer should not extend past foreground bounds
+        mCapture->expectBGColor(129, 129);
+    }
+}
+
+// Verify a boundless color layer will fill its parent bounds. The parent has no buffer but has
+// a crop which will be used to crop the color layer.
+TEST_F(BoundlessLayerTest, BoundlessColorLayerFillsParentCropBounds) {
+    sp<SurfaceControl> cropLayer =
+            mClient->createSurface(String8("CropLayer"), 0, 0, PIXEL_FORMAT_RGBA_8888,
+                                   0 /* flags */, mFGSurfaceControl.get());
+    ASSERT_TRUE(cropLayer != nullptr);
+    ASSERT_TRUE(cropLayer->isValid());
+    sp<SurfaceControl> colorLayer =
+            mClient->createSurface(String8("ColorLayer"), 0, 0, PIXEL_FORMAT_RGBA_8888,
+                                   ISurfaceComposerClient::eFXSurfaceColor, cropLayer.get());
+    ASSERT_TRUE(colorLayer != nullptr);
+    ASSERT_TRUE(colorLayer->isValid());
+    asTransaction([&](Transaction& t) {
+        t.setCrop_legacy(cropLayer, Rect(5, 5, 10, 10));
+        t.setColor(colorLayer, half3{0, 0, 0});
+        t.show(cropLayer);
+        t.show(colorLayer);
+    });
+    {
+        mCapture = screenshot();
+        // Top left of background must now be visible
+        mCapture->expectBGColor(0, 0);
+        // Top left of foreground must now be visible
+        mCapture->expectFGColor(64, 64);
+        // 5 pixels from the foreground we should see the child surface
+        mCapture->expectColor(Rect(69, 69, 74, 74), Color::BLACK);
+        // 10 pixels from the foreground we should be back to the foreground surface
+        mCapture->expectFGColor(74, 74);
+    }
+}
+
+// Verify for boundless layer with no children, their transforms have no effect.
+TEST_F(BoundlessLayerTest, BoundlessColorLayerTransformHasNoEffect) {
+    sp<SurfaceControl> colorLayer =
+            mClient->createSurface(String8("ColorLayer"), 0, 0, PIXEL_FORMAT_RGBA_8888,
+                                   ISurfaceComposerClient::eFXSurfaceColor,
+                                   mFGSurfaceControl.get());
+    ASSERT_TRUE(colorLayer != nullptr);
+    ASSERT_TRUE(colorLayer->isValid());
+    asTransaction([&](Transaction& t) {
+        t.setPosition(colorLayer, 320, 320);
+        t.setMatrix(colorLayer, 2, 0, 0, 2);
+        t.setColor(colorLayer, half3{0, 0, 0});
+        t.show(colorLayer);
+    });
+    {
+        mCapture = screenshot();
+        // Top left of background must now be visible
+        mCapture->expectBGColor(0, 0);
+        // Foreground Surface bounds must be color layer
+        mCapture->expectColor(Rect(64, 64, 128, 128), Color::BLACK);
+        // Color layer should not extend past foreground bounds
+        mCapture->expectBGColor(129, 129);
+    }
+}
+
+// Verify for boundless layer with children, their transforms have an effect.
+TEST_F(BoundlessLayerTest, IntermediateBoundlessLayerCanSetTransform) {
+    sp<SurfaceControl> boundlessLayerRightShift =
+            mClient->createSurface(String8("BoundlessLayerRightShift"), 0, 0,
+                                   PIXEL_FORMAT_RGBA_8888, 0 /* flags */, mFGSurfaceControl.get());
+    ASSERT_TRUE(boundlessLayerRightShift != nullptr);
+    ASSERT_TRUE(boundlessLayerRightShift->isValid());
+    sp<SurfaceControl> boundlessLayerDownShift =
+            mClient->createSurface(String8("BoundlessLayerLeftShift"), 0, 0, PIXEL_FORMAT_RGBA_8888,
+                                   0 /* flags */, boundlessLayerRightShift.get());
+    ASSERT_TRUE(boundlessLayerDownShift != nullptr);
+    ASSERT_TRUE(boundlessLayerDownShift->isValid());
+    sp<SurfaceControl> colorLayer =
+            mClient->createSurface(String8("ColorLayer"), 0, 0, PIXEL_FORMAT_RGBA_8888,
+                                   ISurfaceComposerClient::eFXSurfaceColor,
+                                   boundlessLayerDownShift.get());
+    ASSERT_TRUE(colorLayer != nullptr);
+    ASSERT_TRUE(colorLayer->isValid());
+    asTransaction([&](Transaction& t) {
+        t.setPosition(boundlessLayerRightShift, 32, 0);
+        t.show(boundlessLayerRightShift);
+        t.setPosition(boundlessLayerDownShift, 0, 32);
+        t.show(boundlessLayerDownShift);
+        t.setCrop_legacy(colorLayer, Rect(0, 0, 64, 64));
+        t.setColor(colorLayer, half3{0, 0, 0});
+        t.show(colorLayer);
+    });
+    {
+        mCapture = screenshot();
+        // Top left of background must now be visible
+        mCapture->expectBGColor(0, 0);
+        // Top left of foreground must now be visible
+        mCapture->expectFGColor(64, 64);
+        // Foreground Surface bounds must be color layer
+        mCapture->expectColor(Rect(96, 96, 128, 128), Color::BLACK);
+        // Color layer should not extend past foreground bounds
+        mCapture->expectBGColor(129, 129);
+    }
+}
+
+// Verify child layers do not get clipped if they temporarily move into the negative
+// coordinate space as the result of an intermediate transformation.
+TEST_F(BoundlessLayerTest, IntermediateBoundlessLayerDoNotCrop) {
+    sp<SurfaceControl> boundlessLayer =
+            mClient->createSurface(String8("BoundlessLayer"), 0, 0, PIXEL_FORMAT_RGBA_8888,
+                                   0 /* flags */, mFGSurfaceControl.get());
+    ASSERT_TRUE(boundlessLayer != nullptr);
+    ASSERT_TRUE(boundlessLayer->isValid());
+    sp<SurfaceControl> colorLayer =
+            mClient->createSurface(String8("ColorLayer"), 0, 0, PIXEL_FORMAT_RGBA_8888,
+                                   ISurfaceComposerClient::eFXSurfaceColor, boundlessLayer.get());
+    ASSERT_TRUE(colorLayer != nullptr);
+    ASSERT_TRUE(colorLayer->isValid());
+    asTransaction([&](Transaction& t) {
+        // shift child layer off bounds. If this layer was not boundless, we will
+        // expect the child layer to be cropped.
+        t.setPosition(boundlessLayer, 32, 32);
+        t.show(boundlessLayer);
+        t.setCrop_legacy(colorLayer, Rect(0, 0, 64, 64));
+        // undo shift by parent
+        t.setPosition(colorLayer, -32, -32);
+        t.setColor(colorLayer, half3{0, 0, 0});
+        t.show(colorLayer);
+    });
+    {
+        mCapture = screenshot();
+        // Top left of background must now be visible
+        mCapture->expectBGColor(0, 0);
+        // Foreground Surface bounds must be color layer
+        mCapture->expectColor(Rect(64, 64, 128, 128), Color::BLACK);
+        // Color layer should not extend past foreground bounds
+        mCapture->expectBGColor(129, 129);
+    }
+}
+
+// Verify for boundless root layers with children, their transforms have an effect.
+TEST_F(BoundlessLayerTest, RootBoundlessLayerCanSetTransform) {
+    sp<SurfaceControl> rootBoundlessLayer =
+            mClient->createSurface(String8("RootBoundlessLayer"), 0, 0, PIXEL_FORMAT_RGBA_8888,
+                                   0 /* flags */);
+    ASSERT_TRUE(rootBoundlessLayer != nullptr);
+    ASSERT_TRUE(rootBoundlessLayer->isValid());
+    sp<SurfaceControl> colorLayer =
+            mClient->createSurface(String8("ColorLayer"), 0, 0, PIXEL_FORMAT_RGBA_8888,
+                                   ISurfaceComposerClient::eFXSurfaceColor,
+                                   rootBoundlessLayer.get());
+    ASSERT_TRUE(colorLayer != nullptr);
+    ASSERT_TRUE(colorLayer->isValid());
+    asTransaction([&](Transaction& t) {
+        t.setLayer(rootBoundlessLayer, INT32_MAX - 1);
+        t.setPosition(rootBoundlessLayer, 32, 32);
+        t.show(rootBoundlessLayer);
+        t.setCrop_legacy(colorLayer, Rect(0, 0, 64, 64));
+        t.setColor(colorLayer, half3{0, 0, 0});
+        t.show(colorLayer);
+        t.hide(mFGSurfaceControl);
+    });
+    {
+        mCapture = screenshot();
+        // Top left of background must now be visible
+        mCapture->expectBGColor(0, 0);
+        // Top left of foreground must now be visible
+        mCapture->expectBGColor(31, 31);
+        // Foreground Surface bounds must be color layer
+        mCapture->expectColor(Rect(32, 32, 96, 96), Color::BLACK);
+        // Color layer should not extend past foreground bounds
+        mCapture->expectBGColor(97, 97);
     }
 }
 

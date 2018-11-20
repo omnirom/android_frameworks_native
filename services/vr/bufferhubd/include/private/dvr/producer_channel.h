@@ -42,16 +42,20 @@ class ProducerChannel : public BufferHubChannel {
 
   ~ProducerChannel() override;
 
-  uint64_t buffer_state() const { return buffer_state_->load(); }
+  uint64_t buffer_state() const {
+    return buffer_state_->load(std::memory_order_acquire);
+  }
 
   bool HandleMessage(Message& message) override;
   void HandleImpulse(Message& message) override;
 
   BufferInfo GetBufferInfo() const override;
 
-  BufferDescription<BorrowedHandle> GetBuffer(uint64_t buffer_state_bit);
+  BufferDescription<BorrowedHandle> GetBuffer(uint64_t client_state_mask);
 
-  pdx::Status<RemoteChannelHandle> CreateConsumer(Message& message);
+  pdx::Status<RemoteChannelHandle> CreateConsumer(Message& message,
+                                                  uint64_t consumer_state_mask);
+  pdx::Status<uint64_t> CreateConsumerStateMask();
   pdx::Status<RemoteChannelHandle> OnNewConsumer(Message& message);
 
   pdx::Status<LocalFence> OnConsumerAcquire(Message& message);
@@ -91,7 +95,7 @@ class ProducerChannel : public BufferHubChannel {
   LocalFence post_fence_;
   LocalFence returned_fence_;
   size_t user_metadata_size_;  // size of user requested buffer buffer size.
-  size_t metadata_buf_size_;  // size of the ion buffer that holds metadata.
+  size_t metadata_buf_size_;   // size of the ion buffer that holds metadata.
 
   pdx::LocalHandle acquire_fence_fd_;
   pdx::LocalHandle release_fence_fd_;
@@ -108,7 +112,10 @@ class ProducerChannel : public BufferHubChannel {
   pdx::Status<BufferDescription<BorrowedHandle>> OnGetBuffer(Message& message);
   pdx::Status<void> OnProducerPost(Message& message, LocalFence acquire_fence);
   pdx::Status<LocalFence> OnProducerGain(Message& message);
-  pdx::Status<RemoteChannelHandle> OnProducerDetach(Message& message);
+
+  // Remove consumer from atomics in shared memory based on consumer_state_mask.
+  // This function is used for clean up for failures in CreateConsumer method.
+  void RemoveConsumerClientMask(uint64_t consumer_state_mask);
 
   ProducerChannel(const ProducerChannel&) = delete;
   void operator=(const ProducerChannel&) = delete;

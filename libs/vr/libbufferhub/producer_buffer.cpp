@@ -80,7 +80,7 @@ int ProducerBuffer::LocalPost(const DvrNativeBufferMetadata* meta,
     return error;
 
   // Check invalid state transition.
-  uint64_t buffer_state = buffer_state_->load();
+  uint64_t buffer_state = buffer_state_->load(std::memory_order_acquire);
   if (!BufferHubDefs::IsBufferGained(buffer_state)) {
     ALOGE("ProducerBuffer::LocalPost: not gained, id=%d state=%" PRIx64 ".",
           id(), buffer_state);
@@ -102,8 +102,9 @@ int ProducerBuffer::LocalPost(const DvrNativeBufferMetadata* meta,
     return error;
 
   // Set the producer bit atomically to transit into posted state.
+  // The producer state bit mask is kFirstClientBitMask for now.
   BufferHubDefs::ModifyBufferState(buffer_state_, 0ULL,
-                                   BufferHubDefs::kProducerStateBit);
+                                   BufferHubDefs::kFirstClientBitMask);
   return 0;
 }
 
@@ -134,21 +135,22 @@ int ProducerBuffer::PostAsync(const DvrNativeBufferMetadata* meta,
 }
 
 int ProducerBuffer::LocalGain(DvrNativeBufferMetadata* out_meta,
-                              LocalHandle* out_fence) {
-  uint64_t buffer_state = buffer_state_->load();
+                              LocalHandle* out_fence, bool gain_posted_buffer) {
+  uint64_t buffer_state = buffer_state_->load(std::memory_order_acquire);
   ALOGD_IF(TRACE, "ProducerBuffer::LocalGain: buffer=%d, state=%" PRIx64 ".",
            id(), buffer_state);
 
   if (!out_meta)
     return -EINVAL;
 
-  if (!BufferHubDefs::IsBufferReleased(buffer_state)) {
-    if (BufferHubDefs::IsBufferGained(buffer_state)) {
-      // We don't want to log error when gaining a newly allocated
-      // buffer.
-      ALOGI("ProducerBuffer::LocalGain: already gained id=%d.", id());
-      return -EALREADY;
-    }
+  if (BufferHubDefs::IsBufferGained(buffer_state)) {
+    // We don't want to log error when gaining a newly allocated
+    // buffer.
+    ALOGI("ProducerBuffer::LocalGain: already gained id=%d.", id());
+    return -EALREADY;
+  }
+  if (BufferHubDefs::IsBufferAcquired(buffer_state) ||
+      (BufferHubDefs::IsBufferPosted(buffer_state) && !gain_posted_buffer)) {
     ALOGE("ProducerBuffer::LocalGain: not released id=%d state=%" PRIx64 ".",
           id(), buffer_state);
     return -EBUSY;
@@ -167,7 +169,7 @@ int ProducerBuffer::LocalGain(DvrNativeBufferMetadata* out_meta,
     out_meta->user_metadata_ptr = 0;
   }
 
-  uint64_t fence_state = fence_state_->load();
+  uint64_t fence_state = fence_state_->load(std::memory_order_acquire);
   // If there is an release fence from consumer, we need to return it.
   if (fence_state & BufferHubDefs::kConsumerStateMask) {
     *out_fence = shared_release_fence_.Duplicate();
@@ -180,11 +182,11 @@ int ProducerBuffer::LocalGain(DvrNativeBufferMetadata* out_meta,
   return 0;
 }
 
-int ProducerBuffer::Gain(LocalHandle* release_fence) {
+int ProducerBuffer::Gain(LocalHandle* release_fence, bool gain_posted_buffer) {
   ATRACE_NAME("ProducerBuffer::Gain");
 
   DvrNativeBufferMetadata meta;
-  if (const int error = LocalGain(&meta, release_fence))
+  if (const int error = LocalGain(&meta, release_fence, gain_posted_buffer))
     return error;
 
   auto status = InvokeRemoteMethod<BufferHubRPC::ProducerGain>();
@@ -194,10 +196,11 @@ int ProducerBuffer::Gain(LocalHandle* release_fence) {
 }
 
 int ProducerBuffer::GainAsync(DvrNativeBufferMetadata* out_meta,
-                              LocalHandle* release_fence) {
+                              LocalHandle* release_fence,
+                              bool gain_posted_buffer) {
   ATRACE_NAME("ProducerBuffer::GainAsync");
 
-  if (const int error = LocalGain(out_meta, release_fence))
+  if (const int error = LocalGain(out_meta, release_fence, gain_posted_buffer))
     return error;
 
   return ReturnStatusOrError(SendImpulse(BufferHubRPC::ProducerGain::Opcode));
@@ -226,7 +229,9 @@ Status<LocalChannelHandle> ProducerBuffer::Detach() {
   ALOGW("ProducerBuffer::Detach: not supported operation during migration");
   return {};
 
-  uint64_t buffer_state = buffer_state_->load();
+  // TODO(b/112338294) Keep here for reference. Remove it after new logic is
+  // written.
+  /* uint64_t buffer_state = buffer_state_->load(std::memory_order_acquire);
   if (!BufferHubDefs::IsBufferGained(buffer_state)) {
     // Can only detach a ProducerBuffer when it's in gained state.
     ALOGW("ProducerBuffer::Detach: The buffer (id=%d, state=0x%" PRIx64
@@ -240,7 +245,7 @@ Status<LocalChannelHandle> ProducerBuffer::Detach() {
   ALOGE_IF(!status,
            "ProducerBuffer::Detach: Failed to detach buffer (id=%d): %s.", id(),
            status.GetErrorMessage().c_str());
-  return status;
+  return status; */
 }
 
 }  // namespace dvr

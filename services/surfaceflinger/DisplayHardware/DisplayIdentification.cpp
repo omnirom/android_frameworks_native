@@ -33,6 +33,9 @@ using byte_view = std::basic_string_view<uint8_t>;
 
 constexpr size_t kEdidHeaderLength = 5;
 
+constexpr uint16_t kFallbackEdidManufacturerId = 0;
+constexpr uint16_t kVirtualEdidManufacturerId = 0xffffu;
+
 std::optional<uint8_t> getEdidDescriptorType(const byte_view& view) {
     if (view.size() < kEdidHeaderLength || view[0] || view[1] || view[2] || view[4]) {
         return {};
@@ -61,12 +64,16 @@ char getPnpLetter(uint16_t id) {
     return letter < 'A' || letter > 'Z' ? '\0' : letter;
 }
 
-DisplayId getEdidDisplayId(uint8_t port, uint16_t manufacturerId, uint32_t displayNameHash) {
-    return (static_cast<DisplayId>(manufacturerId) << 40) |
-            (static_cast<DisplayId>(displayNameHash) << 8) | port;
+} // namespace
+
+uint16_t DisplayId::manufacturerId() const {
+    return static_cast<uint16_t>(value >> 40);
 }
 
-} // namespace
+DisplayId DisplayId::fromEdid(uint8_t port, uint16_t manufacturerId, uint32_t displayNameHash) {
+    return {(static_cast<Type>(manufacturerId) << 40) | (static_cast<Type>(displayNameHash) << 8) |
+            port};
+}
 
 bool isEdid(const DisplayIdentificationData& data) {
     const uint8_t kMagic[] = {0, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0};
@@ -165,7 +172,12 @@ std::optional<PnpId> getPnpId(uint16_t manufacturerId) {
     return a && b && c ? std::make_optional(PnpId{a, b, c}) : std::nullopt;
 }
 
-std::optional<DisplayId> generateDisplayId(uint8_t port, const DisplayIdentificationData& data) {
+std::optional<PnpId> getPnpId(DisplayId displayId) {
+    return getPnpId(displayId.manufacturerId());
+}
+
+std::optional<DisplayIdentificationInfo> parseDisplayIdentificationData(
+        uint8_t port, const DisplayIdentificationData& data) {
     if (!isEdid(data)) {
         ALOGE("Display identification data has unknown format.");
         return {};
@@ -179,7 +191,16 @@ std::optional<DisplayId> generateDisplayId(uint8_t port, const DisplayIdentifica
     // Hash display name instead of using product code or serial number, since the latter have been
     // observed to change on some displays with multiple inputs.
     const auto hash = static_cast<uint32_t>(std::hash<std::string_view>()(edid->displayName));
-    return getEdidDisplayId(port, edid->manufacturerId, hash);
+    return DisplayIdentificationInfo{DisplayId::fromEdid(port, edid->manufacturerId, hash),
+                                     std::string(edid->displayName)};
+}
+
+DisplayId getFallbackDisplayId(uint8_t port) {
+    return DisplayId::fromEdid(port, kFallbackEdidManufacturerId, 0);
+}
+
+DisplayId getVirtualDisplayId(uint32_t id) {
+    return DisplayId::fromEdid(0, kVirtualEdidManufacturerId, id);
 }
 
 } // namespace android

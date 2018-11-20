@@ -90,11 +90,13 @@ class BufferHubBase : public pdx::Client {
   int cid() const { return cid_; }
 
   // Returns the buffer buffer state.
-  uint64_t buffer_state() { return buffer_state_->load(); };
+  uint64_t buffer_state() {
+    return buffer_state_->load(std::memory_order_acquire);
+  };
 
   // A state mask which is unique to a buffer hub client among all its siblings
   // sharing the same concrete graphic buffer.
-  uint64_t buffer_state_bit() const { return buffer_state_bit_; }
+  uint64_t client_state_mask() const { return client_state_mask_; }
 
   // The following methods return settings of the first buffer. Currently,
   // it is only possible to create multi-buffer BufferHubBases with the same
@@ -157,7 +159,7 @@ class BufferHubBase : public pdx::Client {
 
   // Client bit mask which indicates the locations of this client object in the
   // buffer_state_.
-  uint64_t buffer_state_bit_{0ULL};
+  uint64_t client_state_mask_{0ULL};
   IonBuffer buffer_;
   IonBuffer metadata_buffer_;
 };

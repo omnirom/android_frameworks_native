@@ -13,22 +13,17 @@ namespace android {
 namespace dvr {
 
 BufferChannel::BufferChannel(BufferHubService* service, int buffer_id,
-                             int channel_id, IonBuffer buffer,
-                             size_t user_metadata_size)
-    : BufferHubChannel(service, buffer_id, channel_id, kDetachedBufferType),
-      buffer_node_(
-          std::make_shared<BufferNode>(std::move(buffer), user_metadata_size)) {
-  buffer_state_bit_ = buffer_node_->AddNewActiveClientsBitToMask();
-}
-
-BufferChannel::BufferChannel(BufferHubService* service, int buffer_id,
                              uint32_t width, uint32_t height,
                              uint32_t layer_count, uint32_t format,
                              uint64_t usage, size_t user_metadata_size)
-    : BufferHubChannel(service, buffer_id, buffer_id, kDetachedBufferType),
-      buffer_node_(std::make_shared<BufferNode>(
-          width, height, layer_count, format, usage, user_metadata_size)) {
-  buffer_state_bit_ = buffer_node_->AddNewActiveClientsBitToMask();
+    : BufferHubChannel(service, buffer_id, buffer_id, kDetachedBufferType) {
+  buffer_node_ = std::make_shared<BufferNode>(
+      width, height, layer_count, format, usage, user_metadata_size);
+  if (!buffer_node_->IsValid()) {
+    ALOGE("BufferChannel::BufferChannel: Failed to create BufferNode.");
+    return;
+  }
+  client_state_mask_ = buffer_node_->AddNewActiveClientsBitToMask();
 }
 
 BufferChannel::BufferChannel(BufferHubService* service, int buffer_id,
@@ -36,8 +31,8 @@ BufferChannel::BufferChannel(BufferHubService* service, int buffer_id,
                              std::shared_ptr<BufferNode> buffer_node)
     : BufferHubChannel(service, buffer_id, channel_id, kDetachedBufferType),
       buffer_node_(buffer_node) {
-  buffer_state_bit_ = buffer_node_->AddNewActiveClientsBitToMask();
-  if (buffer_state_bit_ == 0ULL) {
+  client_state_mask_ = buffer_node_->AddNewActiveClientsBitToMask();
+  if (client_state_mask_ == 0ULL) {
     ALOGE("BufferChannel::BufferChannel: %s", strerror(errno));
     buffer_node_ = nullptr;
   }
@@ -46,17 +41,17 @@ BufferChannel::BufferChannel(BufferHubService* service, int buffer_id,
 BufferChannel::~BufferChannel() {
   ALOGD_IF(TRACE, "BufferChannel::~BufferChannel: channel_id=%d buffer_id=%d.",
            channel_id(), buffer_id());
-  if (buffer_state_bit_ != 0ULL) {
-    buffer_node_->RemoveClientsBitFromMask(buffer_state_bit_);
+  if (client_state_mask_ != 0ULL) {
+    buffer_node_->RemoveClientsBitFromMask(client_state_mask_);
   }
   Hangup();
 }
 
 BufferHubChannel::BufferInfo BufferChannel::GetBufferInfo() const {
   return BufferInfo(
-      buffer_id(), /*consumer_count=*/0, buffer_node_->buffer().width(),
-      buffer_node_->buffer().height(), buffer_node_->buffer().layer_count(),
-      buffer_node_->buffer().format(), buffer_node_->buffer().usage(),
+      buffer_id(), /*consumer_count=*/0, buffer_node_->buffer_desc().width,
+      buffer_node_->buffer_desc().height, buffer_node_->buffer_desc().layers,
+      buffer_node_->buffer_desc().format, buffer_node_->buffer_desc().usage,
       /*pending_count=*/0, /*state=*/0, /*signaled_mask=*/0,
       /*index=*/0);
 }
@@ -90,17 +85,17 @@ Status<BufferTraits<BorrowedHandle>> BufferChannel::OnImport(
 
   // TODO(b/112057680) Move away from the GraphicBuffer-based IonBuffer.
   return BufferTraits<BorrowedHandle>{
-      /*buffer_handle=*/buffer_node_->buffer().handle(),
+      /*buffer_handle=*/buffer_node_->buffer_handle(),
       /*metadata_handle=*/buffer_node_->metadata().ashmem_handle().Borrow(),
       /*id=*/buffer_id(),
-      /*buffer_state_bit=*/buffer_state_bit_,
+      /*client_state_mask=*/client_state_mask_,
       /*metadata_size=*/buffer_node_->metadata().metadata_size(),
-      /*width=*/buffer_node_->buffer().width(),
-      /*height=*/buffer_node_->buffer().height(),
-      /*layer_count=*/buffer_node_->buffer().layer_count(),
-      /*format=*/buffer_node_->buffer().format(),
-      /*usage=*/buffer_node_->buffer().usage(),
-      /*stride=*/buffer_node_->buffer().stride(),
+      /*width=*/buffer_node_->buffer_desc().width,
+      /*height=*/buffer_node_->buffer_desc().height,
+      /*layer_count=*/buffer_node_->buffer_desc().layers,
+      /*format=*/buffer_node_->buffer_desc().format,
+      /*usage=*/buffer_node_->buffer_desc().usage,
+      /*stride=*/buffer_node_->buffer_desc().stride,
       /*acquire_fence_fd=*/BorrowedHandle{},
       /*released_fence_fd=*/BorrowedHandle{}};
 }

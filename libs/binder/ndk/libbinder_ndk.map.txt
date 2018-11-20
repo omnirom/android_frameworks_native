@@ -7,6 +7,8 @@ LIBBINDER_NDK { # introduced=29
     AIBinder_debugGetRefCount;
     AIBinder_decStrong;
     AIBinder_fromJavaBinder;
+    AIBinder_getCallingPid;
+    AIBinder_getCallingUid;
     AIBinder_getClass;
     AIBinder_getUserData;
     AIBinder_incStrong;
@@ -37,9 +39,10 @@ LIBBINDER_NDK { # introduced=29
     AParcel_readInt32Array;
     AParcel_readInt64;
     AParcel_readInt64Array;
-    AParcel_readNullableStrongBinder;
+    AParcel_readParcelFileDescriptor;
     AParcel_readStatusHeader;
     AParcel_readString;
+    AParcel_readStringArray;
     AParcel_readStrongBinder;
     AParcel_readUint32;
     AParcel_readUint32Array;
@@ -59,8 +62,10 @@ LIBBINDER_NDK { # introduced=29
     AParcel_writeInt32Array;
     AParcel_writeInt64;
     AParcel_writeInt64Array;
+    AParcel_writeParcelFileDescriptor;
     AParcel_writeStatusHeader;
     AParcel_writeString;
+    AParcel_writeStringArray;
     AParcel_writeStrongBinder;
     AParcel_writeUint32;
     AParcel_writeUint32Array;

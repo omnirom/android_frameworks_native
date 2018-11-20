@@ -37,6 +37,7 @@
 #include "mock/MockEventThread.h"
 #include "mock/MockMessageQueue.h"
 #include "mock/RenderEngine/MockRenderEngine.h"
+#include "mock/system/window/MockNativeWindow.h"
 
 namespace android {
 namespace {
@@ -65,6 +66,7 @@ constexpr hwc2_display_t HWC_DISPLAY = FakeHwcDisplayInjector::DEFAULT_HWC_DISPL
 constexpr hwc2_layer_t HWC_LAYER = 5000;
 constexpr Transform DEFAULT_TRANSFORM = static_cast<Transform>(0);
 
+constexpr DisplayId DEFAULT_DISPLAY_ID = DisplayId{42};
 constexpr int DEFAULT_DISPLAY_WIDTH = 1920;
 constexpr int DEFAULT_DISPLAY_HEIGHT = 1024;
 
@@ -138,6 +140,7 @@ public:
     sp<DisplayDevice> mExternalDisplay;
     sp<mock::DisplaySurface> mDisplaySurface = new mock::DisplaySurface();
     renderengine::mock::Surface* mRenderSurface = new renderengine::mock::Surface();
+    mock::NativeWindow* mNativeWindow = new mock::NativeWindow();
 
     mock::EventThread* mEventThread = new mock::EventThread();
     mock::EventControlThread* mEventControlThread = new mock::EventControlThread();
@@ -190,7 +193,8 @@ void CompositionTest::captureScreenComposition() {
     constexpr bool forSystem = true;
 
     DisplayRenderArea renderArea(mDisplay, sourceCrop, DEFAULT_DISPLAY_WIDTH,
-                                 DEFAULT_DISPLAY_HEIGHT, ui::Transform::ROT_0);
+                                 DEFAULT_DISPLAY_HEIGHT, ui::Dataspace::V0_SRGB,
+                                 ui::Transform::ROT_0);
 
     auto traverseLayers = [this](const LayerVector::Visitor& visitor) {
         return mFlinger.traverseLayersInDisplay(mDisplay, visitor);
@@ -225,16 +229,22 @@ struct BaseDisplayVariant {
     static constexpr int INIT_POWER_MODE = HWC_POWER_MODE_NORMAL;
 
     static void setupPreconditions(CompositionTest* test) {
-        FakeHwcDisplayInjector(DisplayDevice::DISPLAY_PRIMARY, HWC2::DisplayType::Physical)
+        EXPECT_CALL(*test->mNativeWindow, query(NATIVE_WINDOW_WIDTH, _))
+                .WillRepeatedly(DoAll(SetArgPointee<1>(DEFAULT_DISPLAY_WIDTH), Return(0)));
+        EXPECT_CALL(*test->mNativeWindow, query(NATIVE_WINDOW_HEIGHT, _))
+                .WillRepeatedly(DoAll(SetArgPointee<1>(DEFAULT_DISPLAY_HEIGHT), Return(0)));
+
+        FakeHwcDisplayInjector(DEFAULT_DISPLAY_ID, HWC2::DisplayType::Physical,
+                               true /* isPrimary */)
                 .setCapabilities(&test->mDefaultCapabilities)
                 .inject(&test->mFlinger, test->mComposer);
 
-        test->mDisplay = FakeDisplayDeviceInjector(test->mFlinger, DisplayDevice::DISPLAY_PRIMARY,
-                                                   DisplayDevice::DISPLAY_PRIMARY)
-                                 .setDisplaySize(DEFAULT_DISPLAY_WIDTH, DEFAULT_DISPLAY_HEIGHT)
+        test->mDisplay = FakeDisplayDeviceInjector(test->mFlinger, DEFAULT_DISPLAY_ID,
+                                                   false /* isVirtual */, true /* isPrimary */)
                                  .setDisplaySurface(test->mDisplaySurface)
                                  .setRenderSurface(std::unique_ptr<renderengine::Surface>(
                                          test->mRenderSurface))
+                                 .setNativeWindow(test->mNativeWindow)
                                  .setSecure(Derived::IS_SECURE)
                                  .setPowerMode(Derived::INIT_POWER_MODE)
                                  .inject();
@@ -288,7 +298,7 @@ struct BaseDisplayVariant {
         EXPECT_CALL(*test->mRenderEngine, flush()).WillOnce(Return(ByMove(base::unique_fd())));
         EXPECT_CALL(*test->mRenderEngine, finish()).WillOnce(Return(true));
 
-        EXPECT_CALL(*test->mRenderEngine, setOutputDataSpace(ui::Dataspace::SRGB)).Times(1);
+        EXPECT_CALL(*test->mRenderEngine, setOutputDataSpace(_)).Times(1);
         EXPECT_CALL(*test->mRenderEngine, setDisplayMaxLuminance(DEFAULT_DISPLAY_MAX_LUMINANCE))
                 .Times(1);
         // This expectation retires on saturation as setViewportAndProjection is
@@ -552,10 +562,6 @@ struct BaseLayerProperties {
                                   IComposerClient::Color({0xff, 0xff, 0xff, 0xff})))
                 .Times(1);
 
-        // TODO: ColorLayer::onPreComposition() always returns true, triggering an
-        // extra layer update in SurfaceFlinger::preComposition(). This seems
-        // wrong on the surface.
-        EXPECT_CALL(*test->mMessageQueue, invalidate()).Times(1);
     }
 
     static void setupHwcSetPerFrameBufferCallExpectations(CompositionTest* test) {
@@ -748,7 +754,9 @@ struct BaseLayerVariant {
         EXPECT_CALL(*test->mComposer, createLayer(HWC_DISPLAY, _))
                 .WillOnce(DoAll(SetArgPointee<1>(HWC_LAYER), Return(Error::NONE)));
 
-        layer->createHwcLayer(test->mFlinger.mFlinger->getBE().mHwc.get(), test->mDisplay->getId());
+        const auto displayId = test->mDisplay->getId();
+        ASSERT_TRUE(displayId);
+        layer->createHwcLayer(test->mFlinger.mFlinger->getBE().mHwc.get(), *displayId);
 
         Mock::VerifyAndClear(test->mComposer);
 
@@ -761,8 +769,10 @@ struct BaseLayerVariant {
     static void cleanupInjectedLayers(CompositionTest* test) {
         EXPECT_CALL(*test->mComposer, destroyLayer(HWC_DISPLAY, HWC_LAYER))
                 .WillOnce(Return(Error::NONE));
+        const auto displayId = test->mDisplay->getId();
+        ASSERT_TRUE(displayId);
         for (auto layer : test->mFlinger.mutableDrawingState().layersSortedByZ) {
-            layer->destroyHwcLayer(test->mDisplay->getId());
+            layer->destroyHwcLayer(*displayId);
         }
         test->mFlinger.mutableDrawingState().layersSortedByZ.clear();
     }
@@ -780,6 +790,9 @@ struct ColorLayerVariant : public BaseLayerVariant<LayerProperties> {
                                                     LayerProperties::HEIGHT,
                                                     LayerProperties::LAYER_FLAGS));
         });
+
+        auto& layerDrawingState = test->mFlinger.mutableLayerDrawingState(layer);
+        layerDrawingState.crop_legacy = Rect(0, 0, LayerProperties::HEIGHT, LayerProperties::WIDTH);
         return layer;
     }
 
@@ -950,7 +963,7 @@ struct RECompositionResultVariant : public CompositionResultBaseVariant {
 
 struct ForcedClientCompositionResultVariant : public RECompositionResultVariant {
     static void setupLayerState(CompositionTest*, sp<Layer> layer) {
-        layer->forceClientComposition(DisplayDevice::DISPLAY_PRIMARY);
+        layer->forceClientComposition(DEFAULT_DISPLAY_ID);
     }
 
     template <typename Case>

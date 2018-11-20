@@ -44,9 +44,8 @@ public:
     // (libraries must be stored uncompressed and page aligned); such elements
     // in the search path must have a '!' after the zip filename, e.g.
     //     /system/app/ANGLEPrebuilt/ANGLEPrebuilt.apk!/lib/arm64-v8a
-    void setAngleInfo(const std::string path, const std::string appName, const std::string appPref,
-                      bool devOptIn, const int rulesFd, const long rulesOffset,
-                      const long rulesLength);
+    void setAngleInfo(const std::string path, const std::string appName, bool devOptIn,
+                      const int rulesFd, const long rulesOffset, const long rulesLength);
     android_namespace_t* getAngleNamespace();
     const char* getAngleAppName();
     const char* getAngleAppPref();
@@ -58,22 +57,24 @@ public:
     void setLayerPaths(NativeLoaderNamespace* appNamespace, const std::string layerPaths);
     NativeLoaderNamespace* getAppNamespace();
 
-    const std::string getLayerPaths();
+    const std::string& getLayerPaths();
 
     void setDebugLayers(const std::string layers);
-    const std::string getDebugLayers();
+    void setDebugLayersGLES(const std::string layers);
+    const std::string& getDebugLayers();
+    const std::string& getDebugLayersGLES();
 
 private:
     GraphicsEnv() = default;
     std::string mDriverPath;
     std::string mAnglePath;
     std::string mAngleAppName;
-    std::string mAngleAppPref;
     bool mAngleDeveloperOptIn;
     int mAngleRulesFd;
     long mAngleRulesOffset;
     long mAngleRulesLength;
     std::string mDebugLayers;
+    std::string mDebugLayersGLES;
     std::string mLayerPaths;
     android_namespace_t* mDriverNamespace = nullptr;
     android_namespace_t* mAngleNamespace = nullptr;
@@ -81,29 +82,5 @@ private:
 };
 
 } // namespace android
-
-/* FIXME
- * Export an un-mangled function that just does
- *     return android::GraphicsEnv::getInstance().getDriverNamespace();
- * This allows libEGL to get the function pointer via dlsym, since it can't
- * directly link against libgui. In a future release, we'll fix this so that
- * libgui does not depend on graphics API libraries, and libEGL can link
- * against it. The current dependencies from libgui -> libEGL are:
- *  - the GLConsumer class, which should be moved to its own library
- *  - the EGLsyncKHR synchronization in BufferQueue, which is deprecated and
- *    will be removed soon.
- */
-extern "C" {
-    android_namespace_t* android_getDriverNamespace();
-    android_namespace_t* android_getAngleNamespace();
-    const char* android_getAngleAppName();
-    const char* android_getAngleAppPref();
-    bool android_getAngleDeveloperOptIn();
-    int android_getAngleRulesFd();
-    long android_getAngleRulesOffset();
-    long android_getAngleRulesLength();
-    const char* android_getLayerPaths();
-    const char* android_getDebugLayers();
-}
 
 #endif // ANDROID_UI_GRAPHICS_ENV_H

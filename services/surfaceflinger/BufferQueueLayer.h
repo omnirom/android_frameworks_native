@@ -40,8 +40,6 @@ public:
 public:
     void onLayerDisplayed(const sp<Fence>& releaseFence) override;
 
-    void abandon() override;
-
     void setTransformHint(uint32_t orientation) const override;
 
     std::vector<OccupancyTracker::Segment> getOccupancyHistory(bool forceFlush) override;
@@ -85,7 +83,7 @@ private:
 
     std::optional<Region> latchSidebandStream(bool& recomputeVisibleRegions) override;
 
-    bool hasDrawingBuffer() const override;
+    bool hasFrameUpdate() const override;
 
     void setFilteringEnabled(bool enabled) override;
 
@@ -96,8 +94,7 @@ private:
     status_t updateActiveBuffer() override;
     status_t updateFrameNumber(nsecs_t latchTime) override;
 
-    void setHwcLayerBuffer(const sp<const DisplayDevice>& display) override;
-    // -----------------------------------------------------------------------
+    void setHwcLayerBuffer(DisplayId displayId) override;
 
     // -----------------------------------------------------------------------
     // Interface implementation for BufferLayerConsumer::ContentsChangedListener

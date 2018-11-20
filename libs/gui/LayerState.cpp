@@ -50,6 +50,9 @@ status_t layer_state_t::write(Parcel& output) const
     output.writeFloat(color.r);
     output.writeFloat(color.g);
     output.writeFloat(color.b);
+#ifndef NO_INPUT
+    inputInfo.write(output);
+#endif
     output.write(transparentRegion);
     output.writeUint32(transform);
     output.writeBool(transformToDisplayInverse);
@@ -79,6 +82,13 @@ status_t layer_state_t::write(Parcel& output) const
 
     memcpy(output.writeInplace(16 * sizeof(float)),
            colorTransform.asArray(), 16 * sizeof(float));
+
+    if (output.writeVectorSize(listenerCallbacks) == NO_ERROR) {
+        for (const auto& [listener, callbackIds] : listenerCallbacks) {
+            output.writeStrongBinder(IInterface::asBinder(listener));
+            output.writeInt64Vector(callbackIds);
+        }
+    }
 
     return NO_ERROR;
 }
@@ -113,6 +123,11 @@ status_t layer_state_t::read(const Parcel& input)
     color.r = input.readFloat();
     color.g = input.readFloat();
     color.b = input.readFloat();
+
+#ifndef NO_INPUT
+    inputInfo = InputWindowInfo::read(input);
+#endif
+
     input.read(transparentRegion);
     transform = input.readUint32();
     transformToDisplayInverse = input.readBool();
@@ -134,6 +149,14 @@ status_t layer_state_t::read(const Parcel& input)
     }
 
     colorTransform = mat4(static_cast<const float*>(input.readInplace(16 * sizeof(float))));
+
+    int32_t listenersSize = input.readInt32();
+    for (int32_t i = 0; i < listenersSize; i++) {
+        auto listener = interface_cast<ITransactionCompletedListener>(input.readStrongBinder());
+        std::vector<CallbackId> callbackIds;
+        input.readInt64Vector(&callbackIds);
+        listenerCallbacks.emplace_back(listener, callbackIds);
+    }
 
     return NO_ERROR;
 }
@@ -323,6 +346,17 @@ void layer_state_t::merge(const layer_state_t& other) {
         what |= eColorTransformChanged;
         colorTransform = other.colorTransform;
     }
+    if (other.what & eListenerCallbacksChanged) {
+        what |= eListenerCallbacksChanged;
+        listenerCallbacks = other.listenerCallbacks;
+    }
+
+#ifndef NO_INPUT
+    if (other.what & eInputInfoChanged) {
+        what |= eInputInfoChanged;
+        inputInfo = other.inputInfo;
+    }
+#endif
 
     if ((other.what & what) != other.what) {
         ALOGE("Unmerged SurfaceComposer Transaction properties. LayerState::merge needs updating? "
