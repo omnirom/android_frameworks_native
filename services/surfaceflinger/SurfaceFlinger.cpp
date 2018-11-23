@@ -381,6 +381,23 @@ SurfaceFlinger::SurfaceFlinger() : SurfaceFlinger(SkipInitialization) {
         // for production purposes later on.
         setenv("TREBLE_TESTING_OVERRIDE", "true", true);
     }
+
+    mIsDolphinEnabled = property_get_bool("vendor.perf.dolphin.enable", false);
+    if (mIsDolphinEnabled) {
+        mDolphinHandle = dlopen("libdolphin.so", RTLD_NOW);
+        if (!mDolphinHandle) {
+            ALOGW("Unable to open libdolphin.so: %s.", dlerror());
+        } else {
+            mDolphinInit = (bool (*) ())dlsym(mDolphinHandle, "dolphinInit");
+            mDolphinMonitor = (bool (*) (int))dlsym(mDolphinHandle, "dolphinMonitor");
+            mDolphinRefresh = (void (*) ())dlsym(mDolphinHandle, "dolphinRefresh");
+            if (mDolphinInit != nullptr && mDolphinMonitor != nullptr &&
+                    mDolphinRefresh != nullptr) {
+                if (mDolphinInit()) mDolphinFuncsEnabled = true;
+            }
+            if (!mDolphinFuncsEnabled) dlclose(mDolphinHandle);
+        }
+    }
 }
 
 void SurfaceFlinger::onFirstRef()
@@ -390,6 +407,7 @@ void SurfaceFlinger::onFirstRef()
 
 SurfaceFlinger::~SurfaceFlinger()
 {
+    if (mDolphinFuncsEnabled) dlclose(mDolphinHandle);
 }
 
 void SurfaceFlinger::binderDied(const wp<IBinder>& /* who */)
@@ -1557,6 +1575,24 @@ void SurfaceFlinger::onMessageReceived(int32_t what) {
                 }
             }
 
+            if (mDolphinFuncsEnabled) {
+                int maxQueuedFrames = 0;
+                mDrawingState.traverseInZOrder([&](Layer* layer) {
+                    if (layer->hasQueuedFrame() &&
+                            layer->shouldPresentNow(mPrimaryDispSync)) {
+                        int layerQueuedFrames = layer->getQueuedFrameCount();
+                        if (maxQueuedFrames < layerQueuedFrames &&
+                                !layer->visibleNonTransparentRegion.isEmpty()) {
+                            maxQueuedFrames = layerQueuedFrames;
+                        }
+                    }
+                });
+                if(mDolphinMonitor(maxQueuedFrames)) {
+                    signalLayerUpdate();
+                    break;
+                }
+            }
+
             // Now that we're going to make it to the handleMessageTransaction()
             // call below it's safe to call updateVrFlinger(), which will
             // potentially trigger a display handoff.
@@ -1569,6 +1605,9 @@ void SurfaceFlinger::onMessageReceived(int32_t what) {
                 // Signal a refresh if a transaction modified the window state,
                 // a new buffer was latched, or if HWC has requested a full
                 // repaint
+                if (mDolphinFuncsEnabled) {
+                    mDolphinRefresh();
+                }
                 signalRefresh();
             }
             break;
