@@ -389,6 +389,7 @@ Region BufferLayer::latchBuffer(bool& recomputeVisibleRegions, nsecs_t latchTime
         // replicated in LayerBE until FE/BE is ready to be synchronized
         getBE().compositionInfo.hwc.sidebandStream = mSidebandStream;
         if (getBE().compositionInfo.hwc.sidebandStream != nullptr) {
+            mCurrentState.modified = true;
             setTransactionFlags(eTransactionNeeded);
             mFlinger->setTransactionFlags(eTraversalNeeded);
         }
