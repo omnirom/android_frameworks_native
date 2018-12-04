@@ -79,7 +79,7 @@ int32_t BufferQueueLayer::getQueuedFrameCount() const {
     return mQueuedFrames;
 }
 
-bool BufferQueueLayer::shouldPresentNow(const DispSync& dispSync) const {
+bool BufferQueueLayer::shouldPresentNow(nsecs_t expectedPresentTime) const {
     if (getSidebandStreamChanged() || getAutoRefresh()) {
         return true;
     }
@@ -91,7 +91,6 @@ bool BufferQueueLayer::shouldPresentNow(const DispSync& dispSync) const {
     Mutex::Autolock lock(mQueueItemLock);
 
     const int64_t addedTime = mQueueItems[0].mTimestamp;
-    const nsecs_t expectedPresentTime = mConsumer->computeExpectedPresent(dispSync);
 
     // Ignore timestamps more than a second in the future
     const bool isPlausible = addedTime < (expectedPresentTime + s2ns(1));
@@ -217,7 +216,7 @@ void BufferQueueLayer::setFilteringEnabled(bool enabled) {
     return mConsumer->setFilteringEnabled(enabled);
 }
 
-status_t BufferQueueLayer::bindTextureImage() const {
+status_t BufferQueueLayer::bindTextureImage() {
     return mConsumer->bindTextureImage();
 }
 
@@ -231,8 +230,12 @@ status_t BufferQueueLayer::updateTexImage(bool& recomputeVisibleRegions, nsecs_t
     LayerRejecter r(mDrawingState, getCurrentState(), recomputeVisibleRegions,
                     getProducerStickyTransform() != 0, mName.string(), mOverrideScalingMode,
                     getTransformToDisplayInverse(), mFreezeGeometryUpdates);
+
+    const nsecs_t expectedPresentTime = mFlinger->mUseScheduler
+            ? mFlinger->mScheduler->mPrimaryDispSync->expectedPresentTime()
+            : mFlinger->mPrimaryDispSync->expectedPresentTime();
     status_t updateResult =
-            mConsumer->updateTexImage(&r, *mFlinger->mPrimaryDispSync, &mAutoRefresh, &queuedBuffer,
+            mConsumer->updateTexImage(&r, expectedPresentTime, &mAutoRefresh, &queuedBuffer,
                                       mLastFrameNumberReceived, releaseFence);
     if (updateResult == BufferQueue::PRESENT_LATER) {
         // Producer doesn't want buffer to be displayed yet.  Signal a
@@ -324,8 +327,22 @@ status_t BufferQueueLayer::updateFrameNumber(nsecs_t latchTime) {
     return NO_ERROR;
 }
 
-void BufferQueueLayer::setHwcLayerBuffer(const sp<const DisplayDevice>&) {
+void BufferQueueLayer::setHwcLayerBuffer(const sp<const DisplayDevice>& display) {
+    const auto displayId = display->getId();
+    auto& hwcInfo = getBE().mHwcLayers[displayId];
+    auto& hwcLayer = hwcInfo.layer;
+
+    uint32_t hwcSlot = 0;
+    sp<GraphicBuffer> hwcBuffer;
+    hwcInfo.bufferCache.getHwcBuffer(mActiveBufferSlot, mActiveBuffer, &hwcSlot, &hwcBuffer);
+
     auto acquireFence = mConsumer->getCurrentFence();
+    auto error = hwcLayer->setBuffer(hwcSlot, hwcBuffer, acquireFence);
+    if (error != HWC2::Error::None) {
+        ALOGE("[%s] Failed to set buffer %p: %s (%d)", mName.string(),
+              getBE().compositionInfo.mBuffer->handle, to_string(error).c_str(),
+              static_cast<int32_t>(error));
+    }
     getBE().compositionInfo.mBufferSlot = mActiveBufferSlot;
     getBE().compositionInfo.mBuffer = mActiveBuffer;
     getBE().compositionInfo.hwc.fence = acquireFence;
