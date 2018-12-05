@@ -62,7 +62,8 @@ BufferLayer::BufferLayer(SurfaceFlinger* flinger, const sp<Client>& client, cons
         mBufferLatched(false),
         mPreviousFrameNumber(0),
         mUpdateTexImageFailed(false),
-        mRefreshPending(false) {
+        mRefreshPending(false),
+        mDolphinOnFrameAvailable(nullptr) {
     ALOGV("Creating Layer %s", name.string());
 
     mTextureName = mFlinger->getNewTexture();
