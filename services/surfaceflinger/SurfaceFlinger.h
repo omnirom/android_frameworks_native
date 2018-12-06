@@ -930,9 +930,11 @@ private:
     bool mIsDolphinEnabled = false;
     bool mDolphinFuncsEnabled = false;
     void *mDolphinHandle = nullptr;
-    bool (*mDolphinInit)();
-    bool (*mDolphinMonitor)(int number);
-    void (*mDolphinRefresh)();
+    void (*mDolphinOnFrameAvailable)(bool isTransparent, int num, int32_t width, int32_t height,
+                                     String8 name) = nullptr;
+    bool (*mDolphinInit)() = nullptr;
+    bool (*mDolphinMonitor)(int number) = nullptr;
+    void (*mDolphinRefresh)() = nullptr;
 };
 }; // namespace android
 
