@@ -920,8 +920,12 @@ private:
     std::map<wp<IBinder>, sp<DisplayDevice>> mDisplays;
 
     // don't use a lock for these, we don't care
+    #if 0
+    // TODO(b/120623859): this code is removed because
+    // NUM_BUILTIN_DISPLAY_TYPES no longer exists.
     std::bitset<DisplayDevice::NUM_BUILTIN_DISPLAY_TYPES> mActiveDisplays;
     std::bitset<DisplayDevice::NUM_BUILTIN_DISPLAY_TYPES> mBuiltInBitmask;
+    #endif
     int mDebugRegion;
     int mDebugDDMS;
     int mDebugDisableHWC;

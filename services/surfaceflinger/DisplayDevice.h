@@ -406,7 +406,11 @@ public:
         return tr.transform(mSourceCrop);
     }
 
+    #if 0
+    // TODO(b/120623859): this code is removed because getDisplayType no longer
+    // exists.
     int32_t getDisplayType() { return mDevice->getDisplayType(); }
+    #endif
     uint32_t getPanelMountFlip() { return mDevice->getPanelMountFlip(); }
     std::string getType() const override { return "DisplayRenderArea"; }
 

@@ -126,12 +126,18 @@ filegroup {
         "DisplayHardware/HWComposerBufferCache.cpp",
         "DisplayHardware/PowerAdvisor.cpp",
         "DisplayHardware/VirtualDisplaySurface.cpp",
-        "DisplayUtils.cpp",
+        // TODO(b/120623859): this code is removed because the upstream surface
+        // flinger has been refactored such that this code is no longer
+        // compatible. Please adapt it to the upstream version.
+        // "DisplayUtils.cpp",
         "Effects/Daltonizer.cpp",
         "EventLog/EventLog.cpp",
-        "ExSurfaceFlinger/ExSurfaceFlinger.cpp",
-        "ExSurfaceFlinger/ExVirtualDisplaySurface.cpp",
-        "ExSurfaceFlinger/ExBufferLayer.cpp",
+        // TODO(b/120623859): this code is removed because the upstream surface
+        // flinger has been refactored such that this code is no longer
+        // compatible. Please adapt it to the upstream version.
+        // "ExSurfaceFlinger/ExSurfaceFlinger.cpp",
+        // "ExSurfaceFlinger/ExVirtualDisplaySurface.cpp",
+        // "ExSurfaceFlinger/ExBufferLayer.cpp",
         "FrameTracker.cpp",
         "Layer.cpp",
         "LayerBE.cpp",

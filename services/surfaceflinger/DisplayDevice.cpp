@@ -533,7 +533,7 @@ status_t DisplayDevice::orientationToTransfrom(
         return BAD_VALUE;
     }
 
-    if (DISPLAY_PRIMARY == mId) {
+    if (isPrimary()) {
         flags = flags ^ getPanelMountFlip();
     }
 

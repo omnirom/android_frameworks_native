@@ -39,7 +39,7 @@ namespace android {
 class ExSurfaceFlinger : public SurfaceFlinger
 {
 public:
-    ExSurfaceFlinger();
+    ExSurfaceFlinger(surfaceflinger::Factory&);
 
 protected:
     friend class ExBufferLayer;

@@ -254,8 +254,12 @@ SurfaceFlinger::SurfaceFlinger(surfaceflinger::Factory& factory,
         mGeometryInvalid(false),
         mAnimCompositionPending(false),
         mBootStage(BootStage::BOOTLOADER),
+        #if 0
+        // TODO(b/120623859): this code is removed because
+        // NUM_BUILTIN_DISPLAY_TYPES no longer exists.
         mActiveDisplays(0),
         mBuiltInBitmask(0),
+        #endif
         mDebugRegion(0),
         mDebugDDMS(0),
         mDebugDisableHWC(0),
@@ -746,10 +750,14 @@ void SurfaceFlinger::init() {
         mEnhancedSaturationMatrix = srgbToP3 * mEnhancedSaturationMatrix * p3ToSrgb;
     }
 
+    #if 0
+    // TODO(b/120623859): this code is removed because
+    // NUM_BUILTIN_DISPLAY_TYPES no longer exists.
     mBuiltInBitmask.set(HWC_DISPLAY_PRIMARY);
     for (int disp = HWC_DISPLAY_BUILTIN_2; disp <= HWC_DISPLAY_BUILTIN_4; disp++) {
       mBuiltInBitmask.set(disp);
     }
+    #endif
     ALOGV("Done initializing");
 }
 
@@ -2781,10 +2789,13 @@ void SurfaceFlinger::computeVisibleRegions(const sp<const DisplayDevice>& displa
 
     Layer* layerOfInterest = NULL;
     bool bIgnoreLayer = false;
+    #if 0
+    // TODO(b/120623859): this code is removed because getHwcDisplayId no
+    // longer exists.
     mDrawingState.traverseInReverseZOrder([&](Layer* layer) {
         if (layer->isSecureDisplay()) {
             bIgnoreLayer = true;
-            const int32_t displayId = display->getId();
+            const auto displayId = display->getId();
             const auto hwcDisplayId = getHwComposer().getHwcDisplayId(displayId);
             if (!hwcDisplayId) {
                 layerOfInterest = layer;
@@ -2792,6 +2803,7 @@ void SurfaceFlinger::computeVisibleRegions(const sp<const DisplayDevice>& displa
             return;
         }
     });
+    #endif
 
     mDrawingState.traverseInReverseZOrder([&](Layer* layer) {
         // start with the whole surface at its current location
@@ -3146,6 +3158,9 @@ bool SurfaceFlinger::doComposeSurfaces(const sp<const DisplayDevice>& display) {
                     break;
                 }
                 case HWC2::Composition::Client: {
+                    #if 0
+                    // TODO(b/120623859): this code is removed because
+                    // getHwcDisplayId no longer exists.
                     const auto hwcDisplayId = getHwComposer().getHwcDisplayId(displayId);
                     if ((hwcDisplayId < 0) &&
                         (DisplayUtils::getInstance()->skipColorLayer(layer->getTypeId()))) {
@@ -3153,6 +3168,7 @@ bool SurfaceFlinger::doComposeSurfaces(const sp<const DisplayDevice>& display) {
                         // Skip color (dim) layer for WFD direct streaming.
                         continue;
                     }
+                    #endif
                     if (layer->hasColorTransform()) {
                         mat4 tmpMatrix;
                         if (applyColorMatrix) {
@@ -3927,12 +3943,22 @@ void SurfaceFlinger::setPowerModeInternal(const sp<DisplayDevice>& display, int 
         mInterceptor->savePowerModeUpdate(mCurrentState.displays.valueAt(idx).sequenceId, mode);
     }
 
+    #if 0
+    // TODO(b/120623859): this code is removed because
+    // NUM_BUILTIN_DISPLAY_TYPES no longer exists.
     int32_t type = display->getDisplayType();
     mActiveDisplays[type] = (mode != HWC_POWER_MODE_OFF && mode != HWC_POWER_MODE_DOZE_SUSPEND);
+    #endif
     if (currentMode == HWC_POWER_MODE_OFF) {
         // Turn on the display
         getHwComposer().setPowerMode(*displayId, mode);
+        #if 0
+        // TODO(b/120623859): this code is removed because
+        // NUM_BUILTIN_DISPLAY_TYPES no longer exists.
         if (mActiveDisplays.any() && display->isPrimary() && mode != HWC_POWER_MODE_DOZE_SUSPEND) {
+        #else
+        if (display->isPrimary() && mode != HWC_POWER_MODE_DOZE_SUSPEND) {
+        #endif
             // FIXME: eventthread only knows about the main display right now
             if (mUseScheduler) {
                 mScheduler->onScreenAcquired(mAppConnectionHandle);
@@ -3958,7 +3984,13 @@ void SurfaceFlinger::setPowerModeInternal(const sp<DisplayDevice>& display, int 
             ALOGW("Couldn't set SCHED_OTHER on display off");
         }
 
+        #if 0
+        // TODO(b/120623859): this code is removed because
+        // NUM_BUILTIN_DISPLAY_TYPES no longer exists.
         if (mActiveDisplays.none()) {
+        #else
+        if (display->isPrimary() && currentMode != HWC_POWER_MODE_DOZE_SUSPEND) {
+        #endif
             if (mUseScheduler) {
                 mScheduler->disableHardwareVsync(true);
             } else {
@@ -3978,7 +4010,13 @@ void SurfaceFlinger::setPowerModeInternal(const sp<DisplayDevice>& display, int 
                mode == HWC_POWER_MODE_NORMAL) {
         // Update display while dozing
         getHwComposer().setPowerMode(*displayId, mode);
+        #if 0
+        // TODO(b/120623859): this code is removed because
+        // NUM_BUILTIN_DISPLAY_TYPES no longer exists.
         if (mActiveDisplays.any() && display->isPrimary() && currentMode == HWC_POWER_MODE_DOZE_SUSPEND) {
+        #else
+        if (display->isPrimary() && currentMode == HWC_POWER_MODE_DOZE_SUSPEND) {
+        #endif
             // FIXME: eventthread only knows about the main display right now
             if (mUseScheduler) {
                 mScheduler->onScreenAcquired(mAppConnectionHandle);
@@ -3989,7 +4027,13 @@ void SurfaceFlinger::setPowerModeInternal(const sp<DisplayDevice>& display, int 
         }
     } else if (mode == HWC_POWER_MODE_DOZE_SUSPEND) {
         // Leave display going to doze
+        #if 0
+        // TODO(b/120623859): this code is removed because
+        // NUM_BUILTIN_DISPLAY_TYPES no longer exists.
         if (mActiveDisplays.none()) {
+        #else
+        if (display->isPrimary()) {
+        #endif
             if (mUseScheduler) {
                 mScheduler->disableHardwareVsync(true);
             } else {
