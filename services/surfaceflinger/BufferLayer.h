@@ -198,10 +198,6 @@ private:
 
     bool mUpdateTexImageFailed; // This is only accessed on the main thread.
     bool mRefreshPending;
-
-    void *mDolphinHandle = nullptr;
-    void (*mDolphinOnFrameAvailable)(bool isTransparent, int num, int32_t width, int32_t height,
-                                     String8 name);
 };
 
 } // namespace android
