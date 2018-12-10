@@ -3972,19 +3972,20 @@ void SurfaceFlinger::setPowerModeInternal(const sp<DisplayDevice>& hw,
         mHasPoweredOff = true;
         repaintEverything();
 
-        struct sched_param param = {0};
-        param.sched_priority = 1;
-        if (sched_setscheduler(0, SCHED_FIFO, &param) != 0) {
-            ALOGW("Couldn't set SCHED_FIFO on display on");
+        if (mActiveDisplays.any()) {
+            struct sched_param param = {0};
+            param.sched_priority = 1;
+            if (sched_setscheduler(0, SCHED_FIFO, &param) != 0) {
+                ALOGW("Couldn't set SCHED_FIFO on display on");
+            }
         }
     } else if (mode == HWC_POWER_MODE_OFF) {
         // Turn off the display
-        struct sched_param param = {0};
-        if (sched_setscheduler(0, SCHED_OTHER, &param) != 0) {
-            ALOGW("Couldn't set SCHED_OTHER on display off");
-        }
-
         if (mActiveDisplays.none()) {
+            struct sched_param param = {0};
+            if (sched_setscheduler(0, SCHED_OTHER, &param) != 0) {
+                ALOGW("Couldn't set SCHED_OTHER on display off");
+            }
             disableHardwareVsync(true); // also cancels any in-progress resync
 
             // FIXME: eventthread only knows about the main display right now
