@@ -518,6 +518,27 @@ void SurfaceFlinger::bootFinished()
     postMessageAsync(readProperties);
 }
 
+uint32_t SurfaceFlinger::getNewTexture() {
+    {
+        std::lock_guard lock(mTexturePoolMutex);
+        if (!mTexturePool.empty()) {
+            uint32_t name = mTexturePool.back();
+            mTexturePool.pop_back();
+            ATRACE_INT("TexturePoolSize", mTexturePool.size());
+            return name;
+        }
+
+        // The pool was too small, so increase it for the future
+        ++mTexturePoolSize;
+    }
+
+    // The pool was empty, so we need to get a new texture name directly using a
+    // blocking call to the main thread
+    uint32_t name = 0;
+    postMessageSync(new LambdaMessage([&]() { getRenderEngine().genTextures(1, &name); }));
+    return name;
+}
+
 void SurfaceFlinger::deleteTextureAsync(uint32_t texture) {
     class MessageDestroyGLTexture : public MessageBase {
         RE::RenderEngine& engine;
@@ -1427,6 +1448,16 @@ void SurfaceFlinger::onRefreshReceived(int sequenceId,
         return;
     }
     repaintEverything();
+
+    if (mActiveDisplays.count() != 1) {
+      // Revisit this for multi displays.
+      return;
+    }
+    // Track Vsync Period before and after refresh.
+    const auto& activeConfig = getBE().mHwc->getActiveConfig(HWC_DISPLAY_PRIMARY);
+    const nsecs_t period = activeConfig->getVsyncPeriod();
+    vsyncPeriod = {};
+    vsyncPeriod.push_back(period);
 }
 
 void SurfaceFlinger::setVsyncEnabled(int disp, int enabled) {
@@ -1813,6 +1844,7 @@ void SurfaceFlinger::postComposition(nsecs_t refreshStartTime)
         }
     }
 
+    forceResyncModel();
     if (!hasSyncFramework) {
         if (getBE().mHwc->isConnected(HWC_DISPLAY_PRIMARY) && hw->isDisplayOn()) {
             enableHardwareVsync();
@@ -1861,6 +1893,45 @@ void SurfaceFlinger::postComposition(nsecs_t refreshStartTime)
         getBE().mTotalTime += elapsedTime;
     }
     getBE().mLastSwapTime = currentTime;
+
+    {
+        std::lock_guard lock(mTexturePoolMutex);
+        const size_t refillCount = mTexturePoolSize - mTexturePool.size();
+        if (refillCount > 0) {
+            const size_t offset = mTexturePool.size();
+            mTexturePool.resize(mTexturePoolSize);
+            getRenderEngine().genTextures(refillCount, mTexturePool.data() + offset);
+            ATRACE_INT("TexturePoolSize", mTexturePool.size());
+        }
+    }
+}
+
+void SurfaceFlinger::forceResyncModel() {
+    if (!vsyncPeriod.size()) {
+        return;
+    }
+
+    const auto& activeConfig = getBE().mHwc->getActiveConfig(HWC_DISPLAY_PRIMARY);
+    const nsecs_t period = activeConfig->getVsyncPeriod();
+
+    // Model resync should happen at every fps change.
+    // Upon increase in vsync period start resync immediately.
+    // Upon decrease wait for one frame time for vsync to update.
+    // Post that resync can be triggered.
+
+    if (period > vsyncPeriod.at(vsyncPeriod.size() - 1)) {
+      resyncToHardwareVsync(true);
+      vsyncPeriod.push_back(period);
+    } else if (period < vsyncPeriod.at(vsyncPeriod.size() - 1)) {
+      // Wait for one more cycle to elapse
+      vsyncPeriod.push_back(period);
+    } else {
+      if (vsyncPeriod.size() != 1) {
+        // Vsync period changed. Trigger resync.
+        resyncToHardwareVsync(true);
+      }
+      vsyncPeriod = {};
+    }
 }
 
 void SurfaceFlinger::rebuildLayerStacks() {
@@ -3685,10 +3756,13 @@ String8 SurfaceFlinger::getUniqueLayerName(const String8& name)
     // Tack on our counter whether there is a hit or not, so everyone gets a tag
     String8 uniqueName = name + "#" + String8(std::to_string(dupeCounter).c_str());
 
+    // Grab the state lock since we're accessing mCurrentState
+    Mutex::Autolock lock(mStateLock);
+
     // Loop over layers until we're sure there is no matching name
     while (matchFound) {
         matchFound = false;
-        mDrawingState.traverseInZOrder([&](Layer* layer) {
+        mCurrentState.traverseInZOrder([&](Layer* layer) {
             if (layer->getName() == uniqueName) {
                 matchFound = true;
                 uniqueName = name + "#" + String8(std::to_string(++dupeCounter).c_str());

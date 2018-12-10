@@ -324,6 +324,10 @@ public:
 
     virtual bool IsHWCDisabled() { return false; }
 
+    // Obtains a name from the texture pool, or, if the pool is empty, posts a
+    // synchronous message to the main thread to obtain one on the fly
+    uint32_t getNewTexture();
+
     // utility function to delete a texture on the main thread
     void deleteTextureAsync(uint32_t texture);
 
@@ -659,6 +663,7 @@ private:
 
     void preComposition(nsecs_t refreshStartTime);
     void postComposition(nsecs_t refreshStartTime);
+    void forceResyncModel();
     void updateCompositorTiming(
             nsecs_t vsyncPhase, nsecs_t vsyncInterval, nsecs_t compositeTime,
             std::shared_ptr<FenceTime>& presentFenceTime);
@@ -841,6 +846,7 @@ private:
     // don't use a lock for these, we don't care
     std::bitset<DisplayDevice::NUM_BUILTIN_DISPLAY_TYPES> mActiveDisplays;
     std::bitset<DisplayDevice::NUM_BUILTIN_DISPLAY_TYPES> mBuiltInBitmask;
+    std::vector<nsecs_t> vsyncPeriod;
     int mDebugRegion;
     int mDebugDDMS;
     int mDebugDisableHWC;
@@ -877,6 +883,13 @@ private:
     bool mHWVsyncAvailable;
 
     std::atomic<bool> mRefreshPending{false};
+
+    // We maintain a pool of pre-generated texture names to hand out to avoid
+    // layer creation needing to run on the main thread (which it would
+    // otherwise need to do to access RenderEngine).
+    std::mutex mTexturePoolMutex;
+    uint32_t mTexturePoolSize = 0;
+    std::vector<uint32_t> mTexturePool;
 
     /* ------------------------------------------------------------------------
      * Feature prototyping

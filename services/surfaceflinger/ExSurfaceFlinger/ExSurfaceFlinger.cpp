@@ -90,27 +90,37 @@ void ExSurfaceFlinger::handleDPTransactionIfNeeded(
      */
     if (mDisableExtAnimation) {
         size_t count = displays.size();
-        bool primary_orient_changed = false;
+        bool builtin_orient_changed = false;
         for (size_t i=0 ; i<count ; i++) {
             const DisplayState& s(displays[i]);
-            if (getDisplayType(s.token) == DisplayDevice::DISPLAY_PRIMARY &&
+            sp<DisplayDevice> device(getDisplayDevice(s.token));
+            if (device == nullptr) {
+                continue;
+            }
+            int type = device->getDisplayType();
+            if ((type > DisplayDevice::DISPLAY_ID_INVALID &&
+                type < DisplayDevice::NUM_BUILTIN_DISPLAY_TYPES && mBuiltInBitmask.test(type)) &&
                 !(s.orientation & DisplayState::eOrientationUnchanged)) {
-                primary_orient_changed = true;
+                builtin_orient_changed = true;
                 break;
             }
         }
         for (size_t i=0 ; i<count ; i++) {
             const DisplayState& s(displays[i]);
-            int type = getDisplayType(s.token);
-            if ((type != DisplayDevice::DISPLAY_ID_INVALID &&
-                type != DisplayDevice::DISPLAY_PRIMARY) &&
-                type < DisplayDevice::NUM_BUILTIN_DISPLAY_TYPES) {
+            sp<DisplayDevice> device(getDisplayDevice(s.token));
+            if (device == nullptr) {
+                continue;
+            }
+            int type = device->getDisplayType();
+            if (type == DisplayDevice::DISPLAY_VIRTUAL ||
+                (type > DisplayDevice::DISPLAY_ID_INVALID &&
+                type < DisplayDevice::NUM_BUILTIN_DISPLAY_TYPES && !mBuiltInBitmask.test(type))) {
                 const uint32_t what = s.what;
                 /* Invalidate and wait on eDisplayProjectionChanged to trigger a draw cycle so that
                  * it can fix one incorrect frame on the External, when we
                  * disable external animation
                  */
-                if (what & DisplayState::eDisplayProjectionChanged && primary_orient_changed) {
+                if (what & DisplayState::eDisplayProjectionChanged && builtin_orient_changed) {
                     Mutex::Autolock lock(mExtAnimationLock);
                     invalidateHwcGeometry();
                     android_atomic_or(1, &mRepaintEverything);
@@ -221,7 +231,10 @@ void ExSurfaceFlinger::dumpDrawCycle(bool prePrepare) {
     size_t index = 0;
     String8 dumpsys;
 
-    dumpAllLocked(args, index, dumpsys, regionDump);
+    {
+        Mutex::Autolock lock(mStateLock);
+        dumpAllLocked(args, index, dumpsys, regionDump);
+    }
 
     char timeStamp[32];
     char dataSize[32];
