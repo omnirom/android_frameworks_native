@@ -34,7 +34,6 @@
 
 namespace android {
 
-class DetachedBufferHandle;
 class GraphicBufferMapper;
 
 // ===========================================================================
@@ -118,18 +117,16 @@ public:
         // cannot be used directly, such as one from hidl_handle.
         CLONE_HANDLE,
     };
-    GraphicBuffer(const native_handle_t* handle, HandleWrapMethod method,
-            uint32_t width, uint32_t height,
-            PixelFormat format, uint32_t layerCount,
-            uint64_t usage, uint32_t stride);
+    GraphicBuffer(const native_handle_t* inHandle, HandleWrapMethod method, uint32_t inWidth,
+                  uint32_t inHeight, PixelFormat inFormat, uint32_t inLayerCount, uint64_t inUsage,
+                  uint32_t inStride);
 
     // These functions are deprecated because they only take 32 bits of usage
-    GraphicBuffer(const native_handle_t* handle, HandleWrapMethod method,
-            uint32_t width, uint32_t height,
-            PixelFormat format, uint32_t layerCount,
-            uint32_t usage, uint32_t stride)
-        : GraphicBuffer(handle, method, width, height, format, layerCount,
-                static_cast<uint64_t>(usage), stride) {}
+    GraphicBuffer(const native_handle_t* inHandle, HandleWrapMethod method, uint32_t inWidth,
+                  uint32_t inHeight, PixelFormat inFormat, uint32_t inLayerCount, uint32_t inUsage,
+                  uint32_t inStride)
+          : GraphicBuffer(inHandle, method, inWidth, inHeight, inFormat, inLayerCount,
+                          static_cast<uint64_t>(inUsage), inStride) {}
     GraphicBuffer(uint32_t inWidth, uint32_t inHeight, PixelFormat inFormat,
             uint32_t inLayerCount, uint32_t inUsage, uint32_t inStride,
             native_handle_t* inHandle, bool keepOwnership);
@@ -191,11 +188,6 @@ public:
     status_t flatten(void*& buffer, size_t& size, int*& fds, size_t& count) const;
     status_t unflatten(void const*& buffer, size_t& size, int const*& fds, size_t& count);
 
-    // Sets and takes DetachedBuffer. Should only be called from BufferHub.
-    bool isDetachedBuffer() const;
-    status_t setDetachedBufferHandle(std::unique_ptr<DetachedBufferHandle> detachedBuffer);
-    std::unique_ptr<DetachedBufferHandle> takeDetachedBufferHandle();
-
 private:
     ~GraphicBuffer();
 
@@ -226,10 +218,9 @@ private:
             PixelFormat inFormat, uint32_t inLayerCount,
             uint64_t inUsage, std::string requestorName);
 
-    status_t initWithHandle(const native_handle_t* handle,
-            HandleWrapMethod method, uint32_t width, uint32_t height,
-            PixelFormat format, uint32_t layerCount,
-            uint64_t usage, uint32_t stride);
+    status_t initWithHandle(const native_handle_t* inHandle, HandleWrapMethod method,
+                            uint32_t inWidth, uint32_t inHeight, PixelFormat inFormat,
+                            uint32_t inLayerCount, uint64_t inUsage, uint32_t inStride);
 
     void free_handle();
 
@@ -246,17 +237,6 @@ private:
     // match the BufferQueue's internal generation number (set through
     // IGBP::setGenerationNumber), attempts to attach the buffer will fail.
     uint32_t mGenerationNumber;
-
-    // Stores a BufferHub handle that can be used to re-attach this GraphicBuffer back into a
-    // BufferHub producer/consumer set. In terms of GraphicBuffer's relationship with BufferHub,
-    // there are three different modes:
-    // 1. Legacy mode: GraphicBuffer is not backed by BufferHub and mDetachedBufferHandle must be
-    //    invalid.
-    // 2. Detached mode: GraphicBuffer is backed by BufferHub, but not part of a producer/consumer
-    //    set. In this mode, mDetachedBufferHandle must be valid.
-    // 3. Attached mode: GraphicBuffer is backed by BufferHub and it's part of a producer/consumer
-    //    set. In this mode, mDetachedBufferHandle must be invalid.
-    std::unique_ptr<DetachedBufferHandle> mDetachedBufferHandle;
 };
 
 }; // namespace android

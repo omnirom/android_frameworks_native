@@ -1041,7 +1041,7 @@ void InputDevice::setEnabled(bool enabled, nsecs_t when) {
 
 void InputDevice::dump(std::string& dump) {
     InputDeviceInfo deviceInfo;
-    getDeviceInfo(& deviceInfo);
+    getDeviceInfo(&deviceInfo);
 
     dump += StringPrintf(INDENT "Device %d: %s\n", deviceInfo.getId(),
             deviceInfo.getDisplayName().c_str());
@@ -2612,7 +2612,7 @@ void CursorInputMapper::configure(nsecs_t when,
             // Should not happen during first time configuration.
             ALOGE("Cannot start a device in MODE_POINTER_RELATIVE, starting in MODE_POINTER");
             mParameters.mode = Parameters::MODE_POINTER;
-            // fall through.
+            [[fallthrough]];
         case Parameters::MODE_POINTER:
             mSource = AINPUT_SOURCE_MOUSE;
             mXPrecision = 1.0f;
@@ -3480,8 +3480,8 @@ void TouchInputMapper::configureSurface(nsecs_t when, bool* outResetNeeded) {
     }
 
     // Raw width and height in the natural orientation.
-    int32_t rawWidth = mRawPointerAxes.x.maxValue - mRawPointerAxes.x.minValue + 1;
-    int32_t rawHeight = mRawPointerAxes.y.maxValue - mRawPointerAxes.y.minValue + 1;
+    int32_t rawWidth = mRawPointerAxes.getRawWidth();
+    int32_t rawHeight = mRawPointerAxes.getRawHeight();
 
     // Get associated display dimensions.
     DisplayViewport newViewport;
@@ -3913,8 +3913,8 @@ void TouchInputMapper::configureVirtualKeys() {
 
     int32_t touchScreenLeft = mRawPointerAxes.x.minValue;
     int32_t touchScreenTop = mRawPointerAxes.y.minValue;
-    int32_t touchScreenWidth = mRawPointerAxes.x.maxValue - mRawPointerAxes.x.minValue + 1;
-    int32_t touchScreenHeight = mRawPointerAxes.y.maxValue - mRawPointerAxes.y.minValue + 1;
+    int32_t touchScreenWidth = mRawPointerAxes.getRawWidth();
+    int32_t touchScreenHeight = mRawPointerAxes.getRawHeight();
 
     for (size_t i = 0; i < virtualKeyDefinitions.size(); i++) {
         const VirtualKeyDefinition& virtualKeyDefinition =

@@ -99,12 +99,12 @@ class BufferDescription {
  public:
   BufferDescription() = default;
   BufferDescription(const IonBuffer& buffer, const IonBuffer& metadata, int id,
-                    int buffer_cid, uint64_t buffer_state_bit,
+                    int buffer_cid, uint64_t client_state_mask,
                     const FileHandleType& acquire_fence_fd,
                     const FileHandleType& release_fence_fd)
       : id_(id),
         buffer_cid_(buffer_cid),
-        buffer_state_bit_(buffer_state_bit),
+        client_state_mask_(client_state_mask),
         buffer_(buffer, id),
         metadata_(metadata, id),
         acquire_fence_fd_(acquire_fence_fd.Borrow()),
@@ -122,10 +122,8 @@ class BufferDescription {
   int buffer_cid() const { return buffer_cid_; }
 
   // State mask of the buffer client. Each BufferHub client backed by the
-  // same buffer channel has uniqued state bit among its siblings. For a
-  // producer buffer the bit must be kProducerStateBit; for a consumer the bit
-  // must be one of the kConsumerStateMask.
-  uint64_t buffer_state_bit() const { return buffer_state_bit_; }
+  // same buffer channel has uniqued state bit among its siblings.
+  uint64_t client_state_mask() const { return client_state_mask_; }
   FileHandleType take_acquire_fence() { return std::move(acquire_fence_fd_); }
   FileHandleType take_release_fence() { return std::move(release_fence_fd_); }
 
@@ -135,7 +133,7 @@ class BufferDescription {
  private:
   int id_{-1};
   int buffer_cid_{-1};
-  uint64_t buffer_state_bit_{0};
+  uint64_t client_state_mask_{0};
   // Two IonBuffers: one for the graphic buffer and one for metadata.
   NativeBufferHandle<FileHandleType> buffer_;
   NativeBufferHandle<FileHandleType> metadata_;
@@ -145,7 +143,7 @@ class BufferDescription {
   FileHandleType release_fence_fd_;
 
   PDX_SERIALIZABLE_MEMBERS(BufferDescription<FileHandleType>, id_, buffer_cid_,
-                           buffer_state_bit_, buffer_, metadata_,
+                           client_state_mask_, buffer_, metadata_,
                            acquire_fence_fd_, release_fence_fd_);
 
   BufferDescription(const BufferDescription&) = delete;
@@ -314,7 +312,6 @@ struct BufferHubRPC {
     kOpProducerGain,
     kOpConsumerAcquire,
     kOpConsumerRelease,
-    kOpProducerBufferDetach,
     kOpConsumerBufferDetach,
     kOpCreateProducerQueue,
     kOpCreateConsumerQueue,
@@ -344,8 +341,6 @@ struct BufferHubRPC {
   PDX_REMOTE_METHOD(ConsumerAcquire, kOpConsumerAcquire, LocalFence(Void));
   PDX_REMOTE_METHOD(ConsumerRelease, kOpConsumerRelease,
                     void(LocalFence release_fence));
-  PDX_REMOTE_METHOD(ProducerBufferDetach, kOpProducerBufferDetach,
-                    LocalChannelHandle(Void));
 
   // Detaches a ConsumerBuffer from an existing producer/consumer set. Can only
   // be called when the consumer is the only consumer and it has exclusive

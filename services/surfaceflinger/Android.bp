@@ -19,10 +19,6 @@ cc_defaults {
         "-DGL_GLEXT_PROTOTYPES",
         "-DEGL_EGLEXT_PROTOTYPES",
     ],
-    include_dirs: [
-        "frameworks/native/vulkan/vkjson",
-        "frameworks/native/vulkan/include",
-    ],
     shared_libs: [
         "android.frameworks.vr.composer@1.0",
         "android.hardware.configstore-utils",
@@ -30,6 +26,7 @@ cc_defaults {
         "android.hardware.configstore@1.1",
         "android.hardware.configstore@1.2",
         "android.hardware.graphics.allocator@2.0",
+        "android.hardware.graphics.common@1.2",
         "android.hardware.graphics.composer@2.1",
         "android.hardware.graphics.composer@2.2",
         "android.hardware.graphics.composer@2.3",
@@ -60,13 +57,11 @@ cc_defaults {
         "libtimestats_proto",
         "libui",
         "libutils",
-        "libvulkan",
     ],
     static_libs: [
         "librenderengine",
         "libserviceutils",
         "libtrace_proto",
-        "libvkjson",
         "libvr_manager",
         "libvrflinger",
     ],
@@ -82,6 +77,7 @@ cc_defaults {
     ],
     export_shared_lib_headers: [
         "android.hardware.graphics.allocator@2.0",
+        "android.hardware.graphics.common@1.2",
         "android.hardware.graphics.composer@2.1",
         "android.hardware.graphics.composer@2.2",
         "android.hardware.graphics.composer@2.3",
@@ -130,10 +126,19 @@ filegroup {
         "DisplayHardware/HWComposerBufferCache.cpp",
         "DisplayHardware/PowerAdvisor.cpp",
         "DisplayHardware/VirtualDisplaySurface.cpp",
+        // TODO(b/120623859): this code is removed because the upstream surface
+        // flinger has been refactored such that this code is no longer
+        // compatible. Please adapt it to the upstream version.
+        // "DisplayUtils.cpp",
         "Effects/Daltonizer.cpp",
         "EventLog/EventLog.cpp",
+        // TODO(b/120623859): this code is removed because the upstream surface
+        // flinger has been refactored such that this code is no longer
+        // compatible. Please adapt it to the upstream version.
+        // "ExSurfaceFlinger/ExSurfaceFlinger.cpp",
+        // "ExSurfaceFlinger/ExVirtualDisplaySurface.cpp",
+        // "ExSurfaceFlinger/ExBufferLayer.cpp",
         "FrameTracker.cpp",
-        "GpuService.cpp",
         "Layer.cpp",
         "LayerBE.cpp",
         "LayerProtoHelper.cpp",
@@ -154,10 +159,7 @@ filegroup {
         "SurfaceInterceptor.cpp",
         "SurfaceTracing.cpp",
         "TimeStats/TimeStats.cpp",
-        "DisplayUtils.cpp",
-        "ExSurfaceFlinger/ExSurfaceFlinger.cpp",
-        "ExSurfaceFlinger/ExVirtualDisplaySurface.cpp",
-        "ExSurfaceFlinger/ExBufferLayer.cpp"
+        "TransactionCompletedThread.cpp",
     ],
 }
 

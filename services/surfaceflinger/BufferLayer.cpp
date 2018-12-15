@@ -70,6 +70,8 @@ BufferLayer::~BufferLayer() {
               mName.string());
         destroyAllHwcLayers();
     }
+
+    mTimeStats.onDestroy(getSequence());
 }
 
 void BufferLayer::useSurfaceDamage() {
@@ -227,18 +229,14 @@ bool BufferLayer::isHdrY410() const {
             getBE().compositionInfo.mBuffer->getPixelFormat() == HAL_PIXEL_FORMAT_RGBA_1010102);
 }
 
-void BufferLayer::setPerFrameData(const sp<const DisplayDevice>& display) {
+void BufferLayer::setPerFrameData(DisplayId displayId, const ui::Transform& transform,
+                                  const Rect& viewport, int32_t supportedPerFrameMetadata) {
+    RETURN_IF_NO_HWC_LAYER(displayId);
+
     // Apply this display's projection's viewport to the visible region
     // before giving it to the HWC HAL.
-    const ui::Transform& tr = display->getTransform();
-    const auto& viewport = display->getViewport();
-    Region visible = tr.transform(visibleRegion.intersect(viewport));
-    const auto displayId = display->getId();
-    if (!hasHwcLayer(displayId)) {
-        ALOGE("[%s] failed to setPerFrameData: no HWC layer found (%d)",
-              mName.string(), displayId);
-        return;
-    }
+    Region visible = transform.transform(visibleRegion.intersect(viewport));
+
     auto& hwcInfo = getBE().mHwcLayers[displayId];
     auto& hwcLayer = hwcInfo.layer;
     auto error = hwcLayer->setVisibleRegion(visible);
@@ -288,7 +286,7 @@ void BufferLayer::setPerFrameData(const sp<const DisplayDevice>& display) {
     }
 
     const HdrMetadata& metadata = getDrawingHdrMetadata();
-    error = hwcLayer->setPerFrameMetadata(display->getSupportedPerFrameMetadata(), metadata);
+    error = hwcLayer->setPerFrameMetadata(supportedPerFrameMetadata, metadata);
     if (error != HWC2::Error::None && error != HWC2::Error::Unsupported) {
         ALOGE("[%s] Failed to set hdrMetadata: %s (%d)", mName.string(),
               to_string(error).c_str(), static_cast<int32_t>(error));
@@ -301,10 +299,10 @@ void BufferLayer::setPerFrameData(const sp<const DisplayDevice>& display) {
     }
     getBE().compositionInfo.hwc.dataspace = mCurrentDataSpace;
     getBE().compositionInfo.hwc.hdrMetadata = getDrawingHdrMetadata();
-    getBE().compositionInfo.hwc.supportedPerFrameMetadata = display->getSupportedPerFrameMetadata();
+    getBE().compositionInfo.hwc.supportedPerFrameMetadata = supportedPerFrameMetadata;
     getBE().compositionInfo.hwc.colorTransform = getColorTransform();
 
-    setHwcLayerBuffer(display);
+    setHwcLayerBuffer(displayId);
 }
 
 bool BufferLayer::onPreComposition(nsecs_t refreshStartTime) {
@@ -316,10 +314,10 @@ bool BufferLayer::onPreComposition(nsecs_t refreshStartTime) {
     return hasReadyFrame();
 }
 
-bool BufferLayer::onPostComposition(const std::shared_ptr<FenceTime>& glDoneFence,
+bool BufferLayer::onPostComposition(const std::optional<DisplayId>& displayId,
+                                    const std::shared_ptr<FenceTime>& glDoneFence,
                                     const std::shared_ptr<FenceTime>& presentFence,
                                     const CompositorTiming& compositorTiming) {
-
     // mFrameLatencyNeeded is true when a new frame was latched for the
     // composition.
     if (!mFrameLatencyNeeded) return false;
@@ -335,8 +333,8 @@ bool BufferLayer::onPostComposition(const std::shared_ptr<FenceTime>& glDoneFenc
     nsecs_t desiredPresentTime = getDesiredPresentTime();
     mFrameTracker.setDesiredPresentTime(desiredPresentTime);
 
-    const std::string layerName(getName().c_str());
-    mTimeStats.setDesiredTime(layerName, mCurrentFrameNumber, desiredPresentTime);
+    const int32_t layerID = getSequence();
+    mTimeStats.setDesiredTime(layerID, mCurrentFrameNumber, desiredPresentTime);
 
     std::shared_ptr<FenceTime> frameReadyFence = getCurrentFenceTime();
     if (frameReadyFence->isValid()) {
@@ -348,14 +346,13 @@ bool BufferLayer::onPostComposition(const std::shared_ptr<FenceTime>& glDoneFenc
     }
 
     if (presentFence->isValid()) {
-        mTimeStats.setPresentFence(layerName, mCurrentFrameNumber, presentFence);
+        mTimeStats.setPresentFence(layerID, mCurrentFrameNumber, presentFence);
         mFrameTracker.setActualPresentFence(std::shared_ptr<FenceTime>(presentFence));
-    } else if (mFlinger->getHwComposer().isConnected(HWC_DISPLAY_PRIMARY)) {
+    } else if (displayId && mFlinger->getHwComposer().isConnected(*displayId)) {
         // The HWC doesn't support present fences, so use the refresh
         // timestamp instead.
-        const nsecs_t actualPresentTime =
-                mFlinger->getHwComposer().getRefreshTimestamp(HWC_DISPLAY_PRIMARY);
-        mTimeStats.setPresentTime(layerName, mCurrentFrameNumber, actualPresentTime);
+        const nsecs_t actualPresentTime = mFlinger->getHwComposer().getRefreshTimestamp(*displayId);
+        mTimeStats.setPresentTime(layerID, mCurrentFrameNumber, actualPresentTime);
         mFrameTracker.setActualPresentTime(actualPresentTime);
     }
 
@@ -520,7 +517,7 @@ void BufferLayer::notifyAvailableFrames() {
 }
 
 bool BufferLayer::hasReadyFrame() const {
-    return hasDrawingBuffer() || getSidebandStreamChanged() || getAutoRefresh();
+    return hasFrameUpdate() || getSidebandStreamChanged() || getAutoRefresh();
 }
 
 uint32_t BufferLayer::getEffectiveScalingMode() const {
@@ -658,11 +655,41 @@ void BufferLayer::drawWithOpenGL(const RenderArea& renderArea, bool useIdentityT
 }
 
 uint64_t BufferLayer::getHeadFrameNumber() const {
-    if (hasDrawingBuffer()) {
+    if (hasFrameUpdate()) {
         return getFrameNumber();
     } else {
         return mCurrentFrameNumber;
     }
+}
+
+Rect BufferLayer::getBufferSize(const State& s) const {
+    // If we have a sideband stream, or we are scaling the buffer then return the layer size since
+    // we cannot determine the buffer size.
+    if ((s.sidebandStream != nullptr) ||
+        (getEffectiveScalingMode() != NATIVE_WINDOW_SCALING_MODE_FREEZE)) {
+        return Rect(getActiveWidth(s), getActiveHeight(s));
+    }
+
+    if (mActiveBuffer == nullptr) {
+        return Rect::INVALID_RECT;
+    }
+
+    uint32_t bufWidth = mActiveBuffer->getWidth();
+    uint32_t bufHeight = mActiveBuffer->getHeight();
+
+    // Undo any transformations on the buffer and return the result.
+    if (mCurrentTransform & ui::Transform::ROT_90) {
+        std::swap(bufWidth, bufHeight);
+    }
+
+    if (getTransformToDisplayInverse()) {
+        uint32_t invTransform = DisplayDevice::getPrimaryDisplayOrientationTransform();
+        if (invTransform & ui::Transform::ROT_90) {
+            std::swap(bufWidth, bufHeight);
+        }
+    }
+
+    return Rect(bufWidth, bufHeight);
 }
 
 } // namespace android

@@ -28,7 +28,6 @@
 #include <cutils/sched_policy.h>
 #include <displayservice/DisplayService.h>
 #include <hidl/LegacySupport.h>
-#include "GpuService.h"
 #include "SurfaceFlinger.h"
 #include "DisplayUtils.h"
 #include "SurfaceFlingerFactory.h"
@@ -86,7 +85,15 @@ int main(int, char**) {
     ps->startThreadPool();
 
     // instantiate surfaceflinger
+    #if 0
+    // TODO(b/120623859): this code is removed because the SurfaceFlinger ctor
+    // now takes a surfaceflinger::Factory instance, and there is no such
+    // factory for the Ex versions of the these classes. Suggest to inherit
+    // Factory to fix this.
     sp<SurfaceFlinger> flinger = DisplayUtils::getInstance()->getSFInstance();
+    #else
+    sp<SurfaceFlinger> flinger = surfaceflinger::createSurfaceFlinger();
+    #endif
 
     setpriority(PRIO_PROCESS, 0, PRIORITY_URGENT_DISPLAY);
 
@@ -104,10 +111,6 @@ int main(int, char**) {
     sp<IServiceManager> sm(defaultServiceManager());
     sm->addService(String16(SurfaceFlinger::getServiceName()), flinger, false,
                    IServiceManager::DUMP_FLAG_PRIORITY_CRITICAL | IServiceManager::DUMP_FLAG_PROTO);
-
-    // publish GpuService
-    sp<GpuService> gpuservice = new GpuService();
-    sm->addService(String16(GpuService::SERVICE_NAME), gpuservice, false);
 
     startDisplayService(); // dependency on SF getting registered above
 

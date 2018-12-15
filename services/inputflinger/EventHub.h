@@ -42,20 +42,6 @@
 #define BTN_FIRST 0x100  // first button code
 #define BTN_LAST 0x15f   // last button code
 
-/*
- * These constants are used privately in Android to pass raw timestamps
- * through evdev from uinput device drivers because there is currently no
- * other way to transfer this information.  The evdev driver automatically
- * timestamps all input events with the time they were posted and clobbers
- * whatever information was passed in.
- *
- * For the purposes of this hack, the timestamp is specified in the
- * CLOCK_MONOTONIC timebase and is split into two EV_MSC events specifying
- * seconds and microseconds.
- */
-#define MSC_ANDROID_TIME_SEC 0x6
-#define MSC_ANDROID_TIME_USEC 0x7
-
 namespace android {
 
 enum {
@@ -371,9 +357,6 @@ private:
 
         int32_t controllerNumber;
 
-        int32_t timestampOverrideSec;
-        int32_t timestampOverrideUsec;
-
         Device(int fd, int32_t id, const std::string& path,
                 const InputDeviceIdentifier& identifier);
         ~Device();
@@ -418,6 +401,7 @@ private:
     Device* getDeviceByDescriptorLocked(const std::string& descriptor) const;
     Device* getDeviceLocked(int32_t deviceId) const;
     Device* getDeviceByPathLocked(const char* devicePath) const;
+    Device* getDeviceByFdLocked(int fd) const;
 
     bool hasKeycodeLocked(Device* device, int keycode) const;
 
@@ -465,10 +449,6 @@ private:
     int mINotifyFd;
     int mWakeReadPipeFd;
     int mWakeWritePipeFd;
-
-    // Ids used for epoll notifications not associated with devices.
-    static const uint32_t EPOLL_ID_INOTIFY = 0x80000001;
-    static const uint32_t EPOLL_ID_WAKE = 0x80000002;
 
     // Epoll FD list size hint.
     static const int EPOLL_SIZE_HINT = 8;

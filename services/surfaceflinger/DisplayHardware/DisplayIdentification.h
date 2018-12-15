@@ -19,13 +19,39 @@
 #include <array>
 #include <cstdint>
 #include <optional>
+#include <string>
 #include <string_view>
 #include <vector>
 
 namespace android {
 
-using DisplayId = uint64_t;
+struct DisplayId {
+    using Type = uint64_t;
+    Type value;
+
+    uint16_t manufacturerId() const;
+
+    static DisplayId fromEdid(uint8_t port, uint16_t manufacturerId, uint32_t displayNameHash);
+};
+
+inline bool operator==(DisplayId lhs, DisplayId rhs) {
+    return lhs.value == rhs.value;
+}
+
+inline bool operator!=(DisplayId lhs, DisplayId rhs) {
+    return !(lhs == rhs);
+}
+
+inline std::string to_string(DisplayId displayId) {
+    return std::to_string(displayId.value);
+}
+
 using DisplayIdentificationData = std::vector<uint8_t>;
+
+struct DisplayIdentificationInfo {
+    DisplayId id;
+    std::string name;
+};
 
 // NUL-terminated plug and play ID.
 using PnpId = std::array<char, 4>;
@@ -39,7 +65,23 @@ struct Edid {
 bool isEdid(const DisplayIdentificationData&);
 std::optional<Edid> parseEdid(const DisplayIdentificationData&);
 std::optional<PnpId> getPnpId(uint16_t manufacturerId);
+std::optional<PnpId> getPnpId(DisplayId);
 
-std::optional<DisplayId> generateDisplayId(uint8_t port, const DisplayIdentificationData&);
+std::optional<DisplayIdentificationInfo> parseDisplayIdentificationData(
+        uint8_t port, const DisplayIdentificationData&);
+
+DisplayId getFallbackDisplayId(uint8_t port);
+DisplayId getVirtualDisplayId(uint32_t id);
 
 } // namespace android
+
+namespace std {
+
+template <>
+struct hash<android::DisplayId> {
+    size_t operator()(android::DisplayId displayId) const {
+        return hash<android::DisplayId::Type>()(displayId.value);
+    }
+};
+
+} // namespace std

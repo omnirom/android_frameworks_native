@@ -32,8 +32,7 @@
 
 #include <assert.h>
 
-#ifdef __cplusplus
-
+#include <unistd.h>
 #include <cstddef>
 
 namespace ndk {
@@ -42,7 +41,7 @@ namespace ndk {
  * Represents one strong pointer to an AIBinder object.
  */
 class SpAIBinder {
-public:
+   public:
     /**
      * Takes ownership of one strong refcount of binder.
      */
@@ -106,30 +105,30 @@ public:
      */
     AIBinder** getR() { return &mBinder; }
 
-private:
+   private:
     AIBinder* mBinder = nullptr;
 };
 
 /**
  * This baseclass owns a single object, used to make various classes RAII.
  */
-template <typename T, void (*Destroy)(T*)>
+template <typename T, typename R, R (*Destroy)(T), T DEFAULT>
 class ScopedAResource {
-public:
+   public:
     /**
      * Takes ownership of t.
      */
-    explicit ScopedAResource(T* t = nullptr) : mT(t) {}
+    explicit ScopedAResource(T t = DEFAULT) : mT(t) {}
 
     /**
      * This deletes the underlying object if it exists. See set.
      */
-    ~ScopedAResource() { set(nullptr); }
+    ~ScopedAResource() { set(DEFAULT); }
 
     /**
      * Takes ownership of t.
      */
-    void set(T* t) {
+    void set(T t) {
         Destroy(mT);
         mT = t;
     }
@@ -137,12 +136,12 @@ public:
     /**
      * This returns the underlying object to be modified but does not affect ownership.
      */
-    T* get() { return mT; }
+    T get() { return mT; }
 
     /**
      * This returns the const underlying object but does not affect ownership.
      */
-    const T* get() const { return mT; }
+    const T get() const { return mT; }
 
     /**
      * This allows the value in this class to be set from beneath it. If you call this method and
@@ -156,7 +155,7 @@ public:
      * Other usecases are discouraged.
      *
      */
-    T** getR() { return &mT; }
+    T* getR() { return &mT; }
 
     // copy-constructing, or move/copy assignment is disallowed
     ScopedAResource(const ScopedAResource&) = delete;
@@ -166,15 +165,15 @@ public:
     // move-constructing is okay
     ScopedAResource(ScopedAResource&&) = default;
 
-private:
-    T* mT;
+   private:
+    T mT;
 };
 
 /**
  * Convenience wrapper. See AParcel.
  */
-class ScopedAParcel : public ScopedAResource<AParcel, AParcel_delete> {
-public:
+class ScopedAParcel : public ScopedAResource<AParcel*, void, AParcel_delete, nullptr> {
+   public:
     /**
      * Takes ownership of a.
      */
@@ -186,8 +185,8 @@ public:
 /**
  * Convenience wrapper. See AStatus.
  */
-class ScopedAStatus : public ScopedAResource<AStatus, AStatus_delete> {
-public:
+class ScopedAStatus : public ScopedAResource<AStatus*, void, AStatus_delete, nullptr> {
+   public:
     /**
      * Takes ownership of a.
      */
@@ -199,19 +198,25 @@ public:
      * See AStatus_isOk.
      */
     bool isOk() { return get() != nullptr && AStatus_isOk(get()); }
+
+    /**
+     * Convenience method for okay status.
+     */
+    static ScopedAStatus ok() { return ScopedAStatus(AStatus_newOk()); }
 };
 
 /**
  * Convenience wrapper. See AIBinder_DeathRecipient.
  */
 class ScopedAIBinder_DeathRecipient
-      : public ScopedAResource<AIBinder_DeathRecipient, AIBinder_DeathRecipient_delete> {
-public:
+    : public ScopedAResource<AIBinder_DeathRecipient*, void, AIBinder_DeathRecipient_delete,
+                             nullptr> {
+   public:
     /**
      * Takes ownership of a.
      */
     explicit ScopedAIBinder_DeathRecipient(AIBinder_DeathRecipient* a = nullptr)
-          : ScopedAResource(a) {}
+        : ScopedAResource(a) {}
     ~ScopedAIBinder_DeathRecipient() {}
     ScopedAIBinder_DeathRecipient(ScopedAIBinder_DeathRecipient&&) = default;
 };
@@ -219,8 +224,9 @@ public:
 /**
  * Convenience wrapper. See AIBinder_Weak.
  */
-class ScopedAIBinder_Weak : public ScopedAResource<AIBinder_Weak, AIBinder_Weak_delete> {
-public:
+class ScopedAIBinder_Weak
+    : public ScopedAResource<AIBinder_Weak*, void, AIBinder_Weak_delete, nullptr> {
+   public:
     /**
      * Takes ownership of a.
      */
@@ -234,8 +240,19 @@ public:
     SpAIBinder promote() { return SpAIBinder(AIBinder_Weak_promote(get())); }
 };
 
-} // namespace ndk
+/**
+ * Convenience wrapper for a file descriptor.
+ */
+class ScopedFileDescriptor : public ScopedAResource<int, int, close, -1> {
+   public:
+    /**
+     * Takes ownership of a.
+     */
+    explicit ScopedFileDescriptor(int a = -1) : ScopedAResource(a) {}
+    ~ScopedFileDescriptor() {}
+    ScopedFileDescriptor(ScopedFileDescriptor&&) = default;
+};
 
-#endif // __cplusplus
+}  // namespace ndk
 
 /** @} */
