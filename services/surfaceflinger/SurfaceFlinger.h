@@ -846,6 +846,7 @@ private:
     // don't use a lock for these, we don't care
     std::bitset<DisplayDevice::NUM_BUILTIN_DISPLAY_TYPES> mActiveDisplays;
     std::bitset<DisplayDevice::NUM_BUILTIN_DISPLAY_TYPES> mBuiltInBitmask;
+    std::mutex mVsyncPeriodMutex;
     std::vector<nsecs_t> vsyncPeriod;
     int mDebugRegion;
     int mDebugDDMS;

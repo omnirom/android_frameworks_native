@@ -1477,8 +1477,11 @@ void SurfaceFlinger::onRefreshReceived(int sequenceId,
     // Track Vsync Period before and after refresh.
     const auto& activeConfig = getBE().mHwc->getActiveConfig(HWC_DISPLAY_PRIMARY);
     const nsecs_t period = activeConfig->getVsyncPeriod();
-    vsyncPeriod = {};
-    vsyncPeriod.push_back(period);
+    {
+      std::lock_guard lock(mVsyncPeriodMutex);
+      vsyncPeriod = {};
+      vsyncPeriod.push_back(period);
+    }
 }
 
 void SurfaceFlinger::setVsyncEnabled(int disp, int enabled) {
@@ -1949,6 +1952,7 @@ void SurfaceFlinger::postComposition(nsecs_t refreshStartTime)
 }
 
 void SurfaceFlinger::forceResyncModel() {
+    std::lock_guard lock(mVsyncPeriodMutex);
     if (!vsyncPeriod.size()) {
         return;
     }
