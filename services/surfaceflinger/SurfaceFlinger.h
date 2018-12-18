@@ -82,8 +82,6 @@
 #include <thread>
 #include <unordered_map>
 #include <utility>
-#include <bitset>
-#include "RenderArea.h"
 
 #include <layerproto/LayerProtoHeader.h>
 
@@ -100,6 +98,7 @@ class EventControlThread;
 class EventThread;
 class IGraphicBufferConsumer;
 class IGraphicBufferProducer;
+class IInputFlinger;
 class InjectVSyncSource;
 class Layer;
 class Surface;
@@ -287,7 +286,6 @@ public:
     // Indicate if a device has wide color gamut display. This is typically
     // found on devices with wide color gamut (e.g. Display-P3) display.
     static bool hasWideColorDisplay;
-    friend class ExSurfaceFlinger;
 
     static int primaryDisplayOrientation;
 
@@ -343,8 +341,6 @@ public:
         Mutex::Autolock _l(mStateLock);
         return getDefaultDisplayDeviceLocked();
     }
-
-    virtual bool IsHWCDisabled() { return false; }
 
     // Obtains a name from the texture pool, or, if the pool is empty, posts a
     // synchronous message to the main thread to obtain one on the fly
@@ -436,7 +432,6 @@ private:
     virtual status_t onTransact(uint32_t code, const Parcel& data,
         Parcel* reply, uint32_t flags);
     virtual status_t dump(int fd, const Vector<String16>& args) { return priorityDump(fd, args); }
-    virtual status_t doDump(int fd, const Vector<String16>& args, bool asProto);
 
     /* ------------------------------------------------------------------------
      * ISurfaceComposer interface
@@ -485,6 +480,9 @@ private:
     status_t getCompositionPreference(ui::Dataspace* outDataspace, ui::PixelFormat* outPixelFormat,
                                       ui::Dataspace* outWideColorGamutDataspace,
                                       ui::PixelFormat* outWideColorGamutPixelFormat) const override;
+    virtual status_t getDisplayedContentSamplingAttributes(
+            const sp<IBinder>& display, ui::PixelFormat* outFormat, ui::Dataspace* outDataspace,
+            uint8_t* outComponentMask) const override;
 
     /* ------------------------------------------------------------------------
      * DeathRecipient interface
@@ -504,14 +502,6 @@ private:
     void onHotplugReceived(int32_t sequenceId, hwc2_display_t hwcDisplayId,
                            HWC2::Connection connection) override;
     void onRefreshReceived(int32_t sequenceId, hwc2_display_t hwcDisplayId) override;
-
-    /* ------------------------------------------------------------------------
-     * Extensions
-     */
-    virtual void handleDPTransactionIfNeeded(
-                     const Vector<DisplayState>& /*displays*/) { }
-    virtual void setDisplayAnimating(const sp<const DisplayDevice>& /*hw*/) { }
-    virtual void handleMessageRefresh();
 
     /* ------------------------------------------------------------------------
      * Message handling
@@ -540,9 +530,12 @@ private:
     // Returns whether a new buffer has been latched (see handlePageFlip())
     bool handleMessageInvalidate();
 
+    void handleMessageRefresh();
+
     void handleTransaction(uint32_t transactionFlags);
     void handleTransactionLocked(uint32_t transactionFlags);
 
+    void updateInputWindows();
     void updateCursorAsync();
 
     /* handlePageFlip - latch a new buffer if available and compute the dirty
@@ -559,6 +552,7 @@ private:
     // Can only be called from the main thread or with mStateLock held
     uint32_t setTransactionFlags(uint32_t flags);
     uint32_t setTransactionFlags(uint32_t flags, Scheduler::TransactionStart transactionStart);
+    void latchAndReleaseBuffer(const sp<Layer>& layer);
     void commitTransaction();
     bool containsAnyInvalidClientState(const Vector<ComposerState>& states);
     uint32_t setClientStateLocked(const ComposerState& composerState);
@@ -733,10 +727,10 @@ private:
     void doDebugFlashRegions(const sp<DisplayDevice>& display, bool repaintEverything);
     void doTracing(const char* where);
     void logLayerStats();
-    void doDisplayComposition(const sp<const DisplayDevice>& display, const Region& dirtyRegion);
+    void doDisplayComposition(const sp<DisplayDevice>& display, const Region& dirtyRegion);
 
     // This fails if using GL and the surface has been destroyed.
-    bool doComposeSurfaces(const sp<const DisplayDevice>& display);
+    bool doComposeSurfaces(const sp<DisplayDevice>& display);
 
     void postFramebuffer(const sp<DisplayDevice>& display);
     void postFrame();
@@ -812,15 +806,13 @@ private:
     void listLayersLocked(const Vector<String16>& args, size_t& index, String8& result) const;
     void dumpStatsLocked(const Vector<String16>& args, size_t& index, String8& result) const;
     void clearStatsLocked(const Vector<String16>& args, size_t& index, String8& result);
-    void dumpAllLocked(const Vector<String16>& args, size_t& index, String8& result,
-                                                                 bool enableRegionDump) const;
+    void dumpAllLocked(const Vector<String16>& args, size_t& index, String8& result) const;
     bool startDdmConnection();
     void appendSfConfigString(String8& result) const;
 
     void logFrameStats();
 
     void dumpStaticScreenStats(String8& result) const;
-    virtual void dumpDrawCycle(bool /* prePrepare */ ) { }
     // Not const because each Layer needs to query Fences and cache timestamps.
     void dumpFrameEventsLocked(String8& result);
 
@@ -830,12 +822,13 @@ private:
     void dumpDisplayIdentificationData(String8& result) const;
     void dumpWideColorInfo(String8& result) const;
     void dumpFrameCompositionInfo(String8& result) const;
-    LayersProto dumpProtoInfo(LayerVector::StateSet stateSet, bool enableRegionDump = true) const;
+    LayersProto dumpProtoInfo(LayerVector::StateSet stateSet) const;
     LayersProto dumpVisibleLayersProtoInfo(const DisplayDevice& display) const;
 
     bool isLayerTripleBufferingDisabled() const {
         return this->mLayerTripleBufferingDisabled;
     }
+    status_t doDump(int fd, const Vector<String16>& args, bool asProto);
 
     /* ------------------------------------------------------------------------
      * VrFlinger
@@ -920,12 +913,6 @@ private:
     std::map<wp<IBinder>, sp<DisplayDevice>> mDisplays;
 
     // don't use a lock for these, we don't care
-    #if 0
-    // TODO(b/120623859): this code is removed because
-    // NUM_BUILTIN_DISPLAY_TYPES no longer exists.
-    std::bitset<DisplayDevice::NUM_BUILTIN_DISPLAY_TYPES> mActiveDisplays;
-    std::bitset<DisplayDevice::NUM_BUILTIN_DISPLAY_TYPES> mBuiltInBitmask;
-    #endif
     int mDebugRegion;
     int mDebugDDMS;
     int mDebugDisableHWC;
@@ -1005,6 +992,8 @@ private:
     std::unique_ptr<Scheduler> mScheduler;
     sp<Scheduler::ConnectionHandle> mAppConnectionHandle;
     sp<Scheduler::ConnectionHandle> mSfConnectionHandle;
+
+    sp<IInputFlinger> mInputFlinger;
 };
 }; // namespace android
 

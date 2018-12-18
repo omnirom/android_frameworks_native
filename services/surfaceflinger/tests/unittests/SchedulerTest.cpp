@@ -184,6 +184,5 @@ TEST_F(SchedulerTest, validConnectionHandle) {
     EXPECT_CALL(*mEventThread, setPhaseOffset(10)).Times(1);
     ASSERT_NO_FATAL_FAILURE(mScheduler->setPhaseOffset(mConnectionHandle, 10));
 }
-
 } // namespace
 } // namespace android

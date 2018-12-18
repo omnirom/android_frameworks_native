@@ -47,12 +47,18 @@ public:
             void                setStrictModePolicy(int32_t policy);
             int32_t             getStrictModePolicy() const;
 
-            // See Binder#setThreadWorkSource in Binder.java.
-            uid_t               setWorkSource(uid_t uid);
-            // See Binder#getThreadWorkSource in Binder.java.
-            uid_t               getWorkSource() const;
-            // See Binder#clearThreadWorkSource in Binder.java.
-            uid_t               clearWorkSource();
+            // See Binder#setCallingWorkSourceUid in Binder.java.
+            int64_t             setCallingWorkSourceUid(uid_t uid);
+            // Internal only. Use setCallingWorkSourceUid(uid) instead.
+            int64_t             setCallingWorkSourceUidWithoutPropagation(uid_t uid);
+            // See Binder#getCallingWorkSourceUid in Binder.java.
+            uid_t               getCallingWorkSourceUid() const;
+            // See Binder#clearCallingWorkSource in Binder.java.
+            int64_t             clearCallingWorkSource();
+            // See Binder#restoreCallingWorkSource in Binder.java.
+            void                restoreCallingWorkSource(int64_t token);
+            void                clearPropagateWorkSource();
+            bool                shouldPropagateWorkSource() const;
 
             void                setLastTransactionBinderFlags(int32_t flags);
             int32_t             getLastTransactionBinderFlags() const;
@@ -125,6 +131,11 @@ public:
             // infer information about thread state.
             bool                isServingCall() const;
 
+            // The work source represents the UID of the process we should attribute the transaction
+            // to.
+            // We use -1 to specify that the work source was not set using #setWorkSource.
+            static const int32_t kUnsetWorkSource = -1;
+
 private:
                                 IPCThreadState();
                                 ~IPCThreadState();
@@ -165,6 +176,8 @@ private:
             // The UID of the process who is responsible for this transaction.
             // This is used for resource attribution.
             int32_t             mWorkSource;
+            // Whether the work source should be propagated.
+            bool                mPropagateWorkSource;
             int32_t             mStrictModePolicy;
             int32_t             mLastTransactionBinderFlags;
             IPCThreadStateBase  *mIPCThreadStateBase;

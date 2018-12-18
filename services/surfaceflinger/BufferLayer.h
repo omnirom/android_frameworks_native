@@ -49,7 +49,6 @@ namespace android {
 
 class BufferLayer : public Layer {
 public:
-    friend class ExBufferLayer;
     explicit BufferLayer(const LayerCreationArgs& args);
     ~BufferLayer() override;
 
@@ -110,10 +109,6 @@ public:
     // is set, in which case, it returns mOverrideScalingMode
     uint32_t getEffectiveScalingMode() const override;
     // -----------------------------------------------------------------------
-
-    virtual bool isHDRLayer() const { return false; }
-    virtual bool canAllowGPUForProtected() const { return false; }
-    virtual bool isScreenshot() const { return false; }
 
     // -----------------------------------------------------------------------
     // Functions that must be implemented by derived classes

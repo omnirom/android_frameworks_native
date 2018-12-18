@@ -148,7 +148,6 @@ Error Device::createVirtualDisplay(uint32_t width, uint32_t height,
     display->setConnected(true);
     *outDisplay = display.get();
     mDisplays.emplace(displayId, std::move(display));
-    mComposer->setClientTargetSlotCount((*outDisplay)->getId());
     ALOGI("Created virtual display");
     return Error::None;
 }
@@ -159,7 +158,7 @@ void Device::destroyDisplay(hwc2_display_t displayId)
     mDisplays.erase(displayId);
 }
 
-Error Device::onHotplug(hwc2_display_t displayId, Connection connection) {
+void Device::onHotplug(hwc2_display_t displayId, Connection connection) {
     if (connection == Connection::Connected) {
         // If we get a hotplug connected event for a display we already have,
         // destroy the display and recreate it. This will force us to requery
@@ -180,7 +179,7 @@ Error Device::onHotplug(hwc2_display_t displayId, Connection connection) {
             ALOGE("getDisplayType(%" PRIu64 ") failed: %s (%d). "
                     "Aborting hotplug attempt.",
                     displayId, to_string(error).c_str(), intError);
-            return Error::NoResources;
+            return;
         }
 
         auto newDisplay = std::make_unique<Display>(
@@ -198,7 +197,6 @@ Error Device::onHotplug(hwc2_display_t displayId, Connection connection) {
                   displayId);
         }
     }
-    return Error::None;
 }
 
 // Other Device methods
@@ -236,6 +234,22 @@ Display::Display(android::Hwc2::Composer& composer, android::Hwc2::PowerAdvisor&
         mId(id),
         mIsConnected(false),
         mType(type) {
+    std::vector<Hwc2::DisplayCapability> tmpCapabilities;
+    auto error = static_cast<Error>(mComposer.getDisplayCapabilities(mId, &tmpCapabilities));
+    if (error == Error::None) {
+        for (auto capability : tmpCapabilities) {
+            mDisplayCapabilities.emplace(static_cast<DisplayCapability>(capability));
+        }
+    } else if (error == Error::Unsupported) {
+        if (capabilities.count(Capability::SkipClientColorTransform)) {
+            mDisplayCapabilities.emplace(DisplayCapability::SkipClientColorTransform);
+        }
+        bool dozeSupport = false;
+        error = static_cast<Error>(mComposer.getDozeSupport(mId, &dozeSupport));
+        if (error == Error::None && dozeSupport) {
+            mDisplayCapabilities.emplace(DisplayCapability::Doze);
+        }
+    }
     ALOGV("Created display %" PRIu64, id);
 }
 
@@ -509,15 +523,8 @@ Error Display::getType(DisplayType* outType) const
     return Error::None;
 }
 
-Error Display::supportsDoze(bool* outSupport) const
-{
-    bool intSupport = false;
-    auto intError = mComposer.getDozeSupport(mId, &intSupport);
-    auto error = static_cast<Error>(intError);
-    if (error != Error::None) {
-        return error;
-    }
-    *outSupport = static_cast<bool>(intSupport);
+Error Display::supportsDoze(bool* outSupport) const {
+    *outSupport = mDisplayCapabilities.count(DisplayCapability::Doze) > 0;
     return Error::None;
 }
 
@@ -538,6 +545,14 @@ Error Display::getHdrCapabilities(HdrCapabilities* outCapabilities) const
     *outCapabilities = HdrCapabilities(std::move(types),
             maxLuminance, maxAverageLuminance, minLuminance);
     return Error::None;
+}
+
+Error Display::getDisplayedContentSamplingAttributes(PixelFormat* outFormat,
+                                                     Dataspace* outDataspace,
+                                                     uint8_t* outComponentMask) const {
+    auto intError = mComposer.getDisplayedContentSamplingAttributes(mId, outFormat, outDataspace,
+                                                                    outComponentMask);
+    return static_cast<Error>(intError);
 }
 
 Error Display::getReleaseFences(

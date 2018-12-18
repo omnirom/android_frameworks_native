@@ -254,9 +254,7 @@ std::vector<sp<EventThread::Connection>> EventThread::waitForEventLocked(
             }
         }
 
-        // find out connections waiting for events
-        size_t count = mDisplayEventConnections.size();
-        if (!timestamp && count) {
+        if (!timestamp) {
             // no vsync event, see if there are some other event
             eventPending = !mPendingEvents.empty();
             if (eventPending) {

@@ -41,7 +41,6 @@
 #include "GLExtensions.h"
 #include "GLFramebuffer.h"
 #include "GLImage.h"
-#include "GLSurface.h"
 #include "Program.h"
 #include "ProgramCache.h"
 
@@ -241,58 +240,29 @@ std::unique_ptr<GLES20RenderEngine> GLES20RenderEngine::create(int hwcFormat,
         config = chooseEglConfig(display, hwcFormat, /*logConfig*/ true);
     }
 
-    EGLint renderableType = 0;
-    if (config == EGL_NO_CONFIG) {
-        renderableType = EGL_OPENGL_ES2_BIT;
-    } else if (!eglGetConfigAttrib(display, config, EGL_RENDERABLE_TYPE, &renderableType)) {
-        LOG_ALWAYS_FATAL("can't query EGLConfig RENDERABLE_TYPE");
-    }
-    EGLint contextClientVersion = 0;
-    if (renderableType & EGL_OPENGL_ES2_BIT) {
-        contextClientVersion = 2;
-    } else if (renderableType & EGL_OPENGL_ES_BIT) {
-        contextClientVersion = 1;
-    } else {
-        LOG_ALWAYS_FATAL("no supported EGL_RENDERABLE_TYPEs");
-    }
-
-    std::vector<EGLint> contextAttributes;
-    contextAttributes.reserve(6);
-    contextAttributes.push_back(EGL_CONTEXT_CLIENT_VERSION);
-    contextAttributes.push_back(contextClientVersion);
     bool useContextPriority = extensions.hasContextPriority() &&
             (featureFlags & RenderEngine::USE_HIGH_PRIORITY_CONTEXT);
-    if (useContextPriority) {
-        contextAttributes.push_back(EGL_CONTEXT_PRIORITY_LEVEL_IMG);
-        contextAttributes.push_back(EGL_CONTEXT_PRIORITY_HIGH_IMG);
-    }
-    contextAttributes.push_back(EGL_NONE);
-
-    EGLContext ctxt = eglCreateContext(display, config, nullptr, contextAttributes.data());
+    EGLContext ctxt = createEglContext(display, config, EGL_NO_CONTEXT, useContextPriority);
 
     // if can't create a GL context, we can only abort.
     LOG_ALWAYS_FATAL_IF(ctxt == EGL_NO_CONTEXT, "EGLContext creation failed");
 
-    // now figure out what version of GL did we actually get
-    // NOTE: a dummy surface is not needed if KHR_create_context is supported
-
-    EGLConfig dummyConfig = config;
-    if (dummyConfig == EGL_NO_CONFIG) {
-        dummyConfig = chooseEglConfig(display, hwcFormat, /*logConfig*/ true);
+    EGLSurface dummy = EGL_NO_SURFACE;
+    if (!extensions.hasSurfacelessContext()) {
+        dummy = createDummyEglPbufferSurface(display, config, hwcFormat);
+        LOG_ALWAYS_FATAL_IF(dummy == EGL_NO_SURFACE, "can't create dummy pbuffer");
     }
-    EGLint attribs[] = {EGL_WIDTH, 1, EGL_HEIGHT, 1, EGL_NONE, EGL_NONE};
-    EGLSurface dummy = eglCreatePbufferSurface(display, dummyConfig, attribs);
-    LOG_ALWAYS_FATAL_IF(dummy == EGL_NO_SURFACE, "can't create dummy pbuffer");
+
     EGLBoolean success = eglMakeCurrent(display, dummy, dummy, ctxt);
     LOG_ALWAYS_FATAL_IF(!success, "can't make dummy pbuffer current");
 
     extensions.initWithGLStrings(glGetString(GL_VENDOR), glGetString(GL_RENDERER),
                                  glGetString(GL_VERSION), glGetString(GL_EXTENSIONS));
 
+    // now figure out what version of GL did we actually get
     GlesVersion version = parseGlesVersion(extensions.getVersion());
 
     // initialize the renderer while GL is current
-
     std::unique_ptr<GLES20RenderEngine> engine;
     switch (version) {
         case GLES_VERSION_1_0:
@@ -301,10 +271,10 @@ std::unique_ptr<GLES20RenderEngine> GLES20RenderEngine::create(int hwcFormat,
             break;
         case GLES_VERSION_2_0:
         case GLES_VERSION_3_0:
-            engine = std::make_unique<GLES20RenderEngine>(featureFlags);
+            engine = std::make_unique<GLES20RenderEngine>(featureFlags, display, config, ctxt,
+                                                          dummy);
             break;
     }
-    engine->setEGLHandles(display, config, ctxt);
 
     ALOGI("OpenGL ES informations:");
     ALOGI("vendor    : %s", extensions.getVendor());
@@ -313,9 +283,6 @@ std::unique_ptr<GLES20RenderEngine> GLES20RenderEngine::create(int hwcFormat,
     ALOGI("extensions: %s", extensions.getExtensions());
     ALOGI("GL_MAX_TEXTURE_SIZE = %zu", engine->getMaxTextureSize());
     ALOGI("GL_MAX_VIEWPORT_DIMS = %zu", engine->getMaxViewportDims());
-
-    eglMakeCurrent(display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
-    eglDestroySurface(display, dummy);
 
     return engine;
 }
@@ -359,11 +326,13 @@ EGLConfig GLES20RenderEngine::chooseEglConfig(EGLDisplay display, int format, bo
     return config;
 }
 
-GLES20RenderEngine::GLES20RenderEngine(uint32_t featureFlags)
+GLES20RenderEngine::GLES20RenderEngine(uint32_t featureFlags, EGLDisplay display, EGLConfig config,
+                                       EGLContext ctxt, EGLSurface dummy)
       : renderengine::impl::RenderEngine(featureFlags),
-        mEGLDisplay(EGL_NO_DISPLAY),
-        mEGLConfig(nullptr),
-        mEGLContext(EGL_NO_CONTEXT),
+        mEGLDisplay(display),
+        mEGLConfig(config),
+        mEGLContext(ctxt),
+        mDummySurface(dummy),
         mVpWidth(0),
         mVpHeight(0),
         mUseColorManagement(featureFlags & USE_COLOR_MANAGEMENT) {
@@ -422,10 +391,6 @@ std::unique_ptr<Framebuffer> GLES20RenderEngine::createFramebuffer() {
     return std::make_unique<GLFramebuffer>(*this);
 }
 
-std::unique_ptr<Surface> GLES20RenderEngine::createSurface() {
-    return std::make_unique<GLSurface>(*this);
-}
-
 std::unique_ptr<Image> GLES20RenderEngine::createImage() {
     return std::make_unique<GLImage>(*this);
 }
@@ -436,31 +401,6 @@ void GLES20RenderEngine::primeCache() const {
 
 bool GLES20RenderEngine::isCurrent() const {
     return mEGLDisplay == eglGetCurrentDisplay() && mEGLContext == eglGetCurrentContext();
-}
-
-bool GLES20RenderEngine::setCurrentSurface(const Surface& surface) {
-    // Surface is an abstract interface. GLES20RenderEngine only ever
-    // creates GLSurface's, so it is safe to just cast to the actual
-    // type.
-    bool success = true;
-    const GLSurface& glSurface = static_cast<const GLSurface&>(surface);
-    EGLSurface eglSurface = glSurface.getEGLSurface();
-    if (eglSurface != eglGetCurrentSurface(EGL_DRAW)) {
-        success = eglMakeCurrent(mEGLDisplay, eglSurface, eglSurface, mEGLContext) == EGL_TRUE;
-        if (success && glSurface.getAsync()) {
-            eglSwapInterval(mEGLDisplay, 0);
-        }
-        if (success) {
-            mSurfaceHeight = glSurface.getHeight();
-        }
-    }
-
-    return success;
-}
-
-void GLES20RenderEngine::resetCurrentSurface() {
-    eglMakeCurrent(mEGLDisplay, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
-    mSurfaceHeight = 0;
 }
 
 base::unique_fd GLES20RenderEngine::flush() {
@@ -576,7 +516,7 @@ void GLES20RenderEngine::fillRegionWithColor(const Region& region, float red, fl
 
 void GLES20RenderEngine::setScissor(const Rect& region) {
     // Invert y-coordinate to map to GL-space.
-    int32_t canvasHeight = mRenderToFbo ? mFboHeight : mSurfaceHeight;
+    int32_t canvasHeight = mFboHeight;
     int32_t glBottom = canvasHeight - region.bottom;
 
     glScissor(region.left, glBottom, region.getWidth(), region.getHeight());
@@ -619,7 +559,6 @@ status_t GLES20RenderEngine::bindFrameBuffer(Framebuffer* framebuffer) {
     glBindFramebuffer(GL_FRAMEBUFFER, framebufferName);
     glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, textureName, 0);
 
-    mRenderToFbo = true;
     mFboHeight = glFramebuffer->getBufferHeight();
 
     uint32_t glStatus = glCheckFramebufferStatus(GL_FRAMEBUFFER);
@@ -631,17 +570,10 @@ status_t GLES20RenderEngine::bindFrameBuffer(Framebuffer* framebuffer) {
 }
 
 void GLES20RenderEngine::unbindFrameBuffer(Framebuffer* /* framebuffer */) {
-    mRenderToFbo = false;
     mFboHeight = 0;
 
     // back to main framebuffer
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
-
-    // Workaround for b/77935566 to force the EGL driver to release the
-    // screenshot buffer
-    setScissor(Rect::EMPTY_RECT);
-    clearWithColor(0.0, 0.0, 0.0, 0.0);
-    disableScissor();
 }
 
 void GLES20RenderEngine::checkErrors() const {
@@ -666,9 +598,7 @@ void GLES20RenderEngine::setViewportAndProjection(size_t vpw, size_t vph, Rect s
     int32_t r = sourceCrop.right;
     int32_t b = sourceCrop.bottom;
     int32_t t = sourceCrop.top;
-    if (mRenderToFbo) {
-        std::swap(t, b);
-    }
+    std::swap(t, b);
     mat4 m = mat4::ortho(l, r, b, t, 0, 1);
 
     // Apply custom rotation to the projection.
@@ -947,6 +877,53 @@ GLES20RenderEngine::GlesVersion GLES20RenderEngine::parseGlesVersion(const char*
     return GLES_VERSION_1_0;
 }
 
+EGLContext GLES20RenderEngine::createEglContext(EGLDisplay display, EGLConfig config,
+                                                EGLContext shareContext, bool useContextPriority) {
+    EGLint renderableType = 0;
+    if (config == EGL_NO_CONFIG) {
+        renderableType = EGL_OPENGL_ES2_BIT;
+    } else if (!eglGetConfigAttrib(display, config, EGL_RENDERABLE_TYPE, &renderableType)) {
+        LOG_ALWAYS_FATAL("can't query EGLConfig RENDERABLE_TYPE");
+    }
+    EGLint contextClientVersion = 0;
+    if (renderableType & EGL_OPENGL_ES2_BIT) {
+        contextClientVersion = 2;
+    } else if (renderableType & EGL_OPENGL_ES_BIT) {
+        contextClientVersion = 1;
+    } else {
+        LOG_ALWAYS_FATAL("no supported EGL_RENDERABLE_TYPEs");
+    }
+
+    std::vector<EGLint> contextAttributes;
+    contextAttributes.reserve(5);
+    contextAttributes.push_back(EGL_CONTEXT_CLIENT_VERSION);
+    contextAttributes.push_back(contextClientVersion);
+    if (useContextPriority) {
+        contextAttributes.push_back(EGL_CONTEXT_PRIORITY_LEVEL_IMG);
+        contextAttributes.push_back(EGL_CONTEXT_PRIORITY_HIGH_IMG);
+    }
+    contextAttributes.push_back(EGL_NONE);
+
+    return eglCreateContext(display, config, shareContext, contextAttributes.data());
+}
+
+EGLSurface GLES20RenderEngine::createDummyEglPbufferSurface(EGLDisplay display, EGLConfig config,
+                                                            int hwcFormat) {
+    EGLConfig dummyConfig = config;
+    if (dummyConfig == EGL_NO_CONFIG) {
+        dummyConfig = chooseEglConfig(display, hwcFormat, /*logConfig*/ true);
+    }
+    std::vector<EGLint> attributes;
+    attributes.reserve(5);
+    attributes.push_back(EGL_WIDTH);
+    attributes.push_back(1);
+    attributes.push_back(EGL_HEIGHT);
+    attributes.push_back(1);
+    attributes.push_back(EGL_NONE);
+
+    return eglCreatePbufferSurface(display, dummyConfig, attributes.data());
+}
+
 bool GLES20RenderEngine::isHdrDataSpace(const Dataspace dataSpace) const {
     const Dataspace standard = static_cast<Dataspace>(dataSpace & Dataspace::STANDARD_MASK);
     const Dataspace transfer = static_cast<Dataspace>(dataSpace & Dataspace::TRANSFER_MASK);
@@ -972,12 +949,6 @@ bool GLES20RenderEngine::needsXYZTransformMatrix() const {
             static_cast<Dataspace>(mOutputDataSpace & Dataspace::TRANSFER_MASK);
 
     return (isInputHdrDataSpace || isOutputHdrDataSpace) && inputTransfer != outputTransfer;
-}
-
-void GLES20RenderEngine::setEGLHandles(EGLDisplay display, EGLConfig config, EGLContext ctxt) {
-    mEGLDisplay = display;
-    mEGLConfig = config;
-    mEGLContext = ctxt;
 }
 
 } // namespace gl

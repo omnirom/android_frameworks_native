@@ -26,6 +26,8 @@
 #include "EventControlThread.h"
 #include "EventThread.h"
 #include "InjectVSyncSource.h"
+#include "LayerHistory.h"
+#include "SchedulerUtils.h"
 
 namespace android {
 
@@ -103,7 +105,11 @@ public:
     void addPresentFence(const std::shared_ptr<FenceTime>& fenceTime);
     void setIgnorePresentFences(bool ignore);
     void makeHWSyncAvailable(bool makeAvailable);
-    void addNewFrameTimestamp(const nsecs_t newFrameTimestamp, bool isAutoTimestamp);
+    // Adds the present time for given layer to the history of present times.
+    void addFramePresentTimeForLayer(const nsecs_t framePresentTime, bool isAutoTimestamp,
+                                     const std::string layerName);
+    // Increments counter in the layer history to indicate that SF has started a new frame.
+    void incrementFrameCounter();
 
 protected:
     virtual std::unique_ptr<EventThread> makeEventThread(
@@ -114,6 +120,12 @@ protected:
 private:
     nsecs_t calculateAverage() const;
     void updateFrameSkipping(const int64_t skipCount);
+    // Collects the statistical mean (average) and median between timestamp
+    // intervals for each frame for each layer.
+    void determineLayerTimestampStats(const std::string layerName, const nsecs_t framePresentTime);
+    // Collects the average difference between timestamps for each frame regardless
+    // of which layer the timestamp came from.
+    void determineTimestampAverage(bool isAutoTimestamp, const nsecs_t framePresentTime);
 
     // TODO(b/113612090): Instead of letting BufferQueueLayer to access mDispSync directly, it
     // should make request to Scheduler to compute next refresh.
@@ -147,9 +159,10 @@ private:
     // simulate 30Hz rendering, we skip every other frame, and this variable is set
     // to 1.
     int64_t mSkipCount = 0;
-    static constexpr size_t ARRAY_SIZE = 30;
-    std::array<int64_t, ARRAY_SIZE> mTimeDifferences;
+    std::array<int64_t, scheduler::ARRAY_SIZE> mTimeDifferences{};
     size_t mCounter = 0;
+
+    LayerHistory mLayerHistory;
 };
 
 } // namespace android
