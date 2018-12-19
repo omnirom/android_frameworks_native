@@ -612,10 +612,6 @@ status_t HWComposer::setPowerMode(int32_t displayId, int32_t intMode) {
     }
 
     auto mode = static_cast<HWC2::PowerMode>(intMode);
-    if (mode == HWC2::PowerMode::Off) {
-        setVsyncEnabled(displayId, HWC2::Vsync::Disable);
-    }
-
     auto& hwcDisplay = mDisplayData[displayId].hwcDisplay;
     switch (mode) {
         case HWC2::PowerMode::Off:
