@@ -78,7 +78,11 @@ public:
 
         InputEvent *ev;
         uint32_t seqId;
-        status_t consumed = mInputConsumer->consume(&mInputEventFactory, true, -1, &seqId, &ev);
+        int motionEventType;
+        int touchMoveNumber;
+        bool flag;
+        status_t consumed = mInputConsumer->consume(&mInputEventFactory, true, -1, &seqId, &ev,
+                                                    &motionEventType, &touchMoveNumber, &flag);
         if (consumed != OK) {
             return nullptr;
         }
