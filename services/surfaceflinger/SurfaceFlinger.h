@@ -434,6 +434,7 @@ private:
                                    const Rect& sourceCrop, float frameScale, bool childrenOnly);
     virtual status_t getDisplayStats(const sp<IBinder>& display,
             DisplayStatInfo* stats);
+    virtual status_t getDisplayViewport(const sp<IBinder>& display, Rect* outViewport);
     virtual status_t getDisplayConfigs(const sp<IBinder>& display,
             Vector<DisplayInfo>* configs);
     virtual int getActiveConfig(const sp<IBinder>& display);
@@ -886,7 +887,6 @@ private:
     bool mHWVsyncAvailable;
 
     std::atomic<bool> mRefreshPending{false};
-
     // We maintain a pool of pre-generated texture names to hand out to avoid
     // layer creation needing to run on the main thread (which it would
     // otherwise need to do to access RenderEngine).
@@ -914,9 +914,9 @@ private:
     static bool useVrFlinger;
     std::thread::id mMainThreadId;
 
-    DisplayColorSetting mDisplayColorSetting = DisplayColorSetting::MANAGED;
-    // Applied on sRGB layers when the render intent is non-colorimetric.
-    mat4 mLegacySrgbSaturationMatrix;
+    DisplayColorSetting mDisplayColorSetting = DisplayColorSetting::ENHANCED;
+    // Applied on Display P3 layers when the render intent is non-colorimetric.
+    mat4 mEnhancedSaturationMatrix;
 
     using CreateBufferQueueFunction =
             std::function<void(sp<IGraphicBufferProducer>* /* outProducer */,
