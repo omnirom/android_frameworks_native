@@ -22,6 +22,7 @@
 #include <gui/BufferQueue.h>
 #include <gui/ISurfaceComposerClient.h>
 #include <gui/LayerState.h>
+#include <input/InputWindow.h>
 #include <layerproto/LayerProtoHeader.h>
 #include <math/vec4.h>
 #include <renderengine/Mesh.h>
@@ -109,6 +110,7 @@ public:
     enum { // flags for doTransaction()
         eDontUpdateGeometryState = 0x00000001,
         eVisibleRegion = 0x00000002,
+        eInputInfoChanged = 0x00000004
     };
 
     struct Geometry {
@@ -165,6 +167,9 @@ public:
         SortedVector<wp<Layer>> zOrderRelatives;
 
         half4 color;
+
+        bool inputInfoChanged;
+        InputWindowInfo inputInfo;
 
         // The fields below this point are only used by BufferStateLayer
         Geometry active;
@@ -263,6 +268,8 @@ public:
     virtual void setChildrenDrawingParent(const sp<Layer>& layer);
     virtual bool reparent(const sp<IBinder>& newParentHandle);
     virtual bool detachChildren();
+    bool attachChildren();
+    bool isLayerDetached() const { return mLayerDetached; }
     virtual bool setColorTransform(const mat4& matrix);
     virtual const mat4& getColorTransform() const;
     virtual bool hasColorTransform() const;
@@ -332,8 +339,6 @@ public:
      */
     bool isSecure() const;
 
-    bool isSecureDisplay() const;
-
     /*
      * isVisible - true if this layer is visible, false otherwise
      */
@@ -357,12 +362,10 @@ public:
     // to avoid grabbing the lock again to avoid deadlock
     virtual bool isCreatedFromMainThread() const { return false; }
 
-
     bool isRemovedFromCurrentState() const;
 
     void writeToProto(LayerProto* layerInfo,
-                      LayerVector::StateSet stateSet = LayerVector::StateSet::Drawing,
-                      bool enableRegionDump = true);
+                      LayerVector::StateSet stateSet = LayerVector::StateSet::Drawing);
 
     void writeToProto(LayerProto* layerInfo, DisplayId displayId);
 
@@ -432,8 +435,6 @@ public:
     virtual void releasePendingBuffer(nsecs_t /*dequeueReadyTime*/) { }
 
 
-    virtual bool isScreenshot() const { return false; }
-
     /*
      * draw - performs some global clipping optimizations
      * and calls onDraw().
@@ -490,6 +491,11 @@ public:
      */
     void onRemovedFromCurrentState();
 
+    /*
+     * Called when the layer is added back to the current state list.
+     */
+    void addToCurrentState();
+
     // Updates the transform hint in our SurfaceFlingerConsumer to match
     // the current orientation of the display device.
     void updateTransformHint(const sp<const DisplayDevice>& display) const;
@@ -511,7 +517,8 @@ public:
 
     bool createHwcLayer(HWComposer* hwc, DisplayId displayId);
     bool destroyHwcLayer(DisplayId displayId);
-    void destroyAllHwcLayers();
+    void destroyHwcLayersForAllDisplays();
+    void destroyAllHwcLayersPlusChildren();
 
     bool hasHwcLayer(DisplayId displayId) const { return getBE().mHwcLayers.count(displayId) > 0; }
 
@@ -594,6 +601,12 @@ public:
     void commitChildList();
     int32_t getZ() const;
     virtual void pushPendingState();
+
+    /**
+     * Returns active buffer size in the correct orientation. Buffer size is determined by undoing
+     * any buffer transformations. If the layer has no buffer then return INVALID_RECT.
+     */
+    virtual Rect getBufferSize(const Layer::State&) const { return Rect::INVALID_RECT; }
 
 protected:
     // constant
@@ -712,6 +725,10 @@ public:
     bool getPremultipledAlpha() const;
 
     bool mPendingHWCDestroy{false};
+    void setInputInfo(const InputWindowInfo& info);
+
+    InputWindowInfo fillInputInfo(const Rect& screenBounds);
+    bool hasInput() const;
 
 protected:
     // -----------------------------------------------------------------------
@@ -781,6 +798,9 @@ protected:
 
     mutable LayerBE mBE;
 
+    // Can only be accessed with the SF state lock held.
+    bool mLayerDetached{false};
+
 private:
     /**
      * Returns an unsorted vector of all layers that are part of this tree.
@@ -811,12 +831,6 @@ private:
      * bounds are constrained by its parent bounds.
      */
     Rect getCroppedBufferSize(const Layer::State& s) const;
-
-    /**
-     * Returns active buffer size in the correct orientation. Buffer size is determined by undoing
-     * any buffer transformations. If the layer has no buffer then return INVALID_RECT.
-     */
-    virtual Rect getBufferSize(const Layer::State&) const { return Rect::INVALID_RECT; }
 };
 
 } // namespace android

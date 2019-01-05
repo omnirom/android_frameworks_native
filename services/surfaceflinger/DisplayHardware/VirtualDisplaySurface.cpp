@@ -159,7 +159,7 @@ status_t VirtualDisplaySurface::prepareFrame(CompositionType compositionType) {
 
     if (mCompositionType != COMPOSITION_GLES &&
             (mOutputFormat != mDefaultOutputFormat ||
-             !(mOutputUsage & GRALLOC_USAGE_HW_COMPOSER))) {
+             mOutputUsage != GRALLOC_USAGE_HW_COMPOSER)) {
         // We must have just switched from GLES-only to MIXED or HWC
         // composition. Stop using the format and usage requested by the GLES
         // driver; they may be suboptimal when HWC is writing to the output
@@ -171,7 +171,7 @@ status_t VirtualDisplaySurface::prepareFrame(CompositionType compositionType) {
         // format/usage and get a new buffer when the GLES driver calls
         // dequeueBuffer().
         mOutputFormat = mDefaultOutputFormat;
-        setOutputUsage(GRALLOC_USAGE_HW_COMPOSER);
+        mOutputUsage = GRALLOC_USAGE_HW_COMPOSER;
         refreshOutputBuffer();
     }
 
@@ -255,7 +255,7 @@ void VirtualDisplaySurface::onFrameCommitted() {
         int sslot = mapProducer2SourceSlot(SOURCE_SINK, mOutputProducerSlot);
         QueueBufferOutput qbo;
         VDS_LOGV("onFrameCommitted: queue sink sslot=%d", sslot);
-        if (retireFence->isValid() && mMustRecompose) {
+        if (mMustRecompose) {
             status_t result = mSource[SOURCE_SINK]->queueBuffer(sslot,
                     QueueBufferInput(
                         systemTime(), false /* isAutoTimestamp */,
@@ -319,13 +319,6 @@ status_t VirtualDisplaySurface::setAsyncMode(bool async) {
 status_t VirtualDisplaySurface::dequeueBuffer(Source source,
         PixelFormat format, uint64_t usage, int* sslot, sp<Fence>* fence) {
     LOG_FATAL_IF(!mDisplayId);
-
-    // Exclude video encoder usage flag from scratch buffer usage flags.
-    if (source == SOURCE_SCRATCH) {
-        usage &= ~(GRALLOC_USAGE_HW_VIDEO_ENCODER);
-        VDS_LOGV("dequeueBuffer(%s): updated scratch buffer usage flags=%#" PRIx64,
-                dbgSourceStr(source), usage);
-    }
 
     status_t result =
             mSource[source]->dequeueBuffer(sslot, fence, mSinkBufferWidth, mSinkBufferHeight,
@@ -416,7 +409,7 @@ status_t VirtualDisplaySurface::dequeueBuffer(int* pslot, sp<Fence>* fence, uint
                     mSinkBufferWidth, mSinkBufferHeight,
                     buf->getPixelFormat(), buf->getUsage());
             mOutputFormat = format;
-            setOutputUsage(usage);
+            mOutputUsage = usage;
             result = refreshOutputBuffer();
             if (result < 0)
                 return result;
@@ -691,10 +684,6 @@ const char* VirtualDisplaySurface::dbgSourceStr(Source s) {
         case SOURCE_SCRATCH: return "SCRATCH";
         default:             return "INVALID";
     }
-}
-
-void VirtualDisplaySurface::setOutputUsage(uint64_t flag) {
-    mOutputUsage = flag;
 }
 
 // ---------------------------------------------------------------------------

@@ -120,6 +120,7 @@ public:
     mock::EventThread* mEventThread = new mock::EventThread();
     mock::EventControlThread* mEventControlThread = new mock::EventControlThread();
     sp<mock::NativeWindow> mNativeWindow = new mock::NativeWindow();
+    sp<GraphicBuffer> mBuffer = new GraphicBuffer();
 
     // These mocks are created by the test, but are destroyed by SurfaceFlinger
     // by virtue of being stored into a std::unique_ptr. However we still need
@@ -134,7 +135,6 @@ public:
     sp<mock::GraphicBufferConsumer> mConsumer;
     sp<mock::GraphicBufferProducer> mProducer;
     surfaceflinger::mock::NativeWindowSurface* mNativeWindowSurface = nullptr;
-    renderengine::mock::Surface* mRenderSurface = nullptr;
 };
 
 DisplayTransactionTest::DisplayTransactionTest() {
@@ -340,26 +340,11 @@ struct DisplayVariant {
     static void setupNativeWindowSurfaceCreationCallExpectations(DisplayTransactionTest* test) {
         EXPECT_CALL(*test->mNativeWindowSurface, getNativeWindow())
                 .WillOnce(Return(test->mNativeWindow));
-        EXPECT_CALL(*test->mNativeWindow, perform(19)).WillRepeatedly(Return(NO_ERROR));
 
-        // For simplicity, we only expect to create a single render surface for
-        // each test.
-        ASSERT_TRUE(test->mRenderSurface == nullptr);
-        test->mRenderSurface = new renderengine::mock::Surface();
-        EXPECT_CALL(*test->mRenderEngine, createSurface())
-                .WillOnce(Return(ByMove(
-                        std::unique_ptr<renderengine::Surface>(test->mRenderSurface))));
-
-        // Creating a DisplayDevice requires getting default dimensions from the
-        // native window.
         EXPECT_CALL(*test->mNativeWindow, query(NATIVE_WINDOW_WIDTH, _))
                 .WillRepeatedly(DoAll(SetArgPointee<1>(WIDTH), Return(0)));
         EXPECT_CALL(*test->mNativeWindow, query(NATIVE_WINDOW_HEIGHT, _))
                 .WillRepeatedly(DoAll(SetArgPointee<1>(HEIGHT), Return(0)));
-
-        EXPECT_CALL(*test->mRenderSurface, setAsync(static_cast<bool>(ASYNC))).Times(1);
-        EXPECT_CALL(*test->mRenderSurface, setCritical(static_cast<bool>(CRITICAL))).Times(1);
-        EXPECT_CALL(*test->mRenderSurface, setNativeWindow(test->mNativeWindow.get())).Times(1);
     }
 
     static void setupFramebufferConsumerBufferQueueCallExpectations(DisplayTransactionTest* test) {
@@ -1070,9 +1055,6 @@ TEST_F(DisplayTransactionTest, resetDisplayStateClearsState) {
     // The call disable vsyncs
     EXPECT_CALL(*mEventControlThread, setVsyncEnabled(false)).Times(1);
 
-    // The call clears the current render engine surface
-    EXPECT_CALL(*mRenderEngine, resetCurrentSurface());
-
     // The call ends any display resyncs
     EXPECT_CALL(*mPrimaryDispSync, endResync()).Times(1);
 
@@ -1132,6 +1114,9 @@ public:
                 .WillRepeatedly(DoAll(SetArgPointee<1>(1080 /* arbitrary */), Return(0)));
         EXPECT_CALL(*mNativeWindow, query(NATIVE_WINDOW_HEIGHT, _))
                 .WillRepeatedly(DoAll(SetArgPointee<1>(1920 /* arbitrary */), Return(0)));
+        EXPECT_CALL(*mNativeWindow, perform(9)).Times(1);
+        EXPECT_CALL(*mNativeWindow, perform(13)).Times(1);
+        EXPECT_CALL(*mNativeWindow, perform(30)).Times(1);
         auto displayDevice = mInjector.inject();
 
         displayDevice->getBestColorMode(mInputDataspace, mInputRenderIntent, &mOutDataspace,
@@ -1281,14 +1266,13 @@ TEST_F(SetupNewDisplayDeviceInternalTest, createNonHwcVirtualDisplay) {
     setupNewDisplayDeviceInternalTest<NonHwcVirtualDisplayCase>();
 }
 
-// TODO(b/119263638): Temporarily disabled failing test
-TEST_F(SetupNewDisplayDeviceInternalTest, DISABLED_createHwcVirtualDisplay) {
+TEST_F(SetupNewDisplayDeviceInternalTest, createHwcVirtualDisplay) {
     using Case = HwcVirtualDisplayCase;
 
     // Insert display data so that the HWC thinks it created the virtual display.
     const auto displayId = Case::Display::DISPLAY_ID::get();
     ASSERT_TRUE(displayId);
-    mFlinger.mutableHwcDisplayData()[*displayId] = {};
+    mFlinger.mutableHwcDisplayData().try_emplace(*displayId);
 
     setupNewDisplayDeviceInternalTest<Case>();
 }
@@ -1686,8 +1670,7 @@ TEST_F(HandleTransactionLockedTest, processesHotplugDisconnectThenConnectPrimary
     EXPECT_CALL(*mConsumer, consumerDisconnect()).WillOnce(Return(NO_ERROR));
 }
 
-// TODO(b/119263638): Temporarily disabled failing test
-TEST_F(HandleTransactionLockedTest, DISABLED_processesVirtualDisplayAdded) {
+TEST_F(HandleTransactionLockedTest, processesVirtualDisplayAdded) {
     using Case = HwcVirtualDisplayCase;
 
     // --------------------------------------------------------------------
@@ -1727,7 +1710,6 @@ TEST_F(HandleTransactionLockedTest, DISABLED_processesVirtualDisplayAdded) {
 
     EXPECT_CALL(*surface, setAsyncMode(true)).Times(1);
 
-    EXPECT_CALL(*mProducer, connect(_, _, _, _)).Times(1);
     EXPECT_CALL(*mProducer, disconnect(_, _)).Times(1);
 
     Case::Display::setupHwcVirtualDisplayCreationCallExpectations(this);
@@ -1794,8 +1776,7 @@ TEST_F(HandleTransactionLockedTest, processesVirtualDisplayAddedWithNoSurface) {
     EXPECT_EQ(static_cast<bool>(Case::Display::VIRTUAL), draw.isVirtual());
 }
 
-// TODO(b/119263638): Temporarily disabled failing test
-TEST_F(HandleTransactionLockedTest, DISABLED_processesVirtualDisplayRemoval) {
+TEST_F(HandleTransactionLockedTest, processesVirtualDisplayRemoval) {
     using Case = HwcVirtualDisplayCase;
 
     // --------------------------------------------------------------------
@@ -1804,7 +1785,7 @@ TEST_F(HandleTransactionLockedTest, DISABLED_processesVirtualDisplayRemoval) {
     // A virtual display is set up but is removed from the current state.
     const auto displayId = Case::Display::DISPLAY_ID::get();
     ASSERT_TRUE(displayId);
-    mFlinger.mutableHwcDisplayData()[*displayId] = {};
+    mFlinger.mutableHwcDisplayData().try_emplace(*displayId);
     Case::Display::injectHwcDisplay(this);
     auto existing = Case::Display::makeFakeExistingDisplayInjector(this);
     existing.inject();
@@ -1952,11 +1933,18 @@ TEST_F(HandleTransactionLockedTest, processesDisplayWidthChanges) {
     // A display is set up
     auto nativeWindow = new mock::NativeWindow();
     auto displaySurface = new mock::DisplaySurface();
-    auto renderSurface = new renderengine::mock::Surface();
+    sp<GraphicBuffer> buf = new GraphicBuffer();
     auto display = Case::Display::makeFakeExistingDisplayInjector(this);
     display.setNativeWindow(nativeWindow);
     display.setDisplaySurface(displaySurface);
-    display.setRenderSurface(std::unique_ptr<renderengine::Surface>(renderSurface));
+    // Setup injection expections
+    EXPECT_CALL(*nativeWindow, query(NATIVE_WINDOW_WIDTH, _))
+            .WillOnce(DoAll(SetArgPointee<1>(oldWidth), Return(0)));
+    EXPECT_CALL(*nativeWindow, query(NATIVE_WINDOW_HEIGHT, _))
+            .WillOnce(DoAll(SetArgPointee<1>(oldHeight), Return(0)));
+    EXPECT_CALL(*nativeWindow, perform(9)).Times(1);
+    EXPECT_CALL(*nativeWindow, perform(13)).Times(1);
+    EXPECT_CALL(*nativeWindow, perform(30)).Times(1);
     display.inject();
 
     // There is a change to the viewport state
@@ -1968,9 +1956,7 @@ TEST_F(HandleTransactionLockedTest, processesDisplayWidthChanges) {
     // --------------------------------------------------------------------
     // Call Expectations
 
-    EXPECT_CALL(*renderSurface, setNativeWindow(nullptr)).Times(1);
     EXPECT_CALL(*displaySurface, resizeBuffers(newWidth, oldHeight)).Times(1);
-    EXPECT_CALL(*renderSurface, setNativeWindow(nativeWindow)).Times(1);
 
     // --------------------------------------------------------------------
     // Invocation
@@ -1991,11 +1977,18 @@ TEST_F(HandleTransactionLockedTest, processesDisplayHeightChanges) {
     // A display is set up
     auto nativeWindow = new mock::NativeWindow();
     auto displaySurface = new mock::DisplaySurface();
-    auto renderSurface = new renderengine::mock::Surface();
+    sp<GraphicBuffer> buf = new GraphicBuffer();
     auto display = Case::Display::makeFakeExistingDisplayInjector(this);
     display.setNativeWindow(nativeWindow);
     display.setDisplaySurface(displaySurface);
-    display.setRenderSurface(std::unique_ptr<renderengine::Surface>(renderSurface));
+    // Setup injection expections
+    EXPECT_CALL(*nativeWindow, query(NATIVE_WINDOW_WIDTH, _))
+            .WillOnce(DoAll(SetArgPointee<1>(oldWidth), Return(0)));
+    EXPECT_CALL(*nativeWindow, query(NATIVE_WINDOW_HEIGHT, _))
+            .WillOnce(DoAll(SetArgPointee<1>(oldHeight), Return(0)));
+    EXPECT_CALL(*nativeWindow, perform(9)).Times(1);
+    EXPECT_CALL(*nativeWindow, perform(13)).Times(1);
+    EXPECT_CALL(*nativeWindow, perform(30)).Times(1);
     display.inject();
 
     // There is a change to the viewport state
@@ -2007,9 +2000,7 @@ TEST_F(HandleTransactionLockedTest, processesDisplayHeightChanges) {
     // --------------------------------------------------------------------
     // Call Expectations
 
-    EXPECT_CALL(*renderSurface, setNativeWindow(nullptr)).Times(1);
     EXPECT_CALL(*displaySurface, resizeBuffers(oldWidth, newHeight)).Times(1);
-    EXPECT_CALL(*renderSurface, setNativeWindow(nativeWindow)).Times(1);
 
     // --------------------------------------------------------------------
     // Invocation
@@ -2562,14 +2553,23 @@ TEST_F(DisplayTransactionTest, onInitializeDisplaysSetsUpPrimaryDisplay) {
  */
 
 // Used when we simulate a display that supports doze.
+template <typename Display>
 struct DozeIsSupportedVariant {
     static constexpr bool DOZE_SUPPORTED = true;
     static constexpr IComposerClient::PowerMode ACTUAL_POWER_MODE_FOR_DOZE =
             IComposerClient::PowerMode::DOZE;
     static constexpr IComposerClient::PowerMode ACTUAL_POWER_MODE_FOR_DOZE_SUSPEND =
             IComposerClient::PowerMode::DOZE_SUSPEND;
+
+    static void setupComposerCallExpectations(DisplayTransactionTest* test) {
+        EXPECT_CALL(*test->mComposer, getDisplayCapabilities(Display::HWC_DISPLAY_ID, _))
+                .WillOnce(DoAll(SetArgPointee<1>(std::vector<Hwc2::DisplayCapability>(
+                                        {Hwc2::DisplayCapability::DOZE})),
+                                Return(Error::NONE)));
+    }
 };
 
+template <typename Display>
 // Used when we simulate a display that does not support doze.
 struct DozeNotSupportedVariant {
     static constexpr bool DOZE_SUPPORTED = false;
@@ -2577,6 +2577,12 @@ struct DozeNotSupportedVariant {
             IComposerClient::PowerMode::ON;
     static constexpr IComposerClient::PowerMode ACTUAL_POWER_MODE_FOR_DOZE_SUSPEND =
             IComposerClient::PowerMode::ON;
+
+    static void setupComposerCallExpectations(DisplayTransactionTest* test) {
+        EXPECT_CALL(*test->mComposer, getDisplayCapabilities(Display::HWC_DISPLAY_ID, _))
+                .WillOnce(DoAll(SetArgPointee<1>(std::vector<Hwc2::DisplayCapability>({})),
+                                Return(Error::NONE)));
+    }
 };
 
 struct EventThreadBaseSupportedVariant {
@@ -2833,17 +2839,19 @@ struct DisplayPowerCase {
 // A sample configuration for the primary display.
 // In addition to having event thread support, we emulate doze support.
 template <typename TransitionVariant>
-using PrimaryDisplayPowerCase = DisplayPowerCase<PrimaryDisplayVariant, DozeIsSupportedVariant,
-                                                 EventThreadIsSupportedVariant,
-                                                 DispSyncIsSupportedVariant, TransitionVariant>;
+using PrimaryDisplayPowerCase =
+        DisplayPowerCase<PrimaryDisplayVariant, DozeIsSupportedVariant<PrimaryDisplayVariant>,
+                         EventThreadIsSupportedVariant, DispSyncIsSupportedVariant,
+                         TransitionVariant>;
 
 // A sample configuration for the external display.
 // In addition to not having event thread support, we emulate not having doze
 // support.
 template <typename TransitionVariant>
-using ExternalDisplayPowerCase = DisplayPowerCase<ExternalDisplayVariant, DozeNotSupportedVariant,
-                                                  EventThreadNotSupportedVariant,
-                                                  DispSyncNotSupportedVariant, TransitionVariant>;
+using ExternalDisplayPowerCase =
+        DisplayPowerCase<ExternalDisplayVariant, DozeNotSupportedVariant<ExternalDisplayVariant>,
+                         EventThreadNotSupportedVariant, DispSyncNotSupportedVariant,
+                         TransitionVariant>;
 
 class SetPowerModeInternalTest : public DisplayTransactionTest {
 public:
@@ -2865,6 +2873,7 @@ void SetPowerModeInternalTest::transitionDisplayCommon() {
     // --------------------------------------------------------------------
     // Preconditions
 
+    Case::Doze::setupComposerCallExpectations(this);
     auto display =
             Case::injectDisplayWithInitialPowerMode(this, Case::Transition::INITIAL_POWER_MODE);
     Case::setInitialPrimaryHWVsyncEnabled(this,
@@ -2914,8 +2923,7 @@ TEST_F(SetPowerModeInternalTest, setPowerModeInternalDoesNothingIfNoChange) {
     EXPECT_EQ(HWC_POWER_MODE_NORMAL, display.mutableDisplayDevice()->getPowerMode());
 }
 
-// TODO(b/119263638): Temporarily disabled failing test
-TEST_F(SetPowerModeInternalTest, DISABLED_setPowerModeInternalDoesNothingIfVirtualDisplay) {
+TEST_F(SetPowerModeInternalTest, setPowerModeInternalDoesNothingIfVirtualDisplay) {
     using Case = HwcVirtualDisplayCase;
 
     // --------------------------------------------------------------------
@@ -2924,7 +2932,7 @@ TEST_F(SetPowerModeInternalTest, DISABLED_setPowerModeInternalDoesNothingIfVirtu
     // Insert display data so that the HWC thinks it created the virtual display.
     const auto displayId = Case::Display::DISPLAY_ID::get();
     ASSERT_TRUE(displayId);
-    mFlinger.mutableHwcDisplayData()[*displayId] = {};
+    mFlinger.mutableHwcDisplayData().try_emplace(*displayId);
 
     // A virtual display device is set up
     Case::Display::injectHwcDisplay(this);
@@ -2957,13 +2965,11 @@ TEST_F(SetPowerModeInternalTest, transitionsDisplayFromOnToOffPrimaryDisplay) {
     transitionDisplayCommon<PrimaryDisplayPowerCase<TransitionOnToOffVariant>>();
 }
 
-// TODO(b/119263638): Temporarily disabled failing test
-TEST_F(SetPowerModeInternalTest, DISABLED_transitionsDisplayFromDozeSuspendToOffPrimaryDisplay) {
+TEST_F(SetPowerModeInternalTest, transitionsDisplayFromDozeSuspendToOffPrimaryDisplay) {
     transitionDisplayCommon<PrimaryDisplayPowerCase<TransitionDozeSuspendToOffVariant>>();
 }
 
-// TODO(b/119263638): Temporarily disabled failing test
-TEST_F(SetPowerModeInternalTest, DISABLED_transitionsDisplayFromOnToDozePrimaryDisplay) {
+TEST_F(SetPowerModeInternalTest, transitionsDisplayFromOnToDozePrimaryDisplay) {
     transitionDisplayCommon<PrimaryDisplayPowerCase<TransitionOnToDozeVariant>>();
 }
 
@@ -2971,8 +2977,7 @@ TEST_F(SetPowerModeInternalTest, transitionsDisplayFromDozeSuspendToDozePrimaryD
     transitionDisplayCommon<PrimaryDisplayPowerCase<TransitionDozeSuspendToDozeVariant>>();
 }
 
-// TODO(b/119263638): Temporarily disabled failing test
-TEST_F(SetPowerModeInternalTest, DISABLED_transitionsDisplayFromDozeToOnPrimaryDisplay) {
+TEST_F(SetPowerModeInternalTest, transitionsDisplayFromDozeToOnPrimaryDisplay) {
     transitionDisplayCommon<PrimaryDisplayPowerCase<TransitionDozeToOnVariant>>();
 }
 
@@ -2988,8 +2993,7 @@ TEST_F(SetPowerModeInternalTest, transitionsDisplayFromOnToUnknownPrimaryDisplay
     transitionDisplayCommon<PrimaryDisplayPowerCase<TransitionOnToUnknownVariant>>();
 }
 
-// TODO(b/119263638): Temporarily disabled failing test
-TEST_F(SetPowerModeInternalTest, DISABLED_transitionsDisplayFromOffToOnExternalDisplay) {
+TEST_F(SetPowerModeInternalTest, transitionsDisplayFromOffToOnExternalDisplay) {
     transitionDisplayCommon<ExternalDisplayPowerCase<TransitionOffToOnVariant>>();
 }
 
@@ -2997,38 +3001,31 @@ TEST_F(SetPowerModeInternalTest, transitionsDisplayFromOffToDozeSuspendExternalD
     transitionDisplayCommon<ExternalDisplayPowerCase<TransitionOffToDozeSuspendVariant>>();
 }
 
-// TODO(b/119263638): Temporarily disabled failing test
-TEST_F(SetPowerModeInternalTest, DISABLED_transitionsDisplayFromOnToOffExternalDisplay) {
+TEST_F(SetPowerModeInternalTest, transitionsDisplayFromOnToOffExternalDisplay) {
     transitionDisplayCommon<ExternalDisplayPowerCase<TransitionOnToOffVariant>>();
 }
 
-// TODO(b/119263638): Temporarily disabled failing test
-TEST_F(SetPowerModeInternalTest, DISABLED_transitionsDisplayFromDozeSuspendToOffExternalDisplay) {
+TEST_F(SetPowerModeInternalTest, transitionsDisplayFromDozeSuspendToOffExternalDisplay) {
     transitionDisplayCommon<ExternalDisplayPowerCase<TransitionDozeSuspendToOffVariant>>();
 }
 
-// TODO(b/119263638): Temporarily disabled failing test
-TEST_F(SetPowerModeInternalTest, DISABLED_transitionsDisplayFromOnToDozeExternalDisplay) {
+TEST_F(SetPowerModeInternalTest, transitionsDisplayFromOnToDozeExternalDisplay) {
     transitionDisplayCommon<ExternalDisplayPowerCase<TransitionOnToDozeVariant>>();
 }
 
-// TODO(b/119263638): Temporarily disabled failing test
-TEST_F(SetPowerModeInternalTest, DISABLED_transitionsDisplayFromDozeSuspendToDozeExternalDisplay) {
+TEST_F(SetPowerModeInternalTest, transitionsDisplayFromDozeSuspendToDozeExternalDisplay) {
     transitionDisplayCommon<ExternalDisplayPowerCase<TransitionDozeSuspendToDozeVariant>>();
 }
 
-// TODO(b/119263638): Temporarily disabled failing test
-TEST_F(SetPowerModeInternalTest, DISABLED_transitionsDisplayFromDozeToOnExternalDisplay) {
+TEST_F(SetPowerModeInternalTest, transitionsDisplayFromDozeToOnExternalDisplay) {
     transitionDisplayCommon<ExternalDisplayPowerCase<TransitionDozeToOnVariant>>();
 }
 
-// TODO(b/119263638): Temporarily disabled failing test
-TEST_F(SetPowerModeInternalTest, DISABLED_transitionsDisplayFromDozeSuspendToOnExternalDisplay) {
+TEST_F(SetPowerModeInternalTest, transitionsDisplayFromDozeSuspendToOnExternalDisplay) {
     transitionDisplayCommon<ExternalDisplayPowerCase<TransitionDozeSuspendToOnVariant>>();
 }
 
-// TODO(b/119263638): Temporarily disabled failing test
-TEST_F(SetPowerModeInternalTest, DISABLED_transitionsDisplayFromOnToDozeSuspendExternalDisplay) {
+TEST_F(SetPowerModeInternalTest, transitionsDisplayFromOnToDozeSuspendExternalDisplay) {
     transitionDisplayCommon<ExternalDisplayPowerCase<TransitionOnToDozeSuspendVariant>>();
 }
 
