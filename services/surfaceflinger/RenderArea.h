@@ -61,7 +61,6 @@ public:
     // layers are then rotated around the center of the source crop, and
     // scaled to the physical render area linearly.
     virtual Rect getSourceCrop() const = 0;
-    virtual std::string getType() const = 0;
 
     // Returns the rotation of the source crop and the layers.
     ui::Transform::orientation_flags getRotationFlags() const { return mRotationFlags; };

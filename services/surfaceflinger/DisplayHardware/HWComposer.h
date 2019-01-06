@@ -17,49 +17,26 @@
 #ifndef ANDROID_SF_HWCOMPOSER_H
 #define ANDROID_SF_HWCOMPOSER_H
 
-#include "HWC2.h"
-
-#include <stdint.h>
-#include <sys/types.h>
-
-#include <ui/Fence.h>
-#include <ui/GraphicTypes.h>
-#include <utils/BitSet.h>
-#include <utils/Condition.h>
-#include <utils/Mutex.h>
-#include <utils/StrongPointer.h>
-#include <utils/Thread.h>
-#include <utils/Timers.h>
-#include <utils/Vector.h>
-
+#include <cstdint>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
+#include <android-base/thread_annotations.h>
+#include <ui/Fence.h>
+#include <ui/GraphicTypes.h>
+#include <utils/StrongPointer.h>
+#include <utils/Timers.h>
+
 #include "DisplayIdentification.h"
-
-extern "C" int clock_nanosleep(clockid_t clock_id, int flags,
-                           const struct timespec *request,
-                           struct timespec *remain);
-
-struct framebuffer_device_t;
-
-namespace HWC2 {
-    class Device;
-    class Display;
-}
+#include "HWC2.h"
 
 namespace android {
-// ---------------------------------------------------------------------------
 
-class DisplayDevice;
-class Fence;
-class FloatRect;
 class GraphicBuffer;
-class NativeHandle;
-class Region;
 class String8;
 class TestableSurfaceFlinger;
 struct CompositionInfo;
@@ -71,7 +48,7 @@ class Composer;
 class HWComposer
 {
 public:
-    explicit HWComposer(std::unique_ptr<android::Hwc2::Composer> composer);
+    explicit HWComposer(std::unique_ptr<Hwc2::Composer> composer);
 
     ~HWComposer();
 
@@ -82,6 +59,8 @@ public:
                                       DisplayIdentificationData* outData) const;
 
     bool hasCapability(HWC2::Capability capability) const;
+    bool hasDisplayCapability(const std::optional<DisplayId>& displayId,
+                              HWC2::DisplayCapability capability) const;
 
     // Attempts to allocate a virtual display and returns its ID if created on the HWC device.
     std::optional<DisplayId> allocateVirtualDisplay(uint32_t width, uint32_t height,
@@ -148,6 +127,11 @@ public:
 
     mat4 getDataspaceSaturationMatrix(DisplayId displayId, ui::Dataspace dataspace);
 
+    // Returns the attributes of the color sampling engine.
+    status_t getDisplayedContentSamplingAttributes(DisplayId displayId, ui::PixelFormat* outFormat,
+                                                   ui::Dataspace* outDataspace,
+                                                   uint8_t* outComponentMask);
+
     // Events handling ---------------------------------------------------------
 
     // Returns stable display ID (and display name on connection of new or previously disconnected
@@ -177,7 +161,7 @@ public:
     // for debugging ----------------------------------------------------------
     void dump(String8& out) const;
 
-    android::Hwc2::Composer* getComposer() const { return mHwcDevice->getComposer(); }
+    Hwc2::Composer* getComposer() const { return mHwcDevice->getComposer(); }
 
     // TODO(b/74619554): Remove special cases for internal/external display.
     std::optional<hwc2_display_t> getInternalHwcDisplayId() const { return mInternalHwcDisplayId; }
@@ -194,8 +178,6 @@ private:
 
     static void validateChange(HWC2::Composition from, HWC2::Composition to);
 
-    struct cb_context;
-
     struct DisplayData {
         bool isVirtual = false;
         bool hasClientComposition = false;
@@ -209,11 +191,16 @@ private:
         mutable std::unordered_map<int32_t,
                 std::shared_ptr<const HWC2::Display::Config>> configMap;
 
-        // protected by mVsyncLock
-        HWC2::Vsync vsyncEnabled = HWC2::Vsync::Disable;
-
         bool validateWasSkipped;
         HWC2::Error presentError;
+
+        bool vsyncTraceToggle = false;
+
+        std::mutex vsyncEnabledLock;
+        HWC2::Vsync vsyncEnabled GUARDED_BY(vsyncEnabledLock) = HWC2::Vsync::Disable;
+
+        mutable std::mutex lastHwVsyncLock;
+        nsecs_t lastHwVsync GUARDED_BY(lastHwVsyncLock) = 0;
     };
 
     std::unordered_map<DisplayId, DisplayData> mDisplayData;
@@ -227,25 +214,11 @@ private:
     std::optional<hwc2_display_t> mExternalHwcDisplayId;
     bool mHasMultiDisplaySupport = false;
 
-    // protect mDisplayData from races between prepare and dump
-    mutable Mutex mDisplayLock;
-
-    cb_context* mCBContext = nullptr;
-    std::unordered_map<DisplayId, size_t> mVSyncCounts;
-
     std::unordered_set<DisplayId> mFreeVirtualDisplayIds;
     uint32_t mNextVirtualDisplayId = 0;
     uint32_t mRemainingHwcVirtualDisplays{mHwcDevice->getMaxVirtualDisplayCount()};
-
-    // protected by mLock
-    mutable Mutex mLock;
-    mutable std::unordered_map<DisplayId, nsecs_t> mLastHwVSync;
-
-    // thread-safe
-    mutable Mutex mVsyncLock;
 };
 
-// ---------------------------------------------------------------------------
-}; // namespace android
+} // namespace android
 
 #endif // ANDROID_SF_HWCOMPOSER_H
