@@ -24,6 +24,8 @@
 #include "DisplayDevice.h"
 #include "LayerRejecter.h"
 
+#include "TimeStats/TimeStats.h"
+
 #include <renderengine/RenderEngine.h>
 
 #include <gui/BufferItem.h>
@@ -71,7 +73,7 @@ BufferLayer::~BufferLayer() {
         destroyAllHwcLayersPlusChildren();
     }
 
-    mTimeStats.onDestroy(getSequence());
+    mFlinger->mTimeStats->onDestroy(getSequence());
 }
 
 void BufferLayer::useSurfaceDamage() {
@@ -334,7 +336,7 @@ bool BufferLayer::onPostComposition(const std::optional<DisplayId>& displayId,
     mFrameTracker.setDesiredPresentTime(desiredPresentTime);
 
     const int32_t layerID = getSequence();
-    mTimeStats.setDesiredTime(layerID, mCurrentFrameNumber, desiredPresentTime);
+    mFlinger->mTimeStats->setDesiredTime(layerID, mCurrentFrameNumber, desiredPresentTime);
 
     std::shared_ptr<FenceTime> frameReadyFence = getCurrentFenceTime();
     if (frameReadyFence->isValid()) {
@@ -346,13 +348,13 @@ bool BufferLayer::onPostComposition(const std::optional<DisplayId>& displayId,
     }
 
     if (presentFence->isValid()) {
-        mTimeStats.setPresentFence(layerID, mCurrentFrameNumber, presentFence);
+        mFlinger->mTimeStats->setPresentFence(layerID, mCurrentFrameNumber, presentFence);
         mFrameTracker.setActualPresentFence(std::shared_ptr<FenceTime>(presentFence));
     } else if (displayId && mFlinger->getHwComposer().isConnected(*displayId)) {
         // The HWC doesn't support present fences, so use the refresh
         // timestamp instead.
         const nsecs_t actualPresentTime = mFlinger->getHwComposer().getRefreshTimestamp(*displayId);
-        mTimeStats.setPresentTime(layerID, mCurrentFrameNumber, actualPresentTime);
+        mFlinger->mTimeStats->setPresentTime(layerID, mCurrentFrameNumber, actualPresentTime);
         mFrameTracker.setActualPresentTime(actualPresentTime);
     }
 
@@ -394,6 +396,7 @@ Region BufferLayer::latchBuffer(bool& recomputeVisibleRegions, nsecs_t latchTime
     }
 
     // Capture the old state of the layer for comparisons later
+    Mutex::Autolock lock(mStateMutex);
     const State& s(getDrawingState());
     const bool oldOpacity = isOpaque(s);
     sp<GraphicBuffer> oldBuffer = mActiveBuffer;
@@ -429,26 +432,25 @@ Region BufferLayer::latchBuffer(bool& recomputeVisibleRegions, nsecs_t latchTime
     }
 
     ui::Dataspace dataSpace = getDrawingDataSpace();
-    // treat modern dataspaces as legacy dataspaces whenever possible, until
-    // we can trust the buffer producers
+    // translate legacy dataspaces to modern dataspaces
     switch (dataSpace) {
-        case ui::Dataspace::V0_SRGB:
-            dataSpace = ui::Dataspace::SRGB;
+        case ui::Dataspace::SRGB:
+            dataSpace = ui::Dataspace::V0_SRGB;
             break;
-        case ui::Dataspace::V0_SRGB_LINEAR:
-            dataSpace = ui::Dataspace::SRGB_LINEAR;
+        case ui::Dataspace::SRGB_LINEAR:
+            dataSpace = ui::Dataspace::V0_SRGB_LINEAR;
             break;
-        case ui::Dataspace::V0_JFIF:
-            dataSpace = ui::Dataspace::JFIF;
+        case ui::Dataspace::JFIF:
+            dataSpace = ui::Dataspace::V0_JFIF;
             break;
-        case ui::Dataspace::V0_BT601_625:
-            dataSpace = ui::Dataspace::BT601_625;
+        case ui::Dataspace::BT601_625:
+            dataSpace = ui::Dataspace::V0_BT601_625;
             break;
-        case ui::Dataspace::V0_BT601_525:
-            dataSpace = ui::Dataspace::BT601_525;
+        case ui::Dataspace::BT601_525:
+            dataSpace = ui::Dataspace::V0_BT601_525;
             break;
-        case ui::Dataspace::V0_BT709:
-            dataSpace = ui::Dataspace::BT709;
+        case ui::Dataspace::BT709:
+            dataSpace = ui::Dataspace::V0_BT709;
             break;
         default:
             break;
@@ -501,7 +503,7 @@ Region BufferLayer::latchBuffer(bool& recomputeVisibleRegions, nsecs_t latchTime
 
     // FIXME: postedRegion should be dirty & bounds
     // transform the dirty region to window-manager space
-    return getTransform().transform(Region(getBufferSize(s)));
+    return getTransformLocked().transform(Region(getBufferSize(s)));
 }
 
 // transaction
@@ -549,7 +551,7 @@ bool BufferLayer::latchUnsignaledBuffers() {
 
 // h/w composer set-up
 bool BufferLayer::allTransactionsSignaled() {
-    auto headFrameNumber = getHeadFrameNumber();
+    auto headFrameNumber = getHeadFrameNumberLocked();
     bool matchingFramesFound = false;
     bool allTransactionsApplied = true;
     Mutex::Autolock lock(mLocalSyncPointMutex);
@@ -602,6 +604,7 @@ bool BufferLayer::needsFiltering(const RenderArea& renderArea) const {
 
 void BufferLayer::drawWithOpenGL(const RenderArea& renderArea, bool useIdentityTransform) const {
     ATRACE_CALL();
+    Mutex::Autolock lock(mStateMutex);
     const State& s(getDrawingState());
 
     computeGeometry(renderArea, getBE().mMesh, useIdentityTransform);
@@ -620,9 +623,9 @@ void BufferLayer::drawWithOpenGL(const RenderArea& renderArea, bool useIdentityT
      * minimal value)? Or, we could make GL behave like HWC -- but this feel
      * like more of a hack.
      */
-    const Rect bounds{computeBounds()}; // Rounds from FloatRect
+    const Rect bounds{computeBoundsLocked()}; // Rounds from FloatRect
 
-    ui::Transform t = getTransform();
+    ui::Transform t = getTransformLocked();
     Rect win = bounds;
     const int bufferWidth = getBufferSize(s).getWidth();
     const int bufferHeight = getBufferSize(s).getHeight();
@@ -641,14 +644,20 @@ void BufferLayer::drawWithOpenGL(const RenderArea& renderArea, bool useIdentityT
     texCoords[2] = vec2(right, 1.0f - bottom);
     texCoords[3] = vec2(right, 1.0f - top);
 
+    const auto roundedCornerState = getRoundedCornerStateLocked();
+    const auto cropRect = roundedCornerState.cropRect;
+    setupRoundedCornersCropCoordinates(win, cropRect);
+
     auto& engine(mFlinger->getRenderEngine());
     engine.setupLayerBlending(mPremultipliedAlpha, isOpaque(s), false /* disableTexture */,
-                              getColor());
+                              getColor(), roundedCornerState.radius);
     engine.setSourceDataSpace(mCurrentDataSpace);
 
     if (isHdrY410()) {
         engine.setSourceY410BT2020(true);
     }
+
+    engine.setupCornerRadiusCropSize(cropRect.getWidth(), cropRect.getHeight());
 
     engine.drawMesh(getBE().mMesh);
     engine.disableBlending();
@@ -657,7 +666,12 @@ void BufferLayer::drawWithOpenGL(const RenderArea& renderArea, bool useIdentityT
 }
 
 uint64_t BufferLayer::getHeadFrameNumber() const {
-    if (hasFrameUpdate()) {
+    Mutex::Autolock lock(mStateMutex);
+    return getHeadFrameNumberLocked();
+}
+
+uint64_t BufferLayer::getHeadFrameNumberLocked() const {
+    if (hasFrameUpdateLocked()) {
         return getFrameNumber();
     } else {
         return mCurrentFrameNumber;
@@ -684,7 +698,7 @@ Rect BufferLayer::getBufferSize(const State& s) const {
         std::swap(bufWidth, bufHeight);
     }
 
-    if (getTransformToDisplayInverse()) {
+    if (getTransformToDisplayInverseLocked()) {
         uint32_t invTransform = DisplayDevice::getPrimaryDisplayOrientationTransform();
         if (invTransform & ui::Transform::ROT_90) {
             std::swap(bufWidth, bufHeight);

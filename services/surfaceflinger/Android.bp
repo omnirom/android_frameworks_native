@@ -9,7 +9,6 @@ cc_defaults {
         "-Wunused",
         "-Wunreachable-code",
     ],
-    cppflags: ["-std=c++1z"],
 }
 
 cc_defaults {
@@ -48,7 +47,7 @@ cc_defaults {
         "libhwbinder",
         "liblayers_proto",
         "liblog",
-    	"libnativewindow",
+	"libnativewindow",
         "libpdx_default_transport",
         "libprotobuf-cpp-lite",
         "libsync",
@@ -140,6 +139,7 @@ filegroup {
         "Scheduler/DispSyncSource.cpp",
         "Scheduler/EventControlThread.cpp",
         "Scheduler/EventThread.cpp",
+        "Scheduler/IdleTimer.cpp",
         "Scheduler/LayerHistory.cpp",
         "Scheduler/MessageQueue.cpp",
         "Scheduler/Scheduler.cpp",

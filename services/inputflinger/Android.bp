@@ -15,8 +15,6 @@
 cc_library_shared {
     name: "libinputflinger",
 
-    cpp_std: "c++17",
-
     srcs: [
         "InputDispatcher.cpp",
         "InputManager.cpp",
@@ -24,6 +22,7 @@ cc_library_shared {
 
     shared_libs: [
         "libinputflinger_base",
+        "libinputreporter",
         "libinputreader",
         "libbase",
         "libbinder",
@@ -60,12 +59,11 @@ cc_library_headers {
 cc_library_shared {
     name: "libinputreader",
 
-    cpp_std: "c++17",
-
     srcs: [
         "EventHub.cpp",
         "InputReader.cpp",
         "InputReaderFactory.cpp",
+        "TouchVideoDevice.cpp",
     ],
 
     shared_libs: [
@@ -100,8 +98,6 @@ cc_library_shared {
 cc_library_shared {
     name: "libinputflinger_base",
 
-    cpp_std: "c++17",
-
     srcs: [
         "InputListener.cpp",
         "InputReaderBase.cpp",
@@ -110,6 +106,35 @@ cc_library_shared {
     shared_libs: [
         "libbase",
         "libinput",
+        "liblog",
+        "libutils",
+    ],
+
+    header_libs: [
+        "libinputflinger_headers",
+    ],
+
+    export_header_lib_headers: [
+        "libinputflinger_headers",
+    ],
+
+    cflags: [
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+        "-Wno-unused-parameter",
+    ],
+}
+
+cc_library_shared {
+    name: "libinputreporter",
+
+    srcs: [
+        "InputReporter.cpp",
+    ],
+
+    shared_libs: [
+        "libbase",
         "liblog",
         "libutils",
     ],

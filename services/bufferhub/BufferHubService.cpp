@@ -35,26 +35,92 @@ Return<void> BufferHubService::allocateBuffer(const HardwareBufferDescription& d
 
     std::shared_ptr<BufferNode> node =
             std::make_shared<BufferNode>(desc.width, desc.height, desc.layers, desc.format,
-                                         desc.usage, userMetadataSize, nodeIdGenerator.getId());
+                                         desc.usage, userMetadataSize,
+                                         BufferHubIdGenerator::getInstance().getId());
     if (node == nullptr || !node->IsValid()) {
         ALOGE("%s: creating BufferNode failed.", __FUNCTION__);
-        _hidl_cb(/*bufferClient=*/nullptr, /*status=*/BufferHubStatus::ALLOCATION_FAILED);
+        _hidl_cb(/*status=*/BufferHubStatus::ALLOCATION_FAILED, /*bufferClient=*/nullptr,
+                 /*bufferTraits=*/{});
         return Void();
     }
 
     sp<BufferClient> client = BufferClient::create(this, node);
     // Add it to list for bookkeeping and dumpsys.
-    std::lock_guard<std::mutex> lock(mClientListMutex);
-    mClientList.push_back(client);
+    std::lock_guard<std::mutex> lock(mClientSetMutex);
+    mClientSet.emplace(client);
 
-    _hidl_cb(/*bufferClient=*/client, /*status=*/BufferHubStatus::NO_ERROR);
+    BufferTraits bufferTraits = {/*bufferDesc=*/description,
+                                 /*bufferHandle=*/hidl_handle(node->buffer_handle()),
+                                 // TODO(b/116681016): return real data to client
+                                 /*bufferInfo=*/hidl_handle()};
+
+    _hidl_cb(/*status=*/BufferHubStatus::NO_ERROR, /*bufferClient=*/client,
+             /*bufferTraits=*/bufferTraits);
     return Void();
 }
 
-Return<void> BufferHubService::importBuffer(const hidl_handle& /*nativeHandle*/,
+Return<void> BufferHubService::importBuffer(const hidl_handle& tokenHandle,
                                             importBuffer_cb _hidl_cb) {
-    // TODO(b/118614157): implement buffer import
-    _hidl_cb(/*bufferClient=*/nullptr, /*status=*/BufferHubStatus::NO_ERROR);
+    if (!tokenHandle.getNativeHandle() || tokenHandle->numFds != 0 || tokenHandle->numInts != 1) {
+        // nullptr handle or wrong format
+        _hidl_cb(/*status=*/BufferHubStatus::INVALID_TOKEN, /*bufferClient=*/nullptr,
+                 /*bufferTraits=*/{});
+        return Void();
+    }
+
+    uint32_t token = tokenHandle->data[0];
+
+    wp<BufferClient> originClientWp;
+    {
+        std::lock_guard<std::mutex> lock(mTokenMapMutex);
+        auto iter = mTokenMap.find(token);
+        if (iter == mTokenMap.end()) {
+            // Invalid token
+            _hidl_cb(/*status=*/BufferHubStatus::INVALID_TOKEN, /*bufferClient=*/nullptr,
+                     /*bufferTraits=*/{});
+            return Void();
+        }
+
+        originClientWp = iter->second;
+        mTokenMap.erase(iter);
+    }
+
+    // Check if original client is dead
+    sp<BufferClient> originClient = originClientWp.promote();
+    if (!originClient) {
+        // Should not happen since token should be removed if already gone
+        ALOGE("%s: original client %p gone!", __FUNCTION__, originClientWp.unsafe_get());
+        _hidl_cb(/*status=*/BufferHubStatus::BUFFER_FREED, /*bufferClient=*/nullptr,
+                 /*bufferTraits=*/{});
+        return Void();
+    }
+
+    sp<BufferClient> client = new BufferClient(*originClient);
+    uint32_t clientStateMask = client->getBufferNode()->AddNewActiveClientsBitToMask();
+    if (clientStateMask == 0U) {
+        // Reach max client count
+        ALOGE("%s: import failed, BufferNode#%u reached maximum clients.", __FUNCTION__,
+              client->getBufferNode()->id());
+        _hidl_cb(/*status=*/BufferHubStatus::MAX_CLIENT, /*bufferClient=*/nullptr,
+                 /*bufferTraits=*/{});
+        return Void();
+    }
+
+    std::lock_guard<std::mutex> lock(mClientSetMutex);
+    mClientSet.emplace(client);
+
+    std::shared_ptr<BufferNode> node = client->getBufferNode();
+
+    HardwareBufferDescription bufferDesc;
+    memcpy(&bufferDesc, &node->buffer_desc(), sizeof(HardwareBufferDescription));
+
+    BufferTraits bufferTraits = {/*bufferDesc=*/bufferDesc,
+                                 /*bufferHandle=*/hidl_handle(node->buffer_handle()),
+                                 // TODO(b/116681016): return real data to client
+                                 /*bufferInfo=*/hidl_handle()};
+
+    _hidl_cb(/*status=*/BufferHubStatus::NO_ERROR, /*bufferClient=*/client,
+             /*bufferTraits=*/bufferTraits);
     return Void();
 }
 
@@ -75,6 +141,30 @@ hidl_handle BufferHubService::registerToken(const wp<BufferClient>& client) {
 
     mTokenMap.emplace(token, client);
     return returnToken;
+}
+
+void BufferHubService::onClientClosed(const BufferClient* client) {
+    removeTokenByClient(client);
+
+    std::lock_guard<std::mutex> lock(mClientSetMutex);
+    auto iter = std::find(mClientSet.begin(), mClientSet.end(), client);
+    if (iter != mClientSet.end()) {
+        mClientSet.erase(iter);
+    }
+}
+
+void BufferHubService::removeTokenByClient(const BufferClient* client) {
+    std::lock_guard<std::mutex> lock(mTokenMapMutex);
+    auto iter = mTokenMap.begin();
+    while (iter != mTokenMap.end()) {
+        if (iter->second == client) {
+            auto oldIter = iter;
+            ++iter;
+            mTokenMap.erase(oldIter);
+        } else {
+            ++iter;
+        }
+    }
 }
 
 } // namespace implementation

@@ -6,16 +6,6 @@
 namespace android {
 namespace dvr {
 
-// BufferConsumer was originally poorly named and gets easily confused with
-// IGraphicBufferConsumer. Actually, BufferConsumer is a single buffer that can
-// consume (i.e. read) data from a buffer, but it doesn't consume buffer. On
-// the other hand, IGraphicBufferConsumer is the consumer end of a BufferQueue
-// and it is used to consume buffers.
-//
-// TODO(b/116855254): Remove this typedef once rename is complete in other
-// projects and/or branches.
-typedef class ConsumerBuffer BufferConsumer;
-
 // This is a connection to a producer buffer, which can be located in another
 // application. When that buffer is Post()ed, this fd will be signaled and
 // Acquire allows read access. The user is responsible for making sure that
@@ -48,9 +38,8 @@ class ConsumerBuffer : public pdx::ClientBase<ConsumerBuffer, BufferHubBase> {
   // Asynchronously acquires a bufer.
   int AcquireAsync(DvrNativeBufferMetadata* out_meta, LocalHandle* out_fence);
 
-  // This should be called after a successful Acquire call. If the fence is
-  // valid the fence determines the buffer usage, otherwise the buffer is
-  // released immediately.
+  // Releases the buffer from any buffer state. If the fence is valid the fence
+  // determines the buffer usage, otherwise the buffer is released immediately.
   // This returns zero or a negative unix error code.
   int Release(const LocalHandle& release_fence);
   int ReleaseAsync();

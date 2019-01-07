@@ -72,7 +72,6 @@
 #include "Scheduler/MessageQueue.h"
 #include "Scheduler/Scheduler.h"
 #include "Scheduler/VSyncModulator.h"
-#include "TimeStats/TimeStats.h"
 
 #include <map>
 #include <mutex>
@@ -103,6 +102,7 @@ class InjectVSyncSource;
 class Layer;
 class Surface;
 class SurfaceFlingerBE;
+class TimeStats;
 class VSyncSource;
 struct CompositionInfo;
 
@@ -442,7 +442,9 @@ private:
     virtual void destroyDisplay(const sp<IBinder>& displayToken);
     virtual sp<IBinder> getBuiltInDisplay(int32_t id);
     virtual void setTransactionState(const Vector<ComposerState>& state,
-            const Vector<DisplayState>& displays, uint32_t flags);
+                                     const Vector<DisplayState>& displays, uint32_t flags,
+                                     const sp<IBinder>& applyToken,
+                                     const InputWindowCommands& inputWindowCommands);
     virtual void bootFinished();
     virtual bool authenticateSurfaceTexture(
         const sp<IGraphicBufferProducer>& bufferProducer) const;
@@ -483,6 +485,12 @@ private:
     virtual status_t getDisplayedContentSamplingAttributes(
             const sp<IBinder>& display, ui::PixelFormat* outFormat, ui::Dataspace* outDataspace,
             uint8_t* outComponentMask) const override;
+    virtual status_t setDisplayContentSamplingEnabled(const sp<IBinder>& display, bool enable,
+                                                      uint8_t componentMask,
+                                                      uint64_t maxFrames) const override;
+    virtual status_t getDisplayedContentSample(const sp<IBinder>& display, uint64_t maxFrames,
+                                               uint64_t timestamp,
+                                               DisplayedFrameStats* outStats) const override;
 
     /* ------------------------------------------------------------------------
      * DeathRecipient interface
@@ -518,7 +526,7 @@ private:
     // called on the main thread in response to setActiveConfig()
     void setActiveConfigInternal(const sp<DisplayDevice>& display, int mode);
     // called on the main thread in response to setPowerMode()
-    void setPowerModeInternal(const sp<DisplayDevice>& display, int mode, bool stateLockHeld);
+    void setPowerModeInternal(const sp<DisplayDevice>& display, int mode);
 
     // Called on the main thread in response to setActiveColorMode()
     void setActiveColorModeInternal(const sp<DisplayDevice>& display, ui::ColorMode colorMode,
@@ -547,6 +555,10 @@ private:
     /* ------------------------------------------------------------------------
      * Transactions
      */
+    void applyTransactionState(const Vector<ComposerState>& state,
+                               const Vector<DisplayState>& displays, uint32_t flags,
+                               const InputWindowCommands& inputWindowCommands) REQUIRES(mStateLock);
+    bool flushTransactionQueues();
     uint32_t getTransactionFlags(uint32_t flags);
     uint32_t peekTransactionFlags();
     // Can only be called from the main thread or with mStateLock held
@@ -555,9 +567,11 @@ private:
     void latchAndReleaseBuffer(const sp<Layer>& layer);
     void commitTransaction();
     bool containsAnyInvalidClientState(const Vector<ComposerState>& states);
+    bool composerStateContainsUnsignaledFences(const Vector<ComposerState>& states);
     uint32_t setClientStateLocked(const ComposerState& composerState);
     uint32_t setDisplayStateLocked(const DisplayState& s);
     void setDestroyStateLocked(const ComposerState& composerState);
+    uint32_t addInputWindowCommands(const InputWindowCommands& inputWindowCommands);
 
     /* ------------------------------------------------------------------------
      * Layer management
@@ -595,7 +609,7 @@ private:
     // called when all clients have released all their references to
     // this layer meaning it is entirely safe to destroy all
     // resources associated to this layer.
-    void onHandleDestroyed(const sp<Layer>& layer);
+    void onHandleDestroyed(sp<Layer>& layer);
 
     // remove a layer from SurfaceFlinger immediately
     status_t removeLayer(const sp<Layer>& layer);
@@ -803,25 +817,25 @@ private:
         return hwcDisplayId ? getHwComposer().toPhysicalDisplayId(*hwcDisplayId) : std::nullopt;
     }
 
-    void listLayersLocked(const Vector<String16>& args, size_t& index, String8& result) const;
-    void dumpStatsLocked(const Vector<String16>& args, size_t& index, String8& result) const;
-    void clearStatsLocked(const Vector<String16>& args, size_t& index, String8& result);
-    void dumpAllLocked(const Vector<String16>& args, size_t& index, String8& result) const;
+    void listLayersLocked(const Vector<String16>& args, size_t& index, std::string& result) const;
+    void dumpStatsLocked(const Vector<String16>& args, size_t& index, std::string& result) const;
+    void clearStatsLocked(const Vector<String16>& args, size_t& index, std::string& result);
+    void dumpAllLocked(const Vector<String16>& args, size_t& index, std::string& result) const;
     bool startDdmConnection();
-    void appendSfConfigString(String8& result) const;
+    void appendSfConfigString(std::string& result) const;
 
     void logFrameStats();
 
-    void dumpStaticScreenStats(String8& result) const;
+    void dumpStaticScreenStats(std::string& result) const;
     // Not const because each Layer needs to query Fences and cache timestamps.
-    void dumpFrameEventsLocked(String8& result);
+    void dumpFrameEventsLocked(std::string& result);
 
     void recordBufferingStats(const char* layerName,
             std::vector<OccupancyTracker::Segment>&& history);
-    void dumpBufferingStats(String8& result) const;
-    void dumpDisplayIdentificationData(String8& result) const;
-    void dumpWideColorInfo(String8& result) const;
-    void dumpFrameCompositionInfo(String8& result) const;
+    void dumpBufferingStats(std::string& result) const;
+    void dumpDisplayIdentificationData(std::string& result) const;
+    void dumpWideColorInfo(std::string& result) const;
+    void dumpFrameCompositionInfo(std::string& result) const;
     LayersProto dumpProtoInfo(LayerVector::StateSet stateSet) const;
     LayersProto dumpVisibleLayersProtoInfo(const DisplayDevice& display) const;
 
@@ -926,7 +940,7 @@ private:
     std::unique_ptr<SurfaceInterceptor> mInterceptor{mFactory.createSurfaceInterceptor(this)};
     SurfaceTracing mTracing;
     LayerStats mLayerStats;
-    TimeStats& mTimeStats = TimeStats::getInstance();
+    std::unique_ptr<TimeStats> mTimeStats;
     bool mUseHwcVirtualDisplays = false;
     std::atomic<uint32_t> mFrameMissedCount{0};
 
@@ -959,6 +973,22 @@ private:
     uint32_t mTexturePoolSize = 0;
     std::vector<uint32_t> mTexturePool;
 
+    struct IBinderHash {
+        std::size_t operator()(const sp<IBinder>& strongPointer) const {
+            return std::hash<IBinder*>{}(strongPointer.get());
+        }
+    };
+    struct TransactionState {
+        TransactionState(const Vector<ComposerState>& composerStates,
+                         const Vector<DisplayState>& displayStates, uint32_t transactionFlags)
+              : states(composerStates), displays(displayStates), flags(transactionFlags) {}
+
+        Vector<ComposerState> states;
+        Vector<DisplayState> displays;
+        uint32_t flags;
+    };
+    std::unordered_map<sp<IBinder>, std::queue<TransactionState>, IBinderHash> mTransactionQueues;
+
     /* ------------------------------------------------------------------------
      * Feature prototyping
      */
@@ -980,8 +1010,6 @@ private:
     std::thread::id mMainThreadId;
 
     DisplayColorSetting mDisplayColorSetting = DisplayColorSetting::ENHANCED;
-    // Applied on Display P3 layers when the render intent is non-colorimetric.
-    mat4 mEnhancedSaturationMatrix;
 
     ui::Dataspace mDefaultCompositionDataspace;
     ui::Dataspace mWideColorGamutCompositionDataspace;
@@ -994,6 +1022,8 @@ private:
     sp<Scheduler::ConnectionHandle> mSfConnectionHandle;
 
     sp<IInputFlinger> mInputFlinger;
+
+    InputWindowCommands mInputWindowCommands;
 };
 }; // namespace android
 

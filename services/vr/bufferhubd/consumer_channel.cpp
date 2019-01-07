@@ -17,7 +17,7 @@ namespace android {
 namespace dvr {
 
 ConsumerChannel::ConsumerChannel(BufferHubService* service, int buffer_id,
-                                 int channel_id, uint64_t client_state_mask,
+                                 int channel_id, uint32_t client_state_mask,
                                  const std::shared_ptr<Channel> producer)
     : BufferHubChannel(service, buffer_id, channel_id, kConsumerType),
       client_state_mask_(client_state_mask),
@@ -153,11 +153,21 @@ Status<void> ConsumerChannel::OnConsumerRelease(Message& message,
   }
 }
 
-bool ConsumerChannel::OnProducerPosted() {
+void ConsumerChannel::OnProducerGained() {
+  // Clear the signal if exist. There is a possiblity that the signal still
+  // exist in consumer client when producer gains the buffer, e.g. newly added
+  // consumer fail to acquire the previous posted buffer in time. Then, when
+  // producer gains back the buffer, posts the buffer again and signal the
+  // consumer later, there won't be an signal change in eventfd, and thus,
+  // consumer will miss the posted buffer later. Thus, we need to clear the
+  // signal in consumer clients if the signal exist.
+  ClearAvailable();
+}
+
+void ConsumerChannel::OnProducerPosted() {
   acquired_ = false;
   released_ = false;
   SignalAvailable();
-  return true;
 }
 
 void ConsumerChannel::OnProducerClosed() {

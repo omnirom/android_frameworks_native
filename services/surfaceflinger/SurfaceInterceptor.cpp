@@ -101,21 +101,23 @@ void SurfaceInterceptor::addInitialSurfaceStateLocked(Increment* increment,
     transaction->set_animation(layerFlags & BnSurfaceComposer::eAnimation);
 
     const int32_t layerId(getLayerId(layer));
-    addPositionLocked(transaction, layerId, layer->mCurrentState.active_legacy.transform.tx(),
-                      layer->mCurrentState.active_legacy.transform.ty());
-    addDepthLocked(transaction, layerId, layer->mCurrentState.z);
-    addAlphaLocked(transaction, layerId, layer->mCurrentState.color.a);
+    Mutex::Autolock lock(layer->mStateMutex);
+    addPositionLocked(transaction, layerId, layer->mState.current.active_legacy.transform.tx(),
+                      layer->mState.current.active_legacy.transform.ty());
+    addDepthLocked(transaction, layerId, layer->mState.current.z);
+    addAlphaLocked(transaction, layerId, layer->mState.current.color.a);
     addTransparentRegionLocked(transaction, layerId,
-                               layer->mCurrentState.activeTransparentRegion_legacy);
-    addLayerStackLocked(transaction, layerId, layer->mCurrentState.layerStack);
-    addCropLocked(transaction, layerId, layer->mCurrentState.crop_legacy);
-    if (layer->mCurrentState.barrierLayer_legacy != nullptr) {
+                               layer->mState.current.activeTransparentRegion_legacy);
+    addLayerStackLocked(transaction, layerId, layer->mState.current.layerStack);
+    addCropLocked(transaction, layerId, layer->mState.current.crop_legacy);
+    addCornerRadiusLocked(transaction, layerId, layer->mState.current.cornerRadius);
+    if (layer->mState.current.barrierLayer_legacy != nullptr) {
         addDeferTransactionLocked(transaction, layerId,
-                                  layer->mCurrentState.barrierLayer_legacy.promote(),
-                                  layer->mCurrentState.frameNumber_legacy);
+                                  layer->mState.current.barrierLayer_legacy.promote(),
+                                  layer->mState.current.frameNumber_legacy);
     }
     addOverrideScalingModeLocked(transaction, layerId, layer->getEffectiveScalingMode());
-    addFlagsLocked(transaction, layerId, layer->mCurrentState.flags);
+    addFlagsLocked(transaction, layerId, layer->mState.current.flags);
 }
 
 void SurfaceInterceptor::addInitialDisplayStateLocked(Increment* increment,
@@ -289,6 +291,14 @@ void SurfaceInterceptor::addCropLocked(Transaction* transaction, int32_t layerId
     setProtoRectLocked(protoRect, rect);
 }
 
+void SurfaceInterceptor::addCornerRadiusLocked(Transaction* transaction, int32_t layerId,
+                                       float cornerRadius)
+{
+    SurfaceChange* change(createSurfaceChangeLocked(transaction, layerId));
+    CornerRadiusChange* cornerRadiusChange(change->mutable_corner_radius());
+    cornerRadiusChange->set_corner_radius(cornerRadius);
+}
+
 void SurfaceInterceptor::addDeferTransactionLocked(Transaction* transaction, int32_t layerId,
         const sp<const Layer>& layer, uint64_t frameNumber)
 {
@@ -349,6 +359,9 @@ void SurfaceInterceptor::addSurfaceChangesLocked(Transaction* transaction,
     }
     if (state.what & layer_state_t::eCropChanged_legacy) {
         addCropLocked(transaction, layerId, state.crop_legacy);
+    }
+    if (state.what & layer_state_t::eCornerRadiusChanged) {
+        addCornerRadiusLocked(transaction, layerId, state.cornerRadius);
     }
     if (state.what & layer_state_t::eDeferTransaction_legacy) {
         sp<Layer> otherLayer = nullptr;
@@ -414,8 +427,9 @@ void SurfaceInterceptor::addSurfaceCreationLocked(Increment* increment,
     SurfaceCreation* creation(increment->mutable_surface_creation());
     creation->set_id(getLayerId(layer));
     creation->set_name(getLayerName(layer));
-    creation->set_w(layer->mCurrentState.active_legacy.w);
-    creation->set_h(layer->mCurrentState.active_legacy.h);
+    Mutex::Autolock lock(layer->mStateMutex);
+    creation->set_w(layer->mState.current.active_legacy.w);
+    creation->set_h(layer->mState.current.active_legacy.h);
 }
 
 void SurfaceInterceptor::addSurfaceDeletionLocked(Increment* increment,

@@ -130,6 +130,10 @@ private:
     void updateLooperRegistration(const sp<Looper>& looper); void
             updateLooperRegistrationLocked(const sp<Looper>& looper);
 
+    // Returns whether sensor access is available based on both the uid being active and sensor
+    // privacy not being enabled.
+    bool hasSensorAccess();
+
     sp<SensorService> const mService;
     sp<BitTube> mChannel;
     uid_t mUid;
@@ -165,6 +169,8 @@ private:
 
     sensors_event_t *mEventCache;
     int mCacheSize, mMaxCacheSize;
+    int64_t mTimeOfLastEventDrop;
+    int mEventsDropped;
     String8 mPackageName;
     const String16 mOpPackageName;
 #if DEBUG_CONNECTIONS

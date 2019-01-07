@@ -29,20 +29,22 @@ namespace android {
 namespace renderengine {
 namespace gl {
 
-class GLES20RenderEngine;
+class GLESRenderEngine;
 
 class GLImage : public renderengine::Image {
 public:
-    explicit GLImage(const GLES20RenderEngine& engine);
+    explicit GLImage(const GLESRenderEngine& engine);
     ~GLImage() override;
 
     bool setNativeWindowBuffer(ANativeWindowBuffer* buffer, bool isProtected) override;
 
     EGLImageKHR getEGLImage() const { return mEGLImage; }
+    bool isProtected() const { return mProtected; }
 
 private:
     EGLDisplay mEGLDisplay;
     EGLImageKHR mEGLImage = EGL_NO_IMAGE_KHR;
+    bool mProtected = false;
 
     DISALLOW_COPY_AND_ASSIGN(GLImage);
 };

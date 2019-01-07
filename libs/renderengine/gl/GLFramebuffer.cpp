@@ -21,13 +21,13 @@
 #include <GLES2/gl2.h>
 #include <GLES2/gl2ext.h>
 #include <nativebase/nativebase.h>
-#include "GLES20RenderEngine.h"
+#include "GLESRenderEngine.h"
 
 namespace android {
 namespace renderengine {
 namespace gl {
 
-GLFramebuffer::GLFramebuffer(const GLES20RenderEngine& engine)
+GLFramebuffer::GLFramebuffer(const GLESRenderEngine& engine)
       : mEGLDisplay(engine.getEGLDisplay()), mEGLImage(EGL_NO_IMAGE_KHR) {
     glGenTextures(1, &mTextureName);
     glGenFramebuffers(1, &mFramebufferName);
@@ -39,7 +39,7 @@ GLFramebuffer::~GLFramebuffer() {
     eglDestroyImageKHR(mEGLDisplay, mEGLImage);
 }
 
-bool GLFramebuffer::setNativeWindowBuffer(ANativeWindowBuffer* nativeBuffer) {
+bool GLFramebuffer::setNativeWindowBuffer(ANativeWindowBuffer* nativeBuffer, bool isProtected) {
     if (mEGLImage != EGL_NO_IMAGE_KHR) {
         eglDestroyImageKHR(mEGLDisplay, mEGLImage);
         mEGLImage = EGL_NO_IMAGE_KHR;
@@ -48,8 +48,13 @@ bool GLFramebuffer::setNativeWindowBuffer(ANativeWindowBuffer* nativeBuffer) {
     }
 
     if (nativeBuffer) {
+        EGLint attributes[] = {
+                isProtected ? EGL_PROTECTED_CONTENT_EXT : EGL_NONE,
+                isProtected ? EGL_TRUE : EGL_NONE,
+                EGL_NONE,
+        };
         mEGLImage = eglCreateImageKHR(mEGLDisplay, EGL_NO_CONTEXT, EGL_NATIVE_BUFFER_ANDROID,
-                                      nativeBuffer, nullptr);
+                                      nativeBuffer, attributes);
         if (mEGLImage == EGL_NO_IMAGE_KHR) {
             return false;
         }

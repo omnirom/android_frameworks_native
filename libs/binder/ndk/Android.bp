@@ -23,6 +23,8 @@ cc_library {
         "include_apex",
     ],
 
+    cflags: ["-Wall", "-Wextra", "-Werror"],
+
     srcs: [
         "ibinder.cpp",
         "ibinder_jni.cpp",
@@ -39,9 +41,11 @@ cc_library {
         "libutils",
     ],
 
-    cpp_std: "c++17",
-
     version_script: "libbinder_ndk.map.txt",
+    stubs: {
+        symbol_file: "libbinder_ndk.map.txt",
+        versions: ["29"],
+    },
 }
 
 ndk_headers {

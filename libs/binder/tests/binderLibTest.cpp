@@ -72,6 +72,7 @@ enum BinderLibTestTranscationCode {
     BINDER_LIB_TEST_GET_PTR_SIZE_TRANSACTION,
     BINDER_LIB_TEST_CREATE_BINDER_TRANSACTION,
     BINDER_LIB_TEST_GET_WORK_SOURCE_TRANSACTION,
+    BINDER_LIB_TEST_ECHO_VECTOR,
 };
 
 pid_t start_server_process(int arg2, bool usePoll = false)
@@ -232,7 +233,7 @@ class BinderLibTestBundle : public Parcel
 {
     public:
         BinderLibTestBundle(void) {}
-        BinderLibTestBundle(const Parcel *source) : m_isValid(false) {
+        explicit BinderLibTestBundle(const Parcel *source) : m_isValid(false) {
             int32_t mark;
             int32_t bundleLen;
             size_t pos;
@@ -1060,10 +1061,25 @@ TEST_F(BinderLibTest, WorkSourcePropagatedForAllFollowingBinderCalls)
     EXPECT_EQ(NO_ERROR, ret2);
 }
 
+TEST_F(BinderLibTest, VectorSent) {
+    Parcel data, reply;
+    sp<IBinder> server = addServer();
+    ASSERT_TRUE(server != nullptr);
+
+    std::vector<uint64_t> const testValue = { std::numeric_limits<uint64_t>::max(), 0, 200 };
+    data.writeUint64Vector(testValue);
+
+    status_t ret = server->transact(BINDER_LIB_TEST_ECHO_VECTOR, data, &reply);
+    EXPECT_EQ(NO_ERROR, ret);
+    std::vector<uint64_t> readValue;
+    ret = reply.readUint64Vector(&readValue);
+    EXPECT_EQ(readValue, testValue);
+}
+
 class BinderLibTestService : public BBinder
 {
     public:
-        BinderLibTestService(int32_t id)
+        explicit BinderLibTestService(int32_t id)
             : m_id(id)
             , m_nextServerId(id + 1)
             , m_serverStartRequested(false)
@@ -1363,6 +1379,14 @@ class BinderLibTestService : public BBinder
                 reply->writeInt32(IPCThreadState::self()->getCallingWorkSourceUid());
                 return NO_ERROR;
             }
+            case BINDER_LIB_TEST_ECHO_VECTOR: {
+                std::vector<uint64_t> vector;
+                auto err = data.readUint64Vector(&vector);
+                if (err != NO_ERROR)
+                    return err;
+                reply->writeUint64Vector(vector);
+                return NO_ERROR;
+            }
             default:
                 return UNKNOWN_TRANSACTION;
             };
@@ -1422,7 +1446,7 @@ int run_server(int index, int readypipefd, bool usePoll)
         }
         IPCThreadState::self()->flushCommands(); // flush BC_ENTER_LOOPER
 
-        epoll_fd = epoll_create1(0);
+        epoll_fd = epoll_create1(EPOLL_CLOEXEC);
         if (epoll_fd == -1) {
             return 1;
         }
