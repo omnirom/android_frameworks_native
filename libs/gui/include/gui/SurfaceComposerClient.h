@@ -19,7 +19,9 @@
 
 #include <stdint.h>
 #include <sys/types.h>
+#include <set>
 #include <unordered_map>
+#include <unordered_set>
 
 #include <binder/IBinder.h>
 
@@ -33,9 +35,10 @@
 #include <ui/PixelFormat.h>
 
 #include <gui/CpuConsumer.h>
+#include <gui/ITransactionCompletedListener.h>
+#include <gui/LayerState.h>
 #include <gui/SurfaceControl.h>
 #include <math/vec3.h>
-#include <gui/LayerState.h>
 
 namespace android {
 
@@ -46,6 +49,37 @@ class HdrCapabilities;
 class ISurfaceComposerClient;
 class IGraphicBufferProducer;
 class Region;
+
+// ---------------------------------------------------------------------------
+
+using TransactionCompletedCallbackTakesContext =
+        std::function<void(void* /*context*/, const TransactionStats&)>;
+using TransactionCompletedCallback = std::function<void(const TransactionStats&)>;
+
+class TransactionCompletedListener : public BnTransactionCompletedListener {
+    TransactionCompletedListener();
+
+    CallbackId getNextIdLocked() REQUIRES(mMutex);
+
+    std::mutex mMutex;
+
+    bool mListening GUARDED_BY(mMutex) = false;
+
+    CallbackId mCallbackIdCounter GUARDED_BY(mMutex) = 1;
+
+    std::map<CallbackId, TransactionCompletedCallback> mCallbacks GUARDED_BY(mMutex);
+
+public:
+    static sp<TransactionCompletedListener> getInstance();
+    static sp<ITransactionCompletedListener> getIInstance();
+
+    void startListeningLocked() REQUIRES(mMutex);
+
+    CallbackId addCallback(const TransactionCompletedCallback& callback);
+
+    // Overrides BnTransactionCompletedListener's onTransactionCompleted
+    void onTransactionCompleted(ListenerStats stats) override;
+};
 
 // ---------------------------------------------------------------------------
 
@@ -101,9 +135,15 @@ public:
     /* Triggers screen on/off or low power mode and waits for it to complete */
     static void setDisplayPowerMode(const sp<IBinder>& display, int mode);
 
-    //
-    static status_t getCompositionPreference(ui::Dataspace* dataSpace,
-                                             ui::PixelFormat* pixelFormat);
+    /* Returns the composition preference of the default data space and default pixel format,
+     * as well as the wide color gamut data space and wide color gamut pixel format.
+     * If the wide color gamut data space is V0_SRGB, then it implies that the platform
+     * has no wide color gamut support.
+     */
+    static status_t getCompositionPreference(ui::Dataspace* defaultDataspace,
+                                             ui::PixelFormat* defaultPixelFormat,
+                                             ui::Dataspace* wideColorGamutDataspace,
+                                             ui::PixelFormat* wideColorGamutPixelFormat);
 
     // ------------------------------------------------------------------------
     // surface creation / destruction
@@ -152,9 +192,27 @@ public:
         }
     };
 
+    struct TCLHash {
+        std::size_t operator()(const sp<ITransactionCompletedListener>& tcl) const {
+            return std::hash<IBinder*>{}((tcl) ? IInterface::asBinder(tcl).get() : nullptr);
+        }
+    };
+
+    struct CallbackInfo {
+        // All the callbacks that have been requested for a TransactionCompletedListener in the
+        // Transaction
+        std::unordered_set<CallbackId> callbackIds;
+        // All the SurfaceControls that have been modified in this TransactionCompletedListener's
+        // process that require a callback if there is one or more callbackIds set.
+        std::unordered_set<sp<SurfaceControl>, SCHash> surfaceControls;
+    };
+
     class Transaction {
         std::unordered_map<sp<SurfaceControl>, ComposerState, SCHash> mComposerStates;
         SortedVector<DisplayState > mDisplayStates;
+        std::unordered_map<sp<ITransactionCompletedListener>, CallbackInfo, TCLHash>
+                mListenerCallbacks;
+
         uint32_t                    mForceSynchronous = 0;
         uint32_t                    mTransactionNestCount = 0;
         bool                        mAnimation = false;
@@ -164,6 +222,8 @@ public:
 
         layer_state_t* getLayerState(const sp<SurfaceControl>& sc);
         DisplayState& getDisplayState(const sp<IBinder>& token);
+
+        void registerSurfaceControlForCallback(const sp<SurfaceControl>& sc);
 
     public:
         Transaction() = default;
@@ -244,6 +304,9 @@ public:
         Transaction& setSidebandStream(const sp<SurfaceControl>& sc,
                                        const sp<NativeHandle>& sidebandStream);
 
+        Transaction& addTransactionCompletedCallback(
+                TransactionCompletedCallbackTakesContext callback, void* callbackContext);
+
         // Detaches all child surfaces (and their children recursively)
         // from their SurfaceControl.
         // The child SurfaceControls will not throw exceptions or return errors,
@@ -266,6 +329,10 @@ public:
         // arrives. As some elements normally apply immediately, this enables
         // freezing the total geometry of a surface until a resize is completed.
         Transaction& setGeometryAppliesWithResize(const sp<SurfaceControl>& sc);
+
+#ifndef NO_INPUT
+        Transaction& setInputWindowInfo(const sp<SurfaceControl>& sc, const InputWindowInfo& info);
+#endif
 
         Transaction& destroySurface(const sp<SurfaceControl>& sc);
 
@@ -329,16 +396,21 @@ class ScreenshotClient {
 public:
     // if cropping isn't required, callers may pass in a default Rect, e.g.:
     //   capture(display, producer, Rect(), reqWidth, ...);
-    static status_t capture(const sp<IBinder>& display, Rect sourceCrop, uint32_t reqWidth,
-                            uint32_t reqHeight, bool useIdentityTransform, uint32_t rotation,
-                            sp<GraphicBuffer>* outBuffer);
-    static status_t captureLayers(const sp<IBinder>& layerHandle, Rect sourceCrop, float frameScale,
-                                  sp<GraphicBuffer>* outBuffer);
-    static status_t captureChildLayers(const sp<IBinder>& layerHandle, Rect sourceCrop,
+    static status_t capture(const sp<IBinder>& display, const ui::Dataspace reqDataSpace,
+                            const ui::PixelFormat reqPixelFormat, Rect sourceCrop,
+                            uint32_t reqWidth, uint32_t reqHeight, bool useIdentityTransform,
+                            uint32_t rotation, sp<GraphicBuffer>* outBuffer);
+    static status_t captureLayers(const sp<IBinder>& layerHandle, const ui::Dataspace reqDataSpace,
+                                  const ui::PixelFormat reqPixelFormat, Rect sourceCrop,
+                                  float frameScale, sp<GraphicBuffer>* outBuffer);
+    static status_t captureChildLayers(const sp<IBinder>& layerHandle,
+                                       const ui::Dataspace reqDataSpace,
+                                       const ui::PixelFormat reqPixelFormat, Rect sourceCrop,
                                        float frameScale, sp<GraphicBuffer>* outBuffer);
 };
 
 // ---------------------------------------------------------------------------
+
 }; // namespace android
 
 #endif // ANDROID_GUI_SURFACE_COMPOSER_CLIENT_H

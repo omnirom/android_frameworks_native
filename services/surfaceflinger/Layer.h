@@ -38,6 +38,7 @@
 
 #include <cstdint>
 #include <list>
+#include <optional>
 #include <vector>
 
 #include "Client.h"
@@ -47,6 +48,7 @@
 #include "MonitoredProducer.h"
 #include "SurfaceFlinger.h"
 #include "TimeStats/TimeStats.h"
+#include "TransactionCompletedThread.h"
 
 #include "DisplayHardware/HWComposer.h"
 #include "DisplayHardware/HWComposerBufferCache.h"
@@ -183,6 +185,10 @@ public:
         sp<NativeHandle> sidebandStream;
         mat4 colorTransform;
         bool hasColorTransform;
+
+        // The deque of callback handles for this frame. The back of the deque contains the most
+        // recent callback handle.
+        std::deque<sp<CallbackHandle>> callbackHandles;
     };
 
     explicit Layer(const LayerCreationArgs& args);
@@ -265,13 +271,17 @@ public:
     virtual bool setTransform(uint32_t /*transform*/) { return false; };
     virtual bool setTransformToDisplayInverse(bool /*transformToDisplayInverse*/) { return false; };
     virtual bool setCrop(const Rect& /*crop*/) { return false; };
-    virtual bool setBuffer(sp<GraphicBuffer> /*buffer*/) { return false; };
+    virtual bool setBuffer(const sp<GraphicBuffer>& /*buffer*/) { return false; };
     virtual bool setAcquireFence(const sp<Fence>& /*fence*/) { return false; };
     virtual bool setDataspace(ui::Dataspace /*dataspace*/) { return false; };
     virtual bool setHdrMetadata(const HdrMetadata& /*hdrMetadata*/) { return false; };
     virtual bool setSurfaceDamageRegion(const Region& /*surfaceDamage*/) { return false; };
     virtual bool setApi(int32_t /*api*/) { return false; };
     virtual bool setSidebandStream(const sp<NativeHandle>& /*sidebandStream*/) { return false; };
+    virtual bool setTransactionCompletedListeners(
+            const std::vector<sp<CallbackHandle>>& /*handles*/) {
+        return false;
+    };
 
     ui::Dataspace getDataSpace() const { return mCurrentDataSpace; }
 
@@ -348,13 +358,13 @@ public:
     virtual bool isCreatedFromMainThread() const { return false; }
 
 
-    bool isPendingRemoval() const { return mPendingRemoval; }
+    bool isRemovedFromCurrentState() const;
 
     void writeToProto(LayerProto* layerInfo,
                       LayerVector::StateSet stateSet = LayerVector::StateSet::Drawing,
                       bool enableRegionDump = true);
 
-    void writeToProto(LayerProto* layerInfo, int32_t displayId);
+    void writeToProto(LayerProto* layerInfo, DisplayId displayId);
 
     virtual Geometry getActiveGeometry(const Layer::State& s) const { return s.active_legacy; }
     virtual uint32_t getActiveWidth(const Layer::State& s) const { return s.active_legacy.w; }
@@ -380,24 +390,23 @@ public:
     virtual bool isHdrY410() const { return false; }
 
     void setGeometry(const sp<const DisplayDevice>& display, uint32_t z);
-    void forceClientComposition(int32_t displayId);
-    bool getForceClientComposition(int32_t displayId);
-    virtual void setPerFrameData(const sp<const DisplayDevice>& display) = 0;
+    void forceClientComposition(DisplayId displayId);
+    bool getForceClientComposition(DisplayId displayId);
+    virtual void setPerFrameData(DisplayId displayId, const ui::Transform& transform,
+                                 const Rect& viewport, int32_t supportedPerFrameMetadata) = 0;
 
     // callIntoHwc exists so we can update our local state and call
     // acceptDisplayChanges without unnecessarily updating the device's state
-    void setCompositionType(int32_t displayId, HWC2::Composition type, bool callIntoHwc = true);
-    HWC2::Composition getCompositionType(int32_t displayId) const;
-    void setClearClientTarget(int32_t displayId, bool clear);
-    bool getClearClientTarget(int32_t displayId) const;
+    void setCompositionType(DisplayId displayId, HWC2::Composition type, bool callIntoHwc = true);
+    HWC2::Composition getCompositionType(const std::optional<DisplayId>& displayId) const;
+    void setClearClientTarget(DisplayId displayId, bool clear);
+    bool getClearClientTarget(DisplayId displayId) const;
     void updateCursorPosition(const sp<const DisplayDevice>& display);
 
     /*
      * called after page-flip
      */
     virtual void onLayerDisplayed(const sp<Fence>& releaseFence);
-
-    virtual void abandon() {}
 
     virtual bool shouldPresentNow(nsecs_t /*expectedPresentTime*/) const { return false; }
     virtual void setTransformHint(uint32_t /*orientation*/) const { }
@@ -406,13 +415,14 @@ public:
      * called before composition.
      * returns true if the layer has pending updates.
      */
-    virtual bool onPreComposition(nsecs_t /*refreshStartTime*/) { return true; }
+    virtual bool onPreComposition(nsecs_t refreshStartTime) = 0;
 
     /*
      * called after composition.
      * returns true if the layer latched a new buffer this frame.
      */
-    virtual bool onPostComposition(const std::shared_ptr<FenceTime>& /*glDoneFence*/,
+    virtual bool onPostComposition(const std::optional<DisplayId>& /*displayId*/,
+                                   const std::shared_ptr<FenceTime>& /*glDoneFence*/,
                                    const std::shared_ptr<FenceTime>& /*presentFence*/,
                                    const CompositorTiming& /*compositorTiming*/) {
         return false;
@@ -480,12 +490,6 @@ public:
      */
     void onRemovedFromCurrentState();
 
-    /*
-     * called with the state lock from the main thread when the layer is
-     * removed from the pending removal list
-     */
-    void onRemoved();
-
     // Updates the transform hint in our SurfaceFlingerConsumer to match
     // the current orientation of the display device.
     void updateTransformHint(const sp<const DisplayDevice>& display) const;
@@ -505,24 +509,24 @@ public:
 
     // -----------------------------------------------------------------------
 
-    bool createHwcLayer(HWComposer* hwc, int32_t displayId);
-    bool destroyHwcLayer(int32_t displayId);
+    bool createHwcLayer(HWComposer* hwc, DisplayId displayId);
+    bool destroyHwcLayer(DisplayId displayId);
     void destroyAllHwcLayers();
 
-    bool hasHwcLayer(int32_t displayId) { return getBE().mHwcLayers.count(displayId) > 0; }
+    bool hasHwcLayer(DisplayId displayId) const { return getBE().mHwcLayers.count(displayId) > 0; }
 
-    HWC2::Layer* getHwcLayer(int32_t displayId) {
-        if (getBE().mHwcLayers.count(displayId) == 0) {
+    HWC2::Layer* getHwcLayer(DisplayId displayId) {
+        if (!hasHwcLayer(displayId)) {
             return nullptr;
         }
         return getBE().mHwcLayers[displayId].layer.get();
     }
 
-    bool setHwcLayer(int32_t hwcId) {
-        if (getBE().mHwcLayers.count(hwcId) == 0) {
+    bool setHwcLayer(DisplayId displayId) {
+        if (!hasHwcLayer(displayId)) {
             return false;
         }
-        getBE().compositionInfo.hwc.hwcLayer = getBE().mHwcLayers[hwcId].layer;
+        getBE().compositionInfo.hwc.hwcLayer = getBE().mHwcLayers[displayId].layer;
         return true;
     }
 
@@ -537,7 +541,7 @@ public:
 
     /* always call base class first */
     static void miniDumpHeader(String8& result);
-    void miniDump(String8& result, int32_t displayId) const;
+    void miniDump(String8& result, DisplayId displayId) const;
     void dumpFrameStats(String8& result) const;
     void dumpFrameEvents(String8& result);
     void clearFrameStats();
@@ -580,7 +584,7 @@ public:
     ssize_t removeChild(const sp<Layer>& layer);
     sp<Layer> getParent() const { return mCurrentParent.promote(); }
     bool hasParent() const { return getParent() != nullptr; }
-    Rect computeScreenBounds(bool reduceTransparentRegion = true) const;
+    Rect computeScreenBounds() const;
     bool setChildLayer(const sp<Layer>& childLayer, int32_t z);
     bool setChildRelativeLayer(const sp<Layer>& childLayer,
             const sp<IBinder>& relativeToHandle, int32_t relativeZ);
@@ -600,12 +604,12 @@ protected:
      */
     class LayerCleaner {
         sp<SurfaceFlinger> mFlinger;
-        wp<Layer> mLayer;
+        sp<Layer> mLayer;
 
     protected:
         ~LayerCleaner() {
             // destroy client resources
-            mFlinger->onLayerDestroyed(mLayer);
+            mFlinger->onHandleDestroyed(mLayer);
         }
 
     public:
@@ -707,6 +711,8 @@ public:
     virtual PixelFormat getPixelFormat() const { return PIXEL_FORMAT_NONE; }
     bool getPremultipledAlpha() const;
 
+    bool mPendingHWCDestroy{false};
+
 protected:
     // -----------------------------------------------------------------------
     bool usingRelativeZ(LayerVector::StateSet stateSet);
@@ -750,7 +756,7 @@ protected:
     // Whether filtering is needed b/c of the drawingstate
     bool mNeedsFiltering{false};
 
-    bool mPendingRemoval{false};
+    std::atomic<bool> mRemovedFromCurrentState{false};
 
     // page-flip thread (currently main thread)
     bool mProtectedByApp{false}; // application requires protected path to external sink
@@ -790,10 +796,38 @@ private:
                                        const LayerVector::Visitor& visitor);
     LayerVector makeChildrenTraversalList(LayerVector::StateSet stateSet,
                                           const std::vector<Layer*>& layersInTree);
+
+    /**
+     * Retuns the child bounds in layer space cropped to its bounds as well all its parent bounds.
+     * The cropped bounds must be transformed back from parent layer space to child layer space by
+     * applying the inverse of the child's transformation.
+     */
+    FloatRect cropChildBounds(const FloatRect& childBounds) const;
+
+    /**
+     * Returns the cropped buffer size or the layer crop if the layer has no buffer. Return
+     * INVALID_RECT if the layer has no buffer and no crop.
+     * A layer with an invalid buffer size and no crop is considered to be boundless. The layer
+     * bounds are constrained by its parent bounds.
+     */
+    Rect getCroppedBufferSize(const Layer::State& s) const;
+
+    /**
+     * Returns active buffer size in the correct orientation. Buffer size is determined by undoing
+     * any buffer transformations. If the layer has no buffer then return INVALID_RECT.
+     */
+    virtual Rect getBufferSize(const Layer::State&) const { return Rect::INVALID_RECT; }
 };
 
-// ---------------------------------------------------------------------------
+} // namespace android
 
-}; // namespace android
+#define RETURN_IF_NO_HWC_LAYER(displayId, ...)                                         \
+    do {                                                                               \
+        if (!hasHwcLayer(displayId)) {                                                 \
+            ALOGE("[%s] %s failed: no HWC layer found for display %s", mName.string(), \
+                  __FUNCTION__, to_string(displayId).c_str());                         \
+            return __VA_ARGS__;                                                        \
+        }                                                                              \
+    } while (false)
 
 #endif // ANDROID_LAYER_H

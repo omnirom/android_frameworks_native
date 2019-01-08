@@ -68,8 +68,7 @@ void GraphicsEnv::setDriverPath(const std::string path) {
 }
 
 void GraphicsEnv::setAngleInfo(const std::string path, const std::string appName,
-                               const std::string appPref, bool developerOptIn,
-                               const int rulesFd, const long rulesOffset,
+                               bool developerOptIn, const int rulesFd, const long rulesOffset,
                                const long rulesLength) {
     if (!mAnglePath.empty()) {
         ALOGV("ignoring attempt to change ANGLE path from '%s' to '%s'", mAnglePath.c_str(),
@@ -85,14 +84,6 @@ void GraphicsEnv::setAngleInfo(const std::string path, const std::string appName
     } else {
         ALOGV("setting ANGLE app name to '%s'", appName.c_str());
         mAngleAppName = appName;
-    }
-
-    if (!mAngleAppPref.empty()) {
-        ALOGV("ignoring attempt to change ANGLE application opt-in from '%s' to '%s'",
-              mAngleAppPref.c_str(), appPref.c_str());
-    } else {
-        ALOGV("setting ANGLE application opt-in to '%s'", appPref.c_str());
-        mAngleAppPref = appPref;
     }
 
     mAngleDeveloperOptIn = developerOptIn;
@@ -128,11 +119,6 @@ bool GraphicsEnv::getAngleDeveloperOptIn() {
     return mAngleDeveloperOptIn;
 }
 
-const char* GraphicsEnv::getAngleAppPref() {
-    if (mAngleAppPref.empty()) return nullptr;
-    return mAngleAppPref.c_str();
-}
-
 int GraphicsEnv::getAngleRulesFd() {
     return mAngleRulesFd;
 }
@@ -145,16 +131,24 @@ long GraphicsEnv::getAngleRulesLength() {
     return mAngleRulesLength;
 }
 
-const std::string GraphicsEnv::getLayerPaths(){
+const std::string& GraphicsEnv::getLayerPaths() {
     return mLayerPaths;
 }
 
-const std::string GraphicsEnv::getDebugLayers() {
+const std::string& GraphicsEnv::getDebugLayers() {
     return mDebugLayers;
+}
+
+const std::string& GraphicsEnv::getDebugLayersGLES() {
+    return mDebugLayersGLES;
 }
 
 void GraphicsEnv::setDebugLayers(const std::string layers) {
     mDebugLayers = layers;
+}
+
+void GraphicsEnv::setDebugLayersGLES(const std::string layers) {
+    mDebugLayersGLES = layers;
 }
 
 android_namespace_t* GraphicsEnv::getDriverNamespace() {
@@ -167,7 +161,7 @@ android_namespace_t* GraphicsEnv::getDriverNamespace() {
         auto sphalNamespace = android_get_exported_namespace("sphal");
         if (!sphalNamespace) return;
         mDriverNamespace = android_create_namespace("gfx driver",
-                                                    nullptr,             // ld_library_path
+                                                    mDriverPath.c_str(), // ld_library_path
                                                     mDriverPath.c_str(), // default_library_path
                                                     ANDROID_NAMESPACE_TYPE_SHARED |
                                                             ANDROID_NAMESPACE_TYPE_ISOLATED,
@@ -196,36 +190,3 @@ android_namespace_t* GraphicsEnv::getAngleNamespace() {
 }
 
 } // namespace android
-
-extern "C" {
-android_namespace_t* android_getDriverNamespace() {
-    return android::GraphicsEnv::getInstance().getDriverNamespace();
-}
-android_namespace_t* android_getAngleNamespace() {
-    return android::GraphicsEnv::getInstance().getAngleNamespace();
-}
-const char* android_getAngleAppName() {
-    return android::GraphicsEnv::getInstance().getAngleAppName();
-}
-bool android_getAngleDeveloperOptIn() {
-    return android::GraphicsEnv::getInstance().getAngleDeveloperOptIn();
-}
-const char* android_getAngleAppPref() {
-    return android::GraphicsEnv::getInstance().getAngleAppPref();
-}
-int android_getAngleRulesFd() {
-   return android::GraphicsEnv::getInstance().getAngleRulesFd();
-}
-long android_getAngleRulesOffset() {
-   return android::GraphicsEnv::getInstance().getAngleRulesOffset();
-}
-long android_getAngleRulesLength() {
-   return android::GraphicsEnv::getInstance().getAngleRulesLength();
-}
-const char* android_getLayerPaths() {
-    return android::GraphicsEnv::getInstance().getLayerPaths().c_str();
-}
-const char* android_getDebugLayers() {
-    return android::GraphicsEnv::getInstance().getDebugLayers().c_str();
-}
-}

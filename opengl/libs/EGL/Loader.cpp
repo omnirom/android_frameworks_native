@@ -36,21 +36,10 @@
 #include "egl_platform_entries.h"
 #include "egl_trace.h"
 #include "egldefs.h"
+#include <EGL/eglext_angle.h>
 
 extern "C" {
   android_namespace_t* android_get_exported_namespace(const char*);
-
-  // TODO(ianelliott@): Get this from an ANGLE header:
-  typedef enum ANGLEPreference {
-      ANGLE_NO_PREFERENCE = 0,
-      ANGLE_PREFER_NATIVE = 1,
-      ANGLE_PREFER_ANGLE = 2,
-  } ANGLEPreference;
-
-  // TODO(ianelliott@): Get this from an ANGLE header:
-  typedef bool (*fpANGLEUseForApplication)(const char* appName, const char* deviceMfr,
-                                           const char* deviceModel, ANGLEPreference developerOption,
-                                           ANGLEPreference appPreference);
 
   // TODO(ianelliott@): Get this from an ANGLE header:
   typedef bool (*fpANGLEGetUtilityAPI)(unsigned int* versionToUse);
@@ -274,10 +263,24 @@ void* Loader::open(egl_connection_t* cnx)
     return (void*)hnd;
 }
 
-void Loader::close(void* driver)
+void Loader::close(egl_connection_t* cnx)
 {
-    driver_t* hnd = (driver_t*)driver;
+    driver_t* hnd = (driver_t*) cnx->dso;
     delete hnd;
+    cnx->dso = nullptr;
+
+    if (cnx->featureSo) {
+        dlclose(cnx->featureSo);
+        cnx->featureSo = nullptr;
+    }
+
+    cnx->angleDecided = false;
+    cnx->useAngle = false;
+
+    if (cnx->vendorEGL) {
+        dlclose(cnx->vendorEGL);
+        cnx->vendorEGL = nullptr;
+    }
 }
 
 void Loader::init_api(void* dso,
@@ -507,16 +510,56 @@ static void* load_angle_from_namespace(const char* kind, android_namespace_t* ns
     return nullptr;
 }
 
-static ANGLEPreference getAnglePref(const char* app_pref) {
-    if (app_pref == nullptr)
-        return ANGLE_NO_PREFERENCE;
 
-    if (strcmp(app_pref, "angle") == 0) {
-        return ANGLE_PREFER_ANGLE;
-    } else if (strcmp(app_pref, "native") == 0) {
-        return ANGLE_PREFER_NATIVE;
+static bool check_angle_rules(void* so, const char* app_name) {
+    bool use_angle = false;
+    const int rules_fd = android::GraphicsEnv::getInstance().getAngleRulesFd();
+    const long rules_offset = android::GraphicsEnv::getInstance().getAngleRulesOffset();
+    const long rules_length = android::GraphicsEnv::getInstance().getAngleRulesLength();
+
+    std::string app_name_str = app_name ? app_name : "";
+    char manufacturer[PROPERTY_VALUE_MAX];
+    char model[PROPERTY_VALUE_MAX];
+    property_get("ro.product.manufacturer", manufacturer, "UNSET");
+    property_get("ro.product.model", model, "UNSET");
+
+    fpANGLEGetUtilityAPI ANGLEGetUtilityAPI =
+            (fpANGLEGetUtilityAPI)dlsym(so, "ANGLEGetUtilityAPI");
+
+    if (ANGLEGetUtilityAPI) {
+
+        // Negotiate the interface version by requesting most recent known to the platform
+        unsigned int versionToUse = 1;
+        if ((ANGLEGetUtilityAPI)(&versionToUse)) {
+
+            // Add and remove versions below as needed
+            switch(versionToUse) {
+            case 1: {
+                ALOGV("Using version 1 of ANGLE opt-in/out logic interface");
+                fpAndroidUseANGLEForApplication AndroidUseANGLEForApplication =
+                        (fpAndroidUseANGLEForApplication)dlsym(so, "AndroidUseANGLEForApplication");
+
+                if (AndroidUseANGLEForApplication) {
+                    use_angle = (AndroidUseANGLEForApplication)(rules_fd, rules_offset,
+                                                                rules_length, app_name_str.c_str(),
+                                                                manufacturer, model);
+                } else {
+                    ALOGW("Cannot find AndroidUseANGLEForApplication in ANGLE feature-support library");
+                }
+            }
+            break;
+            default:
+                ALOGW("Cannot find supported version of ANGLE feature-support library, found version %u", versionToUse);
+            }
+        } else {
+            ALOGW("Cannot use ANGLE feature-support library, it is older than supported by EGL, requested version %u", versionToUse);
+        }
+    } else {
+        ALOGW("Cannot find ANGLEGetUtilityAPI function");
     }
-    return ANGLE_NO_PREFERENCE;
+
+    ALOGV("Close temporarily-loaded ANGLE opt-in/out logic");
+    return use_angle;
 }
 
 static void* load_angle(const char* kind, android_namespace_t* ns, egl_connection_t* cnx) {
@@ -524,86 +567,42 @@ static void* load_angle(const char* kind, android_namespace_t* ns, egl_connectio
     if (strcmp(kind, "EGL") != 0 && strcmp(kind, "GLESv2") != 0 && strcmp(kind, "GLESv1_CM") != 0)
         return nullptr;
 
-    void* so = nullptr;
     std::string name;
     char prop[PROPERTY_VALUE_MAX];
 
-    const char* app_name = android_getAngleAppName();
-    const char* app_pref = android_getAngleAppPref();
-    bool developer_opt_in = android_getAngleDeveloperOptIn();
-    const int rules_fd = android_getAngleRulesFd();
-    const long rules_offset = android_getAngleRulesOffset();
-    const long rules_length = android_getAngleRulesLength();
+    const char* app_name = android::GraphicsEnv::getInstance().getAngleAppName();
+    bool developer_opt_in = android::GraphicsEnv::getInstance().getAngleDeveloperOptIn();
 
     // Determine whether or not to use ANGLE:
-    ANGLEPreference developer_option = developer_opt_in ? ANGLE_PREFER_ANGLE : ANGLE_NO_PREFERENCE;
-    bool use_angle = (developer_option == ANGLE_PREFER_ANGLE);
+    bool use_angle = developer_opt_in;
 
     if (use_angle) {
         ALOGV("User set \"Developer Options\" to force the use of ANGLE");
+    } else if (cnx->angleDecided) {
+        use_angle = cnx->useAngle;
     } else {
         // The "Developer Options" value wasn't set to force the use of ANGLE.  Need to temporarily
         // load ANGLE and call the updatable opt-in/out logic:
-        std::string app_name_str = app_name ? app_name : "";
-        char manufacturer[PROPERTY_VALUE_MAX];
-        char model[PROPERTY_VALUE_MAX];
-        property_get("ro.product.manufacturer", manufacturer, "UNSET");
-        property_get("ro.product.model", model, "UNSET");
-        so = load_angle_from_namespace("feature_support", ns);
-        if (so) {
-            ALOGV("Temporarily loaded ANGLE's opt-in/out logic from namespace");
-            bool use_version0_API = false;
-            bool use_version1_API = false;
-            fpANGLEGetUtilityAPI ANGLEGetUtilityAPI =
-                    (fpANGLEGetUtilityAPI)dlsym(so, "ANGLEGetUtilityAPI");
-            if (ANGLEGetUtilityAPI) {
-                unsigned int versionToUse = 1;
-                if ((ANGLEGetUtilityAPI)(&versionToUse)) {
-                    if (versionToUse == 1) {
-                        use_version1_API = true;
-                    } else {
-                        use_version0_API = true;
-                    }
-                }
-            } else {
-                use_version0_API = true;
-            }
-            if (use_version1_API) {
-                // Use the new version 1 API to determine if the
-                // application should use the ANGLE or the native driver.
-                fpAndroidUseANGLEForApplication AndroidUseANGLEForApplication =
-                        (fpAndroidUseANGLEForApplication)dlsym(so, "AndroidUseANGLEForApplication");
-                if (AndroidUseANGLEForApplication) {
-                    use_angle = (AndroidUseANGLEForApplication)(rules_fd, rules_offset,
-                                                                rules_length, app_name_str.c_str(),
-                                                                manufacturer, model);
-                } else {
-                    ALOGW("Cannot find AndroidUseANGLEForApplication in library");
-                }
-            } else if (use_version0_API) {
-                // Use the old version 0 API to determine if the
-                // application should use the ANGLE or the native driver.
-                fpANGLEUseForApplication ANGLEUseForApplication =
-                        (fpANGLEUseForApplication)dlsym(so, "ANGLEUseForApplication");
-                if (ANGLEUseForApplication) {
-                    ANGLEPreference app_preference = getAnglePref(android_getAngleAppPref());
-                    use_angle = (ANGLEUseForApplication)(app_name_str.c_str(), manufacturer, model,
-                                                         developer_option, app_preference);
-                    ALOGV("Result of opt-in/out logic is %s", use_angle ? "true" : "false");
-                } else {
-                    ALOGW("Cannot find ANGLEUseForApplication in library");
-                }
-            }
-            ALOGV("Close temporarily-loaded ANGLE opt-in/out logic");
-            dlclose(so);
-            so = nullptr;
+
+        // Check if ANGLE is enabled. Workaround for several bugs:
+        // b/119305693 b/119322355 b/119305887
+        // Something is not working correctly in the feature library
+        property_get("debug.angle.enable", prop, "0");
+        if (atoi(prop)) {
+            cnx->featureSo = load_angle_from_namespace("feature_support", ns);
+        }
+        if (cnx->featureSo) {
+            ALOGV("loaded ANGLE's opt-in/out logic from namespace");
+            use_angle = check_angle_rules(cnx->featureSo, app_name);
         } else {
             // We weren't able to load and call the updateable opt-in/out logic.
             // If we can't load the library, there is no ANGLE available.
             use_angle = false;
-            ALOGV("Could not temporarily-load the ANGLE opt-in/out logic, cannot use ANGLE.");
+            ALOGV("Could not load the ANGLE opt-in/out logic, cannot use ANGLE.");
         }
+        cnx->angleDecided = true;
     }
+    void* so = nullptr;
     if (use_angle) {
         so = load_angle_from_namespace(kind, ns);
     }
@@ -611,13 +610,30 @@ static void* load_angle(const char* kind, android_namespace_t* ns, egl_connectio
     if (so) {
         ALOGV("Loaded ANGLE %s library for %s (instead of native)",
               kind, app_name ? app_name : "nullptr");
-        property_get("debug.angle.backend", prop, "UNSET");
-        ALOGV("ANGLE's backend set to %s", prop);
         property_get("debug.hwui.renderer", prop, "UNSET");
         ALOGV("Skia's renderer set to %s", prop);
         cnx->useAngle = true;
-        // Find and load vendor libEGL for ANGLE
-        if (!cnx->vendorEGL) {
+
+        EGLint angleBackendDefault = EGL_PLATFORM_ANGLE_TYPE_VULKAN_ANGLE;
+
+        char prop[PROPERTY_VALUE_MAX];
+        property_get("debug.angle.backend", prop, "0");
+        switch (atoi(prop)) {
+            case 1:
+                ALOGV("%s: Requesting OpenGLES back-end", __FUNCTION__);
+                angleBackendDefault = EGL_PLATFORM_ANGLE_TYPE_OPENGLES_ANGLE;
+                break;
+            case 2:
+                ALOGV("%s: Requesting Vulkan back-end", __FUNCTION__);
+                angleBackendDefault = EGL_PLATFORM_ANGLE_TYPE_VULKAN_ANGLE;
+                break;
+            default:
+                break;
+        }
+
+        cnx->angleBackend = angleBackendDefault;
+        if (!cnx->vendorEGL && (cnx->angleBackend == EGL_PLATFORM_ANGLE_TYPE_OPENGLES_ANGLE)) {
+            // Find and load vendor libEGL for ANGLE's GL back-end to use.
             cnx->vendorEGL = load_system_driver("EGL");
         }
         return so;
@@ -660,13 +676,13 @@ void *Loader::load_driver(const char* kind,
     ATRACE_CALL();
 
     void* dso = nullptr;
-    android_namespace_t* ns = android_getAngleNamespace();
+    android_namespace_t* ns = android::GraphicsEnv::getInstance().getAngleNamespace();
     if (ns) {
         dso = load_angle(kind, ns, cnx);
     }
 #ifndef __ANDROID_VNDK__
     if (!dso) {
-        android_namespace_t* ns = android_getDriverNamespace();
+        android_namespace_t* ns = android::GraphicsEnv::getInstance().getDriverNamespace();
         if (ns) {
             dso = load_updated_driver(kind, ns);
         }

@@ -23,7 +23,9 @@ namespace android {
 
 BufferQueueLayer::BufferQueueLayer(const LayerCreationArgs& args) : BufferLayer(args) {}
 
-BufferQueueLayer::~BufferQueueLayer() = default;
+BufferQueueLayer::~BufferQueueLayer() {
+    mConsumer->abandon();
+}
 
 // -----------------------------------------------------------------------
 // Interface implementation for Layer
@@ -31,10 +33,6 @@ BufferQueueLayer::~BufferQueueLayer() = default;
 
 void BufferQueueLayer::onLayerDisplayed(const sp<Fence>& releaseFence) {
     mConsumer->setReleaseFence(releaseFence);
-}
-
-void BufferQueueLayer::abandon() {
-    mConsumer->abandon();
 }
 
 void BufferQueueLayer::setTransformHint(uint32_t orientation) const {
@@ -84,7 +82,7 @@ bool BufferQueueLayer::shouldPresentNow(nsecs_t expectedPresentTime) const {
         return true;
     }
 
-    if (!hasDrawingBuffer()) {
+    if (!hasFrameUpdate()) {
         return false;
     }
 
@@ -112,7 +110,7 @@ bool BufferQueueLayer::fenceHasSignaled() const {
         return true;
     }
 
-    if (!hasDrawingBuffer()) {
+    if (!hasFrameUpdate()) {
         return true;
     }
 
@@ -208,7 +206,7 @@ std::optional<Region> BufferQueueLayer::latchSidebandStream(bool& recomputeVisib
     return {};
 }
 
-bool BufferQueueLayer::hasDrawingBuffer() const {
+bool BufferQueueLayer::hasFrameUpdate() const {
     return mQueuedFrames > 0;
 }
 
@@ -227,6 +225,7 @@ status_t BufferQueueLayer::updateTexImage(bool& recomputeVisibleRegions, nsecs_t
     // BufferItem's that weren't actually queued. This can happen in shared
     // buffer mode.
     bool queuedBuffer = false;
+    const int32_t layerID = getSequence();
     LayerRejecter r(mDrawingState, getCurrentState(), recomputeVisibleRegions,
                     getProducerStickyTransform() != 0, mName.string(), mOverrideScalingMode,
                     getTransformToDisplayInverse(), mFreezeGeometryUpdates);
@@ -247,7 +246,7 @@ status_t BufferQueueLayer::updateTexImage(bool& recomputeVisibleRegions, nsecs_t
         // and return early
         if (queuedBuffer) {
             Mutex::Autolock lock(mQueueItemLock);
-            mTimeStats.removeTimeRecord(getName().c_str(), mQueueItems[0].mFrameNumber);
+            mTimeStats.removeTimeRecord(layerID, mQueueItems[0].mFrameNumber);
             mQueueItems.removeAt(0);
             mQueuedFrames--;
         }
@@ -261,7 +260,7 @@ status_t BufferQueueLayer::updateTexImage(bool& recomputeVisibleRegions, nsecs_t
             Mutex::Autolock lock(mQueueItemLock);
             mQueueItems.clear();
             mQueuedFrames = 0;
-            mTimeStats.clearLayerRecord(getName().c_str());
+            mTimeStats.clearLayerRecord(layerID);
         }
 
         // Once we have hit this state, the shadow queue may no longer
@@ -282,14 +281,13 @@ status_t BufferQueueLayer::updateTexImage(bool& recomputeVisibleRegions, nsecs_t
         // Remove any stale buffers that have been dropped during
         // updateTexImage
         while (mQueueItems[0].mFrameNumber != currentFrameNumber) {
-            mTimeStats.removeTimeRecord(getName().c_str(), mQueueItems[0].mFrameNumber);
+            mTimeStats.removeTimeRecord(layerID, mQueueItems[0].mFrameNumber);
             mQueueItems.removeAt(0);
             mQueuedFrames--;
         }
 
-        const std::string layerName(getName().c_str());
-        mTimeStats.setAcquireFence(layerName, currentFrameNumber, mQueueItems[0].mFenceTime);
-        mTimeStats.setLatchTime(layerName, currentFrameNumber, latchTime);
+        mTimeStats.setAcquireFence(layerID, currentFrameNumber, mQueueItems[0].mFenceTime);
+        mTimeStats.setLatchTime(layerID, currentFrameNumber, latchTime);
 
         mQueueItems.removeAt(0);
     }
@@ -327,8 +325,7 @@ status_t BufferQueueLayer::updateFrameNumber(nsecs_t latchTime) {
     return NO_ERROR;
 }
 
-void BufferQueueLayer::setHwcLayerBuffer(const sp<const DisplayDevice>& display) {
-    const auto displayId = display->getId();
+void BufferQueueLayer::setHwcLayerBuffer(DisplayId displayId) {
     auto& hwcInfo = getBE().mHwcLayers[displayId];
     auto& hwcLayer = hwcInfo.layer;
 
@@ -355,6 +352,11 @@ void BufferQueueLayer::setHwcLayerBuffer(const sp<const DisplayDevice>& display)
 void BufferQueueLayer::onFrameAvailable(const BufferItem& item) {
     // Add this buffer from our internal queue tracker
     { // Autolock scope
+        // Report the timestamp to the Scheduler.
+        if (mFlinger->mUseScheduler) {
+            mFlinger->mScheduler->addNewFrameTimestamp(item.mTimestamp, item.mIsAutoTimestamp);
+        }
+
         Mutex::Autolock lock(mQueueItemLock);
         // Reset the frame number tracker when we receive the first buffer after
         // a frame number reset
@@ -380,7 +382,17 @@ void BufferQueueLayer::onFrameAvailable(const BufferItem& item) {
 
     mFlinger->mInterceptor->saveBufferUpdate(this, item.mGraphicBuffer->getWidth(),
                                              item.mGraphicBuffer->getHeight(), item.mFrameNumber);
-    mFlinger->signalLayerUpdate();
+    
+    // If this layer is orphaned, then we run a fake vsync pulse so that
+    // dequeueBuffer doesn't block indefinitely.
+    if (isRemovedFromCurrentState()) {
+        bool ignored = false;
+        latchBuffer(ignored, systemTime(), Fence::NO_FENCE);
+        usleep(16000);
+        releasePendingBuffer(systemTime());
+    } else {
+        mFlinger->signalLayerUpdate();
+    }
 }
 
 void BufferQueueLayer::onFrameReplaced(const BufferItem& item) {
@@ -395,7 +407,7 @@ void BufferQueueLayer::onFrameReplaced(const BufferItem& item) {
             }
         }
 
-        if (!hasDrawingBuffer()) {
+        if (!hasFrameUpdate()) {
             ALOGE("Can't replace a frame on an empty queue");
             return;
         }

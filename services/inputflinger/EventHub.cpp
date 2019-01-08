@@ -147,8 +147,7 @@ EventHub::Device::Device(int fd, int32_t id, const std::string& path,
         fd(fd), id(id), path(path), identifier(identifier),
         classes(0), configuration(nullptr), virtualKeyMap(nullptr),
         ffEffectPlaying(false), ffEffectId(-1), controllerNumber(0),
-        timestampOverrideSec(0), timestampOverrideUsec(0), enabled(true),
-        isVirtual(fd < 0) {
+        enabled(true), isVirtual(fd < 0) {
     memset(keyBitmask, 0, sizeof(keyBitmask));
     memset(absBitmask, 0, sizeof(absBitmask));
     memset(relBitmask, 0, sizeof(relBitmask));
@@ -193,8 +192,6 @@ bool EventHub::Device::hasValidFd() {
 
 // --- EventHub ---
 
-const uint32_t EventHub::EPOLL_ID_INOTIFY;
-const uint32_t EventHub::EPOLL_ID_WAKE;
 const int EventHub::EPOLL_SIZE_HINT;
 const int EventHub::EPOLL_MAX_EVENTS;
 
@@ -217,7 +214,7 @@ EventHub::EventHub(void) :
     struct epoll_event eventItem;
     memset(&eventItem, 0, sizeof(eventItem));
     eventItem.events = EPOLLIN;
-    eventItem.data.u32 = EPOLL_ID_INOTIFY;
+    eventItem.data.fd = mINotifyFd;
     result = epoll_ctl(mEpollFd, EPOLL_CTL_ADD, mINotifyFd, &eventItem);
     LOG_ALWAYS_FATAL_IF(result != 0, "Could not add INotify to epoll instance.  errno=%d", errno);
 
@@ -236,7 +233,7 @@ EventHub::EventHub(void) :
     LOG_ALWAYS_FATAL_IF(result != 0, "Could not make wake write pipe non-blocking.  errno=%d",
             errno);
 
-    eventItem.data.u32 = EPOLL_ID_WAKE;
+    eventItem.data.fd = mWakeReadPipeFd;
     result = epoll_ctl(mEpollFd, EPOLL_CTL_ADD, mWakeReadPipeFd, &eventItem);
     LOG_ALWAYS_FATAL_IF(result != 0, "Could not add wake read pipe to epoll instance.  errno=%d",
             errno);
@@ -735,6 +732,16 @@ EventHub::Device* EventHub::getDeviceByPathLocked(const char* devicePath) const 
     return nullptr;
 }
 
+EventHub::Device* EventHub::getDeviceByFdLocked(int fd) const {
+    for (size_t i = 0; i < mDevices.size(); i++) {
+        Device* device = mDevices.valueAt(i);
+        if (device->fd == fd) {
+            return device;
+        }
+    }
+    return nullptr;
+}
+
 size_t EventHub::getEvents(int timeoutMillis, RawEvent* buffer, size_t bufferSize) {
     ALOG_ASSERT(bufferSize >= 1);
 
@@ -811,7 +818,7 @@ size_t EventHub::getEvents(int timeoutMillis, RawEvent* buffer, size_t bufferSiz
         bool deviceChanged = false;
         while (mPendingEventIndex < mPendingEventCount) {
             const struct epoll_event& eventItem = mPendingEventItems[mPendingEventIndex++];
-            if (eventItem.data.u32 == EPOLL_ID_INOTIFY) {
+            if (eventItem.data.fd == mINotifyFd) {
                 if (eventItem.events & EPOLLIN) {
                     mPendingINotify = true;
                 } else {
@@ -820,7 +827,7 @@ size_t EventHub::getEvents(int timeoutMillis, RawEvent* buffer, size_t bufferSiz
                 continue;
             }
 
-            if (eventItem.data.u32 == EPOLL_ID_WAKE) {
+            if (eventItem.data.fd == mWakeReadPipeFd) {
                 if (eventItem.events & EPOLLIN) {
                     ALOGV("awoken after wake()");
                     awoken = true;
@@ -836,14 +843,13 @@ size_t EventHub::getEvents(int timeoutMillis, RawEvent* buffer, size_t bufferSiz
                 continue;
             }
 
-            ssize_t deviceIndex = mDevices.indexOfKey(eventItem.data.u32);
-            if (deviceIndex < 0) {
-                ALOGW("Received unexpected epoll event 0x%08x for unknown device id %d.",
-                        eventItem.events, eventItem.data.u32);
+            Device* device = getDeviceByFdLocked(eventItem.data.fd);
+            if (device == nullptr) {
+                ALOGW("Received unexpected epoll event 0x%08x for unknown device fd %d.",
+                        eventItem.events, eventItem.data.fd);
                 continue;
             }
 
-            Device* device = mDevices.valueAt(deviceIndex);
             if (eventItem.events & EPOLLIN) {
                 int32_t readSize = read(device->fd, readBuffer,
                         sizeof(struct input_event) * capacity);
@@ -870,31 +876,6 @@ size_t EventHub::getEvents(int timeoutMillis, RawEvent* buffer, size_t bufferSiz
                                 device->path.c_str(),
                                 (int) iev.time.tv_sec, (int) iev.time.tv_usec,
                                 iev.type, iev.code, iev.value);
-
-                        // Some input devices may have a better concept of the time
-                        // when an input event was actually generated than the kernel
-                        // which simply timestamps all events on entry to evdev.
-                        // This is a custom Android extension of the input protocol
-                        // mainly intended for use with uinput based device drivers.
-                        if (iev.type == EV_MSC) {
-                            if (iev.code == MSC_ANDROID_TIME_SEC) {
-                                device->timestampOverrideSec = iev.value;
-                                continue;
-                            } else if (iev.code == MSC_ANDROID_TIME_USEC) {
-                                device->timestampOverrideUsec = iev.value;
-                                continue;
-                            }
-                        }
-                        if (device->timestampOverrideSec || device->timestampOverrideUsec) {
-                            iev.time.tv_sec = device->timestampOverrideSec;
-                            iev.time.tv_usec = device->timestampOverrideUsec;
-                            if (iev.type == EV_SYN && iev.code == SYN_REPORT) {
-                                device->timestampOverrideSec = 0;
-                                device->timestampOverrideUsec = 0;
-                            }
-                            ALOGV("applied override time %d.%06d",
-                                    int(iev.time.tv_sec), int(iev.time.tv_usec));
-                        }
 
                         // Use the time specified in the event instead of the current time
                         // so that downstream code can get more accurate estimates of
@@ -1089,7 +1070,7 @@ status_t EventHub::registerDeviceForEpollLocked(Device* device) {
     if (mUsingEpollWakeup) {
         eventItem.events |= EPOLLWAKEUP;
     }
-    eventItem.data.u32 = device->id;
+    eventItem.data.fd = device->fd;
     if (epoll_ctl(mEpollFd, EPOLL_CTL_ADD, device->fd, &eventItem)) {
         ALOGE("Could not add device fd to epoll instance.  errno=%d", errno);
         return -errno;

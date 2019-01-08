@@ -16,21 +16,134 @@
 
 #pragma once
 
+#include "BufferQueueLayer.h"
+#include "BufferStateLayer.h"
+#include "ColorLayer.h"
+#include "ContainerLayer.h"
 #include "DisplayDevice.h"
 #include "Layer.h"
+#include "NativeWindowSurface.h"
+#include "StartPropertySetThread.h"
 #include "SurfaceFlinger.h"
+#include "SurfaceFlingerFactory.h"
+#include "SurfaceInterceptor.h"
 
 namespace android {
 
 class EventThread;
 
 namespace renderengine {
+
 class RenderEngine;
-}
+
+} // namespace renderengine
 
 namespace Hwc2 {
+
 class Composer;
-}
+
+} // namespace Hwc2
+
+namespace surfaceflinger::test {
+
+class Factory final : public surfaceflinger::Factory {
+public:
+    ~Factory() = default;
+
+    std::unique_ptr<DispSync> createDispSync(const char*, bool, int64_t) override {
+        // TODO: Use test-fixture controlled factory
+        return nullptr;
+    }
+
+    std::unique_ptr<EventControlThread> createEventControlThread(
+            std::function<void(bool)>) override {
+        // TODO: Use test-fixture controlled factory
+        return nullptr;
+    }
+
+    std::unique_ptr<HWComposer> createHWComposer(const std::string&) override {
+        // TODO: Use test-fixture controlled factory
+        return nullptr;
+    }
+
+    std::unique_ptr<MessageQueue> createMessageQueue() override {
+        // TODO: Use test-fixture controlled factory
+        return std::make_unique<android::impl::MessageQueue>();
+    }
+
+    std::unique_ptr<Scheduler> createScheduler(std::function<void(bool)>) override {
+        // TODO: Use test-fixture controlled factory
+        return nullptr;
+    }
+
+    std::unique_ptr<SurfaceInterceptor> createSurfaceInterceptor(SurfaceFlinger* flinger) override {
+        // TODO: Use test-fixture controlled factory
+        return std::make_unique<android::impl::SurfaceInterceptor>(flinger);
+    }
+
+    sp<StartPropertySetThread> createStartPropertySetThread(bool timestampPropertyValue) override {
+        // TODO: Use test-fixture controlled factory
+        return new StartPropertySetThread(timestampPropertyValue);
+    }
+
+    sp<DisplayDevice> createDisplayDevice(DisplayDeviceCreationArgs&& creationArgs) override {
+        // TODO: Use test-fixture controlled factory
+        return new DisplayDevice(std::move(creationArgs));
+    }
+
+    sp<GraphicBuffer> createGraphicBuffer(uint32_t width, uint32_t height, PixelFormat format,
+                                          uint32_t layerCount, uint64_t usage,
+                                          std::string requestorName) override {
+        // TODO: Use test-fixture controlled factory
+        return new GraphicBuffer(width, height, format, layerCount, usage, requestorName);
+    }
+
+    void createBufferQueue(sp<IGraphicBufferProducer>* outProducer,
+                           sp<IGraphicBufferConsumer>* outConsumer,
+                           bool consumerIsSurfaceFlinger) override {
+        if (!mCreateBufferQueue) return;
+        mCreateBufferQueue(outProducer, outConsumer, consumerIsSurfaceFlinger);
+    }
+
+    std::unique_ptr<surfaceflinger::NativeWindowSurface> createNativeWindowSurface(
+            const sp<IGraphicBufferProducer>& producer) override {
+        if (!mCreateNativeWindowSurface) return nullptr;
+        return mCreateNativeWindowSurface(producer);
+    }
+
+    sp<BufferQueueLayer> createBufferQueueLayer(const LayerCreationArgs&) override {
+        // TODO: Use test-fixture controlled factory
+        return nullptr;
+    }
+
+    sp<BufferStateLayer> createBufferStateLayer(const LayerCreationArgs&) override {
+        // TODO: Use test-fixture controlled factory
+        return nullptr;
+    }
+
+    sp<ColorLayer> createColorLayer(const LayerCreationArgs&) override {
+        // TODO: Use test-fixture controlled factory
+        return nullptr;
+    }
+
+    sp<ContainerLayer> createContainerLayer(const LayerCreationArgs&) override {
+        // TODO: Use test-fixture controlled factory
+        return nullptr;
+    }
+
+    using CreateBufferQueueFunction =
+            std::function<void(sp<IGraphicBufferProducer>* /* outProducer */,
+                               sp<IGraphicBufferConsumer>* /* outConsumer */,
+                               bool /* consumerIsSurfaceFlinger */)>;
+    CreateBufferQueueFunction mCreateBufferQueue;
+
+    using CreateNativeWindowSurfaceFunction =
+            std::function<std::unique_ptr<surfaceflinger::NativeWindowSurface>(
+                    const sp<IGraphicBufferProducer>&)>;
+    CreateNativeWindowSurfaceFunction mCreateNativeWindowSurface;
+};
+
+} // namespace surfaceflinger::test
 
 class TestableSurfaceFlinger {
 public:
@@ -45,14 +158,15 @@ public:
         mFlinger->getBE().mHwc.reset(new HWComposer(std::move(composer)));
     }
 
-    using CreateBufferQueueFunction = SurfaceFlinger::CreateBufferQueueFunction;
+    using CreateBufferQueueFunction = surfaceflinger::test::Factory::CreateBufferQueueFunction;
     void setCreateBufferQueueFunction(CreateBufferQueueFunction f) {
-        mFlinger->mCreateBufferQueue = f;
+        mFactory.mCreateBufferQueue = f;
     }
 
-    using CreateNativeWindowSurfaceFunction = SurfaceFlinger::CreateNativeWindowSurfaceFunction;
+    using CreateNativeWindowSurfaceFunction =
+            surfaceflinger::test::Factory::CreateNativeWindowSurfaceFunction;
     void setCreateNativeWindowSurface(CreateNativeWindowSurfaceFunction f) {
-        mFlinger->mCreateNativeWindowSurface = f;
+        mFactory.mCreateNativeWindowSurface = f;
     }
 
     using HotplugEvent = SurfaceFlinger::HotplugEvent;
@@ -61,12 +175,9 @@ public:
     auto& mutableLayerDrawingState(sp<Layer> layer) { return layer->mDrawingState; }
 
     void setLayerSidebandStream(sp<Layer> layer, sp<NativeHandle> sidebandStream) {
+        layer->mDrawingState.sidebandStream = sidebandStream;
         layer->getBE().compositionInfo.hwc.sidebandStream = sidebandStream;
     }
-
-    void setLayerCompositionType(sp<Layer> layer, HWC2::Composition type) {
-        layer->getBE().mHwcLayers[DisplayDevice::DISPLAY_PRIMARY].compositionType = type;
-    };
 
     void setLayerPotentialCursor(sp<Layer> layer, bool potentialCursor) {
         layer->mPotentialCursor = potentialCursor;
@@ -86,7 +197,8 @@ public:
 
     auto resetDisplayState() { return mFlinger->resetDisplayState(); }
 
-    auto setupNewDisplayDeviceInternal(const wp<IBinder>& displayToken, int32_t displayId,
+    auto setupNewDisplayDeviceInternal(const wp<IBinder>& displayToken,
+                                       const std::optional<DisplayId>& displayId,
                                        const DisplayDeviceState& state,
                                        const sp<DisplaySurface>& dispSurface,
                                        const sp<IGraphicBufferProducer>& producer) {
@@ -149,7 +261,6 @@ public:
     auto& mutableCurrentState() { return mFlinger->mCurrentState; }
     auto& mutableDisplayColorSetting() { return mFlinger->mDisplayColorSetting; }
     auto& mutableDisplays() { return mFlinger->mDisplays; }
-    auto& mutableDisplayTokens() { return mFlinger->mDisplayTokens; }
     auto& mutableDrawingState() { return mFlinger->mDrawingState; }
     auto& mutableEventControlThread() { return mFlinger->mEventControlThread; }
     auto& mutableEventQueue() { return mFlinger->mEventQueue; }
@@ -159,6 +270,7 @@ public:
     auto& mutableInterceptor() { return mFlinger->mInterceptor; }
     auto& mutableMainThreadId() { return mFlinger->mMainThreadId; }
     auto& mutablePendingHotplugEvents() { return mFlinger->mPendingHotplugEvents; }
+    auto& mutablePhysicalDisplayTokens() { return mFlinger->mPhysicalDisplayTokens; }
     auto& mutablePrimaryDispSync() { return mFlinger->mPrimaryDispSync; }
     auto& mutablePrimaryHWVsyncEnabled() { return mFlinger->mPrimaryHWVsyncEnabled; }
     auto& mutableTexturePool() { return mFlinger->mTexturePool; }
@@ -166,8 +278,13 @@ public:
     auto& mutableUseHwcVirtualDisplays() { return mFlinger->mUseHwcVirtualDisplays; }
 
     auto& mutableComposerSequenceId() { return mFlinger->getBE().mComposerSequenceId; }
-    auto& mutableHwcDisplayData() { return mFlinger->getBE().mHwc->mDisplayData; }
-    auto& mutableHwcDisplaySlots() { return mFlinger->getBE().mHwc->mHwcDisplaySlots; }
+    auto& mutableHwcDisplayData() { return mFlinger->getHwComposer().mDisplayData; }
+    auto& mutableHwcPhysicalDisplayIdMap() {
+        return mFlinger->getHwComposer().mPhysicalDisplayIdMap;
+    }
+
+    auto& mutableInternalHwcDisplayId() { return mFlinger->getHwComposer().mInternalHwcDisplayId; }
+    auto& mutableExternalHwcDisplayId() { return mFlinger->getHwComposer().mExternalHwcDisplayId; }
 
     ~TestableSurfaceFlinger() {
         // All these pointer and container clears help ensure that GMock does
@@ -219,8 +336,9 @@ public:
         static constexpr int32_t DEFAULT_DPI = 320;
         static constexpr int32_t DEFAULT_ACTIVE_CONFIG = 0;
 
-        FakeHwcDisplayInjector(DisplayDevice::DisplayType type, HWC2::DisplayType hwcDisplayType)
-              : mType(type), mHwcDisplayType(hwcDisplayType) {}
+        FakeHwcDisplayInjector(DisplayId displayId, HWC2::DisplayType hwcDisplayType,
+                               bool isPrimary)
+              : mDisplayId(displayId), mHwcDisplayType(hwcDisplayType), mIsPrimary(isPrimary) {}
 
         auto& setHwcDisplayId(hwc2_display_t displayId) {
             mHwcDisplayId = displayId;
@@ -289,17 +407,22 @@ public:
             display->mutableConfigs().emplace(mActiveConfig, config.build());
             display->mutableIsConnected() = true;
 
-            ASSERT_TRUE(flinger->mutableHwcDisplayData().size() > static_cast<size_t>(mType));
-            flinger->mutableHwcDisplayData()[mType] = HWComposer::DisplayData();
-            flinger->mutableHwcDisplayData()[mType].hwcDisplay = display.get();
-            flinger->mutableHwcDisplaySlots().emplace(mHwcDisplayId, mType);
+            flinger->mutableHwcDisplayData()[mDisplayId].hwcDisplay = display.get();
+
+            if (mHwcDisplayType == HWC2::DisplayType::Physical) {
+                flinger->mutableHwcPhysicalDisplayIdMap().emplace(mHwcDisplayId, mDisplayId);
+                (mIsPrimary ? flinger->mutableInternalHwcDisplayId()
+                            : flinger->mutableExternalHwcDisplayId()) = mHwcDisplayId;
+            }
 
             flinger->mFakeHwcDisplays.push_back(std::move(display));
         }
 
     private:
-        DisplayDevice::DisplayType mType;
-        HWC2::DisplayType mHwcDisplayType;
+        const DisplayId mDisplayId;
+        const HWC2::DisplayType mHwcDisplayType;
+        const bool mIsPrimary;
+
         hwc2_display_t mHwcDisplayId = DEFAULT_HWC_DISPLAY_ID;
         int32_t mWidth = DEFAULT_WIDTH;
         int32_t mHeight = DEFAULT_HEIGHT;
@@ -313,10 +436,13 @@ public:
 
     class FakeDisplayDeviceInjector {
     public:
-        FakeDisplayDeviceInjector(TestableSurfaceFlinger& flinger, DisplayDevice::DisplayType type,
-                                  int32_t displayId)
-              : mFlinger(flinger),
-                mCreationArgs(flinger.mFlinger.get(), mDisplayToken, type, displayId) {}
+        FakeDisplayDeviceInjector(TestableSurfaceFlinger& flinger,
+                                  const std::optional<DisplayId>& displayId, bool isVirtual,
+                                  bool isPrimary)
+              : mFlinger(flinger), mCreationArgs(flinger.mFlinger.get(), mDisplayToken, displayId) {
+            mCreationArgs.isVirtual = isVirtual;
+            mCreationArgs.isPrimary = isPrimary;
+        }
 
         sp<IBinder> token() const { return mDisplayToken; }
 
@@ -358,20 +484,26 @@ public:
             return *this;
         }
 
-        auto& setDisplaySize(int width, int height) {
-            mCreationArgs.displayWidth = width;
-            mCreationArgs.displayHeight = height;
-            return *this;
-        }
-
         auto& setPowerMode(int mode) {
             mCreationArgs.initialPowerMode = mode;
             return *this;
         }
 
+        auto& setHwcColorModes(
+                const std::unordered_map<ui::ColorMode, std::vector<ui::RenderIntent>>
+                        hwcColorModes) {
+            mCreationArgs.hwcColorModes = hwcColorModes;
+            return *this;
+        }
+
+        auto& setHasWideColorGamut(bool hasWideColorGamut) {
+            mCreationArgs.hasWideColorGamut = hasWideColorGamut;
+            return *this;
+        }
+
         sp<DisplayDevice> inject() {
             DisplayDeviceState state;
-            state.type = mCreationArgs.type;
+            state.displayId = mCreationArgs.isVirtual ? std::nullopt : mCreationArgs.displayId;
             state.isSecure = mCreationArgs.isSecure;
 
             sp<DisplayDevice> device = new DisplayDevice(std::move(mCreationArgs));
@@ -379,9 +511,9 @@ public:
             mFlinger.mutableCurrentState().displays.add(mDisplayToken, state);
             mFlinger.mutableDrawingState().displays.add(mDisplayToken, state);
 
-            if (state.type >= DisplayDevice::DISPLAY_PRIMARY &&
-                state.type < DisplayDevice::DISPLAY_VIRTUAL) {
-                mFlinger.mutableDisplayTokens()[state.type] = mDisplayToken;
+            if (!mCreationArgs.isVirtual) {
+                LOG_ALWAYS_FATAL_IF(!state.displayId);
+                mFlinger.mutablePhysicalDisplayTokens()[*state.displayId] = mDisplayToken;
             }
 
             return device;
@@ -393,7 +525,8 @@ public:
         DisplayDeviceCreationArgs mCreationArgs;
     };
 
-    sp<SurfaceFlinger> mFlinger = new SurfaceFlinger(SurfaceFlinger::SkipInitialization);
+    surfaceflinger::test::Factory mFactory;
+    sp<SurfaceFlinger> mFlinger = new SurfaceFlinger(mFactory, SurfaceFlinger::SkipInitialization);
 
     // We need to keep a reference to these so they are properly destroyed.
     std::vector<std::unique_ptr<HWC2Display>> mFakeHwcDisplays;

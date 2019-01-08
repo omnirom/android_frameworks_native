@@ -26,20 +26,21 @@ static constexpr uint32_t kMetadataUsage =
 // MSB           LSB
 //  |             |
 //  v             v
-// [P|C62|...|C1|C0]
-// Gain'ed state:     [0|..|0|0] -> Exclusively Writable.
-// Post'ed state:     [1|..|0|0]
-// Acquired'ed state: [1|..|X|X] -> At least one bit is set in lower 63 bits
-// Released'ed state: [0|..|X|X] -> At least one bit is set in lower 63 bits
-static constexpr uint64_t kProducerStateBit = 1ULL << 63;
-static constexpr uint64_t kConsumerStateMask = (1ULL << 63) - 1;
+// [C62|...|C1|C0|P]
+// Gain'ed state:     [..|0|0|0] -> Exclusively Writable.
+// Post'ed state:     [..|0|0|1]
+// Acquired'ed state: [..|X|X|1] -> At least one bit is set in higher 63 bits
+// Released'ed state: [..|X|X|0] -> At least one bit is set in higher 63 bits
+static constexpr int kMaxNumberOfClients = 64;
+static constexpr uint64_t kFirstClientBitMask = 1ULL;
+static constexpr uint64_t kConsumerStateMask = ~kFirstClientBitMask;
 
 static inline void ModifyBufferState(std::atomic<uint64_t>* buffer_state,
                                      uint64_t clear_mask, uint64_t set_mask) {
   uint64_t old_state;
   uint64_t new_state;
   do {
-    old_state = buffer_state->load();
+    old_state = buffer_state->load(std::memory_order_acquire);
     new_state = (old_state & ~clear_mask) | set_mask;
   } while (!buffer_state->compare_exchange_weak(old_state, new_state));
 }
@@ -48,23 +49,23 @@ static inline bool IsBufferGained(uint64_t state) { return state == 0; }
 
 static inline bool IsBufferPosted(uint64_t state,
                                   uint64_t consumer_bit = kConsumerStateMask) {
-  return (state & kProducerStateBit) && !(state & consumer_bit);
+  return (state & kFirstClientBitMask) && !(state & consumer_bit);
 }
 
 static inline bool IsBufferAcquired(uint64_t state) {
-  return (state & kProducerStateBit) && (state & kConsumerStateMask);
+  return (state & kFirstClientBitMask) && (state & kConsumerStateMask);
 }
 
 static inline bool IsBufferReleased(uint64_t state) {
-  return !(state & kProducerStateBit) && (state & kConsumerStateMask);
+  return !(state & kFirstClientBitMask) && (state & kConsumerStateMask);
 }
 
-static inline uint64_t FindNextClearedBit(uint64_t bits) {
+static inline uint64_t FindNextAvailableClientStateMask(uint64_t bits) {
   return ~bits - (~bits & (~bits - 1));
 }
 
 static inline uint64_t FindFirstClearedBit() {
-  return FindNextClearedBit(kProducerStateBit);
+  return FindNextAvailableClientStateMask(kFirstClientBitMask);
 }
 
 struct __attribute__((packed, aligned(8))) MetadataHeader {
@@ -94,13 +95,13 @@ class BufferTraits {
   BufferTraits() = default;
   BufferTraits(const native_handle_t* buffer_handle,
                const FileHandleType& metadata_handle, int id,
-               uint64_t buffer_state_bit, uint64_t metadata_size,
+               uint64_t client_state_mask, uint64_t metadata_size,
                uint32_t width, uint32_t height, uint32_t layer_count,
                uint32_t format, uint64_t usage, uint32_t stride,
                const FileHandleType& acquire_fence_fd,
                const FileHandleType& release_fence_fd)
       : id_(id),
-        buffer_state_bit_(buffer_state_bit),
+        client_state_mask_(client_state_mask),
         metadata_size_(metadata_size),
         width_(width),
         height_(height),
@@ -122,9 +123,9 @@ class BufferTraits {
 
   // State mask of the buffer client. Each BufferHubBuffer client backed by the
   // same buffer channel has uniqued state bit among its siblings. For a
-  // producer buffer the bit must be kProducerStateBit; for a consumer the bit
+  // producer buffer the bit must be kFirstClientBitMask; for a consumer the bit
   // must be one of the kConsumerStateMask.
-  uint64_t buffer_state_bit() const { return buffer_state_bit_; }
+  uint64_t client_state_mask() const { return client_state_mask_; }
   uint64_t metadata_size() const { return metadata_size_; }
 
   uint32_t width() { return width_; }
@@ -148,7 +149,7 @@ class BufferTraits {
  private:
   // BufferHub specific traits.
   int id_ = -1;
-  uint64_t buffer_state_bit_;
+  uint64_t client_state_mask_;
   uint64_t metadata_size_;
 
   // Traits for a GraphicBuffer.
@@ -169,10 +170,10 @@ class BufferTraits {
   FileHandleType acquire_fence_fd_;
   FileHandleType release_fence_fd_;
 
-  PDX_SERIALIZABLE_MEMBERS(BufferTraits<FileHandleType>, id_, buffer_state_bit_,
-                           metadata_size_, stride_, width_, height_,
-                           layer_count_, format_, usage_, buffer_handle_,
-                           metadata_handle_, acquire_fence_fd_,
+  PDX_SERIALIZABLE_MEMBERS(BufferTraits<FileHandleType>, id_,
+                           client_state_mask_, metadata_size_, stride_, width_,
+                           height_, layer_count_, format_, usage_,
+                           buffer_handle_, metadata_handle_, acquire_fence_fd_,
                            release_fence_fd_);
 
   BufferTraits(const BufferTraits&) = delete;

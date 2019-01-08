@@ -28,6 +28,7 @@
 #include <string.h>
 #include <math.h>
 
+#include <android-base/stringprintf.h>
 #include <android/hardware/configstore/1.0/ISurfaceFlingerConfigs.h>
 #include <configstore/Utils.h>
 #include <cutils/properties.h>
@@ -37,8 +38,8 @@
 #include <ui/DebugUtils.h>
 #include <ui/DisplayInfo.h>
 #include <ui/PixelFormat.h>
-#include <utils/RefBase.h>
 #include <utils/Log.h>
+#include <utils/RefBase.h>
 
 #include "DisplayHardware/DisplaySurface.h"
 #include "DisplayHardware/HWComposer.h"
@@ -66,7 +67,8 @@ uint32_t DisplayDevice::sPrimaryDisplayOrientation = 0;
 namespace {
 
 // ordered list of known SDR color modes
-const std::array<ColorMode, 2> sSdrColorModes = {
+const std::array<ColorMode, 3> sSdrColorModes = {
+        ColorMode::DISPLAY_BT2020,
         ColorMode::DISPLAY_P3,
         ColorMode::SRGB,
 };
@@ -96,6 +98,8 @@ Dataspace colorModeToDataspace(ColorMode mode) {
             return Dataspace::SRGB;
         case ColorMode::DISPLAY_P3:
             return Dataspace::DISPLAY_P3;
+        case ColorMode::DISPLAY_BT2020:
+            return Dataspace::DISPLAY_BT2020;
         case ColorMode::BT2100_HLG:
             return Dataspace::BT2020_HLG;
         case ColorMode::BT2100_PQ:
@@ -208,22 +212,20 @@ RenderIntent getHwcRenderIntent(const std::vector<RenderIntent>& hwcIntents, Ren
 
 DisplayDeviceCreationArgs::DisplayDeviceCreationArgs(const sp<SurfaceFlinger>& flinger,
                                                      const wp<IBinder>& displayToken,
-                                                     DisplayDevice::DisplayType type, int32_t id)
-      : flinger(flinger), displayToken(displayToken), type(type), id(id) {}
+                                                     const std::optional<DisplayId>& displayId)
+      : flinger(flinger), displayToken(displayToken), displayId(displayId) {}
 
 DisplayDevice::DisplayDevice(DisplayDeviceCreationArgs&& args)
       : lastCompositionHadVisibleLayers(false),
         mFlinger(args.flinger),
-        mType(args.type),
-        mId(args.id),
         mDisplayToken(args.displayToken),
+        mId(args.displayId),
         mNativeWindow(args.nativeWindow),
         mDisplaySurface(args.displaySurface),
         mSurface{std::move(args.renderSurface)},
-        mDisplayWidth(args.displayWidth),
-        mDisplayHeight(args.displayHeight),
         mDisplayInstallOrientation(args.displayInstallOrientation),
         mPageFlipCount(0),
+        mIsVirtual(args.isVirtual),
         mIsSecure(args.isSecure),
         mLayerStack(NO_LAYER_STACK),
         mOrientation(),
@@ -236,14 +238,13 @@ DisplayDevice::DisplayDevice(DisplayDeviceCreationArgs&& args)
         mHasHdr10(false),
         mHasHLG(false),
         mHasDolbyVision(false),
-        mSupportedPerFrameMetadata(args.supportedPerFrameMetadata) {
+        mSupportedPerFrameMetadata(args.supportedPerFrameMetadata),
+        mIsPrimary(args.isPrimary) {
     populateColorModes(args.hwcColorModes);
 
     ALOGE_IF(!mNativeWindow, "No native window was set for display");
     ALOGE_IF(!mDisplaySurface, "No display surface was set for display");
     ALOGE_IF(!mSurface, "No render surface was set for display");
-    ALOGE_IF(mDisplayWidth <= 0 || mDisplayHeight <= 0,
-             "Invalid dimensions of %d x %d were set for display", mDisplayWidth, mDisplayHeight);
 
     std::vector<Hdr> types = args.hdrCapabilities.getSupportedHdrTypes();
     for (Hdr hdrType : types) {
@@ -289,6 +290,10 @@ DisplayDevice::DisplayDevice(DisplayDeviceCreationArgs&& args)
     }
     mHdrCapabilities = HdrCapabilities(types, maxLuminance, maxAverageLuminance, minLuminance);
 
+    ANativeWindow* const window = mNativeWindow.get();
+    mDisplayWidth = ANativeWindow_getWidth(window);
+    mDisplayHeight = ANativeWindow_getHeight(window);
+
     // initialize the display orientation transform.
     setProjection(DisplayState::eOrientationDefault, mViewport, mFrame);
 }
@@ -296,14 +301,10 @@ DisplayDevice::DisplayDevice(DisplayDeviceCreationArgs&& args)
 DisplayDevice::~DisplayDevice() = default;
 
 void DisplayDevice::disconnect(HWComposer& hwc) {
-    if (mId >= 0) {
-        hwc.disconnectDisplay(mId);
-        mId = -1;
+    if (mId) {
+        hwc.disconnectDisplay(*mId);
+        mId.reset();
     }
-}
-
-bool DisplayDevice::isValid() const {
-    return mFlinger != nullptr;
 }
 
 int DisplayDevice::getWidth() const {
@@ -337,9 +338,11 @@ status_t DisplayDevice::beginFrame(bool mustRecompose) const {
 
 status_t DisplayDevice::prepareFrame(HWComposer& hwc,
         std::vector<CompositionInfo>& compositionData) {
-    status_t error = hwc.prepare(*this, compositionData);
-    if (error != NO_ERROR) {
-        return error;
+    if (mId) {
+        status_t error = hwc.prepare(*mId, compositionData);
+        if (error != NO_ERROR) {
+            return error;
+        }
     }
 
     DisplaySurface::CompositionType compositionType;
@@ -530,7 +533,7 @@ status_t DisplayDevice::orientationToTransfrom(
         return BAD_VALUE;
     }
 
-    if (DISPLAY_PRIMARY == mId) {
+    if (isPrimary()) {
         flags = flags ^ getPanelMountFlip();
     }
 
@@ -547,13 +550,8 @@ void DisplayDevice::setDisplaySize(const int newWidth, const int newHeight) {
 
     ANativeWindow* const window = mNativeWindow.get();
     mSurface->setNativeWindow(window);
-    mDisplayWidth = mSurface->getWidth();
-    mDisplayHeight = mSurface->getHeight();
-
-    LOG_FATAL_IF(mDisplayWidth != newWidth,
-                "Unable to set new width to %d", newWidth);
-    LOG_FATAL_IF(mDisplayHeight != newHeight,
-                "Unable to set new height to %d", newHeight);
+    mDisplayWidth = newWidth;
+    mDisplayHeight = newHeight;
 }
 
 void DisplayDevice::setProjection(int orientation,
@@ -608,7 +606,7 @@ void DisplayDevice::setProjection(int orientation,
 
     // need to take care of primary display rotation for mGlobalTransform
     // for case if the panel is not installed aligned with device orientation
-    if (mType == DisplayType::DISPLAY_PRIMARY) {
+    if (isPrimary()) {
         DisplayDevice::orientationToTransfrom(
                 (orientation + mDisplayInstallOrientation) % (DisplayState::eOrientation270 + 1),
                 w, h, &R);
@@ -655,14 +653,21 @@ uint32_t DisplayDevice::getPrimaryDisplayOrientationTransform() {
     return sPrimaryDisplayOrientation;
 }
 
+std::string DisplayDevice::getDebugName() const {
+    const auto id = mId ? to_string(*mId) + ", " : std::string();
+    return base::StringPrintf("DisplayDevice{%s%s%s\"%s\"}", id.c_str(),
+                              isPrimary() ? "primary, " : "", isVirtual() ? "virtual, " : "",
+                              mDisplayName.c_str());
+}
+
 void DisplayDevice::dump(String8& result) const {
     const ui::Transform& tr(mGlobalTransform);
     ANativeWindow* const window = mNativeWindow.get();
-    result.appendFormat("+ DisplayDevice: %s\n", mDisplayName.c_str());
-    result.appendFormat("   type=%x, ID=%d, layerStack=%u, (%4dx%4d), ANativeWindow=%p "
+    result.appendFormat("+ %s\n", getDebugName().c_str());
+    result.appendFormat("  layerStack=%u, (%4dx%4d), ANativeWindow=%p "
                         "(%d:%d:%d:%d), orient=%2d (type=%08x), "
                         "flips=%u, isSecure=%d, powerMode=%d, activeConfig=%d, numLayers=%zu\n",
-                        mType, mId, mLayerStack, mDisplayWidth, mDisplayHeight, window,
+                        mLayerStack, mDisplayWidth, mDisplayHeight, window,
                         mSurface->queryRedSize(), mSurface->queryGreenSize(),
                         mSurface->queryBlueSize(), mSurface->queryAlphaSize(), mOrientation,
                         tr.getType(), getPageFlipCount(), mIsSecure, mPowerMode, mActiveConfig,
@@ -702,7 +707,7 @@ void DisplayDevice::addColorMode(
     const Dataspace dataspace = colorModeToDataspace(mode);
     const Dataspace hwcDataspace = colorModeToDataspace(hwcColorMode);
 
-    ALOGV("DisplayDevice %d/%d: map (%s, %s) to (%s, %s, %s)", mType, mId,
+    ALOGV("%s: map (%s, %s) to (%s, %s, %s)", getDebugName().c_str(),
           dataspaceDetails(static_cast<android_dataspace_t>(dataspace)).c_str(),
           decodeRenderIntent(intent).c_str(),
           dataspaceDetails(static_cast<android_dataspace_t>(hwcDataspace)).c_str(),

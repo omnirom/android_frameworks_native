@@ -112,6 +112,8 @@ Layer::Layer(const LayerCreationArgs& args)
     args.flinger->getCompositorTiming(&compositorTiming);
     mFrameEventHistory.initializeCompositorTiming(compositorTiming);
     mFrameTracker.setDisplayRefreshPeriod(compositorTiming.interval);
+
+    mFlinger->onLayerCreated();
 }
 
 Layer::~Layer() {
@@ -120,13 +122,11 @@ Layer::~Layer() {
         c->detachLayer(this);
     }
 
-    for (auto& point : mRemoteSyncPoints) {
-        point->setTransactionApplied();
-    }
-    for (auto& point : mLocalSyncPoints) {
-        point->setFrameAvailable();
-    }
     mFrameTracker.logAndResetStats(mName);
+
+    destroyAllHwcLayers();
+
+    mFlinger->onLayerDestroyed();
 }
 
 // ---------------------------------------------------------------------------
@@ -141,10 +141,9 @@ Layer::~Layer() {
 void Layer::onLayerDisplayed(const sp<Fence>& /*releaseFence*/) {}
 
 void Layer::onRemovedFromCurrentState() {
+    mRemovedFromCurrentState = true;
+
     // the layer is removed from SF mCurrentState to mLayersPendingRemoval
-
-    mPendingRemoval = true;
-
     if (mCurrentState.zOrderRelativeOf != nullptr) {
         sp<Layer> strongRelative = mCurrentState.zOrderRelativeOf.promote();
         if (strongRelative != nullptr) {
@@ -154,19 +153,26 @@ void Layer::onRemovedFromCurrentState() {
         mCurrentState.zOrderRelativeOf = nullptr;
     }
 
+    // Since we are no longer reachable from CurrentState SurfaceFlinger
+    // will no longer invoke doTransaction for us, and so we will
+    // never finish applying transactions. We signal the sync point
+    // now so that another layer will not become indefinitely
+    // blocked.
+    for (auto& point: mRemoteSyncPoints) {
+        point->setTransactionApplied();
+    }
+    mRemoteSyncPoints.clear();
+
+    {
+    Mutex::Autolock syncLock(mLocalSyncPointMutex);
+    for (auto& point : mLocalSyncPoints) {
+        point->setFrameAvailable();
+    }
+    mLocalSyncPoints.clear();
+    }
+
     for (const auto& child : mCurrentChildren) {
         child->onRemovedFromCurrentState();
-    }
-}
-
-void Layer::onRemoved() {
-    // the layer is removed from SF mLayersPendingRemoval
-    abandon();
-
-    destroyAllHwcLayers();
-
-    for (const auto& child : mCurrentChildren) {
-        child->onRemoved();
     }
 }
 
@@ -191,9 +197,9 @@ sp<IBinder> Layer::getHandle() {
 // h/w composer set-up
 // ---------------------------------------------------------------------------
 
-bool Layer::createHwcLayer(HWComposer* hwc, int32_t displayId) {
-    LOG_ALWAYS_FATAL_IF(getBE().mHwcLayers.count(displayId) != 0,
-                        "Already have a layer for display %d", displayId);
+bool Layer::createHwcLayer(HWComposer* hwc, DisplayId displayId) {
+    LOG_ALWAYS_FATAL_IF(hasHwcLayer(displayId), "Already have a layer for display %s",
+                        to_string(displayId).c_str());
     auto layer = std::shared_ptr<HWC2::Layer>(
             hwc->createLayer(displayId),
             [hwc, displayId](HWC2::Layer* layer) {
@@ -209,8 +215,8 @@ bool Layer::createHwcLayer(HWComposer* hwc, int32_t displayId) {
     return true;
 }
 
-bool Layer::destroyHwcLayer(int32_t displayId) {
-    if (getBE().mHwcLayers.count(displayId) == 0) {
+bool Layer::destroyHwcLayer(DisplayId displayId) {
+    if (!hasHwcLayer(displayId)) {
         return false;
     }
     auto& hwcInfo = getBE().mHwcLayers[displayId];
@@ -229,6 +235,10 @@ void Layer::destroyAllHwcLayers() {
     }
     LOG_ALWAYS_FATAL_IF(!getBE().mHwcLayers.empty(),
                         "All hardware composer layers should have been destroyed");
+
+    for (const sp<Layer>& child : mDrawingChildren) {
+        child->destroyAllHwcLayers();
+    }
 }
 
 Rect Layer::getContentCrop() const {
@@ -266,39 +276,12 @@ static FloatRect reduce(const FloatRect& win, const Region& exclude) {
     return Region(Rect{win}).subtract(exclude).getBounds().toFloatRect();
 }
 
-Rect Layer::computeScreenBounds(bool reduceTransparentRegion) const {
-    const State& s(getDrawingState());
-    Rect win(getActiveWidth(s), getActiveHeight(s));
-
-    Rect crop = getCrop(s);
-    if (!crop.isEmpty()) {
-        win.intersect(crop, &win);
-    }
-
+Rect Layer::computeScreenBounds() const {
+    FloatRect bounds = computeBounds();
     ui::Transform t = getTransform();
-    win = t.transform(win);
-
-    const sp<Layer>& p = mDrawingParent.promote();
-    // Now we need to calculate the parent bounds, so we can clip ourselves to those.
-    // When calculating the parent bounds for purposes of clipping,
-    // we don't need to constrain the parent to its transparent region.
-    // The transparent region is an optimization based on the
-    // buffer contents of the layer, but does not affect the space allocated to
-    // it by policy, and thus children should be allowed to extend into the
-    // parent's transparent region. In fact one of the main uses, is to reduce
-    // buffer allocation size in cases where a child window sits behind a main window
-    // (by marking the hole in the parent window as a transparent region)
-    if (p != nullptr) {
-        Rect bounds = p->computeScreenBounds(false);
-        bounds.intersect(win, &win);
-    }
-
-    if (reduceTransparentRegion) {
-        auto const screenTransparentRegion = t.transform(getActiveTransparentRegion(s));
-        win = reduce(win, screenTransparentRegion);
-    }
-
-    return win;
+    // Transform to screen space.
+    bounds = t.transform(bounds);
+    return Rect{bounds};
 }
 
 FloatRect Layer::computeBounds() const {
@@ -308,32 +291,72 @@ FloatRect Layer::computeBounds() const {
 
 FloatRect Layer::computeBounds(const Region& activeTransparentRegion) const {
     const State& s(getDrawingState());
-    Rect win(getActiveWidth(s), getActiveHeight(s));
+    Rect bounds = getCroppedBufferSize(s);
+    FloatRect floatBounds = bounds.toFloatRect();
+    if (bounds.isValid()) {
+        // Layer has bounds. Pass in our bounds as a special case. Then pass on to our parents so
+        // that they can clip it.
+        floatBounds = cropChildBounds(floatBounds);
+    } else {
+        // Layer does not have bounds, so we fill to our parent bounds. This is done by getting our
+        // parent bounds and inverting the transform to get the maximum bounds we can have that
+        // will fit within our parent bounds.
+        const auto& p = mDrawingParent.promote();
+        if (p != nullptr) {
+            ui::Transform t = s.active_legacy.transform;
+            // When calculating the parent bounds for purposes of clipping, we don't need to
+            // constrain the parent to its transparent region. The transparent region is an
+            // optimization based on the buffer contents of the layer, but does not affect the
+            // space allocated to it by policy, and thus children should be allowed to extend into
+            // the parent's transparent region.
+            // One of the main uses is a parent window with a child sitting behind the parent
+            // window, marked by a transparent region. When computing the parent bounds from the
+            // parent's perspective we pass in the transparent region to reduce buffer allocation
+            // size. When computing the parent bounds from the child's perspective, we pass in an
+            // empty transparent region in order to extend into the the parent bounds.
+            floatBounds = p->computeBounds(Region());
+            // Transform back to layer space.
+            floatBounds = t.inverse().transform(floatBounds);
+        }
+    }
 
-    Rect crop = getCrop(s);
-    if (!crop.isEmpty()) {
-        win.intersect(crop, &win);
+    // Subtract the transparent region and snap to the bounds.
+    return reduce(floatBounds, activeTransparentRegion);
+}
+
+FloatRect Layer::cropChildBounds(const FloatRect& childBounds) const {
+    const State& s(getDrawingState());
+    Rect bounds = getCroppedBufferSize(s);
+    FloatRect croppedBounds = childBounds;
+
+    // If the layer has bounds, then crop the passed in child bounds and pass
+    // it to our parents so they can crop it as well. If the layer has no bounds,
+    // then pass on the child bounds.
+    if (bounds.isValid()) {
+        croppedBounds = croppedBounds.intersect(bounds.toFloatRect());
     }
 
     const auto& p = mDrawingParent.promote();
-    FloatRect floatWin = win.toFloatRect();
-    FloatRect parentBounds = floatWin;
     if (p != nullptr) {
-        // We pass an empty Region here for reasons mirroring that of the case described in
-        // the computeScreenBounds reduceTransparentRegion=false case.
-        parentBounds = p->computeBounds(Region());
+        // Transform to parent space and allow parent layer to crop the
+        // child bounds as well.
+        ui::Transform t = s.active_legacy.transform;
+        croppedBounds = t.transform(croppedBounds);
+        croppedBounds = p->cropChildBounds(croppedBounds);
+        croppedBounds = t.inverse().transform(croppedBounds);
     }
+    return croppedBounds;
+}
 
-    ui::Transform t = s.active_legacy.transform;
-
-    if (p != nullptr) {
-        floatWin = t.transform(floatWin);
-        floatWin = floatWin.intersect(parentBounds);
-        floatWin = t.inverse().transform(floatWin);
+Rect Layer::getCroppedBufferSize(const State& s) const {
+    Rect size = getBufferSize(s);
+    Rect crop = getCrop(s);
+    if (!crop.isEmpty() && size.isValid()) {
+        size.intersect(crop, &size);
+    } else if (!crop.isEmpty()) {
+        size = crop;
     }
-
-    // subtract the transparent region and snap to the bounds
-    return reduce(floatWin, activeTransparentRegion);
+    return size;
 }
 
 Rect Layer::computeInitialCrop(const sp<const DisplayDevice>& display) const {
@@ -452,12 +475,9 @@ FloatRect Layer::computeCrop(const sp<const DisplayDevice>& display) const {
 
 void Layer::setGeometry(const sp<const DisplayDevice>& display, uint32_t z) {
     const auto displayId = display->getId();
-    if (!hasHwcLayer(displayId)) {
-        ALOGE("[%s] failed to setGeometry: no HWC layer found (%d)",
-              mName.string(), displayId);
-        return;
-    }
-    auto& hwcInfo = getBE().mHwcLayers[displayId];
+    LOG_ALWAYS_FATAL_IF(!displayId);
+    RETURN_IF_NO_HWC_LAYER(*displayId);
+    auto& hwcInfo = getBE().mHwcLayers[*displayId];
 
     // enable this layer
     hwcInfo.forceClientComposition = false;
@@ -609,7 +629,7 @@ void Layer::setGeometry(const sp<const DisplayDevice>& display, uint32_t z) {
     if (orientation & ui::Transform::ROT_INVALID) {
         // we can only handle simple transformation
         hwcInfo.forceClientComposition = true;
-        getBE().mHwcLayers[displayId].compositionType = HWC2::Composition::Client;
+        getBE().mHwcLayers[*displayId].compositionType = HWC2::Composition::Client;
     } else {
         auto transform = static_cast<HWC2::Transform>(orientation);
         hwcInfo.transform = transform;
@@ -623,28 +643,20 @@ void Layer::setGeometry(const sp<const DisplayDevice>& display, uint32_t z) {
     }
 }
 
-void Layer::forceClientComposition(int32_t displayId) {
-    if (getBE().mHwcLayers.count(displayId) == 0) {
-        ALOGE("forceClientComposition: no HWC layer found (%d)", displayId);
-        return;
-    }
-
+void Layer::forceClientComposition(DisplayId displayId) {
+    RETURN_IF_NO_HWC_LAYER(displayId);
     getBE().mHwcLayers[displayId].forceClientComposition = true;
 }
 
-bool Layer::getForceClientComposition(int32_t displayId) {
-    if (getBE().mHwcLayers.count(displayId) == 0) {
-        ALOGE("getForceClientComposition: no HWC layer found (%d)", displayId);
-        return false;
-    }
-
+bool Layer::getForceClientComposition(DisplayId displayId) {
+    RETURN_IF_NO_HWC_LAYER(displayId, false);
     return getBE().mHwcLayers[displayId].forceClientComposition;
 }
 
 void Layer::updateCursorPosition(const sp<const DisplayDevice>& display) {
     const auto displayId = display->getId();
-    if (getBE().mHwcLayers.count(displayId) == 0 ||
-        getCompositionType(displayId) != HWC2::Composition::Cursor) {
+    LOG_ALWAYS_FATAL_IF(!displayId);
+    if (!hasHwcLayer(*displayId) || getCompositionType(displayId) != HWC2::Composition::Cursor) {
         return;
     }
 
@@ -666,8 +678,8 @@ void Layer::updateCursorPosition(const sp<const DisplayDevice>& display) {
     auto position = displayTransform.transform(frame);
 
     auto error =
-            (getBE().mHwcLayers[displayId].layer)->setCursorPosition(
-                    position.left, position.top);
+            getBE().mHwcLayers[*displayId].layer->setCursorPosition(position.left, position.top);
+
     ALOGE_IF(error != HWC2::Error::None,
              "[%s] Failed to set cursor position "
              "to (%d, %d): %s (%d)",
@@ -699,7 +711,7 @@ void Layer::clearWithOpenGL(const RenderArea& renderArea) const {
     clearWithOpenGL(renderArea, 0, 0, 0, 0);
 }
 
-void Layer::setCompositionType(int32_t displayId, HWC2::Composition type, bool callIntoHwc) {
+void Layer::setCompositionType(DisplayId displayId, HWC2::Composition type, bool callIntoHwc) {
     if (getBE().mHwcLayers.count(displayId) == 0) {
         ALOGE("setCompositionType called without a valid HWC layer");
         return;
@@ -722,16 +734,20 @@ void Layer::setCompositionType(int32_t displayId, HWC2::Composition type, bool c
     }
 }
 
-HWC2::Composition Layer::getCompositionType(int32_t displayId) const {
-    if (getBE().mHwcLayers.count(displayId) == 0) {
+HWC2::Composition Layer::getCompositionType(const std::optional<DisplayId>& displayId) const {
+    if (!displayId) {
         // If we're querying the composition type for a display that does not
         // have a HWC counterpart, then it will always be Client
         return HWC2::Composition::Client;
     }
-    return getBE().mHwcLayers[displayId].compositionType;
+    if (getBE().mHwcLayers.count(*displayId) == 0) {
+        ALOGE("getCompositionType called with an invalid HWC layer");
+        return HWC2::Composition::Invalid;
+    }
+    return getBE().mHwcLayers.at(*displayId).compositionType;
 }
 
-void Layer::setClearClientTarget(int32_t displayId, bool clear) {
+void Layer::setClearClientTarget(DisplayId displayId, bool clear) {
     if (getBE().mHwcLayers.count(displayId) == 0) {
         ALOGE("setClearClientTarget called without a valid HWC layer");
         return;
@@ -739,7 +755,7 @@ void Layer::setClearClientTarget(int32_t displayId, bool clear) {
     getBE().mHwcLayers[displayId].clearClientTarget = clear;
 }
 
-bool Layer::getClearClientTarget(int32_t displayId) const {
+bool Layer::getClearClientTarget(DisplayId displayId) const {
     if (getBE().mHwcLayers.count(displayId) == 0) {
         ALOGE("getClearClientTarget called without a valid HWC layer");
         return false;
@@ -751,6 +767,9 @@ bool Layer::addSyncPoint(const std::shared_ptr<SyncPoint>& point) {
     if (point->getFrameNumber() <= mCurrentFrameNumber) {
         // Don't bother with a SyncPoint, since we've already latched the
         // relevant frame
+        return false;
+    }
+    if (isRemovedFromCurrentState()) {
         return false;
     }
 
@@ -831,7 +850,9 @@ void Layer::pushPendingState() {
 
     // If this transaction is waiting on the receipt of a frame, generate a sync
     // point and send it to the remote layer.
-    if (mCurrentState.barrierLayer_legacy != nullptr) {
+    // We don't allow installing sync points after we are removed from the current state
+    // as we won't be able to signal our end.
+    if (mCurrentState.barrierLayer_legacy != nullptr && !isRemovedFromCurrentState()) {
         sp<Layer> barrierLayer = mCurrentState.barrierLayer_legacy.promote();
         if (barrierLayer == nullptr) {
             ALOGE("[%s] Unable to promote barrier Layer.", mName.string());
@@ -1040,6 +1061,7 @@ uint32_t Layer::doTransaction(uint32_t flags) {
 
     // Commit the transaction
     commitTransaction(c);
+    mCurrentState.callbackHandles = {};
     return flags;
 }
 
@@ -1407,8 +1429,8 @@ void Layer::miniDumpHeader(String8& result) {
     result.append("-----------------------------\n");
 }
 
-void Layer::miniDump(String8& result, int32_t displayId) const {
-    if (getBE().mHwcLayers.count(displayId) == 0) {
+void Layer::miniDump(String8& result, DisplayId displayId) const {
+    if (!hasHwcLayer(displayId)) {
         return;
     }
 
@@ -1476,13 +1498,13 @@ void Layer::dumpFrameEvents(String8& result) {
 void Layer::onDisconnect() {
     Mutex::Autolock lock(mFrameEventHistoryMutex);
     mFrameEventHistory.onDisconnect();
-    mTimeStats.onDisconnect(getName().c_str());
+    mTimeStats.onDisconnect(getSequence());
 }
 
 void Layer::addAndGetFrameTimestamps(const NewFrameEventsEntry* newTimestamps,
                                      FrameEventHistoryDelta* outDelta) {
     if (newTimestamps) {
-        mTimeStats.setPostTime(getName().c_str(), newTimestamps->frameNumber,
+        mTimeStats.setPostTime(getSequence(), newTimestamps->frameNumber, getName().c_str(),
                                newTimestamps->postedTime);
     }
 
@@ -1974,7 +1996,7 @@ void Layer::writeToProto(LayerProto* layerInfo, LayerVector::StateSet stateSet,
     }
 }
 
-void Layer::writeToProto(LayerProto* layerInfo, int32_t displayId) {
+void Layer::writeToProto(LayerProto* layerInfo, DisplayId displayId) {
     if (!hasHwcLayer(displayId)) {
         return;
     }
@@ -2001,6 +2023,10 @@ void Layer::writeToProto(LayerProto* layerInfo, int32_t displayId) {
     } else {
         layerInfo->set_is_protected(false);
     }
+}
+
+bool Layer::isRemovedFromCurrentState() const  {
+    return mRemovedFromCurrentState;
 }
 
 // ---------------------------------------------------------------------------

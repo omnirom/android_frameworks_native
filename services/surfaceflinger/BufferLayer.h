@@ -81,10 +81,12 @@ public:
 
     bool isHdrY410() const override;
 
-    void setPerFrameData(const sp<const DisplayDevice>& displayDevice) override;
+    void setPerFrameData(DisplayId displayId, const ui::Transform& transform, const Rect& viewport,
+                         int32_t supportedPerFrameMetadata) override;
 
     bool onPreComposition(nsecs_t refreshStartTime) override;
-    bool onPostComposition(const std::shared_ptr<FenceTime>& glDoneFence,
+    bool onPostComposition(const std::optional<DisplayId>& displayId,
+                           const std::shared_ptr<FenceTime>& glDoneFence,
                            const std::shared_ptr<FenceTime>& presentFence,
                            const CompositorTiming& compositorTiming) override;
 
@@ -139,7 +141,7 @@ private:
 
     virtual std::optional<Region> latchSidebandStream(bool& recomputeVisibleRegions) = 0;
 
-    virtual bool hasDrawingBuffer() const = 0;
+    virtual bool hasFrameUpdate() const = 0;
 
     virtual void setFilteringEnabled(bool enabled) = 0;
 
@@ -150,7 +152,7 @@ private:
     virtual status_t updateActiveBuffer() = 0;
     virtual status_t updateFrameNumber(nsecs_t latchTime) = 0;
 
-    virtual void setHwcLayerBuffer(const sp<const DisplayDevice>& display) = 0;
+    virtual void setHwcLayerBuffer(DisplayId displayId) = 0;
 
     // -----------------------------------------------------------------------
 
@@ -191,6 +193,8 @@ private:
     mutable renderengine::Texture mTexture;
 
     bool mRefreshPending{false};
+
+    Rect getBufferSize(const State& s) const override;
 };
 
 } // namespace android

@@ -40,7 +40,8 @@ namespace android {
 bool ExSurfaceFlinger::sAllowHDRFallBack = false;
 bool ExSurfaceFlinger::regionDump = false;
 
-ExSurfaceFlinger::ExSurfaceFlinger() {
+ExSurfaceFlinger::ExSurfaceFlinger(surfaceflinger::Factory& factory)
+      : SurfaceFlinger(factory) {
     char property[PROPERTY_VALUE_MAX] = {0};
 
     mDebugLogs = false;

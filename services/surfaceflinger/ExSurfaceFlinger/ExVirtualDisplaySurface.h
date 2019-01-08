@@ -37,12 +37,14 @@ namespace android {
 
 class ExVirtualDisplaySurface : public VirtualDisplaySurface {
 public:
-    ExVirtualDisplaySurface(HWComposer& hwc, int32_t dispId,
+    ExVirtualDisplaySurface(HWComposer& hwc,
+            const std::optional<DisplayId>& displayId,
             const sp<IGraphicBufferProducer>& sink,
             const sp<IGraphicBufferProducer>& bqProducer,
             const sp<IGraphicBufferConsumer>& bqConsumer,
             const std::string &name,
             bool secure);
+    ~ExVirtualDisplaySurface() override;
 
 private:
     virtual status_t beginFrame(bool mustRecompose);

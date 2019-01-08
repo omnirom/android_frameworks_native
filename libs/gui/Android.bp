@@ -102,6 +102,7 @@ cc_defaults {
         "IProducerListener.cpp",
         "ISurfaceComposer.cpp",
         "ISurfaceComposerClient.cpp",
+        "ITransactionCompletedListener.cpp",
         "LayerDebugInfo.cpp",
         "LayerState.cpp",
         "OccupancyTracker.cpp",
@@ -129,6 +130,7 @@ cc_defaults {
         "libutils",
         "libnativewindow",
         "liblog",
+        "libinput",
         "libhidlbase",
         "libhidltransport",
         "android.hidl.token@1.0-utils",
@@ -140,7 +142,7 @@ cc_defaults {
     // bufferhub is not used when building libgui for vendors
     target: {
         vendor: {
-            cflags: ["-DNO_BUFFERHUB"],
+            cflags: ["-DNO_BUFFERHUB", "-DNO_INPUT"],
             exclude_srcs: [
                 "BufferHubConsumer.cpp",
                 "BufferHubProducer.cpp",
@@ -149,6 +151,7 @@ cc_defaults {
                 "libbufferhub",
                 "libbufferhubqueue",
                 "libpdx_default_transport",
+                "libinput"
             ],
         },
     },

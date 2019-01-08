@@ -39,13 +39,14 @@ namespace android {
 #define VDS_LOGV(msg, ...) ALOGV("[%s] " msg, \
         mDisplayName.c_str(), ##__VA_ARGS__)
 
-ExVirtualDisplaySurface::ExVirtualDisplaySurface(HWComposer& hwc, int32_t dispId,
+ExVirtualDisplaySurface::ExVirtualDisplaySurface(HWComposer& hwc,
+        const std::optional<DisplayId>& displayId,
         const sp<IGraphicBufferProducer>& sink,
         const sp<IGraphicBufferProducer>& bqProducer,
         const sp<IGraphicBufferConsumer>& bqConsumer,
         const std::string &name,
         bool secure)
-:   VirtualDisplaySurface(hwc, dispId, sink, bqProducer, bqConsumer, name),
+:   VirtualDisplaySurface(hwc, displayId, sink, bqProducer, bqConsumer, name),
    mSecure(secure) {
    sink->getConsumerUsage(&mSinkUsage);
    mSinkUsage |= GRALLOC_USAGE_HW_COMPOSER;
@@ -65,9 +66,13 @@ ExVirtualDisplaySurface::ExVirtualDisplaySurface(HWComposer& hwc, int32_t dispId
     }
 }
 
+ExVirtualDisplaySurface::~ExVirtualDisplaySurface() {
+}
+
 status_t ExVirtualDisplaySurface::beginFrame(bool mustRecompose) {
-    if (mDisplayId < 0)
+    if (!mDisplayId) {
         return NO_ERROR;
+    }
 
     mMustRecompose = mustRecompose;
     /* For WFD use cases we must always set the recompose flag in order

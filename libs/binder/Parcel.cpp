@@ -601,6 +601,7 @@ status_t Parcel::writeInterfaceToken(const String16& interface)
 {
     writeInt32(IPCThreadState::self()->getStrictModePolicy() |
                STRICT_MODE_PENALTY_GATHER);
+    writeInt32(IPCThreadState::self()->getWorkSource());
     // currently the interface identification token is just its name as a string
     return writeString16(interface);
 }
@@ -613,6 +614,7 @@ bool Parcel::checkInterface(IBinder* binder) const
 bool Parcel::enforceInterface(const String16& interface,
                               IPCThreadState* threadState) const
 {
+    // StrictModePolicy.
     int32_t strictPolicy = readInt32();
     if (threadState == nullptr) {
         threadState = IPCThreadState::self();
@@ -627,6 +629,10 @@ bool Parcel::enforceInterface(const String16& interface,
     } else {
       threadState->setStrictModePolicy(strictPolicy);
     }
+    // WorkSource.
+    int32_t workSource = readInt32();
+    threadState->setWorkSource(workSource);
+    // Interface descriptor.
     const String16 str(readString16());
     if (str == interface) {
         return true;
@@ -2239,8 +2245,30 @@ int Parcel::readParcelFileDescriptor() const
     int32_t hasComm = readInt32();
     int fd = readFileDescriptor();
     if (hasComm != 0) {
-        // skip
-        readFileDescriptor();
+        // detach (owned by the binder driver)
+        int comm = readFileDescriptor();
+
+        // warning: this must be kept in sync with:
+        // frameworks/base/core/java/android/os/ParcelFileDescriptor.java
+        enum ParcelFileDescriptorStatus {
+            DETACHED = 2,
+        };
+
+#if BYTE_ORDER == BIG_ENDIAN
+        const int32_t message = ParcelFileDescriptorStatus::DETACHED;
+#endif
+#if BYTE_ORDER == LITTLE_ENDIAN
+        const int32_t message = __builtin_bswap32(ParcelFileDescriptorStatus::DETACHED);
+#endif
+
+        ssize_t written = TEMP_FAILURE_RETRY(
+            ::write(comm, &message, sizeof(message)));
+
+        if (written == -1 || written != sizeof(message)) {
+            ALOGW("Failed to detach ParcelFileDescriptor written: %zd err: %s",
+                written, strerror(errno));
+            return BAD_TYPE;
+        }
     }
     return fd;
 }
