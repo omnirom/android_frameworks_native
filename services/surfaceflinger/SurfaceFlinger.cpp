@@ -254,6 +254,7 @@ SurfaceFlinger::SurfaceFlinger(SurfaceFlinger::SkipInitializationTag)
         mBootStage(BootStage::BOOTLOADER),
         mActiveDisplays(0),
         mBuiltInBitmask(0),
+        mPluggableBitmask(0),
         mDebugRegion(0),
         mDebugDDMS(0),
         mDebugDisableHWC(0),
@@ -381,6 +382,26 @@ SurfaceFlinger::SurfaceFlinger() : SurfaceFlinger(SkipInitialization) {
         // for production purposes later on.
         setenv("TREBLE_TESTING_OVERRIDE", "true", true);
     }
+
+    mIsDolphinEnabled = property_get_bool("vendor.perf.dolphin.enable", false);
+    if (mIsDolphinEnabled) {
+        mDolphinHandle = dlopen("libdolphin.so", RTLD_NOW);
+        if (!mDolphinHandle) {
+            ALOGW("Unable to open libdolphin.so: %s.", dlerror());
+        } else {
+            mDolphinInit = (bool (*) ())dlsym(mDolphinHandle, "dolphinInit");
+            mDolphinOnFrameAvailable =
+                (void (*) (bool, int, int32_t, int32_t, String8))dlsym(mDolphinHandle,
+                                                                       "dolphinOnFrameAvailable");
+            mDolphinMonitor = (bool (*) (int))dlsym(mDolphinHandle, "dolphinMonitor");
+            mDolphinRefresh = (void (*) ())dlsym(mDolphinHandle, "dolphinRefresh");
+            if (mDolphinInit != nullptr && mDolphinOnFrameAvailable != nullptr &&
+                mDolphinMonitor != nullptr && mDolphinRefresh != nullptr) {
+                if (mDolphinInit()) mDolphinFuncsEnabled = true;
+            }
+            if (!mDolphinFuncsEnabled) dlclose(mDolphinHandle);
+        }
+    }
 }
 
 void SurfaceFlinger::onFirstRef()
@@ -390,6 +411,7 @@ void SurfaceFlinger::onFirstRef()
 
 SurfaceFlinger::~SurfaceFlinger()
 {
+    if (mDolphinFuncsEnabled) dlclose(mDolphinHandle);
 }
 
 void SurfaceFlinger::binderDied(const wp<IBinder>& /* who */)
@@ -792,6 +814,12 @@ void SurfaceFlinger::init() {
     for (int disp = HWC_DISPLAY_BUILTIN_2; disp <= HWC_DISPLAY_BUILTIN_4; disp++) {
       mBuiltInBitmask.set(disp);
     }
+
+    mPluggableBitmask.set(HWC_DISPLAY_EXTERNAL);
+    for (int disp = HWC_DISPLAY_EXTERNAL_2; disp <= HWC_DISPLAY_EXTERNAL_4; disp++) {
+      mPluggableBitmask.set(disp);
+    }
+
     ALOGV("Done initializing");
 }
 
@@ -1456,8 +1484,11 @@ void SurfaceFlinger::onRefreshReceived(int sequenceId,
     // Track Vsync Period before and after refresh.
     const auto& activeConfig = getBE().mHwc->getActiveConfig(HWC_DISPLAY_PRIMARY);
     const nsecs_t period = activeConfig->getVsyncPeriod();
-    vsyncPeriod = {};
-    vsyncPeriod.push_back(period);
+    {
+      std::lock_guard lock(mVsyncPeriodMutex);
+      vsyncPeriod = {};
+      vsyncPeriod.push_back(period);
+    }
 }
 
 void SurfaceFlinger::setVsyncEnabled(int disp, int enabled) {
@@ -1557,6 +1588,24 @@ void SurfaceFlinger::onMessageReceived(int32_t what) {
                 }
             }
 
+            if (mDolphinFuncsEnabled) {
+                int maxQueuedFrames = 0;
+                mDrawingState.traverseInZOrder([&](Layer* layer) {
+                    if (layer->hasQueuedFrame() &&
+                            layer->shouldPresentNow(mPrimaryDispSync)) {
+                        int layerQueuedFrames = layer->getQueuedFrameCount();
+                        if (maxQueuedFrames < layerQueuedFrames &&
+                                !layer->visibleNonTransparentRegion.isEmpty()) {
+                            maxQueuedFrames = layerQueuedFrames;
+                        }
+                    }
+                });
+                if(mDolphinMonitor(maxQueuedFrames)) {
+                    signalLayerUpdate();
+                    break;
+                }
+            }
+
             // Now that we're going to make it to the handleMessageTransaction()
             // call below it's safe to call updateVrFlinger(), which will
             // potentially trigger a display handoff.
@@ -1569,6 +1618,9 @@ void SurfaceFlinger::onMessageReceived(int32_t what) {
                 // Signal a refresh if a transaction modified the window state,
                 // a new buffer was latched, or if HWC has requested a full
                 // repaint
+                if (mDolphinFuncsEnabled) {
+                    mDolphinRefresh();
+                }
                 signalRefresh();
             }
             break;
@@ -1610,7 +1662,9 @@ void SurfaceFlinger::handleMessageRefresh() {
     doComposition();
     postComposition(refreshStartTime);
 
-    mPreviousPresentFence = getBE().mHwc->getPresentFence(HWC_DISPLAY_PRIMARY);
+    size_t disp_id = getVsyncSource();
+    mPreviousPresentFence = getBE().mHwc->getPresentFence(disp_id);
+    ALOGV("Checking for backpressure against %d retire fence", (int)disp_id);
 
     mHadClientComposition = false;
     for (size_t displayId = 0; displayId < mDisplays.size(); ++displayId) {
@@ -1798,18 +1852,7 @@ void SurfaceFlinger::postComposition(nsecs_t refreshStartTime)
 
     getBE().mDisplayTimeline.updateSignalTimes();
 
-    std::bitset<DisplayDevice::NUM_BUILTIN_DISPLAY_TYPES> activeBuiltInDisplays;
-    activeBuiltInDisplays = mActiveDisplays & mBuiltInBitmask;
-
-    size_t disp_id = HWC_DISPLAY_PRIMARY;
-    for (size_t disp = 0; disp < activeBuiltInDisplays.size(); disp++) {
-      if (mActiveDisplays.test(disp)) {
-        disp_id = disp;
-        break;
-      }
-    }
-
-    sp<Fence> presentFence = getBE().mHwc->getPresentFence(disp_id);
+    sp<Fence> presentFence = getBE().mHwc->getPresentFence(getVsyncSource());
     auto presentFenceTime = std::make_shared<FenceTime>(presentFence);
     getBE().mDisplayTimeline.push(presentFenceTime);
 
@@ -1906,7 +1949,30 @@ void SurfaceFlinger::postComposition(nsecs_t refreshStartTime)
     }
 }
 
+size_t SurfaceFlinger::getVsyncSource() {
+    std::bitset<DisplayDevice::NUM_BUILTIN_DISPLAY_TYPES> activeBuiltInDisplays;
+    std::bitset<DisplayDevice::NUM_BUILTIN_DISPLAY_TYPES> activePluggableDisplays;
+    activeBuiltInDisplays = mActiveDisplays & mBuiltInBitmask;
+    activePluggableDisplays = mActiveDisplays & mPluggableBitmask;
+
+    for (size_t disp = 0; disp < activeBuiltInDisplays.size(); disp++) {
+         if (activeBuiltInDisplays.test(disp)) {
+             return disp;
+         }
+    }
+
+    // Check for pluggable displays
+    for (size_t disp = 0; disp < activePluggableDisplays.size(); disp++) {
+        if (activePluggableDisplays.test(disp)) {
+            return disp;
+        }
+    }
+
+    return HWC_DISPLAY_PRIMARY;
+}
+
 void SurfaceFlinger::forceResyncModel() {
+    std::lock_guard lock(mVsyncPeriodMutex);
     if (!vsyncPeriod.size()) {
         return;
     }
@@ -2099,6 +2165,9 @@ void SurfaceFlinger::setUpHWComposer() {
         // - When a display is created with a private layer stack, we won't
         //   emit any black frames until a layer is added to the layer stack.
         bool mustRecompose = dirty && !(empty && wasEmpty);
+        const auto hwcId = mDisplays[dpy]->getHwcDisplayId();
+        mDisplays[dpy]->mustRecompose = mustRecompose;
+        ALOGV("hwcId %d, mustRecompose %d", hwcId, mustRecompose);
 
         ALOGV_IF(mDisplays[dpy]->getDisplayType() == DisplayDevice::DISPLAY_VIRTUAL,
                 "dpy[%zu]: %s composition (%sdirty %sempty %swasEmpty)", dpy,
@@ -2193,7 +2262,7 @@ void SurfaceFlinger::setUpHWComposer() {
 
     for (size_t displayId = 0; displayId < mDisplays.size(); ++displayId) {
         auto& displayDevice = mDisplays[displayId];
-        if (!displayDevice->isDisplayOn()) {
+        if (!displayDevice->isDisplayOn() || !displayDevice->mustRecompose) {
             continue;
         }
 
@@ -2238,7 +2307,7 @@ void SurfaceFlinger::postFramebuffer()
             continue;
         }
         const auto hwcId = displayDevice->getHwcDisplayId();
-        if (hwcId >= 0) {
+        if (hwcId >= 0 && displayDevice->mustRecompose) {
             getBE().mHwc->presentAndGetReleaseFences(hwcId);
         }
         displayDevice->onSwapBuffersCompleted();
@@ -3034,8 +3103,7 @@ void SurfaceFlinger::doDisplayComposition(
     // 1) It is being handled by hardware composer, which may need this to
     //    keep its virtual display state machine in sync, or
     // 2) There is work to be done (the dirty region isn't empty)
-    bool isHwcDisplay = displayDevice->getHwcDisplayId() >= 0;
-    if (!isHwcDisplay && inDirtyRegion.isEmpty()) {
+    if (inDirtyRegion.isEmpty()) {
         ALOGV("Skipping display composition");
         return;
     }
@@ -3910,12 +3978,12 @@ void SurfaceFlinger::setPowerModeInternal(const sp<DisplayDevice>& hw,
         mInterceptor->savePowerModeUpdate(mCurrentState.displays.valueAt(idx).displayId, mode);
     }
 
-    mActiveDisplays[type] = (mode != HWC_POWER_MODE_OFF && mode != HWC_POWER_MODE_DOZE_SUSPEND);
+    mActiveDisplays[type] = (mode == HWC_POWER_MODE_NORMAL);
 
     if (currentMode == HWC_POWER_MODE_OFF) {
         // Turn on the display
         getHwComposer().setPowerMode(type, mode);
-        if (mActiveDisplays.any() &&
+        if ((mActiveDisplays.count() == 1) &&
             mode != HWC_POWER_MODE_DOZE_SUSPEND) {
             // FIXME: eventthread only knows about the main display right now
             mEventThread->onScreenAcquired();
@@ -3926,19 +3994,20 @@ void SurfaceFlinger::setPowerModeInternal(const sp<DisplayDevice>& hw,
         mHasPoweredOff = true;
         repaintEverything();
 
-        struct sched_param param = {0};
-        param.sched_priority = 1;
-        if (sched_setscheduler(0, SCHED_FIFO, &param) != 0) {
-            ALOGW("Couldn't set SCHED_FIFO on display on");
+        if (mActiveDisplays.any()) {
+            struct sched_param param = {0};
+            param.sched_priority = 1;
+            if (sched_setscheduler(0, SCHED_FIFO, &param) != 0) {
+                ALOGW("Couldn't set SCHED_FIFO on display on");
+            }
         }
     } else if (mode == HWC_POWER_MODE_OFF) {
         // Turn off the display
-        struct sched_param param = {0};
-        if (sched_setscheduler(0, SCHED_OTHER, &param) != 0) {
-            ALOGW("Couldn't set SCHED_OTHER on display off");
-        }
-
         if (mActiveDisplays.none()) {
+            struct sched_param param = {0};
+            if (sched_setscheduler(0, SCHED_OTHER, &param) != 0) {
+                ALOGW("Couldn't set SCHED_OTHER on display off");
+            }
             disableHardwareVsync(true); // also cancels any in-progress resync
 
             // FIXME: eventthread only knows about the main display right now
@@ -3952,7 +4021,7 @@ void SurfaceFlinger::setPowerModeInternal(const sp<DisplayDevice>& hw,
                mode == HWC_POWER_MODE_NORMAL) {
         // Update display while dozing
         getHwComposer().setPowerMode(type, mode);
-        if (mActiveDisplays.any()) {
+        if (mActiveDisplays.count() == 1) {
             // FIXME: eventthread only knows about the main display right now
             mEventThread->onScreenAcquired();
             resyncToHardwareVsync(true);

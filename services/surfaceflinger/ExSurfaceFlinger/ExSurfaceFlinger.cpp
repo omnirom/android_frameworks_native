@@ -140,7 +140,9 @@ void ExSurfaceFlinger::setDisplayAnimating(const sp<const DisplayDevice>& hw __u
                                         vendor::display::config::V1_1::IDisplayConfig::getService();
 
     int32_t dpy = hw->getDisplayType();
-    if (disp_config_v1_1 == NULL || dpy == HWC_DISPLAY_PRIMARY || !mDisableExtAnimation) {
+    if (disp_config_v1_1 == NULL || !mDisableExtAnimation ||
+        ((dpy > DisplayDevice::DISPLAY_ID_INVALID &&
+        dpy < DisplayDevice::NUM_BUILTIN_DISPLAY_TYPES) && mBuiltInBitmask.test(dpy))) {
         return;
     }
 

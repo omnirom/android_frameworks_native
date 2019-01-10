@@ -27,6 +27,8 @@
 
 #include "RenderEngine/RenderEngine.h"
 
+#include <dlfcn.h>
+
 #include <gui/BufferItem.h>
 #include <gui/BufferQueue.h>
 #include <gui/LayerDebugInfo.h>
@@ -768,6 +770,19 @@ void BufferLayer::onFrameAvailable(const BufferItem& item) {
         // Wake up any pending callbacks
         mLastFrameNumberReceived = item.mFrameNumber;
         mQueueItemCondition.broadcast();
+    }
+
+    if (mFlinger->mDolphinFuncsEnabled) {
+        const Vector< sp<Layer> >& visibleLayersSortedByZ =
+            mFlinger->getLayerSortedByZForHwcDisplay(0);
+        bool isTransparentRegion = this->visibleNonTransparentRegion.isEmpty();
+        int visibleLayerNum = visibleLayersSortedByZ.size();
+        Rect crop = this->getContentCrop();
+        int32_t width = crop.getWidth();
+        int32_t height = crop.getHeight();
+        String8 mName = this->getName();
+        mFlinger->mDolphinOnFrameAvailable(isTransparentRegion, visibleLayerNum,
+                                           width, height, mName);
     }
 
     mFlinger->signalLayerUpdate();
