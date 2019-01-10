@@ -1591,6 +1591,7 @@ bool SurfaceFlinger::handleMessageTransaction() {
 
 bool SurfaceFlinger::handleMessageInvalidate() {
     ATRACE_CALL();
+    Mutex::Autolock lock(mStateLock);
     return handlePageFlip();
 }
 
