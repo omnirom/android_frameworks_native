@@ -399,24 +399,21 @@ SurfaceFlinger::SurfaceFlinger() : SurfaceFlinger(SkipInitialization) {
         setenv("TREBLE_TESTING_OVERRIDE", "true", true);
     }
 
-    mIsDolphinEnabled = property_get_bool("vendor.perf.dolphin.enable", false);
-    if (mIsDolphinEnabled) {
-        mDolphinHandle = dlopen("libdolphin.so", RTLD_NOW);
-        if (!mDolphinHandle) {
-            ALOGW("Unable to open libdolphin.so: %s.", dlerror());
-        } else {
-            mDolphinInit = (bool (*) ())dlsym(mDolphinHandle, "dolphinInit");
-            mDolphinOnFrameAvailable =
-                (void (*) (bool, int, int32_t, int32_t, String8))dlsym(mDolphinHandle,
-                                                                       "dolphinOnFrameAvailable");
-            mDolphinMonitor = (bool (*) (int))dlsym(mDolphinHandle, "dolphinMonitor");
-            mDolphinRefresh = (void (*) ())dlsym(mDolphinHandle, "dolphinRefresh");
-            if (mDolphinInit != nullptr && mDolphinOnFrameAvailable != nullptr &&
-                mDolphinMonitor != nullptr && mDolphinRefresh != nullptr) {
-                if (mDolphinInit()) mDolphinFuncsEnabled = true;
-            }
-            if (!mDolphinFuncsEnabled) dlclose(mDolphinHandle);
+    mDolphinHandle = dlopen("libdolphin.so", RTLD_NOW);
+    if (!mDolphinHandle) {
+        ALOGW("Unable to open libdolphin.so: %s.", dlerror());
+    } else {
+        mDolphinInit = (bool (*) ())dlsym(mDolphinHandle, "dolphinInit");
+        mDolphinOnFrameAvailable =
+            (void (*) (bool, int, int32_t, int32_t, String8))dlsym(mDolphinHandle,
+                                                                   "dolphinOnFrameAvailable");
+        mDolphinMonitor = (bool (*) (int))dlsym(mDolphinHandle, "dolphinMonitor");
+        mDolphinRefresh = (void (*) ())dlsym(mDolphinHandle, "dolphinRefresh");
+        if (mDolphinInit != nullptr && mDolphinOnFrameAvailable != nullptr &&
+            mDolphinMonitor != nullptr && mDolphinRefresh != nullptr) {
+            if (mDolphinInit()) mDolphinFuncsEnabled = true;
         }
+        if (!mDolphinFuncsEnabled) dlclose(mDolphinHandle);
     }
 }
 
