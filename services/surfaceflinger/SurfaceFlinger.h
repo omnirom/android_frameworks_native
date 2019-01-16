@@ -930,7 +930,6 @@ private:
 
     SurfaceFlingerBE mBE;
 
-    bool mIsDolphinEnabled = false;
     bool mDolphinFuncsEnabled = false;
     void *mDolphinHandle = nullptr;
     void (*mDolphinOnFrameAvailable)(bool isTransparent, int num, int32_t width, int32_t height,
