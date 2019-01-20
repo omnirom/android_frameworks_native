@@ -97,6 +97,9 @@ constexpr std::chrono::milliseconds SLOW_INTERCEPTION_THRESHOLD = 50ms;
 // Number of recent events to keep for debugging purposes.
 constexpr size_t RECENT_QUEUE_MAX_SIZE = 10;
 
+// Sequence number for synthesized or injected events.
+constexpr uint32_t SYNTHESIZED_EVENT_SEQUENCE_NUM = 0;
+
 
 static inline nsecs_t now() {
     return systemTime(SYSTEM_TIME_MONOTONIC);
@@ -254,6 +257,7 @@ InputDispatcher::InputDispatcher(const sp<InputDispatcherPolicyInterface>& polic
     mFocusedDisplayId(ADISPLAY_ID_DEFAULT),
     mInputTargetWaitCause(INPUT_TARGET_WAIT_CAUSE_NONE) {
     mLooper = new Looper(false);
+    mReporter = createInputReporter();
 
     mKeyRepeatState.lastKeyEntry = nullptr;
 
@@ -710,7 +714,7 @@ InputDispatcher::KeyEntry* InputDispatcher::synthesizeKeyRepeatLocked(nsecs_t cu
         entry->policyFlags = policyFlags;
         entry->repeatCount += 1;
     } else {
-        KeyEntry* newEntry = new KeyEntry(currentTime,
+        KeyEntry* newEntry = new KeyEntry(SYNTHESIZED_EVENT_SEQUENCE_NUM, currentTime,
                 entry->deviceId, entry->source, entry->displayId, policyFlags,
                 entry->action, entry->flags, entry->keyCode, entry->scanCode,
                 entry->metaState, entry->repeatCount + 1, entry->downTime);
@@ -838,6 +842,7 @@ bool InputDispatcher::dispatchKeyLocked(nsecs_t currentTime, KeyEntry* entry,
     if (*dropReason != DROP_REASON_NOT_DROPPED) {
         setInjectionResultLocked(entry, *dropReason == DROP_REASON_POLICY
                 ? INPUT_EVENT_INJECTION_SUCCEEDED : INPUT_EVENT_INJECTION_FAILED);
+        mReporter->reportDroppedKey(entry->sequenceNum);
         return true;
     }
 
@@ -1663,11 +1668,17 @@ Unresponsive:
 
 void InputDispatcher::addWindowTargetLocked(const sp<InputWindowHandle>& windowHandle,
         int32_t targetFlags, BitSet32 pointerIds, Vector<InputTarget>& inputTargets) {
+    sp<InputChannel> inputChannel = getInputChannelLocked(windowHandle->getToken());
+    if (inputChannel == nullptr) {
+        ALOGW("Window %s already unregistered input channel", windowHandle->getName().c_str());
+        return;
+    }
+
     inputTargets.push();
 
     const InputWindowInfo* windowInfo = windowHandle->getInfo();
     InputTarget& target = inputTargets.editTop();
-    target.inputChannel = getInputChannelLocked(windowHandle->getToken());
+    target.inputChannel = inputChannel;
     target.flags = targetFlags;
     target.xOffset = - windowInfo->frameLeft;
     target.yOffset = - windowInfo->frameTop;
@@ -2468,6 +2479,7 @@ InputDispatcher::splitMotionEvent(const MotionEntry* originalMotionEntry, BitSet
     }
 
     MotionEntry* splitMotionEntry = new MotionEntry(
+            originalMotionEntry->sequenceNum,
             originalMotionEntry->eventTime,
             originalMotionEntry->deviceId,
             originalMotionEntry->source,
@@ -2501,7 +2513,8 @@ void InputDispatcher::notifyConfigurationChanged(const NotifyConfigurationChange
     { // acquire lock
         AutoMutex _l(mLock);
 
-        ConfigurationChangedEntry* newEntry = new ConfigurationChangedEntry(args->eventTime);
+        ConfigurationChangedEntry* newEntry =
+                new ConfigurationChangedEntry(args->sequenceNum, args->eventTime);
         needWake = enqueueInboundEventLocked(newEntry);
     } // release lock
 
@@ -2606,7 +2619,7 @@ void InputDispatcher::notifyKey(const NotifyKeyArgs* args) {
             mLock.lock();
         }
 
-        KeyEntry* newEntry = new KeyEntry(args->eventTime,
+        KeyEntry* newEntry = new KeyEntry(args->sequenceNum, args->eventTime,
                 args->deviceId, args->source, args->displayId, policyFlags,
                 args->action, flags, keyCode, args->scanCode,
                 metaState, repeatCount, args->downTime);
@@ -2690,7 +2703,7 @@ void InputDispatcher::notifyMotion(const NotifyMotionArgs* args) {
         }
 
         // Just enqueue a new motion event.
-        MotionEntry* newEntry = new MotionEntry(args->eventTime,
+        MotionEntry* newEntry = new MotionEntry(args->sequenceNum, args->eventTime,
                 args->deviceId, args->source, args->displayId, policyFlags,
                 args->action, args->actionButton, args->flags,
                 args->metaState, args->buttonState,
@@ -2734,7 +2747,8 @@ void InputDispatcher::notifyDeviceReset(const NotifyDeviceResetArgs* args) {
     { // acquire lock
         AutoMutex _l(mLock);
 
-        DeviceResetEntry* newEntry = new DeviceResetEntry(args->eventTime, args->deviceId);
+        DeviceResetEntry* newEntry =
+                new DeviceResetEntry(args->sequenceNum, args->eventTime, args->deviceId);
         needWake = enqueueInboundEventLocked(newEntry);
     } // release lock
 
@@ -2793,7 +2807,7 @@ int32_t InputDispatcher::injectInputEvent(const InputEvent* event,
         }
 
         mLock.lock();
-        firstInjectedEntry = new KeyEntry(keyEvent.getEventTime(),
+        firstInjectedEntry = new KeyEntry(SYNTHESIZED_EVENT_SEQUENCE_NUM, keyEvent.getEventTime(),
                 keyEvent.getDeviceId(), keyEvent.getSource(), keyEvent.getDisplayId(),
                 policyFlags, action, flags,
                 keyEvent.getKeyCode(), keyEvent.getScanCode(), keyEvent.getMetaState(),
@@ -2825,7 +2839,7 @@ int32_t InputDispatcher::injectInputEvent(const InputEvent* event,
         mLock.lock();
         const nsecs_t* sampleEventTimes = motionEvent->getSampleEventTimes();
         const PointerCoords* samplePointerCoords = motionEvent->getSamplePointerCoords();
-        firstInjectedEntry = new MotionEntry(*sampleEventTimes,
+        firstInjectedEntry = new MotionEntry(SYNTHESIZED_EVENT_SEQUENCE_NUM, *sampleEventTimes,
                 motionEvent->getDeviceId(), motionEvent->getSource(), motionEvent->getDisplayId(),
                 policyFlags,
                 action, actionButton, motionEvent->getFlags(),
@@ -2839,7 +2853,8 @@ int32_t InputDispatcher::injectInputEvent(const InputEvent* event,
         for (size_t i = motionEvent->getHistorySize(); i > 0; i--) {
             sampleEventTimes += 1;
             samplePointerCoords += pointerCount;
-            MotionEntry* nextInjectedEntry = new MotionEntry(*sampleEventTimes,
+            MotionEntry* nextInjectedEntry = new MotionEntry(SYNTHESIZED_EVENT_SEQUENCE_NUM,
+                    *sampleEventTimes,
                     motionEvent->getDeviceId(), motionEvent->getSource(),
                     motionEvent->getDisplayId(), policyFlags,
                     action, actionButton, motionEvent->getFlags(),
@@ -3077,23 +3092,45 @@ void InputDispatcher::setInputWindows(const Vector<sp<InputWindowHandle>>& input
             // Remove all handles on a display if there are no windows left.
             mWindowHandlesByDisplay.erase(displayId);
         } else {
-            size_t numWindows = inputWindowHandles.size();
+            // Since we compare the pointer of input window handles across window updates, we need
+            // to make sure the handle object for the same window stays unchanged across updates.
+            const Vector<sp<InputWindowHandle>>& oldHandles = mWindowHandlesByDisplay[displayId];
+            std::unordered_map<sp<IBinder>, sp<InputWindowHandle>, IBinderHash> oldHandlesByTokens;
+            for (size_t i = 0; i < oldHandles.size(); i++) {
+                const sp<InputWindowHandle>& handle = oldHandles.itemAt(i);
+                oldHandlesByTokens[handle->getToken()] = handle;
+            }
+
+            const size_t numWindows = inputWindowHandles.size();
+            Vector<sp<InputWindowHandle>> newHandles;
             for (size_t i = 0; i < numWindows; i++) {
-                const sp<InputWindowHandle>& windowHandle = inputWindowHandles.itemAt(i);
-                if (!windowHandle->updateInfo() || getInputChannelLocked(windowHandle->getToken()) == nullptr) {
+                const sp<InputWindowHandle>& handle = inputWindowHandles.itemAt(i);
+                if (!handle->updateInfo() || getInputChannelLocked(handle->getToken()) == nullptr) {
                     ALOGE("Window handle %s has no registered input channel",
-                            windowHandle->getName().c_str());
+                            handle->getName().c_str());
                     continue;
                 }
 
-                if (windowHandle->getInfo()->displayId != displayId) {
+                if (handle->getInfo()->displayId != displayId) {
                     ALOGE("Window %s updated by wrong display %d, should belong to display %d",
-                        windowHandle->getName().c_str(), displayId,
-                        windowHandle->getInfo()->displayId);
+                        handle->getName().c_str(), displayId,
+                        handle->getInfo()->displayId);
                     continue;
                 }
 
-                if (windowHandle->getInfo()->hasFocus) {
+                if (oldHandlesByTokens.find(handle->getToken()) != oldHandlesByTokens.end()) {
+                    const sp<InputWindowHandle> oldHandle =
+                            oldHandlesByTokens.at(handle->getToken());
+                    oldHandle->updateFrom(handle);
+                    newHandles.push_back(oldHandle);
+                } else {
+                    newHandles.push_back(handle);
+                }
+            }
+
+            for (size_t i = 0; i < newHandles.size(); i++) {
+                const sp<InputWindowHandle>& windowHandle = newHandles.itemAt(i);
+                if (windowHandle->getInfo()->hasFocus && windowHandle->getInfo()->visible) {
                     newFocusedWindowHandle = windowHandle;
                 }
                 if (windowHandle == mLastHoverWindowHandle) {
@@ -3102,7 +3139,7 @@ void InputDispatcher::setInputWindows(const Vector<sp<InputWindowHandle>>& input
             }
 
             // Insert or replace
-            mWindowHandlesByDisplay[displayId] = inputWindowHandles;
+            mWindowHandlesByDisplay[displayId] = newHandles;
         }
 
         if (!foundHoveredWindow) {
@@ -3518,7 +3555,7 @@ void InputDispatcher::dumpDispatchStateLocked(std::string& dump) {
                     dump += StringPrintf(INDENT3 "%zu: name='%s', displayId=%d, "
                             "paused=%s, hasFocus=%s, hasWallpaper=%s, "
                             "visible=%s, canReceiveKeys=%s, flags=0x%08x, type=0x%08x, layer=%d, "
-                            "frame=[%d,%d][%d,%d], globalScale=%f, windowScale=%f,%f"
+                            "frame=[%d,%d][%d,%d], globalScale=%f, windowScale=(%f,%f), "
                             "touchableRegion=",
                             i, windowInfo->name.c_str(), windowInfo->displayId,
                             toString(windowInfo->paused),
@@ -3989,172 +4026,181 @@ void InputDispatcher::doDispatchCycleFinishedLockedInterruptible(
 
 bool InputDispatcher::afterKeyEventLockedInterruptible(const sp<Connection>& connection,
         DispatchEntry* dispatchEntry, KeyEntry* keyEntry, bool handled) {
-    if (!(keyEntry->flags & AKEY_EVENT_FLAG_FALLBACK)) {
-        // Get the fallback key state.
-        // Clear it out after dispatching the UP.
-        int32_t originalKeyCode = keyEntry->keyCode;
-        int32_t fallbackKeyCode = connection->inputState.getFallbackKey(originalKeyCode);
-        if (keyEntry->action == AKEY_EVENT_ACTION_UP) {
-            connection->inputState.removeFallbackKey(originalKeyCode);
+    if (keyEntry->flags & AKEY_EVENT_FLAG_FALLBACK) {
+        if (!handled) {
+            // Report the key as unhandled, since the fallback was not handled.
+            mReporter->reportUnhandledKey(keyEntry->sequenceNum);
         }
+        return false;
+    }
 
-        if (handled || !dispatchEntry->hasForegroundTarget()) {
-            // If the application handles the original key for which we previously
-            // generated a fallback or if the window is not a foreground window,
-            // then cancel the associated fallback key, if any.
-            if (fallbackKeyCode != -1) {
-                // Dispatch the unhandled key to the policy with the cancel flag.
+    // Get the fallback key state.
+    // Clear it out after dispatching the UP.
+    int32_t originalKeyCode = keyEntry->keyCode;
+    int32_t fallbackKeyCode = connection->inputState.getFallbackKey(originalKeyCode);
+    if (keyEntry->action == AKEY_EVENT_ACTION_UP) {
+        connection->inputState.removeFallbackKey(originalKeyCode);
+    }
+
+    if (handled || !dispatchEntry->hasForegroundTarget()) {
+        // If the application handles the original key for which we previously
+        // generated a fallback or if the window is not a foreground window,
+        // then cancel the associated fallback key, if any.
+        if (fallbackKeyCode != -1) {
+            // Dispatch the unhandled key to the policy with the cancel flag.
 #if DEBUG_OUTBOUND_EVENT_DETAILS
-                ALOGD("Unhandled key event: Asking policy to cancel fallback action.  "
-                        "keyCode=%d, action=%d, repeatCount=%d, policyFlags=0x%08x",
-                        keyEntry->keyCode, keyEntry->action, keyEntry->repeatCount,
-                        keyEntry->policyFlags);
-#endif
-                KeyEvent event;
-                initializeKeyEvent(&event, keyEntry);
-                event.setFlags(event.getFlags() | AKEY_EVENT_FLAG_CANCELED);
-
-                mLock.unlock();
-
-                mPolicy->dispatchUnhandledKey(connection->inputChannel->getToken(),
-                        &event, keyEntry->policyFlags, &event);
-
-                mLock.lock();
-
-                // Cancel the fallback key.
-                if (fallbackKeyCode != AKEYCODE_UNKNOWN) {
-                    CancelationOptions options(CancelationOptions::CANCEL_FALLBACK_EVENTS,
-                            "application handled the original non-fallback key "
-                            "or is no longer a foreground target, "
-                            "canceling previously dispatched fallback key");
-                    options.keyCode = fallbackKeyCode;
-                    synthesizeCancelationEventsForConnectionLocked(connection, options);
-                }
-                connection->inputState.removeFallbackKey(originalKeyCode);
-            }
-        } else {
-            // If the application did not handle a non-fallback key, first check
-            // that we are in a good state to perform unhandled key event processing
-            // Then ask the policy what to do with it.
-            bool initialDown = keyEntry->action == AKEY_EVENT_ACTION_DOWN
-                    && keyEntry->repeatCount == 0;
-            if (fallbackKeyCode == -1 && !initialDown) {
-#if DEBUG_OUTBOUND_EVENT_DETAILS
-                ALOGD("Unhandled key event: Skipping unhandled key event processing "
-                        "since this is not an initial down.  "
-                        "keyCode=%d, action=%d, repeatCount=%d, policyFlags=0x%08x",
-                        originalKeyCode, keyEntry->action, keyEntry->repeatCount,
-                        keyEntry->policyFlags);
-#endif
-                return false;
-            }
-
-            // Dispatch the unhandled key to the policy.
-#if DEBUG_OUTBOUND_EVENT_DETAILS
-            ALOGD("Unhandled key event: Asking policy to perform fallback action.  "
+            ALOGD("Unhandled key event: Asking policy to cancel fallback action.  "
                     "keyCode=%d, action=%d, repeatCount=%d, policyFlags=0x%08x",
                     keyEntry->keyCode, keyEntry->action, keyEntry->repeatCount,
                     keyEntry->policyFlags);
 #endif
             KeyEvent event;
             initializeKeyEvent(&event, keyEntry);
+            event.setFlags(event.getFlags() | AKEY_EVENT_FLAG_CANCELED);
 
             mLock.unlock();
 
-            bool fallback = mPolicy->dispatchUnhandledKey(connection->inputChannel->getToken(),
-                    &event, keyEntry->policyFlags, &event);
+            mPolicy->dispatchUnhandledKey(connection->inputChannel->getToken(),
+                                          &event, keyEntry->policyFlags, &event);
 
             mLock.lock();
 
-            if (connection->status != Connection::STATUS_NORMAL) {
-                connection->inputState.removeFallbackKey(originalKeyCode);
-                return false;
-            }
-
-            // Latch the fallback keycode for this key on an initial down.
-            // The fallback keycode cannot change at any other point in the lifecycle.
-            if (initialDown) {
-                if (fallback) {
-                    fallbackKeyCode = event.getKeyCode();
-                } else {
-                    fallbackKeyCode = AKEYCODE_UNKNOWN;
-                }
-                connection->inputState.setFallbackKey(originalKeyCode, fallbackKeyCode);
-            }
-
-            ALOG_ASSERT(fallbackKeyCode != -1);
-
-            // Cancel the fallback key if the policy decides not to send it anymore.
-            // We will continue to dispatch the key to the policy but we will no
-            // longer dispatch a fallback key to the application.
-            if (fallbackKeyCode != AKEYCODE_UNKNOWN
-                    && (!fallback || fallbackKeyCode != event.getKeyCode())) {
-#if DEBUG_OUTBOUND_EVENT_DETAILS
-                if (fallback) {
-                    ALOGD("Unhandled key event: Policy requested to send key %d"
-                            "as a fallback for %d, but on the DOWN it had requested "
-                            "to send %d instead.  Fallback canceled.",
-                            event.getKeyCode(), originalKeyCode, fallbackKeyCode);
-                } else {
-                    ALOGD("Unhandled key event: Policy did not request fallback for %d, "
-                            "but on the DOWN it had requested to send %d.  "
-                            "Fallback canceled.",
-                            originalKeyCode, fallbackKeyCode);
-                }
-#endif
-
+            // Cancel the fallback key.
+            if (fallbackKeyCode != AKEYCODE_UNKNOWN) {
                 CancelationOptions options(CancelationOptions::CANCEL_FALLBACK_EVENTS,
-                        "canceling fallback, policy no longer desires it");
+                                           "application handled the original non-fallback key "
+                                           "or is no longer a foreground target, "
+                                           "canceling previously dispatched fallback key");
                 options.keyCode = fallbackKeyCode;
                 synthesizeCancelationEventsForConnectionLocked(connection, options);
-
-                fallback = false;
-                fallbackKeyCode = AKEYCODE_UNKNOWN;
-                if (keyEntry->action != AKEY_EVENT_ACTION_UP) {
-                    connection->inputState.setFallbackKey(originalKeyCode,
-                            fallbackKeyCode);
-                }
             }
-
+            connection->inputState.removeFallbackKey(originalKeyCode);
+        }
+    } else {
+        // If the application did not handle a non-fallback key, first check
+        // that we are in a good state to perform unhandled key event processing
+        // Then ask the policy what to do with it.
+        bool initialDown = keyEntry->action == AKEY_EVENT_ACTION_DOWN
+                && keyEntry->repeatCount == 0;
+        if (fallbackKeyCode == -1 && !initialDown) {
 #if DEBUG_OUTBOUND_EVENT_DETAILS
-            {
-                std::string msg;
-                const KeyedVector<int32_t, int32_t>& fallbackKeys =
-                        connection->inputState.getFallbackKeys();
-                for (size_t i = 0; i < fallbackKeys.size(); i++) {
-                    msg += StringPrintf(", %d->%d", fallbackKeys.keyAt(i),
-                            fallbackKeys.valueAt(i));
-                }
-                ALOGD("Unhandled key event: %zu currently tracked fallback keys%s.",
-                        fallbackKeys.size(), msg.c_str());
-            }
+            ALOGD("Unhandled key event: Skipping unhandled key event processing "
+                    "since this is not an initial down.  "
+                    "keyCode=%d, action=%d, repeatCount=%d, policyFlags=0x%08x",
+                    originalKeyCode, keyEntry->action, keyEntry->repeatCount,
+                    keyEntry->policyFlags);
 #endif
+            return false;
+        }
 
+        // Dispatch the unhandled key to the policy.
+#if DEBUG_OUTBOUND_EVENT_DETAILS
+        ALOGD("Unhandled key event: Asking policy to perform fallback action.  "
+                "keyCode=%d, action=%d, repeatCount=%d, policyFlags=0x%08x",
+                keyEntry->keyCode, keyEntry->action, keyEntry->repeatCount,
+                keyEntry->policyFlags);
+#endif
+        KeyEvent event;
+        initializeKeyEvent(&event, keyEntry);
+
+        mLock.unlock();
+
+        bool fallback = mPolicy->dispatchUnhandledKey(connection->inputChannel->getToken(),
+                                                      &event, keyEntry->policyFlags, &event);
+
+        mLock.lock();
+
+        if (connection->status != Connection::STATUS_NORMAL) {
+            connection->inputState.removeFallbackKey(originalKeyCode);
+            return false;
+        }
+
+        // Latch the fallback keycode for this key on an initial down.
+        // The fallback keycode cannot change at any other point in the lifecycle.
+        if (initialDown) {
             if (fallback) {
-                // Restart the dispatch cycle using the fallback key.
-                keyEntry->eventTime = event.getEventTime();
-                keyEntry->deviceId = event.getDeviceId();
-                keyEntry->source = event.getSource();
-                keyEntry->displayId = event.getDisplayId();
-                keyEntry->flags = event.getFlags() | AKEY_EVENT_FLAG_FALLBACK;
-                keyEntry->keyCode = fallbackKeyCode;
-                keyEntry->scanCode = event.getScanCode();
-                keyEntry->metaState = event.getMetaState();
-                keyEntry->repeatCount = event.getRepeatCount();
-                keyEntry->downTime = event.getDownTime();
-                keyEntry->syntheticRepeat = false;
+                fallbackKeyCode = event.getKeyCode();
+            } else {
+                fallbackKeyCode = AKEYCODE_UNKNOWN;
+            }
+            connection->inputState.setFallbackKey(originalKeyCode, fallbackKeyCode);
+        }
+
+        ALOG_ASSERT(fallbackKeyCode != -1);
+
+        // Cancel the fallback key if the policy decides not to send it anymore.
+        // We will continue to dispatch the key to the policy but we will no
+        // longer dispatch a fallback key to the application.
+        if (fallbackKeyCode != AKEYCODE_UNKNOWN
+                && (!fallback || fallbackKeyCode != event.getKeyCode())) {
+#if DEBUG_OUTBOUND_EVENT_DETAILS
+            if (fallback) {
+                ALOGD("Unhandled key event: Policy requested to send key %d"
+                        "as a fallback for %d, but on the DOWN it had requested "
+                        "to send %d instead.  Fallback canceled.",
+                        event.getKeyCode(), originalKeyCode, fallbackKeyCode);
+            } else {
+                ALOGD("Unhandled key event: Policy did not request fallback for %d, "
+                        "but on the DOWN it had requested to send %d.  "
+                        "Fallback canceled.",
+                        originalKeyCode, fallbackKeyCode);
+            }
+#endif
+
+            CancelationOptions options(CancelationOptions::CANCEL_FALLBACK_EVENTS,
+                                       "canceling fallback, policy no longer desires it");
+            options.keyCode = fallbackKeyCode;
+            synthesizeCancelationEventsForConnectionLocked(connection, options);
+
+            fallback = false;
+            fallbackKeyCode = AKEYCODE_UNKNOWN;
+            if (keyEntry->action != AKEY_EVENT_ACTION_UP) {
+                connection->inputState.setFallbackKey(originalKeyCode,
+                                                      fallbackKeyCode);
+            }
+        }
 
 #if DEBUG_OUTBOUND_EVENT_DETAILS
-                ALOGD("Unhandled key event: Dispatching fallback key.  "
-                        "originalKeyCode=%d, fallbackKeyCode=%d, fallbackMetaState=%08x",
-                        originalKeyCode, fallbackKeyCode, keyEntry->metaState);
-#endif
-                return true; // restart the event
-            } else {
-#if DEBUG_OUTBOUND_EVENT_DETAILS
-                ALOGD("Unhandled key event: No fallback key.");
-#endif
+        {
+            std::string msg;
+            const KeyedVector<int32_t, int32_t>& fallbackKeys =
+                    connection->inputState.getFallbackKeys();
+            for (size_t i = 0; i < fallbackKeys.size(); i++) {
+                msg += StringPrintf(", %d->%d", fallbackKeys.keyAt(i),
+                        fallbackKeys.valueAt(i));
             }
+            ALOGD("Unhandled key event: %zu currently tracked fallback keys%s.",
+                    fallbackKeys.size(), msg.c_str());
+        }
+#endif
+
+        if (fallback) {
+            // Restart the dispatch cycle using the fallback key.
+            keyEntry->eventTime = event.getEventTime();
+            keyEntry->deviceId = event.getDeviceId();
+            keyEntry->source = event.getSource();
+            keyEntry->displayId = event.getDisplayId();
+            keyEntry->flags = event.getFlags() | AKEY_EVENT_FLAG_FALLBACK;
+            keyEntry->keyCode = fallbackKeyCode;
+            keyEntry->scanCode = event.getScanCode();
+            keyEntry->metaState = event.getMetaState();
+            keyEntry->repeatCount = event.getRepeatCount();
+            keyEntry->downTime = event.getDownTime();
+            keyEntry->syntheticRepeat = false;
+
+#if DEBUG_OUTBOUND_EVENT_DETAILS
+            ALOGD("Unhandled key event: Dispatching fallback key.  "
+                    "originalKeyCode=%d, fallbackKeyCode=%d, fallbackMetaState=%08x",
+                    originalKeyCode, fallbackKeyCode, keyEntry->metaState);
+#endif
+            return true; // restart the event
+        } else {
+#if DEBUG_OUTBOUND_EVENT_DETAILS
+            ALOGD("Unhandled key event: No fallback key.");
+#endif
+
+            // Report the key as unhandled, since there is no fallback key.
+            mReporter->reportUnhandledKey(keyEntry->sequenceNum);
         }
     }
     return false;
@@ -4251,9 +4297,10 @@ void InputDispatcher::InjectionState::release() {
 
 // --- InputDispatcher::EventEntry ---
 
-InputDispatcher::EventEntry::EventEntry(int32_t type, nsecs_t eventTime, uint32_t policyFlags) :
-        refCount(1), type(type), eventTime(eventTime), policyFlags(policyFlags),
-        injectionState(nullptr), dispatchInProgress(false) {
+InputDispatcher::EventEntry::EventEntry(uint32_t sequenceNum, int32_t type,
+        nsecs_t eventTime, uint32_t policyFlags) :
+        sequenceNum(sequenceNum), refCount(1), type(type), eventTime(eventTime),
+        policyFlags(policyFlags), injectionState(nullptr), dispatchInProgress(false) {
 }
 
 InputDispatcher::EventEntry::~EventEntry() {
@@ -4279,8 +4326,9 @@ void InputDispatcher::EventEntry::releaseInjectionState() {
 
 // --- InputDispatcher::ConfigurationChangedEntry ---
 
-InputDispatcher::ConfigurationChangedEntry::ConfigurationChangedEntry(nsecs_t eventTime) :
-        EventEntry(TYPE_CONFIGURATION_CHANGED, eventTime, 0) {
+InputDispatcher::ConfigurationChangedEntry::ConfigurationChangedEntry(
+        uint32_t sequenceNum, nsecs_t eventTime) :
+        EventEntry(sequenceNum, TYPE_CONFIGURATION_CHANGED, eventTime, 0) {
 }
 
 InputDispatcher::ConfigurationChangedEntry::~ConfigurationChangedEntry() {
@@ -4293,8 +4341,9 @@ void InputDispatcher::ConfigurationChangedEntry::appendDescription(std::string& 
 
 // --- InputDispatcher::DeviceResetEntry ---
 
-InputDispatcher::DeviceResetEntry::DeviceResetEntry(nsecs_t eventTime, int32_t deviceId) :
-        EventEntry(TYPE_DEVICE_RESET, eventTime, 0),
+InputDispatcher::DeviceResetEntry::DeviceResetEntry(
+        uint32_t sequenceNum, nsecs_t eventTime, int32_t deviceId) :
+        EventEntry(sequenceNum, TYPE_DEVICE_RESET, eventTime, 0),
         deviceId(deviceId) {
 }
 
@@ -4309,11 +4358,11 @@ void InputDispatcher::DeviceResetEntry::appendDescription(std::string& msg) cons
 
 // --- InputDispatcher::KeyEntry ---
 
-InputDispatcher::KeyEntry::KeyEntry(nsecs_t eventTime,
+InputDispatcher::KeyEntry::KeyEntry(uint32_t sequenceNum, nsecs_t eventTime,
         int32_t deviceId, uint32_t source, int32_t displayId, uint32_t policyFlags, int32_t action,
         int32_t flags, int32_t keyCode, int32_t scanCode, int32_t metaState,
         int32_t repeatCount, nsecs_t downTime) :
-        EventEntry(TYPE_KEY, eventTime, policyFlags),
+        EventEntry(sequenceNum, TYPE_KEY, eventTime, policyFlags),
         deviceId(deviceId), source(source), displayId(displayId), action(action), flags(flags),
         keyCode(keyCode), scanCode(scanCode), metaState(metaState),
         repeatCount(repeatCount), downTime(downTime),
@@ -4344,7 +4393,7 @@ void InputDispatcher::KeyEntry::recycle() {
 
 // --- InputDispatcher::MotionEntry ---
 
-InputDispatcher::MotionEntry::MotionEntry(nsecs_t eventTime, int32_t deviceId,
+InputDispatcher::MotionEntry::MotionEntry(uint32_t sequenceNum, nsecs_t eventTime, int32_t deviceId,
         uint32_t source, int32_t displayId, uint32_t policyFlags, int32_t action,
         int32_t actionButton,
         int32_t flags, int32_t metaState, int32_t buttonState, int32_t edgeFlags,
@@ -4352,7 +4401,7 @@ InputDispatcher::MotionEntry::MotionEntry(nsecs_t eventTime, int32_t deviceId,
         uint32_t pointerCount,
         const PointerProperties* pointerProperties, const PointerCoords* pointerCoords,
         float xOffset, float yOffset) :
-        EventEntry(TYPE_MOTION, eventTime, policyFlags),
+        EventEntry(sequenceNum, TYPE_MOTION, eventTime, policyFlags),
         eventTime(eventTime),
         deviceId(deviceId), source(source), displayId(displayId), action(action),
         actionButton(actionButton), flags(flags), metaState(metaState), buttonState(buttonState),
@@ -4666,7 +4715,7 @@ void InputDispatcher::InputState::synthesizeCancelationEvents(nsecs_t currentTim
     for (size_t i = 0; i < mKeyMementos.size(); i++) {
         const KeyMemento& memento = mKeyMementos.itemAt(i);
         if (shouldCancelKey(memento, options)) {
-            outEvents.push(new KeyEntry(currentTime,
+            outEvents.push(new KeyEntry(SYNTHESIZED_EVENT_SEQUENCE_NUM, currentTime,
                     memento.deviceId, memento.source, memento.displayId, memento.policyFlags,
                     AKEY_EVENT_ACTION_UP, memento.flags | AKEY_EVENT_FLAG_CANCELED,
                     memento.keyCode, memento.scanCode, memento.metaState, 0, memento.downTime));
@@ -4676,7 +4725,7 @@ void InputDispatcher::InputState::synthesizeCancelationEvents(nsecs_t currentTim
     for (size_t i = 0; i < mMotionMementos.size(); i++) {
         const MotionMemento& memento = mMotionMementos.itemAt(i);
         if (shouldCancelMotion(memento, options)) {
-            outEvents.push(new MotionEntry(currentTime,
+            outEvents.push(new MotionEntry(SYNTHESIZED_EVENT_SEQUENCE_NUM, currentTime,
                     memento.deviceId, memento.source, memento.displayId, memento.policyFlags,
                     memento.hovering
                             ? AMOTION_EVENT_ACTION_HOVER_EXIT

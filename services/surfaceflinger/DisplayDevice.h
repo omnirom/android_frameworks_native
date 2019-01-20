@@ -37,7 +37,6 @@
 #include <ui/Transform.h>
 #include <utils/Mutex.h>
 #include <utils/RefBase.h>
-#include <utils/String8.h>
 #include <utils/Timers.h>
 
 #include "DisplayHardware/DisplayIdentification.h"
@@ -113,6 +112,7 @@ public:
 
     const std::optional<DisplayId>& getId() const { return mId; }
     const wp<IBinder>& getDisplayToken() const { return mDisplayToken; }
+    int32_t getSequenceId() const { return mSequenceId; }
 
     int32_t getSupportedPerFrameMetadata() const { return mSupportedPerFrameMetadata; }
 
@@ -123,6 +123,7 @@ public:
 
     bool hasWideColorGamut() const { return mHasWideColorGamut; }
     // Whether h/w composer has native support for specific HDR type.
+    bool hasHDR10PlusSupport() const { return mHasHdr10Plus; }
     bool hasHDR10Support() const { return mHasHdr10; }
     bool hasHLGSupport() const { return mHasHLG; }
     bool hasDolbyVisionSupport() const { return mHasDolbyVision; }
@@ -146,6 +147,7 @@ public:
                           ui::Dataspace* outDataspace, ui::ColorMode* outMode,
                           ui::RenderIntent* outIntent) const;
 
+    void setProtected(bool useProtected);
     // Queues the drawn buffer for consumption by HWC.
     void queueBuffer(HWComposer& hwc);
     // Allocates a buffer as scratch space for GPU composition
@@ -201,11 +203,12 @@ public:
      */
     uint32_t getPageFlipCount() const;
     std::string getDebugName() const;
-    void dump(String8& result) const;
+    void dump(std::string& result) const;
 
 private:
     const sp<SurfaceFlinger> mFlinger;
     const wp<IBinder> mDisplayToken;
+    const int32_t mSequenceId;
 
     std::optional<DisplayId> mId;
 
@@ -274,6 +277,7 @@ private:
     // Initialized by SurfaceFlinger when the DisplayDevice is created.
     // Fed to RenderEngine during composition.
     bool mHasWideColorGamut;
+    bool mHasHdr10Plus;
     bool mHasHdr10;
     bool mHasHLG;
     bool mHasDolbyVision;
@@ -333,6 +337,7 @@ struct DisplayDeviceCreationArgs {
     const wp<IBinder> displayToken;
     const std::optional<DisplayId> displayId;
 
+    int32_t sequenceId{0};
     bool isVirtual{false};
     bool isSecure{false};
     sp<ANativeWindow> nativeWindow;

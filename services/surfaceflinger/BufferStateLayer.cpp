@@ -21,8 +21,12 @@
 
 #include "BufferStateLayer.h"
 
+#include "TimeStats/TimeStats.h"
+
 #include <private/gui/SyncFeatures.h>
 #include <renderengine/Image.h>
+
+#include <limits>
 
 namespace android {
 
@@ -68,128 +72,163 @@ bool BufferStateLayer::shouldPresentNow(nsecs_t /*expectedPresentTime*/) const {
 }
 
 bool BufferStateLayer::willPresentCurrentTransaction() const {
+    Mutex::Autolock lock(mStateMutex);
     // Returns true if the most recent Transaction applied to CurrentState will be presented.
     return getSidebandStreamChanged() || getAutoRefresh() ||
-            (mCurrentState.modified && mCurrentState.buffer != nullptr);
+            (mState.current.modified && mState.current.buffer != nullptr);
 }
 
-bool BufferStateLayer::getTransformToDisplayInverse() const {
-    return mCurrentState.transformToDisplayInverse;
+bool BufferStateLayer::getTransformToDisplayInverseLocked() const {
+    return mState.current.transformToDisplayInverse;
 }
 
-void BufferStateLayer::pushPendingState() {
-    if (!mCurrentState.modified) {
+void BufferStateLayer::pushPendingStateLocked() {
+    if (!mState.current.modified) {
         return;
     }
-    mPendingStates.push_back(mCurrentState);
-    ATRACE_INT(mTransactionName.string(), mPendingStates.size());
+    mState.pending.push_back(mState.current);
+    ATRACE_INT(mTransactionName.string(), mState.pending.size());
 }
 
 bool BufferStateLayer::applyPendingStates(Layer::State* stateToCommit) {
-    const bool stateUpdateAvailable = !mPendingStates.empty();
-    while (!mPendingStates.empty()) {
+    const bool stateUpdateAvailable = !mState.pending.empty();
+    while (!mState.pending.empty()) {
         popPendingState(stateToCommit);
     }
-    mCurrentStateModified = stateUpdateAvailable && mCurrentState.modified;
-    mCurrentState.modified = false;
+    mCurrentStateModified = stateUpdateAvailable && mState.current.modified;
+    mState.current.modified = false;
     return stateUpdateAvailable;
 }
 
-Rect BufferStateLayer::getCrop(const Layer::State& s) const {
-    return (getEffectiveScalingMode() == NATIVE_WINDOW_SCALING_MODE_SCALE_CROP)
-            ? GLConsumer::scaleDownCrop(s.crop, s.active.w, s.active.h)
-            : s.crop;
+// Crop that applies to the window
+Rect BufferStateLayer::getCrop(const Layer::State& /*s*/) const {
+    return Rect::INVALID_RECT;
 }
 
 bool BufferStateLayer::setTransform(uint32_t transform) {
-    if (mCurrentState.transform == transform) return false;
-    mCurrentState.sequence++;
-    mCurrentState.transform = transform;
-    mCurrentState.modified = true;
+    Mutex::Autolock lock(mStateMutex);
+    if (mState.current.transform == transform) return false;
+    mState.current.sequence++;
+    mState.current.transform = transform;
+    mState.current.modified = true;
     setTransactionFlags(eTransactionNeeded);
     return true;
 }
 
 bool BufferStateLayer::setTransformToDisplayInverse(bool transformToDisplayInverse) {
-    if (mCurrentState.transformToDisplayInverse == transformToDisplayInverse) return false;
-    mCurrentState.sequence++;
-    mCurrentState.transformToDisplayInverse = transformToDisplayInverse;
-    mCurrentState.modified = true;
+    Mutex::Autolock lock(mStateMutex);
+    if (mState.current.transformToDisplayInverse == transformToDisplayInverse) return false;
+    mState.current.sequence++;
+    mState.current.transformToDisplayInverse = transformToDisplayInverse;
+    mState.current.modified = true;
     setTransactionFlags(eTransactionNeeded);
     return true;
 }
 
 bool BufferStateLayer::setCrop(const Rect& crop) {
-    if (mCurrentState.crop == crop) return false;
-    mCurrentState.sequence++;
-    mCurrentState.crop = crop;
-    mCurrentState.modified = true;
+    Mutex::Autolock lock(mStateMutex);
+    if (mState.current.crop == crop) return false;
+    mState.current.sequence++;
+    mState.current.crop = crop;
+    mState.current.modified = true;
+    setTransactionFlags(eTransactionNeeded);
+    return true;
+}
+
+bool BufferStateLayer::setFrame(const Rect& frame) {
+    int x = frame.left;
+    int y = frame.top;
+    int w = frame.getWidth();
+    int h = frame.getHeight();
+
+    Mutex::Autolock lock(mStateMutex);
+    if (mState.current.active.transform.tx() == x && mState.current.active.transform.ty() == y &&
+        mState.current.active.w == w && mState.current.active.h == h) {
+        return false;
+    }
+
+    if (!frame.isValid()) {
+        x = y = w = h = 0;
+    }
+    mState.current.active.transform.set(x, y);
+    mState.current.active.w = w;
+    mState.current.active.h = h;
+
+    mState.current.sequence++;
+    mState.current.modified = true;
     setTransactionFlags(eTransactionNeeded);
     return true;
 }
 
 bool BufferStateLayer::setBuffer(const sp<GraphicBuffer>& buffer) {
-    if (mCurrentState.buffer) {
+    Mutex::Autolock lock(mStateMutex);
+    if (mState.current.buffer) {
         mReleasePreviousBuffer = true;
     }
 
-    mCurrentState.sequence++;
-    mCurrentState.buffer = buffer;
-    mCurrentState.modified = true;
+    mState.current.sequence++;
+    mState.current.buffer = buffer;
+    mState.current.modified = true;
     setTransactionFlags(eTransactionNeeded);
     return true;
 }
 
 bool BufferStateLayer::setAcquireFence(const sp<Fence>& fence) {
+    Mutex::Autolock lock(mStateMutex);
     // The acquire fences of BufferStateLayers have already signaled before they are set
     mCallbackHandleAcquireTime = fence->getSignalTime();
 
-    mCurrentState.acquireFence = fence;
-    mCurrentState.modified = true;
+    mState.current.acquireFence = fence;
+    mState.current.modified = true;
     setTransactionFlags(eTransactionNeeded);
     return true;
 }
 
 bool BufferStateLayer::setDataspace(ui::Dataspace dataspace) {
-    if (mCurrentState.dataspace == dataspace) return false;
-    mCurrentState.sequence++;
-    mCurrentState.dataspace = dataspace;
-    mCurrentState.modified = true;
+    Mutex::Autolock lock(mStateMutex);
+    if (mState.current.dataspace == dataspace) return false;
+    mState.current.sequence++;
+    mState.current.dataspace = dataspace;
+    mState.current.modified = true;
     setTransactionFlags(eTransactionNeeded);
     return true;
 }
 
 bool BufferStateLayer::setHdrMetadata(const HdrMetadata& hdrMetadata) {
-    if (mCurrentState.hdrMetadata == hdrMetadata) return false;
-    mCurrentState.sequence++;
-    mCurrentState.hdrMetadata = hdrMetadata;
-    mCurrentState.modified = true;
+    Mutex::Autolock lock(mStateMutex);
+    if (mState.current.hdrMetadata == hdrMetadata) return false;
+    mState.current.sequence++;
+    mState.current.hdrMetadata = hdrMetadata;
+    mState.current.modified = true;
     setTransactionFlags(eTransactionNeeded);
     return true;
 }
 
 bool BufferStateLayer::setSurfaceDamageRegion(const Region& surfaceDamage) {
-    mCurrentState.sequence++;
-    mCurrentState.surfaceDamageRegion = surfaceDamage;
-    mCurrentState.modified = true;
+    Mutex::Autolock lock(mStateMutex);
+    mState.current.sequence++;
+    mState.current.surfaceDamageRegion = surfaceDamage;
+    mState.current.modified = true;
     setTransactionFlags(eTransactionNeeded);
     return true;
 }
 
 bool BufferStateLayer::setApi(int32_t api) {
-    if (mCurrentState.api == api) return false;
-    mCurrentState.sequence++;
-    mCurrentState.api = api;
-    mCurrentState.modified = true;
+    Mutex::Autolock lock(mStateMutex);
+    if (mState.current.api == api) return false;
+    mState.current.sequence++;
+    mState.current.api = api;
+    mState.current.modified = true;
     setTransactionFlags(eTransactionNeeded);
     return true;
 }
 
 bool BufferStateLayer::setSidebandStream(const sp<NativeHandle>& sidebandStream) {
-    if (mCurrentState.sidebandStream == sidebandStream) return false;
-    mCurrentState.sequence++;
-    mCurrentState.sidebandStream = sidebandStream;
-    mCurrentState.modified = true;
+    Mutex::Autolock lock(mStateMutex);
+    if (mState.current.sidebandStream == sidebandStream) return false;
+    mState.current.sequence++;
+    mState.current.sidebandStream = sidebandStream;
+    mState.current.modified = true;
     setTransactionFlags(eTransactionNeeded);
 
     if (!mSidebandStreamChanged.exchange(true)) {
@@ -223,7 +262,10 @@ bool BufferStateLayer::setTransactionCompletedListeners(
             mFlinger->getTransactionCompletedThread().registerPendingLatchedCallbackHandle(handle);
 
             // Store so latched time and release fence can be set
-            mCurrentState.callbackHandles.push_back(handle);
+            {
+                Mutex::Autolock lock(mStateMutex);
+                mState.current.callbackHandles.push_back(handle);
+            }
 
         } else { // If this layer will NOT need to be relatched and presented this frame
             // Notify the transaction completed thread this handle is done
@@ -237,49 +279,34 @@ bool BufferStateLayer::setTransactionCompletedListeners(
     return willPresent;
 }
 
-bool BufferStateLayer::setSize(uint32_t w, uint32_t h) {
-    if (mCurrentState.active.w == w && mCurrentState.active.h == h) return false;
-    mCurrentState.active.w = w;
-    mCurrentState.active.h = h;
-    mCurrentState.modified = true;
-    setTransactionFlags(eTransactionNeeded);
-    return true;
-}
-
-bool BufferStateLayer::setPosition(float x, float y, bool /*immediate*/) {
-    if (mCurrentState.active.transform.tx() == x && mCurrentState.active.transform.ty() == y)
-        return false;
-
-    mCurrentState.active.transform.set(x, y);
-
-    mCurrentState.sequence++;
-    mCurrentState.modified = true;
-    setTransactionFlags(eTransactionNeeded);
-    return true;
-}
-
 bool BufferStateLayer::setTransparentRegionHint(const Region& transparent) {
-    mCurrentState.transparentRegionHint = transparent;
-    mCurrentState.modified = true;
+    Mutex::Autolock lock(mStateMutex);
+    mState.current.transparentRegionHint = transparent;
+    mState.current.modified = true;
     setTransactionFlags(eTransactionNeeded);
     return true;
 }
 
-bool BufferStateLayer::setMatrix(const layer_state_t::matrix22_t& matrix,
-                                 bool allowNonRectPreservingTransforms) {
-    ui::Transform t;
-    t.set(matrix.dsdx, matrix.dtdy, matrix.dtdx, matrix.dsdy);
-
-    if (!allowNonRectPreservingTransforms && !t.preserveRects()) {
-        ALOGW("Attempt to set rotation matrix without permission ACCESS_SURFACE_FLINGER ignored");
-        return false;
+Rect BufferStateLayer::getBufferSize(const State& s) const {
+    // for buffer state layers we use the display frame size as the buffer size.
+    if (getActiveWidth(s) < UINT32_MAX && getActiveHeight(s) < UINT32_MAX) {
+        return Rect(getActiveWidth(s), getActiveHeight(s));
     }
 
-    mCurrentState.sequence++;
-    mCurrentState.active.transform.set(matrix.dsdx, matrix.dtdy, matrix.dtdx, matrix.dsdy);
-    mCurrentState.modified = true;
-    setTransactionFlags(eTransactionNeeded);
-    return true;
+    // if the display frame is not defined, use the parent bounds as the buffer size.
+    const auto& p = mDrawingParent.promote();
+    if (p != nullptr) {
+        Rect parentBounds = Rect(p->computeBounds(Region()));
+        if (!parentBounds.isEmpty()) {
+            return parentBounds;
+        }
+    }
+
+    // if there is no parent layer, use the buffer's bounds as the buffer size
+    if (s.buffer) {
+        return s.buffer->getBounds();
+    }
+    return Rect::INVALID_RECT;
 }
 // -----------------------------------------------------------------------
 
@@ -291,6 +318,7 @@ bool BufferStateLayer::fenceHasSignaled() const {
         return true;
     }
 
+    Mutex::Autolock lock(mStateMutex);
     return getDrawingState().acquireFence->getStatus() == Fence::Status::Signaled;
 }
 
@@ -299,7 +327,7 @@ nsecs_t BufferStateLayer::getDesiredPresentTime() {
     return 0;
 }
 
-std::shared_ptr<FenceTime> BufferStateLayer::getCurrentFenceTime() const {
+std::shared_ptr<FenceTime> BufferStateLayer::getCurrentFenceTimeLocked() const {
     return std::make_shared<FenceTime>(getDrawingState().acquireFence);
 }
 
@@ -315,8 +343,30 @@ ui::Dataspace BufferStateLayer::getDrawingDataSpace() const {
     return getDrawingState().dataspace;
 }
 
+// Crop that applies to the buffer
 Rect BufferStateLayer::getDrawingCrop() const {
-    return Rect::INVALID_RECT;
+    const State& s(getDrawingState());
+
+    if (s.crop.isEmpty() && s.buffer) {
+        return s.buffer->getBounds();
+    } else if (s.buffer) {
+        Rect crop = s.crop;
+        crop.left = std::max(crop.left, 0);
+        crop.top = std::max(crop.top, 0);
+        uint32_t bufferWidth = s.buffer->getWidth();
+        uint32_t bufferHeight = s.buffer->getHeight();
+        if (bufferHeight <= std::numeric_limits<int32_t>::max() &&
+            bufferWidth <= std::numeric_limits<int32_t>::max()) {
+            crop.right = std::min(crop.right, static_cast<int32_t>(bufferWidth));
+            crop.bottom = std::min(crop.bottom, static_cast<int32_t>(bufferHeight));
+        }
+        if (!crop.isValid()) {
+            // Crop rect is out of bounds, return whole buffer
+            return s.buffer->getBounds();
+        }
+        return crop;
+    }
+    return s.crop;
 }
 
 uint32_t BufferStateLayer::getDrawingScalingMode() const {
@@ -324,14 +374,17 @@ uint32_t BufferStateLayer::getDrawingScalingMode() const {
 }
 
 Region BufferStateLayer::getDrawingSurfaceDamage() const {
+    Mutex::Autolock lock(mStateMutex);
     return getDrawingState().surfaceDamageRegion;
 }
 
 const HdrMetadata& BufferStateLayer::getDrawingHdrMetadata() const {
+    Mutex::Autolock lock(mStateMutex);
     return getDrawingState().hdrMetadata;
 }
 
 int BufferStateLayer::getDrawingApi() const {
+    Mutex::Autolock lock(mStateMutex);
     return getDrawingState().api;
 }
 
@@ -356,6 +409,7 @@ bool BufferStateLayer::getSidebandStreamChanged() const {
 }
 
 std::optional<Region> BufferStateLayer::latchSidebandStream(bool& recomputeVisibleRegions) {
+    Mutex::Autolock lock(mStateMutex);
     if (mSidebandStreamChanged.exchange(false)) {
         const State& s(getDrawingState());
         // mSidebandStreamChanged was true
@@ -367,12 +421,12 @@ std::optional<Region> BufferStateLayer::latchSidebandStream(bool& recomputeVisib
         }
         recomputeVisibleRegions = true;
 
-        return getTransform().transform(Region(Rect(s.active.w, s.active.h)));
+        return getTransformLocked().transform(Region(Rect(s.active.w, s.active.h)));
     }
     return {};
 }
 
-bool BufferStateLayer::hasFrameUpdate() const {
+bool BufferStateLayer::hasFrameUpdateLocked() const {
     return mCurrentStateModified && getCurrentState().buffer != nullptr;
 }
 
@@ -382,6 +436,10 @@ void BufferStateLayer::setFilteringEnabled(bool enabled) {
 }
 
 status_t BufferStateLayer::bindTextureImage() {
+    Mutex::Autolock lock(mStateMutex);
+    return bindTextureImageLocked();
+}
+status_t BufferStateLayer::bindTextureImageLocked() {
     const State& s(getDrawingState());
     auto& engine(mFlinger->getRenderEngine());
 
@@ -457,7 +515,7 @@ status_t BufferStateLayer::updateTexImage(bool& /*recomputeVisibleRegions*/, nse
         ALOGE("[%s] rejecting buffer: "
               "bufferWidth=%d, bufferHeight=%d, front.active.{w=%d, h=%d}",
               mName.string(), bufferWidth, bufferHeight, s.active.w, s.active.h);
-        mTimeStats.removeTimeRecord(layerID, getFrameNumber());
+        mFlinger->mTimeStats->removeTimeRecord(layerID, getFrameNumber());
         return BAD_VALUE;
     }
 
@@ -469,7 +527,7 @@ status_t BufferStateLayer::updateTexImage(bool& /*recomputeVisibleRegions*/, nse
     if (SyncFeatures::getInstance().useNativeFenceSync() && releaseFence != Fence::NO_FENCE) {
         // TODO(alecmouri): Fail somewhere upstream if the fence is invalid.
         if (!releaseFence->isValid()) {
-            mTimeStats.clearLayerRecord(layerID);
+            mFlinger->mTimeStats->onDestroy(layerID);
             return UNKNOWN_ERROR;
         }
 
@@ -479,15 +537,15 @@ status_t BufferStateLayer::updateTexImage(bool& /*recomputeVisibleRegions*/, nse
         auto currentStatus = s.acquireFence->getStatus();
         if (currentStatus == Fence::Status::Invalid) {
             ALOGE("Existing fence has invalid state");
-            mTimeStats.clearLayerRecord(layerID);
+            mFlinger->mTimeStats->onDestroy(layerID);
             return BAD_VALUE;
         }
 
         auto incomingStatus = releaseFence->getStatus();
         if (incomingStatus == Fence::Status::Invalid) {
             ALOGE("New fence has invalid state");
-            mDrawingState.acquireFence = releaseFence;
-            mTimeStats.clearLayerRecord(layerID);
+            mState.drawing.acquireFence = releaseFence;
+            mFlinger->mTimeStats->onDestroy(layerID);
             return BAD_VALUE;
         }
 
@@ -497,16 +555,16 @@ status_t BufferStateLayer::updateTexImage(bool& /*recomputeVisibleRegions*/, nse
             char fenceName[32] = {};
             snprintf(fenceName, 32, "%.28s:%d", mName.string(), mFrameNumber);
             sp<Fence> mergedFence =
-                    Fence::merge(fenceName, mDrawingState.acquireFence, releaseFence);
+                    Fence::merge(fenceName, mState.drawing.acquireFence, releaseFence);
             if (!mergedFence.get()) {
                 ALOGE("failed to merge release fences");
                 // synchronization is broken, the best we can do is hope fences
                 // signal in order so the new fence will act like a union
-                mDrawingState.acquireFence = releaseFence;
-                mTimeStats.clearLayerRecord(layerID);
+                mState.drawing.acquireFence = releaseFence;
+                mFlinger->mTimeStats->onDestroy(layerID);
                 return BAD_VALUE;
             }
-            mDrawingState.acquireFence = mergedFence;
+            mState.drawing.acquireFence = mergedFence;
         } else if (incomingStatus == Fence::Status::Unsignaled) {
             // If one fence has signaled and the other hasn't, the unsignaled
             // fence will approximately correspond with the correct timestamp.
@@ -515,7 +573,7 @@ status_t BufferStateLayer::updateTexImage(bool& /*recomputeVisibleRegions*/, nse
             // by this point, they will have both signaled and only the timestamp
             // will be slightly off; any dependencies after this point will
             // already have been met.
-            mDrawingState.acquireFence = releaseFence;
+            mState.drawing.acquireFence = releaseFence;
         }
     } else {
         // Bind the new buffer to the GL texture.
@@ -524,17 +582,17 @@ status_t BufferStateLayer::updateTexImage(bool& /*recomputeVisibleRegions*/, nse
         // by glEGLImageTargetTexture2DOES, which this method calls.  Newer
         // devices will either call this in Layer::onDraw, or (if it's not
         // a GL-composited layer) not at all.
-        status_t err = bindTextureImage();
+        status_t err = bindTextureImageLocked();
         if (err != NO_ERROR) {
-            mTimeStats.clearLayerRecord(layerID);
+            mFlinger->mTimeStats->onDestroy(layerID);
             return BAD_VALUE;
         }
     }
 
     // TODO(marissaw): properly support mTimeStats
-    mTimeStats.setPostTime(layerID, getFrameNumber(), getName().c_str(), latchTime);
-    mTimeStats.setAcquireFence(layerID, getFrameNumber(), getCurrentFenceTime());
-    mTimeStats.setLatchTime(layerID, getFrameNumber(), latchTime);
+    mFlinger->mTimeStats->setPostTime(layerID, getFrameNumber(), getName().c_str(), latchTime);
+    mFlinger->mTimeStats->setAcquireFence(layerID, getFrameNumber(), getCurrentFenceTimeLocked());
+    mFlinger->mTimeStats->setLatchTime(layerID, getFrameNumber(), latchTime);
 
     return NO_ERROR;
 }
@@ -560,6 +618,7 @@ status_t BufferStateLayer::updateFrameNumber(nsecs_t /*latchTime*/) {
 }
 
 void BufferStateLayer::setHwcLayerBuffer(DisplayId displayId) {
+    Mutex::Autolock lock(mStateMutex);
     auto& hwcInfo = getBE().mHwcLayers[displayId];
     auto& hwcLayer = hwcInfo.layer;
 

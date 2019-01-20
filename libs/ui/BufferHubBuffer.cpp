@@ -40,6 +40,7 @@
 
 #include <android-base/unique_fd.h>
 #include <ui/BufferHubBuffer.h>
+#include <ui/BufferHubDefs.h>
 
 using android::base::unique_fd;
 using android::dvr::BufferTraits;
@@ -61,6 +62,15 @@ namespace {
 // to use Binder.
 static constexpr char kBufferHubClientPath[] = "system/buffer_hub/client";
 
+using BufferHubDefs::AnyClientAcquired;
+using BufferHubDefs::AnyClientGained;
+using BufferHubDefs::AnyClientPosted;
+using BufferHubDefs::IsClientAcquired;
+using BufferHubDefs::IsClientGained;
+using BufferHubDefs::IsClientPosted;
+using BufferHubDefs::IsClientReleased;
+using BufferHubDefs::kHighBitsMask;
+
 } // namespace
 
 BufferHubClient::BufferHubClient() : Client(ClientChannelFactory::Create(kBufferHubClientPath)) {}
@@ -71,7 +81,7 @@ BufferHubClient::BufferHubClient(LocalChannelHandle mChannelHandle)
 BufferHubClient::~BufferHubClient() {}
 
 bool BufferHubClient::IsValid() const {
-  return IsConnected() && GetChannelHandle().valid();
+    return IsConnected() && GetChannelHandle().valid();
 }
 
 LocalChannelHandle BufferHubClient::TakeChannelHandle() {
@@ -85,22 +95,21 @@ LocalChannelHandle BufferHubClient::TakeChannelHandle() {
 BufferHubBuffer::BufferHubBuffer(uint32_t width, uint32_t height, uint32_t layerCount,
                                  uint32_t format, uint64_t usage, size_t mUserMetadataSize) {
     ATRACE_CALL();
-    ALOGD("BufferHubBuffer::BufferHubBuffer: width=%u height=%u layerCount=%u, format=%u "
-          "usage=%" PRIx64 " mUserMetadataSize=%zu",
-          width, height, layerCount, format, usage, mUserMetadataSize);
+    ALOGD("%s: width=%u height=%u layerCount=%u, format=%u usage=%" PRIx64 " mUserMetadataSize=%zu",
+          __FUNCTION__, width, height, layerCount, format, usage, mUserMetadataSize);
 
     auto status =
             mClient.InvokeRemoteMethod<DetachedBufferRPC::Create>(width, height, layerCount, format,
                                                                   usage, mUserMetadataSize);
     if (!status) {
-        ALOGE("BufferHubBuffer::BufferHubBuffer: Failed to create detached buffer: %s",
+        ALOGE("%s: Failed to create detached buffer: %s", __FUNCTION__,
               status.GetErrorMessage().c_str());
         mClient.Close(-status.error());
     }
 
     const int ret = ImportGraphicBuffer();
     if (ret < 0) {
-        ALOGE("BufferHubBuffer::BufferHubBuffer: Failed to import buffer: %s", strerror(-ret));
+        ALOGE("%s: Failed to import buffer: %s", __FUNCTION__, strerror(-ret));
         mClient.Close(ret);
     }
 }
@@ -109,7 +118,7 @@ BufferHubBuffer::BufferHubBuffer(LocalChannelHandle mChannelHandle)
       : mClient(std::move(mChannelHandle)) {
     const int ret = ImportGraphicBuffer();
     if (ret < 0) {
-        ALOGE("BufferHubBuffer::BufferHubBuffer: Failed to import buffer: %s", strerror(-ret));
+        ALOGE("%s: Failed to import buffer: %s", __FUNCTION__, strerror(-ret));
         mClient.Close(ret);
     }
 }
@@ -119,14 +128,14 @@ int BufferHubBuffer::ImportGraphicBuffer() {
 
     auto status = mClient.InvokeRemoteMethod<DetachedBufferRPC::Import>();
     if (!status) {
-        ALOGE("BufferHubBuffer::BufferHubBuffer: Failed to import GraphicBuffer: %s",
+        ALOGE("%s: Failed to import GraphicBuffer: %s", __FUNCTION__,
               status.GetErrorMessage().c_str());
         return -status.error();
     }
 
     BufferTraits<LocalHandle> bufferTraits = status.take();
     if (bufferTraits.id() < 0) {
-        ALOGE("BufferHubBuffer::BufferHubBuffer: Received an invalid id!");
+        ALOGE("%s: Received an invalid id!", __FUNCTION__);
         return -EIO;
     }
 
@@ -139,22 +148,34 @@ int BufferHubBuffer::ImportGraphicBuffer() {
     mMetadata = BufferHubMetadata::Import(std::move(metadataFd));
 
     if (!mMetadata.IsValid()) {
-        ALOGE("BufferHubBuffer::ImportGraphicBuffer: invalid metadata.");
+        ALOGE("%s: invalid metadata.", __FUNCTION__);
         return -ENOMEM;
     }
 
     if (mMetadata.metadata_size() != bufferTraits.metadata_size()) {
-        ALOGE("BufferHubBuffer::ImportGraphicBuffer: metadata buffer too small: "
-              "%zu, expected: %" PRIu64 ".",
+        ALOGE("%s: metadata buffer too small: %zu, expected: %" PRIu64 ".", __FUNCTION__,
               mMetadata.metadata_size(), bufferTraits.metadata_size());
         return -ENOMEM;
     }
 
     size_t metadataSize = static_cast<size_t>(bufferTraits.metadata_size());
-    if (metadataSize < dvr::BufferHubDefs::kMetadataHeaderSize) {
-        ALOGE("BufferHubBuffer::ImportGraphicBuffer: metadata too small: %zu", metadataSize);
+    if (metadataSize < BufferHubDefs::kMetadataHeaderSize) {
+        ALOGE("%s: metadata too small: %zu", __FUNCTION__, metadataSize);
         return -EINVAL;
     }
+
+    // Populate shortcuts to the atomics in metadata.
+    auto metadata_header = mMetadata.metadata_header();
+    buffer_state_ = &metadata_header->buffer_state;
+    fence_state_ = &metadata_header->fence_state;
+    active_clients_bit_mask_ = &metadata_header->active_clients_bit_mask;
+    // The C++ standard recommends (but does not require) that lock-free atomic operations are
+    // also address-free, that is, suitable for communication between processes using shared
+    // memory.
+    LOG_ALWAYS_FATAL_IF(!std::atomic_is_lock_free(buffer_state_) ||
+                                !std::atomic_is_lock_free(fence_state_) ||
+                                !std::atomic_is_lock_free(active_clients_bit_mask_),
+                        "Atomic variables in ashmen are not lock free.");
 
     // Import the buffer: We only need to hold on the native_handle_t here so that
     // GraphicBuffer instance can be created in future.
@@ -175,8 +196,94 @@ int BufferHubBuffer::ImportGraphicBuffer() {
     mClientStateMask = bufferTraits.client_state_mask();
 
     // TODO(b/112012161) Set up shared fences.
-    ALOGD("BufferHubBuffer::ImportGraphicBuffer: id=%d, buffer_state=%" PRIx64 ".", id(),
-          mMetadata.metadata_header()->buffer_state.load(std::memory_order_acquire));
+    ALOGD("%s: id=%d, buffer_state=%" PRIx32 ".", __FUNCTION__, id(),
+          buffer_state_->load(std::memory_order_acquire));
+    return 0;
+}
+
+int BufferHubBuffer::Gain() {
+    uint32_t current_buffer_state = buffer_state_->load(std::memory_order_acquire);
+    if (IsClientGained(current_buffer_state, mClientStateMask)) {
+        ALOGV("%s: Buffer is already gained by this client %" PRIx32 ".", __FUNCTION__,
+              mClientStateMask);
+        return 0;
+    }
+    do {
+        if (AnyClientGained(current_buffer_state & (~mClientStateMask)) ||
+            AnyClientAcquired(current_buffer_state)) {
+            ALOGE("%s: Buffer is in use, id=%d mClientStateMask=%" PRIx32 " state=%" PRIx32 ".",
+                  __FUNCTION__, mId, mClientStateMask, current_buffer_state);
+            return -EBUSY;
+        }
+        // Change the buffer state to gained state, whose value happens to be the same as
+        // mClientStateMask.
+    } while (!buffer_state_->compare_exchange_weak(current_buffer_state, mClientStateMask,
+                                                   std::memory_order_acq_rel,
+                                                   std::memory_order_acquire));
+    // TODO(b/119837586): Update fence state and return GPU fence.
+    return 0;
+}
+
+int BufferHubBuffer::Post() {
+    uint32_t current_buffer_state = buffer_state_->load(std::memory_order_acquire);
+    uint32_t current_active_clients_bit_mask = 0U;
+    uint32_t updated_buffer_state = 0U;
+    do {
+        if (!IsClientGained(current_buffer_state, mClientStateMask)) {
+            ALOGE("%s: Cannot post a buffer that is not gained by this client. buffer_id=%d "
+                  "mClientStateMask=%" PRIx32 " state=%" PRIx32 ".",
+                  __FUNCTION__, mId, mClientStateMask, current_buffer_state);
+            return -EBUSY;
+        }
+        // Set the producer client buffer state to released, other clients' buffer state to posted.
+        current_active_clients_bit_mask = active_clients_bit_mask_->load(std::memory_order_acquire);
+        updated_buffer_state =
+                current_active_clients_bit_mask & (~mClientStateMask) & kHighBitsMask;
+    } while (!buffer_state_->compare_exchange_weak(current_buffer_state, updated_buffer_state,
+                                                   std::memory_order_acq_rel,
+                                                   std::memory_order_acquire));
+    // TODO(b/119837586): Update fence state and return GPU fence if needed.
+    return 0;
+}
+
+int BufferHubBuffer::Acquire() {
+    uint32_t current_buffer_state = buffer_state_->load(std::memory_order_acquire);
+    if (IsClientAcquired(current_buffer_state, mClientStateMask)) {
+        ALOGV("%s: Buffer is already acquired by this client %" PRIx32 ".", __FUNCTION__,
+              mClientStateMask);
+        return 0;
+    }
+    uint32_t updated_buffer_state = 0U;
+    do {
+        if (!IsClientPosted(current_buffer_state, mClientStateMask)) {
+            ALOGE("%s: Cannot acquire a buffer that is not in posted state. buffer_id=%d "
+                  "mClientStateMask=%" PRIx32 " state=%" PRIx32 ".",
+                  __FUNCTION__, mId, mClientStateMask, current_buffer_state);
+            return -EBUSY;
+        }
+        // Change the buffer state for this consumer from posted to acquired.
+        updated_buffer_state = current_buffer_state ^ mClientStateMask;
+    } while (!buffer_state_->compare_exchange_weak(current_buffer_state, updated_buffer_state,
+                                                   std::memory_order_acq_rel,
+                                                   std::memory_order_acquire));
+    // TODO(b/119837586): Update fence state and return GPU fence.
+    return 0;
+}
+
+int BufferHubBuffer::Release() {
+    uint32_t current_buffer_state = buffer_state_->load(std::memory_order_acquire);
+    if (IsClientReleased(current_buffer_state, mClientStateMask)) {
+        ALOGV("%s: Buffer is already released by this client %" PRIx32 ".", __FUNCTION__,
+              mClientStateMask);
+        return 0;
+    }
+    uint32_t updated_buffer_state = 0U;
+    do {
+        updated_buffer_state = current_buffer_state & (~mClientStateMask);
+    } while (!buffer_state_->compare_exchange_weak(current_buffer_state, updated_buffer_state,
+                                                   std::memory_order_acq_rel,
+                                                   std::memory_order_acquire));
+    // TODO(b/119837586): Update fence state and return GPU fence if needed.
     return 0;
 }
 
@@ -189,12 +296,12 @@ int BufferHubBuffer::Poll(int timeoutMs) {
 
 Status<LocalChannelHandle> BufferHubBuffer::Duplicate() {
     ATRACE_CALL();
-    ALOGD("BufferHubBuffer::Duplicate: id=%d.", mId);
+    ALOGD("%s: id=%d.", __FUNCTION__, mId);
 
     auto statusOrHandle = mClient.InvokeRemoteMethod<DetachedBufferRPC::Duplicate>();
 
     if (!statusOrHandle.ok()) {
-        ALOGE("BufferHubBuffer::Duplicate: Failed to duplicate buffer (id=%d): %s.", mId,
+        ALOGE("%s: Failed to duplicate buffer (id=%d): %s.", __FUNCTION__, mId,
               statusOrHandle.GetErrorMessage().c_str());
     }
     return statusOrHandle;

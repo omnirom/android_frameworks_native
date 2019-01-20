@@ -19,6 +19,7 @@
 #include <math/mat4.h>
 #include <math/vec3.h>
 #include <renderengine/Texture.h>
+#include <ui/Fence.h>
 #include <ui/FloatRect.h>
 #include <ui/GraphicBuffer.h>
 #include <ui/GraphicTypes.h>
@@ -34,58 +35,70 @@ struct Buffer {
     // Buffer containing the image that we will render.
     // If buffer == nullptr, then the rest of the fields in this struct will be
     // ignored.
-    sp<GraphicBuffer> buffer;
+    sp<GraphicBuffer> buffer = nullptr;
+
+    // Fence that will fire when the buffer is ready to be bound.
+    sp<Fence> fence = nullptr;
 
     // Texture identifier to bind the external texture to.
     // TODO(alecmouri): This is GL-specific...make the type backend-agnostic.
-    uint32_t textureName;
+    uint32_t textureName = 0;
 
     // Whether to use filtering when rendering the texture.
-    bool useTextureFiltering;
+    bool useTextureFiltering = false;
 
     // Transform matrix to apply to texture coordinates.
-    mat4 textureTransform;
+    mat4 textureTransform = mat4();
 
     // Wheteher to use pre-multiplied alpha
-    bool usePremultipliedAlpha;
+    bool usePremultipliedAlpha = true;
+
+    // Override flag that alpha for each pixel in the buffer *must* be 1.0.
+    // LayerSettings::alpha is still used if isOpaque==true - this flag only
+    // overrides the alpha channel of the buffer.
+    bool isOpaque = false;
 
     // HDR color-space setting for Y410.
-    bool isY410BT2020;
+    bool isY410BT2020 = false;
 };
 
 // Metadata describing the layer geometry.
 struct Geometry {
     // Boundaries of the layer.
-    FloatRect boundaries;
+    FloatRect boundaries = FloatRect();
 
     // Transform matrix to apply to mesh coordinates.
-    mat4 positionTransform;
+    mat4 positionTransform = mat4();
 };
 
 // Descriptor of the source pixels for this layer.
 struct PixelSource {
     // Source buffer
-    Buffer buffer;
+    Buffer buffer = Buffer();
 
     // The solid color with which to fill the layer.
     // This should only be populated if we don't render from an application
     // buffer.
-    half3 solidColor;
+    half3 solidColor = half3(0.0f, 0.0f, 0.0f);
 };
 
 // The settings that RenderEngine requires for correctly rendering a Layer.
 struct LayerSettings {
     // Geometry information
-    Geometry geometry;
+    Geometry geometry = Geometry();
 
     // Source pixels for this layer.
-    PixelSource source;
+    PixelSource source = PixelSource();
 
-    // Alpha option to apply to the source pixels
-    half alpha;
+    // Alpha option to blend with the source pixels
+    half alpha = half(0.0);
 
     // Color space describing how the source pixels should be interpreted.
     ui::Dataspace sourceDataspace;
+
+    // Additional layer-specific color transform to be applied before the global
+    // transform.
+    mat4 colorTransform;
 };
 
 } // namespace renderengine

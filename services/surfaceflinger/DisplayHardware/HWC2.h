@@ -40,6 +40,7 @@
 #include "PowerAdvisor.h"
 
 namespace android {
+    struct DisplayedFrameStats;
     class Fence;
     class FloatRect;
     class GraphicBuffer;
@@ -240,6 +241,11 @@ public:
     [[clang::warn_unused_result]] Error getDisplayedContentSamplingAttributes(
             android::ui::PixelFormat* outFormat, android::ui::Dataspace* outDataspace,
             uint8_t* outComponentMask) const;
+    [[clang::warn_unused_result]] Error setDisplayContentSamplingEnabled(bool enabled,
+                                                                         uint8_t componentMask,
+                                                                         uint64_t maxFrames) const;
+    [[clang::warn_unused_result]] Error getDisplayedContentSample(
+            uint64_t maxFrames, uint64_t timestamp, android::DisplayedFrameStats* outStats) const;
     [[clang::warn_unused_result]] Error getReleaseFences(
             std::unordered_map<Layer*,
                     android::sp<android::Fence>>* outFences) const;

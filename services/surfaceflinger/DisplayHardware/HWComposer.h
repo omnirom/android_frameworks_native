@@ -36,8 +36,8 @@
 
 namespace android {
 
+struct DisplayedFrameStats;
 class GraphicBuffer;
-class String8;
 class TestableSurfaceFlinger;
 struct CompositionInfo;
 
@@ -131,6 +131,10 @@ public:
     status_t getDisplayedContentSamplingAttributes(DisplayId displayId, ui::PixelFormat* outFormat,
                                                    ui::Dataspace* outDataspace,
                                                    uint8_t* outComponentMask);
+    status_t setDisplayContentSamplingEnabled(DisplayId displayId, bool enabled,
+                                              uint8_t componentMask, uint64_t maxFrames);
+    status_t getDisplayedContentSample(DisplayId displayId, uint64_t maxFrames, uint64_t timestamp,
+                                       DisplayedFrameStats* outStats);
 
     // Events handling ---------------------------------------------------------
 
@@ -159,7 +163,7 @@ public:
     bool isUsingVrComposer() const;
 
     // for debugging ----------------------------------------------------------
-    void dump(String8& out) const;
+    void dump(std::string& out) const;
 
     Hwc2::Composer* getComposer() const { return mHwcDevice->getComposer(); }
 

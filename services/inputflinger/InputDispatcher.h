@@ -37,6 +37,7 @@
 #include <unordered_map>
 
 #include "InputListener.h"
+#include "InputReporter.h"
 
 
 namespace android {
@@ -454,6 +455,7 @@ private:
             TYPE_MOTION
         };
 
+        uint32_t sequenceNum;
         mutable int32_t refCount;
         int32_t type;
         nsecs_t eventTime;
@@ -469,13 +471,13 @@ private:
         virtual void appendDescription(std::string& msg) const = 0;
 
     protected:
-        EventEntry(int32_t type, nsecs_t eventTime, uint32_t policyFlags);
+        EventEntry(uint32_t sequenceNum, int32_t type, nsecs_t eventTime, uint32_t policyFlags);
         virtual ~EventEntry();
         void releaseInjectionState();
     };
 
     struct ConfigurationChangedEntry : EventEntry {
-        explicit ConfigurationChangedEntry(nsecs_t eventTime);
+        explicit ConfigurationChangedEntry(uint32_t sequenceNum, nsecs_t eventTime);
         virtual void appendDescription(std::string& msg) const;
 
     protected:
@@ -485,7 +487,7 @@ private:
     struct DeviceResetEntry : EventEntry {
         int32_t deviceId;
 
-        DeviceResetEntry(nsecs_t eventTime, int32_t deviceId);
+        DeviceResetEntry(uint32_t sequenceNum, nsecs_t eventTime, int32_t deviceId);
         virtual void appendDescription(std::string& msg) const;
 
     protected:
@@ -515,7 +517,7 @@ private:
         InterceptKeyResult interceptKeyResult; // set based on the interception result
         nsecs_t interceptKeyWakeupTime; // used with INTERCEPT_KEY_RESULT_TRY_AGAIN_LATER
 
-        KeyEntry(nsecs_t eventTime,
+        KeyEntry(uint32_t sequenceNum, nsecs_t eventTime,
                 int32_t deviceId, uint32_t source, int32_t displayId, uint32_t policyFlags,
                 int32_t action, int32_t flags, int32_t keyCode, int32_t scanCode, int32_t metaState,
                 int32_t repeatCount, nsecs_t downTime);
@@ -544,7 +546,7 @@ private:
         PointerProperties pointerProperties[MAX_POINTERS];
         PointerCoords pointerCoords[MAX_POINTERS];
 
-        MotionEntry(nsecs_t eventTime,
+        MotionEntry(uint32_t sequenceNum, nsecs_t eventTime,
                 int32_t deviceId, uint32_t source, int32_t displayId, uint32_t policyFlags,
                 int32_t action, int32_t actionButton, int32_t flags,
                 int32_t metaState, int32_t buttonState, int32_t edgeFlags,
@@ -1185,6 +1187,8 @@ private:
     void traceInboundQueueLengthLocked();
     void traceOutboundQueueLengthLocked(const sp<Connection>& connection);
     void traceWaitQueueLengthLocked(const sp<Connection>& connection);
+
+    sp<InputReporter> mReporter;
 };
 
 /* Enqueues and dispatches input events, endlessly. */

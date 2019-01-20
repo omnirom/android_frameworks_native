@@ -14,8 +14,8 @@
  * limitations under the License.
  */
 
-#ifndef SF_GLES20RENDERENGINE_H_
-#define SF_GLES20RENDERENGINE_H_
+#ifndef SF_GLESRENDERENGINE_H_
+#define SF_GLESRENDERENGINE_H_
 
 #include <stdint.h>
 #include <sys/types.h>
@@ -30,8 +30,6 @@
 
 namespace android {
 
-class String8;
-
 namespace renderengine {
 
 class Mesh;
@@ -41,14 +39,15 @@ namespace gl {
 
 class GLImage;
 
-class GLES20RenderEngine : public impl::RenderEngine {
+class GLESRenderEngine : public impl::RenderEngine {
 public:
-    static std::unique_ptr<GLES20RenderEngine> create(int hwcFormat, uint32_t featureFlags);
+    static std::unique_ptr<GLESRenderEngine> create(int hwcFormat, uint32_t featureFlags);
     static EGLConfig chooseEglConfig(EGLDisplay display, int format, bool logConfig);
 
-    GLES20RenderEngine(uint32_t featureFlags, // See RenderEngine::FeatureFlag
-                       EGLDisplay display, EGLConfig config, EGLContext ctxt, EGLSurface dummy);
-    ~GLES20RenderEngine() override;
+    GLESRenderEngine(uint32_t featureFlags, // See RenderEngine::FeatureFlag
+                     EGLDisplay display, EGLConfig config, EGLContext ctxt, EGLSurface dummy,
+                     EGLContext protectedContext, EGLSurface protectedDummy);
+    ~GLESRenderEngine() override;
 
     std::unique_ptr<Framebuffer> createFramebuffer() override;
     std::unique_ptr<Image> createImage() override;
@@ -70,26 +69,29 @@ public:
     void unbindFrameBuffer(Framebuffer* framebuffer) override;
     void checkErrors() const override;
 
-    status_t drawLayers(const DisplaySettings& settings, const std::vector<LayerSettings>& layers,
-                        ANativeWindowBuffer* const buffer,
-                        base::unique_fd* displayFence) const override;
+    bool isProtected() const override { return mInProtectedContext; }
+    bool supportsProtectedContent() const override;
+    bool useProtectedContext(bool useProtectedContext) override;
+    status_t drawLayers(const DisplaySettings& display, const std::vector<LayerSettings>& layers,
+                        ANativeWindowBuffer* buffer, base::unique_fd* drawFence) override;
 
     // internal to RenderEngine
     EGLDisplay getEGLDisplay() const { return mEGLDisplay; }
     EGLConfig getEGLConfig() const { return mEGLConfig; }
 
 protected:
-    void dump(String8& result) override;
+    void dump(std::string& result) override;
     void setViewportAndProjection(size_t vpw, size_t vph, Rect sourceCrop,
                                   ui::Transform::orientation_flags rotation) override;
     void setupLayerBlending(bool premultipliedAlpha, bool opaque, bool disableTexture,
-                            const half4& color) override;
+                            const half4& color, float cornerRadius) override;
     void setupLayerTexturing(const Texture& texture) override;
     void setupLayerBlackedOut() override;
     void setupFillWithColor(float r, float g, float b, float a) override;
     void setColorTransform(const mat4& colorTransform) override;
     void disableTexturing() override;
     void disableBlending() override;
+    void setupCornerRadiusCropSize(float width, float height) override;
 
     // HDR and color management related functions and state
     void setSourceY410BT2020(bool enable) override;
@@ -113,20 +115,26 @@ private:
 
     static GlesVersion parseGlesVersion(const char* str);
     static EGLContext createEglContext(EGLDisplay display, EGLConfig config,
-                                       EGLContext shareContext, bool useContextPriority);
+                                       EGLContext shareContext, bool useContextPriority,
+                                       Protection protection);
     static EGLSurface createDummyEglPbufferSurface(EGLDisplay display, EGLConfig config,
-                                                   int hwcFormat);
+                                                   int hwcFormat, Protection protection);
 
     // A data space is considered HDR data space if it has BT2020 color space
     // with PQ or HLG transfer function.
     bool isHdrDataSpace(const ui::Dataspace dataSpace) const;
     bool needsXYZTransformMatrix() const;
-    void setEGLHandles(EGLDisplay display, EGLConfig config, EGLContext ctxt, EGLSurface dummy);
+    // Defines the viewport, and sets the projection matrix to the projection
+    // defined by the clip.
+    void setViewportAndProjection(Rect viewport, Rect clip);
+    status_t bindExternalTextureBuffer(uint32_t texName, sp<GraphicBuffer> buffer, sp<Fence> fence);
 
     EGLDisplay mEGLDisplay;
     EGLConfig mEGLConfig;
     EGLContext mEGLContext;
     EGLSurface mDummySurface;
+    EGLContext mProtectedEGLContext;
+    EGLSurface mProtectedDummySurface;
     GLuint mProtectedTexName;
     GLint mMaxViewportDims[2];
     GLint mMaxTextureSize;
@@ -147,6 +155,7 @@ private:
     mat4 mBt2020ToSrgb;
     mat4 mBt2020ToDisplayP3;
 
+    bool mInProtectedContext = false;
     int32_t mFboHeight = 0;
 
     // Current dataspace of layer being rendered
@@ -164,4 +173,4 @@ private:
 } // namespace renderengine
 } // namespace android
 
-#endif /* SF_GLES20RENDERENGINE_H_ */
+#endif /* SF_GLESRENDERENGINE_H_ */

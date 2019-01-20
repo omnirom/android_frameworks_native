@@ -207,7 +207,7 @@ TEST_F(SurfaceTest, QueryConsumerUsage) {
 }
 
 TEST_F(SurfaceTest, QueryDefaultBuffersDataSpace) {
-    const android_dataspace TEST_DATASPACE = HAL_DATASPACE_SRGB;
+    const android_dataspace TEST_DATASPACE = HAL_DATASPACE_V0_SRGB;
     sp<IGraphicBufferProducer> producer;
     sp<IGraphicBufferConsumer> consumer;
     BufferQueue::createBufferQueue(&producer, &consumer);
@@ -558,8 +558,9 @@ public:
     void destroyDisplay(const sp<IBinder>& /*display */) override {}
     sp<IBinder> getBuiltInDisplay(int32_t /*id*/) override { return nullptr; }
     void setTransactionState(const Vector<ComposerState>& /*state*/,
-            const Vector<DisplayState>& /*displays*/, uint32_t /*flags*/)
-            override {}
+                             const Vector<DisplayState>& /*displays*/, uint32_t /*flags*/,
+                             const sp<IBinder>& /*applyToken*/,
+                             const InputWindowCommands& /*inputWindowCommands*/) override {}
     void bootFinished() override {}
     bool authenticateSurfaceTexture(
             const sp<IGraphicBufferProducer>& /*surface*/) const override {
@@ -647,6 +648,16 @@ public:
                                                    uint8_t* /*outComponentMask*/) const override {
         return NO_ERROR;
     }
+    status_t setDisplayContentSamplingEnabled(const sp<IBinder>& /*display*/, bool /*enable*/,
+                                              uint8_t /*componentMask*/,
+                                              uint64_t /*maxFrames*/) const override {
+        return NO_ERROR;
+    }
+    status_t getDisplayedContentSample(const sp<IBinder>& /*display*/, uint64_t /*maxFrames*/,
+                                       uint64_t /*timestamp*/,
+                                       DisplayedFrameStats* /*outStats*/) const override {
+        return NO_ERROR;
+    }
 
     virtual status_t getColorManagement(bool* /*outGetColorManagement*/) const { return NO_ERROR; }
 
@@ -659,8 +670,7 @@ private:
 
 class FakeProducerFrameEventHistory : public ProducerFrameEventHistory {
 public:
-    FakeProducerFrameEventHistory(FenceToFenceTimeMap* fenceMap)
-        : mFenceMap(fenceMap) {}
+    explicit FakeProducerFrameEventHistory(FenceToFenceTimeMap* fenceMap) : mFenceMap(fenceMap) {}
 
     ~FakeProducerFrameEventHistory() {}
 

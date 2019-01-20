@@ -37,6 +37,8 @@
 #include <linux/input.h>
 #include <sys/epoll.h>
 
+#include "TouchVideoDevice.h"
+
 /* Convenience constants. */
 
 #define BTN_FIRST 0x100  // first button code
@@ -209,6 +211,7 @@ public:
      * Returns the number of events obtained, or 0 if the timeout expired.
      */
     virtual size_t getEvents(int timeoutMillis, RawEvent* buffer, size_t bufferSize) = 0;
+    virtual std::vector<TouchVideoFrame> getVideoFrames(int32_t deviceId) = 0;
 
     /*
      * Query current input state.
@@ -301,6 +304,7 @@ public:
             const int32_t* keyCodes, uint8_t* outFlags) const;
 
     virtual size_t getEvents(int timeoutMillis, RawEvent* buffer, size_t bufferSize);
+    virtual std::vector<TouchVideoFrame> getVideoFrames(int32_t deviceId);
 
     virtual bool hasScanCode(int32_t deviceId, int32_t scanCode) const;
     virtual bool hasLed(int32_t deviceId, int32_t led) const;
@@ -333,6 +337,8 @@ private:
         const int32_t id;
         const std::string path;
         const InputDeviceIdentifier identifier;
+
+        std::unique_ptr<TouchVideoDevice> videoDevice;
 
         uint32_t classes;
 
@@ -377,12 +383,14 @@ private:
         }
     };
 
-    status_t openDeviceLocked(const char *devicePath);
+    status_t openDeviceLocked(const char* devicePath);
+    void openVideoDeviceLocked(const std::string& devicePath);
     void createVirtualKeyboardLocked();
     void addDeviceLocked(Device* device);
     void assignDescriptorLocked(InputDeviceIdentifier& identifier);
 
-    status_t closeDeviceByPathLocked(const char *devicePath);
+    void closeDeviceByPathLocked(const char *devicePath);
+    void closeVideoDeviceByPathLocked(const std::string& devicePath);
     void closeDeviceLocked(Device* device);
     void closeAllDevicesLocked();
 
@@ -391,16 +399,25 @@ private:
     bool isDeviceEnabled(int32_t deviceId);
     status_t enableDevice(int32_t deviceId);
     status_t disableDevice(int32_t deviceId);
+    status_t registerFdForEpoll(int fd);
+    status_t unregisterFdFromEpoll(int fd);
     status_t registerDeviceForEpollLocked(Device* device);
+    void registerVideoDeviceForEpollLocked(const TouchVideoDevice& videoDevice);
     status_t unregisterDeviceFromEpollLocked(Device* device);
+    void unregisterVideoDeviceFromEpollLocked(const TouchVideoDevice& videoDevice);
 
     status_t scanDirLocked(const char *dirname);
+    status_t scanVideoDirLocked(const std::string& dirname);
     void scanDevicesLocked();
     status_t readNotifyLocked();
 
     Device* getDeviceByDescriptorLocked(const std::string& descriptor) const;
     Device* getDeviceLocked(int32_t deviceId) const;
     Device* getDeviceByPathLocked(const char* devicePath) const;
+    /**
+     * Look through all available fd's (both for input devices and for video devices),
+     * and return the device pointer.
+     */
     Device* getDeviceByFdLocked(int fd) const;
 
     bool hasKeycodeLocked(Device* device, int keycode) const;
@@ -436,6 +453,14 @@ private:
     BitSet32 mControllerNumbers;
 
     KeyedVector<int32_t, Device*> mDevices;
+    /**
+     * Video devices that report touchscreen heatmap, but have not (yet) been paired
+     * with a specific input device. Video device discovery is independent from input device
+     * discovery, so the two types of devices could be found in any order.
+     * Ideally, video devices in this queue do not have an open fd, or at least aren't
+     * actively streaming.
+     */
+    std::vector<std::unique_ptr<TouchVideoDevice>> mUnattachedVideoDevices;
 
     Device *mOpeningDevices;
     Device *mClosingDevices;
@@ -450,8 +475,8 @@ private:
     int mWakeReadPipeFd;
     int mWakeWritePipeFd;
 
-    // Epoll FD list size hint.
-    static const int EPOLL_SIZE_HINT = 8;
+    int mInputWd;
+    int mVideoWd;
 
     // Maximum number of signalled FDs to handle at a time.
     static const int EPOLL_MAX_EVENTS = 16;

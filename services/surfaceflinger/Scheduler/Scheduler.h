@@ -25,6 +25,7 @@
 #include "DispSync.h"
 #include "EventControlThread.h"
 #include "EventThread.h"
+#include "IdleTimer.h"
 #include "InjectVSyncSource.h"
 #include "LayerHistory.h"
 #include "SchedulerUtils.h"
@@ -52,14 +53,14 @@ public:
 
     class Connection {
     public:
-        Connection(sp<ConnectionHandle> handle, sp<BnDisplayEventConnection> eventConnection,
+        Connection(sp<ConnectionHandle> handle, sp<EventThreadConnection> eventConnection,
                    std::unique_ptr<EventThread> eventThread)
               : handle(handle), eventConnection(eventConnection), thread(std::move(eventThread)) {}
 
         ~Connection() = default;
 
         sp<ConnectionHandle> handle;
-        sp<BnDisplayEventConnection> eventConnection;
+        sp<EventThreadConnection> eventConnection;
         const std::unique_ptr<EventThread> thread;
     };
 
@@ -78,7 +79,7 @@ public:
     // Getter methods.
     EventThread* getEventThread(const sp<ConnectionHandle>& handle);
 
-    sp<BnDisplayEventConnection> getEventConnection(const sp<ConnectionHandle>& handle);
+    sp<EventThreadConnection> getEventConnection(const sp<ConnectionHandle>& handle);
 
     // Should be called when receiving a hotplug event.
     void hotplugReceived(const sp<ConnectionHandle>& handle, EventThread::DisplayType displayType,
@@ -91,7 +92,7 @@ public:
     void onScreenReleased(const sp<ConnectionHandle>& handle);
 
     // Should be called when dumpsys command is received.
-    void dump(const sp<ConnectionHandle>& handle, String8& result) const;
+    void dump(const sp<ConnectionHandle>& handle, std::string& result) const;
 
     // Offers ability to modify phase offset in the event thread.
     void setPhaseOffset(const sp<ConnectionHandle>& handle, nsecs_t phaseOffset);
@@ -126,6 +127,10 @@ private:
     // Collects the average difference between timestamps for each frame regardless
     // of which layer the timestamp came from.
     void determineTimestampAverage(bool isAutoTimestamp, const nsecs_t framePresentTime);
+    // Function that resets the idle timer.
+    void resetIdleTimer();
+    // Function that is called when the timer expires.
+    void expiredTimerCallback();
 
     // TODO(b/113612090): Instead of letting BufferQueueLayer to access mDispSync directly, it
     // should make request to Scheduler to compute next refresh.
@@ -163,6 +168,11 @@ private:
     size_t mCounter = 0;
 
     LayerHistory mLayerHistory;
+
+    // Timer that records time between requests for next vsync. If the time is higher than a given
+    // interval, a callback is fired. Set this variable to >0 to use this feature.
+    int64_t mSetIdleTimerMs = 0;
+    std::unique_ptr<scheduler::IdleTimer> mIdleTimer;
 };
 
 } // namespace android
