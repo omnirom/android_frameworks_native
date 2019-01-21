@@ -4028,7 +4028,12 @@ void SurfaceFlinger::setPowerModeInternal(const sp<DisplayDevice>& hw,
         mInterceptor->savePowerModeUpdate(mCurrentState.displays.valueAt(idx).displayId, mode);
     }
 
-    mActiveDisplays[type] = (mode == HWC_POWER_MODE_NORMAL);
+    if (mUpdateVSyncSourceOnDoze) {
+        mActiveDisplays[type] = (mode == HWC_POWER_MODE_NORMAL);
+    } else {
+        mActiveDisplays[type] = (mode != HWC_POWER_MODE_OFF &&
+                                 mode != HWC_POWER_MODE_DOZE_SUSPEND);
+    }
 
     if (currentMode == HWC_POWER_MODE_OFF) {
         // Turn on the display
