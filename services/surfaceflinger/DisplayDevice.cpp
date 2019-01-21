@@ -230,6 +230,7 @@ DisplayDevice::DisplayDevice(
         const std::unordered_map<ColorMode, std::vector<RenderIntent>>& hwcColorModes,
         int initialPowerMode)
     : lastCompositionHadVisibleLayers(false),
+      mustRecompose(true),
       mFlinger(flinger),
       mType(type),
       mHwcDisplayId(hwcId),

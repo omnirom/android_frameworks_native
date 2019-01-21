@@ -434,6 +434,7 @@ private:
                                    const Rect& sourceCrop, float frameScale, bool childrenOnly);
     virtual status_t getDisplayStats(const sp<IBinder>& display,
             DisplayStatInfo* stats);
+    virtual status_t getDisplayViewport(const sp<IBinder>& display, Rect* outViewport);
     virtual status_t getDisplayConfigs(const sp<IBinder>& display,
             Vector<DisplayInfo>* configs);
     virtual int getActiveConfig(const sp<IBinder>& display);
@@ -664,6 +665,7 @@ private:
     void preComposition(nsecs_t refreshStartTime);
     void postComposition(nsecs_t refreshStartTime);
     void forceResyncModel();
+    size_t getVsyncSource();
     void updateCompositorTiming(
             nsecs_t vsyncPhase, nsecs_t vsyncInterval, nsecs_t compositeTime,
             std::shared_ptr<FenceTime>& presentFenceTime);
@@ -846,6 +848,8 @@ private:
     // don't use a lock for these, we don't care
     std::bitset<DisplayDevice::NUM_BUILTIN_DISPLAY_TYPES> mActiveDisplays;
     std::bitset<DisplayDevice::NUM_BUILTIN_DISPLAY_TYPES> mBuiltInBitmask;
+    std::bitset<DisplayDevice::NUM_BUILTIN_DISPLAY_TYPES> mPluggableBitmask;
+    std::mutex mVsyncPeriodMutex;
     std::vector<nsecs_t> vsyncPeriod;
     int mDebugRegion;
     int mDebugDDMS;
@@ -883,7 +887,6 @@ private:
     bool mHWVsyncAvailable;
 
     std::atomic<bool> mRefreshPending{false};
-
     // We maintain a pool of pre-generated texture names to hand out to avoid
     // layer creation needing to run on the main thread (which it would
     // otherwise need to do to access RenderEngine).
@@ -911,9 +914,9 @@ private:
     static bool useVrFlinger;
     std::thread::id mMainThreadId;
 
-    DisplayColorSetting mDisplayColorSetting = DisplayColorSetting::MANAGED;
-    // Applied on sRGB layers when the render intent is non-colorimetric.
-    mat4 mLegacySrgbSaturationMatrix;
+    DisplayColorSetting mDisplayColorSetting = DisplayColorSetting::ENHANCED;
+    // Applied on Display P3 layers when the render intent is non-colorimetric.
+    mat4 mEnhancedSaturationMatrix;
 
     using CreateBufferQueueFunction =
             std::function<void(sp<IGraphicBufferProducer>* /* outProducer */,
