@@ -2502,6 +2502,11 @@ void SurfaceFlinger::processDisplayHotplugEventsLocked() {
                 mCurrentState.displays.removeItemsAt(idx);
             }
             mBuiltinDisplays[displayType].clear();
+            if ((event.display >= 0) &&
+                (event.display < DisplayDevice::NUM_BUILTIN_DISPLAY_TYPES)) {
+                // Display no longer exists.
+                mActiveDisplays.reset(event.display);
+            }
         }
 
         processDisplayChangesLocked();
