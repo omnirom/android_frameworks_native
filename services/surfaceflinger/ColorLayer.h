@@ -29,17 +29,17 @@ public:
     ~ColorLayer() override;
 
     virtual const char* getTypeId() const { return "ColorLayer"; }
-    virtual void onDraw(const RenderArea& renderArea, const Region& clip, bool useIdentityTransform)
-            EXCLUDES(mStateMutex);
-    bool isVisible() const override EXCLUDES(mStateMutex);
+    virtual void onDraw(const RenderArea& renderArea, const Region& clip,
+                        bool useIdentityTransform);
+    bool isVisible() const override;
 
     void setPerFrameData(DisplayId displayId, const ui::Transform& transform, const Rect& viewport,
-                         int32_t supportedPerFrameMetadata) override EXCLUDES(mStateMutex);
+                         int32_t supportedPerFrameMetadata) override;
 
     bool onPreComposition(nsecs_t /*refreshStartTime*/) override { return false; }
 
 protected:
-    FloatRect computeCrop(const sp<const DisplayDevice>& /*display*/) const override { return {}; }
+    FloatRect computeCrop(const Rect& /*windowbounds*/) const override { return {}; }
 };
 
 } // namespace android

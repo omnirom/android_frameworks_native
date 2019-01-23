@@ -87,21 +87,10 @@ public:
         eVsyncSourceSurfaceFlinger = 1
     };
 
-    /* create connection with surface flinger, requires
-     * ACCESS_SURFACE_FLINGER permission
+    /* 
+     * Create a connection with SurfaceFlinger.
      */
     virtual sp<ISurfaceComposerClient> createConnection() = 0;
-
-    /** create a scoped connection with surface flinger.
-     * Surfaces produced with this connection will act
-     * as children of the passed in GBP. That is to say
-     * SurfaceFlinger will draw them relative and confined to
-     * drawing of buffers from the layer associated with parent.
-     * As this is graphically equivalent in reach to just drawing
-     * pixels into the parent buffers, it requires no special permission.
-     */
-    virtual sp<ISurfaceComposerClient> createScopedConnection(
-            const sp<IGraphicBufferProducer>& parent) = 0;
 
     /* return an IDisplayEventConnection */
     virtual sp<IDisplayEventConnection> createDisplayEventConnection(
@@ -127,7 +116,8 @@ public:
     virtual void setTransactionState(const Vector<ComposerState>& state,
                                      const Vector<DisplayState>& displays, uint32_t flags,
                                      const sp<IBinder>& applyToken,
-                                     const InputWindowCommands& inputWindowCommands) = 0;
+                                     const InputWindowCommands& inputWindowCommands,
+                                     int64_t desiredPresentTime) = 0;
 
     /* signal that we're done booting.
      * Requires ACCESS_SURFACE_FLINGER permission
@@ -320,6 +310,17 @@ public:
     virtual status_t getDisplayedContentSample(const sp<IBinder>& display, uint64_t maxFrames,
                                                uint64_t timestamp,
                                                DisplayedFrameStats* outStats) const = 0;
+
+    /*
+     * Gets whether SurfaceFlinger can support protected content in GPU composition.
+     * Requires the ACCESS_SURFACE_FLINGER permission.
+     */
+    virtual status_t getProtectedContentSupport(bool* outSupported) const = 0;
+
+    virtual status_t cacheBuffer(const sp<IBinder>& token, const sp<GraphicBuffer>& buffer,
+                                 int32_t* outBufferId) = 0;
+
+    virtual status_t uncacheBuffer(const sp<IBinder>& token, int32_t bufferId) = 0;
 };
 
 // ----------------------------------------------------------------------------
@@ -356,12 +357,14 @@ public:
         ENABLE_VSYNC_INJECTIONS,
         INJECT_VSYNC,
         GET_LAYER_DEBUG_INFO,
-        CREATE_SCOPED_CONNECTION,
         GET_COMPOSITION_PREFERENCE,
         GET_COLOR_MANAGEMENT,
         GET_DISPLAYED_CONTENT_SAMPLING_ATTRIBUTES,
         SET_DISPLAY_CONTENT_SAMPLING_ENABLED,
         GET_DISPLAYED_CONTENT_SAMPLE,
+        GET_PROTECTED_CONTENT_SUPPORT,
+        CACHE_BUFFER,
+        UNCACHE_BUFFER,
     };
 
     virtual status_t onTransact(uint32_t code, const Parcel& data,

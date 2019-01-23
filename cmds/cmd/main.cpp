@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018 The Android Open Source Project
+ * Copyright (C) 2015 The Android Open Source Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,24 +14,20 @@
  * limitations under the License.
  */
 
-#include "mock/RenderEngine/MockRenderEngine.h"
+#include <unistd.h>
 
-#include <ui/Region.h>
+#include "cmd.h"
 
-namespace android {
-namespace renderengine {
-namespace mock {
+int main(int argc, char* const argv[]) {
+    signal(SIGPIPE, SIG_IGN);
 
-// Explicit default instantiation is recommended.
-RenderEngine::RenderEngine() = default;
-RenderEngine::~RenderEngine() = default;
+    std::vector<std::string_view> arguments;
+    arguments.reserve(argc - 1);
+    // 0th argument is a program name, skipping.
+    for (int i = 1; i < argc; ++i) {
+        arguments.emplace_back(argv[i]);
+    }
 
-Image::Image() = default;
-Image::~Image() = default;
-
-Framebuffer::Framebuffer() = default;
-Framebuffer::~Framebuffer() = default;
-
-} // namespace mock
-} // namespace renderengine
-} // namespace android
+    return cmdMain(arguments, android::aout, android::aerr, STDIN_FILENO, STDOUT_FILENO,
+                   STDERR_FILENO, RunMode::kStandalone);
+}
