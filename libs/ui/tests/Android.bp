@@ -29,28 +29,45 @@ cc_test {
 }
 
 cc_test {
-    name: "BufferHubBuffer_test",
+    name: "GraphicBuffer_test",
     header_libs: [
         "libbufferhub_headers",
         "libdvr_headers",
         "libnativewindow_headers",
     ],
     shared_libs: [
-        "android.frameworks.bufferhub@1.0",
-        "libhidlbase",
-        "libhwbinder",
         "libpdx_default_transport",
         "libui",
-        "libutils"
+        "libutils",
     ],
-    srcs: ["BufferHubBuffer_test.cpp"],
+    srcs: ["GraphicBuffer_test.cpp"],
     cflags: ["-Wall", "-Werror"],
 }
 
 cc_test {
-    name: "BufferHubMetadata_test",
-    header_libs: ["libbufferhub_headers", "libdvr_headers"],
-    shared_libs: ["libpdx_default_transport", "libui", "libutils"],
-    srcs: ["BufferHubMetadata_test.cpp"],
+    name: "BufferHub_test",
+    header_libs: [
+        "libbufferhub_headers",
+        "libdvr_headers",
+        "libnativewindow_headers",
+    ],
+    static_libs: [
+        "libgmock",
+    ],
+    shared_libs: [
+        "android.frameworks.bufferhub@1.0",
+        "libcutils",
+        "libhidlbase",
+        "libhwbinder",
+        "liblog",
+        "libpdx_default_transport",
+        "libui",
+        "libutils"
+    ],
+    srcs: [
+        "BufferHubBuffer_test.cpp",
+        "BufferHubEventFd_test.cpp",
+        "BufferHubMetadata_test.cpp",
+    ],
     cflags: ["-Wall", "-Werror"],
 }

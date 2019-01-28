@@ -15,27 +15,22 @@
 cc_library_shared {
     name: "libinputflinger",
 
-    cpp_std: "c++17",
-
     srcs: [
-        "EventHub.cpp",
         "InputDispatcher.cpp",
-        "InputListener.cpp",
         "InputManager.cpp",
-        "InputReader.cpp",
     ],
 
     shared_libs: [
+        "libinputflinger_base",
+        "libinputreporter",
+        "libinputreader",
         "libbase",
         "libbinder",
-        "libcrypto",
         "libcutils",
         "libinput",
         "liblog",
         "libutils",
         "libui",
-        "libhardware_legacy",
-        "libutils"
     ],
 
     cflags: [
@@ -47,7 +42,117 @@ cc_library_shared {
         //-fvisibility=hidden
     ],
 
-    export_include_dirs: ["."],
+    export_include_dirs: [
+        ".",
+        "include",
+    ],
+
+}
+
+
+cc_library_headers {
+   name: "libinputflinger_headers",
+
+   export_include_dirs: ["include"],
+}
+
+cc_library_shared {
+    name: "libinputreader",
+
+    srcs: [
+        "EventHub.cpp",
+        "InputReader.cpp",
+        "InputReaderFactory.cpp",
+        "TouchVideoDevice.cpp",
+    ],
+
+    shared_libs: [
+        "libinputflinger_base",
+        "libbase",
+        "libcrypto",
+        "libcutils",
+        "libinput",
+        "liblog",
+        "libutils",
+        "libui",
+        "libhardware_legacy",
+        "libutils"
+    ],
+
+    header_libs: [
+        "libinputflinger_headers",
+    ],
+
+    export_header_lib_headers: [
+        "libinputflinger_headers",
+    ],
+
+    cflags: [
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+        "-Wno-unused-parameter",
+    ],
+}
+
+cc_library_shared {
+    name: "libinputflinger_base",
+
+    srcs: [
+        "InputListener.cpp",
+        "InputReaderBase.cpp",
+    ],
+
+    shared_libs: [
+        "libbase",
+        "libinput",
+        "liblog",
+        "libutils",
+    ],
+
+    header_libs: [
+        "libinputflinger_headers",
+    ],
+
+    export_header_lib_headers: [
+        "libinputflinger_headers",
+    ],
+
+    cflags: [
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+        "-Wno-unused-parameter",
+    ],
+}
+
+cc_library_shared {
+    name: "libinputreporter",
+
+    srcs: [
+        "InputReporter.cpp",
+    ],
+
+    shared_libs: [
+        "libbase",
+        "liblog",
+        "libutils",
+    ],
+
+    header_libs: [
+        "libinputflinger_headers",
+    ],
+
+    export_header_lib_headers: [
+        "libinputflinger_headers",
+    ],
+
+    cflags: [
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+        "-Wno-unused-parameter",
+    ],
 }
 
 subdirs = [

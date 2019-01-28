@@ -24,24 +24,23 @@
 #include <string>
 #include <unordered_map>
 
+#include <android/native_window.h>
 #include <binder/IBinder.h>
 #include <gui/LayerState.h>
 #include <hardware/hwcomposer_defs.h>
 #include <math/mat4.h>
-#include <renderengine/Surface.h>
+#include <renderengine/RenderEngine.h>
+#include <system/window.h>
 #include <ui/GraphicTypes.h>
 #include <ui/HdrCapabilities.h>
 #include <ui/Region.h>
 #include <ui/Transform.h>
-#include <utils/RefBase.h>
 #include <utils/Mutex.h>
-#include <utils/String8.h>
+#include <utils/RefBase.h>
 #include <utils/Timers.h>
 
 #include "DisplayHardware/DisplayIdentification.h"
 #include "RenderArea.h"
-
-struct ANativeWindow;
 
 namespace android {
 
@@ -110,10 +109,10 @@ public:
     bool                    needsFiltering() const { return mNeedsFiltering; }
 
     uint32_t                getLayerStack() const { return mLayerStack; }
-    uint32_t                getPanelMountFlip() const { return mPanelMountFlip; }
 
     const std::optional<DisplayId>& getId() const { return mId; }
     const wp<IBinder>& getDisplayToken() const { return mDisplayToken; }
+    int32_t getSequenceId() const { return mSequenceId; }
 
     int32_t getSupportedPerFrameMetadata() const { return mSupportedPerFrameMetadata; }
 
@@ -124,6 +123,7 @@ public:
 
     bool hasWideColorGamut() const { return mHasWideColorGamut; }
     // Whether h/w composer has native support for specific HDR type.
+    bool hasHDR10PlusSupport() const { return mHasHdr10Plus; }
     bool hasHDR10Support() const { return mHasHdr10; }
     bool hasHLGSupport() const { return mHasHLG; }
     bool hasDolbyVisionSupport() const { return mHasDolbyVision; }
@@ -147,10 +147,14 @@ public:
                           ui::Dataspace* outDataspace, ui::ColorMode* outMode,
                           ui::RenderIntent* outIntent) const;
 
-    void swapBuffers(HWComposer& hwc) const;
+    void setProtected(bool useProtected);
+    // Queues the drawn buffer for consumption by HWC.
+    void queueBuffer(HWComposer& hwc);
+    // Allocates a buffer as scratch space for GPU composition
+    sp<GraphicBuffer> dequeueBuffer();
 
     // called after h/w composer has completed its set() call
-    void onSwapBuffersCompleted() const;
+    void onPresentDisplayCompleted();
 
     Rect getBounds() const {
         return Rect(mDisplayWidth, mDisplayHeight);
@@ -160,7 +164,11 @@ public:
     void setDisplayName(const std::string& displayName);
     const std::string& getDisplayName() const { return mDisplayName; }
 
-    bool makeCurrent() const;
+    // Acquires a new buffer for GPU composition.
+    void readyNewBuffer();
+    // Marks the current buffer has finished, so that it can be presented and
+    // swapped out.
+    void finishBuffer();
     void setViewportAndProjection() const;
 
     const sp<Fence>& getClientTargetAcquireFence() const;
@@ -195,19 +203,24 @@ public:
      */
     uint32_t getPageFlipCount() const;
     std::string getDebugName() const;
-    void dump(String8& result) const;
+    void dump(std::string& result) const;
 
 private:
     const sp<SurfaceFlinger> mFlinger;
     const wp<IBinder> mDisplayToken;
+    const int32_t mSequenceId;
 
     std::optional<DisplayId> mId;
 
     // ANativeWindow this display is rendering into
     sp<ANativeWindow> mNativeWindow;
+    // Current buffer that this display can render to.
+    sp<GraphicBuffer> mGraphicBuffer;
     sp<DisplaySurface> mDisplaySurface;
+    // File descriptor indicating that mGraphicBuffer is ready for display, i.e.
+    // that drawing to the buffer is now complete.
+    base::unique_fd mBufferReady;
 
-    std::unique_ptr<renderengine::Surface> mSurface;
     int             mDisplayWidth;
     int             mDisplayHeight;
     const int       mDisplayInstallOrientation;
@@ -230,8 +243,8 @@ private:
     /*
      * Transaction state
      */
-    status_t orientationToTransfrom(int orientation,
-                                    int w, int h, ui::Transform* tr);
+    static status_t orientationToTransfrom(int orientation,
+                                           int w, int h, ui::Transform* tr);
 
     // The identifier of the active layer stack for this display. Several displays
     // can use the same layer stack: A z-ordered group of layers (sometimes called
@@ -252,8 +265,6 @@ private:
     int mPowerMode;
     // Current active config
     int mActiveConfig;
-    // Panel's mount flip, H, V or 180 (HV)
-    uint32_t mPanelMountFlip;
     // current active color mode
     ui::ColorMode mActiveColorMode = ui::ColorMode::NATIVE;
     // Current active render intent.
@@ -266,6 +277,7 @@ private:
     // Initialized by SurfaceFlinger when the DisplayDevice is created.
     // Fed to RenderEngine during composition.
     bool mHasWideColorGamut;
+    bool mHasHdr10Plus;
     bool mHasHdr10;
     bool mHasHLG;
     bool mHasDolbyVision;
@@ -325,11 +337,11 @@ struct DisplayDeviceCreationArgs {
     const wp<IBinder> displayToken;
     const std::optional<DisplayId> displayId;
 
+    int32_t sequenceId{0};
     bool isVirtual{false};
     bool isSecure{false};
     sp<ANativeWindow> nativeWindow;
     sp<DisplaySurface> displaySurface;
-    std::unique_ptr<renderengine::Surface> renderSurface;
     int displayInstallOrientation{DisplayState::eOrientationDefault};
     bool hasWideColorGamut{false};
     HdrCapabilities hdrCapabilities;
@@ -405,14 +417,6 @@ public:
         tr.set(flags, getWidth(), getHeight());
         return tr.transform(mSourceCrop);
     }
-
-    #if 0
-    // TODO(b/120623859): this code is removed because getDisplayType no longer
-    // exists.
-    int32_t getDisplayType() { return mDevice->getDisplayType(); }
-    #endif
-    uint32_t getPanelMountFlip() { return mDevice->getPanelMountFlip(); }
-    std::string getType() const override { return "DisplayRenderArea"; }
 
 private:
     // Install orientation is transparent to the callers.  We need to cancel

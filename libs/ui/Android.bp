@@ -26,7 +26,6 @@ cc_library_shared {
         "-Werror",
     ],
     cppflags: [
-        "-std=c++1z",
         "-Weverything",
 
         // The static constructors and destructors in this library have not been noted to
@@ -55,6 +54,7 @@ cc_library_shared {
     srcs: [
         "ColorSpace.cpp",
         "BufferHubBuffer.cpp",
+        "BufferHubEventFd.cpp",
         "BufferHubMetadata.cpp",
         "DebugUtils.cpp",
         "Fence.cpp",
@@ -109,13 +109,16 @@ cc_library_shared {
     // bufferhub is not used when building libgui for vendors
     target: {
         vendor: {
+            cflags: ["-DLIBUI_IN_VNDK"],
             exclude_srcs: [
                 "BufferHubBuffer.cpp",
+                "BufferHubEventFd.cpp",
                 "BufferHubMetadata.cpp",
             ],
             exclude_header_libs: [
                 "libbufferhub_headers",
                 "libdvr_headers",
+                "libnativewindow_headers",
             ],
             exclude_shared_libs: [
                 "libpdx_default_transport",
@@ -128,6 +131,7 @@ cc_library_shared {
         "libbufferhub_headers",
         "libdvr_headers",
         "libnativebase_headers",
+        "libnativewindow_headers",
         "libhardware_headers",
         "libui_headers",
         "libpdx_headers",
@@ -155,6 +159,7 @@ cc_library_headers {
     vendor_available: true,
     target: {
         vendor: {
+            cflags: ["-DLIBUI_IN_VNDK"],
             override_export_include_dirs: ["include_vndk"],
         },
     },

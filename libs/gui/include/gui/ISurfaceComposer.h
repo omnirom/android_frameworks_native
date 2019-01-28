@@ -27,10 +27,11 @@
 
 #include <binder/IInterface.h>
 
+#include <ui/DisplayedFrameStats.h>
 #include <ui/FrameStats.h>
-#include <ui/PixelFormat.h>
 #include <ui/GraphicBuffer.h>
 #include <ui/GraphicTypes.h>
+#include <ui/PixelFormat.h>
 
 #include <vector>
 
@@ -41,6 +42,7 @@ struct ComposerState;
 struct DisplayState;
 struct DisplayInfo;
 struct DisplayStatInfo;
+struct InputWindowCommands;
 class LayerDebugInfo;
 class HdrCapabilities;
 class IDisplayEventConnection;
@@ -123,7 +125,9 @@ public:
 
     /* open/close transactions. requires ACCESS_SURFACE_FLINGER permission */
     virtual void setTransactionState(const Vector<ComposerState>& state,
-            const Vector<DisplayState>& displays, uint32_t flags) = 0;
+                                     const Vector<DisplayState>& displays, uint32_t flags,
+                                     const sp<IBinder>& applyToken,
+                                     const InputWindowCommands& inputWindowCommands) = 0;
 
     /* signal that we're done booting.
      * Requires ACCESS_SURFACE_FLINGER permission
@@ -293,6 +297,29 @@ public:
                                               ui::PixelFormat* defaultPixelFormat,
                                               ui::Dataspace* wideColorGamutDataspace,
                                               ui::PixelFormat* wideColorGamutPixelFormat) const = 0;
+    /*
+     * Requires the ACCESS_SURFACE_FLINGER permission.
+     */
+    virtual status_t getDisplayedContentSamplingAttributes(const sp<IBinder>& display,
+                                                           ui::PixelFormat* outFormat,
+                                                           ui::Dataspace* outDataspace,
+                                                           uint8_t* outComponentMask) const = 0;
+
+    /* Turns on the color sampling engine on the display.
+     *
+     * Requires the ACCESS_SURFACE_FLINGER permission.
+     */
+    virtual status_t setDisplayContentSamplingEnabled(const sp<IBinder>& display, bool enable,
+                                                      uint8_t componentMask,
+                                                      uint64_t maxFrames) const = 0;
+
+    /* Returns statistics on the color profile of the last frame displayed for a given display
+     *
+     * Requires the ACCESS_SURFACE_FLINGER permission.
+     */
+    virtual status_t getDisplayedContentSample(const sp<IBinder>& display, uint64_t maxFrames,
+                                               uint64_t timestamp,
+                                               DisplayedFrameStats* outStats) const = 0;
 };
 
 // ----------------------------------------------------------------------------
@@ -332,6 +359,9 @@ public:
         CREATE_SCOPED_CONNECTION,
         GET_COMPOSITION_PREFERENCE,
         GET_COLOR_MANAGEMENT,
+        GET_DISPLAYED_CONTENT_SAMPLING_ATTRIBUTES,
+        SET_DISPLAY_CONTENT_SAMPLING_ENABLED,
+        GET_DISPLAYED_CONTENT_SAMPLE,
     };
 
     virtual status_t onTransact(uint32_t code, const Parcel& data,

@@ -236,8 +236,8 @@ static void synthesizeButtonKey(InputReaderContext* context, int32_t action,
             || (action == AKEY_EVENT_ACTION_UP
                     && (lastButtonState & buttonState)
                     && !(currentButtonState & buttonState))) {
-        NotifyKeyArgs args(when, deviceId, source, displayId, policyFlags,
-                action, 0, keyCode, 0, context->getGlobalMetaState(), when);
+        NotifyKeyArgs args(context->getNextSequenceNum(), when, deviceId, source, displayId,
+                policyFlags, action, 0, keyCode, 0, context->getGlobalMetaState(), when);
         context->getListener()->notifyKey(&args);
     }
 }
@@ -254,55 +254,13 @@ static void synthesizeButtonKeys(InputReaderContext* context, int32_t action,
 }
 
 
-// --- InputReaderConfiguration ---
-
-std::optional<DisplayViewport> InputReaderConfiguration::getDisplayViewport(
-        ViewportType viewportType, const std::string& uniqueDisplayId) const {
-    for (const DisplayViewport& currentViewport : mDisplays) {
-        if (currentViewport.type == viewportType) {
-            if (uniqueDisplayId.empty() ||
-                    (!uniqueDisplayId.empty() && uniqueDisplayId == currentViewport.uniqueId)) {
-                return std::make_optional(currentViewport);
-            }
-        }
-    }
-    return std::nullopt;
-}
-
-void InputReaderConfiguration::setDisplayViewports(const std::vector<DisplayViewport>& viewports) {
-    mDisplays = viewports;
-}
-
-void InputReaderConfiguration::dump(std::string& dump) const {
-    for (const DisplayViewport& viewport : mDisplays) {
-        dumpViewport(dump, viewport);
-    }
-}
-
-void InputReaderConfiguration::dumpViewport(std::string& dump, const DisplayViewport& viewport)
-        const {
-    dump += StringPrintf(INDENT4 "%s\n", viewport.toString().c_str());
-}
-
-
-// -- TouchAffineTransformation --
-void TouchAffineTransformation::applyTo(float& x, float& y) const {
-    float newX, newY;
-    newX = x * x_scale + y * x_ymix + x_offset;
-    newY = x * y_xmix + y * y_scale + y_offset;
-
-    x = newX;
-    y = newY;
-}
-
-
 // --- InputReader ---
 
 InputReader::InputReader(const sp<EventHubInterface>& eventHub,
         const sp<InputReaderPolicyInterface>& policy,
         const sp<InputListenerInterface>& listener) :
         mContext(this), mEventHub(eventHub), mPolicy(policy),
-        mGlobalMetaState(0), mGeneration(1),
+        mNextSequenceNum(1), mGlobalMetaState(0), mGeneration(1),
         mDisableVirtualKeysTimeout(LLONG_MIN), mNextTimeout(LLONG_MAX),
         mConfigurationChangesToRefresh(0) {
     mQueuedListener = new QueuedInputListener(listener);
@@ -588,7 +546,7 @@ void InputReader::handleConfigurationChangedLocked(nsecs_t when) {
     updateGlobalMetaStateLocked();
 
     // Enqueue configuration changed.
-    NotifyConfigurationChangedArgs args(when);
+    NotifyConfigurationChangedArgs args(mContext.getNextSequenceNum(), when);
     mQueuedListener->notifyConfigurationChanged(&args);
 }
 
@@ -986,21 +944,9 @@ EventHubInterface* InputReader::ContextImpl::getEventHub() {
     return mReader->mEventHub.get();
 }
 
-
-// --- InputReaderThread ---
-
-InputReaderThread::InputReaderThread(const sp<InputReaderInterface>& reader) :
-        Thread(/*canCallJava*/ true), mReader(reader) {
+uint32_t InputReader::ContextImpl::getNextSequenceNum() {
+    return (mReader->mNextSequenceNum)++;
 }
-
-InputReaderThread::~InputReaderThread() {
-}
-
-bool InputReaderThread::threadLoop() {
-    mReader->loopOnce();
-    return true;
-}
-
 
 // --- InputDevice ---
 
@@ -1047,6 +993,12 @@ void InputDevice::dump(std::string& dump) {
             deviceInfo.getDisplayName().c_str());
     dump += StringPrintf(INDENT2 "Generation: %d\n", mGeneration);
     dump += StringPrintf(INDENT2 "IsExternal: %s\n", toString(mIsExternal));
+    dump += StringPrintf(INDENT2 "AssociatedDisplayPort: ");
+    if (mAssociatedDisplayPort) {
+        dump += StringPrintf("%" PRIu8 "\n", *mAssociatedDisplayPort);
+    } else {
+        dump += "<none>\n";
+    }
     dump += StringPrintf(INDENT2 "HasMic:     %s\n", toString(mHasMic));
     dump += StringPrintf(INDENT2 "Sources: 0x%08x\n", deviceInfo.getSources());
     dump += StringPrintf(INDENT2 "KeyboardType: %d\n", deviceInfo.getKeyboardType());
@@ -1114,6 +1066,20 @@ void InputDevice::configure(nsecs_t when, const InputReaderConfiguration* config
             ssize_t index = config->disabledDevices.indexOf(mId);
             bool enabled = index < 0;
             setEnabled(enabled, when);
+        }
+
+        if (!changes || (changes & InputReaderConfiguration::CHANGE_DISPLAY_INFO)) {
+             // In most situations, no port will be specified.
+            mAssociatedDisplayPort = std::nullopt;
+            // Find the display port that corresponds to the current input port.
+            const std::string& inputPort = mIdentifier.location;
+            if (!inputPort.empty()) {
+                const std::unordered_map<std::string, uint8_t>& ports = config->portAssociations;
+                const auto& displayPort = ports.find(inputPort);
+                if (displayPort != ports.end()) {
+                    mAssociatedDisplayPort = std::make_optional(displayPort->second);
+                }
+            }
         }
 
         size_t numMappers = mMappers.size();
@@ -1301,7 +1267,7 @@ void InputDevice::bumpGeneration() {
 }
 
 void InputDevice::notifyReset(nsecs_t when) {
-    NotifyDeviceResetArgs args(when, mId);
+    NotifyDeviceResetArgs args(mContext->getNextSequenceNum(), when, mId);
     mContext->getListener()->notifyDeviceReset(&args);
 }
 
@@ -2074,7 +2040,8 @@ void SwitchInputMapper::processSwitch(int32_t switchCode, int32_t switchValue) {
 void SwitchInputMapper::sync(nsecs_t when) {
     if (mUpdatedSwitchMask) {
         uint32_t updatedSwitchValues = mSwitchValues & mUpdatedSwitchMask;
-        NotifySwitchArgs args(when, 0, updatedSwitchValues, mUpdatedSwitchMask);
+        NotifySwitchArgs args(mContext->getNextSequenceNum(), when, 0, updatedSwitchValues,
+                mUpdatedSwitchMask);
         getListener()->notifySwitch(&args);
 
         mUpdatedSwitchMask = 0;
@@ -2259,7 +2226,7 @@ void KeyboardInputMapper::configure(nsecs_t when,
 
     if (!changes || (changes & InputReaderConfiguration::CHANGE_DISPLAY_INFO)) {
         if (mParameters.orientationAware) {
-            mViewport = config->getDisplayViewport(ViewportType::VIEWPORT_INTERNAL, "");
+            mViewport = config->getDisplayViewportByType(ViewportType::VIEWPORT_INTERNAL);
         }
     }
 }
@@ -2456,8 +2423,8 @@ void KeyboardInputMapper::processKey(nsecs_t when, bool down, int32_t scanCode,
         policyFlags |= POLICY_FLAG_DISABLE_KEY_REPEAT;
     }
 
-    NotifyKeyArgs args(when, getDeviceId(), mSource, getDisplayId(), policyFlags,
-            down ? AKEY_EVENT_ACTION_DOWN : AKEY_EVENT_ACTION_UP,
+    NotifyKeyArgs args(mContext->getNextSequenceNum(), when, getDeviceId(), mSource,
+            getDisplayId(), policyFlags, down ? AKEY_EVENT_ACTION_DOWN : AKEY_EVENT_ACTION_UP,
             AKEY_EVENT_FLAG_FROM_SYSTEM, keyCode, scanCode, keyMetaState, downTime);
     getListener()->notifyKey(&args);
 }
@@ -2669,7 +2636,7 @@ void CursorInputMapper::configure(nsecs_t when,
         mOrientation = DISPLAY_ORIENTATION_0;
         if (mParameters.orientationAware && mParameters.hasAssociatedDisplay) {
             std::optional<DisplayViewport> internalViewport =
-                    config->getDisplayViewport(ViewportType::VIEWPORT_INTERNAL, "");
+                    config->getDisplayViewportByType(ViewportType::VIEWPORT_INTERNAL);
             if (internalViewport) {
                 mOrientation = internalViewport->orientation;
             }
@@ -2859,20 +2826,21 @@ void CursorInputMapper::sync(nsecs_t when) {
             while (!released.isEmpty()) {
                 int32_t actionButton = BitSet32::valueForBit(released.clearFirstMarkedBit());
                 buttonState &= ~actionButton;
-                NotifyMotionArgs releaseArgs(when, getDeviceId(), mSource, displayId, policyFlags,
+                NotifyMotionArgs releaseArgs(mContext->getNextSequenceNum(), when, getDeviceId(),
+                        mSource, displayId, policyFlags,
                         AMOTION_EVENT_ACTION_BUTTON_RELEASE, actionButton, 0,
                         metaState, buttonState, AMOTION_EVENT_EDGE_FLAG_NONE,
                         /* deviceTimestamp */ 0, 1, &pointerProperties, &pointerCoords,
-                        mXPrecision, mYPrecision, downTime);
+                        mXPrecision, mYPrecision, downTime, /* videoFrames */ {});
                 getListener()->notifyMotion(&releaseArgs);
             }
         }
 
-        NotifyMotionArgs args(when, getDeviceId(), mSource, displayId, policyFlags,
-                motionEventAction, 0, 0, metaState, currentButtonState,
+        NotifyMotionArgs args(mContext->getNextSequenceNum(), when, getDeviceId(), mSource,
+                displayId, policyFlags, motionEventAction, 0, 0, metaState, currentButtonState,
                 AMOTION_EVENT_EDGE_FLAG_NONE,
                 /* deviceTimestamp */ 0, 1, &pointerProperties, &pointerCoords,
-                mXPrecision, mYPrecision, downTime);
+                mXPrecision, mYPrecision, downTime, /* videoFrames */ {});
         getListener()->notifyMotion(&args);
 
         if (buttonsPressed) {
@@ -2880,11 +2848,11 @@ void CursorInputMapper::sync(nsecs_t when) {
             while (!pressed.isEmpty()) {
                 int32_t actionButton = BitSet32::valueForBit(pressed.clearFirstMarkedBit());
                 buttonState |= actionButton;
-                NotifyMotionArgs pressArgs(when, getDeviceId(), mSource, displayId, policyFlags,
-                        AMOTION_EVENT_ACTION_BUTTON_PRESS, actionButton, 0,
-                        metaState, buttonState, AMOTION_EVENT_EDGE_FLAG_NONE,
+                NotifyMotionArgs pressArgs(mContext->getNextSequenceNum(), when, getDeviceId(),
+                        mSource, displayId, policyFlags, AMOTION_EVENT_ACTION_BUTTON_PRESS,
+                        actionButton, 0, metaState, buttonState, AMOTION_EVENT_EDGE_FLAG_NONE,
                         /* deviceTimestamp */ 0, 1, &pointerProperties, &pointerCoords,
-                        mXPrecision, mYPrecision, downTime);
+                        mXPrecision, mYPrecision, downTime, /* videoFrames */ {});
                 getListener()->notifyMotion(&pressArgs);
             }
         }
@@ -2894,11 +2862,11 @@ void CursorInputMapper::sync(nsecs_t when) {
         // Send hover move after UP to tell the application that the mouse is hovering now.
         if (motionEventAction == AMOTION_EVENT_ACTION_UP
                 && (mSource == AINPUT_SOURCE_MOUSE)) {
-            NotifyMotionArgs hoverArgs(when, getDeviceId(), mSource, displayId, policyFlags,
-                    AMOTION_EVENT_ACTION_HOVER_MOVE, 0, 0,
+            NotifyMotionArgs hoverArgs(mContext->getNextSequenceNum(), when, getDeviceId(),
+                    mSource, displayId, policyFlags, AMOTION_EVENT_ACTION_HOVER_MOVE, 0, 0,
                     metaState, currentButtonState, AMOTION_EVENT_EDGE_FLAG_NONE,
                     /* deviceTimestamp */ 0, 1, &pointerProperties, &pointerCoords,
-                    mXPrecision, mYPrecision, downTime);
+                    mXPrecision, mYPrecision, downTime, /* videoFrames */ {});
             getListener()->notifyMotion(&hoverArgs);
         }
 
@@ -2907,11 +2875,12 @@ void CursorInputMapper::sync(nsecs_t when) {
             pointerCoords.setAxisValue(AMOTION_EVENT_AXIS_VSCROLL, vscroll);
             pointerCoords.setAxisValue(AMOTION_EVENT_AXIS_HSCROLL, hscroll);
 
-            NotifyMotionArgs scrollArgs(when, getDeviceId(), mSource, displayId, policyFlags,
+            NotifyMotionArgs scrollArgs(mContext->getNextSequenceNum(), when, getDeviceId(),
+                    mSource, displayId, policyFlags,
                     AMOTION_EVENT_ACTION_SCROLL, 0, 0, metaState, currentButtonState,
                     AMOTION_EVENT_EDGE_FLAG_NONE,
                     /* deviceTimestamp */ 0, 1, &pointerProperties, &pointerCoords,
-                    mXPrecision, mYPrecision, downTime);
+                    mXPrecision, mYPrecision, downTime, /* videoFrames */ {});
             getListener()->notifyMotion(&scrollArgs);
         }
     }
@@ -2985,7 +2954,7 @@ void RotaryEncoderInputMapper::configure(nsecs_t when,
     }
     if (!changes || (changes & InputReaderConfiguration::CHANGE_DISPLAY_INFO)) {
         std::optional<DisplayViewport> internalViewport =
-                config->getDisplayViewport(ViewportType::VIEWPORT_INTERNAL, "");
+                config->getDisplayViewportByType(ViewportType::VIEWPORT_INTERNAL);
         if (internalViewport) {
             mOrientation = internalViewport->orientation;
         } else {
@@ -3038,11 +3007,12 @@ void RotaryEncoderInputMapper::sync(nsecs_t when) {
         int32_t metaState = mContext->getGlobalMetaState();
         pointerCoords.setAxisValue(AMOTION_EVENT_AXIS_SCROLL, scroll * mScalingFactor);
 
-        NotifyMotionArgs scrollArgs(when, getDeviceId(), mSource, displayId, policyFlags,
+        NotifyMotionArgs scrollArgs(mContext->getNextSequenceNum(), when, getDeviceId(),
+                mSource, displayId, policyFlags,
                 AMOTION_EVENT_ACTION_SCROLL, 0, 0, metaState, 0,
                 AMOTION_EVENT_EDGE_FLAG_NONE,
                 /* deviceTimestamp */ 0, 1, &pointerProperties, &pointerCoords,
-                0, 0, 0);
+                0, 0, 0, /* videoFrames */ {});
         getListener()->notifyMotion(&scrollArgs);
     }
 
@@ -3366,6 +3336,9 @@ void TouchInputMapper::configureParameters() {
             mParameters.uniqueDisplayId = uniqueDisplayId.c_str();
         }
     }
+    if (getDevice()->getAssociatedDisplayPort()) {
+        mParameters.hasAssociatedDisplay = true;
+    }
 
     // Initial downs on external touch devices should wake the device.
     // Normally we don't do this for internal touch screens to prevent them from waking
@@ -3440,6 +3413,59 @@ bool TouchInputMapper::hasExternalStylus() const {
     return mExternalStylusConnected;
 }
 
+/**
+ * Determine which DisplayViewport to use.
+ * 1. If display port is specified, return the matching viewport. If matching viewport not
+ * found, then return.
+ * 2. If a device has associated display, get the matching viewport by either unique id or by
+ * the display type (internal or external).
+ * 3. Otherwise, use a non-display viewport.
+ */
+std::optional<DisplayViewport> TouchInputMapper::findViewport() {
+    if (mParameters.hasAssociatedDisplay) {
+        const std::optional<uint8_t> displayPort = mDevice->getAssociatedDisplayPort();
+        if (displayPort) {
+            // Find the viewport that contains the same port
+            std::optional<DisplayViewport> v = mConfig.getDisplayViewportByPort(*displayPort);
+            if (!v) {
+                ALOGW("Input device %s should be associated with display on port %" PRIu8 ", "
+                        "but the corresponding viewport is not found.",
+                        getDeviceName().c_str(), *displayPort);
+            }
+            return v;
+        }
+
+        if (!mParameters.uniqueDisplayId.empty()) {
+            return mConfig.getDisplayViewportByUniqueId(mParameters.uniqueDisplayId);
+        }
+
+        ViewportType viewportTypeToUse;
+        if (mParameters.associatedDisplayIsExternal) {
+            viewportTypeToUse = ViewportType::VIEWPORT_EXTERNAL;
+        } else {
+            viewportTypeToUse = ViewportType::VIEWPORT_INTERNAL;
+        }
+
+        std::optional<DisplayViewport> viewport =
+                mConfig.getDisplayViewportByType(viewportTypeToUse);
+        if (!viewport && viewportTypeToUse == ViewportType::VIEWPORT_EXTERNAL) {
+            ALOGW("Input device %s should be associated with external display, "
+                    "fallback to internal one for the external viewport is not found.",
+                        getDeviceName().c_str());
+            viewport = mConfig.getDisplayViewportByType(ViewportType::VIEWPORT_INTERNAL);
+        }
+
+        return viewport;
+    }
+
+    DisplayViewport newViewport;
+    // Raw width and height in the natural orientation.
+    int32_t rawWidth = mRawPointerAxes.getRawWidth();
+    int32_t rawHeight = mRawPointerAxes.getRawHeight();
+    newViewport.setNonDisplayViewport(rawWidth, rawHeight);
+    return std::make_optional(newViewport);
+}
+
 void TouchInputMapper::configureSurface(nsecs_t when, bool* outResetNeeded) {
     int32_t oldDeviceMode = mDeviceMode;
 
@@ -3473,8 +3499,19 @@ void TouchInputMapper::configureSurface(nsecs_t when, bool* outResetNeeded) {
 
     // Ensure we have valid X and Y axes.
     if (!mRawPointerAxes.x.valid || !mRawPointerAxes.y.valid) {
-        ALOGW(INDENT "Touch device '%s' did not report support for X or Y axis!  "
+        ALOGW("Touch device '%s' did not report support for X or Y axis!  "
                 "The device will be inoperable.", getDeviceName().c_str());
+        mDeviceMode = DEVICE_MODE_DISABLED;
+        return;
+    }
+
+    // Get associated display dimensions.
+    std::optional<DisplayViewport> newViewport = findViewport();
+    if (!newViewport) {
+        ALOGI("Touch device '%s' could not query the properties of its associated "
+                "display.  The device will be inoperable until the display size "
+                "becomes available.",
+                getDeviceName().c_str());
         mDeviceMode = DEVICE_MODE_DISABLED;
         return;
     }
@@ -3483,40 +3520,9 @@ void TouchInputMapper::configureSurface(nsecs_t when, bool* outResetNeeded) {
     int32_t rawWidth = mRawPointerAxes.getRawWidth();
     int32_t rawHeight = mRawPointerAxes.getRawHeight();
 
-    // Get associated display dimensions.
-    DisplayViewport newViewport;
-    if (mParameters.hasAssociatedDisplay) {
-        std::string uniqueDisplayId;
-        ViewportType viewportTypeToUse;
-
-        if (mParameters.associatedDisplayIsExternal) {
-            viewportTypeToUse = ViewportType::VIEWPORT_EXTERNAL;
-        } else if (!mParameters.uniqueDisplayId.empty()) {
-            // If the IDC file specified a unique display Id, then it expects to be linked to a
-            // virtual display with the same unique ID.
-            uniqueDisplayId = mParameters.uniqueDisplayId;
-            viewportTypeToUse = ViewportType::VIEWPORT_VIRTUAL;
-        } else {
-            viewportTypeToUse = ViewportType::VIEWPORT_INTERNAL;
-        }
-
-        std::optional<DisplayViewport> viewportToUse =
-                mConfig.getDisplayViewport(viewportTypeToUse, uniqueDisplayId);
-        if (!viewportToUse) {
-            ALOGI(INDENT "Touch device '%s' could not query the properties of its associated "
-                    "display.  The device will be inoperable until the display size "
-                    "becomes available.",
-                    getDeviceName().c_str());
-            mDeviceMode = DEVICE_MODE_DISABLED;
-            return;
-        }
-        newViewport = *viewportToUse;
-    } else {
-        newViewport.setNonDisplayViewport(rawWidth, rawHeight);
-    }
-    bool viewportChanged = mViewport != newViewport;
+    bool viewportChanged = mViewport != *newViewport;
     if (viewportChanged) {
-        mViewport = newViewport;
+        mViewport = *newViewport;
 
         if (mDeviceMode == DEVICE_MODE_DIRECT || mDeviceMode == DEVICE_MODE_POINTER) {
             // Convert rotated viewport to natural surface coordinates.
@@ -4704,7 +4710,8 @@ void TouchInputMapper::dispatchVirtualKey(nsecs_t when, uint32_t policyFlags,
     int32_t metaState = mContext->getGlobalMetaState();
     policyFlags |= POLICY_FLAG_VIRTUAL;
 
-    NotifyKeyArgs args(when, getDeviceId(), AINPUT_SOURCE_KEYBOARD, mViewport.displayId,
+    NotifyKeyArgs args(mContext->getNextSequenceNum(), when, getDeviceId(), AINPUT_SOURCE_KEYBOARD,
+            mViewport.displayId,
             policyFlags, keyEventAction, keyEventFlags, keyCode, scanCode, metaState, downTime);
     getListener()->notifyKey(&args);
 }
@@ -5397,11 +5404,12 @@ void TouchInputMapper::dispatchPointerGestures(nsecs_t when, uint32_t policyFlag
         pointerCoords.setAxisValue(AMOTION_EVENT_AXIS_X, x);
         pointerCoords.setAxisValue(AMOTION_EVENT_AXIS_Y, y);
 
-        NotifyMotionArgs args(when, getDeviceId(), mSource, mViewport.displayId, policyFlags,
+        NotifyMotionArgs args(mContext->getNextSequenceNum(), when, getDeviceId(),
+                mSource, mViewport.displayId, policyFlags,
                 AMOTION_EVENT_ACTION_HOVER_MOVE, 0, 0,
                 metaState, buttonState, AMOTION_EVENT_EDGE_FLAG_NONE,
                 /* deviceTimestamp */ 0, 1, &pointerProperties, &pointerCoords,
-                0, 0, mPointerGesture.downTime);
+                0, 0, mPointerGesture.downTime, /* videoFrames */ {});
         getListener()->notifyMotion(&args);
     }
 
@@ -6320,12 +6328,13 @@ void TouchInputMapper::dispatchPointerSimple(nsecs_t when, uint32_t policyFlags,
         mPointerSimple.down = false;
 
         // Send up.
-        NotifyMotionArgs args(when, getDeviceId(), mSource, mViewport.displayId, policyFlags,
-                 AMOTION_EVENT_ACTION_UP, 0, 0, metaState, mLastRawState.buttonState, 0,
-                 /* deviceTimestamp */ 0,
-                 1, &mPointerSimple.lastProperties, &mPointerSimple.lastCoords,
-                 mOrientedXPrecision, mOrientedYPrecision,
-                 mPointerSimple.downTime);
+        NotifyMotionArgs args(mContext->getNextSequenceNum(), when, getDeviceId(),
+                mSource, mViewport.displayId, policyFlags,
+                AMOTION_EVENT_ACTION_UP, 0, 0, metaState, mLastRawState.buttonState, 0,
+                /* deviceTimestamp */ 0,
+                1, &mPointerSimple.lastProperties, &mPointerSimple.lastCoords,
+                mOrientedXPrecision, mOrientedYPrecision,
+                mPointerSimple.downTime, /* videoFrames */ {});
         getListener()->notifyMotion(&args);
     }
 
@@ -6333,12 +6342,13 @@ void TouchInputMapper::dispatchPointerSimple(nsecs_t when, uint32_t policyFlags,
         mPointerSimple.hovering = false;
 
         // Send hover exit.
-        NotifyMotionArgs args(when, getDeviceId(), mSource, mViewport.displayId, policyFlags,
+        NotifyMotionArgs args(mContext->getNextSequenceNum(), when, getDeviceId(), 
+                mSource, mViewport.displayId, policyFlags,
                 AMOTION_EVENT_ACTION_HOVER_EXIT, 0, 0, metaState, mLastRawState.buttonState, 0,
                 /* deviceTimestamp */ 0,
                 1, &mPointerSimple.lastProperties, &mPointerSimple.lastCoords,
                 mOrientedXPrecision, mOrientedYPrecision,
-                mPointerSimple.downTime);
+                mPointerSimple.downTime, /* videoFrames */ {});
         getListener()->notifyMotion(&args);
     }
 
@@ -6348,22 +6358,24 @@ void TouchInputMapper::dispatchPointerSimple(nsecs_t when, uint32_t policyFlags,
             mPointerSimple.downTime = when;
 
             // Send down.
-            NotifyMotionArgs args(when, getDeviceId(), mSource, mViewport.displayId, policyFlags,
+            NotifyMotionArgs args(mContext->getNextSequenceNum(), when, getDeviceId(), 
+                    mSource, mViewport.displayId, policyFlags,
                     AMOTION_EVENT_ACTION_DOWN, 0, 0, metaState, mCurrentRawState.buttonState, 0,
                     /* deviceTimestamp */ 0,
                     1, &mPointerSimple.currentProperties, &mPointerSimple.currentCoords,
                     mOrientedXPrecision, mOrientedYPrecision,
-                    mPointerSimple.downTime);
+                    mPointerSimple.downTime, /* videoFrames */ {});
             getListener()->notifyMotion(&args);
         }
 
         // Send move.
-        NotifyMotionArgs args(when, getDeviceId(), mSource, mViewport.displayId, policyFlags,
+        NotifyMotionArgs args(mContext->getNextSequenceNum(), when, getDeviceId(), 
+                mSource, mViewport.displayId, policyFlags,
                 AMOTION_EVENT_ACTION_MOVE, 0, 0, metaState, mCurrentRawState.buttonState, 0,
                 /* deviceTimestamp */ 0,
                 1, &mPointerSimple.currentProperties, &mPointerSimple.currentCoords,
                 mOrientedXPrecision, mOrientedYPrecision,
-                mPointerSimple.downTime);
+                mPointerSimple.downTime, /* videoFrames */ {});
         getListener()->notifyMotion(&args);
     }
 
@@ -6372,24 +6384,26 @@ void TouchInputMapper::dispatchPointerSimple(nsecs_t when, uint32_t policyFlags,
             mPointerSimple.hovering = true;
 
             // Send hover enter.
-            NotifyMotionArgs args(when, getDeviceId(), mSource, mViewport.displayId, policyFlags,
+            NotifyMotionArgs args(mContext->getNextSequenceNum(), when, getDeviceId(), 
+                    mSource, mViewport.displayId, policyFlags,
                     AMOTION_EVENT_ACTION_HOVER_ENTER, 0, 0, metaState,
                     mCurrentRawState.buttonState, 0,
                     /* deviceTimestamp */ 0,
                     1, &mPointerSimple.currentProperties, &mPointerSimple.currentCoords,
                     mOrientedXPrecision, mOrientedYPrecision,
-                    mPointerSimple.downTime);
+                    mPointerSimple.downTime, /* videoFrames */ {});
             getListener()->notifyMotion(&args);
         }
 
         // Send hover move.
-        NotifyMotionArgs args(when, getDeviceId(), mSource, mViewport.displayId, policyFlags,
+        NotifyMotionArgs args(mContext->getNextSequenceNum(), when, getDeviceId(), 
+                mSource, mViewport.displayId, policyFlags,
                 AMOTION_EVENT_ACTION_HOVER_MOVE, 0, 0, metaState,
                 mCurrentRawState.buttonState, 0,
                 /* deviceTimestamp */ 0,
                 1, &mPointerSimple.currentProperties, &mPointerSimple.currentCoords,
                 mOrientedXPrecision, mOrientedYPrecision,
-                mPointerSimple.downTime);
+                mPointerSimple.downTime, /* videoFrames */ {});
         getListener()->notifyMotion(&args);
     }
 
@@ -6405,12 +6419,13 @@ void TouchInputMapper::dispatchPointerSimple(nsecs_t when, uint32_t policyFlags,
         pointerCoords.setAxisValue(AMOTION_EVENT_AXIS_VSCROLL, vscroll);
         pointerCoords.setAxisValue(AMOTION_EVENT_AXIS_HSCROLL, hscroll);
 
-        NotifyMotionArgs args(when, getDeviceId(), mSource, mViewport.displayId, policyFlags,
+        NotifyMotionArgs args(mContext->getNextSequenceNum(), when, getDeviceId(), 
+                mSource, mViewport.displayId, policyFlags,
                 AMOTION_EVENT_ACTION_SCROLL, 0, 0, metaState, mCurrentRawState.buttonState, 0,
                 /* deviceTimestamp */ 0,
                 1, &mPointerSimple.currentProperties, &pointerCoords,
                 mOrientedXPrecision, mOrientedYPrecision,
-                mPointerSimple.downTime);
+                mPointerSimple.downTime, /* videoFrames */ {});
         getListener()->notifyMotion(&args);
     }
 
@@ -6468,10 +6483,13 @@ void TouchInputMapper::dispatchMotion(nsecs_t when, uint32_t policyFlags, uint32
         }
     }
 
-    NotifyMotionArgs args(when, getDeviceId(), source, mViewport.displayId, policyFlags,
+    const int32_t deviceId = getDeviceId();
+    std::vector<TouchVideoFrame> frames = mDevice->getEventHub()->getVideoFrames(deviceId);
+    NotifyMotionArgs args(mContext->getNextSequenceNum(), when, deviceId,
+            source, mViewport.displayId, policyFlags,
             action, actionButton, flags, metaState, buttonState, edgeFlags,
             deviceTimestamp, pointerCount, pointerProperties, pointerCoords,
-            xPrecision, yPrecision, downTime);
+            xPrecision, yPrecision, downTime, std::move(frames));
     getListener()->notifyMotion(&args);
 }
 
@@ -7392,11 +7410,11 @@ void JoystickInputMapper::sync(nsecs_t when, bool force) {
     // TODO: Use the input device configuration to control this behavior more finely.
     uint32_t policyFlags = 0;
 
-    NotifyMotionArgs args(when, getDeviceId(), AINPUT_SOURCE_JOYSTICK, ADISPLAY_ID_NONE,
-            policyFlags,
+    NotifyMotionArgs args(mContext->getNextSequenceNum(), when, getDeviceId(),
+            AINPUT_SOURCE_JOYSTICK, ADISPLAY_ID_NONE, policyFlags,
             AMOTION_EVENT_ACTION_MOVE, 0, 0, metaState, buttonState, AMOTION_EVENT_EDGE_FLAG_NONE,
             /* deviceTimestamp */ 0, 1, &pointerProperties, &pointerCoords,
-            0, 0, 0);
+            0, 0, 0, /* videoFrames */ {});
     getListener()->notifyMotion(&args);
 }
 

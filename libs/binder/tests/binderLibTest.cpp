@@ -72,6 +72,7 @@ enum BinderLibTestTranscationCode {
     BINDER_LIB_TEST_GET_PTR_SIZE_TRANSACTION,
     BINDER_LIB_TEST_CREATE_BINDER_TRANSACTION,
     BINDER_LIB_TEST_GET_WORK_SOURCE_TRANSACTION,
+    BINDER_LIB_TEST_ECHO_VECTOR,
 };
 
 pid_t start_server_process(int arg2, bool usePoll = false)
@@ -180,6 +181,7 @@ class BinderLibTest : public ::testing::Test {
     public:
         virtual void SetUp() {
             m_server = static_cast<BinderLibTestEnv *>(binder_env)->getServer();
+            IPCThreadState::self()->restoreCallingWorkSource(0); 
         }
         virtual void TearDown() {
         }
@@ -231,7 +233,7 @@ class BinderLibTestBundle : public Parcel
 {
     public:
         BinderLibTestBundle(void) {}
-        BinderLibTestBundle(const Parcel *source) : m_isValid(false) {
+        explicit BinderLibTestBundle(const Parcel *source) : m_isValid(false) {
             int32_t mark;
             int32_t bundleLen;
             size_t pos;
@@ -953,11 +955,28 @@ TEST_F(BinderLibTest, WorkSourceSet)
 {
     status_t ret;
     Parcel data, reply;
-    uid_t previousWorkSource = IPCThreadState::self()->setWorkSource(100);
+    IPCThreadState::self()->clearCallingWorkSource();
+    int64_t previousWorkSource = IPCThreadState::self()->setCallingWorkSourceUid(100);
     data.writeInterfaceToken(binderLibTestServiceName);
     ret = m_server->transact(BINDER_LIB_TEST_GET_WORK_SOURCE_TRANSACTION, data, &reply);
     EXPECT_EQ(100, reply.readInt32());
     EXPECT_EQ(-1, previousWorkSource);
+    EXPECT_EQ(true, IPCThreadState::self()->shouldPropagateWorkSource());
+    EXPECT_EQ(NO_ERROR, ret);
+}
+
+TEST_F(BinderLibTest, WorkSourceSetWithoutPropagation)
+{
+    status_t ret;
+    Parcel data, reply;
+
+    IPCThreadState::self()->setCallingWorkSourceUidWithoutPropagation(100);
+    EXPECT_EQ(false, IPCThreadState::self()->shouldPropagateWorkSource());
+
+    data.writeInterfaceToken(binderLibTestServiceName);
+    ret = m_server->transact(BINDER_LIB_TEST_GET_WORK_SOURCE_TRANSACTION, data, &reply);
+    EXPECT_EQ(-1, reply.readInt32());
+    EXPECT_EQ(false, IPCThreadState::self()->shouldPropagateWorkSource());
     EXPECT_EQ(NO_ERROR, ret);
 }
 
@@ -966,8 +985,9 @@ TEST_F(BinderLibTest, WorkSourceCleared)
     status_t ret;
     Parcel data, reply;
 
-    IPCThreadState::self()->setWorkSource(100);
-    uid_t previousWorkSource = IPCThreadState::self()->clearWorkSource();
+    IPCThreadState::self()->setCallingWorkSourceUid(100);
+    int64_t token = IPCThreadState::self()->clearCallingWorkSource();
+    int32_t previousWorkSource = (int32_t)token;
     data.writeInterfaceToken(binderLibTestServiceName);
     ret = m_server->transact(BINDER_LIB_TEST_GET_WORK_SOURCE_TRANSACTION, data, &reply);
 
@@ -976,10 +996,90 @@ TEST_F(BinderLibTest, WorkSourceCleared)
     EXPECT_EQ(NO_ERROR, ret);
 }
 
+TEST_F(BinderLibTest, WorkSourceRestored)
+{
+    status_t ret;
+    Parcel data, reply;
+
+    IPCThreadState::self()->setCallingWorkSourceUid(100);
+    int64_t token = IPCThreadState::self()->clearCallingWorkSource();
+    IPCThreadState::self()->restoreCallingWorkSource(token);
+
+    data.writeInterfaceToken(binderLibTestServiceName);
+    ret = m_server->transact(BINDER_LIB_TEST_GET_WORK_SOURCE_TRANSACTION, data, &reply);
+
+    EXPECT_EQ(100, reply.readInt32());
+    EXPECT_EQ(true, IPCThreadState::self()->shouldPropagateWorkSource());
+    EXPECT_EQ(NO_ERROR, ret);
+}
+
+TEST_F(BinderLibTest, PropagateFlagSet)
+{
+    status_t ret;
+    Parcel data, reply;
+
+    IPCThreadState::self()->clearPropagateWorkSource();
+    IPCThreadState::self()->setCallingWorkSourceUid(100);
+    EXPECT_EQ(true, IPCThreadState::self()->shouldPropagateWorkSource());
+}
+
+TEST_F(BinderLibTest, PropagateFlagCleared)
+{
+    status_t ret;
+    Parcel data, reply;
+
+    IPCThreadState::self()->setCallingWorkSourceUid(100);
+    IPCThreadState::self()->clearPropagateWorkSource();
+    EXPECT_EQ(false, IPCThreadState::self()->shouldPropagateWorkSource());
+}
+
+TEST_F(BinderLibTest, PropagateFlagRestored)
+{
+    status_t ret;
+    Parcel data, reply;
+
+    int token = IPCThreadState::self()->setCallingWorkSourceUid(100);
+    IPCThreadState::self()->restoreCallingWorkSource(token);
+
+    EXPECT_EQ(false, IPCThreadState::self()->shouldPropagateWorkSource());
+}
+
+TEST_F(BinderLibTest, WorkSourcePropagatedForAllFollowingBinderCalls)
+{
+    IPCThreadState::self()->setCallingWorkSourceUid(100);
+
+    Parcel data, reply;
+    status_t ret;
+    data.writeInterfaceToken(binderLibTestServiceName);
+    ret = m_server->transact(BINDER_LIB_TEST_GET_WORK_SOURCE_TRANSACTION, data, &reply);
+
+    Parcel data2, reply2;
+    status_t ret2;
+    data2.writeInterfaceToken(binderLibTestServiceName);
+    ret2 = m_server->transact(BINDER_LIB_TEST_GET_WORK_SOURCE_TRANSACTION, data2, &reply2);
+    EXPECT_EQ(100, reply2.readInt32());
+    EXPECT_EQ(NO_ERROR, ret2);
+}
+
+TEST_F(BinderLibTest, VectorSent) {
+    Parcel data, reply;
+    sp<IBinder> server = addServer();
+    ASSERT_TRUE(server != nullptr);
+
+    std::vector<uint64_t> const testValue = { std::numeric_limits<uint64_t>::max(), 0, 200 };
+    data.writeUint64Vector(testValue);
+
+    status_t ret = server->transact(BINDER_LIB_TEST_ECHO_VECTOR, data, &reply);
+    EXPECT_EQ(NO_ERROR, ret);
+    std::vector<uint64_t> readValue;
+    ret = reply.readUint64Vector(&readValue);
+    EXPECT_EQ(readValue, testValue);
+}
+
 class BinderLibTestService : public BBinder
 {
     public:
-        BinderLibTestService(int32_t id)
+        explicit BinderLibTestService(int32_t id)
             : m_id(id)
             , m_nextServerId(id + 1)
             , m_serverStartRequested(false)
@@ -1276,7 +1376,15 @@ class BinderLibTestService : public BBinder
             }
             case BINDER_LIB_TEST_GET_WORK_SOURCE_TRANSACTION: {
                 data.enforceInterface(binderLibTestServiceName);
-                reply->writeInt32(IPCThreadState::self()->getWorkSource());
+                reply->writeInt32(IPCThreadState::self()->getCallingWorkSourceUid());
+                return NO_ERROR;
+            }
+            case BINDER_LIB_TEST_ECHO_VECTOR: {
+                std::vector<uint64_t> vector;
+                auto err = data.readUint64Vector(&vector);
+                if (err != NO_ERROR)
+                    return err;
+                reply->writeUint64Vector(vector);
                 return NO_ERROR;
             }
             default:
@@ -1338,7 +1446,7 @@ int run_server(int index, int readypipefd, bool usePoll)
         }
         IPCThreadState::self()->flushCommands(); // flush BC_ENTER_LOOPER
 
-        epoll_fd = epoll_create1(0);
+        epoll_fd = epoll_create1(EPOLL_CLOEXEC);
         if (epoll_fd == -1) {
             return 1;
         }

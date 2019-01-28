@@ -23,7 +23,6 @@
 #include <renderengine/LayerSettings.h>
 #include <renderengine/Mesh.h>
 #include <renderengine/RenderEngine.h>
-#include <renderengine/Surface.h>
 #include <renderengine/Texture.h>
 #include <ui/GraphicBuffer.h>
 
@@ -37,15 +36,12 @@ public:
     ~RenderEngine() override;
 
     MOCK_METHOD0(createFramebuffer, std::unique_ptr<Framebuffer>());
-    MOCK_METHOD0(createSurface, std::unique_ptr<renderengine::Surface>());
     MOCK_METHOD0(createImage, std::unique_ptr<renderengine::Image>());
     MOCK_CONST_METHOD0(primeCache, void());
-    MOCK_METHOD1(dump, void(String8&));
+    MOCK_METHOD1(dump, void(std::string&));
     MOCK_CONST_METHOD0(useNativeFenceSync, bool());
     MOCK_CONST_METHOD0(useWaitSync, bool());
     MOCK_CONST_METHOD0(isCurrent, bool());
-    MOCK_METHOD1(setCurrentSurface, bool(const renderengine::Surface&));
-    MOCK_METHOD0(resetCurrentSurface, void());
     MOCK_METHOD0(flush, base::unique_fd());
     MOCK_METHOD0(finish, bool());
     MOCK_METHOD1(waitFence, bool(base::unique_fd*));
@@ -60,10 +56,11 @@ public:
     MOCK_CONST_METHOD0(checkErrors, void());
     MOCK_METHOD4(setViewportAndProjection,
                  void(size_t, size_t, Rect, ui::Transform::orientation_flags));
-    MOCK_METHOD4(setupLayerBlending, void(bool, bool, bool, const half4&));
+    MOCK_METHOD5(setupLayerBlending, void(bool, bool, bool, const half4&, float));
     MOCK_METHOD1(setupLayerTexturing, void(const Texture&));
     MOCK_METHOD0(setupLayerBlackedOut, void());
     MOCK_METHOD4(setupFillWithColor, void(float, float, float, float));
+    MOCK_METHOD2(setupCornerRadiusCropSize, void(float, float));
     MOCK_METHOD1(setColorTransform, void(const mat4&));
     MOCK_METHOD1(setSaturationMatrix, void(const mat4&));
     MOCK_METHOD0(disableTexturing, void());
@@ -77,26 +74,12 @@ public:
     MOCK_METHOD1(drawMesh, void(const Mesh&));
     MOCK_CONST_METHOD0(getMaxTextureSize, size_t());
     MOCK_CONST_METHOD0(getMaxViewportDims, size_t());
-    MOCK_CONST_METHOD4(drawLayers,
-                       status_t(const DisplaySettings&, const std::vector<LayerSettings>&,
-                                ANativeWindowBuffer* const, base::unique_fd*));
-};
-
-class Surface : public renderengine::Surface {
-public:
-    Surface();
-    ~Surface() override;
-
-    MOCK_METHOD1(setCritical, void(bool));
-    MOCK_METHOD1(setAsync, void(bool));
-    MOCK_METHOD1(setNativeWindow, void(ANativeWindow*));
-    MOCK_CONST_METHOD0(swapBuffers, void());
-    MOCK_CONST_METHOD0(queryRedSize, int32_t());
-    MOCK_CONST_METHOD0(queryGreenSize, int32_t());
-    MOCK_CONST_METHOD0(queryBlueSize, int32_t());
-    MOCK_CONST_METHOD0(queryAlphaSize, int32_t());
-    MOCK_CONST_METHOD0(getWidth, int32_t());
-    MOCK_CONST_METHOD0(getHeight, int32_t());
+    MOCK_CONST_METHOD0(isProtected, bool());
+    MOCK_CONST_METHOD0(supportsProtectedContent, bool());
+    MOCK_METHOD1(useProtectedContext, bool(bool));
+    MOCK_METHOD4(drawLayers,
+                 status_t(const DisplaySettings&, const std::vector<LayerSettings>&,
+                          ANativeWindowBuffer*, base::unique_fd*));
 };
 
 class Image : public renderengine::Image {
@@ -104,8 +87,7 @@ public:
     Image();
     ~Image() override;
 
-    MOCK_METHOD2(setNativeWindowBuffer,
-                 bool(ANativeWindowBuffer* buffer, bool isProtected));
+    MOCK_METHOD2(setNativeWindowBuffer, bool(ANativeWindowBuffer*, bool));
 };
 
 class Framebuffer : public renderengine::Framebuffer {
@@ -113,7 +95,7 @@ public:
     Framebuffer();
     ~Framebuffer() override;
 
-    MOCK_METHOD1(setNativeWindowBuffer, bool(ANativeWindowBuffer*));
+    MOCK_METHOD2(setNativeWindowBuffer, bool(ANativeWindowBuffer*, bool));
 };
 
 } // namespace mock

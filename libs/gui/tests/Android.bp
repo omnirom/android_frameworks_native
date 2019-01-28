@@ -16,6 +16,8 @@ cc_test {
         "BufferItemConsumer_test.cpp",
         "BufferQueue_test.cpp",
         "CpuConsumer_test.cpp",
+        "EndToEndNativeInputTest.cpp",
+        "DisplayedContentSampling_test.cpp",
         "FillBuffer.cpp",
         "GLTest.cpp",
         "IGraphicBufferProducer_test.cpp",
@@ -35,6 +37,7 @@ cc_test {
     shared_libs: [
         "android.hardware.configstore@1.0",
         "android.hardware.configstore-utils",
+        "libbase",
         "liblog",
         "libEGL",
         "libGLESv1_CM",

@@ -39,7 +39,6 @@ struct ANativeWindowBuffer;
 
 namespace android {
 
-class String8;
 class Rect;
 class Region;
 
@@ -48,12 +47,16 @@ namespace renderengine {
 class BindNativeBufferAsFramebuffer;
 class Image;
 class Mesh;
-class Surface;
 class Texture;
 
 namespace impl {
 class RenderEngine;
 }
+
+enum class Protection {
+    UNPROTECTED = 1,
+    PROTECTED = 2,
+};
 
 class RenderEngine {
 public:
@@ -72,20 +75,17 @@ public:
     // used to support legacy behavior.
 
     virtual std::unique_ptr<Framebuffer> createFramebuffer() = 0;
-    virtual std::unique_ptr<Surface> createSurface() = 0;
     virtual std::unique_ptr<Image> createImage() = 0;
 
     virtual void primeCache() const = 0;
 
     // dump the extension strings. always call the base class.
-    virtual void dump(String8& result) = 0;
+    virtual void dump(std::string& result) = 0;
 
     virtual bool useNativeFenceSync() const = 0;
     virtual bool useWaitSync() const = 0;
 
     virtual bool isCurrent() const = 0;
-    virtual bool setCurrentSurface(const Surface& surface) = 0;
-    virtual void resetCurrentSurface() = 0;
 
     // helpers
     // flush submits RenderEngine command stream for execution and returns a
@@ -118,10 +118,20 @@ public:
     virtual void setViewportAndProjection(size_t vpw, size_t vph, Rect sourceCrop,
                                           ui::Transform::orientation_flags rotation) = 0;
     virtual void setupLayerBlending(bool premultipliedAlpha, bool opaque, bool disableTexture,
-                                    const half4& color) = 0;
+                                    const half4& color, float cornerRadius) = 0;
     virtual void setupLayerTexturing(const Texture& texture) = 0;
     virtual void setupLayerBlackedOut() = 0;
     virtual void setupFillWithColor(float r, float g, float b, float a) = 0;
+    // Sets up the crop size for corner radius clipping.
+    //
+    // Having corner radius will force GPU composition on the layer and its children, drawing it
+    // with a special shader. The shader will receive the radius and the crop rectangle as input,
+    // modifying the opacity of the destination texture, multiplying it by a number between 0 and 1.
+    // We query Layer#getRoundedCornerState() to retrieve the radius as well as the rounded crop
+    // rectangle to figure out how to apply the radius for this layer. The crop rectangle will be
+    // in local layer coordinate space, so we have to take the layer transform into account when
+    // walking up the tree.
+    virtual void setupCornerRadiusCropSize(float width, float height) = 0;
 
     // Set a color transform matrix that is applied in linear space right before OETF.
     virtual void setColorTransform(const mat4& /* colorTransform */) = 0;
@@ -145,14 +155,18 @@ public:
 
     // ----- BEGIN NEW INTERFACE -----
 
+    virtual bool isProtected() const = 0;
+    virtual bool supportsProtectedContent() const = 0;
+    virtual bool useProtectedContext(bool useProtectedContext) = 0;
+
     // Renders layers for a particular display via GPU composition. This method
     // should be called for every display that needs to be rendered via the GPU.
-    // @param settings The display-wide settings that should be applied prior to
+    // @param display The display-wide settings that should be applied prior to
     // drawing any layers.
     // @param layers The layers to draw onto the display, in Z-order.
     // @param buffer The buffer which will be drawn to. This buffer will be
     // ready once displayFence fires.
-    // @param displayFence A pointer to a fence, which will fire when the buffer
+    // @param drawFence A pointer to a fence, which will fire when the buffer
     // has been drawn to and is ready to be examined. The fence will be
     // initialized by this method. The caller will be responsible for owning the
     // fence.
@@ -160,10 +174,9 @@ public:
     // now, this always returns NO_ERROR.
     // TODO(alecmouri): Consider making this a multi-display API, so that the
     // caller deoes not need to handle multiple fences.
-    virtual status_t drawLayers(const DisplaySettings& settings,
+    virtual status_t drawLayers(const DisplaySettings& display,
                                 const std::vector<LayerSettings>& layers,
-                                ANativeWindowBuffer* const buffer,
-                                base::unique_fd* displayFence) const = 0;
+                                ANativeWindowBuffer* buffer, base::unique_fd* drawFence) = 0;
 
     // TODO(alecmouri): Expose something like bindTexImage() so that devices
     // that don't support native sync fences can get rid of code duplicated
@@ -177,12 +190,12 @@ class BindNativeBufferAsFramebuffer {
 public:
     BindNativeBufferAsFramebuffer(RenderEngine& engine, ANativeWindowBuffer* buffer)
           : mEngine(engine), mFramebuffer(mEngine.createFramebuffer()), mStatus(NO_ERROR) {
-        mStatus = mFramebuffer->setNativeWindowBuffer(buffer)
+        mStatus = mFramebuffer->setNativeWindowBuffer(buffer, mEngine.isProtected())
                 ? mEngine.bindFrameBuffer(mFramebuffer.get())
                 : NO_MEMORY;
     }
     ~BindNativeBufferAsFramebuffer() {
-        mFramebuffer->setNativeWindowBuffer(nullptr);
+        mFramebuffer->setNativeWindowBuffer(nullptr, false);
         mEngine.unbindFrameBuffer(mFramebuffer.get());
     }
     status_t getStatus() const { return mStatus; }

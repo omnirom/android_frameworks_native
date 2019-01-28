@@ -29,7 +29,6 @@
 #include <displayservice/DisplayService.h>
 #include <hidl/LegacySupport.h>
 #include "SurfaceFlinger.h"
-#include "DisplayUtils.h"
 #include "SurfaceFlingerFactory.h"
 
 using namespace android;
@@ -85,15 +84,7 @@ int main(int, char**) {
     ps->startThreadPool();
 
     // instantiate surfaceflinger
-    #if 0
-    // TODO(b/120623859): this code is removed because the SurfaceFlinger ctor
-    // now takes a surfaceflinger::Factory instance, and there is no such
-    // factory for the Ex versions of the these classes. Suggest to inherit
-    // Factory to fix this.
-    sp<SurfaceFlinger> flinger = DisplayUtils::getInstance()->getSFInstance();
-    #else
     sp<SurfaceFlinger> flinger = surfaceflinger::createSurfaceFlinger();
-    #endif
 
     setpriority(PRIO_PROCESS, 0, PRIORITY_URGENT_DISPLAY);
 

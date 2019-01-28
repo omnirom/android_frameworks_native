@@ -63,6 +63,9 @@ private:
     virtual void notifyInputChannelBroken(const sp<IBinder>&) {
     }
 
+    virtual void notifyFocusChanged(const sp<IBinder>&) {
+    }
+
     virtual void getDispatcherConfiguration(InputDispatcherConfiguration* outConfig) {
         *outConfig = mConfig;
     }
@@ -344,7 +347,6 @@ protected:
             const std::string name, int32_t displayId) :
                 mDispatcher(dispatcher), mName(name), mDisplayId(displayId) {
             InputChannel::openInputChannelPair(name, mServerChannel, mClientChannel);
-
             mConsumer = new InputConsumer(mClientChannel);
         }
 
@@ -358,6 +360,7 @@ protected:
 
         sp<InputDispatcher> mDispatcher;
         sp<InputChannel> mServerChannel, mClientChannel;
+        sp<IBinder> mToken;
         InputConsumer *mConsumer;
         PreallocatedInputEventFactory mEventFactory;
 
@@ -372,15 +375,17 @@ public:
 
     FakeWindowHandle(const sp<InputApplicationHandle>& inputApplicationHandle,
         const sp<InputDispatcher>& dispatcher, const std::string name, int32_t displayId) :
-            InputWindowHandle(inputApplicationHandle),
             FakeInputReceiver(dispatcher, name, displayId),
             mFocused(false) {
             mServerChannel->setToken(new BBinder());
             mDispatcher->registerInputChannel(mServerChannel, displayId);
+ 
+            inputApplicationHandle->updateInfo();
+            mInfo.applicationInfo = *inputApplicationHandle->getInfo();
     }
 
     virtual bool updateInfo() {
-        mInfo.inputChannel = mServerChannel;
+        mInfo.token = mServerChannel->getToken();
         mInfo.name = mName;
         mInfo.layoutParamsFlags = 0;
         mInfo.layoutParamsType = InputWindowInfo::TYPE_APPLICATION;
@@ -389,7 +394,7 @@ public:
         mInfo.frameTop = 0;
         mInfo.frameRight = WIDTH;
         mInfo.frameBottom = HEIGHT;
-        mInfo.scaleFactor = 1.0;
+        mInfo.globalScaleFactor = 1.0;
         mInfo.addTouchableRegion(Rect(0, 0, WIDTH, HEIGHT));
         mInfo.visible = true;
         mInfo.canReceiveKeys = true;

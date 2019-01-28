@@ -40,6 +40,7 @@
 #include "PowerAdvisor.h"
 
 namespace android {
+    struct DisplayedFrameStats;
     class Fence;
     class FloatRect;
     class GraphicBuffer;
@@ -102,7 +103,7 @@ public:
             android::ui::PixelFormat* format, Display** outDisplay);
     void destroyDisplay(hwc2_display_t displayId);
 
-    Error onHotplug(hwc2_display_t displayId, Connection connection);
+    void onHotplug(hwc2_display_t displayId, Connection connection);
 
     // Other Device methods
 
@@ -237,6 +238,14 @@ public:
     [[clang::warn_unused_result]] Error supportsDoze(bool* outSupport) const;
     [[clang::warn_unused_result]] Error getHdrCapabilities(
             android::HdrCapabilities* outCapabilities) const;
+    [[clang::warn_unused_result]] Error getDisplayedContentSamplingAttributes(
+            android::ui::PixelFormat* outFormat, android::ui::Dataspace* outDataspace,
+            uint8_t* outComponentMask) const;
+    [[clang::warn_unused_result]] Error setDisplayContentSamplingEnabled(bool enabled,
+                                                                         uint8_t componentMask,
+                                                                         uint64_t maxFrames) const;
+    [[clang::warn_unused_result]] Error getDisplayedContentSample(
+            uint64_t maxFrames, uint64_t timestamp, android::DisplayedFrameStats* outStats) const;
     [[clang::warn_unused_result]] Error getReleaseFences(
             std::unordered_map<Layer*,
                     android::sp<android::Fence>>* outFences) const;
@@ -269,6 +278,9 @@ public:
     hwc2_display_t getId() const { return mId; }
     bool isConnected() const { return mIsConnected; }
     void setConnected(bool connected);  // For use by Device only
+    const std::unordered_set<DisplayCapability>& getCapabilities() const {
+        return mDisplayCapabilities;
+    };
 
 private:
     int32_t getAttribute(hwc2_config_t configId, Attribute attribute);
@@ -295,6 +307,7 @@ private:
     DisplayType mType;
     std::unordered_map<hwc2_layer_t, std::unique_ptr<Layer>> mLayers;
     std::unordered_map<hwc2_config_t, std::shared_ptr<const Config>> mConfigs;
+    std::unordered_set<DisplayCapability> mDisplayCapabilities;
 };
 
 // Convenience C++ class to access hwc2_device_t Layer functions directly.

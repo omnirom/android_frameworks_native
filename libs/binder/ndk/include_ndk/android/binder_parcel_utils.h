@@ -26,6 +26,7 @@
 
 #pragma once
 
+#include <android/binder_auto_utils.h>
 #include <android/binder_parcel.h>
 
 #include <optional>
@@ -42,7 +43,7 @@ static inline bool AParcel_stdVectorAllocator(void* vectorData, int32_t length, 
     if (length < 0) return false;
 
     std::vector<T>* vec = static_cast<std::vector<T>*>(vectorData);
-    if (length > vec->max_size()) return false;
+    if (static_cast<size_t>(length) > vec->max_size()) return false;
 
     vec->resize(length);
     *outBuffer = vec->data();
@@ -64,7 +65,7 @@ static inline bool AParcel_nullableStdVectorAllocator(void* vectorData, int32_t 
 
     *vec = std::optional<std::vector<T>>(std::vector<T>{});
 
-    if (length > (*vec)->max_size()) return false;
+    if (static_cast<size_t>(length) > (*vec)->max_size()) return false;
     (*vec)->resize(length);
 
     *outBuffer = (*vec)->data();
@@ -87,7 +88,7 @@ static inline bool AParcel_stdVectorExternalAllocator(void* vectorData, int32_t 
     if (length < 0) return false;
 
     std::vector<T>* vec = static_cast<std::vector<T>*>(vectorData);
-    if (length > vec->max_size()) return false;
+    if (static_cast<size_t>(length) > vec->max_size()) return false;
 
     vec->resize(length);
     return true;
@@ -115,7 +116,7 @@ static inline bool AParcel_nullableStdVectorExternalAllocator(void* vectorData, 
 
     *vec = std::optional<std::vector<T>>(std::vector<T>{});
 
-    if (length > (*vec)->max_size()) return false;
+    if (static_cast<size_t>(length) > (*vec)->max_size()) return false;
     (*vec)->resize(length);
 
     return true;
@@ -152,25 +153,100 @@ static inline void AParcel_nullableStdVectorSetter(void* vectorData, size_t inde
 }
 
 /**
+ * Convenience method to write a nullable strong binder.
+ */
+static inline binder_status_t AParcel_writeNullableStrongBinder(AParcel* parcel,
+                                                                const SpAIBinder& binder) {
+    return AParcel_writeStrongBinder(parcel, binder.get());
+}
+
+/**
+ * Convenience method to read a nullable strong binder.
+ */
+static inline binder_status_t AParcel_readNullableStrongBinder(const AParcel* parcel,
+                                                               SpAIBinder* binder) {
+    AIBinder* readBinder;
+    binder_status_t status = AParcel_readStrongBinder(parcel, &readBinder);
+    if (status == STATUS_OK) {
+        binder->set(readBinder);
+    }
+    return status;
+}
+
+/**
  * Convenience method to write a strong binder but return an error if it is null.
  */
-static inline binder_status_t AParcel_writeRequiredStrongBinder(AParcel* parcel, AIBinder* binder) {
-    if (binder == nullptr) {
+static inline binder_status_t AParcel_writeRequiredStrongBinder(AParcel* parcel,
+                                                                const SpAIBinder& binder) {
+    if (binder.get() == nullptr) {
         return STATUS_UNEXPECTED_NULL;
     }
-    return AParcel_writeStrongBinder(parcel, binder);
+    return AParcel_writeStrongBinder(parcel, binder.get());
 }
 
 /**
  * Convenience method to read a strong binder but return an error if it is null.
  */
 static inline binder_status_t AParcel_readRequiredStrongBinder(const AParcel* parcel,
-                                                               AIBinder** binder) {
-    binder_status_t ret = AParcel_readStrongBinder(parcel, binder);
-    if (ret == STATUS_OK && *binder == nullptr) {
-        return STATUS_UNEXPECTED_NULL;
+                                                               SpAIBinder* binder) {
+    AIBinder* readBinder;
+    binder_status_t ret = AParcel_readStrongBinder(parcel, &readBinder);
+    if (ret == STATUS_OK) {
+        if (readBinder == nullptr) {
+            return STATUS_UNEXPECTED_NULL;
+        }
+
+        binder->set(readBinder);
     }
     return ret;
+}
+
+/**
+ * Convenience method to write a ParcelFileDescriptor where -1 represents a null value.
+ */
+static inline binder_status_t AParcel_writeNullableParcelFileDescriptor(
+        AParcel* parcel, const ScopedFileDescriptor& fd) {
+    return AParcel_writeParcelFileDescriptor(parcel, fd.get());
+}
+
+/**
+ * Convenience method to read a ParcelFileDescriptor where -1 represents a null value.
+ */
+static inline binder_status_t AParcel_readNullableParcelFileDescriptor(const AParcel* parcel,
+                                                                       ScopedFileDescriptor* fd) {
+    int readFd;
+    binder_status_t status = AParcel_readParcelFileDescriptor(parcel, &readFd);
+    if (status == STATUS_OK) {
+        fd->set(readFd);
+    }
+    return status;
+}
+
+/**
+ * Convenience method to write a valid ParcelFileDescriptor.
+ */
+static inline binder_status_t AParcel_writeRequiredParcelFileDescriptor(
+        AParcel* parcel, const ScopedFileDescriptor& fd) {
+    if (fd.get() < 0) {
+        return STATUS_UNEXPECTED_NULL;
+    }
+    return AParcel_writeParcelFileDescriptor(parcel, fd.get());
+}
+
+/**
+ * Convenience method to read a valid ParcelFileDescriptor.
+ */
+static inline binder_status_t AParcel_readRequiredParcelFileDescriptor(const AParcel* parcel,
+                                                                       ScopedFileDescriptor* fd) {
+    int readFd;
+    binder_status_t status = AParcel_readParcelFileDescriptor(parcel, &readFd);
+    if (status == STATUS_OK) {
+        if (readFd < 0) {
+            return STATUS_UNEXPECTED_NULL;
+        }
+        fd->set(readFd);
+    }
+    return status;
 }
 
 /**
@@ -223,7 +299,7 @@ static inline bool AParcel_stdVectorStringElementAllocator(void* vectorData, siz
  * index.
  */
 static inline const char* AParcel_stdVectorStringElementGetter(const void* vectorData, size_t index,
-                                                               size_t* outLength) {
+                                                               int32_t* outLength) {
     const std::vector<std::string>* vec = static_cast<const std::vector<std::string>*>(vectorData);
     const std::string& element = vec->at(index);
 
@@ -251,7 +327,7 @@ static inline bool AParcel_nullableStdVectorStringElementAllocator(void* vectorD
  */
 static inline const char* AParcel_nullableStdVectorStringElementGetter(const void* vectorData,
                                                                        size_t index,
-                                                                       size_t* outLength) {
+                                                                       int32_t* outLength) {
     const std::optional<std::vector<std::optional<std::string>>>* vec =
             static_cast<const std::optional<std::vector<std::optional<std::string>>>*>(vectorData);
     const std::optional<std::string>& element = vec->value().at(index);
@@ -342,6 +418,46 @@ static inline binder_status_t AParcel_readVector(
             parcel, vectorData,
             AParcel_nullableStdVectorExternalAllocator<std::optional<std::string>>,
             AParcel_nullableStdVectorStringElementAllocator);
+}
+
+/**
+ * Writes a parcelable object of type P inside a std::vector<P> at index 'index' to 'parcel'.
+ */
+template <typename P>
+binder_status_t AParcel_writeStdVectorParcelableElement(AParcel* parcel, const void* vectorData,
+                                                        size_t index) {
+    const std::vector<P>* vector = static_cast<const std::vector<P>*>(vectorData);
+    return vector->at(index).writeToParcel(parcel);
+}
+
+/**
+ * Reads a parcelable object of type P inside a std::vector<P> at index 'index' from 'parcel'.
+ */
+template <typename P>
+binder_status_t AParcel_readStdVectorParcelableElement(const AParcel* parcel, void* vectorData,
+                                                       size_t index) {
+    std::vector<P>* vector = static_cast<std::vector<P>*>(vectorData);
+    return vector->at(index).readFromParcel(parcel);
+}
+
+/**
+ * Convenience API for writing a std::vector<P>
+ */
+template <typename P>
+static inline binder_status_t AParcel_writeVector(AParcel* parcel, const std::vector<P>& vec) {
+    const void* vectorData = static_cast<const void*>(&vec);
+    return AParcel_writeParcelableArray(parcel, vectorData, vec.size(),
+                                        AParcel_writeStdVectorParcelableElement<P>);
+}
+
+/**
+ * Convenience API for reading a std::vector<P>
+ */
+template <typename P>
+static inline binder_status_t AParcel_readVector(const AParcel* parcel, std::vector<P>* vec) {
+    void* vectorData = static_cast<void*>(vec);
+    return AParcel_readParcelableArray(parcel, vectorData, AParcel_stdVectorExternalAllocator<P>,
+                                       AParcel_readStdVectorParcelableElement<P>);
 }
 
 // @START

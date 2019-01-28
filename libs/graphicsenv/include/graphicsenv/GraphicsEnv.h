@@ -18,6 +18,7 @@
 #define ANDROID_UI_GRAPHICS_ENV_H 1
 
 #include <string>
+#include <vector>
 
 struct android_namespace_t;
 
@@ -39,20 +40,17 @@ public:
     void setDriverPath(const std::string path);
     android_namespace_t* getDriverNamespace();
 
+    bool shouldUseAngle(std::string appName);
+    bool shouldUseAngle();
     // Set a search path for loading ANGLE libraries. The path is a list of
     // directories separated by ':'. A directory can be contained in a zip file
     // (libraries must be stored uncompressed and page aligned); such elements
     // in the search path must have a '!' after the zip filename, e.g.
     //     /system/app/ANGLEPrebuilt/ANGLEPrebuilt.apk!/lib/arm64-v8a
-    void setAngleInfo(const std::string path, const std::string appName, bool devOptIn,
+    void setAngleInfo(const std::string path, const std::string appName, std::string devOptIn,
                       const int rulesFd, const long rulesOffset, const long rulesLength);
     android_namespace_t* getAngleNamespace();
-    const char* getAngleAppName();
-    const char* getAngleAppPref();
-    bool getAngleDeveloperOptIn();
-    int getAngleRulesFd();
-    long getAngleRulesOffset();
-    long getAngleRulesLength();
+    std::string& getAngleAppName();
 
     void setLayerPaths(NativeLoaderNamespace* appNamespace, const std::string layerPaths);
     NativeLoaderNamespace* getAppNamespace();
@@ -65,14 +63,17 @@ public:
     const std::string& getDebugLayersGLES();
 
 private:
+    void* loadLibrary(std::string name);
+    bool checkAngleRules(void* so);
+    void updateUseAngle();
+
     GraphicsEnv() = default;
     std::string mDriverPath;
     std::string mAnglePath;
     std::string mAngleAppName;
-    bool mAngleDeveloperOptIn;
-    int mAngleRulesFd;
-    long mAngleRulesOffset;
-    long mAngleRulesLength;
+    std::string mAngleDeveloperOptIn;
+    std::vector<char> mRulesBuffer;
+    bool mUseAngle;
     std::string mDebugLayers;
     std::string mDebugLayersGLES;
     std::string mLayerPaths;

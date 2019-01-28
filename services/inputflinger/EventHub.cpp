@@ -40,7 +40,6 @@
 #include <hardware_legacy/power.h>
 
 #include <android-base/stringprintf.h>
-#include <cutils/properties.h>
 #include <openssl/sha.h>
 #include <utils/Log.h>
 #include <utils/Timers.h>
@@ -69,8 +68,12 @@ using android::base::StringPrintf;
 
 namespace android {
 
+static constexpr bool DEBUG = false;
+
 static const char *WAKE_LOCK_ID = "KeyEvents";
 static const char *DEVICE_PATH = "/dev/input";
+// v4l2 devices go directly into /dev
+static const char *VIDEO_DEVICE_PATH = "/dev";
 
 static inline const char* toString(bool value) {
     return value ? "true" : "false";
@@ -96,6 +99,31 @@ static void getLinuxRelease(int* major, int* minor) {
         *major = 0, *minor = 0;
         ALOGE("Could not get linux version: %s", strerror(errno));
     }
+}
+
+/**
+ * Return true if name matches "v4l-touch*"
+ */
+static bool isV4lTouchNode(const char* name) {
+    return strstr(name, "v4l-touch") == name;
+}
+
+static nsecs_t processEventTimestamp(const struct input_event& event) {
+    // Use the time specified in the event instead of the current time
+    // so that downstream code can get more accurate estimates of
+    // event dispatch latency from the time the event is enqueued onto
+    // the evdev client buffer.
+    //
+    // The event's timestamp fortuitously uses the same monotonic clock
+    // time base as the rest of Android. The kernel event device driver
+    // (drivers/input/evdev.c) obtains timestamps using ktime_get_ts().
+    // The systemTime(SYSTEM_TIME_MONOTONIC) function we use everywhere
+    // calls clock_gettime(CLOCK_MONOTONIC) which is implemented as a
+    // system call that also queries ktime_get_ts().
+
+    const nsecs_t inputEventTime = seconds_to_nanoseconds(event.time.tv_sec) +
+            microseconds_to_nanoseconds(event.time.tv_usec);
+    return inputEventTime;
 }
 
 // --- Global Functions ---
@@ -192,7 +220,6 @@ bool EventHub::Device::hasValidFd() {
 
 // --- EventHub ---
 
-const int EventHub::EPOLL_SIZE_HINT;
 const int EventHub::EPOLL_MAX_EVENTS;
 
 EventHub::EventHub(void) :
@@ -203,19 +230,22 @@ EventHub::EventHub(void) :
         mPendingEventCount(0), mPendingEventIndex(0), mPendingINotify(false) {
     acquire_wake_lock(PARTIAL_WAKE_LOCK, WAKE_LOCK_ID);
 
-    mEpollFd = epoll_create(EPOLL_SIZE_HINT);
-    LOG_ALWAYS_FATAL_IF(mEpollFd < 0, "Could not create epoll instance.  errno=%d", errno);
+    mEpollFd = epoll_create1(EPOLL_CLOEXEC);
+    LOG_ALWAYS_FATAL_IF(mEpollFd < 0, "Could not create epoll instance: %s", strerror(errno));
 
     mINotifyFd = inotify_init();
-    int result = inotify_add_watch(mINotifyFd, DEVICE_PATH, IN_DELETE | IN_CREATE);
-    LOG_ALWAYS_FATAL_IF(result < 0, "Could not register INotify for %s.  errno=%d",
-            DEVICE_PATH, errno);
+    mInputWd = inotify_add_watch(mINotifyFd, DEVICE_PATH, IN_DELETE | IN_CREATE);
+    LOG_ALWAYS_FATAL_IF(mInputWd < 0, "Could not register INotify for %s: %s",
+            DEVICE_PATH, strerror(errno));
+    mVideoWd = inotify_add_watch(mINotifyFd, VIDEO_DEVICE_PATH, IN_DELETE | IN_CREATE);
+    LOG_ALWAYS_FATAL_IF(mVideoWd < 0, "Could not register INotify for %s: %s",
+            VIDEO_DEVICE_PATH, strerror(errno));
 
     struct epoll_event eventItem;
     memset(&eventItem, 0, sizeof(eventItem));
     eventItem.events = EPOLLIN;
     eventItem.data.fd = mINotifyFd;
-    result = epoll_ctl(mEpollFd, EPOLL_CTL_ADD, mINotifyFd, &eventItem);
+    int result = epoll_ctl(mEpollFd, EPOLL_CTL_ADD, mINotifyFd, &eventItem);
     LOG_ALWAYS_FATAL_IF(result != 0, "Could not add INotify to epoll instance.  errno=%d", errno);
 
     int wakeFds[2];
@@ -471,8 +501,7 @@ status_t EventHub::mapKey(int32_t deviceId,
 
         // Check the key layout next.
         if (status != NO_ERROR && device->keyMap.haveKeyLayout()) {
-            if (!device->keyMap.keyLayoutMap->mapKey(
-                    scanCode, usageCode, outKeycode, outFlags)) {
+            if (!device->keyMap.keyLayoutMap->mapKey(scanCode, usageCode, outKeycode, outFlags)) {
                 status = NO_ERROR;
             }
         }
@@ -732,13 +761,27 @@ EventHub::Device* EventHub::getDeviceByPathLocked(const char* devicePath) const 
     return nullptr;
 }
 
+/**
+ * The file descriptor could be either input device, or a video device (associated with a
+ * specific input device). Check both cases here, and return the device that this event
+ * belongs to. Caller can compare the fd's once more to determine event type.
+ * Looks through all input devices, and only attached video devices. Unattached video
+ * devices are ignored.
+ */
 EventHub::Device* EventHub::getDeviceByFdLocked(int fd) const {
     for (size_t i = 0; i < mDevices.size(); i++) {
         Device* device = mDevices.valueAt(i);
         if (device->fd == fd) {
+            // This is an input device event
+            return device;
+        }
+        if (device->videoDevice && device->videoDevice->getFd() == fd) {
+            // This is a video device event
             return device;
         }
     }
+    // We do not check mUnattachedVideoDevices here because they should not participate in epoll,
+    // and therefore should never be looked up by fd.
     return nullptr;
 }
 
@@ -844,12 +887,33 @@ size_t EventHub::getEvents(int timeoutMillis, RawEvent* buffer, size_t bufferSiz
             }
 
             Device* device = getDeviceByFdLocked(eventItem.data.fd);
-            if (device == nullptr) {
-                ALOGW("Received unexpected epoll event 0x%08x for unknown device fd %d.",
+            if (!device) {
+                ALOGE("Received unexpected epoll event 0x%08x for unknown fd %d.",
                         eventItem.events, eventItem.data.fd);
+                ALOG_ASSERT(!DEBUG);
                 continue;
             }
-
+            if (device->videoDevice && eventItem.data.fd == device->videoDevice->getFd()) {
+                if (eventItem.events & EPOLLIN) {
+                    size_t numFrames = device->videoDevice->readAndQueueFrames();
+                    if (numFrames == 0) {
+                        ALOGE("Received epoll event for video device %s, but could not read frame",
+                                device->videoDevice->getName().c_str());
+                    }
+                } else if (eventItem.events & EPOLLHUP) {
+                    // TODO(b/121395353) - consider adding EPOLLRDHUP
+                    ALOGI("Removing video device %s due to epoll hang-up event.",
+                            device->videoDevice->getName().c_str());
+                    unregisterVideoDeviceFromEpollLocked(*device->videoDevice);
+                    device->videoDevice = nullptr;
+                } else {
+                    ALOGW("Received unexpected epoll event 0x%08x for device %s.",
+                            eventItem.events, device->videoDevice->getName().c_str());
+                    ALOG_ASSERT(!DEBUG);
+                }
+                continue;
+            }
+            // This must be an input event
             if (eventItem.events & EPOLLIN) {
                 int32_t readSize = read(device->fd, readBuffer,
                         sizeof(struct input_event) * capacity);
@@ -872,61 +936,7 @@ size_t EventHub::getEvents(int timeoutMillis, RawEvent* buffer, size_t bufferSiz
                     size_t count = size_t(readSize) / sizeof(struct input_event);
                     for (size_t i = 0; i < count; i++) {
                         struct input_event& iev = readBuffer[i];
-                        ALOGV("%s got: time=%d.%06d, type=%d, code=%d, value=%d",
-                                device->path.c_str(),
-                                (int) iev.time.tv_sec, (int) iev.time.tv_usec,
-                                iev.type, iev.code, iev.value);
-
-                        // Use the time specified in the event instead of the current time
-                        // so that downstream code can get more accurate estimates of
-                        // event dispatch latency from the time the event is enqueued onto
-                        // the evdev client buffer.
-                        //
-                        // The event's timestamp fortuitously uses the same monotonic clock
-                        // time base as the rest of Android.  The kernel event device driver
-                        // (drivers/input/evdev.c) obtains timestamps using ktime_get_ts().
-                        // The systemTime(SYSTEM_TIME_MONOTONIC) function we use everywhere
-                        // calls clock_gettime(CLOCK_MONOTONIC) which is implemented as a
-                        // system call that also queries ktime_get_ts().
-                        event->when = nsecs_t(iev.time.tv_sec) * 1000000000LL
-                                + nsecs_t(iev.time.tv_usec) * 1000LL;
-                        ALOGV("event time %" PRId64 ", now %" PRId64, event->when, now);
-
-                        // Bug 7291243: Add a guard in case the kernel generates timestamps
-                        // that appear to be far into the future because they were generated
-                        // using the wrong clock source.
-                        //
-                        // This can happen because when the input device is initially opened
-                        // it has a default clock source of CLOCK_REALTIME.  Any input events
-                        // enqueued right after the device is opened will have timestamps
-                        // generated using CLOCK_REALTIME.  We later set the clock source
-                        // to CLOCK_MONOTONIC but it is already too late.
-                        //
-                        // Invalid input event timestamps can result in ANRs, crashes and
-                        // and other issues that are hard to track down.  We must not let them
-                        // propagate through the system.
-                        //
-                        // Log a warning so that we notice the problem and recover gracefully.
-                        if (event->when >= now + 10 * 1000000000LL) {
-                            // Double-check.  Time may have moved on.
-                            nsecs_t time = systemTime(SYSTEM_TIME_MONOTONIC);
-                            if (event->when > time) {
-                                ALOGW("An input event from %s has a timestamp that appears to "
-                                        "have been generated using the wrong clock source "
-                                        "(expected CLOCK_MONOTONIC): "
-                                        "event time %" PRId64 ", current time %" PRId64
-                                        ", call time %" PRId64 ".  "
-                                        "Using current time instead.",
-                                        device->path.c_str(), event->when, time, now);
-                                event->when = time;
-                            } else {
-                                ALOGV("Event time is ok but failed the fast path and required "
-                                        "an extra call to systemTime: "
-                                        "event time %" PRId64 ", current time %" PRId64
-                                        ", call time %" PRId64 ".",
-                                        event->when, time, now);
-                            }
-                        }
+                        event->when = processEventTimestamp(iev);
                         event->deviceId = deviceId;
                         event->type = iev.type;
                         event->code = iev.code;
@@ -1018,6 +1028,16 @@ size_t EventHub::getEvents(int timeoutMillis, RawEvent* buffer, size_t bufferSiz
     return event - buffer;
 }
 
+std::vector<TouchVideoFrame> EventHub::getVideoFrames(int32_t deviceId) {
+    AutoMutex _l(mLock);
+
+    Device* device = getDeviceLocked(deviceId);
+    if (!device || !device->videoDevice) {
+        return {};
+    }
+    return device->videoDevice->consumeFrames();
+}
+
 void EventHub::wake() {
     ALOGV("wake() called");
 
@@ -1027,14 +1047,18 @@ void EventHub::wake() {
     } while (nWrite == -1 && errno == EINTR);
 
     if (nWrite != 1 && errno != EAGAIN) {
-        ALOGW("Could not write wake signal, errno=%d", errno);
+        ALOGW("Could not write wake signal: %s", strerror(errno));
     }
 }
 
 void EventHub::scanDevicesLocked() {
-    status_t res = scanDirLocked(DEVICE_PATH);
-    if(res < 0) {
-        ALOGE("scan dir failed for %s\n", DEVICE_PATH);
+    status_t result = scanDirLocked(DEVICE_PATH);
+    if(result < 0) {
+        ALOGE("scan dir failed for %s", DEVICE_PATH);
+    }
+    result = scanVideoDirLocked(VIDEO_DEVICE_PATH);
+    if (result != OK) {
+        ALOGE("scan video dir failed for %s", VIDEO_DEVICE_PATH);
     }
     if (mDevices.indexOfKey(VIRTUAL_KEYBOARD_ID) < 0) {
         createVirtualKeyboardLocked();
@@ -1063,32 +1087,76 @@ static const int32_t GAMEPAD_KEYCODES[] = {
         AKEYCODE_BUTTON_START, AKEYCODE_BUTTON_SELECT, AKEYCODE_BUTTON_MODE,
 };
 
-status_t EventHub::registerDeviceForEpollLocked(Device* device) {
-    struct epoll_event eventItem;
-    memset(&eventItem, 0, sizeof(eventItem));
-    eventItem.events = EPOLLIN;
-    if (mUsingEpollWakeup) {
-        eventItem.events |= EPOLLWAKEUP;
-    }
-    eventItem.data.fd = device->fd;
-    if (epoll_ctl(mEpollFd, EPOLL_CTL_ADD, device->fd, &eventItem)) {
-        ALOGE("Could not add device fd to epoll instance.  errno=%d", errno);
+status_t EventHub::registerFdForEpoll(int fd) {
+    // TODO(b/121395353) - consider adding EPOLLRDHUP
+    struct epoll_event eventItem = {};
+    eventItem.events = EPOLLIN | EPOLLWAKEUP;
+    eventItem.data.fd = fd;
+    if (epoll_ctl(mEpollFd, EPOLL_CTL_ADD, fd, &eventItem)) {
+        ALOGE("Could not add fd to epoll instance: %s", strerror(errno));
         return -errno;
     }
     return OK;
 }
 
-status_t EventHub::unregisterDeviceFromEpollLocked(Device* device) {
-    if (device->hasValidFd()) {
-        if (epoll_ctl(mEpollFd, EPOLL_CTL_DEL, device->fd, nullptr)) {
-            ALOGW("Could not remove device fd from epoll instance.  errno=%d", errno);
-            return -errno;
-        }
+status_t EventHub::unregisterFdFromEpoll(int fd) {
+    if (epoll_ctl(mEpollFd, EPOLL_CTL_DEL, fd, nullptr)) {
+        ALOGW("Could not remove fd from epoll instance: %s", strerror(errno));
+        return -errno;
     }
     return OK;
 }
 
-status_t EventHub::openDeviceLocked(const char *devicePath) {
+status_t EventHub::registerDeviceForEpollLocked(Device* device) {
+    if (device == nullptr) {
+        if (DEBUG) {
+            LOG_ALWAYS_FATAL("Cannot call registerDeviceForEpollLocked with null Device");
+        }
+        return BAD_VALUE;
+    }
+    status_t result = registerFdForEpoll(device->fd);
+    if (result != OK) {
+        ALOGE("Could not add input device fd to epoll for device %" PRId32, device->id);
+        return result;
+    }
+    if (device->videoDevice) {
+        registerVideoDeviceForEpollLocked(*device->videoDevice);
+    }
+    return result;
+}
+
+void EventHub::registerVideoDeviceForEpollLocked(const TouchVideoDevice& videoDevice) {
+    status_t result = registerFdForEpoll(videoDevice.getFd());
+    if (result != OK) {
+        ALOGE("Could not add video device %s to epoll", videoDevice.getName().c_str());
+    }
+}
+
+status_t EventHub::unregisterDeviceFromEpollLocked(Device* device) {
+    if (device->hasValidFd()) {
+        status_t result = unregisterFdFromEpoll(device->fd);
+        if (result != OK) {
+            ALOGW("Could not remove input device fd from epoll for device %" PRId32, device->id);
+            return result;
+        }
+    }
+    if (device->videoDevice) {
+        unregisterVideoDeviceFromEpollLocked(*device->videoDevice);
+    }
+    return OK;
+}
+
+void EventHub::unregisterVideoDeviceFromEpollLocked(const TouchVideoDevice& videoDevice) {
+    if (videoDevice.hasValidFd()) {
+        status_t result = unregisterFdFromEpoll(videoDevice.getFd());
+        if (result != OK) {
+            ALOGW("Could not remove video device fd from epoll for device: %s",
+                    videoDevice.getName().c_str());
+        }
+    }
+}
+
+status_t EventHub::openDeviceLocked(const char* devicePath) {
     char buffer[80];
 
     ALOGV("Opening device: %s", devicePath);
@@ -1103,7 +1171,7 @@ status_t EventHub::openDeviceLocked(const char *devicePath) {
 
     // Get device name.
     if(ioctl(fd, EVIOCGNAME(sizeof(buffer) - 1), &buffer) < 1) {
-        //fprintf(stderr, "could not get device name for %s, %s\n", devicePath, strerror(errno));
+        ALOGE("Could not get device name for %s: %s", devicePath, strerror(errno));
     } else {
         buffer[sizeof(buffer) - 1] = '\0';
         identifier.name = buffer;
@@ -1345,6 +1413,18 @@ status_t EventHub::openDeviceLocked(const char *devicePath) {
         setLedForControllerLocked(device);
     }
 
+    // Find a matching video device by comparing device names
+    // This should be done before registerDeviceForEpollLocked, so that both fds are added to epoll
+    for (std::unique_ptr<TouchVideoDevice>& videoDevice : mUnattachedVideoDevices) {
+        if (device->identifier.name == videoDevice->getName()) {
+            device->videoDevice = std::move(videoDevice);
+            break;
+        }
+    }
+    mUnattachedVideoDevices.erase(std::remove_if(mUnattachedVideoDevices.begin(),
+            mUnattachedVideoDevices.end(),
+            [](const std::unique_ptr<TouchVideoDevice>& videoDevice){
+            return videoDevice == nullptr; }), mUnattachedVideoDevices.end());
 
     if (registerDeviceForEpollLocked(device) != OK) {
         delete device;
@@ -1399,6 +1479,31 @@ void EventHub::configureFd(Device* device) {
     bool usingClockIoctl = !ioctl(device->fd, EVIOCSCLOCKID, &clockId);
     ALOGI("wakeMechanism=%s, usingClockIoctl=%s", wakeMechanism.c_str(),
           toString(usingClockIoctl));
+}
+
+void EventHub::openVideoDeviceLocked(const std::string& devicePath) {
+    std::unique_ptr<TouchVideoDevice> videoDevice = TouchVideoDevice::create(devicePath);
+    if (!videoDevice) {
+        ALOGE("Could not create touch video device for %s. Ignoring", devicePath.c_str());
+        return;
+    }
+    // Transfer ownership of this video device to a matching input device
+    for (size_t i = 0; i < mDevices.size(); i++) {
+        Device* device = mDevices.valueAt(i);
+        if (videoDevice->getName() == device->identifier.name) {
+            device->videoDevice = std::move(videoDevice);
+            if (device->enabled) {
+                registerVideoDeviceForEpollLocked(*device->videoDevice);
+            }
+            return;
+        }
+    }
+
+    // Couldn't find a matching input device, so just add it to a temporary holding queue.
+    // A matching input device may appear later.
+    ALOGI("Adding video device %s to list of unattached video devices",
+            videoDevice->getName().c_str());
+    mUnattachedVideoDevices.push_back(std::move(videoDevice));
 }
 
 bool EventHub::isDeviceEnabled(int32_t deviceId) {
@@ -1580,24 +1685,46 @@ status_t EventHub::mapLed(Device* device, int32_t led, int32_t* outScanCode) con
     return NAME_NOT_FOUND;
 }
 
-status_t EventHub::closeDeviceByPathLocked(const char *devicePath) {
+void EventHub::closeDeviceByPathLocked(const char *devicePath) {
     Device* device = getDeviceByPathLocked(devicePath);
     if (device) {
         closeDeviceLocked(device);
-        return 0;
+        return;
     }
     ALOGV("Remove device: %s not found, device may already have been removed.", devicePath);
-    return -1;
+}
+
+/**
+ * Find the video device by filename, and close it.
+ * The video device is closed by path during an inotify event, where we don't have the
+ * additional context about the video device fd, or the associated input device.
+ */
+void EventHub::closeVideoDeviceByPathLocked(const std::string& devicePath) {
+    // A video device may be owned by an existing input device, or it may be stored in
+    // the mUnattachedVideoDevices queue. Check both locations.
+    for (size_t i = 0; i < mDevices.size(); i++) {
+        Device* device = mDevices.valueAt(i);
+        if (device->videoDevice && device->videoDevice->getPath() == devicePath) {
+            unregisterVideoDeviceFromEpollLocked(*device->videoDevice);
+            device->videoDevice = nullptr;
+            return;
+        }
+    }
+    mUnattachedVideoDevices.erase(std::remove_if(mUnattachedVideoDevices.begin(),
+            mUnattachedVideoDevices.end(), [&devicePath](
+            const std::unique_ptr<TouchVideoDevice>& videoDevice) {
+            return videoDevice->getPath() == devicePath; }), mUnattachedVideoDevices.end());
 }
 
 void EventHub::closeAllDevicesLocked() {
+    mUnattachedVideoDevices.clear();
     while (mDevices.size() > 0) {
         closeDeviceLocked(mDevices.valueAt(mDevices.size() - 1));
     }
 }
 
 void EventHub::closeDeviceLocked(Device* device) {
-    ALOGI("Removed device: path=%s name=%s id=%d fd=%d classes=0x%x\n",
+    ALOGI("Removed device: path=%s name=%s id=%d fd=%d classes=0x%x",
          device->path.c_str(), device->identifier.name.c_str(), device->id,
          device->fd, device->classes);
 
@@ -1608,6 +1735,10 @@ void EventHub::closeDeviceLocked(Device* device) {
     }
 
     unregisterDeviceFromEpollLocked(device);
+    if (device->videoDevice) {
+        // This must be done after the video device is removed from epoll
+        mUnattachedVideoDevices.push_back(std::move(device->videoDevice));
+    }
 
     releaseControllerNumberLocked(device);
 
@@ -1646,8 +1777,6 @@ void EventHub::closeDeviceLocked(Device* device) {
 
 status_t EventHub::readNotifyLocked() {
     int res;
-    char devname[PATH_MAX];
-    char *filename;
     char event_buf[512];
     int event_size;
     int event_pos = 0;
@@ -1661,22 +1790,32 @@ status_t EventHub::readNotifyLocked() {
         ALOGW("could not get event, %s\n", strerror(errno));
         return -1;
     }
-    //printf("got %d bytes of event information\n", res);
-
-    strcpy(devname, DEVICE_PATH);
-    filename = devname + strlen(devname);
-    *filename++ = '/';
 
     while(res >= (int)sizeof(*event)) {
         event = (struct inotify_event *)(event_buf + event_pos);
-        //printf("%d: %08x \"%s\"\n", event->wd, event->mask, event->len ? event->name : "");
         if(event->len) {
-            strcpy(filename, event->name);
-            if(event->mask & IN_CREATE) {
-                openDeviceLocked(devname);
-            } else {
-                ALOGI("Removing device '%s' due to inotify event\n", devname);
-                closeDeviceByPathLocked(devname);
+            if (event->wd == mInputWd) {
+                std::string filename = StringPrintf("%s/%s", DEVICE_PATH, event->name);
+                if(event->mask & IN_CREATE) {
+                    openDeviceLocked(filename.c_str());
+                } else {
+                    ALOGI("Removing device '%s' due to inotify event\n", filename.c_str());
+                    closeDeviceByPathLocked(filename.c_str());
+                }
+            }
+            else if (event->wd == mVideoWd) {
+                if (isV4lTouchNode(event->name)) {
+                    std::string filename = StringPrintf("%s/%s", VIDEO_DEVICE_PATH, event->name);
+                    if (event->mask & IN_CREATE) {
+                        openVideoDeviceLocked(filename);
+                    } else {
+                        ALOGI("Removing video device '%s' due to inotify event", filename.c_str());
+                        closeVideoDeviceByPathLocked(filename);
+                    }
+                }
+            }
+            else {
+                LOG_ALWAYS_FATAL("Unexpected inotify event, wd = %i", event->wd);
             }
         }
         event_size = sizeof(*event) + event->len;
@@ -1708,6 +1847,30 @@ status_t EventHub::scanDirLocked(const char *dirname)
     }
     closedir(dir);
     return 0;
+}
+
+/**
+ * Look for all dirname/v4l-touch* devices, and open them.
+ */
+status_t EventHub::scanVideoDirLocked(const std::string& dirname)
+{
+    DIR* dir;
+    struct dirent* de;
+    dir = opendir(dirname.c_str());
+    if(!dir) {
+        ALOGE("Could not open video directory %s", dirname.c_str());
+        return BAD_VALUE;
+    }
+
+    while((de = readdir(dir))) {
+        const char* name = de->d_name;
+        if (isV4lTouchNode(name)) {
+            ALOGI("Found touch video device %s", name);
+            openVideoDeviceLocked(dirname + "/" + name);
+        }
+    }
+    closedir(dir);
+    return OK;
 }
 
 void EventHub::requestReopenDevices() {
@@ -1755,6 +1918,20 @@ void EventHub::dump(std::string& dump) {
                     device->configurationFile.c_str());
             dump += StringPrintf(INDENT3 "HaveKeyboardLayoutOverlay: %s\n",
                     toString(device->overlayKeyMap != nullptr));
+            dump += INDENT3 "VideoDevice: ";
+            if (device->videoDevice) {
+                dump += device->videoDevice->dump() + "\n";
+            } else {
+                dump += "<none>\n";
+            }
+        }
+
+        dump += INDENT "Unattached video devices:\n";
+        for (const std::unique_ptr<TouchVideoDevice>& videoDevice : mUnattachedVideoDevices) {
+            dump += INDENT2 + videoDevice->dump() + "\n";
+        }
+        if (mUnattachedVideoDevices.empty()) {
+            dump += INDENT2 "<none>\n";
         }
     } // release lock
 }

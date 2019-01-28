@@ -166,6 +166,7 @@ SurfaceComposerClient::Transaction::Transaction(const Transaction& other) :
     mEarlyWakeup(other.mEarlyWakeup) {
     mDisplayStates = other.mDisplayStates;
     mComposerStates = other.mComposerStates;
+    mInputWindowCommands = other.mInputWindowCommands;
 }
 
 SurfaceComposerClient::Transaction& SurfaceComposerClient::Transaction::merge(Transaction&& other) {
@@ -198,6 +199,8 @@ SurfaceComposerClient::Transaction& SurfaceComposerClient::Transaction::merge(Tr
                                         std::make_move_iterator(surfaceControls.end()));
     }
     other.mListenerCallbacks.clear();
+
+    mInputWindowCommands.merge(other.mInputWindowCommands);
 
     return *this;
 }
@@ -264,7 +267,9 @@ status_t SurfaceComposerClient::Transaction::apply(bool synchronous) {
     mAnimation = false;
     mEarlyWakeup = false;
 
-    sf->setTransactionState(composerStates, displayStates, flags);
+    sp<IBinder> applyToken = IInterface::asBinder(TransactionCompletedListener::getIInstance());
+    sf->setTransactionState(composerStates, displayStates, flags, applyToken, mInputWindowCommands);
+    mInputWindowCommands.clear();
     mStatus = NO_ERROR;
     return NO_ERROR;
 }
@@ -475,6 +480,18 @@ SurfaceComposerClient::Transaction& SurfaceComposerClient::Transaction::setCrop_
     return *this;
 }
 
+SurfaceComposerClient::Transaction& SurfaceComposerClient::Transaction::setCornerRadius(
+        const sp<SurfaceControl>& sc, float cornerRadius) {
+    layer_state_t* s = getLayerState(sc);
+    if (!s) {
+        mStatus = BAD_INDEX;
+        return *this;
+    }
+    s->what |= layer_state_t::eCornerRadiusChanged;
+    s->cornerRadius = cornerRadius;
+    return *this;
+}
+
 SurfaceComposerClient::Transaction&
 SurfaceComposerClient::Transaction::deferTransactionUntil_legacy(const sp<SurfaceControl>& sc,
                                                                  const sp<IBinder>& handle,
@@ -592,6 +609,20 @@ SurfaceComposerClient::Transaction& SurfaceComposerClient::Transaction::setCrop(
     }
     s->what |= layer_state_t::eCropChanged;
     s->crop = crop;
+
+    registerSurfaceControlForCallback(sc);
+    return *this;
+}
+
+SurfaceComposerClient::Transaction& SurfaceComposerClient::Transaction::setFrame(
+        const sp<SurfaceControl>& sc, const Rect& frame) {
+    layer_state_t* s = getLayerState(sc);
+    if (!s) {
+        mStatus = BAD_INDEX;
+        return *this;
+    }
+    s->what |= layer_state_t::eFrameChanged;
+    s->frame = frame;
 
     registerSurfaceControlForCallback(sc);
     return *this;
@@ -776,6 +807,16 @@ SurfaceComposerClient::Transaction& SurfaceComposerClient::Transaction::setInput
     s->what |= layer_state_t::eInputInfoChanged;
     return *this;
 }
+
+SurfaceComposerClient::Transaction& SurfaceComposerClient::Transaction::transferTouchFocus(
+        const sp<IBinder>& fromToken, const sp<IBinder>& toToken) {
+    InputWindowCommands::TransferTouchFocusCommand transferTouchFocusCommand;
+    transferTouchFocusCommand.fromToken = fromToken;
+    transferTouchFocusCommand.toToken = toToken;
+    mInputWindowCommands.transferTouchFocusCommands.emplace_back(transferTouchFocusCommand);
+    return *this;
+}
+
 #endif
 
 SurfaceComposerClient::Transaction& SurfaceComposerClient::Transaction::destroySurface(
@@ -1077,6 +1118,29 @@ status_t SurfaceComposerClient::getHdrCapabilities(const sp<IBinder>& display,
             outCapabilities);
 }
 
+status_t SurfaceComposerClient::getDisplayedContentSamplingAttributes(const sp<IBinder>& display,
+                                                                      ui::PixelFormat* outFormat,
+                                                                      ui::Dataspace* outDataspace,
+                                                                      uint8_t* outComponentMask) {
+    return ComposerService::getComposerService()
+            ->getDisplayedContentSamplingAttributes(display, outFormat, outDataspace,
+                                                    outComponentMask);
+}
+
+status_t SurfaceComposerClient::setDisplayContentSamplingEnabled(const sp<IBinder>& display,
+                                                                 bool enable, uint8_t componentMask,
+                                                                 uint64_t maxFrames) {
+    return ComposerService::getComposerService()->setDisplayContentSamplingEnabled(display, enable,
+                                                                                   componentMask,
+                                                                                   maxFrames);
+}
+
+status_t SurfaceComposerClient::getDisplayedContentSample(const sp<IBinder>& display,
+                                                          uint64_t maxFrames, uint64_t timestamp,
+                                                          DisplayedFrameStats* outStats) {
+    return ComposerService::getComposerService()->getDisplayedContentSample(display, maxFrames,
+                                                                            timestamp, outStats);
+}
 // ----------------------------------------------------------------------------
 
 status_t ScreenshotClient::capture(const sp<IBinder>& display, const ui::Dataspace reqDataSpace,

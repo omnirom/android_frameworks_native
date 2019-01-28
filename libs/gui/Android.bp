@@ -26,7 +26,6 @@ cc_defaults {
         "-Werror",
     ],
     cppflags: [
-        "-std=c++1z",
         "-Weverything",
 
         // The static constructors and destructors in this library have not been noted to
@@ -118,6 +117,7 @@ cc_defaults {
 
     shared_libs: [
         "android.hardware.graphics.common@1.1",
+        "libbase",
         "libsync",
         "libbinder",
         "libbufferhub",

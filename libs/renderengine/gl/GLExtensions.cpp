@@ -60,6 +60,11 @@ void GLExtensions::initWithGLStrings(GLubyte const* vendor, GLubyte const* rende
     mRenderer = (char const*)renderer;
     mVersion = (char const*)version;
     mExtensions = (char const*)extensions;
+
+    ExtensionSet extensionSet(mExtensions.c_str());
+    if (extensionSet.hasExtension("GL_EXT_protected_textures")) {
+        mHasProtectedTexture = true;
+    }
 }
 
 char const* GLExtensions::getVendor() const {
@@ -111,6 +116,9 @@ void GLExtensions::initWithEGLStrings(char const* eglVersion, char const* eglExt
     }
     if (extensionSet.hasExtension("EGL_IMG_context_priority")) {
         mHasContextPriority = true;
+    }
+    if (extensionSet.hasExtension("EGL_KHR_surfaceless_context")) {
+        mHasSurfacelessContext = true;
     }
 }
 

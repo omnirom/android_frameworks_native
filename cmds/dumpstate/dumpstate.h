@@ -27,6 +27,7 @@
 
 #include <android-base/macros.h>
 #include <android-base/unique_fd.h>
+#include <android/os/IDumpstate.h>
 #include <android/os/IDumpstateListener.h>
 #include <utils/StrongPointer.h>
 #include <ziparchive/zip_writer.h>
@@ -42,6 +43,9 @@
 // TODO: and then remove explicitly android::os::dumpstate:: prefixes
 namespace android {
 namespace os {
+
+struct DumpstateOptions;
+
 namespace dumpstate {
 
 class DumpstateTest;
@@ -68,7 +72,7 @@ extern "C" {
  */
 class DurationReporter {
   public:
-    DurationReporter(const std::string& title, bool log_only = false);
+    explicit DurationReporter(const std::string& title, bool log_only = false);
 
     ~DurationReporter();
 
@@ -107,7 +111,7 @@ class Progress {
      */
     static const int kDefaultMax;
 
-    Progress(const std::string& path = "");
+    explicit Progress(const std::string& path = "");
 
     // Gets the current progress.
     int32_t Get() const;
@@ -138,7 +142,7 @@ class Progress {
     float growth_factor_;
     int32_t n_runs_;
     int32_t average_max_;
-    const std::string& path_;
+    std::string path_;
 };
 
 /*
@@ -158,6 +162,11 @@ static std::string VERSION_SPLIT_ANR = "3.0-dev-split-anr";
  * "Alias" for the current version.
  */
 static std::string VERSION_DEFAULT = "default";
+
+/*
+ * Directory used by Dumpstate binary to keep its local files.
+ */
+static const std::string DUMPSTATE_DIRECTORY = "/bugreports";
 
 /*
  * Structure that contains the information of an open dump file.
@@ -184,6 +193,17 @@ class Dumpstate {
 
   public:
     enum RunStatus { OK, HELP, INVALID_INPUT, ERROR };
+
+    // The mode under which the bugreport should be run. Each mode encapsulates a few options.
+    enum BugreportMode {
+        BUGREPORT_FULL = android::os::IDumpstate::BUGREPORT_MODE_FULL,
+        BUGREPORT_INTERACTIVE = android::os::IDumpstate::BUGREPORT_MODE_INTERACTIVE,
+        BUGREPORT_REMOTE = android::os::IDumpstate::BUGREPORT_MODE_REMOTE,
+        BUGREPORT_WEAR = android::os::IDumpstate::BUGREPORT_MODE_WEAR,
+        BUGREPORT_TELEPHONY = android::os::IDumpstate::BUGREPORT_MODE_TELEPHONY,
+        BUGREPORT_WIFI = android::os::IDumpstate::BUGREPORT_MODE_WIFI,
+        BUGREPORT_DEFAULT = android::os::IDumpstate::BUGREPORT_MODE_DEFAULT
+    };
 
     static android::os::dumpstate::CommandOptions DEFAULT_DUMPSYS;
 
@@ -247,7 +267,7 @@ class Dumpstate {
                                         std::chrono::milliseconds timeout);
 
     /*
-     * Adds a text entry entry to the existing zip file.
+     * Adds a text entry to the existing zip file.
      */
     bool AddTextZipEntry(const std::string& entry_name, const std::string& content);
 
@@ -286,7 +306,11 @@ class Dumpstate {
      */
     bool FinishZipFile();
 
-    /* Gets the path of a bugreport file with the given suffix. */
+    /* Constructs a full path inside directory with file name formatted using the given suffix. */
+    std::string GetPath(const std::string& directory, const std::string& suffix) const;
+
+    /* Constructs a full path inside bugreport_internal_dir_ with file name formatted using the
+     * given suffix. */
     std::string GetPath(const std::string& suffix) const;
 
     /* Returns true if the current version supports priority dump feature. */
@@ -294,10 +318,12 @@ class Dumpstate {
 
     struct DumpOptions;
 
-    /* Main entry point for running a complete bugreport. Takes ownership of options. */
-    RunStatus RunWithOptions(std::unique_ptr<DumpOptions> options);
+    /* Main entry point for running a complete bugreport. */
+    RunStatus Run();
 
-    // TODO: add other options from DumpState.
+    /* Sets runtime options. */
+    void SetOptions(std::unique_ptr<DumpOptions> options);
+
     /*
      * Structure to hold options that determine the behavior of dumpstate.
      */
@@ -316,7 +342,12 @@ class Dumpstate {
         bool wifi_only = false;
         // Whether progress updates should be published.
         bool do_progress_updates = false;
+        // File descriptor to output zip file. -1 indicates not set. Takes precedence over
+        // use_outfile.
+        int fd = -1;
+        // Partial path to output file.
         std::string use_outfile;
+        // TODO: rename to MODE.
         // Extra options passed as system property.
         std::string extra_options;
         // Command-line arguments as string
@@ -327,6 +358,9 @@ class Dumpstate {
 
         /* Initializes options from commandline arguments and system properties. */
         RunStatus Initialize(int argc, char* argv[]);
+
+        /* Initializes options from the requested mode. */
+        void Initialize(BugreportMode bugreport_mode);
 
         /* Returns true if the options set so far are consistent. */
         bool ValidateOptions() const;
@@ -360,12 +394,6 @@ class Dumpstate {
     // Bugreport format version;
     std::string version_ = VERSION_CURRENT;
 
-    // Full path of the directory where the bugreport files will be written.
-    std::string bugreport_dir_;
-
-    // Full path of the temporary file containing the screenshot (when requested).
-    std::string screenshot_path_;
-
     time_t now_;
 
     // Base name (without suffix or extensions) of the bugreport files, typically
@@ -376,14 +404,29 @@ class Dumpstate {
     // `-d`), but it could be changed by the user..
     std::string name_;
 
-    // Full path of the temporary file containing the bugreport.
+    std::string bugreport_internal_dir_ = DUMPSTATE_DIRECTORY;
+
+    // Full path of the temporary file containing the bugreport, inside bugreport_internal_dir_.
+    // At the very end this file is pulled into the zip file.
     std::string tmp_path_;
 
-    // Full path of the file containing the dumpstate logs.
+    // Full path of the file containing the dumpstate logs, inside bugreport_internal_dir_.
+    // This is useful for debugging.
     std::string log_path_;
 
-    // Pointer to the actual path, be it zip or text.
+    // Full path of the bugreport file, be it zip or text, inside bugreport_internal_dir_.
     std::string path_;
+
+    // TODO: If temporary this should be removed at the end.
+    // Full path of the temporary file containing the screenshot (when requested).
+    std::string screenshot_path_;
+
+    // TODO(b/111441001): remove when obsolete.
+    // Full path of the final zip file inside the caller-specified directory, if available.
+    std::string final_path_;
+
+    // The caller-specified directory, if available.
+    std::string bugreport_dir_;
 
     // Pointer to the zipped file.
     std::unique_ptr<FILE, int (*)(FILE*)> zip_file{nullptr, fclose};
@@ -404,7 +447,7 @@ class Dumpstate {
 
   private:
     // Used by GetInstance() only.
-    Dumpstate(const std::string& version = VERSION_CURRENT);
+    explicit Dumpstate(const std::string& version = VERSION_CURRENT);
 
     DISALLOW_COPY_AND_ASSIGN(Dumpstate);
 };

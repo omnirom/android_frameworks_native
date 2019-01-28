@@ -467,7 +467,6 @@ status_t Parcel::setData(const uint8_t* buffer, size_t len)
 
 status_t Parcel::appendFrom(const Parcel *parcel, size_t offset, size_t len)
 {
-    const sp<ProcessState> proc(ProcessState::self());
     status_t err;
     const uint8_t *data = parcel->mData;
     const binder_size_t *objects = parcel->mObjects;
@@ -520,6 +519,7 @@ status_t Parcel::appendFrom(const Parcel *parcel, size_t offset, size_t len)
     err = NO_ERROR;
 
     if (numObjects > 0) {
+        const sp<ProcessState> proc(ProcessState::self());
         // grow objects
         if (mObjectsCapacity < mObjectsSize + numObjects) {
             size_t newSize = ((mObjectsSize + numObjects)*3)/2;
@@ -599,9 +599,10 @@ bool Parcel::hasFileDescriptors() const
 // Write RPC headers.  (previously just the interface token)
 status_t Parcel::writeInterfaceToken(const String16& interface)
 {
-    writeInt32(IPCThreadState::self()->getStrictModePolicy() |
-               STRICT_MODE_PENALTY_GATHER);
-    writeInt32(IPCThreadState::self()->getWorkSource());
+    const IPCThreadState* threadState = IPCThreadState::self();
+    writeInt32(threadState->getStrictModePolicy() | STRICT_MODE_PENALTY_GATHER);
+    writeInt32(threadState->shouldPropagateWorkSource() ?
+            threadState->getCallingWorkSourceUid() : IPCThreadState::kUnsetWorkSource);
     // currently the interface identification token is just its name as a string
     return writeString16(interface);
 }
@@ -631,7 +632,7 @@ bool Parcel::enforceInterface(const String16& interface,
     }
     // WorkSource.
     int32_t workSource = readInt32();
-    threadState->setWorkSource(workSource);
+    threadState->setCallingWorkSourceUidWithoutPropagation(workSource);
     // Interface descriptor.
     const String16 str(readString16());
     if (str == interface) {
@@ -875,6 +876,16 @@ status_t Parcel::writeInt64Vector(const std::vector<int64_t>& val)
 status_t Parcel::writeInt64Vector(const std::unique_ptr<std::vector<int64_t>>& val)
 {
     return writeNullableTypedVector(val, &Parcel::writeInt64);
+}
+
+status_t Parcel::writeUint64Vector(const std::vector<uint64_t>& val)
+{
+    return writeTypedVector(val, &Parcel::writeUint64);
+}
+
+status_t Parcel::writeUint64Vector(const std::unique_ptr<std::vector<uint64_t>>& val)
+{
+    return writeNullableTypedVector(val, &Parcel::writeUint64);
 }
 
 status_t Parcel::writeFloatVector(const std::vector<float>& val)
@@ -1738,6 +1749,14 @@ status_t Parcel::readInt64Vector(std::vector<int64_t>* val) const {
     return readTypedVector(val, &Parcel::readInt64);
 }
 
+status_t Parcel::readUint64Vector(std::unique_ptr<std::vector<uint64_t>>* val) const {
+    return readNullableTypedVector(val, &Parcel::readUint64);
+}
+
+status_t Parcel::readUint64Vector(std::vector<uint64_t>* val) const {
+    return readTypedVector(val, &Parcel::readUint64);
+}
+
 status_t Parcel::readFloatVector(std::unique_ptr<std::vector<float>>* val) const {
     return readNullableTypedVector(val, &Parcel::readFloat);
 }
@@ -2558,8 +2577,11 @@ void Parcel::print(TextOutput& to, uint32_t /*flags*/) const
 
 void Parcel::releaseObjects()
 {
-    const sp<ProcessState> proc(ProcessState::self());
     size_t i = mObjectsSize;
+    if (i == 0) {
+        return;
+    }
+    sp<ProcessState> proc(ProcessState::self());
     uint8_t* const data = mData;
     binder_size_t* const objects = mObjects;
     while (i > 0) {
@@ -2572,8 +2594,11 @@ void Parcel::releaseObjects()
 
 void Parcel::acquireObjects()
 {
-    const sp<ProcessState> proc(ProcessState::self());
     size_t i = mObjectsSize;
+    if (i == 0) {
+        return;
+    }
+    const sp<ProcessState> proc(ProcessState::self());
     uint8_t* const data = mData;
     binder_size_t* const objects = mObjects;
     while (i > 0) {

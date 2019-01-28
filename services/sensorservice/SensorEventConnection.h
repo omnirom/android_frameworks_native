@@ -108,6 +108,10 @@ private:
     // size, reallocate memory and copy over events from the older cache.
     void reAllocateCacheLocked(sensors_event_t const* scratch, int count);
 
+    // Add the events to the cache. If the cache would be exceeded, drop events at the beginning of
+    // the cache.
+    void appendEventsToCacheLocked(sensors_event_t const* events, int count);
+
     // LooperCallback method. If there is data to read on this fd, it is an ack from the app that it
     // has read events from a wake up sensor, decrement mWakeLockRefCount.  If this fd is available
     // for writing send the data from the cache.
@@ -125,6 +129,10 @@ private:
     // other end hangs up or when this client unregisters for this connection.
     void updateLooperRegistration(const sp<Looper>& looper); void
             updateLooperRegistrationLocked(const sp<Looper>& looper);
+
+    // Returns whether sensor access is available based on both the uid being active and sensor
+    // privacy not being enabled.
+    bool hasSensorAccess();
 
     sp<SensorService> const mService;
     sp<BitTube> mChannel;
@@ -161,6 +169,8 @@ private:
 
     sensors_event_t *mEventCache;
     int mCacheSize, mMaxCacheSize;
+    int64_t mTimeOfLastEventDrop;
+    int mEventsDropped;
     String8 mPackageName;
     const String16 mOpPackageName;
 #if DEBUG_CONNECTIONS

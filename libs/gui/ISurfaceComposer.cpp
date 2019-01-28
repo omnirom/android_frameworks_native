@@ -73,11 +73,10 @@ public:
         return interface_cast<ISurfaceComposerClient>(reply.readStrongBinder());
     }
 
-    virtual void setTransactionState(
-            const Vector<ComposerState>& state,
-            const Vector<DisplayState>& displays,
-            uint32_t flags)
-    {
+    virtual void setTransactionState(const Vector<ComposerState>& state,
+                                     const Vector<DisplayState>& displays, uint32_t flags,
+                                     const sp<IBinder>& applyToken,
+                                     const InputWindowCommands& commands) {
         Parcel data, reply;
         data.writeInterfaceToken(ISurfaceComposer::getInterfaceDescriptor());
 
@@ -92,6 +91,8 @@ public:
         }
 
         data.writeUint32(flags);
+        data.writeStrongBinder(applyToken);
+        commands.write(data);
         remote()->transact(BnSurfaceComposer::SET_TRANSACTION_STATE, data, &reply);
     }
 
@@ -599,6 +600,97 @@ public:
         }
         return err;
     }
+
+    virtual status_t getDisplayedContentSamplingAttributes(const sp<IBinder>& display,
+                                                           ui::PixelFormat* outFormat,
+                                                           ui::Dataspace* outDataspace,
+                                                           uint8_t* outComponentMask) const {
+        if (!outFormat || !outDataspace || !outComponentMask) return BAD_VALUE;
+        Parcel data, reply;
+        data.writeInterfaceToken(ISurfaceComposer::getInterfaceDescriptor());
+        data.writeStrongBinder(display);
+
+        status_t error =
+                remote()->transact(BnSurfaceComposer::GET_DISPLAYED_CONTENT_SAMPLING_ATTRIBUTES,
+                                   data, &reply);
+        if (error != NO_ERROR) {
+            return error;
+        }
+
+        uint32_t value = 0;
+        error = reply.readUint32(&value);
+        if (error != NO_ERROR) {
+            return error;
+        }
+        *outFormat = static_cast<ui::PixelFormat>(value);
+
+        error = reply.readUint32(&value);
+        if (error != NO_ERROR) {
+            return error;
+        }
+        *outDataspace = static_cast<ui::Dataspace>(value);
+
+        error = reply.readUint32(&value);
+        if (error != NO_ERROR) {
+            return error;
+        }
+        *outComponentMask = static_cast<uint8_t>(value);
+        return error;
+    }
+
+    virtual status_t setDisplayContentSamplingEnabled(const sp<IBinder>& display, bool enable,
+                                                      uint8_t componentMask,
+                                                      uint64_t maxFrames) const {
+        Parcel data, reply;
+        data.writeInterfaceToken(ISurfaceComposer::getInterfaceDescriptor());
+        data.writeStrongBinder(display);
+        data.writeBool(enable);
+        data.writeByte(static_cast<int8_t>(componentMask));
+        data.writeUint64(maxFrames);
+        status_t result =
+                remote()->transact(BnSurfaceComposer::SET_DISPLAY_CONTENT_SAMPLING_ENABLED, data,
+                                   &reply);
+        return result;
+    }
+
+    virtual status_t getDisplayedContentSample(const sp<IBinder>& display, uint64_t maxFrames,
+                                               uint64_t timestamp,
+                                               DisplayedFrameStats* outStats) const {
+        if (!outStats) return BAD_VALUE;
+
+        Parcel data, reply;
+        data.writeInterfaceToken(ISurfaceComposer::getInterfaceDescriptor());
+        data.writeStrongBinder(display);
+        data.writeUint64(maxFrames);
+        data.writeUint64(timestamp);
+
+        status_t result =
+                remote()->transact(BnSurfaceComposer::GET_DISPLAYED_CONTENT_SAMPLE, data, &reply);
+
+        if (result != NO_ERROR) {
+            return result;
+        }
+
+        result = reply.readUint64(&outStats->numFrames);
+        if (result != NO_ERROR) {
+            return result;
+        }
+
+        result = reply.readUint64Vector(&outStats->component_0_sample);
+        if (result != NO_ERROR) {
+            return result;
+        }
+        result = reply.readUint64Vector(&outStats->component_1_sample);
+        if (result != NO_ERROR) {
+            return result;
+        }
+        result = reply.readUint64Vector(&outStats->component_2_sample);
+        if (result != NO_ERROR) {
+            return result;
+        }
+        result = reply.readUint64Vector(&outStats->component_3_sample);
+        return result;
+    }
 };
 
 // Out-of-line virtual method definition to trigger vtable emission in this
@@ -659,7 +751,10 @@ status_t BnSurfaceComposer::onTransact(
             }
 
             uint32_t stateFlags = data.readUint32();
-            setTransactionState(state, displays, stateFlags);
+            sp<IBinder> applyToken = data.readStrongBinder();
+            InputWindowCommands inputWindowCommands;
+            inputWindowCommands.read(data);
+            setTransactionState(state, displays, stateFlags, applyToken, inputWindowCommands);
             return NO_ERROR;
         }
         case BOOT_FINISHED: {
@@ -938,7 +1033,7 @@ status_t BnSurfaceComposer::onTransact(
                 reply->writeInt32(static_cast<int32_t>(defaultDataspace));
                 reply->writeInt32(static_cast<int32_t>(defaultPixelFormat));
                 reply->writeInt32(static_cast<int32_t>(wideColorGamutDataspace));
-                reply->writeInt32(static_cast<int32_t>(wideColorGamutDataspace));
+                reply->writeInt32(static_cast<int32_t>(wideColorGamutPixelFormat));
             }
             return NO_ERROR;
         }
@@ -948,6 +1043,88 @@ status_t BnSurfaceComposer::onTransact(
             status_t error = getColorManagement(&result);
             if (error == NO_ERROR) {
                 reply->writeBool(result);
+            }
+            return result;
+        }
+        case GET_DISPLAYED_CONTENT_SAMPLING_ATTRIBUTES: {
+            CHECK_INTERFACE(ISurfaceComposer, data, reply);
+
+            sp<IBinder> display = data.readStrongBinder();
+            ui::PixelFormat format;
+            ui::Dataspace dataspace;
+            uint8_t component = 0;
+            auto result =
+                    getDisplayedContentSamplingAttributes(display, &format, &dataspace, &component);
+            if (result == NO_ERROR) {
+                reply->writeUint32(static_cast<uint32_t>(format));
+                reply->writeUint32(static_cast<uint32_t>(dataspace));
+                reply->writeUint32(static_cast<uint32_t>(component));
+            }
+            return result;
+        }
+        case SET_DISPLAY_CONTENT_SAMPLING_ENABLED: {
+            CHECK_INTERFACE(ISurfaceComposer, data, reply);
+
+            sp<IBinder> display = nullptr;
+            bool enable = false;
+            int8_t componentMask = 0;
+            uint64_t maxFrames = 0;
+            status_t result = data.readStrongBinder(&display);
+            if (result != NO_ERROR) {
+                ALOGE("setDisplayContentSamplingEnabled failure in reading Display token: %d",
+                      result);
+                return result;
+            }
+
+            result = data.readBool(&enable);
+            if (result != NO_ERROR) {
+                ALOGE("setDisplayContentSamplingEnabled failure in reading enable: %d", result);
+                return result;
+            }
+
+            result = data.readByte(static_cast<int8_t*>(&componentMask));
+            if (result != NO_ERROR) {
+                ALOGE("setDisplayContentSamplingEnabled failure in reading component mask: %d",
+                      result);
+                return result;
+            }
+
+            result = data.readUint64(&maxFrames);
+            if (result != NO_ERROR) {
+                ALOGE("setDisplayContentSamplingEnabled failure in reading max frames: %d", result);
+                return result;
+            }
+
+            return setDisplayContentSamplingEnabled(display, enable,
+                                                    static_cast<uint8_t>(componentMask), maxFrames);
+        }
+        case GET_DISPLAYED_CONTENT_SAMPLE: {
+            CHECK_INTERFACE(ISurfaceComposer, data, reply);
+
+            sp<IBinder> display = data.readStrongBinder();
+            uint64_t maxFrames = 0;
+            uint64_t timestamp = 0;
+
+            status_t result = data.readUint64(&maxFrames);
+            if (result != NO_ERROR) {
+                ALOGE("getDisplayedContentSample failure in reading max frames: %d", result);
+                return result;
+            }
+
+            result = data.readUint64(&timestamp);
+            if (result != NO_ERROR) {
+                ALOGE("getDisplayedContentSample failure in reading timestamp: %d", result);
+                return result;
+            }
+
+            DisplayedFrameStats stats;
+            result = getDisplayedContentSample(display, maxFrames, timestamp, &stats);
+            if (result == NO_ERROR) {
+                reply->writeUint64(stats.numFrames);
+                reply->writeUint64Vector(stats.component_0_sample);
+                reply->writeUint64Vector(stats.component_1_sample);
+                reply->writeUint64Vector(stats.component_2_sample);
+                reply->writeUint64Vector(stats.component_3_sample);
             }
             return result;
         }

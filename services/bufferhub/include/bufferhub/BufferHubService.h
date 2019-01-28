@@ -22,6 +22,7 @@
 
 #include <android/frameworks/bufferhub/1.0/IBufferHub.h>
 #include <bufferhub/BufferClient.h>
+#include <bufferhub/BufferHubIdGenerator.h>
 #include <utils/Mutex.h>
 
 namespace android {
@@ -39,22 +40,27 @@ public:
     Return<void> allocateBuffer(const HardwareBufferDescription& description,
                                 const uint32_t userMetadataSize,
                                 allocateBuffer_cb _hidl_cb) override;
-    Return<void> importBuffer(const hidl_handle& nativeHandle, importBuffer_cb _hidl_cb) override;
+    Return<void> importBuffer(const hidl_handle& tokenHandle, importBuffer_cb _hidl_cb) override;
 
     // Non-binder functions
     // Internal help function for IBufferClient::duplicate.
-    hidl_handle registerToken(const BufferClient* client);
+    hidl_handle registerToken(const wp<BufferClient>& client);
+
+    void onClientClosed(const BufferClient* client);
 
 private:
+    // Helper function to remove all the token belongs to a specific client.
+    void removeTokenByClient(const BufferClient* client);
+
     // List of active BufferClient for bookkeeping.
-    std::mutex mClientListMutex;
-    std::vector<sp<BufferClient>> mClientList GUARDED_BY(mClientListMutex);
+    std::mutex mClientSetMutex;
+    std::set<wp<BufferClient>> mClientSet GUARDED_BY(mClientSetMutex);
 
     // TODO(b/118180214): use a more secure implementation
     std::mt19937 mTokenEngine;
     // The mapping from token to the client creates it.
     std::mutex mTokenMapMutex;
-    std::map<uint32_t, const BufferClient*> mTokenMap GUARDED_BY(mTokenMapMutex);
+    std::map<uint32_t, const wp<BufferClient>> mTokenMap GUARDED_BY(mTokenMapMutex);
 };
 
 } // namespace implementation

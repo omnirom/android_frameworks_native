@@ -9,7 +9,6 @@ cc_defaults {
         "-Wunused",
         "-Wunreachable-code",
     ],
-    cppflags: ["-std=c++1z"],
 }
 
 cc_defaults {
@@ -32,8 +31,6 @@ cc_defaults {
         "android.hardware.graphics.composer@2.3",
         "android.hardware.power@1.0",
         "android.hardware.power@1.3",
-        "vendor.display.config@1.1",
-        "vendor.display.config@1.2",
         "libbase",
         "libbinder",
         "libbufferhubqueue",
@@ -50,12 +47,13 @@ cc_defaults {
         "libhwbinder",
         "liblayers_proto",
         "liblog",
-    	"libnativewindow",
+	"libnativewindow",
         "libpdx_default_transport",
         "libprotobuf-cpp-lite",
         "libsync",
         "libtimestats_proto",
         "libui",
+        "libinput",
         "libutils",
     ],
     static_libs: [
@@ -69,7 +67,6 @@ cc_defaults {
         "android.hardware.graphics.composer@2.1-command-buffer",
         "android.hardware.graphics.composer@2.2-command-buffer",
         "android.hardware.graphics.composer@2.3-command-buffer",
-        "display_intf_headers",
     ],
     export_static_lib_headers: [
         "librenderengine",
@@ -126,18 +123,8 @@ filegroup {
         "DisplayHardware/HWComposerBufferCache.cpp",
         "DisplayHardware/PowerAdvisor.cpp",
         "DisplayHardware/VirtualDisplaySurface.cpp",
-        // TODO(b/120623859): this code is removed because the upstream surface
-        // flinger has been refactored such that this code is no longer
-        // compatible. Please adapt it to the upstream version.
-        // "DisplayUtils.cpp",
         "Effects/Daltonizer.cpp",
         "EventLog/EventLog.cpp",
-        // TODO(b/120623859): this code is removed because the upstream surface
-        // flinger has been refactored such that this code is no longer
-        // compatible. Please adapt it to the upstream version.
-        // "ExSurfaceFlinger/ExSurfaceFlinger.cpp",
-        // "ExSurfaceFlinger/ExVirtualDisplaySurface.cpp",
-        // "ExSurfaceFlinger/ExBufferLayer.cpp",
         "FrameTracker.cpp",
         "Layer.cpp",
         "LayerBE.cpp",
@@ -152,8 +139,11 @@ filegroup {
         "Scheduler/DispSyncSource.cpp",
         "Scheduler/EventControlThread.cpp",
         "Scheduler/EventThread.cpp",
+        "Scheduler/IdleTimer.cpp",
+        "Scheduler/LayerHistory.cpp",
         "Scheduler/MessageQueue.cpp",
         "Scheduler/Scheduler.cpp",
+        "Scheduler/SchedulerUtils.cpp",
         "StartPropertySetThread.cpp",
         "SurfaceFlinger.cpp",
         "SurfaceInterceptor.cpp",
@@ -195,8 +185,10 @@ cc_defaults {
         "libdisplayservicehidl",
         "libhidlbase",
         "libhidltransport",
+        "libinput",
         "liblayers_proto",
         "liblog",
+        "libsync",
         "libtimestats_proto",
         "libutils",
     ],

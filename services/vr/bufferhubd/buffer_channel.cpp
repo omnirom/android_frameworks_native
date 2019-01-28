@@ -32,7 +32,7 @@ BufferChannel::BufferChannel(BufferHubService* service, int buffer_id,
     : BufferHubChannel(service, buffer_id, channel_id, kDetachedBufferType),
       buffer_node_(buffer_node) {
   client_state_mask_ = buffer_node_->AddNewActiveClientsBitToMask();
-  if (client_state_mask_ == 0ULL) {
+  if (client_state_mask_ == 0U) {
     ALOGE("BufferChannel::BufferChannel: %s", strerror(errno));
     buffer_node_ = nullptr;
   }
@@ -41,7 +41,7 @@ BufferChannel::BufferChannel(BufferHubService* service, int buffer_id,
 BufferChannel::~BufferChannel() {
   ALOGD_IF(TRACE, "BufferChannel::~BufferChannel: channel_id=%d buffer_id=%d.",
            channel_id(), buffer_id());
-  if (client_state_mask_ != 0ULL) {
+  if (client_state_mask_ != 0U) {
     buffer_node_->RemoveClientsBitFromMask(client_state_mask_);
   }
   Hangup();
@@ -52,8 +52,7 @@ BufferHubChannel::BufferInfo BufferChannel::GetBufferInfo() const {
       buffer_id(), /*consumer_count=*/0, buffer_node_->buffer_desc().width,
       buffer_node_->buffer_desc().height, buffer_node_->buffer_desc().layers,
       buffer_node_->buffer_desc().format, buffer_node_->buffer_desc().usage,
-      /*pending_count=*/0, /*state=*/0, /*signaled_mask=*/0,
-      /*index=*/0);
+      /*state=*/0, /*signaled_mask=*/0, /*index=*/0);
 }
 
 void BufferChannel::HandleImpulse(Message& /*message*/) {
@@ -83,10 +82,13 @@ Status<BufferTraits<BorrowedHandle>> BufferChannel::OnImport(
   ATRACE_NAME("BufferChannel::OnImport");
   ALOGD_IF(TRACE, "BufferChannel::OnImport: buffer=%d.", buffer_id());
 
+  BorrowedHandle ashmem_handle =
+      BorrowedHandle(buffer_node_->metadata().ashmem_fd().get());
+
   // TODO(b/112057680) Move away from the GraphicBuffer-based IonBuffer.
   return BufferTraits<BorrowedHandle>{
       /*buffer_handle=*/buffer_node_->buffer_handle(),
-      /*metadata_handle=*/buffer_node_->metadata().ashmem_handle().Borrow(),
+      /*metadata_handle=*/ashmem_handle,
       /*id=*/buffer_id(),
       /*client_state_mask=*/client_state_mask_,
       /*metadata_size=*/buffer_node_->metadata().metadata_size(),

@@ -17,27 +17,14 @@
 #ifndef ANDROID_BUFFER_HUB_METADATA_H_
 #define ANDROID_BUFFER_HUB_METADATA_H_
 
-// We would eliminate the clang warnings introduced by libdpx.
-// TODO(b/112338294): Remove those once BufferHub moved to use Binder
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wconversion"
-#pragma clang diagnostic ignored "-Wdouble-promotion"
-#pragma clang diagnostic ignored "-Wgnu-case-range"
-#pragma clang diagnostic ignored "-Wgnu-zero-variadic-macro-arguments"
-#pragma clang diagnostic ignored "-Winconsistent-missing-destructor-override"
-#pragma clang diagnostic ignored "-Wnested-anon-types"
-#pragma clang diagnostic ignored "-Wpacked"
-#pragma clang diagnostic ignored "-Wshadow"
-#pragma clang diagnostic ignored "-Wsign-conversion"
-#pragma clang diagnostic ignored "-Wswitch-enum"
-#pragma clang diagnostic ignored "-Wundefined-func-template"
-#pragma clang diagnostic ignored "-Wunused-template"
-#pragma clang diagnostic ignored "-Wweak-vtables"
-#include <pdx/file_handle.h>
-#include <private/dvr/buffer_hub_defs.h>
-#pragma clang diagnostic pop
+#include <android-base/unique_fd.h>
+#include <ui/BufferHubDefs.h>
 
 namespace android {
+
+namespace {
+using base::unique_fd;
+} // namespace
 
 class BufferHubMetadata {
 public:
@@ -50,11 +37,8 @@ public:
 
     // Imports an existing BufferHubMetadata from an ashmem FD.
     //
-    // TODO(b/112338294): Refactor BufferHub to use Binder as its internal IPC backend instead of
-    // UDS.
-    //
-    // @param ashmemHandle Ashmem file handle representing an ashmem region.
-    static BufferHubMetadata Import(pdx::LocalHandle ashmemHandle);
+    // @param ashmemFd Ashmem file descriptor representing an ashmem region.
+    static BufferHubMetadata Import(unique_fd ashmemFd);
 
     BufferHubMetadata() = default;
 
@@ -67,7 +51,7 @@ public:
             mUserMetadataSize = other.mUserMetadataSize;
             other.mUserMetadataSize = 0;
 
-            mAshmemHandle = std::move(other.mAshmemHandle);
+            mAshmemFd = std::move(other.mAshmemFd);
 
             // The old raw mMetadataHeader pointer must be cleared, otherwise the destructor will
             // automatically mummap() the shared memory.
@@ -79,26 +63,24 @@ public:
 
     // Returns true if the metadata is valid, i.e. the metadata has a valid ashmem fd and the ashmem
     // has been mapped into virtual address space.
-    bool IsValid() const { return mAshmemHandle.IsValid() && mMetadataHeader != nullptr; }
+    bool IsValid() const { return mAshmemFd.get() != -1 && mMetadataHeader != nullptr; }
 
     size_t user_metadata_size() const { return mUserMetadataSize; }
-    size_t metadata_size() const {
-        return mUserMetadataSize + dvr::BufferHubDefs::kMetadataHeaderSize;
-    }
+    size_t metadata_size() const { return mUserMetadataSize + BufferHubDefs::kMetadataHeaderSize; }
 
-    const pdx::LocalHandle& ashmem_handle() const { return mAshmemHandle; }
-    dvr::BufferHubDefs::MetadataHeader* metadata_header() { return mMetadataHeader; }
+    const unique_fd& ashmem_fd() const { return mAshmemFd; }
+    BufferHubDefs::MetadataHeader* metadata_header() { return mMetadataHeader; }
 
 private:
-    BufferHubMetadata(size_t userMetadataSize, pdx::LocalHandle ashmemHandle,
-                      dvr::BufferHubDefs::MetadataHeader* metadataHeader);
+    BufferHubMetadata(size_t userMetadataSize, unique_fd ashmemFd,
+                      BufferHubDefs::MetadataHeader* metadataHeader);
 
     BufferHubMetadata(const BufferHubMetadata&) = delete;
     void operator=(const BufferHubMetadata&) = delete;
 
     size_t mUserMetadataSize = 0;
-    pdx::LocalHandle mAshmemHandle;
-    dvr::BufferHubDefs::MetadataHeader* mMetadataHeader = nullptr;
+    unique_fd mAshmemFd;
+    BufferHubDefs::MetadataHeader* mMetadataHeader = nullptr;
 };
 
 } // namespace android

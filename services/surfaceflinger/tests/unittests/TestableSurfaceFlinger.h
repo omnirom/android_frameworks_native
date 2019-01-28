@@ -28,6 +28,8 @@
 #include "SurfaceFlingerFactory.h"
 #include "SurfaceInterceptor.h"
 
+#include "TimeStats/TimeStats.h"
+
 namespace android {
 
 class EventThread;
@@ -131,6 +133,11 @@ public:
         return nullptr;
     }
 
+    std::unique_ptr<TimeStats> createTimeStats() override {
+        // TODO: Use test-fixture controlled factory
+        return std::make_unique<TimeStats>();
+    }
+
     using CreateBufferQueueFunction =
             std::function<void(sp<IGraphicBufferProducer>* /* outProducer */,
                                sp<IGraphicBufferConsumer>* /* outConsumer */,
@@ -171,11 +178,12 @@ public:
 
     using HotplugEvent = SurfaceFlinger::HotplugEvent;
 
-    auto& mutableLayerCurrentState(sp<Layer> layer) { return layer->mCurrentState; }
-    auto& mutableLayerDrawingState(sp<Layer> layer) { return layer->mDrawingState; }
+    auto& mutableLayerCurrentState(sp<Layer> layer) { return layer->mState.current; }
+    auto& mutableLayerDrawingState(sp<Layer> layer) { return layer->mState.drawing; }
 
     void setLayerSidebandStream(sp<Layer> layer, sp<NativeHandle> sidebandStream) {
-        layer->mDrawingState.sidebandStream = sidebandStream;
+        Mutex::Autolock lock(layer->mStateMutex);
+        layer->mState.drawing.sidebandStream = sidebandStream;
         layer->getBE().compositionInfo.hwc.sidebandStream = sidebandStream;
     }
 
@@ -219,9 +227,8 @@ public:
 
     auto onInitializeDisplays() { return mFlinger->onInitializeDisplays(); }
 
-    auto setPowerModeInternal(const sp<DisplayDevice>& display, int mode,
-                              bool stateLockHeld = false) {
-        return mFlinger->setPowerModeInternal(display, mode, stateLockHeld);
+    auto setPowerModeInternal(const sp<DisplayDevice>& display, int mode) {
+        return mFlinger->setPowerModeInternal(display, mode);
     }
 
     auto onMessageReceived(int32_t what) { return mFlinger->onMessageReceived(what); }
@@ -471,11 +478,6 @@ public:
 
         auto& setDisplaySurface(const sp<DisplaySurface>& displaySurface) {
             mCreationArgs.displaySurface = displaySurface;
-            return *this;
-        }
-
-        auto& setRenderSurface(std::unique_ptr<renderengine::Surface> renderSurface) {
-            mCreationArgs.renderSurface = std::move(renderSurface);
             return *this;
         }
 

@@ -29,6 +29,7 @@
 #include <utils/Looper.h>
 #include <utils/BitSet.h>
 #include <cutils/atomic.h>
+#include <unordered_map>
 
 #include <stddef.h>
 #include <unistd.h>
@@ -36,6 +37,7 @@
 #include <unordered_map>
 
 #include "InputListener.h"
+#include "InputReporter.h"
 
 
 namespace android {
@@ -159,7 +161,9 @@ struct InputTarget {
 
     // Scaling factor to apply to MotionEvent as it is delivered.
     // (ignored for KeyEvents)
-    float scaleFactor;
+    float globalScaleFactor;
+    float windowXScale = 1.0f;
+    float windowYScale = 1.0f;
 
     // The subset of pointer ids to include in motion events dispatched to this input target
     // if FLAG_SPLIT is set.
@@ -213,6 +217,7 @@ public:
 
     /* Notifies the system that an input channel is unrecoverably broken. */
     virtual void notifyInputChannelBroken(const sp<IBinder>& token) = 0;
+    virtual void notifyFocusChanged(const sp<IBinder>& token) = 0;
 
     /* Gets the input dispatcher configuration. */
     virtual void getDispatcherConfiguration(InputDispatcherConfiguration* outConfig) = 0;
@@ -450,6 +455,7 @@ private:
             TYPE_MOTION
         };
 
+        uint32_t sequenceNum;
         mutable int32_t refCount;
         int32_t type;
         nsecs_t eventTime;
@@ -465,13 +471,13 @@ private:
         virtual void appendDescription(std::string& msg) const = 0;
 
     protected:
-        EventEntry(int32_t type, nsecs_t eventTime, uint32_t policyFlags);
+        EventEntry(uint32_t sequenceNum, int32_t type, nsecs_t eventTime, uint32_t policyFlags);
         virtual ~EventEntry();
         void releaseInjectionState();
     };
 
     struct ConfigurationChangedEntry : EventEntry {
-        explicit ConfigurationChangedEntry(nsecs_t eventTime);
+        explicit ConfigurationChangedEntry(uint32_t sequenceNum, nsecs_t eventTime);
         virtual void appendDescription(std::string& msg) const;
 
     protected:
@@ -481,7 +487,7 @@ private:
     struct DeviceResetEntry : EventEntry {
         int32_t deviceId;
 
-        DeviceResetEntry(nsecs_t eventTime, int32_t deviceId);
+        DeviceResetEntry(uint32_t sequenceNum, nsecs_t eventTime, int32_t deviceId);
         virtual void appendDescription(std::string& msg) const;
 
     protected:
@@ -511,7 +517,7 @@ private:
         InterceptKeyResult interceptKeyResult; // set based on the interception result
         nsecs_t interceptKeyWakeupTime; // used with INTERCEPT_KEY_RESULT_TRY_AGAIN_LATER
 
-        KeyEntry(nsecs_t eventTime,
+        KeyEntry(uint32_t sequenceNum, nsecs_t eventTime,
                 int32_t deviceId, uint32_t source, int32_t displayId, uint32_t policyFlags,
                 int32_t action, int32_t flags, int32_t keyCode, int32_t scanCode, int32_t metaState,
                 int32_t repeatCount, nsecs_t downTime);
@@ -540,7 +546,7 @@ private:
         PointerProperties pointerProperties[MAX_POINTERS];
         PointerCoords pointerCoords[MAX_POINTERS];
 
-        MotionEntry(nsecs_t eventTime,
+        MotionEntry(uint32_t sequenceNum, nsecs_t eventTime,
                 int32_t deviceId, uint32_t source, int32_t displayId, uint32_t policyFlags,
                 int32_t action, int32_t actionButton, int32_t flags,
                 int32_t metaState, int32_t buttonState, int32_t edgeFlags,
@@ -561,7 +567,9 @@ private:
         int32_t targetFlags;
         float xOffset;
         float yOffset;
-        float scaleFactor;
+        float globalScaleFactor;
+        float windowXScale = 1.0f;
+        float windowYScale = 1.0f;
         nsecs_t deliveryTime; // time when the event was actually delivered
 
         // Set to the resolved action and flags when the event is enqueued.
@@ -569,7 +577,8 @@ private:
         int32_t resolvedFlags;
 
         DispatchEntry(EventEntry* eventEntry,
-                int32_t targetFlags, float xOffset, float yOffset, float scaleFactor);
+                int32_t targetFlags, float xOffset, float yOffset,
+                float globalScaleFactor, float windowXScale, float windowYScale);
         ~DispatchEntry();
 
         inline bool hasForegroundTarget() const {
@@ -622,6 +631,7 @@ private:
         uint32_t seq;
         bool handled;
         sp<InputChannel> inputChannel;
+        sp<IBinder> token;
     };
 
     // Generic queue implementation.
@@ -916,6 +926,13 @@ private:
     // All registered connections mapped by channel file descriptor.
     KeyedVector<int, sp<Connection> > mConnectionsByFd;
 
+    struct IBinderHash {
+        std::size_t operator()(const sp<IBinder>& b) const {
+            return std::hash<IBinder *>{}(b.get());
+        }
+    };
+    std::unordered_map<sp<IBinder>, sp<InputChannel>, IBinderHash> mInputChannelsByToken;
+
     ssize_t getConnectionIndexLocked(const sp<InputChannel>& inputChannel);
 
     // Input channels that will receive a copy of all input events sent to the provided display.
@@ -979,6 +996,7 @@ private:
     // Get window handles by display, return an empty vector if not found.
     Vector<sp<InputWindowHandle>> getWindowHandlesLocked(int32_t displayId) const;
     sp<InputWindowHandle> getWindowHandleLocked(const sp<InputChannel>& inputChannel) const;
+    sp<InputChannel> getInputChannelLocked(const sp<IBinder>& windowToken) const;
     bool hasWindowHandleLocked(const sp<InputWindowHandle>& windowHandle) const;
 
     // Focus tracking for keys, trackball, etc.
@@ -1051,7 +1069,7 @@ private:
     nsecs_t mInputTargetWaitStartTime;
     nsecs_t mInputTargetWaitTimeoutTime;
     bool mInputTargetWaitTimeoutExpired;
-    sp<InputApplicationHandle> mInputTargetWaitApplicationHandle;
+    sp<IBinder> mInputTargetWaitApplicationToken;
 
     // Contains the last window which received a hover event.
     sp<InputWindowHandle> mLastHoverWindowHandle;
@@ -1143,6 +1161,7 @@ private:
             nsecs_t currentTime, const sp<Connection>& connection, uint32_t seq, bool handled);
     void onDispatchCycleBrokenLocked(
             nsecs_t currentTime, const sp<Connection>& connection);
+    void onFocusChangedLocked(const sp<InputWindowHandle>& newFocus);
     void onANRLocked(
             nsecs_t currentTime, const sp<InputApplicationHandle>& applicationHandle,
             const sp<InputWindowHandle>& windowHandle,
@@ -1151,6 +1170,7 @@ private:
     // Outbound policy interactions.
     void doNotifyConfigurationChangedInterruptible(CommandEntry* commandEntry);
     void doNotifyInputChannelBrokenLockedInterruptible(CommandEntry* commandEntry);
+    void doNotifyFocusChangedLockedInterruptible(CommandEntry* commandEntry);
     void doNotifyANRLockedInterruptible(CommandEntry* commandEntry);
     void doInterceptKeyBeforeDispatchingLockedInterruptible(CommandEntry* commandEntry);
     void doDispatchCycleFinishedLockedInterruptible(CommandEntry* commandEntry);
@@ -1167,6 +1187,8 @@ private:
     void traceInboundQueueLengthLocked();
     void traceOutboundQueueLengthLocked(const sp<Connection>& connection);
     void traceWaitQueueLengthLocked(const sp<Connection>& connection);
+
+    sp<InputReporter> mReporter;
 };
 
 /* Enqueues and dispatches input events, endlessly. */

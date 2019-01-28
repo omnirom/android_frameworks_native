@@ -487,21 +487,43 @@ Error Composer::getHdrCapabilities(Display display,
         float* outMaxAverageLuminance, float* outMinLuminance)
 {
     Error error = kDefaultError;
-    mClient->getHdrCapabilities(display,
-            [&](const auto& tmpError, const auto& tmpTypes,
-                const auto& tmpMaxLuminance,
-                const auto& tmpMaxAverageLuminance,
-                const auto& tmpMinLuminance) {
-                error = tmpError;
-                if (error != Error::NONE) {
-                    return;
-                }
+    if (mClient_2_3) {
+        mClient_2_3->getHdrCapabilities_2_3(display,
+                                            [&](const auto& tmpError, const auto& tmpTypes,
+                                                const auto& tmpMaxLuminance,
+                                                const auto& tmpMaxAverageLuminance,
+                                                const auto& tmpMinLuminance) {
+                                                error = tmpError;
+                                                if (error != Error::NONE) {
+                                                    return;
+                                                }
 
-                *outTypes = tmpTypes;
-                *outMaxLuminance = tmpMaxLuminance;
-                *outMaxAverageLuminance = tmpMaxAverageLuminance;
-                *outMinLuminance = tmpMinLuminance;
-            });
+                                                *outTypes = tmpTypes;
+                                                *outMaxLuminance = tmpMaxLuminance;
+                                                *outMaxAverageLuminance = tmpMaxAverageLuminance;
+                                                *outMinLuminance = tmpMinLuminance;
+                                            });
+    } else {
+        mClient->getHdrCapabilities(display,
+                                    [&](const auto& tmpError, const auto& tmpTypes,
+                                        const auto& tmpMaxLuminance,
+                                        const auto& tmpMaxAverageLuminance,
+                                        const auto& tmpMinLuminance) {
+                                        error = tmpError;
+                                        if (error != Error::NONE) {
+                                            return;
+                                        }
+
+                                        outTypes->clear();
+                                        for (auto type : tmpTypes) {
+                                            outTypes->push_back(static_cast<Hdr>(type));
+                                        }
+
+                                        *outMaxLuminance = tmpMaxLuminance;
+                                        *outMaxAverageLuminance = tmpMaxAverageLuminance;
+                                        *outMinLuminance = tmpMinLuminance;
+                                    });
+    }
 
     return error;
 }
@@ -926,15 +948,33 @@ std::vector<IComposerClient::PerFrameMetadataKey> Composer::getPerFrameMetadataK
     }
 
     Error error = kDefaultError;
-    mClient_2_2->getPerFrameMetadataKeys(display, [&](const auto& tmpError, const auto& tmpKeys) {
-        error = tmpError;
-        if (error != Error::NONE) {
-            ALOGW("getPerFrameMetadataKeys failed with %d", tmpError);
-            return;
-        }
+    if (mClient_2_3) {
+        mClient_2_3->getPerFrameMetadataKeys_2_3(display,
+                                                 [&](const auto& tmpError, const auto& tmpKeys) {
+                                                     error = tmpError;
+                                                     if (error != Error::NONE) {
+                                                         ALOGW("getPerFrameMetadataKeys failed "
+                                                               "with %d",
+                                                               tmpError);
+                                                         return;
+                                                     }
+                                                     keys = tmpKeys;
+                                                 });
+    } else {
+        mClient_2_2
+                ->getPerFrameMetadataKeys(display, [&](const auto& tmpError, const auto& tmpKeys) {
+                    error = tmpError;
+                    if (error != Error::NONE) {
+                        ALOGW("getPerFrameMetadataKeys failed with %d", tmpError);
+                        return;
+                    }
 
-        keys = tmpKeys;
-    });
+                    keys.clear();
+                    for (auto key : tmpKeys) {
+                        keys.push_back(static_cast<IComposerClient::PerFrameMetadataKey>(key));
+                    }
+                });
+    }
 
     return keys;
 }
@@ -1020,6 +1060,100 @@ Error Composer::setLayerColorTransform(Display display, Layer layer, const float
     mWriter.selectDisplay(display);
     mWriter.selectLayer(layer);
     mWriter.setLayerColorTransform(matrix);
+    return Error::NONE;
+}
+
+Error Composer::getDisplayedContentSamplingAttributes(Display display, PixelFormat* outFormat,
+                                                      Dataspace* outDataspace,
+                                                      uint8_t* outComponentMask) {
+    if (!outFormat || !outDataspace || !outComponentMask) {
+        return Error::BAD_PARAMETER;
+    }
+    if (!mClient_2_3) {
+        return Error::UNSUPPORTED;
+    }
+    Error error = kDefaultError;
+    mClient_2_3->getDisplayedContentSamplingAttributes(display,
+                                                       [&](const auto tmpError,
+                                                           const auto& tmpFormat,
+                                                           const auto& tmpDataspace,
+                                                           const auto& tmpComponentMask) {
+                                                           error = tmpError;
+                                                           if (error == Error::NONE) {
+                                                               *outFormat = tmpFormat;
+                                                               *outDataspace = tmpDataspace;
+                                                               *outComponentMask =
+                                                                       static_cast<uint8_t>(
+                                                                               tmpComponentMask);
+                                                           }
+                                                       });
+    return error;
+}
+
+Error Composer::getDisplayCapabilities(Display display,
+                                       std::vector<DisplayCapability>* outCapabilities) {
+    if (!mClient_2_3) {
+        return Error::UNSUPPORTED;
+    }
+    Error error = kDefaultError;
+    mClient_2_3->getDisplayCapabilities(display,
+                                        [&](const auto& tmpError, const auto& tmpCapabilities) {
+                                            error = tmpError;
+                                            if (error != Error::NONE) {
+                                                return;
+                                            }
+                                            *outCapabilities = tmpCapabilities;
+                                        });
+    return error;
+}
+
+Error Composer::setDisplayContentSamplingEnabled(Display display, bool enabled,
+                                                 uint8_t componentMask, uint64_t maxFrames) {
+    if (!mClient_2_3) {
+        return Error::UNSUPPORTED;
+    }
+
+    auto enable = enabled ? V2_3::IComposerClient::DisplayedContentSampling::ENABLE
+                          : V2_3::IComposerClient::DisplayedContentSampling::DISABLE;
+    return mClient_2_3->setDisplayedContentSamplingEnabled(display, enable, componentMask,
+                                                           maxFrames);
+}
+
+Error Composer::getDisplayedContentSample(Display display, uint64_t maxFrames, uint64_t timestamp,
+                                          DisplayedFrameStats* outStats) {
+    if (!outStats) {
+        return Error::BAD_PARAMETER;
+    }
+    if (!mClient_2_3) {
+        return Error::UNSUPPORTED;
+    }
+    Error error = kDefaultError;
+    mClient_2_3->getDisplayedContentSample(display, maxFrames, timestamp,
+                                           [&](const auto tmpError, auto tmpNumFrames,
+                                               const auto& tmpSamples0, const auto& tmpSamples1,
+                                               const auto& tmpSamples2, const auto& tmpSamples3) {
+                                               error = tmpError;
+                                               if (error == Error::NONE) {
+                                                   outStats->numFrames = tmpNumFrames;
+                                                   outStats->component_0_sample = tmpSamples0;
+                                                   outStats->component_1_sample = tmpSamples1;
+                                                   outStats->component_2_sample = tmpSamples2;
+                                                   outStats->component_3_sample = tmpSamples3;
+                                               }
+                                           });
+    return error;
+}
+
+Error Composer::setLayerPerFrameMetadataBlobs(
+        Display display, Layer layer,
+        const std::vector<IComposerClient::PerFrameMetadataBlob>& metadata) {
+    if (!mClient_2_3) {
+        return Error::UNSUPPORTED;
+    }
+
+    mWriter.selectDisplay(display);
+    mWriter.selectLayer(layer);
+    mWriter.setLayerPerFrameMetadataBlobs(metadata);
     return Error::NONE;
 }
 

@@ -16,17 +16,18 @@ class ConsumerChannel : public BufferHubChannel {
   using Message = pdx::Message;
 
   ConsumerChannel(BufferHubService* service, int buffer_id, int channel_id,
-                  uint64_t client_state_mask,
+                  uint32_t client_state_mask,
                   const std::shared_ptr<Channel> producer);
   ~ConsumerChannel() override;
 
   bool HandleMessage(Message& message) override;
   void HandleImpulse(Message& message) override;
 
-  uint64_t client_state_mask() const { return client_state_mask_; }
+  uint32_t client_state_mask() const { return client_state_mask_; }
   BufferInfo GetBufferInfo() const override;
 
-  bool OnProducerPosted();
+  void OnProducerGained();
+  void OnProducerPosted();
   void OnProducerClosed();
 
  private:
@@ -38,7 +39,7 @@ class ConsumerChannel : public BufferHubChannel {
   pdx::Status<void> OnConsumerRelease(Message& message,
                                       LocalFence release_fence);
 
-  uint64_t client_state_mask_{0};
+  uint32_t client_state_mask_{0U};
   bool acquired_{false};
   bool released_{true};
   std::weak_ptr<Channel> producer_;

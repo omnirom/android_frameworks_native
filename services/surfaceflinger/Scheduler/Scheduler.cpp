@@ -18,6 +18,7 @@
 
 #include "Scheduler.h"
 
+#include <algorithm>
 #include <cinttypes>
 #include <cstdint>
 #include <memory>
@@ -28,15 +29,19 @@
 #include <android/hardware/configstore/1.2/ISurfaceFlingerConfigs.h>
 #include <configstore/Utils.h>
 
+#include <cutils/properties.h>
 #include <gui/ISurfaceComposer.h>
 #include <ui/DisplayStatInfo.h>
+#include <utils/Timers.h>
 #include <utils/Trace.h>
 
 #include "DispSync.h"
 #include "DispSyncSource.h"
 #include "EventControlThread.h"
 #include "EventThread.h"
+#include "IdleTimer.h"
 #include "InjectVSyncSource.h"
+#include "SchedulerUtils.h"
 
 namespace android {
 
@@ -65,6 +70,17 @@ Scheduler::Scheduler(impl::EventControlThread::SetVSyncEnabledFunction function)
     primaryDispSync->init(mHasSyncFramework, mDispSyncPresentTimeOffset);
     mPrimaryDispSync = std::move(primaryDispSync);
     mEventControlThread = std::make_unique<impl::EventControlThread>(function);
+
+    char value[PROPERTY_VALUE_MAX];
+    property_get("debug.sf.set_idle_timer_ms", value, "0");
+    mSetIdleTimerMs = atoi(value);
+
+    if (mSetIdleTimerMs > 0) {
+        mIdleTimer =
+                std::make_unique<scheduler::IdleTimer>(std::chrono::milliseconds(mSetIdleTimerMs),
+                                                       [this] { expiredTimerCallback(); });
+        mIdleTimer->start();
+    }
 }
 
 Scheduler::~Scheduler() = default;
@@ -95,7 +111,8 @@ std::unique_ptr<EventThread> Scheduler::makeEventThread(
             std::make_unique<DispSyncSource>(dispSync, phaseOffsetNs, true, sourceName.c_str());
     const std::string threadName = connectionName + "Thread";
     return std::make_unique<impl::EventThread>(std::move(eventThreadSource), resyncCallback,
-                                               interceptCallback, threadName.c_str());
+                                               interceptCallback, [this] { resetIdleTimer(); },
+                                               threadName.c_str());
 }
 
 sp<IDisplayEventConnection> Scheduler::createDisplayEventConnection(
@@ -109,7 +126,7 @@ EventThread* Scheduler::getEventThread(const sp<Scheduler::ConnectionHandle>& ha
     return mConnections[handle->id]->thread.get();
 }
 
-sp<BnDisplayEventConnection> Scheduler::getEventConnection(const sp<ConnectionHandle>& handle) {
+sp<EventThreadConnection> Scheduler::getEventConnection(const sp<ConnectionHandle>& handle) {
     RETURN_VALUE_IF_INVALID(nullptr);
     return mConnections[handle->id]->eventConnection;
 }
@@ -130,7 +147,7 @@ void Scheduler::onScreenReleased(const sp<Scheduler::ConnectionHandle>& handle) 
     mConnections[handle->id]->thread->onScreenReleased();
 }
 
-void Scheduler::dump(const sp<Scheduler::ConnectionHandle>& handle, String8& result) const {
+void Scheduler::dump(const sp<Scheduler::ConnectionHandle>& handle, std::string& result) const {
     RETURN_IF_INVALID();
     mConnections.at(handle->id)->thread->dump(result);
 }
@@ -205,44 +222,20 @@ void Scheduler::makeHWSyncAvailable(bool makeAvailable) {
     mHWVsyncAvailable = makeAvailable;
 }
 
-void Scheduler::addNewFrameTimestamp(const nsecs_t newFrameTimestamp, bool isAutoTimestamp) {
-    ATRACE_INT("AutoTimestamp", isAutoTimestamp);
-    // Video does not have timestamp automatically set, so we discard timestamps that are
-    // coming in from other sources for now.
-    if (isAutoTimestamp) {
-        return;
-    }
-    int64_t differenceMs = (newFrameTimestamp - mPreviousFrameTimestamp) / 1000000;
-    mPreviousFrameTimestamp = newFrameTimestamp;
+void Scheduler::addFramePresentTimeForLayer(const nsecs_t framePresentTime, bool isAutoTimestamp,
+                                            const std::string layerName) {
+    // This is V1 logic. It calculates the average FPS based on the timestamp frequency
+    // regardless of which layer the timestamp came from.
+    // For now, the averages and FPS are recorded in the systrace.
+    determineTimestampAverage(isAutoTimestamp, framePresentTime);
 
-    if (differenceMs < 10 || differenceMs > 100) {
-        // Dismiss noise.
-        return;
-    }
-    ATRACE_INT("TimestampDiff", differenceMs);
-
-    mTimeDifferences[mCounter % ARRAY_SIZE] = differenceMs;
-    mCounter++;
-    nsecs_t average = calculateAverage();
-    ATRACE_INT("TimestampAverage", average);
-
-    // TODO(b/113612090): This are current numbers from trial and error while running videos
-    // from YouTube at 24, 30, and 60 fps.
-    if (average > 14 && average < 18) {
-        ATRACE_INT("FPS", 60);
-    } else if (average > 31 && average < 34) {
-        ATRACE_INT("FPS", 30);
-        updateFrameSkipping(1);
-        return;
-    } else if (average > 39 && average < 42) {
-        ATRACE_INT("FPS", 24);
-    }
-    updateFrameSkipping(0);
+    // This is V2 logic. It calculates the average and median timestamp difference based on the
+    // individual layer history. The results are recorded in the systrace.
+    determineLayerTimestampStats(layerName, framePresentTime);
 }
 
-nsecs_t Scheduler::calculateAverage() const {
-    nsecs_t sum = std::accumulate(mTimeDifferences.begin(), mTimeDifferences.end(), 0);
-    return (sum / ARRAY_SIZE);
+void Scheduler::incrementFrameCounter() {
+    mLayerHistory.incrementCounter();
 }
 
 void Scheduler::updateFrameSkipping(const int64_t skipCount) {
@@ -252,6 +245,96 @@ void Scheduler::updateFrameSkipping(const int64_t skipCount) {
         mPrimaryDispSync->setRefreshSkipCount(skipCount);
         mSkipCount = skipCount;
     }
+}
+
+void Scheduler::determineLayerTimestampStats(const std::string layerName,
+                                             const nsecs_t framePresentTime) {
+    mLayerHistory.insert(layerName, framePresentTime);
+    std::vector<int64_t> differencesMs;
+
+    // Traverse through the layer history, and determine the differences in present times.
+    nsecs_t newestPresentTime = framePresentTime;
+    std::string differencesText = "";
+    for (int i = 1; i < mLayerHistory.getSize(); i++) {
+        std::unordered_map<std::string, nsecs_t> layers = mLayerHistory.get(i);
+        for (auto layer : layers) {
+            if (layer.first != layerName) {
+                continue;
+            }
+            int64_t differenceMs = (newestPresentTime - layer.second) / 1000000;
+            // Dismiss noise.
+            if (differenceMs > 10 && differenceMs < 60) {
+                differencesMs.push_back(differenceMs);
+            }
+            IF_ALOGV() { differencesText += (std::to_string(differenceMs) + " "); }
+            newestPresentTime = layer.second;
+        }
+    }
+    ALOGV("Layer %s timestamp intervals: %s", layerName.c_str(), differencesText.c_str());
+
+    if (!differencesMs.empty()) {
+        // Mean/Average is a good indicator for when 24fps videos are playing, because the frames
+        // come in 33, and 49 ms intervals with occasional 41ms.
+        const int64_t meanMs = scheduler::calculate_mean(differencesMs);
+        const auto tagMean = "TimestampMean_" + layerName;
+        ATRACE_INT(tagMean.c_str(), meanMs);
+
+        // Mode and median are good indicators for 30 and 60 fps videos, because the majority of
+        // frames come in 16, or 33 ms intervals.
+        const auto tagMedian = "TimestampMedian_" + layerName;
+        ATRACE_INT(tagMedian.c_str(), scheduler::calculate_median(&differencesMs));
+
+        const auto tagMode = "TimestampMode_" + layerName;
+        ATRACE_INT(tagMode.c_str(), scheduler::calculate_mode(differencesMs));
+    }
+}
+
+void Scheduler::determineTimestampAverage(bool isAutoTimestamp, const nsecs_t framePresentTime) {
+    ATRACE_INT("AutoTimestamp", isAutoTimestamp);
+
+    // Video does not have timestamp automatically set, so we discard timestamps that are
+    // coming in from other sources for now.
+    if (isAutoTimestamp) {
+        return;
+    }
+    int64_t differenceMs = (framePresentTime - mPreviousFrameTimestamp) / 1000000;
+    mPreviousFrameTimestamp = framePresentTime;
+
+    if (differenceMs < 10 || differenceMs > 100) {
+        // Dismiss noise.
+        return;
+    }
+    ATRACE_INT("TimestampDiff", differenceMs);
+
+    mTimeDifferences[mCounter % scheduler::ARRAY_SIZE] = differenceMs;
+    mCounter++;
+    int64_t mean = scheduler::calculate_mean(mTimeDifferences);
+    ATRACE_INT("AutoTimestampMean", mean);
+
+    // TODO(b/113612090): This are current numbers from trial and error while running videos
+    // from YouTube at 24, 30, and 60 fps.
+    if (mean > 14 && mean < 18) {
+        ATRACE_INT("FPS", 60);
+    } else if (mean > 31 && mean < 34) {
+        ATRACE_INT("FPS", 30);
+        return;
+    } else if (mean > 39 && mean < 42) {
+        ATRACE_INT("FPS", 24);
+    }
+}
+
+void Scheduler::resetIdleTimer() {
+    if (mIdleTimer) {
+        mIdleTimer->reset();
+        ATRACE_INT("ExpiredIdleTimer", 0);
+    }
+}
+
+void Scheduler::expiredTimerCallback() {
+    // TODO(b/113612090): Each time a timer expired, we should record the information into
+    // a circular buffer. Once this has happened a given amount (TBD) of times, we can comfortably
+    // say that the device is sitting in idle.
+    ATRACE_INT("ExpiredIdleTimer", 1);
 }
 
 } // namespace android
