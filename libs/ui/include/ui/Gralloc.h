@@ -31,7 +31,7 @@ class GrallocMapper {
 public:
     virtual ~GrallocMapper();
 
-    virtual bool isSupported() const = 0;
+    virtual bool isLoaded() const = 0;
 
     virtual status_t createDescriptor(void* bufferDescriptorInfo,
                                       void* outBufferDescriptor) const = 0;
@@ -56,7 +56,8 @@ public:
     // The ownership of acquireFence is always transferred to the callee, even
     // on errors.
     virtual status_t lock(buffer_handle_t bufferHandle, uint64_t usage, const Rect& bounds,
-                          int acquireFence, void** outData) const = 0;
+                          int acquireFence, void** outData, int32_t* outBytesPerPixel,
+                          int32_t* outBytesPerStride) const = 0;
 
     // The ownership of acquireFence is always transferred to the callee, even
     // on errors.
@@ -73,7 +74,7 @@ class GrallocAllocator {
 public:
     virtual ~GrallocAllocator();
 
-    virtual bool isSupported() const = 0;
+    virtual bool isLoaded() const = 0;
 
     virtual std::string dumpDebugInfo() const = 0;
 

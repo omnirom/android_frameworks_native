@@ -598,6 +598,10 @@ public:
             Vector<ColorMode>* /*outColorModes*/) override {
         return NO_ERROR;
     }
+    status_t getDisplayNativePrimaries(const sp<IBinder>& /*display*/,
+            ui::DisplayPrimaries& /*primaries*/) override {
+        return NO_ERROR;
+    }
     ColorMode getActiveColorMode(const sp<IBinder>& /*display*/)
             override {
         return ColorMode::NATIVE;
@@ -665,6 +669,7 @@ public:
         return NO_ERROR;
     }
     status_t uncacheBuffer(const sp<IBinder>& /*token*/, int32_t /*bufferId*/) { return NO_ERROR; }
+    status_t isWideColorDisplay(const sp<IBinder>&, bool*) const override { return NO_ERROR; }
 
 protected:
     IBinder* onAsBinder() override { return nullptr; }

@@ -23,6 +23,7 @@
 #include "ColorLayer.h"
 #include "ContainerLayer.h"
 #include "DisplayDevice.h"
+#include "FakePhaseOffsets.h"
 #include "Layer.h"
 #include "NativeWindowSurface.h"
 #include "StartPropertySetThread.h"
@@ -73,6 +74,10 @@ public:
     std::unique_ptr<MessageQueue> createMessageQueue() override {
         // TODO: Use test-fixture controlled factory
         return std::make_unique<android::impl::MessageQueue>();
+    }
+
+    std::unique_ptr<scheduler::PhaseOffsets> createPhaseOffsets() override {
+        return std::make_unique<scheduler::FakePhaseOffsets>();
     }
 
     std::unique_ptr<Scheduler> createScheduler(std::function<void(bool)>) override {
@@ -139,9 +144,9 @@ public:
         return nullptr;
     }
 
-    std::unique_ptr<TimeStats> createTimeStats() override {
+    std::shared_ptr<TimeStats> createTimeStats() override {
         // TODO: Use test-fixture controlled factory
-        return std::make_unique<TimeStats>();
+        return std::make_shared<android::impl::TimeStats>();
     }
 
     using CreateBufferQueueFunction =
@@ -185,6 +190,10 @@ public:
             surfaceflinger::test::Factory::CreateNativeWindowSurfaceFunction;
     void setCreateNativeWindowSurface(CreateNativeWindowSurfaceFunction f) {
         mFactory.mCreateNativeWindowSurface = f;
+    }
+
+    void setInternalDisplayPrimaries(const ui::DisplayPrimaries& primaries) {
+        memcpy(&mFlinger->mInternalDisplayPrimaries, &primaries, sizeof(ui::DisplayPrimaries));
     }
 
     using HotplugEvent = SurfaceFlinger::HotplugEvent;
@@ -260,6 +269,15 @@ public:
         return mFlinger->SurfaceFlinger::traverseLayersInDisplay(display, visitor);
     }
 
+    auto getDisplayNativePrimaries(const sp<IBinder>& displayToken,
+                                   ui::DisplayPrimaries &primaries) {
+        return mFlinger->SurfaceFlinger::getDisplayNativePrimaries(displayToken, primaries);
+    }
+
+    void initDefaultDisplayNativePrimaries() {
+        mFlinger->SurfaceFlinger::initDefaultDisplayNativePrimaries();
+    }
+
     /* ------------------------------------------------------------------------
      * Read-only access to private data to assert post-conditions.
      */
@@ -290,6 +308,7 @@ public:
     auto& mutableEventControlThread() { return mFlinger->mEventControlThread; }
     auto& mutableEventQueue() { return mFlinger->mEventQueue; }
     auto& mutableEventThread() { return mFlinger->mEventThread; }
+    auto& mutableSFEventThread() { return mFlinger->mSFEventThread; }
     auto& mutableGeometryInvalid() { return mFlinger->mGeometryInvalid; }
     auto& mutableHWVsyncAvailable() { return mFlinger->mHWVsyncAvailable; }
     auto& mutableInterceptor() { return mFlinger->mInterceptor; }
@@ -317,6 +336,7 @@ public:
         mutableEventControlThread().reset();
         mutableEventQueue().reset();
         mutableEventThread().reset();
+        mutableSFEventThread().reset();
         mutableInterceptor().reset();
         mutablePrimaryDispSync().reset();
         mFlinger->mCompositionEngine->setHwComposer(std::unique_ptr<HWComposer>());
@@ -335,11 +355,11 @@ public:
         void setExpensiveRenderingExpected(hwc2_display_t, bool) override {}
     };
 
-    struct HWC2Display : public HWC2::Display {
+    struct HWC2Display : public HWC2::impl::Display {
         HWC2Display(Hwc2::Composer& composer, Hwc2::PowerAdvisor& advisor,
                     const std::unordered_set<HWC2::Capability>& capabilities, hwc2_display_t id,
                     HWC2::DisplayType type)
-              : HWC2::Display(composer, advisor, capabilities, id, type) {}
+              : HWC2::impl::Display(composer, advisor, capabilities, id, type) {}
         ~HWC2Display() {
             // Prevents a call to disable vsyncs.
             mType = HWC2::DisplayType::Invalid;

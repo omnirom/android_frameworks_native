@@ -16,6 +16,9 @@
 
 #define LOG_TAG "BufferHubBufferTest"
 
+#include <errno.h>
+#include <sys/epoll.h>
+
 #include <android/hardware_buffer.h>
 #include <cutils/native_handle.h>
 #include <gmock/gmock.h>
@@ -23,6 +26,7 @@
 #include <hidl/ServiceManagement.h>
 #include <hwbinder/IPCThreadState.h>
 #include <ui/BufferHubBuffer.h>
+#include <ui/BufferHubEventFd.h>
 
 namespace android {
 
@@ -31,7 +35,6 @@ namespace {
 using ::android::BufferHubDefs::AnyClientAcquired;
 using ::android::BufferHubDefs::AnyClientGained;
 using ::android::BufferHubDefs::AnyClientPosted;
-using ::android::BufferHubDefs::IsBufferReleased;
 using ::android::BufferHubDefs::IsClientAcquired;
 using ::android::BufferHubDefs::IsClientGained;
 using ::android::BufferHubDefs::IsClientPosted;
@@ -158,8 +161,34 @@ TEST_F(BufferHubBufferTest, DuplicateAndImportBuffer) {
     EXPECT_NE(b1->client_state_mask(), b2->client_state_mask());
 
     // Both buffer instances should be in released state currently.
-    EXPECT_TRUE(IsBufferReleased(b1->buffer_state()));
-    EXPECT_TRUE(IsBufferReleased(b2->buffer_state()));
+    EXPECT_TRUE(b1->IsReleased());
+    EXPECT_TRUE(b2->IsReleased());
+
+    // The event fd should behave like duped event fds.
+    const BufferHubEventFd& eventFd1 = b1->eventFd();
+    ASSERT_GE(eventFd1.get(), 0);
+    const BufferHubEventFd& eventFd2 = b2->eventFd();
+    ASSERT_GE(eventFd2.get(), 0);
+
+    base::unique_fd epollFd(epoll_create(64));
+    ASSERT_GE(epollFd.get(), 0);
+
+    // Add eventFd1 to epoll set, and signal eventFd2.
+    epoll_event e = {.events = EPOLLIN | EPOLLET, .data = {.u32 = 0}};
+    ASSERT_EQ(epoll_ctl(epollFd.get(), EPOLL_CTL_ADD, eventFd1.get(), &e), 0) << strerror(errno);
+
+    std::array<epoll_event, 1> events;
+    EXPECT_EQ(epoll_wait(epollFd.get(), events.data(), events.size(), 0), 0);
+
+    eventFd2.signal();
+    EXPECT_EQ(epoll_wait(epollFd.get(), events.data(), events.size(), 0), 1);
+
+    // The epoll fd is edge triggered, so it only responds to the eventFd once.
+    EXPECT_EQ(epoll_wait(epollFd.get(), events.data(), events.size(), 0), 0);
+
+    eventFd2.signal();
+    eventFd2.clear();
+    EXPECT_EQ(epoll_wait(epollFd.get(), events.data(), events.size(), 0), 0);
 }
 
 TEST_F(BufferHubBufferTest, ImportFreedBuffer) {
@@ -189,8 +218,6 @@ TEST_F(BufferHubBufferTest, ImportNullToken) {
     EXPECT_THAT(b1, IsNull());
 }
 
-// TODO(b/118180214): remove the comment after ag/5856474 landed
-// This test has a very little chance to fail (number of existing tokens / 2 ^ 32)
 TEST_F(BufferHubBufferTest, ImportInvalidToken) {
     native_handle_t* token = native_handle_create(/*numFds=*/0, /*numInts=*/1);
     token->data[0] = 0;
@@ -202,7 +229,7 @@ TEST_F(BufferHubBufferTest, ImportInvalidToken) {
 }
 
 TEST_F(BufferHubBufferStateTransitionTest, GainBuffer_fromReleasedState) {
-    ASSERT_TRUE(IsBufferReleased(b1->buffer_state()));
+    ASSERT_TRUE(b1->IsReleased());
 
     // Successful gaining the buffer should change the buffer state bit of b1 to
     // gained state, other client state bits to released state.
@@ -291,7 +318,7 @@ TEST_F(BufferHubBufferStateTransitionTest, PostBuffer_fromAcquiredState) {
 }
 
 TEST_F(BufferHubBufferStateTransitionTest, PostBuffer_fromReleasedState) {
-    ASSERT_TRUE(IsBufferReleased(b1->buffer_state()));
+    ASSERT_TRUE(b1->IsReleased());
 
     // Posting from released state should fail.
     EXPECT_EQ(b1->Post(), -EBUSY);
@@ -329,7 +356,7 @@ TEST_F(BufferHubBufferStateTransitionTest, AcquireBuffer_fromSelfInAcquiredState
 }
 
 TEST_F(BufferHubBufferStateTransitionTest, AcquireBuffer_fromReleasedState) {
-    ASSERT_TRUE(IsBufferReleased(b1->buffer_state()));
+    ASSERT_TRUE(b1->IsReleased());
 
     // Acquiring form released state should fail.
     EXPECT_EQ(b1->Acquire(), -EBUSY);
@@ -346,13 +373,13 @@ TEST_F(BufferHubBufferStateTransitionTest, AcquireBuffer_fromGainedState) {
 }
 
 TEST_F(BufferHubBufferStateTransitionTest, ReleaseBuffer_fromSelfInReleasedState) {
-    ASSERT_TRUE(IsBufferReleased(b1->buffer_state()));
+    ASSERT_TRUE(b1->IsReleased());
 
     EXPECT_EQ(b1->Release(), 0);
 }
 
 TEST_F(BufferHubBufferStateTransitionTest, ReleaseBuffer_fromSelfInGainedState) {
-    ASSERT_TRUE(IsBufferReleased(b1->buffer_state()));
+    ASSERT_TRUE(b1->IsReleased());
     ASSERT_EQ(b1->Gain(), 0);
     ASSERT_TRUE(AnyClientGained(b1->buffer_state()));
 

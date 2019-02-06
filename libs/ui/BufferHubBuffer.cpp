@@ -167,30 +167,35 @@ int BufferHubBuffer::initWithBufferTraits(const BufferTraits& bufferTraits) {
         return -EINVAL;
     }
 
-    int bufferId = bufferTraits.bufferInfo->data[1];
+    // Import fds. Dup fds because hidl_handle owns the fds.
+    unique_fd ashmemFd(fcntl(bufferTraits.bufferInfo->data[0], F_DUPFD_CLOEXEC, 0));
+    mMetadata = BufferHubMetadata::Import(std::move(ashmemFd));
+    if (!mMetadata.IsValid()) {
+        ALOGE("%s: Received an invalid metadata.", __FUNCTION__);
+        return -EINVAL;
+    }
+
+    mEventFd = BufferHubEventFd(fcntl(bufferTraits.bufferInfo->data[1], F_DUPFD_CLOEXEC, 0));
+    if (!mEventFd.isValid()) {
+        ALOGE("%s: Received ad invalid event fd.", __FUNCTION__);
+        return -EINVAL;
+    }
+
+    int bufferId = bufferTraits.bufferInfo->data[2];
     if (bufferId < 0) {
-        ALOGE("%s: Received an invalid (negative) id!", __FUNCTION__);
+        ALOGE("%s: Received an invalid (negative) id.", __FUNCTION__);
         return -EINVAL;
     }
 
     uint32_t clientBitMask;
-    memcpy(&clientBitMask, &bufferTraits.bufferInfo->data[2], sizeof(clientBitMask));
+    memcpy(&clientBitMask, &bufferTraits.bufferInfo->data[3], sizeof(clientBitMask));
     if (clientBitMask == 0U) {
-        ALOGE("%s: Received a invalid client state mask!", __FUNCTION__);
-        return -EINVAL;
-    }
-
-    // Import the metadata. Dup since hidl_handle owns the fd
-    unique_fd ashmemFd(fcntl(bufferTraits.bufferInfo->data[0], F_DUPFD_CLOEXEC, 0));
-    mMetadata = BufferHubMetadata::Import(std::move(ashmemFd));
-
-    if (!mMetadata.IsValid()) {
-        ALOGE("%s: invalid metadata.", __FUNCTION__);
+        ALOGE("%s: Received an invalid client state mask.", __FUNCTION__);
         return -EINVAL;
     }
 
     uint32_t userMetadataSize;
-    memcpy(&userMetadataSize, &bufferTraits.bufferInfo->data[3], sizeof(userMetadataSize));
+    memcpy(&userMetadataSize, &bufferTraits.bufferInfo->data[4], sizeof(userMetadataSize));
     if (mMetadata.user_metadata_size() != userMetadataSize) {
         ALOGE("%s: user metadata size not match: expected %u, actual %zu.", __FUNCTION__,
               userMetadataSize, mMetadata.user_metadata_size());
@@ -313,10 +318,14 @@ int BufferHubBuffer::Release() {
     return 0;
 }
 
+bool BufferHubBuffer::IsReleased() const {
+    return (buffer_state_->load(std::memory_order_acquire) &
+            active_clients_bit_mask_->load(std::memory_order_acquire)) == 0;
+}
+
 bool BufferHubBuffer::IsValid() const {
-    // TODO(b/68770788): check eventFd once implemented
     return mBufferHandle.getNativeHandle() != nullptr && mId >= 0 && mClientStateMask != 0U &&
-            mMetadata.IsValid() && mBufferClient != nullptr;
+            mEventFd.get() >= 0 && mMetadata.IsValid() && mBufferClient != nullptr;
 }
 
 native_handle_t* BufferHubBuffer::Duplicate() {

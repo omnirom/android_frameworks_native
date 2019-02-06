@@ -19,6 +19,7 @@
 
 #include <sys/types.h>
 
+#include <compositionengine/LayerFE.h>
 #include <gui/BufferQueue.h>
 #include <gui/ISurfaceComposerClient.h>
 #include <gui/LayerState.h>
@@ -51,7 +52,6 @@
 #include "TransactionCompletedThread.h"
 
 #include "DisplayHardware/HWComposer.h"
-#include "DisplayHardware/HWComposerBufferCache.h"
 #include "RenderArea.h"
 
 using namespace android::surfaceflinger;
@@ -67,6 +67,10 @@ class GraphicBuffer;
 class SurfaceFlinger;
 class LayerDebugInfo;
 class LayerBE;
+
+namespace compositionengine {
+class Layer;
+}
 
 namespace impl {
 class SurfaceInterceptor;
@@ -87,7 +91,7 @@ struct LayerCreationArgs {
     uint32_t flags;
 };
 
-class Layer : public virtual RefBase {
+class Layer : public virtual compositionengine::LayerFE {
     static std::atomic<int32_t> sSequence;
 
 public:
@@ -167,8 +171,7 @@ public:
         Region activeTransparentRegion_legacy;
         Region requestedTransparentRegion_legacy;
 
-        int32_t appId;
-        int32_t type;
+        LayerMetadata metadata;
 
         // If non-null, a Surface this Surface's Z-order is interpreted relative to.
         wp<Layer> zOrderRelativeOf;
@@ -202,6 +205,11 @@ public:
         mat4 colorTransform;
         bool hasColorTransform;
 
+        // pointer to background color layer that, if set, appears below the buffer state layer
+        // and the buffer state layer's children.  Z order will be set to
+        // INT_MIN
+        sp<Layer> bgColorLayer;
+
         // The deque of callback handles for this frame. The back of the deque contains the most
         // recent callback handle.
         std::deque<sp<CallbackHandle>> callbackHandles;
@@ -211,6 +219,7 @@ public:
     virtual ~Layer();
 
     void setPrimaryDisplayOnly() { mPrimaryDisplayOnly = true; }
+    bool getPrimaryDisplayOnly() const { return mPrimaryDisplayOnly; }
 
     // ------------------------------------------------------------------------
     // Geometry setting functions.
@@ -265,7 +274,7 @@ public:
     virtual bool setRelativeLayer(const sp<IBinder>& relativeToHandle, int32_t relativeZ);
 
     virtual bool setAlpha(float alpha);
-    virtual bool setColor(const half3& color);
+    virtual bool setColor(const half3& /*color*/) { return false; };
 
     // Set rounded corner radius for this layer and its children.
     //
@@ -281,7 +290,7 @@ public:
                                               uint64_t frameNumber);
     virtual void deferTransactionUntil_legacy(const sp<Layer>& barrierLayer, uint64_t frameNumber);
     virtual bool setOverrideScalingMode(int32_t overrideScalingMode);
-    virtual void setInfo(int32_t type, int32_t appId);
+    virtual bool setMetadata(LayerMetadata data);
     virtual bool reparentChildren(const sp<IBinder>& layer);
     virtual void setChildrenDrawingParent(const sp<Layer>& layer);
     virtual bool reparent(const sp<IBinder>& newParentHandle);
@@ -308,6 +317,7 @@ public:
             const std::vector<sp<CallbackHandle>>& /*handles*/) {
         return false;
     };
+    virtual bool setBackgroundColor(const half3& color, float alpha, ui::Dataspace dataspace);
 
     ui::Dataspace getDataSpace() const { return mCurrentDataSpace; }
 
@@ -317,6 +327,8 @@ public:
     // needed to be saturated so that they match what they are designed for
     // visually.
     bool isLegacyDataSpace() const;
+
+    virtual std::shared_ptr<compositionengine::Layer> getCompositionLayer() const;
 
     // If we have received a new buffer this frame, we will pass its surface
     // damage down to hardware composer. Otherwise, we must send a region with
@@ -328,6 +340,9 @@ public:
     uint32_t getTransactionFlags(uint32_t flags);
     uint32_t setTransactionFlags(uint32_t flags);
 
+    // Deprecated, please use compositionengine::Output::belongsInOutput()
+    // instead.
+    // TODO(lpique): Move the remaining callers (screencap) to the new function.
     bool belongsToDisplay(uint32_t layerStack, bool isPrimaryDisplay) const {
         return getLayerStack() == layerStack && (!mPrimaryDisplayOnly || isPrimaryDisplay);
     }
@@ -458,7 +473,6 @@ public:
 
     // If a buffer was replaced this frame, release the former buffer
     virtual void releasePendingBuffer(nsecs_t /*dequeueReadyTime*/) { }
-
 
     /*
      * draw - performs some global clipping optimizations
@@ -671,22 +685,12 @@ protected:
 
     uint32_t getEffectiveUsage(uint32_t usage) const;
 
-    // Computes the crop applied to this layer. windowBounds is the boundary of
-    // layer-stack space, so the cropping rectangle will be clipped to those
-    // bounds in that space. The crop rectangle is returned in buffer space. If
-    // windowBounds is invalid, then it is ignored.
-    virtual FloatRect computeCrop(const Rect& windowBounds) const;
-
-    // See the above method, but pulls the window boundaries from the display.
-    FloatRect computeCrop(const sp<const DisplayDevice>& display) const {
-        return computeCrop(display->getViewport());
-    }
+    virtual FloatRect computeCrop(const sp<const DisplayDevice>& display) const;
     // Compute the initial crop as specified by parent layers and the
     // SurfaceControl for this layer. Does not include buffer crop from the
     // IGraphicBufferProducer client, as that should not affect child clipping.
     // Returns in screen space.
-    Rect computeInitialCrop(const Rect& windowBounds) const;
-
+    Rect computeInitialCrop(const sp<const DisplayDevice>& display) const;
     /**
      * Setup rounded corners coordinates of this layer, taking into account the layer bounds and
      * crop coordinates, transforming them into layer space.
@@ -844,6 +848,8 @@ protected:
 
     // Can only be accessed with the SF state lock held.
     bool mLayerDetached{false};
+    // Can only be accessed with the SF state lock held.
+    bool mChildrenChanged{false};
 
 private:
     /**

@@ -59,6 +59,8 @@
 #include "Scheduler/DispSync.h"
 #include "Scheduler/EventThread.h"
 #include "Scheduler/MessageQueue.h"
+#include "Scheduler/PhaseOffsets.h"
+#include "Scheduler/RefreshRateStats.h"
 #include "Scheduler/Scheduler.h"
 #include "Scheduler/VSyncModulator.h"
 #include "SurfaceFlingerFactory.h"
@@ -68,6 +70,7 @@
 
 #include <atomic>
 #include <cstdint>
+#include <functional>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -75,6 +78,7 @@
 #include <set>
 #include <string>
 #include <thread>
+#include <type_traits>
 #include <unordered_map>
 #include <utility>
 
@@ -137,7 +141,6 @@ enum class DisplayColorSetting : int32_t {
     UNMANAGED = 1,
     ENHANCED = 2,
 };
-
 
 class SurfaceFlingerBE
 {
@@ -292,10 +295,6 @@ public:
     // starts SurfaceFlinger main loop in the current thread
     void run() ANDROID_API;
 
-    enum {
-        EVENT_VSYNC = HWC_EVENT_VSYNC
-    };
-
     // post an asynchronous message to the main thread
     status_t postMessageAsync(const sp<MessageBase>& msg, nsecs_t reltime = 0, uint32_t flags = 0);
 
@@ -440,6 +439,8 @@ private:
     int getActiveConfig(const sp<IBinder>& displayToken) override;
     status_t getDisplayColorModes(const sp<IBinder>& displayToken,
                                   Vector<ui::ColorMode>* configs) override;
+    status_t getDisplayNativePrimaries(const sp<IBinder>& displayToken,
+                                       ui::DisplayPrimaries &primaries);
     ui::ColorMode getActiveColorMode(const sp<IBinder>& displayToken) override;
     status_t setActiveColorMode(const sp<IBinder>& displayToken, ui::ColorMode colorMode) override;
     void setPowerMode(const sp<IBinder>& displayToken, int mode) override;
@@ -469,6 +470,8 @@ private:
     status_t cacheBuffer(const sp<IBinder>& token, const sp<GraphicBuffer>& buffer,
                          int32_t* outBufferId) override;
     status_t uncacheBuffer(const sp<IBinder>& token, int32_t bufferId) override;
+    status_t isWideColorDisplay(const sp<IBinder>& displayToken,
+                                bool* outIsWideColorDisplay) const override;
 
     /* ------------------------------------------------------------------------
      * DeathRecipient interface
@@ -553,10 +556,9 @@ private:
     /* ------------------------------------------------------------------------
      * Layer management
      */
-    status_t createLayer(const String8& name, const sp<Client>& client,
-            uint32_t w, uint32_t h, PixelFormat format, uint32_t flags,
-            int32_t windowType, int32_t ownerUid, sp<IBinder>* handle,
-            sp<IGraphicBufferProducer>* gbp, sp<Layer>* parent);
+    status_t createLayer(const String8& name, const sp<Client>& client, uint32_t w, uint32_t h,
+                         PixelFormat format, uint32_t flags, LayerMetadata metadata,
+                         sp<IBinder>* handle, sp<IGraphicBufferProducer>* gbp, sp<Layer>* parent);
 
     status_t createBufferQueueLayer(const sp<Client>& client, const String8& name, uint32_t w,
                                     uint32_t h, uint32_t flags, PixelFormat& format,
@@ -664,6 +666,10 @@ private:
     // region of all screens presenting this layer stack.
     void invalidateLayerStack(const sp<const Layer>& layer, const Region& dirty);
 
+    // Initialize structures containing information about the internal
+    // display's native color coordinates using default data
+    void initDefaultDisplayNativePrimaries();
+
     /* ------------------------------------------------------------------------
      * H/W composer
      */
@@ -751,6 +757,8 @@ private:
     void processDisplayChangesLocked();
     void processDisplayHotplugEventsLocked();
 
+    void dispatchDisplayHotplugEvent(EventThread::DisplayType displayType, bool connected);
+
     /* ------------------------------------------------------------------------
      * VSync
      */
@@ -786,19 +794,9 @@ private:
         };
     }
 
-    /* ------------------------------------------------------------------------
-     * Debugging & dumpsys
+    /*
+     * Display identification
      */
-public:
-    status_t dumpCritical(int fd, const Vector<String16>& /*args*/, bool asProto) {
-        return doDump(fd, Vector<String16>(), asProto);
-    }
-
-    status_t dumpAll(int fd, const Vector<String16>& args, bool asProto) {
-        return doDump(fd, args, asProto);
-    }
-
-private:
     sp<IBinder> getPhysicalDisplayToken(DisplayId displayId) const {
         const auto it = mPhysicalDisplayTokens.find(displayId);
         return it != mPhysicalDisplayTokens.end() ? it->second : nullptr;
@@ -830,17 +828,48 @@ private:
         return hwcDisplayId ? getHwComposer().toPhysicalDisplayId(*hwcDisplayId) : std::nullopt;
     }
 
-    void listLayersLocked(const Vector<String16>& args, size_t& index, std::string& result) const;
-    void dumpStatsLocked(const Vector<String16>& args, size_t& index, std::string& result) const
-            REQUIRES(mStateLock);
-    void clearStatsLocked(const Vector<String16>& args, size_t& index, std::string& result);
-    void dumpAllLocked(const Vector<String16>& args, size_t& index, std::string& result) const
-            REQUIRES(mStateLock);
+    /*
+     * Debugging & dumpsys
+     */
     bool startDdmConnection();
-    void appendSfConfigString(std::string& result) const;
 
+    using DumpArgs = Vector<String16>;
+    using Dumper = std::function<void(const DumpArgs&, bool asProto, std::string&)>;
+
+    template <typename F, std::enable_if_t<!std::is_member_function_pointer_v<F>>* = nullptr>
+    static Dumper dumper(F&& dump) {
+        using namespace std::placeholders;
+        return std::bind(std::forward<F>(dump), _3);
+    }
+
+    template <typename F, std::enable_if_t<std::is_member_function_pointer_v<F>>* = nullptr>
+    Dumper dumper(F dump) {
+        using namespace std::placeholders;
+        return std::bind(dump, this, _3);
+    }
+
+    template <typename F>
+    Dumper argsDumper(F dump) {
+        using namespace std::placeholders;
+        return std::bind(dump, this, _1, _3);
+    }
+
+    template <typename F>
+    Dumper protoDumper(F dump) {
+        using namespace std::placeholders;
+        return std::bind(dump, this, _1, _2, _3);
+    }
+
+    void dumpAllLocked(const DumpArgs& args, std::string& result) const REQUIRES(mStateLock);
+
+    void appendSfConfigString(std::string& result) const;
+    void listLayersLocked(std::string& result) const;
+    void dumpStatsLocked(const DumpArgs& args, std::string& result) const REQUIRES(mStateLock);
+    void clearStatsLocked(const DumpArgs& args, std::string& result);
+    void dumpTimeStats(const DumpArgs& args, bool asProto, std::string& result) const;
     void logFrameStats();
 
+    void dumpVSync(std::string& result) const REQUIRES(mStateLock);
     void dumpStaticScreenStats(std::string& result) const;
     // Not const because each Layer needs to query Fences and cache timestamps.
     void dumpFrameEventsLocked(std::string& result);
@@ -857,7 +886,16 @@ private:
     bool isLayerTripleBufferingDisabled() const {
         return this->mLayerTripleBufferingDisabled;
     }
-    status_t doDump(int fd, const Vector<String16>& args, bool asProto);
+
+    status_t doDump(int fd, const DumpArgs& args, bool asProto);
+
+    status_t dumpCritical(int fd, const DumpArgs&, bool asProto) override {
+        return doDump(fd, DumpArgs(), asProto);
+    }
+
+    status_t dumpAll(int fd, const DumpArgs& args, bool asProto) override {
+        return doDump(fd, args, asProto);
+    }
 
     /* ------------------------------------------------------------------------
      * VrFlinger
@@ -911,7 +949,10 @@ private:
     std::unique_ptr<EventControlThread> mEventControlThread;
     std::unordered_map<DisplayId, sp<IBinder>> mPhysicalDisplayTokens;
 
+    // Calculates correct offsets.
     VSyncModulator mVsyncModulator;
+    // Keeps track of all available phase offsets for different refresh types.
+    std::unique_ptr<scheduler::PhaseOffsets> mPhaseOffsets;
 
     // Can only accessed from the main thread, these members
     // don't need synchronization
@@ -955,7 +996,7 @@ private:
     std::unique_ptr<SurfaceInterceptor> mInterceptor{mFactory.createSurfaceInterceptor(this)};
     SurfaceTracing mTracing;
     LayerStats mLayerStats;
-    std::unique_ptr<TimeStats> mTimeStats;
+    std::shared_ptr<TimeStats> mTimeStats;
     bool mUseHwcVirtualDisplays = false;
     std::atomic<uint32_t> mFrameMissedCount{0};
 
@@ -1037,16 +1078,23 @@ private:
     SurfaceFlingerBE mBE;
     std::unique_ptr<compositionengine::CompositionEngine> mCompositionEngine;
 
+    /* ------------------------------------------------------------------------
+     * Scheduler
+     */
     bool mUseScheduler = false;
     std::unique_ptr<Scheduler> mScheduler;
     sp<Scheduler::ConnectionHandle> mAppConnectionHandle;
     sp<Scheduler::ConnectionHandle> mSfConnectionHandle;
+    std::unique_ptr<scheduler::RefreshRateStats> mRefreshRateStats;
 
+    /* ------------------------------------------------------------------------ */
     sp<IInputFlinger> mInputFlinger;
 
     InputWindowCommands mInputWindowCommands;
 
     BufferStateLayerCache mBufferStateLayerCache;
+
+    ui::DisplayPrimaries mInternalDisplayPrimaries;
 };
 }; // namespace android
 

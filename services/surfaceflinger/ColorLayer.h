@@ -28,10 +28,14 @@ public:
     explicit ColorLayer(const LayerCreationArgs&);
     ~ColorLayer() override;
 
+    std::shared_ptr<compositionengine::Layer> getCompositionLayer() const override;
+
     virtual const char* getTypeId() const { return "ColorLayer"; }
     virtual void onDraw(const RenderArea& renderArea, const Region& clip,
                         bool useIdentityTransform);
     bool isVisible() const override;
+
+    bool setColor(const half3& color) override;
 
     void setPerFrameData(DisplayId displayId, const ui::Transform& transform, const Rect& viewport,
                          int32_t supportedPerFrameMetadata) override;
@@ -39,7 +43,10 @@ public:
     bool onPreComposition(nsecs_t /*refreshStartTime*/) override { return false; }
 
 protected:
-    FloatRect computeCrop(const Rect& /*windowbounds*/) const override { return {}; }
+    FloatRect computeCrop(const sp<const DisplayDevice>& /*display*/) const override { return {}; }
+
+private:
+    std::shared_ptr<compositionengine::Layer> mCompositionLayer;
 };
 
 } // namespace android

@@ -20,6 +20,7 @@
 #define ATRACE_TAG ATRACE_TAG_GRAPHICS
 
 #include "BufferStateLayer.h"
+#include "ColorLayer.h"
 
 #include "TimeStats/TimeStats.h"
 

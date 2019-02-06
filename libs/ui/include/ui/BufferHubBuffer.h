@@ -21,6 +21,7 @@
 #include <android/hardware_buffer.h>
 #include <cutils/native_handle.h>
 #include <ui/BufferHubDefs.h>
+#include <ui/BufferHubEventFd.h>
 #include <ui/BufferHubMetadata.h>
 
 namespace android {
@@ -55,10 +56,10 @@ public:
         return native_handle_clone(mBufferHandle.getNativeHandle());
     }
 
+    const BufferHubEventFd& eventFd() const { return mEventFd; }
+
     // Returns the current value of MetadataHeader::buffer_state.
-    uint32_t buffer_state() {
-        return mMetadata.metadata_header()->buffer_state.load(std::memory_order_acquire);
-    }
+    uint32_t buffer_state() const { return buffer_state_->load(std::memory_order_acquire); }
 
     // A state mask which is unique to a buffer hub client among all its siblings sharing the same
     // concrete graphic buffer.
@@ -94,6 +95,9 @@ public:
     // current cycle of the usage of the buffer.
     int Release();
 
+    // Returns whether the buffer is released by all active clients or not.
+    bool IsReleased() const;
+
     // Creates a token that stands for this BufferHubBuffer client and could be used for Import to
     // create another BufferHubBuffer. The new BufferHubBuffer will share the same underlying
     // gralloc buffer and ashmem region for metadata. Note that the caller owns the token and
@@ -122,6 +126,9 @@ private:
 
     // Wraps the gralloc buffer handle of this buffer.
     hardware::hidl_handle mBufferHandle;
+
+    // Event fd used for signalling buffer state changes. Shared by all clients of the same buffer.
+    BufferHubEventFd mEventFd;
 
     // An ashmem-based metadata object. The same shared memory are mapped to the
     // bufferhubd daemon and all buffer clients.
