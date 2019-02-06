@@ -16,6 +16,8 @@
 
 #pragma once
 
+#include <compositionengine/impl/CompositionEngine.h>
+
 #include "BufferQueueLayer.h"
 #include "BufferStateLayer.h"
 #include "ColorLayer.h"
@@ -113,6 +115,10 @@ public:
         return mCreateNativeWindowSurface(producer);
     }
 
+    std::unique_ptr<compositionengine::CompositionEngine> createCompositionEngine() override {
+        return compositionengine::impl::createCompositionEngine();
+    }
+
     sp<BufferQueueLayer> createBufferQueueLayer(const LayerCreationArgs&) override {
         // TODO: Use test-fixture controlled factory
         return nullptr;
@@ -148,6 +154,10 @@ public:
             std::function<std::unique_ptr<surfaceflinger::NativeWindowSurface>(
                     const sp<IGraphicBufferProducer>&)>;
     CreateNativeWindowSurfaceFunction mCreateNativeWindowSurface;
+
+    using CreateCompositionEngineFunction =
+            std::function<std::unique_ptr<compositionengine::CompositionEngine>()>;
+    CreateCompositionEngineFunction mCreateCompositionEngine;
 };
 
 } // namespace surfaceflinger::test
@@ -158,11 +168,12 @@ public:
     // functions.
 
     void setupRenderEngine(std::unique_ptr<renderengine::RenderEngine> renderEngine) {
-        mFlinger->getBE().mRenderEngine = std::move(renderEngine);
+        mFlinger->mCompositionEngine->setRenderEngine(std::move(renderEngine));
     }
 
     void setupComposer(std::unique_ptr<Hwc2::Composer> composer) {
-        mFlinger->getBE().mHwc.reset(new HWComposer(std::move(composer)));
+        mFlinger->mCompositionEngine->setHwComposer(
+                std::make_unique<impl::HWComposer>(std::move(composer)));
     }
 
     using CreateBufferQueueFunction = surfaceflinger::test::Factory::CreateBufferQueueFunction;
@@ -178,12 +189,11 @@ public:
 
     using HotplugEvent = SurfaceFlinger::HotplugEvent;
 
-    auto& mutableLayerCurrentState(sp<Layer> layer) { return layer->mState.current; }
-    auto& mutableLayerDrawingState(sp<Layer> layer) { return layer->mState.drawing; }
+    auto& mutableLayerCurrentState(sp<Layer> layer) { return layer->mCurrentState; }
+    auto& mutableLayerDrawingState(sp<Layer> layer) { return layer->mDrawingState; }
 
     void setLayerSidebandStream(sp<Layer> layer, sp<NativeHandle> sidebandStream) {
-        Mutex::Autolock lock(layer->mStateMutex);
-        layer->mState.drawing.sidebandStream = sidebandStream;
+        layer->mDrawingState.sidebandStream = sidebandStream;
         layer->getBE().compositionInfo.hwc.sidebandStream = sidebandStream;
     }
 
@@ -208,7 +218,7 @@ public:
     auto setupNewDisplayDeviceInternal(const wp<IBinder>& displayToken,
                                        const std::optional<DisplayId>& displayId,
                                        const DisplayDeviceState& state,
-                                       const sp<DisplaySurface>& dispSurface,
+                                       const sp<compositionengine::DisplaySurface>& dispSurface,
                                        const sp<IGraphicBufferProducer>& producer) {
         return mFlinger->setupNewDisplayDeviceInternal(displayToken, displayId, state, dispSurface,
                                                        producer);
@@ -225,9 +235,14 @@ public:
 
     auto setDisplayStateLocked(const DisplayState& s) { return mFlinger->setDisplayStateLocked(s); }
 
-    auto onInitializeDisplays() { return mFlinger->onInitializeDisplays(); }
+    // Allow reading display state without locking, as if called on the SF main thread.
+    auto onInitializeDisplays() NO_THREAD_SAFETY_ANALYSIS {
+        return mFlinger->onInitializeDisplays();
+    }
 
-    auto setPowerModeInternal(const sp<DisplayDevice>& display, int mode) {
+    // Allow reading display state without locking, as if called on the SF main thread.
+    auto setPowerModeInternal(const sp<DisplayDevice>& display,
+                              int mode) NO_THREAD_SAFETY_ANALYSIS {
         return mFlinger->setPowerModeInternal(display, mode);
     }
 
@@ -253,6 +268,9 @@ public:
     const auto& getHasPoweredOff() const { return mFlinger->mHasPoweredOff; }
     const auto& getHWVsyncAvailable() const { return mFlinger->mHWVsyncAvailable; }
     const auto& getVisibleRegionsDirty() const { return mFlinger->mVisibleRegionsDirty; }
+    auto& getHwComposer() const {
+        return static_cast<impl::HWComposer&>(mFlinger->getHwComposer());
+    }
 
     const auto& getCompositorTiming() const { return mFlinger->getBE().mCompositorTiming; }
 
@@ -285,13 +303,10 @@ public:
     auto& mutableUseHwcVirtualDisplays() { return mFlinger->mUseHwcVirtualDisplays; }
 
     auto& mutableComposerSequenceId() { return mFlinger->getBE().mComposerSequenceId; }
-    auto& mutableHwcDisplayData() { return mFlinger->getHwComposer().mDisplayData; }
-    auto& mutableHwcPhysicalDisplayIdMap() {
-        return mFlinger->getHwComposer().mPhysicalDisplayIdMap;
-    }
-
-    auto& mutableInternalHwcDisplayId() { return mFlinger->getHwComposer().mInternalHwcDisplayId; }
-    auto& mutableExternalHwcDisplayId() { return mFlinger->getHwComposer().mExternalHwcDisplayId; }
+    auto& mutableHwcDisplayData() { return getHwComposer().mDisplayData; }
+    auto& mutableHwcPhysicalDisplayIdMap() { return getHwComposer().mPhysicalDisplayIdMap; }
+    auto& mutableInternalHwcDisplayId() { return getHwComposer().mInternalHwcDisplayId; }
+    auto& mutableExternalHwcDisplayId() { return getHwComposer().mExternalHwcDisplayId; }
 
     ~TestableSurfaceFlinger() {
         // All these pointer and container clears help ensure that GMock does
@@ -304,8 +319,9 @@ public:
         mutableEventThread().reset();
         mutableInterceptor().reset();
         mutablePrimaryDispSync().reset();
-        mFlinger->getBE().mHwc.reset();
-        mFlinger->getBE().mRenderEngine.reset();
+        mFlinger->mCompositionEngine->setHwComposer(std::unique_ptr<HWComposer>());
+        mFlinger->mCompositionEngine->setRenderEngine(
+                std::unique_ptr<renderengine::RenderEngine>());
     }
 
     /* ------------------------------------------------------------------------
@@ -476,7 +492,7 @@ public:
             return *this;
         }
 
-        auto& setDisplaySurface(const sp<DisplaySurface>& displaySurface) {
+        auto& setDisplaySurface(const sp<compositionengine::DisplaySurface>& displaySurface) {
             mCreationArgs.displaySurface = displaySurface;
             return *this;
         }

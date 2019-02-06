@@ -17,11 +17,14 @@
 #undef LOG_TAG
 #define LOG_TAG "CompositionTest"
 
+#include <compositionengine/mock/DisplaySurface.h>
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
-
 #include <gui/IProducerListener.h>
 #include <log/log.h>
+#include <renderengine/mock/Framebuffer.h>
+#include <renderengine/mock/Image.h>
+#include <renderengine/mock/RenderEngine.h>
 #include <system/window.h>
 #include <utils/String8.h>
 
@@ -31,12 +34,10 @@
 
 #include "TestableSurfaceFlinger.h"
 #include "mock/DisplayHardware/MockComposer.h"
-#include "mock/DisplayHardware/MockDisplaySurface.h"
 #include "mock/MockDispSync.h"
 #include "mock/MockEventControlThread.h"
 #include "mock/MockEventThread.h"
 #include "mock/MockMessageQueue.h"
-#include "mock/RenderEngine/MockRenderEngine.h"
 #include "mock/system/window/MockNativeWindow.h"
 
 namespace android {
@@ -143,7 +144,8 @@ public:
     TestableSurfaceFlinger mFlinger;
     sp<DisplayDevice> mDisplay;
     sp<DisplayDevice> mExternalDisplay;
-    sp<mock::DisplaySurface> mDisplaySurface = new mock::DisplaySurface();
+    sp<compositionengine::mock::DisplaySurface> mDisplaySurface =
+            new compositionengine::mock::DisplaySurface();
     mock::NativeWindow* mNativeWindow = new mock::NativeWindow();
 
     sp<GraphicBuffer> mBuffer = new GraphicBuffer();
@@ -325,11 +327,14 @@ struct BaseDisplayVariant {
     }
 
     static void setupHwcCompositionCallExpectations(CompositionTest* test) {
-        EXPECT_CALL(*test->mDisplaySurface, prepareFrame(DisplaySurface::COMPOSITION_HWC)).Times(1);
+        EXPECT_CALL(*test->mDisplaySurface,
+                    prepareFrame(compositionengine::DisplaySurface::COMPOSITION_HWC))
+                .Times(1);
     }
 
     static void setupRECompositionCallExpectations(CompositionTest* test) {
-        EXPECT_CALL(*test->mDisplaySurface, prepareFrame(DisplaySurface::COMPOSITION_GLES))
+        EXPECT_CALL(*test->mDisplaySurface,
+                    prepareFrame(compositionengine::DisplaySurface::COMPOSITION_GLES))
                 .Times(1);
         EXPECT_CALL(*test->mDisplaySurface, getClientTargetAcquireFence())
                 .WillRepeatedly(ReturnRef(test->mClientTargetAcquireFence));
@@ -767,7 +772,7 @@ struct BaseLayerVariant {
 
         const auto displayId = test->mDisplay->getId();
         ASSERT_TRUE(displayId);
-        layer->createHwcLayer(test->mFlinger.mFlinger->getBE().mHwc.get(), *displayId);
+        layer->createHwcLayer(&test->mFlinger.getHwComposer(), *displayId);
 
         Mock::VerifyAndClear(test->mComposer);
 

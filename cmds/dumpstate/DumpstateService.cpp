@@ -43,7 +43,6 @@ static binder::Status error(uint32_t code, const std::string& msg) {
 
 static void* callAndNotify(void* data) {
     Dumpstate& ds = *static_cast<Dumpstate*>(data);
-    // TODO(111441001): Return status on listener.
     ds.Run();
     MYLOGE("Finished Run()\n");
     return nullptr;
@@ -98,9 +97,16 @@ binder::Status DumpstateService::setListener(const std::string& name,
     return binder::Status::ok();
 }
 
-binder::Status DumpstateService::startBugreport(int, int bugreport_mode, int32_t* returned_id) {
-    // TODO(111441001): return a request id here.
-    *returned_id = -1;
+// TODO(b/111441001): Hook up to consent service & copy final br only if user approves.
+binder::Status DumpstateService::startBugreport(int32_t /* calling_uid */,
+                                                const std::string& /* calling_package */,
+                                                const android::base::unique_fd& bugreport_fd,
+                                                const android::base::unique_fd& screenshot_fd,
+                                                int bugreport_mode,
+                                                const sp<IDumpstateListener>& listener) {
+    // TODO(b/111441001):
+    // 1. check DUMP permission (again)?
+    // 2. check if primary user? If non primary user the consent service will reject anyway.
     MYLOGI("startBugreport() with mode: %d\n", bugreport_mode);
 
     if (bugreport_mode != Dumpstate::BugreportMode::BUGREPORT_FULL &&
@@ -114,9 +120,20 @@ binder::Status DumpstateService::startBugreport(int, int bugreport_mode, int32_t
                          StringPrintf("Invalid bugreport mode: %d", bugreport_mode));
     }
 
+    if (bugreport_fd.get() == -1 || screenshot_fd.get() == -1) {
+        return exception(binder::Status::EX_ILLEGAL_ARGUMENT, "Invalid file descriptor");
+    }
+
     std::unique_ptr<Dumpstate::DumpOptions> options = std::make_unique<Dumpstate::DumpOptions>();
-    options->Initialize(static_cast<Dumpstate::BugreportMode>(bugreport_mode));
+    options->Initialize(static_cast<Dumpstate::BugreportMode>(bugreport_mode), bugreport_fd,
+                        screenshot_fd);
+
+    std::lock_guard<std::mutex> lock(lock_);
+    // TODO(b/111441001): Disallow multiple simultaneous bugreports.
     ds_.SetOptions(std::move(options));
+    if (listener != nullptr) {
+        ds_.listener_ = listener;
+    }
 
     pthread_t thread;
     status_t err = pthread_create(&thread, nullptr, callAndNotify, &ds_);

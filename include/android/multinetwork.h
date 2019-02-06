@@ -113,28 +113,55 @@ int android_getaddrinfofornetwork(net_handle_t network,
 #if __ANDROID_API__ >= 29
 
 /**
+ * Possible values of the flags argument to android_res_nsend and android_res_nquery.
+ * Values are ORed together.
+ */
+enum ResNsendFlags : uint32_t {
+    /**
+     * Send a single request to a single resolver and fail on timeout or network errors
+     */
+    ANDROID_RESOLV_NO_RETRY = 1 << 0,
+
+    /**
+     * Do not cache the result of the lookup. The lookup may return a result that is already
+     * in the cache, unless the ANDROID_RESOLV_NO_CACHE_LOOKUP flag is also specified.
+     */
+    ANDROID_RESOLV_NO_CACHE_STORE = 1 << 1,
+
+    /**
+     * Don't lookup the request in cache.
+     */
+    ANDROID_RESOLV_NO_CACHE_LOOKUP = 1 << 2,
+};
+
+/**
  * Look up the {|ns_class|, |ns_type|} Resource Record (RR) associated
  * with Domain Name |dname| on the given |network|.
  * The typical value for |ns_class| is ns_c_in, while |type| can be any
  * record type (for instance, ns_t_aaaa or ns_t_txt).
+ * |flags| is a additional config to control actual querying behavior, see
+ * ResNsendFlags for detail.
  *
  * Returns a file descriptor to watch for read events, or a negative
  * POSIX error code (see errno.h) if an immediate error occurs.
  */
 int android_res_nquery(net_handle_t network,
-        const char *dname, int ns_class, int ns_type) __INTRODUCED_IN(29);
+        const char *dname, int ns_class, int ns_type, uint32_t flags) __INTRODUCED_IN(29);
 
 /**
  * Issue the query |msg| on the given |network|.
+ * |flags| is a additional config to control actual querying behavior, see
+ * ResNsendFlags for detail.
  *
  * Returns a file descriptor to watch for read events, or a negative
  * POSIX error code (see errno.h) if an immediate error occurs.
  */
 int android_res_nsend(net_handle_t network,
-        const uint8_t *msg, size_t msglen) __INTRODUCED_IN(29);
+        const uint8_t *msg, size_t msglen, uint32_t flags) __INTRODUCED_IN(29);
 
 /**
  * Read a result for the query associated with the |fd| descriptor.
+ * Closes |fd| before returning.
  *
  * Returns:
  *     < 0: negative POSIX error code (see errno.h for possible values). |rcode| is not set.

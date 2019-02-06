@@ -37,7 +37,7 @@
 #include <unordered_map>
 
 #include "InputListener.h"
-#include "InputReporter.h"
+#include "InputReporterInterface.h"
 
 
 namespace android {
@@ -217,7 +217,7 @@ public:
 
     /* Notifies the system that an input channel is unrecoverably broken. */
     virtual void notifyInputChannelBroken(const sp<IBinder>& token) = 0;
-    virtual void notifyFocusChanged(const sp<IBinder>& token) = 0;
+    virtual void notifyFocusChanged(const sp<IBinder>& oldToken, const sp<IBinder>& newToken) = 0;
 
     /* Gets the input dispatcher configuration. */
     virtual void getDispatcherConfiguration(InputDispatcherConfiguration* outConfig) = 0;
@@ -343,13 +343,11 @@ public:
      */
     virtual void setInputFilterEnabled(bool enabled) = 0;
 
-    /* Transfers touch focus from the window associated with one channel to the
-     * window associated with the other channel.
+    /* Transfers touch focus from one window to another window.
      *
      * Returns true on success.  False if the window did not actually have touch focus.
      */
-    virtual bool transferTouchFocus(const sp<InputChannel>& fromChannel,
-            const sp<InputChannel>& toChannel) = 0;
+    virtual bool transferTouchFocus(const sp<IBinder>& fromToken, const sp<IBinder>& toToken) = 0;
 
     /* Registers input channels that may be used as targets for input events.
      * If inputWindowHandle is null, and displayId is not ADISPLAY_ID_NONE,
@@ -414,8 +412,7 @@ public:
     virtual void setInputDispatchMode(bool enabled, bool frozen);
     virtual void setInputFilterEnabled(bool enabled);
 
-    virtual bool transferTouchFocus(const sp<InputChannel>& fromChannel,
-            const sp<InputChannel>& toChannel);
+    virtual bool transferTouchFocus(const sp<IBinder>& fromToken, const sp<IBinder>& toToken);
 
     virtual status_t registerInputChannel(const sp<InputChannel>& inputChannel,
             int32_t displayId);
@@ -538,6 +535,7 @@ private:
         int32_t flags;
         int32_t metaState;
         int32_t buttonState;
+        MotionClassification classification;
         int32_t edgeFlags;
         float xPrecision;
         float yPrecision;
@@ -549,8 +547,9 @@ private:
         MotionEntry(uint32_t sequenceNum, nsecs_t eventTime,
                 int32_t deviceId, uint32_t source, int32_t displayId, uint32_t policyFlags,
                 int32_t action, int32_t actionButton, int32_t flags,
-                int32_t metaState, int32_t buttonState, int32_t edgeFlags,
-                float xPrecision, float yPrecision, nsecs_t downTime, uint32_t pointerCount,
+                int32_t metaState, int32_t buttonState, MotionClassification classification,
+                int32_t edgeFlags, float xPrecision, float yPrecision,
+                nsecs_t downTime, uint32_t pointerCount,
                 const PointerProperties* pointerProperties, const PointerCoords* pointerCoords,
                 float xOffset, float yOffset);
         virtual void appendDescription(std::string& msg) const;
@@ -631,7 +630,8 @@ private:
         uint32_t seq;
         bool handled;
         sp<InputChannel> inputChannel;
-        sp<IBinder> token;
+        sp<IBinder> oldToken;
+        sp<IBinder> newToken;
     };
 
     // Generic queue implementation.
@@ -995,7 +995,7 @@ private:
     std::unordered_map<int32_t, Vector<sp<InputWindowHandle>>> mWindowHandlesByDisplay;
     // Get window handles by display, return an empty vector if not found.
     Vector<sp<InputWindowHandle>> getWindowHandlesLocked(int32_t displayId) const;
-    sp<InputWindowHandle> getWindowHandleLocked(const sp<InputChannel>& inputChannel) const;
+    sp<InputWindowHandle> getWindowHandleLocked(const sp<IBinder>& windowHandleToken) const;
     sp<InputChannel> getInputChannelLocked(const sp<IBinder>& windowToken) const;
     bool hasWindowHandleLocked(const sp<InputWindowHandle>& windowHandle) const;
 
@@ -1161,7 +1161,8 @@ private:
             nsecs_t currentTime, const sp<Connection>& connection, uint32_t seq, bool handled);
     void onDispatchCycleBrokenLocked(
             nsecs_t currentTime, const sp<Connection>& connection);
-    void onFocusChangedLocked(const sp<InputWindowHandle>& newFocus);
+    void onFocusChangedLocked(const sp<InputWindowHandle>& oldFocus,
+            const sp<InputWindowHandle>& newFocus);
     void onANRLocked(
             nsecs_t currentTime, const sp<InputApplicationHandle>& applicationHandle,
             const sp<InputWindowHandle>& windowHandle,
@@ -1188,7 +1189,7 @@ private:
     void traceOutboundQueueLengthLocked(const sp<Connection>& connection);
     void traceWaitQueueLengthLocked(const sp<Connection>& connection);
 
-    sp<InputReporter> mReporter;
+    sp<InputReporterInterface> mReporter;
 };
 
 /* Enqueues and dispatches input events, endlessly. */

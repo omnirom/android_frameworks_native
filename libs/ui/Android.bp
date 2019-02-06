@@ -60,7 +60,9 @@ cc_library_shared {
         "Fence.cpp",
         "FenceTime.cpp",
         "FrameStats.cpp",
+        "Gralloc.cpp",
         "Gralloc2.cpp",
+        "Gralloc3.cpp",
         "GraphicBuffer.cpp",
         "GraphicBufferAllocator.cpp",
         "GraphicBufferMapper.cpp",
@@ -68,6 +70,7 @@ cc_library_shared {
         "PixelFormat.cpp",
         "Rect.cpp",
         "Region.cpp",
+        "Size.cpp",
         "Transform.cpp",
         "UiConfig.cpp",
     ],
@@ -77,10 +80,13 @@ cc_library_shared {
     ],
 
     shared_libs: [
+        "android.frameworks.bufferhub@1.0",
         "android.hardware.graphics.allocator@2.0",
+        "android.hardware.graphics.allocator@3.0",
         "android.hardware.graphics.common@1.2",
         "android.hardware.graphics.mapper@2.0",
         "android.hardware.graphics.mapper@2.1",
+        "android.hardware.graphics.mapper@3.0",
         "android.hardware.configstore@1.0",
         "android.hardware.configstore-utils",
         "libbase",
@@ -93,7 +99,6 @@ cc_library_shared {
         "libutils",
         "libutilscallstack",
         "liblog",
-        "libpdx_default_transport",  // TODO(b/112338294): Remove this once BufferHub moved to use Binder.
     ],
 
     export_shared_lib_headers: [
@@ -121,6 +126,7 @@ cc_library_shared {
                 "libnativewindow_headers",
             ],
             exclude_shared_libs: [
+                "android.frameworks.bufferhub@1.0",
                 "libpdx_default_transport",
             ],
         },
@@ -148,9 +154,6 @@ cc_library_shared {
         "libhardware_headers",
         "libui_headers",
     ],
-
-    // TODO(b/117568153): Temporarily opt out using libcrt.
-    no_libcrt: true,
 }
 
 cc_library_headers {

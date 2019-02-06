@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018 The Android Open Source Project
+ * Copyright 2018 The Android Open Source Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,27 +17,20 @@
 #pragma once
 
 #include <gmock/gmock.h>
-
-#include <utils/String8.h>
-
-#include "DisplayHardware/DisplaySurface.h"
+#include <renderengine/Image.h>
 
 namespace android {
+namespace renderengine {
 namespace mock {
 
-class DisplaySurface : public android::DisplaySurface {
+class Image : public renderengine::Image {
 public:
-    DisplaySurface();
-    ~DisplaySurface() override;
+    Image();
+    ~Image() override;
 
-    MOCK_METHOD1(beginFrame, status_t(bool mustRecompose));
-    MOCK_METHOD1(prepareFrame, status_t(CompositionType compositionType));
-    MOCK_METHOD0(advanceFrame, status_t());
-    MOCK_METHOD0(onFrameCommitted, void());
-    MOCK_CONST_METHOD1(dumpAsString, void(String8& result));
-    MOCK_METHOD2(resizeBuffers, void(uint32_t, uint32_t));
-    MOCK_CONST_METHOD0(getClientTargetAcquireFence, const sp<Fence>&());
+    MOCK_METHOD2(setNativeWindowBuffer, bool(ANativeWindowBuffer* buffer, bool isProtected));
 };
 
 } // namespace mock
+} // namespace renderengine
 } // namespace android

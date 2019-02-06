@@ -43,8 +43,12 @@ namespace android {
 
 // ---------------------------------------------------------------------------
 
-EventThreadConnection::EventThreadConnection(EventThread* eventThread)
-      : count(-1), mEventThread(eventThread), mChannel(gui::BitTube::DefaultSize) {}
+EventThreadConnection::EventThreadConnection(EventThread* eventThread,
+                                             ResyncCallback resyncCallback)
+      : resyncCallback(std::move(resyncCallback)),
+        count(-1),
+        mEventThread(eventThread),
+        mChannel(gui::BitTube::DefaultSize) {}
 
 EventThreadConnection::~EventThreadConnection() {
     // do nothing here -- clean-up will happen automatically
@@ -67,7 +71,13 @@ status_t EventThreadConnection::setVsyncRate(uint32_t count) {
 }
 
 void EventThreadConnection::requestNextVsync() {
-    mEventThread->requestNextVsync(this);
+    ATRACE_NAME("requestNextVsync");
+    mEventThread->requestNextVsync(this, true);
+}
+
+void EventThreadConnection::requestNextVsyncForHWC() {
+    ATRACE_NAME("requestNextVsyncForHWC");
+    mEventThread->requestNextVsync(this, false);
 }
 
 status_t EventThreadConnection::postEvent(const DisplayEventReceiver::Event& event) {
@@ -82,26 +92,21 @@ EventThread::~EventThread() = default;
 namespace impl {
 
 EventThread::EventThread(std::unique_ptr<VSyncSource> src,
-                         const ResyncWithRateLimitCallback& resyncWithRateLimitCallback,
                          const InterceptVSyncsCallback& interceptVSyncsCallback,
                          const ResetIdleTimerCallback& resetIdleTimerCallback,
                          const char* threadName)
-      : EventThread(nullptr, std::move(src), resyncWithRateLimitCallback, interceptVSyncsCallback,
-                    threadName) {
+      : EventThread(nullptr, std::move(src), interceptVSyncsCallback, threadName) {
     mResetIdleTimer = resetIdleTimerCallback;
 }
 
-EventThread::EventThread(VSyncSource* src, ResyncWithRateLimitCallback resyncWithRateLimitCallback,
-                         InterceptVSyncsCallback interceptVSyncsCallback, const char* threadName)
-      : EventThread(src, nullptr, resyncWithRateLimitCallback, interceptVSyncsCallback,
-                    threadName) {}
+EventThread::EventThread(VSyncSource* src, InterceptVSyncsCallback interceptVSyncsCallback,
+                         const char* threadName)
+      : EventThread(src, nullptr, interceptVSyncsCallback, threadName) {}
 
 EventThread::EventThread(VSyncSource* src, std::unique_ptr<VSyncSource> uniqueSrc,
-                         ResyncWithRateLimitCallback resyncWithRateLimitCallback,
                          InterceptVSyncsCallback interceptVSyncsCallback, const char* threadName)
       : mVSyncSource(src),
         mVSyncSourceUnique(std::move(uniqueSrc)),
-        mResyncWithRateLimitCallback(resyncWithRateLimitCallback),
         mInterceptVSyncsCallback(interceptVSyncsCallback) {
     if (src == nullptr) {
         mVSyncSource = mVSyncSourceUnique.get();
@@ -144,8 +149,8 @@ void EventThread::setPhaseOffset(nsecs_t phaseOffset) {
     mVSyncSource->setPhaseOffset(phaseOffset);
 }
 
-sp<EventThreadConnection> EventThread::createEventConnection() const {
-    return new EventThreadConnection(const_cast<EventThread*>(this));
+sp<EventThreadConnection> EventThread::createEventConnection(ResyncCallback resyncCallback) const {
+    return new EventThreadConnection(const_cast<EventThread*>(this), std::move(resyncCallback));
 }
 
 status_t EventThread::registerDisplayEventConnection(const sp<EventThreadConnection>& connection) {
@@ -184,15 +189,17 @@ void EventThread::setVsyncRate(uint32_t count, const sp<EventThreadConnection>& 
     }
 }
 
-void EventThread::requestNextVsync(const sp<EventThreadConnection>& connection) {
-    std::lock_guard<std::mutex> lock(mMutex);
-    if (mResetIdleTimer) {
+void EventThread::requestNextVsync(const sp<EventThreadConnection>& connection, bool reset) {
+    if (mResetIdleTimer && reset) {
+        ATRACE_NAME("resetIdleTimer");
         mResetIdleTimer();
     }
 
-    if (mResyncWithRateLimitCallback) {
-        mResyncWithRateLimitCallback();
+    if (connection->resyncCallback) {
+        connection->resyncCallback();
     }
+
+    std::lock_guard<std::mutex> lock(mMutex);
 
     if (connection->count < 0) {
         connection->count = 0;

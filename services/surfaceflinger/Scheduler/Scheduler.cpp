@@ -86,39 +86,38 @@ Scheduler::Scheduler(impl::EventControlThread::SetVSyncEnabledFunction function)
 Scheduler::~Scheduler() = default;
 
 sp<Scheduler::ConnectionHandle> Scheduler::createConnection(
-        const std::string& connectionName, int64_t phaseOffsetNs,
-        impl::EventThread::ResyncWithRateLimitCallback resyncCallback,
+        const std::string& connectionName, int64_t phaseOffsetNs, ResyncCallback resyncCallback,
         impl::EventThread::InterceptVSyncsCallback interceptCallback) {
     const int64_t id = sNextId++;
     ALOGV("Creating a connection handle with ID: %" PRId64 "\n", id);
 
     std::unique_ptr<EventThread> eventThread =
-            makeEventThread(connectionName, mPrimaryDispSync.get(), phaseOffsetNs, resyncCallback,
+            makeEventThread(connectionName, mPrimaryDispSync.get(), phaseOffsetNs,
                             interceptCallback);
     auto connection = std::make_unique<Connection>(new ConnectionHandle(id),
-                                                   eventThread->createEventConnection(),
+                                                   eventThread->createEventConnection(
+                                                           std::move(resyncCallback)),
                                                    std::move(eventThread));
+
     mConnections.insert(std::make_pair(id, std::move(connection)));
     return mConnections[id]->handle;
 }
 
 std::unique_ptr<EventThread> Scheduler::makeEventThread(
         const std::string& connectionName, DispSync* dispSync, int64_t phaseOffsetNs,
-        impl::EventThread::ResyncWithRateLimitCallback resyncCallback,
         impl::EventThread::InterceptVSyncsCallback interceptCallback) {
     const std::string sourceName = connectionName + "Source";
     std::unique_ptr<VSyncSource> eventThreadSource =
             std::make_unique<DispSyncSource>(dispSync, phaseOffsetNs, true, sourceName.c_str());
     const std::string threadName = connectionName + "Thread";
-    return std::make_unique<impl::EventThread>(std::move(eventThreadSource), resyncCallback,
-                                               interceptCallback, [this] { resetIdleTimer(); },
-                                               threadName.c_str());
+    return std::make_unique<impl::EventThread>(std::move(eventThreadSource), interceptCallback,
+                                               [this] { resetIdleTimer(); }, threadName.c_str());
 }
 
 sp<IDisplayEventConnection> Scheduler::createDisplayEventConnection(
-        const sp<Scheduler::ConnectionHandle>& handle) {
+        const sp<Scheduler::ConnectionHandle>& handle, ResyncCallback resyncCallback) {
     RETURN_VALUE_IF_INVALID(nullptr);
-    return mConnections[handle->id]->thread->createEventConnection();
+    return mConnections[handle->id]->thread->createEventConnection(std::move(resyncCallback));
 }
 
 EventThread* Scheduler::getEventThread(const sp<Scheduler::ConnectionHandle>& handle) {
@@ -238,6 +237,16 @@ void Scheduler::incrementFrameCounter() {
     mLayerHistory.incrementCounter();
 }
 
+void Scheduler::setExpiredIdleTimerCallback(const ExpiredIdleTimerCallback& expiredTimerCallback) {
+    std::lock_guard<std::mutex> lock(mCallbackLock);
+    mExpiredTimerCallback = expiredTimerCallback;
+}
+
+void Scheduler::setResetIdleTimerCallback(const ResetIdleTimerCallback& resetTimerCallback) {
+    std::lock_guard<std::mutex> lock(mCallbackLock);
+    mResetTimerCallback = resetTimerCallback;
+}
+
 void Scheduler::updateFrameSkipping(const int64_t skipCount) {
     ATRACE_INT("FrameSkipCount", skipCount);
     if (mSkipCount != skipCount) {
@@ -314,12 +323,12 @@ void Scheduler::determineTimestampAverage(bool isAutoTimestamp, const nsecs_t fr
     // TODO(b/113612090): This are current numbers from trial and error while running videos
     // from YouTube at 24, 30, and 60 fps.
     if (mean > 14 && mean < 18) {
-        ATRACE_INT("FPS", 60);
+        ATRACE_INT("MediaFPS", 60);
     } else if (mean > 31 && mean < 34) {
-        ATRACE_INT("FPS", 30);
+        ATRACE_INT("MediaFPS", 30);
         return;
     } else if (mean > 39 && mean < 42) {
-        ATRACE_INT("FPS", 24);
+        ATRACE_INT("MediaFPS", 24);
     }
 }
 
@@ -328,13 +337,19 @@ void Scheduler::resetIdleTimer() {
         mIdleTimer->reset();
         ATRACE_INT("ExpiredIdleTimer", 0);
     }
+
+    std::lock_guard<std::mutex> lock(mCallbackLock);
+    if (mResetTimerCallback) {
+        mResetTimerCallback();
+    }
 }
 
 void Scheduler::expiredTimerCallback() {
-    // TODO(b/113612090): Each time a timer expired, we should record the information into
-    // a circular buffer. Once this has happened a given amount (TBD) of times, we can comfortably
-    // say that the device is sitting in idle.
-    ATRACE_INT("ExpiredIdleTimer", 1);
+    std::lock_guard<std::mutex> lock(mCallbackLock);
+    if (mExpiredTimerCallback) {
+        mExpiredTimerCallback();
+        ATRACE_INT("ExpiredIdleTimer", 1);
+    }
 }
 
 } // namespace android

@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+#include <array>
 #include <math.h>
 
 #include <binder/Parcel.h>
@@ -25,11 +26,7 @@ namespace android {
 // Default display id.
 static constexpr int32_t DISPLAY_ID = ADISPLAY_ID_DEFAULT;
 
-class BaseTest : public testing::Test {
-protected:
-    virtual void SetUp() { }
-    virtual void TearDown() { }
-};
+class BaseTest : public testing::Test { };
 
 // --- PointerCoordsTest ---
 
@@ -260,7 +257,7 @@ void MotionEventTest::initializeEventWithHistory(MotionEvent* event) {
     event->initialize(2, AINPUT_SOURCE_TOUCHSCREEN, DISPLAY_ID, AMOTION_EVENT_ACTION_MOVE, 0,
             AMOTION_EVENT_FLAG_WINDOW_IS_OBSCURED,
             AMOTION_EVENT_EDGE_FLAG_TOP, AMETA_ALT_ON, AMOTION_EVENT_BUTTON_PRIMARY,
-            X_OFFSET, Y_OFFSET, 2.0f, 2.1f,
+            MotionClassification::NONE, X_OFFSET, Y_OFFSET, 2.0f, 2.1f,
             ARBITRARY_DOWN_TIME, ARBITRARY_EVENT_TIME,
             2, pointerProperties, pointerCoords);
 
@@ -316,6 +313,7 @@ void MotionEventTest::assertEqualsEventWithHistory(const MotionEvent* event) {
     ASSERT_EQ(AMOTION_EVENT_EDGE_FLAG_TOP, event->getEdgeFlags());
     ASSERT_EQ(AMETA_ALT_ON, event->getMetaState());
     ASSERT_EQ(AMOTION_EVENT_BUTTON_PRIMARY, event->getButtonState());
+    ASSERT_EQ(MotionClassification::NONE, event->getClassification());
     ASSERT_EQ(X_OFFSET, event->getXOffset());
     ASSERT_EQ(Y_OFFSET, event->getYOffset());
     ASSERT_EQ(2.0f, event->getXPrecision());
@@ -572,8 +570,11 @@ TEST_F(MotionEventTest, Transform) {
         pointerCoords[i].setAxisValue(AMOTION_EVENT_AXIS_ORIENTATION, angle);
     }
     MotionEvent event;
-    event.initialize(0, 0, DISPLAY_ID, AMOTION_EVENT_ACTION_MOVE, 0, 0, 0, 0, 0,
-            0, 0, 0, 0, 0, 0, pointerCount, pointerProperties, pointerCoords);
+    event.initialize(0 /*deviceId*/, AINPUT_SOURCE_UNKNOWN, DISPLAY_ID, AMOTION_EVENT_ACTION_MOVE,
+            0 /*actionButton*/, 0 /*flags*/, AMOTION_EVENT_EDGE_FLAG_NONE,
+            AMETA_NONE, 0 /*buttonState*/, MotionClassification::NONE,
+            0 /*xOffset*/, 0 /*yOffset*/, 0 /*xPrecision*/, 0 /*yPrecision*/,
+            0 /*downTime*/, 0 /*eventTime*/, pointerCount, pointerProperties, pointerCoords);
     float originalRawX = 0 + 3;
     float originalRawY = -RADIUS + 2;
 
@@ -604,6 +605,32 @@ TEST_F(MotionEventTest, Transform) {
     // Applying the transformation should preserve the raw X and Y of the first point.
     ASSERT_NEAR(originalRawX, event.getRawX(0), 0.001);
     ASSERT_NEAR(originalRawY, event.getRawY(0), 0.001);
+}
+
+TEST_F(MotionEventTest, Initialize_SetsClassification) {
+    std::array<MotionClassification, 3> classifications = {
+            MotionClassification::NONE,
+            MotionClassification::AMBIGUOUS_GESTURE,
+            MotionClassification::DEEP_PRESS,
+    };
+
+    MotionEvent event;
+    constexpr size_t pointerCount = 1;
+    PointerProperties pointerProperties[pointerCount];
+    PointerCoords pointerCoords[pointerCount];
+    for (size_t i = 0; i < pointerCount; i++) {
+        pointerProperties[i].clear();
+        pointerProperties[i].id = i;
+        pointerCoords[i].clear();
+    }
+
+    for (MotionClassification classification : classifications) {
+        event.initialize(0 /*deviceId*/, AINPUT_SOURCE_TOUCHSCREEN, DISPLAY_ID,
+                AMOTION_EVENT_ACTION_DOWN, 0, 0, AMOTION_EVENT_EDGE_FLAG_NONE, AMETA_NONE, 0,
+                classification, 0, 0, 0, 0, 0 /*downTime*/, 0 /*eventTime*/,
+                pointerCount, pointerProperties, pointerCoords);
+        ASSERT_EQ(classification, event.getClassification());
+    }
 }
 
 } // namespace android
