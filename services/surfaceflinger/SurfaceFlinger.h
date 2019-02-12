@@ -60,6 +60,7 @@
 #include "Scheduler/EventThread.h"
 #include "Scheduler/MessageQueue.h"
 #include "Scheduler/PhaseOffsets.h"
+#include "Scheduler/RefreshRateConfigs.h"
 #include "Scheduler/RefreshRateStats.h"
 #include "Scheduler/Scheduler.h"
 #include "Scheduler/VSyncModulator.h"
@@ -313,7 +314,7 @@ public:
     compositionengine::CompositionEngine& getCompositionEngine() const;
 
     // returns the default Display
-    sp<const DisplayDevice> getDefaultDisplayDevice() const {
+    sp<const DisplayDevice> getDefaultDisplayDevice() {
         Mutex::Autolock _l(mStateLock);
         return getDefaultDisplayDeviceLocked();
     }
@@ -327,7 +328,7 @@ public:
 
     // enable/disable h/w composer event
     // TODO: this should be made accessible only to EventThread
-    void setVsyncEnabled(EventThread::DisplayType displayType, bool enabled);
+    void setPrimaryVsyncEnabled(bool enabled);
 
     // called on the main thread by MessageQueue when an internal message
     // is received
@@ -414,7 +415,8 @@ private:
     sp<ISurfaceComposerClient> createConnection() override;
     sp<IBinder> createDisplay(const String8& displayName, bool secure) override;
     void destroyDisplay(const sp<IBinder>& displayToken) override;
-    sp<IBinder> getBuiltInDisplay(int32_t id) override;
+    std::vector<PhysicalDisplayId> getPhysicalDisplayIds() const override;
+    sp<IBinder> getPhysicalDisplayToken(PhysicalDisplayId displayId) const override;
     void setTransactionState(const Vector<ComposerState>& state,
                              const Vector<DisplayState>& displays, uint32_t flags,
                              const sp<IBinder>& applyToken,
@@ -435,7 +437,12 @@ private:
                            const Rect& sourceCrop, float frameScale, bool childrenOnly) override;
     status_t getDisplayStats(const sp<IBinder>& displayToken, DisplayStatInfo* stats) override;
     status_t getDisplayConfigs(const sp<IBinder>& displayToken,
-                               Vector<DisplayInfo>* configs) override;
+                               Vector<DisplayInfo>* configs) override {
+        Mutex::Autolock _l(mStateLock);
+        return getDisplayConfigsLocked(displayToken, configs);
+    }
+    status_t getDisplayConfigsLocked(const sp<IBinder>& displayToken, Vector<DisplayInfo>* configs)
+            REQUIRES(mStateLock);
     int getActiveConfig(const sp<IBinder>& displayToken) override;
     status_t getDisplayColorModes(const sp<IBinder>& displayToken,
                                   Vector<ui::ColorMode>* configs) override;
@@ -467,9 +474,6 @@ private:
                                        uint64_t timestamp,
                                        DisplayedFrameStats* outStats) const override;
     status_t getProtectedContentSupport(bool* outSupported) const override;
-    status_t cacheBuffer(const sp<IBinder>& token, const sp<GraphicBuffer>& buffer,
-                         int32_t* outBufferId) override;
-    status_t uncacheBuffer(const sp<IBinder>& token, int32_t bufferId) override;
     status_t isWideColorDisplay(const sp<IBinder>& displayToken,
                                 bool* outIsWideColorDisplay) const override;
 
@@ -504,10 +508,18 @@ private:
 
     // called on the main thread in response to initializeDisplays()
     void onInitializeDisplays() REQUIRES(mStateLock);
-    // setActiveConfigInternal() posted on a main thread for async execution
-    status_t setActiveConfigAsync(const sp<IBinder>& displayToken, int mode);
-    // called on the main thread in response to setActiveConfig()
-    void setActiveConfigInternal(const sp<IBinder>& displayToken, int mode) REQUIRES(mStateLock);
+    // Sets the desired active config bit. It obtains the lock, and sets mDesiredActiveConfig.
+    void setDesiredActiveConfig(const sp<IBinder>& displayToken, int mode) REQUIRES(mStateLock);
+    // Calls setActiveConfig in HWC.
+    void setActiveConfigInHWC();
+    // Once HWC has returned the present fence, this sets the active config and a new refresh
+    // rate in SF. It also triggers HWC vsync.
+    void setActiveConfigInternal() REQUIRES(mStateLock);
+    // Active config is updated on INVALIDATE call in a state machine-like manner. When the
+    // desired config was set, HWC needs to update the pannel on the next refresh, and when
+    // we receive the fence back, we know that the process was complete. It returns whether
+    // the invalidate process should continue.
+    bool updateSetActiveConfigStateMachine();
     // called on the main thread in response to setPowerMode()
     void setPowerModeInternal(const sp<DisplayDevice>& display, int mode) REQUIRES(mStateLock);
 
@@ -522,7 +534,8 @@ private:
     void handleTransaction(uint32_t transactionFlags);
     void handleTransactionLocked(uint32_t transactionFlags);
 
-    void updateInputWindows();
+    void updateInputFlinger();
+    void updateInputWindowInfo();
     void executeInputWindowCommands();
     void updateCursorAsync();
 
@@ -600,7 +613,8 @@ private:
     void startBootAnim();
 
     void renderScreenImplLocked(const RenderArea& renderArea, TraverseLayersFunction traverseLayers,
-                                bool useIdentityTransform);
+                                ANativeWindowBuffer* buffer, bool useIdentityTransform,
+                                int* outSyncFd);
     status_t captureScreenCommon(RenderArea& renderArea, TraverseLayersFunction traverseLayers,
                                  sp<GraphicBuffer>* outBuffer, const ui::PixelFormat reqPixelFormat,
                                  bool useIdentityTransform);
@@ -656,7 +670,7 @@ private:
     }
 
     sp<DisplayDevice> getDefaultDisplayDeviceLocked() {
-        if (const auto token = getInternalDisplayToken()) {
+        if (const auto token = getInternalDisplayTokenLocked()) {
             return getDisplayDeviceLocked(token);
         }
         return nullptr;
@@ -739,8 +753,11 @@ private:
     void logLayerStats();
     void doDisplayComposition(const sp<DisplayDevice>& display, const Region& dirtyRegion);
 
-    // This fails if using GL and the surface has been destroyed.
-    bool doComposeSurfaces(const sp<DisplayDevice>& display);
+    // This fails if using GL and the surface has been destroyed. readyFence
+    // will be populated if using GL and native fence sync is supported, to
+    // signal when drawing has completed.
+    bool doComposeSurfaces(const sp<DisplayDevice>& display, const Region& debugRegionm,
+                           base::unique_fd* readyFence);
 
     void postFramebuffer(const sp<DisplayDevice>& display);
     void postFrame();
@@ -757,7 +774,7 @@ private:
     void processDisplayChangesLocked();
     void processDisplayHotplugEventsLocked();
 
-    void dispatchDisplayHotplugEvent(EventThread::DisplayType displayType, bool connected);
+    void dispatchDisplayHotplugEvent(PhysicalDisplayId displayId, bool connected);
 
     /* ------------------------------------------------------------------------
      * VSync
@@ -767,9 +784,9 @@ private:
     void resyncToHardwareVsync(bool makeAvailable, nsecs_t period);
     void disableHardwareVsync(bool makeUnavailable);
 
-    // Sets the refresh rate to newFps by switching active configs, if they are available for
+    // Sets the refresh rate by switching active configs, if they are available for
     // the desired refresh rate.
-    void setRefreshRateTo(float newFps);
+    void setRefreshRateTo(scheduler::RefreshRateConfigs::RefreshRateType) REQUIRES(mStateLock);
 
     using GetVsyncPeriod = std::function<nsecs_t()>;
 
@@ -797,12 +814,12 @@ private:
     /*
      * Display identification
      */
-    sp<IBinder> getPhysicalDisplayToken(DisplayId displayId) const {
+    sp<IBinder> getPhysicalDisplayTokenLocked(DisplayId displayId) const {
         const auto it = mPhysicalDisplayTokens.find(displayId);
         return it != mPhysicalDisplayTokens.end() ? it->second : nullptr;
     }
 
-    std::optional<DisplayId> getPhysicalDisplayId(const sp<IBinder>& displayToken) const {
+    std::optional<DisplayId> getPhysicalDisplayIdLocked(const sp<IBinder>& displayToken) const {
         for (const auto& [id, token] : mPhysicalDisplayTokens) {
             if (token == displayToken) {
                 return id;
@@ -812,27 +829,19 @@ private:
     }
 
     // TODO(b/74619554): Remove special cases for primary display.
-    sp<IBinder> getInternalDisplayToken() const {
-        const auto displayId = getInternalDisplayId();
-        return displayId ? getPhysicalDisplayToken(*displayId) : nullptr;
+    sp<IBinder> getInternalDisplayTokenLocked() const {
+        const auto displayId = getInternalDisplayIdLocked();
+        return displayId ? getPhysicalDisplayTokenLocked(*displayId) : nullptr;
     }
 
-    std::optional<DisplayId> getInternalDisplayId() const {
+    std::optional<DisplayId> getInternalDisplayIdLocked() const {
         const auto hwcDisplayId = getHwComposer().getInternalHwcDisplayId();
-        return hwcDisplayId ? getHwComposer().toPhysicalDisplayId(*hwcDisplayId) : std::nullopt;
-    }
-
-    // TODO(b/74619554): Remove special cases for external display.
-    std::optional<DisplayId> getExternalDisplayId() const {
-        const auto hwcDisplayId = getHwComposer().getExternalHwcDisplayId();
         return hwcDisplayId ? getHwComposer().toPhysicalDisplayId(*hwcDisplayId) : std::nullopt;
     }
 
     /*
      * Debugging & dumpsys
      */
-    bool startDdmConnection();
-
     using DumpArgs = Vector<String16>;
     using Dumper = std::function<void(const DumpArgs&, bool asProto, std::string&)>;
 
@@ -947,7 +956,6 @@ private:
     std::unique_ptr<VSyncSource> mSfEventThreadSource;
     std::unique_ptr<InjectVSyncSource> mVSyncInjector;
     std::unique_ptr<EventControlThread> mEventControlThread;
-    std::unordered_map<DisplayId, sp<IBinder>> mPhysicalDisplayTokens;
 
     // Calculates correct offsets.
     VSyncModulator mVsyncModulator;
@@ -958,9 +966,13 @@ private:
     // don't need synchronization
     State mDrawingState{LayerVector::StateSet::Drawing};
     bool mVisibleRegionsDirty;
+    // Set during transaction commit stage to track if the input info for a layer has changed.
+    bool mInputInfoChanged{false};
     bool mGeometryInvalid;
     bool mAnimCompositionPending;
     std::vector<sp<Layer>> mLayersWithQueuedFrames;
+    // Tracks layers that need to update a display's dirty region.
+    std::vector<sp<Layer>> mLayersPendingRefresh;
     sp<Fence> mPreviousPresentFence = Fence::NO_FENCE;
     bool mHadClientComposition = false;
 
@@ -981,10 +993,10 @@ private:
     // this may only be written from the main thread with mStateLock held
     // it may be read from other threads with mStateLock held
     std::map<wp<IBinder>, sp<DisplayDevice>> mDisplays;
+    std::unordered_map<DisplayId, sp<IBinder>> mPhysicalDisplayTokens;
 
     // don't use a lock for these, we don't care
     int mDebugRegion;
-    int mDebugDDMS;
     int mDebugDisableHWC;
     int mDebugDisableTransformHint;
     volatile nsecs_t mDebugInSwapBuffers;
@@ -1087,12 +1099,38 @@ private:
     sp<Scheduler::ConnectionHandle> mSfConnectionHandle;
     std::unique_ptr<scheduler::RefreshRateStats> mRefreshRateStats;
 
+    // The following structs are used for configuring active config state at a desired time,
+    // which is once per vsync at invalidate time.
+    enum SetActiveConfigState {
+        NONE,            // not in progress
+        NOTIFIED_HWC,    // call to HWC has been made
+        REFRESH_RECEIVED // onRefresh was received from HWC
+    };
+    std::atomic<SetActiveConfigState> mSetActiveConfigState = SetActiveConfigState::NONE;
+
+    struct ActiveConfigInfo {
+        int configId;
+        sp<IBinder> displayToken;
+
+        bool operator!=(const ActiveConfigInfo& other) const {
+            if (configId != other.configId) {
+                return true;
+            }
+            return (displayToken != other.displayToken);
+        }
+    };
+    std::mutex mActiveConfigLock;
+    // This bit is set once we start setting the config. We read from this bit during the
+    // process. If at the end, this bit is different than mDesiredActiveConfig, we restart
+    // the process.
+    ActiveConfigInfo mUpcomingActiveConfig; // Always read and written on the main thread.
+    // This bit can be set at any point in time when the system wants the new config.
+    ActiveConfigInfo mDesiredActiveConfig GUARDED_BY(mActiveConfigLock);
+
     /* ------------------------------------------------------------------------ */
     sp<IInputFlinger> mInputFlinger;
 
     InputWindowCommands mInputWindowCommands;
-
-    BufferStateLayerCache mBufferStateLayerCache;
 
     ui::DisplayPrimaries mInternalDisplayPrimaries;
 };

@@ -62,6 +62,9 @@ public:
 public:
     bool fenceHasSignaled() const override;
 
+protected:
+    bool useCachedBufferForClientComposition() const override;
+
 private:
     nsecs_t getDesiredPresentTime() override;
     std::shared_ptr<FenceTime> getCurrentFenceTime() const override;
@@ -81,7 +84,7 @@ private:
     bool getAutoRefresh() const override;
     bool getSidebandStreamChanged() const override;
 
-    std::optional<Region> latchSidebandStream(bool& recomputeVisibleRegions) override;
+    bool latchSidebandStream(bool& recomputeVisibleRegions) override;
 
     bool hasFrameUpdate() const override;
 

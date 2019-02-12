@@ -28,6 +28,13 @@ namespace android {
 struct NativeLoaderNamespace;
 
 class GraphicsEnv {
+    struct GpuStats {
+        std::string driverPackageName;
+        std::string driverVersionName;
+        uint64_t driverVersionCode;
+        std::string appPackageName;
+    };
+
 public:
     static GraphicsEnv& getInstance();
 
@@ -40,6 +47,9 @@ public:
     //     /data/app/com.example.driver/base.apk!/lib/arm64-v8a
     void setDriverPath(const std::string path);
     android_namespace_t* getDriverNamespace();
+    void setGpuStats(const std::string driverPackageName, const std::string driverVersionName,
+                     const uint64_t versionCode, const std::string appPackageName);
+    void sendGpuStats();
 
     bool shouldUseAngle(std::string appName);
     bool shouldUseAngle();
@@ -70,6 +80,7 @@ private:
 
     GraphicsEnv() = default;
     std::string mDriverPath;
+    GpuStats mGpuStats;
     std::string mAnglePath;
     std::string mAngleAppName;
     std::string mAngleDeveloperOptIn;

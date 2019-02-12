@@ -152,12 +152,6 @@ public:
     static void doDropReferenceTransaction(const sp<IBinder>& handle,
             const sp<ISurfaceComposerClient>& client);
 
-    // Caches a buffer with the ISurfaceComposer so the buffer does not need to be resent across
-    // processes
-    static status_t cacheBuffer(const sp<GraphicBuffer>& buffer, int32_t* outBufferId);
-    // Uncaches a buffer set by cacheBuffer
-    static status_t uncacheBuffer(int32_t bufferId);
-
     // Queries whether a given display is wide color display.
     static status_t isWideColorDisplay(const sp<IBinder>& display, bool* outIsWideColorDisplay);
 
@@ -202,9 +196,13 @@ public:
     //! Destroy a virtual display
     static void destroyDisplay(const sp<IBinder>& display);
 
-    //! Get the token for the existing default displays.
-    //! Possible values for id are eDisplayIdMain and eDisplayIdHdmi.
-    static sp<IBinder> getBuiltInDisplay(int32_t id);
+    //! Get stable IDs for connected physical displays
+    static std::vector<PhysicalDisplayId> getPhysicalDisplayIds();
+    static std::optional<PhysicalDisplayId> getInternalDisplayId();
+
+    //! Get token for a physical display given its stable ID
+    static sp<IBinder> getPhysicalDisplayToken(PhysicalDisplayId displayId);
+    static sp<IBinder> getInternalDisplayToken();
 
     static status_t enableVSyncInjections(bool enable);
 
