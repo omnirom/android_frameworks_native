@@ -19,6 +19,28 @@
 #define LOG_TAG "BufferLayer"
 #define ATRACE_TAG ATRACE_TAG_GRAPHICS
 
+#include <cmath>
+#include <cstdlib>
+#include <mutex>
+
+#include <compositionengine/CompositionEngine.h>
+#include <compositionengine/Layer.h>
+#include <compositionengine/LayerCreationArgs.h>
+#include <cutils/compiler.h>
+#include <cutils/native_handle.h>
+#include <cutils/properties.h>
+#include <gui/BufferItem.h>
+#include <gui/BufferQueue.h>
+#include <gui/LayerDebugInfo.h>
+#include <gui/Surface.h>
+#include <renderengine/RenderEngine.h>
+#include <ui/DebugUtils.h>
+#include <utils/Errors.h>
+#include <utils/Log.h>
+#include <utils/NativeHandle.h>
+#include <utils/StopWatch.h>
+#include <utils/Trace.h>
+
 #include "BufferLayer.h"
 #include "Colorizer.h"
 #include "DisplayDevice.h"
@@ -26,33 +48,13 @@
 
 #include "TimeStats/TimeStats.h"
 
-#include <renderengine/RenderEngine.h>
-
-#include <gui/BufferItem.h>
-#include <gui/BufferQueue.h>
-#include <gui/LayerDebugInfo.h>
-#include <gui/Surface.h>
-
-#include <ui/DebugUtils.h>
-
-#include <utils/Errors.h>
-#include <utils/Log.h>
-#include <utils/NativeHandle.h>
-#include <utils/StopWatch.h>
-#include <utils/Trace.h>
-
-#include <cutils/compiler.h>
-#include <cutils/native_handle.h>
-#include <cutils/properties.h>
-
-#include <math.h>
-#include <stdlib.h>
-#include <mutex>
-
 namespace android {
 
 BufferLayer::BufferLayer(const LayerCreationArgs& args)
-      : Layer(args), mTextureName(args.flinger->getNewTexture()) {
+      : Layer(args),
+        mTextureName(args.flinger->getNewTexture()),
+        mCompositionLayer{mFlinger->getCompositionEngine().createLayer(
+                compositionengine::LayerCreationArgs{this})} {
     ALOGV("Creating Layer %s", args.name.string());
 
     mTexture.init(renderengine::Texture::TEXTURE_EXTERNAL, mTextureName);
@@ -624,19 +626,16 @@ void BufferLayer::drawWithOpenGL(const RenderArea& renderArea, bool useIdentityT
      * minimal value)? Or, we could make GL behave like HWC -- but this feel
      * like more of a hack.
      */
+    const Rect bounds{computeBounds()}; // Rounds from FloatRect
 
-    // Convert to Rect so that bounds are clipped to integers.
-    const Rect win{computeCrop(Rect::INVALID_RECT)};
-    // computeCrop() returns the cropping rectangle in buffer space, so we
-    // shouldn't use getBufferSize() since that may return a rectangle specified
-    // in layer space. Otherwise we may compute incorrect texture coordinates.
-    const float bufWidth = float(mActiveBuffer->getWidth());
-    const float bufHeight = float(mActiveBuffer->getHeight());
+    Rect win = bounds;
+    const int bufferWidth = getBufferSize(s).getWidth();
+    const int bufferHeight = getBufferSize(s).getHeight();
 
-    const float left = win.left / bufWidth;
-    const float top = win.top / bufHeight;
-    const float right = win.right / bufWidth;
-    const float bottom = win.bottom / bufHeight;
+    const float left = float(win.left) / float(bufferWidth);
+    const float top = float(win.top) / float(bufferHeight);
+    const float right = float(win.right) / float(bufferWidth);
+    const float bottom = float(win.bottom) / float(bufferHeight);
 
     // TODO: we probably want to generate the texture coords with the mesh
     // here we assume that we only have 4 vertices
@@ -704,6 +703,10 @@ Rect BufferLayer::getBufferSize(const State& s) const {
     }
 
     return Rect(bufWidth, bufHeight);
+}
+
+std::shared_ptr<compositionengine::Layer> BufferLayer::getCompositionLayer() const {
+    return mCompositionLayer;
 }
 
 } // namespace android

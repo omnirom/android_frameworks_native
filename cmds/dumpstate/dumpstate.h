@@ -27,6 +27,7 @@
 
 #include <android-base/macros.h>
 #include <android-base/unique_fd.h>
+#include <android/os/BnIncidentAuthListener.h>
 #include <android/os/IDumpstate.h>
 #include <android/os/IDumpstateListener.h>
 #include <utils/StrongPointer.h>
@@ -192,7 +193,7 @@ class Dumpstate {
     friend class DumpstateTest;
 
   public:
-    enum RunStatus { OK, HELP, INVALID_INPUT, ERROR };
+    enum RunStatus { OK, HELP, INVALID_INPUT, ERROR, USER_CONSENT_DENIED, USER_CONSENT_TIMED_OUT };
 
     // The mode under which the bugreport should be run. Each mode encapsulates a few options.
     enum BugreportMode {
@@ -319,7 +320,7 @@ class Dumpstate {
     struct DumpOptions;
 
     /* Main entry point for running a complete bugreport. */
-    RunStatus Run();
+    RunStatus Run(int32_t calling_uid, const std::string& calling_package);
 
     /* Sets runtime options. */
     void SetOptions(std::unique_ptr<DumpOptions> options);
@@ -331,6 +332,7 @@ class Dumpstate {
         bool do_add_date = false;
         bool do_zip_file = false;
         bool do_vibrate = true;
+        // Writes bugreport content to a socket; only flatfile format is supported.
         bool use_socket = false;
         bool use_control_socket = false;
         bool do_fb = false;
@@ -342,13 +344,10 @@ class Dumpstate {
         bool wifi_only = false;
         // Whether progress updates should be published.
         bool do_progress_updates = false;
-        // File descriptor to output zip file. Takes precedence over use_outfile.
+        // File descriptor to output zip file.
         android::base::unique_fd bugreport_fd;
         // File descriptor to screenshot file.
-        // TODO(b/111441001): Use this fd.
         android::base::unique_fd screenshot_fd;
-        // Partial path to output file.
-        std::string use_outfile;
         // TODO: rename to MODE.
         // Extra options passed as system property.
         std::string extra_options;
@@ -367,6 +366,13 @@ class Dumpstate {
 
         /* Returns true if the options set so far are consistent. */
         bool ValidateOptions() const;
+
+        /* Returns if options specified require writing bugreport to a file */
+        bool OutputToFile() const {
+            // If we are not writing to socket, we will write to a file. If bugreport_fd is
+            // specified, it is preferred. If not bugreport is written to /bugreports.
+            return !use_socket;
+        }
     };
 
     // TODO: initialize fields on constructor
@@ -424,13 +430,6 @@ class Dumpstate {
     // Full path of the temporary file containing the screenshot (when requested).
     std::string screenshot_path_;
 
-    // TODO(b/111441001): remove when obsolete.
-    // Full path of the final zip file inside the caller-specified directory, if available.
-    std::string final_path_;
-
-    // The caller-specified directory, if available.
-    std::string bugreport_dir_;
-
     // Pointer to the zipped file.
     std::unique_ptr<FILE, int (*)(FILE*)> zip_file{nullptr, fclose};
 
@@ -448,11 +447,46 @@ class Dumpstate {
     // List of open ANR dump files.
     std::vector<DumpData> anr_data_;
 
+    // A callback to IncidentCompanion service, which checks user consent for sharing the
+    // bugreport with the calling app. If the user has not responded yet to the dialog it will
+    // be neither confirmed nor denied.
+    class ConsentCallback : public android::os::BnIncidentAuthListener {
+      public:
+        ConsentCallback();
+        android::binder::Status onReportApproved() override;
+        android::binder::Status onReportDenied() override;
+
+        enum ConsentResult { APPROVED, DENIED, UNAVAILABLE };
+
+        ConsentResult getResult();
+
+        // Returns the time since creating this listener
+        uint64_t getElapsedTimeMs() const;
+
+      private:
+        ConsentResult result_;
+        uint64_t start_time_;
+        std::mutex lock_;
+    };
+
   private:
-    RunStatus RunInternal();
+    RunStatus RunInternal(int32_t calling_uid, const std::string& calling_package);
+
+    void CheckUserConsent(int32_t calling_uid, const android::String16& calling_package);
+
+    // Removes the in progress files output files (tmp file, zip/txt file, screenshot),
+    // but leaves the log file alone.
+    void CleanupFiles();
+
+    RunStatus HandleUserConsentDenied();
+
+    // Copies bugreport artifacts over to the caller's directories provided there is user consent.
+    RunStatus CopyBugreportIfUserConsented();
 
     // Used by GetInstance() only.
     explicit Dumpstate(const std::string& version = VERSION_CURRENT);
+
+    android::sp<ConsentCallback> consent_callback_;
 
     DISALLOW_COPY_AND_ASSIGN(Dumpstate);
 };

@@ -38,20 +38,18 @@ interface IDumpstateListener {
     /* User denied consent to share the bugreport with the specified app */
     const int BUGREPORT_ERROR_USER_DENIED_CONSENT = 3;
 
+    /* The request to get user consent timed out */
+    const int BUGREPORT_ERROR_USER_CONSENT_TIMED_OUT = 4;
+
     /**
      * Called on an error condition with one of the error codes listed above.
      */
     oneway void onError(int errorCode);
 
     /**
-     * Called when taking bugreport finishes successfully
-     *
-     * @param durationMs time capturing bugreport took in milliseconds
-     * @param title title for the bugreport; helpful in reminding the user why they took it
-     * @param description detailed description for the bugreport
+     * Called when taking bugreport finishes successfully.
      */
-     oneway void onFinished(long durationMs, @utf8InCpp String title,
-                            @utf8InCpp String description);
+     oneway void onFinished();
 
     // TODO(b/111441001): Remove old methods when not used anymore.
     void onProgressUpdated(int progress);

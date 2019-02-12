@@ -19,6 +19,9 @@
 #include <compositionengine/impl/Output.h>
 #include <compositionengine/mock/CompositionEngine.h>
 #include <compositionengine/mock/DisplayColorProfile.h>
+#include <compositionengine/mock/Layer.h>
+#include <compositionengine/mock/LayerFE.h>
+#include <compositionengine/mock/OutputLayer.h>
 #include <compositionengine/mock/RenderSurface.h>
 #include <gtest/gtest.h>
 #include <ui/Rect.h>
@@ -153,10 +156,10 @@ TEST_F(OutputTest, setLayerStackFilterSetsFilterAndDirtiesEntireOutput) {
     mOutput.editState().bounds = displaySize;
 
     const uint32_t layerStack = 123u;
-    mOutput.setLayerStackFilter(true, layerStack);
+    mOutput.setLayerStackFilter(layerStack, true);
 
-    EXPECT_TRUE(mOutput.getState().singleLayerStack);
-    EXPECT_EQ(layerStack, mOutput.getState().singleLayerStackId);
+    EXPECT_TRUE(mOutput.getState().layerStackInternal);
+    EXPECT_EQ(layerStack, mOutput.getState().layerStackId);
 
     EXPECT_THAT(mOutput.getState().dirtyRegion, RegionEq(Region(displaySize)));
 }
@@ -257,6 +260,112 @@ TEST_F(OutputTest, getPhysicalSpaceDirtyRegionWithRepaintEverythingFalse) {
 
         // The dirtyRegion should be rotated and clipped to the display bounds.
         EXPECT_THAT(result, RegionEq(Region(Rect(100, 50))));
+    }
+}
+
+/* ------------------------------------------------------------------------
+ * Output::belongsInOutput()
+ */
+
+TEST_F(OutputTest, belongsInOutputFiltersAsExpected) {
+    const uint32_t layerStack1 = 123u;
+    const uint32_t layerStack2 = 456u;
+
+    // If the output accepts layerStack1 and internal-only layers....
+    mOutput.setLayerStackFilter(layerStack1, true);
+
+    // Any layer with layerStack1 belongs to it, internal-only or not.
+    EXPECT_TRUE(mOutput.belongsInOutput(layerStack1, false));
+    EXPECT_TRUE(mOutput.belongsInOutput(layerStack1, true));
+    EXPECT_FALSE(mOutput.belongsInOutput(layerStack2, true));
+    EXPECT_FALSE(mOutput.belongsInOutput(layerStack2, false));
+
+    // If the output accepts layerStack21 but not internal-only layers...
+    mOutput.setLayerStackFilter(layerStack1, false);
+
+    // Only non-internal layers with layerStack1 belong to it.
+    EXPECT_TRUE(mOutput.belongsInOutput(layerStack1, false));
+    EXPECT_FALSE(mOutput.belongsInOutput(layerStack1, true));
+    EXPECT_FALSE(mOutput.belongsInOutput(layerStack2, true));
+    EXPECT_FALSE(mOutput.belongsInOutput(layerStack2, false));
+}
+
+/* ------------------------------------------------------------------------
+ * Output::getOutputLayerForLayer()
+ */
+
+TEST_F(OutputTest, getOutputLayerForLayerWorks) {
+    mock::OutputLayer* outputLayer1 = new StrictMock<mock::OutputLayer>();
+    mock::OutputLayer* outputLayer2 = new StrictMock<mock::OutputLayer>();
+
+    Output::OutputLayers outputLayers;
+    outputLayers.emplace_back(std::unique_ptr<OutputLayer>(outputLayer1));
+    outputLayers.emplace_back(nullptr);
+    outputLayers.emplace_back(std::unique_ptr<OutputLayer>(outputLayer2));
+    mOutput.setOutputLayersOrderedByZ(std::move(outputLayers));
+
+    StrictMock<mock::Layer> layer;
+    StrictMock<mock::Layer> otherLayer;
+
+    // If the input layer matches the first OutputLayer, it will be returned.
+    EXPECT_CALL(*outputLayer1, getLayer()).WillOnce(ReturnRef(layer));
+    EXPECT_EQ(outputLayer1, mOutput.getOutputLayerForLayer(&layer));
+
+    // If the input layer matches the second OutputLayer, it will be returned.
+    EXPECT_CALL(*outputLayer1, getLayer()).WillOnce(ReturnRef(otherLayer));
+    EXPECT_CALL(*outputLayer2, getLayer()).WillOnce(ReturnRef(layer));
+    EXPECT_EQ(outputLayer2, mOutput.getOutputLayerForLayer(&layer));
+
+    // If the input layer does not match an output layer, null will be returned.
+    EXPECT_CALL(*outputLayer1, getLayer()).WillOnce(ReturnRef(otherLayer));
+    EXPECT_CALL(*outputLayer2, getLayer()).WillOnce(ReturnRef(otherLayer));
+    EXPECT_EQ(nullptr, mOutput.getOutputLayerForLayer(&layer));
+}
+
+/* ------------------------------------------------------------------------
+ * Output::getOrCreateOutputLayer()
+ */
+
+TEST_F(OutputTest, getOrCreateOutputLayerWorks) {
+    mock::OutputLayer* existingOutputLayer = new StrictMock<mock::OutputLayer>();
+
+    Output::OutputLayers outputLayers;
+    outputLayers.emplace_back(nullptr);
+    outputLayers.emplace_back(std::unique_ptr<OutputLayer>(existingOutputLayer));
+    mOutput.setOutputLayersOrderedByZ(std::move(outputLayers));
+
+    std::shared_ptr<mock::Layer> layer{new StrictMock<mock::Layer>()};
+    sp<LayerFE> layerFE{new StrictMock<mock::LayerFE>()};
+
+    StrictMock<mock::Layer> otherLayer;
+
+    {
+        // If there is no OutputLayer corresponding to the input layer, a
+        // new OutputLayer is constructed and returned.
+        EXPECT_CALL(*existingOutputLayer, getLayer()).WillOnce(ReturnRef(otherLayer));
+        auto result = mOutput.getOrCreateOutputLayer(layer, layerFE);
+        EXPECT_NE(existingOutputLayer, result.get());
+        EXPECT_TRUE(result.get() != nullptr);
+        EXPECT_EQ(layer.get(), &result->getLayer());
+        EXPECT_EQ(layerFE.get(), &result->getLayerFE());
+
+        // The entries in the ordered array should be unchanged.
+        auto& outputLayers = mOutput.getOutputLayersOrderedByZ();
+        EXPECT_EQ(nullptr, outputLayers[0].get());
+        EXPECT_EQ(existingOutputLayer, outputLayers[1].get());
+    }
+
+    {
+        // If there is an existing OutputLayer for the requested layer, an owned
+        // pointer is returned
+        EXPECT_CALL(*existingOutputLayer, getLayer()).WillOnce(ReturnRef(*layer));
+        auto result = mOutput.getOrCreateOutputLayer(layer, layerFE);
+        EXPECT_EQ(existingOutputLayer, result.get());
+
+        // The corresponding entry in the ordered array should be cleared.
+        auto& outputLayers = mOutput.getOutputLayersOrderedByZ();
+        EXPECT_EQ(nullptr, outputLayers[0].get());
+        EXPECT_EQ(nullptr, outputLayers[1].get());
     }
 }
 

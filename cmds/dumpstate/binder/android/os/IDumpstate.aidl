@@ -18,7 +18,6 @@ package android.os;
 
 import android.os.IDumpstateListener;
 import android.os.IDumpstateToken;
-import android.os.DumpstateOptions;
 
 /**
   * Binder interface for the currently running dumpstate process.
@@ -79,4 +78,9 @@ interface IDumpstate {
     void startBugreport(int callingUid, @utf8InCpp String callingPackage,
                         FileDescriptor bugreportFd, FileDescriptor screenshotFd,
                         int bugreportMode, IDumpstateListener listener);
+
+    /*
+     * Cancels the bugreport currently in progress.
+     */
+    void cancelBugreport();
 }

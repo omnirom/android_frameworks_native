@@ -30,6 +30,7 @@
 #include <input/InputWindow.h>
 #endif
 
+#include <gui/LayerMetadata.h>
 #include <math/vec3.h>
 #include <ui/GraphicTypes.h>
 #include <ui/Rect.h>
@@ -85,6 +86,8 @@ struct layer_state_t {
         eCornerRadiusChanged = 0x80000000,
         eFrameChanged = 0x1'00000000,
         eCachedBufferChanged = 0x2'00000000,
+        eBackgroundColorChanged = 0x4'00000000,
+        eMetadataChanged = 0x8'00000000,
     };
 
     layer_state_t()
@@ -110,7 +113,9 @@ struct layer_state_t {
             dataspace(ui::Dataspace::UNKNOWN),
             surfaceDamageRegion(),
             api(-1),
-            colorTransform(mat4()) {
+            colorTransform(mat4()),
+            bgColorAlpha(0),
+            bgColorDataspace(ui::Dataspace::UNKNOWN) {
         matrix.dsdx = matrix.dtdy = 1.0f;
         matrix.dsdy = matrix.dtdx = 0.0f;
         hdrMetadata.validTypes = 0;
@@ -180,6 +185,13 @@ struct layer_state_t {
 #endif
 
     cached_buffer_t cachedBuffer;
+
+    LayerMetadata metadata;
+
+    // The following refer to the alpha, and dataspace, respectively of
+    // the background color layer
+    float bgColorAlpha;
+    ui::Dataspace bgColorDataspace;
 };
 
 struct ComposerState {

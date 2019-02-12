@@ -41,6 +41,7 @@
 
 #include <android-base/logging.h>
 #include <android-base/properties.h>
+#include <android-base/scopeguard.h>
 #include <android-base/stringprintf.h>
 #include <android-base/strings.h>
 #include <android-base/unique_fd.h>
@@ -75,6 +76,9 @@ using std::endl;
 
 namespace android {
 namespace installd {
+
+// An uuid used in unit tests.
+static constexpr const char* kTestUuid = "TEST";
 
 static constexpr const char* kCpPath = "/system/bin/cp";
 static constexpr const char* kXattrDefault = "user.default";
@@ -154,6 +158,15 @@ binder::Status checkArgumentUuid(const std::unique_ptr<std::string>& uuid) {
     }
 }
 
+binder::Status checkArgumentUuidTestOrNull(const std::unique_ptr<std::string>& uuid) {
+    if (!uuid || strcmp(uuid->c_str(), kTestUuid) == 0) {
+        return ok();
+    } else {
+        return exception(binder::Status::EX_ILLEGAL_ARGUMENT,
+                StringPrintf("UUID must be null or \"%s\", got: %s", kTestUuid, uuid->c_str()));
+    }
+}
+
 binder::Status checkArgumentPackageName(const std::string& packageName) {
     if (is_valid_package_name(packageName.c_str())) {
         return ok();
@@ -205,6 +218,13 @@ binder::Status checkArgumentPath(const std::unique_ptr<std::string>& path) {
         return status;                                      \
     }                                                       \
 }
+
+#define CHECK_ARGUMENT_UUID_IS_TEST_OR_NULL(uuid) {         \
+    auto status = checkArgumentUuidTestOrNull(uuid);        \
+    if (!status.isOk()) {                                   \
+        return status;                                      \
+    }                                                       \
+}                                                           \
 
 #define CHECK_ARGUMENT_PACKAGE_NAME(packageName) {          \
     binder::Status status =                                 \
@@ -784,6 +804,233 @@ binder::Status InstalldNativeService::fixupAppData(const std::unique_ptr<std::st
     return ok();
 }
 
+static int32_t copy_directory_recursive(const char* from, const char* to) {
+    char *argv[] = {
+        (char*) kCpPath,
+        (char*) "-F", /* delete any existing destination file first (--remove-destination) */
+        (char*) "-p", /* preserve timestamps, ownership, and permissions */
+        (char*) "-R", /* recurse into subdirectories (DEST must be a directory) */
+        (char*) "-P", /* Do not follow symlinks [default] */
+        (char*) "-d", /* don't dereference symlinks */
+        (char*) from,
+        (char*) to
+    };
+
+    LOG(DEBUG) << "Copying " << from << " to " << to;
+    return android_fork_execvp(ARRAY_SIZE(argv), argv, nullptr, false, true);
+}
+
+binder::Status InstalldNativeService::snapshotAppData(
+        const std::unique_ptr<std::string>& volumeUuid,
+        const std::string& packageName, int32_t user, int32_t storageFlags,
+        int64_t* _aidl_return) {
+    ENFORCE_UID(AID_SYSTEM);
+    CHECK_ARGUMENT_UUID_IS_TEST_OR_NULL(volumeUuid);
+    CHECK_ARGUMENT_PACKAGE_NAME(packageName);
+    std::lock_guard<std::recursive_mutex> lock(mLock);
+
+    const char* volume_uuid = volumeUuid ? volumeUuid->c_str() : nullptr;
+    const char* package_name = packageName.c_str();
+
+    binder::Status res = ok();
+    // Default result to 0, it will be populated with inode of ce data snapshot
+    // if FLAG_STORAGE_CE has been passed.
+    if (_aidl_return != nullptr) *_aidl_return = 0;
+
+    bool clear_ce_on_exit = false;
+    bool clear_de_on_exit = false;
+
+    auto deleter = [&clear_ce_on_exit, &clear_de_on_exit, &volume_uuid, &user, &package_name] {
+        if (clear_de_on_exit) {
+            auto to = create_data_misc_de_rollback_package_path(volume_uuid, user, package_name);
+            if (delete_dir_contents(to.c_str(), 1, nullptr) != 0) {
+                LOG(WARNING) << "Failed to delete app data snapshot: " << to;
+            }
+        }
+
+        if (clear_ce_on_exit) {
+            auto to = create_data_misc_ce_rollback_package_path(volume_uuid, user, package_name);
+            if (delete_dir_contents(to.c_str(), 1, nullptr) != 0) {
+                LOG(WARNING) << "Failed to delete app data snapshot: " << to;
+            }
+        }
+    };
+
+    auto scope_guard = android::base::make_scope_guard(deleter);
+
+    // The app may not have any data at all, in which case it's OK to skip here.
+    auto from_ce = create_data_user_ce_package_path(volume_uuid, user, package_name);
+    if (access(from_ce.c_str(), F_OK) != 0) {
+        LOG(INFO) << "Missing source " << from_ce;
+        return ok();
+    }
+
+    // ce_data_inode is not needed when FLAG_CLEAR_CACHE_ONLY is set.
+    binder::Status clear_cache_result = clearAppData(volumeUuid, packageName, user,
+            storageFlags | FLAG_CLEAR_CACHE_ONLY, 0);
+    if (!clear_cache_result.isOk()) {
+        // It should be fine to continue snapshot if we for some reason failed
+        // to clear cache.
+        LOG(WARNING) << "Failed to clear cache of app " << packageName;
+    }
+
+    // ce_data_inode is not needed when FLAG_CLEAR_CODE_CACHE_ONLY is set.
+    binder::Status clear_code_cache_result = clearAppData(volumeUuid, packageName, user,
+            storageFlags | FLAG_CLEAR_CODE_CACHE_ONLY, 0);
+    if (!clear_code_cache_result.isOk()) {
+        // It should be fine to continue snapshot if we for some reason failed
+        // to clear code_cache.
+        LOG(WARNING) << "Failed to clear code_cache of app " << packageName;
+    }
+
+    if (storageFlags & FLAG_STORAGE_DE) {
+        auto from = create_data_user_de_package_path(volume_uuid, user, package_name);
+        auto to = create_data_misc_de_rollback_path(volume_uuid, user);
+
+        int rd = delete_dir_contents(to, true /* ignore_if_missing */);
+        if (rd != 0) {
+            res = error(rd, "Failed clearing existing snapshot " + to);
+            return res;
+        }
+
+        int rc = copy_directory_recursive(from.c_str(), to.c_str());
+        if (rc != 0) {
+            res = error(rc, "Failed copying " + from + " to " + to);
+            clear_de_on_exit = true;
+            return res;
+        }
+    }
+
+    if (storageFlags & FLAG_STORAGE_CE) {
+        auto from = create_data_user_ce_package_path(volume_uuid, user, package_name);
+        auto to = create_data_misc_ce_rollback_path(volume_uuid, user);
+
+        int rd = delete_dir_contents(to, true /* ignore_if_missing */);
+        if (rd != 0) {
+            res = error(rd, "Failed clearing existing snapshot " + to);
+            return res;
+        }
+
+        int rc = copy_directory_recursive(from.c_str(), to.c_str());
+        if (rc != 0) {
+            res = error(rc, "Failed copying " + from + " to " + to);
+            clear_ce_on_exit = true;
+            return res;
+        }
+        if (_aidl_return != nullptr) {
+            auto ce_snapshot_path = create_data_misc_ce_rollback_package_path(volume_uuid, user,
+                    package_name);
+            rc = get_path_inode(ce_snapshot_path, reinterpret_cast<ino_t*>(_aidl_return));
+            if (rc != 0) {
+                res = error(rc, "Failed to get_path_inode for " + ce_snapshot_path);
+                clear_ce_on_exit = true;
+                return res;
+            }
+        }
+    }
+
+    return res;
+}
+
+binder::Status InstalldNativeService::restoreAppDataSnapshot(
+        const std::unique_ptr<std::string>& volumeUuid, const std::string& packageName,
+        const int32_t appId, const int64_t ceDataInode, const std::string& seInfo,
+        const int32_t user, int32_t storageFlags) {
+    ENFORCE_UID(AID_SYSTEM);
+    CHECK_ARGUMENT_UUID_IS_TEST_OR_NULL(volumeUuid);
+    CHECK_ARGUMENT_PACKAGE_NAME(packageName);
+    std::lock_guard<std::recursive_mutex> lock(mLock);
+
+    const char* volume_uuid = volumeUuid ? volumeUuid->c_str() : nullptr;
+    const char* package_name = packageName.c_str();
+
+    auto from_ce = create_data_misc_ce_rollback_package_path(volume_uuid,
+            user, package_name);
+    auto from_de = create_data_misc_de_rollback_package_path(volume_uuid,
+            user, package_name);
+
+    const bool needs_ce_rollback = (storageFlags & FLAG_STORAGE_CE) &&
+        (access(from_ce.c_str(), F_OK) == 0);
+    const bool needs_de_rollback = (storageFlags & FLAG_STORAGE_DE) &&
+        (access(from_de.c_str(), F_OK) == 0);
+
+    if (!needs_ce_rollback && !needs_de_rollback) {
+        return ok();
+    }
+
+    // We know we're going to rollback one of the CE or DE data, so we clear
+    // application data first. Note that it's possible that we're asked to
+    // restore both CE & DE data but that one of the restores fail. Leaving the
+    // app with no data in those cases is arguably better than leaving the app
+    // with mismatched / stale data.
+    LOG(INFO) << "Clearing app data for " << packageName << " to restore snapshot.";
+    binder::Status res = clearAppData(volumeUuid, packageName, user, storageFlags, ceDataInode);
+    if (!res.isOk()) {
+        return res;
+    }
+
+    if (needs_ce_rollback) {
+        auto to_ce = create_data_user_ce_path(volume_uuid, user);
+        int rc = copy_directory_recursive(from_ce.c_str(), to_ce.c_str());
+        if (rc != 0) {
+            res = error(rc, "Failed copying " + from_ce + " to " + to_ce);
+            return res;
+        }
+    }
+
+    if (needs_de_rollback) {
+        auto to_de = create_data_user_de_path(volume_uuid, user);
+        int rc = copy_directory_recursive(from_de.c_str(), to_de.c_str());
+        if (rc != 0) {
+            if (needs_ce_rollback) {
+                auto ce_data = create_data_user_ce_package_path(volume_uuid, user, package_name);
+                LOG(WARNING) << "de_data rollback failed. Erasing rolled back ce_data " << ce_data;
+                if (delete_dir_contents(ce_data.c_str(), 1, nullptr) != 0) {
+                    LOG(WARNING) << "Failed to delete rolled back ce_data " << ce_data;
+                }
+            }
+            res = error(rc, "Failed copying " + from_de + " to " + to_de);
+            return res;
+        }
+    }
+
+    // Finally, restore the SELinux label on the app data.
+    return restoreconAppData(volumeUuid, packageName, user, storageFlags, appId, seInfo);
+}
+
+binder::Status InstalldNativeService::destroyAppDataSnapshot(
+        const std::unique_ptr<std::string> &volumeUuid, const std::string& packageName,
+        const int32_t user, const int64_t ceSnapshotInode, int32_t storageFlags) {
+    ENFORCE_UID(AID_SYSTEM);
+    CHECK_ARGUMENT_UUID_IS_TEST_OR_NULL(volumeUuid);
+    CHECK_ARGUMENT_PACKAGE_NAME(packageName);
+    std::lock_guard<std::recursive_mutex> lock(mLock);
+
+    const char* volume_uuid = volumeUuid ? volumeUuid->c_str() : nullptr;
+    const char* package_name = packageName.c_str();
+
+    if (storageFlags & FLAG_STORAGE_DE) {
+        auto de_snapshot_path = create_data_misc_de_rollback_package_path(volume_uuid,
+                user, package_name);
+
+        int res = delete_dir_contents_and_dir(de_snapshot_path, true /* ignore_if_missing */);
+        if (res != 0) {
+            return error(res, "Failed clearing snapshot " + de_snapshot_path);
+        }
+    }
+
+    if (storageFlags & FLAG_STORAGE_CE) {
+        auto ce_snapshot_path = create_data_misc_ce_rollback_package_path(volume_uuid,
+                user, package_name, ceSnapshotInode);
+        int res = delete_dir_contents_and_dir(ce_snapshot_path, true /* ignore_if_missing */);
+        if (res != 0) {
+            return error(res, "Failed clearing snapshot " + ce_snapshot_path);
+        }
+    }
+    return ok();
+}
+
+
 binder::Status InstalldNativeService::moveCompleteApp(const std::unique_ptr<std::string>& fromUuid,
         const std::unique_ptr<std::string>& toUuid, const std::string& packageName,
         const std::string& dataAppName, int32_t appId, const std::string& seInfo,
@@ -808,19 +1055,7 @@ binder::Status InstalldNativeService::moveCompleteApp(const std::unique_ptr<std:
         auto to = create_data_app_package_path(to_uuid, data_app_name);
         auto to_parent = create_data_app_path(to_uuid);
 
-        char *argv[] = {
-            (char*) kCpPath,
-            (char*) "-F", /* delete any existing destination file first (--remove-destination) */
-            (char*) "-p", /* preserve timestamps, ownership, and permissions */
-            (char*) "-R", /* recurse into subdirectories (DEST must be a directory) */
-            (char*) "-P", /* Do not follow symlinks [default] */
-            (char*) "-d", /* don't dereference symlinks */
-            (char*) from.c_str(),
-            (char*) to_parent.c_str()
-        };
-
-        LOG(DEBUG) << "Copying " << from << " to " << to;
-        int rc = android_fork_execvp(ARRAY_SIZE(argv), argv, nullptr, false, true);
+        int rc = copy_directory_recursive(from.c_str(), to_parent.c_str());
         if (rc != 0) {
             res = error(rc, "Failed copying " + from + " to " + to);
             goto fail;
@@ -848,25 +1083,11 @@ binder::Status InstalldNativeService::moveCompleteApp(const std::unique_ptr<std:
             goto fail;
         }
 
-        char *argv[] = {
-            (char*) kCpPath,
-            (char*) "-F", /* delete any existing destination file first (--remove-destination) */
-            (char*) "-p", /* preserve timestamps, ownership, and permissions */
-            (char*) "-R", /* recurse into subdirectories (DEST must be a directory) */
-            (char*) "-P", /* Do not follow symlinks [default] */
-            (char*) "-d", /* don't dereference symlinks */
-            nullptr,
-            nullptr
-        };
-
         {
             auto from = create_data_user_de_package_path(from_uuid, user, package_name);
             auto to = create_data_user_de_path(to_uuid, user);
-            argv[6] = (char*) from.c_str();
-            argv[7] = (char*) to.c_str();
 
-            LOG(DEBUG) << "Copying " << from << " to " << to;
-            int rc = android_fork_execvp(ARRAY_SIZE(argv), argv, nullptr, false, true);
+            int rc = copy_directory_recursive(from.c_str(), to.c_str());
             if (rc != 0) {
                 res = error(rc, "Failed copying " + from + " to " + to);
                 goto fail;
@@ -875,11 +1096,8 @@ binder::Status InstalldNativeService::moveCompleteApp(const std::unique_ptr<std:
         {
             auto from = create_data_user_ce_package_path(from_uuid, user, package_name);
             auto to = create_data_user_ce_path(to_uuid, user);
-            argv[6] = (char*) from.c_str();
-            argv[7] = (char*) to.c_str();
 
-            LOG(DEBUG) << "Copying " << from << " to " << to;
-            int rc = android_fork_execvp(ARRAY_SIZE(argv), argv, nullptr, false, true);
+            int rc = copy_directory_recursive(from.c_str(), to.c_str());
             if (rc != 0) {
                 res = error(rc, "Failed copying " + from + " to " + to);
                 goto fail;
@@ -1928,8 +2146,14 @@ binder::Status InstalldNativeService::linkNativeLibraryDirectory(
         return error("Failed to stat " + _pkgdir);
     }
 
+    char *con = nullptr;
+    if (lgetfilecon(pkgdir, &con) < 0) {
+        return error("Failed to lgetfilecon " + _pkgdir);
+    }
+
     if (chown(pkgdir, AID_INSTALL, AID_INSTALL) < 0) {
-        return error("Failed to chown " + _pkgdir);
+        res = error("Failed to chown " + _pkgdir);
+        goto out;
     }
 
     if (chmod(pkgdir, 0700) < 0) {
@@ -1961,7 +2185,13 @@ binder::Status InstalldNativeService::linkNativeLibraryDirectory(
         goto out;
     }
 
+    if (lsetfilecon(libsymlink, con) < 0) {
+        res = error("Failed to lsetfilecon " + _libsymlink);
+        goto out;
+    }
+
 out:
+    free(con);
     if (chmod(pkgdir, s.st_mode) < 0) {
         auto msg = "Failed to cleanup chmod " + _pkgdir;
         if (res.isOk()) {
@@ -2249,7 +2479,7 @@ binder::Status InstalldNativeService::rmPackageDir(const std::string& packageDir
     if (validate_apk_path(packageDir.c_str())) {
         return error("Invalid path " + packageDir);
     }
-    if (delete_dir_contents_and_dir(packageDir) != 0) {
+    if (rm_package_dir(packageDir) != 0) {
         return error("Failed to delete " + packageDir);
     }
     return ok();

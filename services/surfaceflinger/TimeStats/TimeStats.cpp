@@ -32,19 +32,14 @@
 
 namespace android {
 
-void TimeStats::parseArgs(bool asProto, const Vector<String16>& args, size_t& index,
-                          std::string& result) {
+namespace impl {
+
+void TimeStats::parseArgs(bool asProto, const Vector<String16>& args, std::string& result) {
     ATRACE_CALL();
 
-    if (args.size() > index + 10) {
-        ALOGD("Invalid args count");
-        return;
-    }
-
     std::unordered_map<std::string, int32_t> argsMap;
-    while (index < args.size()) {
+    for (size_t index = 0; index < args.size(); ++index) {
         argsMap[std::string(String8(args[index]).c_str())] = index;
-        ++index;
     }
 
     if (argsMap.count("-disable")) {
@@ -457,6 +452,15 @@ void TimeStats::setPowerMode(int32_t powerMode) {
     mPowerTime.powerMode = powerMode;
 }
 
+void TimeStats::recordRefreshRate(uint32_t fps, nsecs_t duration) {
+    std::lock_guard<std::mutex> lock(mMutex);
+    if (mTimeStats.refreshRateStats.count(fps)) {
+        mTimeStats.refreshRateStats[fps] += duration;
+    } else {
+        mTimeStats.refreshRateStats.insert({fps, duration});
+    }
+}
+
 void TimeStats::flushAvailableGlobalRecordsToStatsLocked() {
     ATRACE_CALL();
 
@@ -554,6 +558,7 @@ void TimeStats::clear() {
     mTimeStats.clientCompositionFrames = 0;
     mTimeStats.displayOnTime = 0;
     mTimeStats.presentToPresent.hist.clear();
+    mTimeStats.refreshRateStats.clear();
     mPowerTime.prevTime = systemTime();
     mGlobalRecord.prevPresentTime = 0;
     mGlobalRecord.presentFences.clear();
@@ -586,5 +591,7 @@ void TimeStats::dump(bool asProto, std::optional<uint32_t> maxLayers, std::strin
         result.append("\n");
     }
 }
+
+} // namespace impl
 
 } // namespace android
