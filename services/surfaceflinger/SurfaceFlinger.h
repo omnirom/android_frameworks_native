@@ -851,6 +851,7 @@ private:
     std::bitset<DisplayDevice::NUM_BUILTIN_DISPLAY_TYPES> mPluggableBitmask;
     std::mutex mVsyncPeriodMutex;
     std::vector<nsecs_t> vsyncPeriod;
+    bool mUpdateVSyncSourceOnDoze = false;
     int mDebugRegion;
     int mDebugDDMS;
     int mDebugDisableHWC;
