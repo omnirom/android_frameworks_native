@@ -181,8 +181,20 @@ bool ProcessState::becomeContextManager(context_check_func checkFunc, void* user
         mBinderContextCheckFunc = checkFunc;
         mBinderContextUserData = userData;
 
-        int dummy = 0;
-        status_t result = ioctl(mDriverFD, BINDER_SET_CONTEXT_MGR, &dummy);
+        flat_binder_object obj {
+            .flags = FLAT_BINDER_FLAG_TXN_SECURITY_CTX,
+        };
+
+        status_t result = ioctl(mDriverFD, BINDER_SET_CONTEXT_MGR_EXT, &obj);
+
+        // fallback to original method
+        if (result != 0) {
+            android_errorWriteLog(0x534e4554, "121035042");
+
+            int dummy = 0;
+            result = ioctl(mDriverFD, BINDER_SET_CONTEXT_MGR, &dummy);
+        }
+
         if (result == 0) {
             mManagesContexts = true;
         } else if (result == -1) {
@@ -232,6 +244,12 @@ ssize_t ProcessState::getKernelReferences(size_t buf_count, uintptr_t* buf)
     } while (info.ptr != 0);
 
     return count;
+}
+
+void ProcessState::setCallRestriction(CallRestriction restriction) {
+    LOG_ALWAYS_FATAL_IF(IPCThreadState::selfOrNull(), "Call restrictions must be set before the threadpool is started.");
+
+    mCallRestriction = restriction;
 }
 
 ProcessState::handle_entry* ProcessState::lookupHandleLocked(int32_t handle)
@@ -426,6 +444,7 @@ ProcessState::ProcessState(const char *driver)
     , mBinderContextUserData(nullptr)
     , mThreadPoolStarted(false)
     , mThreadPoolSeq(1)
+    , mCallRestriction(CallRestriction::NONE)
 {
     if (mDriverFD >= 0) {
         // mmap the binder, providing a chunk of virtual address space to receive transactions.

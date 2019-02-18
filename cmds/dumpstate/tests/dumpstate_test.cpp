@@ -59,6 +59,10 @@ using ::testing::internal::GetCapturedStdout;
 
 class DumpstateListenerMock : public IDumpstateListener {
   public:
+    MOCK_METHOD1(onProgress, binder::Status(int32_t progress));
+    MOCK_METHOD1(onError, binder::Status(int32_t error_code));
+    MOCK_METHOD3(onFinished, binder::Status(int64_t duration_ms, const ::std::string& title,
+                                            const ::std::string& description));
     MOCK_METHOD1(onProgressUpdated, binder::Status(int32_t progress));
     MOCK_METHOD1(onMaxProgressUpdated, binder::Status(int32_t max_progress));
     MOCK_METHOD4(onSectionComplete, binder::Status(const ::std::string& name, int32_t status,
@@ -652,8 +656,9 @@ class DumpstateTest : public DumpstateBaseTest {
         }
 
         if (update_progress) {
-            message += android::base::StringPrintf("Setting progress (%s): %d/%d\n",
-                                                   listener_name.c_str(), progress, max);
+            message += android::base::StringPrintf("Setting progress (%s): %d/%d (%d%%)\n",
+                                                   listener_name.c_str(), progress, max,
+                                                   (100 * progress / max));
         }
 
         return message;
@@ -812,12 +817,14 @@ TEST_F(DumpstateTest, RunCommandProgress) {
     SetProgress(0, 30);
 
     EXPECT_CALL(*listener, onProgressUpdated(20));
+    EXPECT_CALL(*listener, onProgress(66));  // 20/30 %
     EXPECT_EQ(0, RunCommand("", {kSimpleCommand}, CommandOptions::WithTimeout(20).Build()));
     std::string progress_message = GetProgressMessage(ds.listener_name_, 20, 30);
     EXPECT_THAT(out, StrEq("stdout\n"));
     EXPECT_THAT(err, StrEq("stderr\n" + progress_message));
 
     EXPECT_CALL(*listener, onProgressUpdated(30));
+    EXPECT_CALL(*listener, onProgress(100));  // 35/35 %
     EXPECT_EQ(0, RunCommand("", {kSimpleCommand}, CommandOptions::WithTimeout(10).Build()));
     progress_message = GetProgressMessage(ds.listener_name_, 30, 30);
     EXPECT_THAT(out, StrEq("stdout\n"));
@@ -826,6 +833,7 @@ TEST_F(DumpstateTest, RunCommandProgress) {
     // Run a command that will increase maximum timeout.
     EXPECT_CALL(*listener, onProgressUpdated(31));
     EXPECT_CALL(*listener, onMaxProgressUpdated(37));
+    EXPECT_CALL(*listener, onProgress(83));  // 31/37 %
     EXPECT_EQ(0, RunCommand("", {kSimpleCommand}, CommandOptions::WithTimeout(1).Build()));
     progress_message = GetProgressMessage(ds.listener_name_, 31, 37, 30);  // 20% increase
     EXPECT_THAT(out, StrEq("stdout\n"));
@@ -834,6 +842,7 @@ TEST_F(DumpstateTest, RunCommandProgress) {
     // Make sure command ran while in dry_run is counted.
     SetDryRun(true);
     EXPECT_CALL(*listener, onProgressUpdated(35));
+    EXPECT_CALL(*listener, onProgress(94));  // 35/37 %
     EXPECT_EQ(0, RunCommand("", {kSimpleCommand}, CommandOptions::WithTimeout(4).Build()));
     progress_message = GetProgressMessage(ds.listener_name_, 35, 37);
     EXPECT_THAT(out, IsEmpty());
@@ -850,6 +859,7 @@ TEST_F(DumpstateTest, RunCommandProgressIgnoreThreshold) {
 
     // First update should always be sent.
     EXPECT_CALL(*listener, onProgressUpdated(1));
+    EXPECT_CALL(*listener, onProgress(12));  // 1/12 %
     EXPECT_EQ(0, RunCommand("", {kSimpleCommand}, CommandOptions::WithTimeout(1).Build()));
     std::string progress_message = GetProgressMessage(ds.listener_name_, 1, 8);
     EXPECT_THAT(out, StrEq("stdout\n"));
@@ -862,6 +872,7 @@ TEST_F(DumpstateTest, RunCommandProgressIgnoreThreshold) {
 
     // Third update should be sent because it reaches threshold (6 - 1 = 5).
     EXPECT_CALL(*listener, onProgressUpdated(6));
+    EXPECT_CALL(*listener, onProgress(75));  // 6/8 %
     EXPECT_EQ(0, RunCommand("", {kSimpleCommand}, CommandOptions::WithTimeout(1).Build()));
     progress_message = GetProgressMessage(ds.listener_name_, 6, 8);
     EXPECT_THAT(out, StrEq("stdout\n"));
@@ -1101,6 +1112,7 @@ TEST_F(DumpstateTest, DumpFileUpdateProgress) {
     SetProgress(0, 30);
 
     EXPECT_CALL(*listener, onProgressUpdated(5));
+    EXPECT_CALL(*listener, onProgress(16));  // 5/30 %
     EXPECT_EQ(0, DumpFile("", kTestDataPath + "single-line.txt"));
 
     std::string progress_message =

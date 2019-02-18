@@ -475,47 +475,6 @@ static bool dump_anrd_trace() {
     return false;
 }
 
-static void dump_systrace() {
-    if (!ds.IsZipping()) {
-        MYLOGD("Not dumping systrace because it's not a zipped bugreport\n");
-        return;
-    }
-    std::string systrace_path = ds.GetPath("-systrace.txt");
-    if (systrace_path.empty()) {
-        MYLOGE("Not dumping systrace because path is empty\n");
-        return;
-    }
-    const char* path = "/sys/kernel/debug/tracing/tracing_on";
-    long int is_tracing;
-    if (read_file_as_long(path, &is_tracing)) {
-        return; // error already logged
-    }
-    if (is_tracing <= 0) {
-        MYLOGD("Skipping systrace because '%s' content is '%ld'\n", path, is_tracing);
-        return;
-    }
-
-    MYLOGD("Running '/system/bin/atrace --async_dump -o %s', which can take several minutes",
-            systrace_path.c_str());
-    if (RunCommand("SYSTRACE", {"/system/bin/atrace", "--async_dump", "-o", systrace_path},
-                   CommandOptions::WithTimeout(120).Build())) {
-        MYLOGE("systrace timed out, its zip entry will be incomplete\n");
-        // TODO: RunCommand tries to kill the process, but atrace doesn't die
-        // peacefully; ideally, we should call strace to stop itself, but there is no such option
-        // yet (just a --async_stop, which stops and dump
-        // if (RunCommand("SYSTRACE", {"/system/bin/atrace", "--kill"})) {
-        //   MYLOGE("could not stop systrace ");
-        // }
-    }
-    if (!ds.AddZipEntry("systrace.txt", systrace_path)) {
-        MYLOGE("Unable to add systrace file %s to zip file\n", systrace_path.c_str());
-    } else {
-        if (remove(systrace_path.c_str())) {
-            MYLOGE("Error removing systrace file %s: %s", systrace_path.c_str(), strerror(errno));
-        }
-    }
-}
-
 static bool skip_not_stat(const char *path) {
     static const char stat[] = "/stat";
     size_t len = strlen(path);
@@ -1446,12 +1405,8 @@ static void dumpstate() {
 
 /* Dumps state for the default case. Returns true if everything went fine. */
 static bool DumpstateDefault() {
-    // Dumps systrace right away, otherwise it will be filled with unnecessary events.
-    // First try to dump anrd trace if the daemon is running. Otherwise, dump
-    // the raw trace.
-    if (!dump_anrd_trace()) {
-        dump_systrace();
-    }
+    // Try to dump anrd trace if the daemon is running.
+    dump_anrd_trace();
 
     // Invoking the following dumpsys calls before dump_traces() to try and
     // keep the system stats as close to its initial state as possible.
@@ -1571,6 +1526,15 @@ static void DumpstateWifiOnly() {
                SEC_TO_MSEC(10));
     RunDumpsys("DUMPSYS", {"wifi"}, CommandOptions::WithTimeout(90).Build(),
                SEC_TO_MSEC(10));
+
+    if (ds.IsZipping()) {
+        RunCommand("HARDWARE HALS", {"lshal", "-lVSietrpc", "--types=b,c,l,z"},
+                   CommandOptions::WithTimeout(2).AsRootIfAvailable().Build());
+        DumpHals();
+    } else {
+        RunCommand("HARDWARE HALS", {"lshal", "-lVSietrpc", "--types=b,c,l,z", "--debug"},
+                   CommandOptions::WithTimeout(10).AsRootIfAvailable().Build());
+    }
 
     printf("========================================================\n");
     printf("== dumpstate: done (id %d)\n", ds.id_);
@@ -1692,7 +1656,7 @@ void Dumpstate::DumpstateBoard() {
     printf("*** See dumpstate-board.txt entry ***\n");
 }
 
-static void ShowUsageAndExit(int exit_code = 1) {
+static void ShowUsage() {
     fprintf(stderr,
             "usage: dumpstate [-h] [-b soundfile] [-e soundfile] [-o file] [-d] [-p] "
             "[-z]] [-s] [-S] [-q] [-B] [-P] [-R] [-V version]\n"
@@ -1712,12 +1676,6 @@ static void ShowUsageAndExit(int exit_code = 1) {
             "  -R: take bugreport in remote mode (requires -o, -z, -d and -B, "
             "shouldn't be used with -P)\n"
             "  -v: prints the dumpstate header and exit\n");
-    exit(exit_code);
-}
-
-static void ExitOnInvalidArgs() {
-    fprintf(stderr, "invalid combination of args\n");
-    ShowUsageAndExit();
 }
 
 static void register_sig_handler() {
@@ -1878,8 +1836,9 @@ static void PrepareToWriteToFile() {
     ds.tmp_path_ = ds.GetPath(".tmp");
     ds.log_path_ = ds.GetPath("-dumpstate_log-" + std::to_string(ds.pid_) + ".txt");
 
-    std::string destination = ds.options_->fd != -1 ? StringPrintf("[fd:%d]", ds.options_->fd)
-                                                    : ds.bugreport_dir_.c_str();
+    std::string destination = ds.options_->bugreport_fd.get() != -1
+                                  ? StringPrintf("[fd:%d]", ds.options_->bugreport_fd.get())
+                                  : ds.bugreport_dir_.c_str();
     MYLOGD(
         "Bugreport dir: %s\n"
         "Internal Bugreport dir: %s\n"
@@ -1957,8 +1916,8 @@ static void FinalizeFile() {
             }
             // The zip file lives in an internal directory. Copy it over to output.
             bool copy_succeeded = false;
-            if (ds.options_->fd != -1) {
-                copy_succeeded = android::os::CopyFileToFd(ds.path_, ds.options_->fd);
+            if (ds.options_->bugreport_fd.get() != -1) {
+                copy_succeeded = android::os::CopyFileToFd(ds.path_, ds.options_->bugreport_fd.get());
             } else {
                 ds.final_path_ = ds.GetPath(ds.bugreport_dir_, ".zip");
                 copy_succeeded = android::os::CopyFileToFile(ds.path_, ds.final_path_);
@@ -2161,7 +2120,7 @@ static void LogDumpOptions(const Dumpstate::DumpOptions& options) {
     MYLOGI("telephony_only: %d\n", options.telephony_only);
     MYLOGI("wifi_only: %d\n", options.wifi_only);
     MYLOGI("do_progress_updates: %d\n", options.do_progress_updates);
-    MYLOGI("fd: %d\n", options.fd);
+    MYLOGI("fd: %d\n", options.bugreport_fd.get());
     MYLOGI("use_outfile: %s\n", options.use_outfile.c_str());
     MYLOGI("extra_options: %s\n", options.extra_options.c_str());
     MYLOGI("args: %s\n", options.args.c_str());
@@ -2169,14 +2128,17 @@ static void LogDumpOptions(const Dumpstate::DumpOptions& options) {
     MYLOGI("notification_description: %s\n", options.notification_description.c_str());
 }
 
-void Dumpstate::DumpOptions::Initialize(BugreportMode bugreport_mode) {
+void Dumpstate::DumpOptions::Initialize(BugreportMode bugreport_mode,
+                                        const android::base::unique_fd& bugreport_fd_in,
+                                        const android::base::unique_fd& screenshot_fd_in) {
     // In the new API world, date is always added; output is always a zip file.
     // TODO(111441001): remove these options once they are obsolete.
     do_add_date = true;
     do_zip_file = true;
 
-    // STOPSHIP b/111441001: Remove hardcoded output file path; accept fd.
-    use_outfile = "/data/user_de/0/com.android.shell/files/bugreports/bugreport";
+    // Duplicate the fds because the passed in fds don't outlive the binder transaction.
+    bugreport_fd.reset(dup(bugreport_fd_in.get()));
+    screenshot_fd.reset(dup(screenshot_fd_in.get()));
 
     extra_options = ModeToString(bugreport_mode);
     SetOptionsFromMode(bugreport_mode, this);
@@ -2227,11 +2189,11 @@ Dumpstate::RunStatus Dumpstate::DumpOptions::Initialize(int argc, char* argv[]) 
 }
 
 bool Dumpstate::DumpOptions::ValidateOptions() const {
-    if (fd != -1 && !do_zip_file) {
+    if (bugreport_fd.get() != -1 && !do_zip_file) {
         return false;
     }
 
-    bool has_out_file_options = !use_outfile.empty() || fd != -1;
+    bool has_out_file_options = !use_outfile.empty() || bugreport_fd.get() != -1;
     if ((do_zip_file || do_add_date || do_progress_updates || do_broadcast) &&
         !has_out_file_options) {
         return false;
@@ -2255,6 +2217,28 @@ void Dumpstate::SetOptions(std::unique_ptr<DumpOptions> options) {
     options_ = std::move(options);
 }
 
+Dumpstate::RunStatus Dumpstate::Run() {
+    Dumpstate::RunStatus status = RunInternal();
+    if (listener_ != nullptr) {
+        switch (status) {
+            case Dumpstate::RunStatus::OK:
+                // TODO(b/111441001): duration argument does not make sense. Remove.
+                listener_->onFinished(0 /* duration */, options_->notification_title,
+                                      options_->notification_description);
+                break;
+            case Dumpstate::RunStatus::HELP:
+                break;
+            case Dumpstate::RunStatus::INVALID_INPUT:
+                listener_->onError(android::os::IDumpstateListener::BUGREPORT_ERROR_INVALID_INPUT);
+                break;
+            case Dumpstate::RunStatus::ERROR:
+                listener_->onError(android::os::IDumpstateListener::BUGREPORT_ERROR_RUNTIME_ERROR);
+                break;
+        }
+    }
+    return status;
+}
+
 /*
  * Dumps relevant information to a bugreport based on the given options.
  *
@@ -2276,7 +2260,7 @@ void Dumpstate::SetOptions(std::unique_ptr<DumpOptions> options) {
  * Bugreports are first generated in a local directory and later copied to the caller's fd or
  * directory.
  */
-Dumpstate::RunStatus Dumpstate::Run() {
+Dumpstate::RunStatus Dumpstate::RunInternal() {
     LogDumpOptions(*options_);
     if (!options_->ValidateOptions()) {
         MYLOGE("Invalid options specified\n");
@@ -2481,6 +2465,7 @@ Dumpstate::RunStatus Dumpstate::Run() {
     /* tell activity manager we're done */
     if (options_->do_broadcast) {
         SendBugreportFinishedBroadcast();
+        // Note that listener_ is notified in Run();
     }
 
     MYLOGD("Final progress: %d/%d (estimated %d)\n", progress_->Get(), progress_->GetMax(),
@@ -2514,17 +2499,18 @@ int run_main(int argc, char* argv[]) {
 
     switch (status) {
         case Dumpstate::RunStatus::OK:
-            return 0;
-            // TODO(b/111441001): Exit directly in the following cases.
+            exit(0);
         case Dumpstate::RunStatus::HELP:
-            ShowUsageAndExit(0 /* exit code */);
-            break;
+            ShowUsage();
+            exit(0);
         case Dumpstate::RunStatus::INVALID_INPUT:
-            ExitOnInvalidArgs();
-            break;
+            fprintf(stderr, "Invalid combination of args\n");
+            ShowUsage();
+            exit(1);
         case Dumpstate::RunStatus::ERROR:
-            exit(-1);
-            break;
+            exit(2);
+        default:
+            fprintf(stderr, "Unknown status: %d\n", status);
+            exit(2);
     }
-    return 0;
 }

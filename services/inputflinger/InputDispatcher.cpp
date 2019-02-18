@@ -2155,7 +2155,7 @@ void InputDispatcher::startDispatchCycleLocked(nsecs_t currentTime,
                     motionEntry->deviceId, motionEntry->source, motionEntry->displayId,
                     dispatchEntry->resolvedAction, motionEntry->actionButton,
                     dispatchEntry->resolvedFlags, motionEntry->edgeFlags,
-                    motionEntry->metaState, motionEntry->buttonState,
+                    motionEntry->metaState, motionEntry->buttonState, motionEntry->classification,
                     xOffset, yOffset, motionEntry->xPrecision, motionEntry->yPrecision,
                     motionEntry->downTime, motionEntry->eventTime,
                     motionEntry->pointerCount, motionEntry->pointerProperties,
@@ -2386,7 +2386,8 @@ void InputDispatcher::synthesizeCancelationEventsForConnectionLocked(
             }
 
             InputTarget target;
-            sp<InputWindowHandle> windowHandle = getWindowHandleLocked(connection->inputChannel);
+            sp<InputWindowHandle> windowHandle = getWindowHandleLocked(
+                    connection->inputChannel->getToken());
             if (windowHandle != nullptr) {
                 const InputWindowInfo* windowInfo = windowHandle->getInfo();
                 target.xOffset = -windowInfo->frameLeft;
@@ -2490,6 +2491,7 @@ InputDispatcher::splitMotionEvent(const MotionEntry* originalMotionEntry, BitSet
             originalMotionEntry->flags,
             originalMotionEntry->metaState,
             originalMotionEntry->buttonState,
+            originalMotionEntry->classification,
             originalMotionEntry->edgeFlags,
             originalMotionEntry->xPrecision,
             originalMotionEntry->yPrecision,
@@ -2690,7 +2692,7 @@ void InputDispatcher::notifyMotion(const NotifyMotionArgs* args) {
             event.initialize(args->deviceId, args->source, args->displayId,
                     args->action, args->actionButton,
                     args->flags, args->edgeFlags, args->metaState, args->buttonState,
-                    0, 0, args->xPrecision, args->yPrecision,
+                    args->classification, 0, 0, args->xPrecision, args->yPrecision,
                     args->downTime, args->eventTime,
                     args->pointerCount, args->pointerProperties, args->pointerCoords);
 
@@ -2706,7 +2708,7 @@ void InputDispatcher::notifyMotion(const NotifyMotionArgs* args) {
         MotionEntry* newEntry = new MotionEntry(args->sequenceNum, args->eventTime,
                 args->deviceId, args->source, args->displayId, policyFlags,
                 args->action, args->actionButton, args->flags,
-                args->metaState, args->buttonState,
+                args->metaState, args->buttonState, args->classification,
                 args->edgeFlags, args->xPrecision, args->yPrecision, args->downTime,
                 args->pointerCount, args->pointerProperties, args->pointerCoords, 0, 0);
 
@@ -2844,7 +2846,7 @@ int32_t InputDispatcher::injectInputEvent(const InputEvent* event,
                 policyFlags,
                 action, actionButton, motionEvent->getFlags(),
                 motionEvent->getMetaState(), motionEvent->getButtonState(),
-                motionEvent->getEdgeFlags(),
+                motionEvent->getClassification(), motionEvent->getEdgeFlags(),
                 motionEvent->getXPrecision(), motionEvent->getYPrecision(),
                 motionEvent->getDownTime(),
                 uint32_t(pointerCount), pointerProperties, samplePointerCoords,
@@ -2859,7 +2861,7 @@ int32_t InputDispatcher::injectInputEvent(const InputEvent* event,
                     motionEvent->getDisplayId(), policyFlags,
                     action, actionButton, motionEvent->getFlags(),
                     motionEvent->getMetaState(), motionEvent->getButtonState(),
-                    motionEvent->getEdgeFlags(),
+                    motionEvent->getClassification(), motionEvent->getEdgeFlags(),
                     motionEvent->getXPrecision(), motionEvent->getYPrecision(),
                     motionEvent->getDownTime(),
                     uint32_t(pointerCount), pointerProperties, samplePointerCoords,
@@ -3024,13 +3026,13 @@ Vector<sp<InputWindowHandle>> InputDispatcher::getWindowHandlesLocked(int32_t di
 }
 
 sp<InputWindowHandle> InputDispatcher::getWindowHandleLocked(
-        const sp<InputChannel>& inputChannel) const {
+        const sp<IBinder>& windowHandleToken) const {
     for (auto& it : mWindowHandlesByDisplay) {
         const Vector<sp<InputWindowHandle>> windowHandles = it.second;
         size_t numWindows = windowHandles.size();
         for (size_t i = 0; i < numWindows; i++) {
             const sp<InputWindowHandle>& windowHandle = windowHandles.itemAt(i);
-            if (windowHandle->getToken() == inputChannel->getToken()) {
+            if (windowHandle->getToken() == windowHandleToken) {
                 return windowHandle;
             }
         }
@@ -3130,7 +3132,9 @@ void InputDispatcher::setInputWindows(const Vector<sp<InputWindowHandle>>& input
 
             for (size_t i = 0; i < newHandles.size(); i++) {
                 const sp<InputWindowHandle>& windowHandle = newHandles.itemAt(i);
-                if (windowHandle->getInfo()->hasFocus && windowHandle->getInfo()->visible) {
+                // Set newFocusedWindowHandle to the top most focused window instead of the last one
+                if (!newFocusedWindowHandle && windowHandle->getInfo()->hasFocus
+                        && windowHandle->getInfo()->visible) {
                     newFocusedWindowHandle = windowHandle;
                 }
                 if (windowHandle == mLastHoverWindowHandle) {
@@ -3174,7 +3178,7 @@ void InputDispatcher::setInputWindows(const Vector<sp<InputWindowHandle>>& input
             }
 
             if (mFocusedDisplayId == displayId) {
-                onFocusChangedLocked(newFocusedWindowHandle);
+                onFocusChangedLocked(oldFocusedWindowHandle, newFocusedWindowHandle);
             }
 
         }
@@ -3292,7 +3296,7 @@ void InputDispatcher::setFocusedDisplay(int32_t displayId) {
             // Sanity check
             sp<InputWindowHandle> newFocusedWindowHandle =
                     getValueByKey(mFocusedWindowHandlesByDisplay, displayId);
-            onFocusChangedLocked(newFocusedWindowHandle);
+            onFocusChangedLocked(oldFocusedWindowHandle, newFocusedWindowHandle);
 
             if (newFocusedWindowHandle == nullptr) {
                 ALOGW("Focused display #%" PRId32 " does not have a focused window.", displayId);
@@ -3373,29 +3377,27 @@ void InputDispatcher::setInputFilterEnabled(bool enabled) {
     mLooper->wake();
 }
 
-bool InputDispatcher::transferTouchFocus(const sp<InputChannel>& fromChannel,
-        const sp<InputChannel>& toChannel) {
+bool InputDispatcher::transferTouchFocus(const sp<IBinder>& fromToken, const sp<IBinder>& toToken) {
+    if (fromToken == toToken) {
 #if DEBUG_FOCUS
-    ALOGD("transferTouchFocus: fromChannel=%s, toChannel=%s",
-            fromChannel->getName().c_str(), toChannel->getName().c_str());
+        ALOGD("Trivial transfer to same window.");
 #endif
+        return true;
+    }
+
     { // acquire lock
         AutoMutex _l(mLock);
 
-        sp<InputWindowHandle> fromWindowHandle = getWindowHandleLocked(fromChannel);
-        sp<InputWindowHandle> toWindowHandle = getWindowHandleLocked(toChannel);
+        sp<InputWindowHandle> fromWindowHandle = getWindowHandleLocked(fromToken);
+        sp<InputWindowHandle> toWindowHandle = getWindowHandleLocked(toToken);
         if (fromWindowHandle == nullptr || toWindowHandle == nullptr) {
-#if DEBUG_FOCUS
-            ALOGD("Cannot transfer focus because from or to window not found.");
-#endif
+            ALOGW("Cannot transfer focus because from or to window not found.");
             return false;
         }
-        if (fromWindowHandle == toWindowHandle) {
 #if DEBUG_FOCUS
-            ALOGD("Trivial transfer to same window.");
+        ALOGD("transferTouchFocus: fromWindowHandle=%s, toWindowHandle=%s",
+            fromWindowHandle->getName().c_str(), toWindowHandle->getName().c_str());
 #endif
-            return true;
-        }
         if (fromWindowHandle->getInfo()->displayId != toWindowHandle->getInfo()->displayId) {
 #if DEBUG_FOCUS
             ALOGD("Cannot transfer focus because windows are on different displays.");
@@ -3433,6 +3435,9 @@ Found:
             return false;
         }
 
+
+        sp<InputChannel> fromChannel = getInputChannelLocked(fromToken);
+        sp<InputChannel> toChannel = getInputChannelLocked(toToken);
         ssize_t fromConnectionIndex = getConnectionIndexLocked(fromChannel);
         ssize_t toConnectionIndex = getConnectionIndexLocked(toChannel);
         if (fromConnectionIndex >= 0 && toConnectionIndex >= 0) {
@@ -3853,11 +3858,14 @@ void InputDispatcher::onDispatchCycleBrokenLocked(
     commandEntry->connection = connection;
 }
 
-void InputDispatcher::onFocusChangedLocked(const sp<InputWindowHandle>& newFocus) {
-    sp<IBinder> token = newFocus != nullptr ? newFocus->getToken() : nullptr;
+void InputDispatcher::onFocusChangedLocked(const sp<InputWindowHandle>& oldFocus,
+        const sp<InputWindowHandle>& newFocus) {
+    sp<IBinder> oldToken = oldFocus != nullptr ? oldFocus->getToken() : nullptr;
+    sp<IBinder> newToken = newFocus != nullptr ? newFocus->getToken() : nullptr;
     CommandEntry* commandEntry = postCommandLocked(
             & InputDispatcher::doNotifyFocusChangedLockedInterruptible);
-    commandEntry->token = token;
+    commandEntry->oldToken = oldToken;
+    commandEntry->newToken = newToken;
 }
 
 void InputDispatcher::onANRLocked(
@@ -3919,9 +3927,10 @@ void InputDispatcher::doNotifyInputChannelBrokenLockedInterruptible(
 
 void InputDispatcher::doNotifyFocusChangedLockedInterruptible(
         CommandEntry* commandEntry) {
-    sp<IBinder> token = commandEntry->token;
+    sp<IBinder> oldToken = commandEntry->oldToken;
+    sp<IBinder> newToken = commandEntry->newToken;
     mLock.unlock();
-    mPolicy->notifyFocusChanged(token);
+    mPolicy->notifyFocusChanged(oldToken, newToken);
     mLock.lock();
 }
 
@@ -4396,8 +4405,8 @@ void InputDispatcher::KeyEntry::recycle() {
 InputDispatcher::MotionEntry::MotionEntry(uint32_t sequenceNum, nsecs_t eventTime, int32_t deviceId,
         uint32_t source, int32_t displayId, uint32_t policyFlags, int32_t action,
         int32_t actionButton,
-        int32_t flags, int32_t metaState, int32_t buttonState, int32_t edgeFlags,
-        float xPrecision, float yPrecision, nsecs_t downTime,
+        int32_t flags, int32_t metaState, int32_t buttonState, MotionClassification classification,
+        int32_t edgeFlags, float xPrecision, float yPrecision, nsecs_t downTime,
         uint32_t pointerCount,
         const PointerProperties* pointerProperties, const PointerCoords* pointerCoords,
         float xOffset, float yOffset) :
@@ -4405,7 +4414,8 @@ InputDispatcher::MotionEntry::MotionEntry(uint32_t sequenceNum, nsecs_t eventTim
         eventTime(eventTime),
         deviceId(deviceId), source(source), displayId(displayId), action(action),
         actionButton(actionButton), flags(flags), metaState(metaState), buttonState(buttonState),
-        edgeFlags(edgeFlags), xPrecision(xPrecision), yPrecision(yPrecision),
+        classification(classification), edgeFlags(edgeFlags),
+        xPrecision(xPrecision), yPrecision(yPrecision),
         downTime(downTime), pointerCount(pointerCount) {
     for (uint32_t i = 0; i < pointerCount; i++) {
         this->pointerProperties[i].copyFrom(pointerProperties[i]);
@@ -4422,9 +4432,10 @@ InputDispatcher::MotionEntry::~MotionEntry() {
 void InputDispatcher::MotionEntry::appendDescription(std::string& msg) const {
     msg += StringPrintf("MotionEvent(deviceId=%d, source=0x%08x, displayId=%" PRId32
             ", action=%s, actionButton=0x%08x, flags=0x%08x, metaState=0x%08x, buttonState=0x%08x, "
-            "edgeFlags=0x%08x, xPrecision=%.1f, yPrecision=%.1f, pointers=[",
+            "classification=%s, edgeFlags=0x%08x, xPrecision=%.1f, yPrecision=%.1f, pointers=[",
             deviceId, source, displayId, motionActionToString(action).c_str(), actionButton, flags,
-            metaState, buttonState, edgeFlags, xPrecision, yPrecision);
+            metaState, buttonState, motionClassificationToString(classification), edgeFlags,
+            xPrecision, yPrecision);
 
     for (uint32_t i = 0; i < pointerCount; i++) {
         if (i) {
@@ -4725,15 +4736,15 @@ void InputDispatcher::InputState::synthesizeCancelationEvents(nsecs_t currentTim
     for (size_t i = 0; i < mMotionMementos.size(); i++) {
         const MotionMemento& memento = mMotionMementos.itemAt(i);
         if (shouldCancelMotion(memento, options)) {
+            const int32_t action = memento.hovering ?
+                    AMOTION_EVENT_ACTION_HOVER_EXIT : AMOTION_EVENT_ACTION_CANCEL;
             outEvents.push(new MotionEntry(SYNTHESIZED_EVENT_SEQUENCE_NUM, currentTime,
                     memento.deviceId, memento.source, memento.displayId, memento.policyFlags,
-                    memento.hovering
-                            ? AMOTION_EVENT_ACTION_HOVER_EXIT
-                            : AMOTION_EVENT_ACTION_CANCEL,
-                    memento.flags, 0, 0, 0, 0,
+                    action, 0 /*actionButton*/, memento.flags, AMETA_NONE, 0 /*buttonState*/,
+                    MotionClassification::NONE, AMOTION_EVENT_EDGE_FLAG_NONE,
                     memento.xPrecision, memento.yPrecision, memento.downTime,
                     memento.pointerCount, memento.pointerProperties, memento.pointerCoords,
-                    0, 0));
+                    0 /*xOffset*/, 0 /*yOffset*/));
         }
     }
 }

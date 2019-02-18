@@ -39,19 +39,15 @@ class Client : public BnSurfaceComposerClient
 {
 public:
     explicit Client(const sp<SurfaceFlinger>& flinger);
-    Client(const sp<SurfaceFlinger>& flinger, const sp<Layer>& parentLayer);
-    ~Client();
+    ~Client() = default;
 
     status_t initCheck() const;
 
     // protected by SurfaceFlinger::mStateLock
     void attachLayer(const sp<IBinder>& handle, const sp<Layer>& layer);
-
     void detachLayer(const Layer* layer);
 
     sp<Layer> getLayerUser(const sp<IBinder>& handle) const;
-
-    void updateParent(const sp<Layer>& parentLayer);
 
 private:
     // ISurfaceComposerClient interface
@@ -62,23 +58,21 @@ private:
             sp<IBinder>* handle,
             sp<IGraphicBufferProducer>* gbp);
 
-    virtual status_t destroySurface(const sp<IBinder>& handle);
+    virtual status_t createWithSurfaceParent(const String8& name, uint32_t w, uint32_t h,
+                                             PixelFormat format, uint32_t flags,
+                                             const sp<IGraphicBufferProducer>& parent,
+                                             int32_t windowType, int32_t ownerUid,
+                                             sp<IBinder>* handle, sp<IGraphicBufferProducer>* gbp);
 
     virtual status_t clearLayerFrameStats(const sp<IBinder>& handle) const;
 
     virtual status_t getLayerFrameStats(const sp<IBinder>& handle, FrameStats* outStats) const;
-
-    virtual status_t onTransact(
-        uint32_t code, const Parcel& data, Parcel* reply, uint32_t flags);
-
-    sp<Layer> getParentLayer(bool* outParentDied = nullptr) const;
 
     // constant
     sp<SurfaceFlinger> mFlinger;
 
     // protected by mLock
     DefaultKeyedVector< wp<IBinder>, wp<Layer> > mLayers;
-    wp<Layer> mParentLayer;
 
     // thread-safe
     mutable Mutex mLock;

@@ -30,11 +30,12 @@ public:
     ~MessageQueue() override;
 
     MOCK_METHOD1(init, void(const sp<SurfaceFlinger>&));
-    MOCK_METHOD1(setEventThread, void(android::EventThread*));
-    MOCK_METHOD1(setEventConnection, void(const sp<android::EventThreadConnection>& connection));
+    MOCK_METHOD2(setEventThread, void(android::EventThread*, ResyncCallback));
+    MOCK_METHOD1(setEventConnection, void(const sp<EventThreadConnection>& connection));
     MOCK_METHOD0(waitMessage, void());
     MOCK_METHOD2(postMessage, status_t(const sp<MessageBase>&, nsecs_t));
     MOCK_METHOD0(invalidate, void());
+    MOCK_METHOD0(invalidateForHWC, void());
     MOCK_METHOD0(refresh, void());
 };
 

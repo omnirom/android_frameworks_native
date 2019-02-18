@@ -176,7 +176,7 @@ void BufferLayer::onDraw(const RenderArea& renderArea, const Region& clip,
 
     if (!blackOutLayer) {
         // TODO: we could be more subtle with isFixedSize()
-        const bool useFiltering = needsFiltering(renderArea) || isFixedSize();
+        const bool useFiltering = needsFiltering() || renderArea.needsFiltering() || isFixedSize();
 
         // Query the texture matrix given our current filtering mode.
         float textureMatrix[16];
@@ -396,7 +396,6 @@ Region BufferLayer::latchBuffer(bool& recomputeVisibleRegions, nsecs_t latchTime
     }
 
     // Capture the old state of the layer for comparisons later
-    Mutex::Autolock lock(mStateMutex);
     const State& s(getDrawingState());
     const bool oldOpacity = isOpaque(s);
     sp<GraphicBuffer> oldBuffer = mActiveBuffer;
@@ -503,7 +502,7 @@ Region BufferLayer::latchBuffer(bool& recomputeVisibleRegions, nsecs_t latchTime
 
     // FIXME: postedRegion should be dirty & bounds
     // transform the dirty region to window-manager space
-    return getTransformLocked().transform(Region(getBufferSize(s)));
+    return getTransform().transform(Region(getBufferSize(s)));
 }
 
 // transaction
@@ -551,7 +550,7 @@ bool BufferLayer::latchUnsignaledBuffers() {
 
 // h/w composer set-up
 bool BufferLayer::allTransactionsSignaled() {
-    auto headFrameNumber = getHeadFrameNumberLocked();
+    auto headFrameNumber = getHeadFrameNumber();
     bool matchingFramesFound = false;
     bool allTransactionsApplied = true;
     Mutex::Autolock lock(mLocalSyncPointMutex);
@@ -598,13 +597,15 @@ bool BufferLayer::getOpacityForFormat(uint32_t format) {
     return true;
 }
 
-bool BufferLayer::needsFiltering(const RenderArea& renderArea) const {
-    return mNeedsFiltering || renderArea.needsFiltering();
+bool BufferLayer::needsFiltering() const {
+    const auto displayFrame = getBE().compositionInfo.hwc.displayFrame;
+    const auto sourceCrop = getBE().compositionInfo.hwc.sourceCrop;
+    return mNeedsFiltering || sourceCrop.getHeight() != displayFrame.getHeight() ||
+            sourceCrop.getWidth() != displayFrame.getWidth();
 }
 
 void BufferLayer::drawWithOpenGL(const RenderArea& renderArea, bool useIdentityTransform) const {
     ATRACE_CALL();
-    Mutex::Autolock lock(mStateMutex);
     const State& s(getDrawingState());
 
     computeGeometry(renderArea, getBE().mMesh, useIdentityTransform);
@@ -623,17 +624,19 @@ void BufferLayer::drawWithOpenGL(const RenderArea& renderArea, bool useIdentityT
      * minimal value)? Or, we could make GL behave like HWC -- but this feel
      * like more of a hack.
      */
-    const Rect bounds{computeBoundsLocked()}; // Rounds from FloatRect
 
-    ui::Transform t = getTransformLocked();
-    Rect win = bounds;
-    const int bufferWidth = getBufferSize(s).getWidth();
-    const int bufferHeight = getBufferSize(s).getHeight();
+    // Convert to Rect so that bounds are clipped to integers.
+    const Rect win{computeCrop(Rect::INVALID_RECT)};
+    // computeCrop() returns the cropping rectangle in buffer space, so we
+    // shouldn't use getBufferSize() since that may return a rectangle specified
+    // in layer space. Otherwise we may compute incorrect texture coordinates.
+    const float bufWidth = float(mActiveBuffer->getWidth());
+    const float bufHeight = float(mActiveBuffer->getHeight());
 
-    const float left = float(win.left) / float(bufferWidth);
-    const float top = float(win.top) / float(bufferHeight);
-    const float right = float(win.right) / float(bufferWidth);
-    const float bottom = float(win.bottom) / float(bufferHeight);
+    const float left = win.left / bufWidth;
+    const float top = win.top / bufHeight;
+    const float right = win.right / bufWidth;
+    const float bottom = win.bottom / bufHeight;
 
     // TODO: we probably want to generate the texture coords with the mesh
     // here we assume that we only have 4 vertices
@@ -644,7 +647,7 @@ void BufferLayer::drawWithOpenGL(const RenderArea& renderArea, bool useIdentityT
     texCoords[2] = vec2(right, 1.0f - bottom);
     texCoords[3] = vec2(right, 1.0f - top);
 
-    const auto roundedCornerState = getRoundedCornerStateLocked();
+    const auto roundedCornerState = getRoundedCornerState();
     const auto cropRect = roundedCornerState.cropRect;
     setupRoundedCornersCropCoordinates(win, cropRect);
 
@@ -666,12 +669,7 @@ void BufferLayer::drawWithOpenGL(const RenderArea& renderArea, bool useIdentityT
 }
 
 uint64_t BufferLayer::getHeadFrameNumber() const {
-    Mutex::Autolock lock(mStateMutex);
-    return getHeadFrameNumberLocked();
-}
-
-uint64_t BufferLayer::getHeadFrameNumberLocked() const {
-    if (hasFrameUpdateLocked()) {
+    if (hasFrameUpdate()) {
         return getFrameNumber();
     } else {
         return mCurrentFrameNumber;
@@ -698,7 +696,7 @@ Rect BufferLayer::getBufferSize(const State& s) const {
         std::swap(bufWidth, bufHeight);
     }
 
-    if (getTransformToDisplayInverseLocked()) {
+    if (getTransformToDisplayInverse()) {
         uint32_t invTransform = DisplayDevice::getPrimaryDisplayOrientationTransform();
         if (invTransform & ui::Transform::ROT_90) {
             std::swap(bufWidth, bufHeight);
