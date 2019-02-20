@@ -45,9 +45,9 @@ namespace android {
 namespace {
 
 using testing::_;
-using testing::ByMove;
 using testing::DoAll;
 using testing::Mock;
+using testing::ResultOf;
 using testing::Return;
 using testing::SetArgPointee;
 
@@ -321,11 +321,6 @@ struct DisplayVariant {
     // Whether the display is primary
     static constexpr Primary PRIMARY = primary;
 
-    static constexpr auto displayType() {
-        return static_cast<bool>(PRIMARY) ? EventThread::DisplayType::Primary
-                                          : EventThread::DisplayType::External;
-    }
-
     static auto makeFakeExistingDisplayInjector(DisplayTransactionTest* test) {
         auto injector =
                 FakeDisplayDeviceInjector(test->mFlinger, DISPLAY_ID::get(),
@@ -335,11 +330,17 @@ struct DisplayVariant {
         injector.setNativeWindow(test->mNativeWindow);
 
         // Creating a DisplayDevice requires getting default dimensions from the
-        // native window.
+        // native window along with some other initial setup.
         EXPECT_CALL(*test->mNativeWindow, query(NATIVE_WINDOW_WIDTH, _))
                 .WillRepeatedly(DoAll(SetArgPointee<1>(WIDTH), Return(0)));
         EXPECT_CALL(*test->mNativeWindow, query(NATIVE_WINDOW_HEIGHT, _))
                 .WillRepeatedly(DoAll(SetArgPointee<1>(HEIGHT), Return(0)));
+        EXPECT_CALL(*test->mNativeWindow, perform(NATIVE_WINDOW_SET_BUFFERS_FORMAT))
+                .WillRepeatedly(Return(0));
+        EXPECT_CALL(*test->mNativeWindow, perform(NATIVE_WINDOW_API_CONNECT))
+                .WillRepeatedly(Return(0));
+        EXPECT_CALL(*test->mNativeWindow, perform(NATIVE_WINDOW_SET_USAGE64))
+                .WillRepeatedly(Return(0));
         return injector;
     }
 
@@ -352,6 +353,12 @@ struct DisplayVariant {
                 .WillRepeatedly(DoAll(SetArgPointee<1>(WIDTH), Return(0)));
         EXPECT_CALL(*test->mNativeWindow, query(NATIVE_WINDOW_HEIGHT, _))
                 .WillRepeatedly(DoAll(SetArgPointee<1>(HEIGHT), Return(0)));
+        EXPECT_CALL(*test->mNativeWindow, perform(NATIVE_WINDOW_SET_BUFFERS_FORMAT))
+                .WillRepeatedly(Return(0));
+        EXPECT_CALL(*test->mNativeWindow, perform(NATIVE_WINDOW_API_CONNECT))
+                .WillRepeatedly(Return(0));
+        EXPECT_CALL(*test->mNativeWindow, perform(NATIVE_WINDOW_SET_USAGE64))
+                .WillRepeatedly(Return(0));
     }
 
     static void setupFramebufferConsumerBufferQueueCallExpectations(DisplayTransactionTest* test) {
@@ -389,7 +396,7 @@ struct HwcDisplayVariant {
     }
 
     // Called by tests to inject a HWC display setup
-    static void injectHwcDisplay(DisplayTransactionTest* test) {
+    static void injectHwcDisplayWithNoDefaultCapabilities(DisplayTransactionTest* test) {
         const auto displayId = DisplayVariant::DISPLAY_ID::get();
         ASSERT_TRUE(displayId);
         FakeHwcDisplayInjector(*displayId, HWC_DISPLAY_TYPE,
@@ -399,6 +406,14 @@ struct HwcDisplayVariant {
                 .setHeight(DisplayVariant::HEIGHT)
                 .setActiveConfig(HWC_ACTIVE_CONFIG_ID)
                 .inject(&test->mFlinger, test->mComposer);
+    }
+
+    // Called by tests to inject a HWC display setup
+    static void injectHwcDisplay(DisplayTransactionTest* test) {
+        EXPECT_CALL(*test->mComposer, getDisplayCapabilities(HWC_DISPLAY_ID, _))
+                .WillOnce(DoAll(SetArgPointee<1>(std::vector<Hwc2::DisplayCapability>({})),
+                                Return(Error::NONE)));
+        injectHwcDisplayWithNoDefaultCapabilities(test);
     }
 
     static void setupHwcHotplugCallExpectations(DisplayTransactionTest* test) {
@@ -430,6 +445,9 @@ struct HwcDisplayVariant {
                     getDisplayAttribute(HWC_DISPLAY_ID, HWC_ACTIVE_CONFIG_ID,
                                         IComposerClient::Attribute::DPI_Y, _))
                 .WillOnce(DoAll(SetArgPointee<3>(DEFAULT_DPI), Return(Error::NONE)));
+        EXPECT_CALL(*test->mComposer, getDisplayCapabilities(HWC_DISPLAY_ID, _))
+                .WillOnce(DoAll(SetArgPointee<1>(std::vector<Hwc2::DisplayCapability>({})),
+                                Return(Error::NONE)));
 
         if (PhysicalDisplay::HAS_IDENTIFICATION_DATA) {
             EXPECT_CALL(*test->mComposer, getDisplayIdentificationData(HWC_DISPLAY_ID, _, _))
@@ -482,6 +500,8 @@ struct ExternalDisplay {
 
 struct TertiaryDisplay {
     static constexpr Primary PRIMARY = Primary::FALSE;
+    static constexpr uint8_t PORT = 253;
+    static constexpr auto GET_IDENTIFICATION_DATA = getExternalEdid;
 };
 
 // A primary display is a physical display that is critical
@@ -577,6 +597,8 @@ struct WideColorP3ColorimetricSupportedVariant {
     }
 
     static void setupComposerCallExpectations(DisplayTransactionTest* test) {
+        EXPECT_CALL(*test->mNativeWindow, perform(NATIVE_WINDOW_SET_BUFFERS_DATASPACE)).Times(1);
+
         EXPECT_CALL(*test->mComposer, getColorModes(Display::HWC_DISPLAY_ID, _))
                 .WillOnce(DoAll(SetArgPointee<1>(std::vector<ColorMode>({ColorMode::DISPLAY_P3})),
                                 Return(Error::NONE)));
@@ -1156,9 +1178,9 @@ public:
                 .WillRepeatedly(DoAll(SetArgPointee<1>(1080 /* arbitrary */), Return(0)));
         EXPECT_CALL(*mNativeWindow, query(NATIVE_WINDOW_HEIGHT, _))
                 .WillRepeatedly(DoAll(SetArgPointee<1>(1920 /* arbitrary */), Return(0)));
-        EXPECT_CALL(*mNativeWindow, perform(9)).Times(1);
-        EXPECT_CALL(*mNativeWindow, perform(13)).Times(1);
-        EXPECT_CALL(*mNativeWindow, perform(30)).Times(1);
+        EXPECT_CALL(*mNativeWindow, perform(NATIVE_WINDOW_SET_BUFFERS_FORMAT)).Times(1);
+        EXPECT_CALL(*mNativeWindow, perform(NATIVE_WINDOW_API_CONNECT)).Times(1);
+        EXPECT_CALL(*mNativeWindow, perform(NATIVE_WINDOW_SET_USAGE64)).Times(1);
         auto displayDevice = mInjector.inject();
 
         displayDevice->getCompositionDisplay()
@@ -1470,6 +1492,9 @@ public:
     template <typename Case>
     void setupCommonPreconditions();
 
+    template <typename Case, bool connected>
+    static void expectHotplugReceived(mock::EventThread*);
+
     template <typename Case>
     void setupCommonCallExpectationsForConnectProcessing();
 
@@ -1507,6 +1532,17 @@ void HandleTransactionLockedTest::setupCommonPreconditions() {
     injectFakeNativeWindowSurfaceFactory();
 }
 
+template <typename Case, bool connected>
+void HandleTransactionLockedTest::expectHotplugReceived(mock::EventThread* eventThread) {
+    const auto convert = [](auto physicalDisplayId) {
+        return std::make_optional(DisplayId{physicalDisplayId});
+    };
+
+    EXPECT_CALL(*eventThread,
+                onHotplugReceived(ResultOf(convert, Case::Display::DISPLAY_ID::get()), connected))
+            .Times(1);
+}
+
 template <typename Case>
 void HandleTransactionLockedTest::setupCommonCallExpectationsForConnectProcessing() {
     Case::Display::setupHwcHotplugCallExpectations(this);
@@ -1522,16 +1558,16 @@ void HandleTransactionLockedTest::setupCommonCallExpectationsForConnectProcessin
 
     EXPECT_CALL(*mSurfaceInterceptor, saveDisplayCreation(_)).Times(1);
 
-    EXPECT_CALL(*mEventThread, onHotplugReceived(Case::Display::displayType(), true)).Times(1);
-    EXPECT_CALL(*mSFEventThread, onHotplugReceived(Case::Display::displayType(), true)).Times(1);
+    expectHotplugReceived<Case, true>(mEventThread);
+    expectHotplugReceived<Case, true>(mSFEventThread);
 }
 
 template <typename Case>
 void HandleTransactionLockedTest::setupCommonCallExpectationsForDisconnectProcessing() {
     EXPECT_CALL(*mSurfaceInterceptor, saveDisplayDeletion(_)).Times(1);
 
-    EXPECT_CALL(*mEventThread, onHotplugReceived(Case::Display::displayType(), false)).Times(1);
-    EXPECT_CALL(*mSFEventThread, onHotplugReceived(Case::Display::displayType(), false)).Times(1);
+    expectHotplugReceived<Case, false>(mEventThread);
+    expectHotplugReceived<Case, false>(mSFEventThread);
 }
 
 template <typename Case>
@@ -1705,6 +1741,13 @@ TEST_F(HandleTransactionLockedTest, ignoresHotplugConnectIfPrimaryAndExternalAlr
     PrimaryDisplayVariant::injectHwcDisplay(this);
     ExternalDisplayVariant::injectHwcDisplay(this);
 
+    // TODO: This is an unnecessary call.
+    EXPECT_CALL(*mComposer,
+                getDisplayIdentificationData(TertiaryDisplayVariant::HWC_DISPLAY_ID, _, _))
+            .WillOnce(DoAll(SetArgPointee<1>(TertiaryDisplay::PORT),
+                            SetArgPointee<2>(TertiaryDisplay::GET_IDENTIFICATION_DATA()),
+                            Return(Error::NONE)));
+
     EXPECT_CALL(*mComposer, isUsingVrComposer()).WillRepeatedly(Return(false));
 
     ignoresHotplugConnectCommon<SimpleTertiaryDisplayCase>();
@@ -1852,6 +1895,10 @@ TEST_F(HandleTransactionLockedTest, processesVirtualDisplayAdded) {
     Case::Display::setupFramebufferConsumerBufferQueueCallExpectations(this);
     Case::Display::setupNativeWindowSurfaceCreationCallExpectations(this);
 
+    EXPECT_CALL(*mComposer, getDisplayCapabilities(Case::Display::HWC_DISPLAY_ID, _))
+            .WillOnce(DoAll(SetArgPointee<1>(std::vector<Hwc2::DisplayCapability>({})),
+                            Return(Error::NONE)));
+
     EXPECT_CALL(*surface, query(NATIVE_WINDOW_WIDTH, _))
             .WillRepeatedly(DoAll(SetArgPointee<1>(Case::Display::WIDTH), Return(NO_ERROR)));
     EXPECT_CALL(*surface, query(NATIVE_WINDOW_HEIGHT, _))
@@ -1864,6 +1911,7 @@ TEST_F(HandleTransactionLockedTest, processesVirtualDisplayAdded) {
 
     EXPECT_CALL(*surface, setAsyncMode(true)).Times(1);
 
+    EXPECT_CALL(*mProducer, connect(_, NATIVE_WINDOW_API_EGL, false, _)).Times(1);
     EXPECT_CALL(*mProducer, disconnect(_, _)).Times(1);
 
     Case::Display::setupHwcVirtualDisplayCreationCallExpectations(this);
@@ -2096,9 +2144,9 @@ TEST_F(HandleTransactionLockedTest, processesDisplayWidthChanges) {
             .WillOnce(DoAll(SetArgPointee<1>(oldWidth), Return(0)));
     EXPECT_CALL(*nativeWindow, query(NATIVE_WINDOW_HEIGHT, _))
             .WillOnce(DoAll(SetArgPointee<1>(oldHeight), Return(0)));
-    EXPECT_CALL(*nativeWindow, perform(9)).Times(1);
-    EXPECT_CALL(*nativeWindow, perform(13)).Times(1);
-    EXPECT_CALL(*nativeWindow, perform(30)).Times(1);
+    EXPECT_CALL(*nativeWindow, perform(NATIVE_WINDOW_SET_BUFFERS_FORMAT)).Times(1);
+    EXPECT_CALL(*nativeWindow, perform(NATIVE_WINDOW_API_CONNECT)).Times(1);
+    EXPECT_CALL(*nativeWindow, perform(NATIVE_WINDOW_SET_USAGE64)).Times(1);
     display.inject();
 
     // There is a change to the viewport state
@@ -2140,9 +2188,9 @@ TEST_F(HandleTransactionLockedTest, processesDisplayHeightChanges) {
             .WillOnce(DoAll(SetArgPointee<1>(oldWidth), Return(0)));
     EXPECT_CALL(*nativeWindow, query(NATIVE_WINDOW_HEIGHT, _))
             .WillOnce(DoAll(SetArgPointee<1>(oldHeight), Return(0)));
-    EXPECT_CALL(*nativeWindow, perform(9)).Times(1);
-    EXPECT_CALL(*nativeWindow, perform(13)).Times(1);
-    EXPECT_CALL(*nativeWindow, perform(30)).Times(1);
+    EXPECT_CALL(*nativeWindow, perform(NATIVE_WINDOW_SET_BUFFERS_FORMAT)).Times(1);
+    EXPECT_CALL(*nativeWindow, perform(NATIVE_WINDOW_API_CONNECT)).Times(1);
+    EXPECT_CALL(*nativeWindow, perform(NATIVE_WINDOW_SET_USAGE64)).Times(1);
     display.inject();
 
     // There is a change to the viewport state
@@ -2656,6 +2704,8 @@ TEST_F(DisplayTransactionTest, onInitializeDisplaysSetsUpPrimaryDisplay) {
     // processing.
     EXPECT_CALL(*mMessageQueue, invalidate()).Times(1);
 
+    EXPECT_CALL(*mPrimaryDispSync, expectedPresentTime()).WillRepeatedly(Return(0));
+
     // --------------------------------------------------------------------
     // Invocation
 
@@ -2950,7 +3000,7 @@ struct DisplayPowerCase {
     using Transition = TransitionVariant;
 
     static auto injectDisplayWithInitialPowerMode(DisplayTransactionTest* test, int mode) {
-        Display::injectHwcDisplay(test);
+        Display::injectHwcDisplayWithNoDefaultCapabilities(test);
         auto display = Display::makeFakeExistingDisplayInjector(test);
         display.inject();
         display.mutableDisplayDevice()->setPowerMode(mode);
