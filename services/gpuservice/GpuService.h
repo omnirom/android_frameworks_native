@@ -37,8 +37,10 @@ protected:
 
 private:
     // IGpuService interface
-    void setGpuStats(const std::string driverPackageName, const std::string driverVersionName,
-                     const uint64_t driverVersionCode, const std::string appPackageName);
+    void setGpuStats(const std::string& driverPackageName, const std::string& driverVersionName,
+                     uint64_t driverVersionCode, const std::string& driverBuildDate,
+                     const std::string& appPackageName, GraphicsEnv::Driver driver,
+                     bool isDriverLoaded, int64_t driverLoadingTime);
 
     // GpuStats access must be protected by mStateLock
     std::mutex mStateLock;

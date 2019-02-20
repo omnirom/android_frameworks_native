@@ -113,6 +113,7 @@ void add_mountinfo();
 #define LOGPERSIST_DATA_DIR "/data/misc/logd"
 #define PROFILE_DATA_DIR_CUR "/data/misc/profiles/cur"
 #define PROFILE_DATA_DIR_REF "/data/misc/profiles/ref"
+#define XFRM_STAT_PROC_FILE "/proc/net/xfrm_stat"
 #define WLUTIL "/vendor/xbin/wlutil"
 #define WMTRACE_DATA_DIR "/data/misc/wmtrace"
 
@@ -1455,14 +1456,23 @@ static bool DumpstateDefault() {
     add_mountinfo();
     DumpIpTablesAsRoot();
 
-    // Capture any IPSec policies in play.  No keys are exposed here.
+    // Capture any IPSec policies in play. No keys are exposed here.
     RunCommand("IP XFRM POLICY", {"ip", "xfrm", "policy"}, CommandOptions::WithTimeout(10).Build());
+
+    // Dump IPsec stats. No keys are exposed here.
+    DumpFile("XFRM STATS", XFRM_STAT_PROC_FILE);
 
     // Run ss as root so we can see socket marks.
     RunCommand("DETAILED SOCKET STATE", {"ss", "-eionptu"}, CommandOptions::WithTimeout(10).Build());
 
     // Run iotop as root to show top 100 IO threads
     RunCommand("IOTOP", {"iotop", "-n", "1", "-m", "100"});
+
+    // Gather shared memory buffer info if the product implements it
+    struct stat st;
+    if (!stat("/product/bin/dmabuf_dump", &st)) {
+        RunCommand("Dmabuf dump", {"/product/bin/dmabuf_dump"});
+    }
 
     if (!DropRootUser()) {
         return false;
@@ -2592,21 +2602,26 @@ Dumpstate::RunStatus Dumpstate::CopyBugreportIfUserConsented() {
     return Dumpstate::RunStatus::ERROR;
 }
 
-/* Main entry point for dumpstate binary. */
-int run_main(int argc, char* argv[]) {
+Dumpstate::RunStatus Dumpstate::ParseCommandlineAndRun(int argc, char* argv[]) {
     std::unique_ptr<Dumpstate::DumpOptions> options = std::make_unique<Dumpstate::DumpOptions>();
     Dumpstate::RunStatus status = options->Initialize(argc, argv);
     if (status == Dumpstate::RunStatus::OK) {
-        ds.SetOptions(std::move(options));
+        SetOptions(std::move(options));
         // When directly running dumpstate binary, the output is not expected to be written
         // to any external file descriptor.
-        assert(ds.options_->bugreport_fd.get() == -1);
+        assert(options_->bugreport_fd.get() == -1);
 
         // calling_uid and calling_package are for user consent to share the bugreport with
         // an app; they are irrelvant here because bugreport is only written to a local
         // directory, and not shared.
-        status = ds.Run(-1 /* calling_uid */, "" /* calling_package */);
+        status = Run(-1 /* calling_uid */, "" /* calling_package */);
     }
+    return status;
+}
+
+/* Main entry point for dumpstate binary. */
+int run_main(int argc, char* argv[]) {
+    Dumpstate::RunStatus status = ds.ParseCommandlineAndRun(argc, argv);
 
     switch (status) {
         case Dumpstate::RunStatus::OK:

@@ -156,28 +156,106 @@ void GraphicsEnv::setDriverPath(const std::string path) {
     mDriverPath = path;
 }
 
-void GraphicsEnv::setGpuStats(const std::string driverPackageName,
-                              const std::string driverVersionName, const uint64_t driverVersionCode,
-                              const std::string appPackageName) {
+void GraphicsEnv::setGpuStats(const std::string& driverPackageName,
+                              const std::string& driverVersionName, uint64_t driverVersionCode,
+                              const std::string& driverBuildDate,
+                              const std::string& appPackageName) {
     ATRACE_CALL();
 
+    std::lock_guard<std::mutex> lock(mStatsLock);
     ALOGV("setGpuStats:\n"
           "\tdriverPackageName[%s]\n"
           "\tdriverVersionName[%s]\n"
           "\tdriverVersionCode[%llu]\n"
+          "\tdriverBuildDate[%s]\n"
           "\tappPackageName[%s]\n",
           driverPackageName.c_str(), driverVersionName.c_str(),
-          (unsigned long long)driverVersionCode, appPackageName.c_str());
+          (unsigned long long)driverVersionCode, driverBuildDate.c_str(), appPackageName.c_str());
 
-    mGpuStats = {
-            .driverPackageName = driverPackageName,
-            .driverVersionName = driverVersionName,
-            .driverVersionCode = driverVersionCode,
-            .appPackageName = appPackageName,
-    };
+    mGpuStats.driverPackageName = driverPackageName;
+    mGpuStats.driverVersionName = driverVersionName;
+    mGpuStats.driverVersionCode = driverVersionCode;
+    mGpuStats.driverBuildDate = driverBuildDate;
+    mGpuStats.appPackageName = appPackageName;
 }
 
-void GraphicsEnv::sendGpuStats() {
+void GraphicsEnv::setDriverToLoad(GraphicsEnv::Driver driver) {
+    ATRACE_CALL();
+
+    std::lock_guard<std::mutex> lock(mStatsLock);
+    switch (driver) {
+        case GraphicsEnv::Driver::GL:
+        case GraphicsEnv::Driver::GL_UPDATED:
+        case GraphicsEnv::Driver::ANGLE: {
+            if (mGpuStats.glDriverToLoad == GraphicsEnv::Driver::NONE) {
+                mGpuStats.glDriverToLoad = driver;
+                break;
+            }
+
+            if (mGpuStats.glDriverFallback == GraphicsEnv::Driver::NONE) {
+                mGpuStats.glDriverFallback = driver;
+            }
+            break;
+        }
+        case Driver::VULKAN:
+        case Driver::VULKAN_UPDATED: {
+            if (mGpuStats.vkDriverToLoad == GraphicsEnv::Driver::NONE) {
+                mGpuStats.vkDriverToLoad = driver;
+                break;
+            }
+
+            if (mGpuStats.vkDriverFallback == GraphicsEnv::Driver::NONE) {
+                mGpuStats.vkDriverFallback = driver;
+            }
+            break;
+        }
+        default:
+            break;
+    }
+}
+
+void GraphicsEnv::setDriverLoaded(GraphicsEnv::Api api, bool isLoaded, int64_t driverLoadingTime) {
+    ATRACE_CALL();
+
+    std::lock_guard<std::mutex> lock(mStatsLock);
+    GraphicsEnv::Driver driver = GraphicsEnv::Driver::NONE;
+    bool isIntendedDriverLoaded = false;
+    if (api == GraphicsEnv::Api::API_GL) {
+        driver = mGpuStats.glDriverToLoad;
+        isIntendedDriverLoaded = isLoaded &&
+                ((mGpuStats.glDriverFallback == GraphicsEnv::Driver::NONE) ||
+                 (mGpuStats.glDriverToLoad == mGpuStats.glDriverFallback));
+    } else {
+        driver = mGpuStats.vkDriverToLoad;
+        isIntendedDriverLoaded =
+                isLoaded && (mGpuStats.vkDriverFallback == GraphicsEnv::Driver::NONE);
+    }
+
+    sendGpuStatsLocked(driver, isIntendedDriverLoaded, driverLoadingTime);
+}
+
+void GraphicsEnv::clearDriverLoadingInfo(GraphicsEnv::Api api) {
+    ATRACE_CALL();
+
+    std::lock_guard<std::mutex> lock(mStatsLock);
+    if (api == GraphicsEnv::Api::API_GL) {
+        mGpuStats.glDriverToLoad = GraphicsEnv::Driver::NONE;
+        mGpuStats.glDriverFallback = GraphicsEnv::Driver::NONE;
+    }
+}
+
+static sp<IGpuService> getGpuService() {
+    const sp<IBinder> binder = defaultServiceManager()->checkService(String16("gpu"));
+    if (!binder) {
+        ALOGE("Failed to get gpu service");
+        return nullptr;
+    }
+
+    return interface_cast<IGpuService>(binder);
+}
+
+void GraphicsEnv::sendGpuStatsLocked(GraphicsEnv::Driver driver, bool isDriverLoaded,
+                                     int64_t driverLoadingTime) {
     ATRACE_CALL();
 
     // Do not sendGpuStats for those skipping the GraphicsEnvironment setup
@@ -187,20 +265,23 @@ void GraphicsEnv::sendGpuStats() {
           "\tdriverPackageName[%s]\n"
           "\tdriverVersionName[%s]\n"
           "\tdriverVersionCode[%llu]\n"
-          "\tappPackageName[%s]\n",
+          "\tdriverBuildDate[%s]\n"
+          "\tappPackageName[%s]\n"
+          "\tdriver[%d]\n"
+          "\tisDriverLoaded[%d]\n"
+          "\tdriverLoadingTime[%lld]",
           mGpuStats.driverPackageName.c_str(), mGpuStats.driverVersionName.c_str(),
-          (unsigned long long)mGpuStats.driverVersionCode, mGpuStats.appPackageName.c_str());
+          (unsigned long long)mGpuStats.driverVersionCode, mGpuStats.driverBuildDate.c_str(),
+          mGpuStats.appPackageName.c_str(), static_cast<int32_t>(driver), isDriverLoaded,
+          (long long)driverLoadingTime);
 
-    const sp<IBinder> binder = defaultServiceManager()->checkService(String16("gpu"));
-    if (!binder) {
-        ALOGE("Failed to get gpu service for [%s]", mGpuStats.appPackageName.c_str());
-        return;
+    const sp<IGpuService> gpuService = getGpuService();
+    if (gpuService) {
+        gpuService->setGpuStats(mGpuStats.driverPackageName, mGpuStats.driverVersionName,
+                                mGpuStats.driverVersionCode, mGpuStats.driverBuildDate,
+                                mGpuStats.appPackageName, driver, isDriverLoaded,
+                                driverLoadingTime);
     }
-
-    interface_cast<IGpuService>(binder)->setGpuStats(mGpuStats.driverPackageName,
-                                                     mGpuStats.driverVersionName,
-                                                     mGpuStats.driverVersionCode,
-                                                     mGpuStats.appPackageName);
 }
 
 void* GraphicsEnv::loadLibrary(std::string name) {
@@ -316,28 +397,28 @@ bool GraphicsEnv::shouldUseAngle() {
         return false;
     }
 
-    return mUseAngle;
+    return (mUseAngle == YES) ? true : false;
 }
 
 void GraphicsEnv::updateUseAngle() {
-    mUseAngle = false;
+    mUseAngle = NO;
 
     const char* ANGLE_PREFER_ANGLE = "angle";
     const char* ANGLE_PREFER_NATIVE = "native";
 
     if (mAngleDeveloperOptIn == ANGLE_PREFER_ANGLE) {
         ALOGV("User set \"Developer Options\" to force the use of ANGLE");
-        mUseAngle = true;
+        mUseAngle = YES;
     } else if (mAngleDeveloperOptIn == ANGLE_PREFER_NATIVE) {
         ALOGV("User set \"Developer Options\" to force the use of Native");
-        mUseAngle = false;
+        mUseAngle = NO;
     } else {
         // The "Developer Options" value wasn't set to force the use of ANGLE.  Need to temporarily
         // load ANGLE and call the updatable opt-in/out logic:
         void* featureSo = loadLibrary("feature_support");
         if (featureSo) {
             ALOGV("loaded ANGLE's opt-in/out logic from namespace");
-            mUseAngle = checkAngleRules(featureSo);
+            mUseAngle = checkAngleRules(featureSo) ? YES : NO;
             dlclose(featureSo);
             featureSo = nullptr;
         } else {
@@ -349,6 +430,13 @@ void GraphicsEnv::updateUseAngle() {
 void GraphicsEnv::setAngleInfo(const std::string path, const std::string appName,
                                const std::string developerOptIn, const int rulesFd,
                                const long rulesOffset, const long rulesLength) {
+    if (mUseAngle != UNKNOWN) {
+        // We've already figured out an answer for this app, so just return.
+        ALOGV("Already evaluated the rules file for '%s': use ANGLE = %s", appName.c_str(),
+              (mUseAngle == YES) ? "true" : "false");
+        return;
+    }
+
     ALOGV("setting ANGLE path to '%s'", path.c_str());
     mAnglePath = path;
     ALOGV("setting ANGLE app name to '%s'", appName.c_str());

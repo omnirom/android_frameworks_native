@@ -88,6 +88,7 @@ public:
                                       uint64_t /*frameNumber*/) override {}
 
     Rect getBufferSize(const State& s) const override;
+    FloatRect computeSourceBounds(const FloatRect& parentBounds) const override;
     // -----------------------------------------------------------------------
 
     // -----------------------------------------------------------------------
@@ -124,13 +125,12 @@ private:
     void setFilteringEnabled(bool enabled) override;
 
     status_t bindTextureImage() override;
-    status_t updateTexImage(bool& recomputeVisibleRegions, nsecs_t latchTime,
-                            const sp<Fence>& releaseFence) override;
+    status_t updateTexImage(bool& recomputeVisibleRegions, nsecs_t latchTime) override;
 
     status_t updateActiveBuffer() override;
     status_t updateFrameNumber(nsecs_t latchTime) override;
 
-    void setHwcLayerBuffer(DisplayId displayId) override;
+    void setHwcLayerBuffer(const sp<const DisplayDevice>& display) override;
 
 private:
     void onFirstRef() override;
