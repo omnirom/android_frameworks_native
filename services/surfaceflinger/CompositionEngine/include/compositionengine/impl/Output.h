@@ -17,6 +17,8 @@
 #pragma once
 
 #include <memory>
+#include <utility>
+#include <vector>
 
 #include <compositionengine/Output.h>
 #include <compositionengine/impl/OutputCompositionState.h>
@@ -24,13 +26,15 @@
 namespace android::compositionengine {
 
 class CompositionEngine;
+class Layer;
+class OutputLayer;
 
 namespace impl {
 
 class Output : public virtual compositionengine::Output {
 public:
     Output(const CompositionEngine&);
-    virtual ~Output();
+    ~Output() override;
 
     bool isValid() const override;
 
@@ -38,7 +42,7 @@ public:
     void setProjection(const ui::Transform&, int32_t orientation, const Rect& frame,
                        const Rect& viewport, const Rect& scissor, bool needsFiltering) override;
     void setBounds(const ui::Size&) override;
-    void setLayerStackFilter(bool singleLayerStack, uint32_t singleLayerStackId) override;
+    void setLayerStackFilter(uint32_t layerStackId, bool isInternal) override;
 
     void setColorTransform(const mat4&) override;
     void setColorMode(ui::ColorMode, ui::Dataspace, ui::RenderIntent) override;
@@ -58,7 +62,14 @@ public:
     OutputCompositionState& editState() override;
 
     Region getPhysicalSpaceDirtyRegion(bool repaintEverything) const override;
-    bool belongsInOutput(uint32_t) const override;
+    bool belongsInOutput(uint32_t, bool) const override;
+
+    compositionengine::OutputLayer* getOutputLayerForLayer(
+            compositionengine::Layer*) const override;
+    std::unique_ptr<compositionengine::OutputLayer> getOrCreateOutputLayer(
+            std::shared_ptr<compositionengine::Layer>, sp<LayerFE>) override;
+    void setOutputLayersOrderedByZ(OutputLayers&&) override;
+    const OutputLayers& getOutputLayersOrderedByZ() const override;
 
     // Testing
     void setDisplayColorProfileForTest(std::unique_ptr<compositionengine::DisplayColorProfile>);
@@ -79,6 +90,8 @@ private:
 
     std::unique_ptr<compositionengine::DisplayColorProfile> mDisplayColorProfile;
     std::unique_ptr<compositionengine::RenderSurface> mRenderSurface;
+
+    OutputLayers mOutputLayersOrderedByZ;
 };
 
 } // namespace impl

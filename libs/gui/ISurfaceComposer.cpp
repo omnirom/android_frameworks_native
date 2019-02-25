@@ -395,6 +395,32 @@ public:
         return result;
     }
 
+    virtual status_t getDisplayNativePrimaries(const sp<IBinder>& display,
+            ui::DisplayPrimaries& primaries) {
+        Parcel data, reply;
+        status_t result = data.writeInterfaceToken(ISurfaceComposer::getInterfaceDescriptor());
+        if (result != NO_ERROR) {
+            ALOGE("getDisplayNativePrimaries failed to writeInterfaceToken: %d", result);
+            return result;
+        }
+        result = data.writeStrongBinder(display);
+        if (result != NO_ERROR) {
+            ALOGE("getDisplayNativePrimaries failed to writeStrongBinder: %d", result);
+            return result;
+        }
+        result = remote()->transact(BnSurfaceComposer::GET_DISPLAY_NATIVE_PRIMARIES, data, &reply);
+        if (result != NO_ERROR) {
+            ALOGE("getDisplayNativePrimaries failed to transact: %d", result);
+            return result;
+        }
+        result = reply.readInt32();
+        if (result == NO_ERROR) {
+            memcpy(&primaries, reply.readInplace(sizeof(ui::DisplayPrimaries)),
+                    sizeof(ui::DisplayPrimaries));
+        }
+        return result;
+    }
+
     virtual ColorMode getActiveColorMode(const sp<IBinder>& display) {
         Parcel data, reply;
         status_t result = data.writeInterfaceToken(ISurfaceComposer::getInterfaceDescriptor());
@@ -687,13 +713,13 @@ public:
     virtual status_t getProtectedContentSupport(bool* outSupported) const {
         Parcel data, reply;
         data.writeInterfaceToken(ISurfaceComposer::getInterfaceDescriptor());
-        remote()->transact(BnSurfaceComposer::GET_PROTECTED_CONTENT_SUPPORT, data, &reply);
-        bool result;
-        status_t err = reply.readBool(&result);
-        if (err == NO_ERROR) {
-            *outSupported = result;
+        status_t error =
+                remote()->transact(BnSurfaceComposer::GET_PROTECTED_CONTENT_SUPPORT, data, &reply);
+        if (error != NO_ERROR) {
+            return error;
         }
-        return err;
+        error = reply.readBool(outSupported);
+        return error;
     }
 
     virtual status_t cacheBuffer(const sp<IBinder>& token, const sp<GraphicBuffer>& buffer,
@@ -730,6 +756,26 @@ public:
         data.writeInt32(bufferId);
 
         return remote()->transact(BnSurfaceComposer::UNCACHE_BUFFER, data, &reply);
+    }
+
+    virtual status_t isWideColorDisplay(const sp<IBinder>& token,
+                                        bool* outIsWideColorDisplay) const {
+        Parcel data, reply;
+        status_t error = data.writeInterfaceToken(ISurfaceComposer::getInterfaceDescriptor());
+        if (error != NO_ERROR) {
+            return error;
+        }
+        error = data.writeStrongBinder(token);
+        if (error != NO_ERROR) {
+            return error;
+        }
+
+        error = remote()->transact(BnSurfaceComposer::IS_WIDE_COLOR_DISPLAY, data, &reply);
+        if (error != NO_ERROR) {
+            return error;
+        }
+        error = reply.readBool(outIsWideColorDisplay);
+        return error;
     }
 };
 
@@ -952,6 +998,26 @@ status_t BnSurfaceComposer::onTransact(
                     reply->writeInt32(static_cast<int32_t>(colorModes[i]));
                 }
             }
+            return NO_ERROR;
+        }
+        case GET_DISPLAY_NATIVE_PRIMARIES: {
+            CHECK_INTERFACE(ISurfaceComposer, data, reply);
+            ui::DisplayPrimaries primaries;
+            sp<IBinder> display = nullptr;
+
+            status_t result = data.readStrongBinder(&display);
+            if (result != NO_ERROR) {
+                ALOGE("getDisplayNativePrimaries failed to readStrongBinder: %d", result);
+                return result;
+            }
+
+            result = getDisplayNativePrimaries(display, primaries);
+            reply->writeInt32(result);
+            if (result == NO_ERROR) {
+                memcpy(reply->writeInplace(sizeof(ui::DisplayPrimaries)), &primaries,
+                        sizeof(ui::DisplayPrimaries));
+            }
+
             return NO_ERROR;
         }
         case GET_ACTIVE_COLOR_MODE: {
@@ -1213,6 +1279,20 @@ status_t BnSurfaceComposer::onTransact(
             }
 
             return uncacheBuffer(token, bufferId);
+        }
+        case IS_WIDE_COLOR_DISPLAY: {
+            CHECK_INTERFACE(ISurfaceComposer, data, reply);
+            sp<IBinder> display = nullptr;
+            status_t error = data.readStrongBinder(&display);
+            if (error != NO_ERROR) {
+                return error;
+            }
+            bool result;
+            error = isWideColorDisplay(display, &result);
+            if (error == NO_ERROR) {
+                reply->writeBool(result);
+            }
+            return error;
         }
         default: {
             return BBinder::onTransact(code, data, reply, flags);

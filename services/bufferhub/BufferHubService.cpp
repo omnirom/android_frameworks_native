@@ -65,15 +65,20 @@ Return<void> BufferHubService::allocateBuffer(const HardwareBufferDescription& d
     std::lock_guard<std::mutex> lock(mClientSetMutex);
     mClientSet.emplace(client);
 
+    // Allocate memory for bufferInfo of type hidl_handle on the stack. See
+    // http://aosp/286282 for the usage of NATIVE_HANDLE_DECLARE_STORAGE.
+    NATIVE_HANDLE_DECLARE_STORAGE(bufferInfoStorage, BufferHubDefs::kBufferInfoNumFds,
+                                  BufferHubDefs::kBufferInfoNumInts);
     hidl_handle bufferInfo =
-            buildBufferInfo(node->id(), node->AddNewActiveClientsBitToMask(),
-                            node->user_metadata_size(), node->metadata().ashmem_fd());
+            buildBufferInfo(bufferInfoStorage, node->id(), node->AddNewActiveClientsBitToMask(),
+                            node->user_metadata_size(), node->metadata().ashmem_fd(),
+                            node->eventFd().get());
     BufferTraits bufferTraits = {/*bufferDesc=*/description,
                                  /*bufferHandle=*/hidl_handle(node->buffer_handle()),
-                                 /*bufferInfo=*/bufferInfo};
+                                 /*bufferInfo=*/std::move(bufferInfo)};
 
     _hidl_cb(/*status=*/BufferHubStatus::NO_ERROR, /*bufferClient=*/client,
-             /*bufferTraits=*/bufferTraits);
+             /*bufferTraits=*/std::move(bufferTraits));
     return Void();
 }
 
@@ -154,15 +159,19 @@ Return<void> BufferHubService::importBuffer(const hidl_handle& tokenHandle,
     HardwareBufferDescription bufferDesc;
     memcpy(&bufferDesc, &node->buffer_desc(), sizeof(HardwareBufferDescription));
 
-    hidl_handle bufferInfo =
-            buildBufferInfo(node->id(), clientStateMask, node->user_metadata_size(),
-                            node->metadata().ashmem_fd());
+    // Allocate memory for bufferInfo of type hidl_handle on the stack. See
+    // http://aosp/286282 for the usage of NATIVE_HANDLE_DECLARE_STORAGE.
+    NATIVE_HANDLE_DECLARE_STORAGE(bufferInfoStorage, BufferHubDefs::kBufferInfoNumFds,
+                                  BufferHubDefs::kBufferInfoNumInts);
+    hidl_handle bufferInfo = buildBufferInfo(bufferInfoStorage, node->id(), clientStateMask,
+                                             node->user_metadata_size(),
+                                             node->metadata().ashmem_fd(), node->eventFd().get());
     BufferTraits bufferTraits = {/*bufferDesc=*/bufferDesc,
                                  /*bufferHandle=*/hidl_handle(node->buffer_handle()),
-                                 /*bufferInfo=*/bufferInfo};
+                                 /*bufferInfo=*/std::move(bufferInfo)};
 
     _hidl_cb(/*status=*/BufferHubStatus::NO_ERROR, /*bufferClient=*/client,
-             /*bufferTraits=*/bufferTraits);
+             /*bufferTraits=*/std::move(bufferTraits));
     return Void();
 }
 
@@ -206,7 +215,7 @@ Return<void> BufferHubService::debug(const hidl_handle& fd, const hidl_vec<hidl_
     stream << std::right;
     stream << std::setw(6) << "Id";
     stream << " ";
-    stream << std::setw(9) << "Clients";
+    stream << std::setw(9) << "#Clients";
     stream << " ";
     stream << std::setw(14) << "Geometry";
     stream << " ";
@@ -232,7 +241,7 @@ Return<void> BufferHubService::debug(const hidl_handle& fd, const hidl_vec<hidl_
         stream << std::right;
         stream << std::setw(6) << /*Id=*/node->id();
         stream << " ";
-        stream << std::setw(9) << /*Clients=*/clientCount;
+        stream << std::setw(9) << /*#Clients=*/clientCount;
         stream << " ";
         if (desc.format == HAL_PIXEL_FORMAT_BLOB) {
             std::string size = std::to_string(desc.width) + " B";
@@ -282,14 +291,14 @@ Return<void> BufferHubService::debug(const hidl_handle& fd, const hidl_vec<hidl_
     stream << std::right;
     stream << std::setw(8) << "Buffer Id";
     stream << " ";
-    stream << std::setw(6) << "Tokens";
+    stream << std::setw(7) << "#Tokens";
     stream << std::endl;
 
     for (auto iter = tokenCount.begin(); iter != tokenCount.end(); ++iter) {
         stream << std::right;
         stream << std::setw(8) << /*Buffer Id=*/iter->first;
         stream << " ";
-        stream << std::setw(6) << /*Tokens=*/iter->second;
+        stream << std::setw(7) << /*#Tokens=*/iter->second;
         stream << std::endl;
     }
 
@@ -344,20 +353,23 @@ void BufferHubService::onClientClosed(const BufferClient* client) {
 
 // Implementation of this function should be consistent with the definition of bufferInfo handle in
 // ui/BufferHubDefs.h.
-hidl_handle BufferHubService::buildBufferInfo(int bufferId, uint32_t clientBitMask,
-                                              uint32_t userMetadataSize, const int metadataFd) {
-    native_handle_t* infoHandle = native_handle_create(BufferHubDefs::kBufferInfoNumFds,
-                                                       BufferHubDefs::kBufferInfoNumInts);
+hidl_handle BufferHubService::buildBufferInfo(char* bufferInfoStorage, int bufferId,
+                                              uint32_t clientBitMask, uint32_t userMetadataSize,
+                                              int metadataFd, int eventFd) {
+    native_handle_t* infoHandle =
+            native_handle_init(bufferInfoStorage, BufferHubDefs::kBufferInfoNumFds,
+                               BufferHubDefs::kBufferInfoNumInts);
 
-    infoHandle->data[0] = dup(metadataFd);
-    infoHandle->data[1] = bufferId;
+    infoHandle->data[0] = metadataFd;
+    infoHandle->data[1] = eventFd;
+    infoHandle->data[2] = bufferId;
     // Use memcpy to convert to int without missing digit.
     // TOOD(b/121345852): use bit_cast to unpack bufferInfo when C++20 becomes available.
-    memcpy(&infoHandle->data[2], &clientBitMask, sizeof(clientBitMask));
-    memcpy(&infoHandle->data[3], &userMetadataSize, sizeof(userMetadataSize));
+    memcpy(&infoHandle->data[3], &clientBitMask, sizeof(clientBitMask));
+    memcpy(&infoHandle->data[4], &userMetadataSize, sizeof(userMetadataSize));
 
     hidl_handle bufferInfo;
-    bufferInfo.setTo(infoHandle, /*shouldOwn=*/true);
+    bufferInfo.setTo(infoHandle, /*shouldOwn=*/false);
 
     return bufferInfo;
 }

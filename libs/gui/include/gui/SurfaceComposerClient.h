@@ -30,6 +30,7 @@
 #include <utils/SortedVector.h>
 #include <utils/threads.h>
 
+#include <ui/ConfigStoreTypes.h>
 #include <ui/DisplayedFrameStats.h>
 #include <ui/FrameStats.h>
 #include <ui/GraphicTypes.h>
@@ -53,34 +54,23 @@ class Region;
 
 // ---------------------------------------------------------------------------
 
-using TransactionCompletedCallbackTakesContext =
-        std::function<void(void* /*context*/, const TransactionStats&)>;
-using TransactionCompletedCallback = std::function<void(const TransactionStats&)>;
+struct SurfaceControlStats {
+    SurfaceControlStats(const sp<SurfaceControl>& sc, nsecs_t time,
+                        const sp<Fence>& prevReleaseFence)
+          : surfaceControl(sc), acquireTime(time), previousReleaseFence(prevReleaseFence) {}
 
-class TransactionCompletedListener : public BnTransactionCompletedListener {
-    TransactionCompletedListener();
-
-    CallbackId getNextIdLocked() REQUIRES(mMutex);
-
-    std::mutex mMutex;
-
-    bool mListening GUARDED_BY(mMutex) = false;
-
-    CallbackId mCallbackIdCounter GUARDED_BY(mMutex) = 1;
-
-    std::map<CallbackId, TransactionCompletedCallback> mCallbacks GUARDED_BY(mMutex);
-
-public:
-    static sp<TransactionCompletedListener> getInstance();
-    static sp<ITransactionCompletedListener> getIInstance();
-
-    void startListeningLocked() REQUIRES(mMutex);
-
-    CallbackId addCallback(const TransactionCompletedCallback& callback);
-
-    // Overrides BnTransactionCompletedListener's onTransactionCompleted
-    void onTransactionCompleted(ListenerStats stats) override;
+    sp<SurfaceControl> surfaceControl;
+    nsecs_t acquireTime = -1;
+    sp<Fence> previousReleaseFence;
 };
+
+using TransactionCompletedCallbackTakesContext =
+        std::function<void(void* /*context*/, nsecs_t /*latchTime*/,
+                           const sp<Fence>& /*presentFence*/,
+                           const std::vector<SurfaceControlStats>& /*stats*/)>;
+using TransactionCompletedCallback =
+        std::function<void(nsecs_t /*latchTime*/, const sp<Fence>& /*presentFence*/,
+                           const std::vector<SurfaceControlStats>& /*stats*/)>;
 
 // ---------------------------------------------------------------------------
 
@@ -125,6 +115,10 @@ public:
     static status_t getDisplayColorModes(const sp<IBinder>& display,
             Vector<ui::ColorMode>* outColorModes);
 
+    // Get the coordinates of the display's native color primaries
+    static status_t getDisplayNativePrimaries(const sp<IBinder>& display,
+            ui::DisplayPrimaries& outPrimaries);
+
     // Gets the active color mode for the given display
     static ui::ColorMode getActiveColorMode(const sp<IBinder>& display);
 
@@ -164,43 +158,42 @@ public:
     // Uncaches a buffer set by cacheBuffer
     static status_t uncacheBuffer(int32_t bufferId);
 
+    // Queries whether a given display is wide color display.
+    static status_t isWideColorDisplay(const sp<IBinder>& display, bool* outIsWideColorDisplay);
+
     // ------------------------------------------------------------------------
     // surface creation / destruction
 
+    static sp<SurfaceComposerClient> getDefault();
+
     //! Create a surface
-    sp<SurfaceControl> createSurface(
-            const String8& name,// name of the surface
-            uint32_t w,         // width in pixel
-            uint32_t h,         // height in pixel
-            PixelFormat format, // pixel-format desired
-            uint32_t flags = 0, // usage flags
-            SurfaceControl* parent = nullptr, // parent
-            int32_t windowType = -1, // from WindowManager.java (STATUS_BAR, INPUT_METHOD, etc.)
-            int32_t ownerUid = -1 // UID of the task
+    sp<SurfaceControl> createSurface(const String8& name,              // name of the surface
+                                     uint32_t w,                       // width in pixel
+                                     uint32_t h,                       // height in pixel
+                                     PixelFormat format,               // pixel-format desired
+                                     uint32_t flags = 0,               // usage flags
+                                     SurfaceControl* parent = nullptr, // parent
+                                     LayerMetadata metadata = LayerMetadata() // metadata
     );
 
-    status_t createSurfaceChecked(
-            const String8& name, // name of the surface
-            uint32_t w,          // width in pixel
-            uint32_t h,          // height in pixel
-            PixelFormat format,  // pixel-format desired
-            sp<SurfaceControl>* outSurface,
-            uint32_t flags = 0,               // usage flags
-            SurfaceControl* parent = nullptr, // parent
-            int32_t windowType = -1, // from WindowManager.java (STATUS_BAR, INPUT_METHOD, etc.)
-            int32_t ownerUid = -1    // UID of the task
+    status_t createSurfaceChecked(const String8& name, // name of the surface
+                                  uint32_t w,          // width in pixel
+                                  uint32_t h,          // height in pixel
+                                  PixelFormat format,  // pixel-format desired
+                                  sp<SurfaceControl>* outSurface,
+                                  uint32_t flags = 0,                      // usage flags
+                                  SurfaceControl* parent = nullptr,        // parent
+                                  LayerMetadata metadata = LayerMetadata() // metadata
     );
 
     //! Create a surface
-    sp<SurfaceControl> createWithSurfaceParent(
-            const String8& name,       // name of the surface
-            uint32_t w,                // width in pixel
-            uint32_t h,                // height in pixel
-            PixelFormat format,        // pixel-format desired
-            uint32_t flags = 0,        // usage flags
-            Surface* parent = nullptr, // parent
-            int32_t windowType = -1,   // from WindowManager.java (STATUS_BAR, INPUT_METHOD, etc.)
-            int32_t ownerUid = -1      // UID of the task
+    sp<SurfaceControl> createWithSurfaceParent(const String8& name,       // name of the surface
+                                               uint32_t w,                // width in pixel
+                                               uint32_t h,                // height in pixel
+                                               PixelFormat format,        // pixel-format desired
+                                               uint32_t flags = 0,        // usage flags
+                                               Surface* parent = nullptr, // parent
+                                               LayerMetadata metadata = LayerMetadata() // metadata
     );
 
     //! Create a virtual display
@@ -311,6 +304,8 @@ public:
         Transaction& setCrop_legacy(const sp<SurfaceControl>& sc, const Rect& crop);
         Transaction& setCornerRadius(const sp<SurfaceControl>& sc, float cornerRadius);
         Transaction& setLayerStack(const sp<SurfaceControl>& sc, uint32_t layerStack);
+        Transaction& setMetadata(const sp<SurfaceControl>& sc, uint32_t key,
+                                 std::vector<uint8_t> data);
         // Defers applying any changes made in this transaction until the Layer
         // identified by handle reaches the given frameNumber. If the Layer identified
         // by handle is removed, then we will apply this transaction regardless of
@@ -334,6 +329,10 @@ public:
                 const sp<IBinder>& newParentHandle);
 
         Transaction& setColor(const sp<SurfaceControl>& sc, const half3& color);
+
+        // Sets the background color of a layer with the specified color, alpha, and dataspace
+        Transaction& setBackgroundColor(const sp<SurfaceControl>& sc, const half3& color,
+                                        float alpha, ui::Dataspace dataspace);
 
         Transaction& setTransform(const sp<SurfaceControl>& sc, uint32_t transform);
         Transaction& setTransformToDisplayInverse(const sp<SurfaceControl>& sc,
@@ -386,6 +385,9 @@ public:
         // Set a color transform matrix on the given layer on the built-in display.
         Transaction& setColorTransform(const sp<SurfaceControl>& sc, const mat3& matrix,
                                        const vec3& translation);
+
+        Transaction& setGeometry(const sp<SurfaceControl>& sc,
+                const Rect& source, const Rect& dst, int transform);
 
         status_t setDisplaySurface(const sp<IBinder>& token,
                 const sp<IGraphicBufferProducer>& bufferProducer);
@@ -461,6 +463,50 @@ public:
                                        const ui::Dataspace reqDataSpace,
                                        const ui::PixelFormat reqPixelFormat, Rect sourceCrop,
                                        float frameScale, sp<GraphicBuffer>* outBuffer);
+};
+
+// ---------------------------------------------------------------------------
+
+class TransactionCompletedListener : public BnTransactionCompletedListener {
+    TransactionCompletedListener();
+
+    CallbackId getNextIdLocked() REQUIRES(mMutex);
+
+    std::mutex mMutex;
+
+    bool mListening GUARDED_BY(mMutex) = false;
+
+    CallbackId mCallbackIdCounter GUARDED_BY(mMutex) = 1;
+
+    struct IBinderHash {
+        std::size_t operator()(const sp<IBinder>& iBinder) const {
+            return std::hash<IBinder*>{}(iBinder.get());
+        }
+    };
+
+    struct CallbackTranslation {
+        TransactionCompletedCallback callbackFunction;
+        std::unordered_map<sp<IBinder>, sp<SurfaceControl>, IBinderHash> surfaceControls;
+    };
+
+    std::unordered_map<CallbackId, CallbackTranslation> mCallbacks GUARDED_BY(mMutex);
+
+public:
+    static sp<TransactionCompletedListener> getInstance();
+    static sp<ITransactionCompletedListener> getIInstance();
+
+    void startListeningLocked() REQUIRES(mMutex);
+
+    CallbackId addCallbackFunction(
+            const TransactionCompletedCallback& callbackFunction,
+            const std::unordered_set<sp<SurfaceControl>, SurfaceComposerClient::SCHash>&
+                    surfaceControls);
+
+    void addSurfaceControlToCallbacks(const sp<SurfaceControl>& surfaceControl,
+                                      const std::unordered_set<CallbackId>& callbackIds);
+
+    // Overrides BnTransactionCompletedListener's onTransactionCompleted
+    void onTransactionCompleted(ListenerStats stats) override;
 };
 
 // ---------------------------------------------------------------------------

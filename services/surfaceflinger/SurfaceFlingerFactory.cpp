@@ -33,6 +33,7 @@
 #include "Scheduler/DispSync.h"
 #include "Scheduler/EventControlThread.h"
 #include "Scheduler/MessageQueue.h"
+#include "Scheduler/PhaseOffsets.h"
 #include "Scheduler/Scheduler.h"
 #include "TimeStats/TimeStats.h"
 
@@ -66,6 +67,10 @@ sp<SurfaceFlinger> createSurfaceFlinger() {
 
         std::unique_ptr<MessageQueue> createMessageQueue() override {
             return std::make_unique<android::impl::MessageQueue>();
+        }
+
+        std::unique_ptr<scheduler::PhaseOffsets> createPhaseOffsets() override {
+            return std::make_unique<scheduler::impl::PhaseOffsets>();
         }
 
         std::unique_ptr<Scheduler> createScheduler(std::function<void(bool)> callback) override {
@@ -123,8 +128,8 @@ sp<SurfaceFlinger> createSurfaceFlinger() {
             return new ColorLayer(args);
         }
 
-        std::unique_ptr<TimeStats> createTimeStats() override {
-            return std::make_unique<TimeStats>();
+        std::shared_ptr<TimeStats> createTimeStats() override {
+            return std::make_shared<android::impl::TimeStats>();
         }
     };
     static Factory factory;

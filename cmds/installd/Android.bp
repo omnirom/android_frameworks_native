@@ -18,6 +18,7 @@ cc_defaults {
         "dexopt.cpp",
         "globals.cpp",
         "utils.cpp",
+        "utils_default.cpp",
         "view_compiler.cpp",
         ":installd_aidl",
     ],
@@ -138,10 +139,23 @@ cc_binary {
     ],
     clang: true,
 
-    srcs: ["otapreopt_chroot.cpp"],
+    srcs: [
+        "otapreopt_chroot.cpp",
+        "otapreopt_utils.cpp",
+    ],
     shared_libs: [
         "libbase",
         "liblog",
+        "libprotobuf-cpp-full",
+        "libselinux",
+        "libziparchive",
+    ],
+    static_libs: [
+        "libapex",
+        "libapexd",
+        "lib_apex_manifest_proto",
+        "libavb",
+        "libdm",
     ],
 }
 
@@ -190,7 +204,9 @@ cc_binary {
         "dexopt.cpp",
         "globals.cpp",
         "otapreopt.cpp",
+        "otapreopt_utils.cpp",
         "utils.cpp",
+        "utils_default.cpp",
         "view_compiler.cpp",
     ],
 
@@ -211,5 +227,25 @@ cc_binary {
         "libprocessgroup",
         "libselinux",
         "libutils",
+    ],
+}
+
+// OTA slot script
+cc_prebuilt_binary {
+    name: "otapreopt_slot",
+    srcs: ["otapreopt_slot.sh"],
+    init_rc: ["otapreopt.rc"],
+}
+
+// OTA postinstall script
+cc_prebuilt_binary {
+    name: "otapreopt_script",
+    srcs: ["otapreopt_script.sh"],
+    // Let this depend on otapreopt, the chroot tool and the slot script,
+    // so we just have to mention one in a configuration.
+    required: [
+        "otapreopt",
+        "otapreopt_chroot",
+        "otapreopt_slot",
     ],
 }

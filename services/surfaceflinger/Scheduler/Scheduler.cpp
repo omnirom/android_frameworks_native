@@ -28,7 +28,6 @@
 #include <android/hardware/configstore/1.1/ISurfaceFlingerConfigs.h>
 #include <android/hardware/configstore/1.2/ISurfaceFlingerConfigs.h>
 #include <configstore/Utils.h>
-
 #include <cutils/properties.h>
 #include <gui/ISurfaceComposer.h>
 #include <ui/DisplayStatInfo.h>
@@ -42,11 +41,13 @@
 #include "IdleTimer.h"
 #include "InjectVSyncSource.h"
 #include "SchedulerUtils.h"
+#include "SurfaceFlingerProperties.h"
 
 namespace android {
 
 using namespace android::hardware::configstore;
 using namespace android::hardware::configstore::V1_0;
+using namespace android::sysprop;
 
 #define RETURN_VALUE_IF_INVALID(value) \
     if (handle == nullptr || mConnections.count(handle->id) == 0) return value
@@ -56,11 +57,8 @@ using namespace android::hardware::configstore::V1_0;
 std::atomic<int64_t> Scheduler::sNextId = 0;
 
 Scheduler::Scheduler(impl::EventControlThread::SetVSyncEnabledFunction function)
-      : mHasSyncFramework(
-                getBool<ISurfaceFlingerConfigs, &ISurfaceFlingerConfigs::hasSyncFramework>(true)),
-        mDispSyncPresentTimeOffset(
-                getInt64<ISurfaceFlingerConfigs,
-                         &ISurfaceFlingerConfigs::presentTimeOffsetFromVSyncNs>(0)),
+      : mHasSyncFramework(running_without_sync_framework(true)),
+        mDispSyncPresentTimeOffset(present_time_offset_from_vsync_ns(0)),
         mPrimaryHWVsyncEnabled(false),
         mHWVsyncAvailable(false) {
     // Note: We create a local temporary with the real DispSync implementation
@@ -72,7 +70,7 @@ Scheduler::Scheduler(impl::EventControlThread::SetVSyncEnabledFunction function)
     mEventControlThread = std::make_unique<impl::EventControlThread>(function);
 
     char value[PROPERTY_VALUE_MAX];
-    property_get("debug.sf.set_idle_timer_ms", value, "0");
+    property_get("debug.sf.set_idle_timer_ms", value, "30");
     mSetIdleTimerMs = atoi(value);
 
     if (mSetIdleTimerMs > 0) {
@@ -86,14 +84,14 @@ Scheduler::Scheduler(impl::EventControlThread::SetVSyncEnabledFunction function)
 Scheduler::~Scheduler() = default;
 
 sp<Scheduler::ConnectionHandle> Scheduler::createConnection(
-        const std::string& connectionName, int64_t phaseOffsetNs, ResyncCallback resyncCallback,
+        const char* connectionName, int64_t phaseOffsetNs, ResyncCallback resyncCallback,
         impl::EventThread::InterceptVSyncsCallback interceptCallback) {
     const int64_t id = sNextId++;
     ALOGV("Creating a connection handle with ID: %" PRId64 "\n", id);
 
     std::unique_ptr<EventThread> eventThread =
             makeEventThread(connectionName, mPrimaryDispSync.get(), phaseOffsetNs,
-                            interceptCallback);
+                            std::move(interceptCallback));
     auto connection = std::make_unique<Connection>(new ConnectionHandle(id),
                                                    eventThread->createEventConnection(
                                                            std::move(resyncCallback)),
@@ -104,14 +102,13 @@ sp<Scheduler::ConnectionHandle> Scheduler::createConnection(
 }
 
 std::unique_ptr<EventThread> Scheduler::makeEventThread(
-        const std::string& connectionName, DispSync* dispSync, int64_t phaseOffsetNs,
+        const char* connectionName, DispSync* dispSync, int64_t phaseOffsetNs,
         impl::EventThread::InterceptVSyncsCallback interceptCallback) {
-    const std::string sourceName = connectionName + "Source";
     std::unique_ptr<VSyncSource> eventThreadSource =
-            std::make_unique<DispSyncSource>(dispSync, phaseOffsetNs, true, sourceName.c_str());
-    const std::string threadName = connectionName + "Thread";
-    return std::make_unique<impl::EventThread>(std::move(eventThreadSource), interceptCallback,
-                                               [this] { resetIdleTimer(); }, threadName.c_str());
+            std::make_unique<DispSyncSource>(dispSync, phaseOffsetNs, true, connectionName);
+    return std::make_unique<impl::EventThread>(std::move(eventThreadSource),
+                                               std::move(interceptCallback),
+                                               [this] { resetIdleTimer(); }, connectionName);
 }
 
 sp<IDisplayEventConnection> Scheduler::createDisplayEventConnection(
@@ -350,6 +347,12 @@ void Scheduler::expiredTimerCallback() {
         mExpiredTimerCallback();
         ATRACE_INT("ExpiredIdleTimer", 1);
     }
+}
+
+std::string Scheduler::doDump() {
+    std::ostringstream stream;
+    stream << "+  Idle timer interval: " << mSetIdleTimerMs << " ms" << std::endl;
+    return stream.str();
 }
 
 } // namespace android

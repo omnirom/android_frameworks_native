@@ -46,6 +46,7 @@
 #include <gui/Surface.h>
 
 #include "BufferLayer.h"
+#include "ColorLayer.h"
 #include "Colorizer.h"
 #include "DisplayDevice.h"
 #include "Layer.h"
@@ -94,8 +95,6 @@ Layer::Layer(const LayerCreationArgs& args)
     mCurrentState.layerStack = 0;
     mCurrentState.sequence = 0;
     mCurrentState.requested_legacy = mCurrentState.active_legacy;
-    mCurrentState.appId = 0;
-    mCurrentState.type = 0;
     mCurrentState.active.w = UINT32_MAX;
     mCurrentState.active.h = UINT32_MAX;
     mCurrentState.active.transform.set(0, 0);
@@ -380,7 +379,7 @@ Rect Layer::getCroppedBufferSize(const State& s) const {
     return size;
 }
 
-Rect Layer::computeInitialCrop(const Rect& windowBounds) const {
+Rect Layer::computeInitialCrop(const sp<const DisplayDevice>& display) const {
     // the crop is the area of the window that gets cropped, but not
     // scaled in any ways.
     const State& s(getDrawingState());
@@ -391,17 +390,12 @@ Rect Layer::computeInitialCrop(const Rect& windowBounds) const {
     // pixels in the buffer.
 
     FloatRect activeCropFloat = computeBounds();
-
-    // If we have valid window boundaries then we need to crop to the window
-    // boundaries in layer space.
-    if (windowBounds.isValid()) {
-        const ui::Transform t = getTransform();
-        // Transform to screen space.
-        activeCropFloat = t.transform(activeCropFloat);
-        activeCropFloat = activeCropFloat.intersect(windowBounds.toFloatRect());
-        // Back to layer space to work with the content crop.
-        activeCropFloat = t.inverse().transform(activeCropFloat);
-    }
+    ui::Transform t = getTransform();
+    // Transform to screen space.
+    activeCropFloat = t.transform(activeCropFloat);
+    activeCropFloat = activeCropFloat.intersect(display->getViewport().toFloatRect());
+    // Back to layer space to work with the content crop.
+    activeCropFloat = t.inverse().transform(activeCropFloat);
     // This needs to be here as transform.transform(Rect) computes the
     // transformed rect and then takes the bounding box of the result before
     // returning. This means
@@ -431,7 +425,7 @@ void Layer::setupRoundedCornersCropCoordinates(Rect win,
     cropCoords[3] = vec2(win.right, win.top);
 }
 
-FloatRect Layer::computeCrop(const Rect& windowBounds) const {
+FloatRect Layer::computeCrop(const sp<const DisplayDevice>& display) const {
     // the content crop is the area of the content that gets scaled to the
     // layer's size. This is in buffer space.
     FloatRect crop = getContentCrop().toFloatRect();
@@ -439,7 +433,7 @@ FloatRect Layer::computeCrop(const Rect& windowBounds) const {
     // In addition there is a WM-specified crop we pull from our drawing state.
     const State& s(getDrawingState());
 
-    Rect activeCrop = computeInitialCrop(windowBounds);
+    Rect activeCrop = computeInitialCrop(display);
     Rect bufferSize = getBufferSize(s);
 
     // Transform the window crop to match the buffer coordinate system,
@@ -599,14 +593,16 @@ void Layer::setGeometry(const sp<const DisplayDevice>& display, uint32_t z) {
              to_string(error).c_str(), static_cast<int32_t>(error));
     getBE().compositionInfo.hwc.z = z;
 
-    int type = s.type;
-    int appId = s.appId;
+    int type = s.metadata.getInt32(METADATA_WINDOW_TYPE, 0);
+    int appId = s.metadata.getInt32(METADATA_OWNER_UID, 0);
     sp<Layer> parent = mDrawingParent.promote();
     if (parent.get()) {
         auto& parentState = parent->getDrawingState();
-        if (parentState.type >= 0 || parentState.appId >= 0) {
-            type = parentState.type;
-            appId = parentState.appId;
+        const int parentType = parentState.metadata.getInt32(METADATA_WINDOW_TYPE, 0);
+        const int parentAppId = parentState.metadata.getInt32(METADATA_OWNER_UID, 0);
+        if (parentType >= 0 || parentAppId >= 0) {
+            type = parentType;
+            appId = parentAppId;
         }
     }
 
@@ -1071,6 +1067,11 @@ uint32_t Layer::doTransaction(uint32_t flags) {
         mNeedsFiltering = (!getActiveTransform(c).preserveRects() || type >= ui::Transform::SCALE);
     }
 
+    if (mChildrenChanged) {
+        flags |= eVisibleRegion;
+        mChildrenChanged = false;
+    }
+
     // If the layer is hidden, signal and clear out all local sync points so
     // that transactions for layers depending on this layer's frames becoming
     // visible are not blocked
@@ -1237,17 +1238,35 @@ bool Layer::setAlpha(float alpha) {
     return true;
 }
 
-bool Layer::setColor(const half3& color) {
-    if (color.r == mCurrentState.color.r && color.g == mCurrentState.color.g &&
-        color.b == mCurrentState.color.b)
+bool Layer::setBackgroundColor(const half3& color, float alpha, ui::Dataspace dataspace) {
+    if (!mCurrentState.bgColorLayer && alpha == 0) {
         return false;
+    } else if (!mCurrentState.bgColorLayer && alpha != 0) {
+        // create background color layer if one does not yet exist
+        uint32_t flags = ISurfaceComposerClient::eFXSurfaceColor;
+        const String8& name = mName + "BackgroundColorLayer";
+        mCurrentState.bgColorLayer =
+                new ColorLayer(LayerCreationArgs(mFlinger.get(), nullptr, name, 0, 0, flags));
 
-    mCurrentState.sequence++;
-    mCurrentState.color.r = color.r;
-    mCurrentState.color.g = color.g;
-    mCurrentState.color.b = color.b;
-    mCurrentState.modified = true;
-    setTransactionFlags(eTransactionNeeded);
+        // add to child list
+        addChild(mCurrentState.bgColorLayer);
+        mFlinger->mLayersAdded = true;
+        // set up SF to handle added color layer
+        if (isRemovedFromCurrentState()) {
+            mCurrentState.bgColorLayer->onRemovedFromCurrentState();
+        }
+        mFlinger->setTransactionFlags(eTransactionNeeded);
+    } else if (mCurrentState.bgColorLayer && alpha == 0) {
+        mCurrentState.bgColorLayer->reparent(nullptr);
+        mCurrentState.bgColorLayer = nullptr;
+        return true;
+    }
+
+    mCurrentState.bgColorLayer->setColor(color);
+    mCurrentState.bgColorLayer->setLayer(std::numeric_limits<int32_t>::min());
+    mCurrentState.bgColorLayer->setAlpha(alpha);
+    mCurrentState.bgColorLayer->setDataspace(dataspace);
+
     return true;
 }
 
@@ -1315,11 +1334,14 @@ bool Layer::setOverrideScalingMode(int32_t scalingMode) {
     return true;
 }
 
-void Layer::setInfo(int32_t type, int32_t appId) {
-    mCurrentState.appId = appId;
-    mCurrentState.type = type;
+bool Layer::setMetadata(LayerMetadata data) {
+    bool changed = data.mMap != mCurrentState.metadata.mMap;
+    if (!changed) return false;
+    mCurrentState.metadata = std::move(data);
+    mCurrentState.sequence++;
     mCurrentState.modified = true;
     setTransactionFlags(eTransactionNeeded);
+    return true;
 }
 
 bool Layer::setLayerStack(uint32_t layerStack) {
@@ -1572,13 +1594,16 @@ size_t Layer::getChildrenCount() const {
 }
 
 void Layer::addChild(const sp<Layer>& layer) {
+    mChildrenChanged = true;
+
     mCurrentChildren.add(layer);
     layer->setParent(this);
 }
 
 ssize_t Layer::removeChild(const sp<Layer>& layer) {
-    layer->setParent(nullptr);
+    mChildrenChanged = true;
 
+    layer->setParent(nullptr);
     return mCurrentChildren.remove(layer);
 }
 
@@ -1624,19 +1649,26 @@ bool Layer::reparent(const sp<IBinder>& newParentHandle) {
         return false;
     }
 
+    sp<Layer> newParent;
+    if (newParentHandle != nullptr) {
+        auto handle = static_cast<Handle*>(newParentHandle.get());
+        newParent = handle->owner.promote();
+        if (newParent == nullptr) {
+            ALOGE("Unable to promote Layer handle");
+            return false;
+        }
+        if (newParent == this) {
+            ALOGE("Invalid attempt to reparent Layer (%s) to itself", getName().c_str());
+            return false;
+        }
+    }
+
     sp<Layer> parent = getParent();
     if (parent != nullptr) {
         parent->removeChild(this);
     }
 
     if (newParentHandle != nullptr) {
-        auto handle = static_cast<Handle*>(newParentHandle.get());
-        sp<Layer> newParent = handle->owner.promote();
-        if (newParent == nullptr) {
-            ALOGE("Unable to promote Layer handle");
-            return false;
-        }
-
         newParent->addChild(this);
         if (!newParent->isRemovedFromCurrentState()) {
             addToCurrentState();
@@ -2087,8 +2119,6 @@ void Layer::writeToProto(LayerProto* layerInfo, LayerVector::StateSet stateSet) 
 
     layerInfo->set_queued_frames(getQueuedFrameCount());
     layerInfo->set_refresh_pending(isBufferLatched());
-    layerInfo->set_window_type(state.type);
-    layerInfo->set_app_id(state.appId);
     layerInfo->set_curr_frame(mCurrentFrameNumber);
     layerInfo->set_effective_scaling_mode(getEffectiveScalingMode());
 
@@ -2099,6 +2129,11 @@ void Layer::writeToProto(LayerProto* layerInfo, LayerVector::StateSet stateSet) 
             barrierLayerProto->set_id(barrierLayer->sequence);
             barrierLayerProto->set_frame_number(pendingState.frameNumber_legacy);
         }
+    }
+
+    auto protoMap = layerInfo->mutable_metadata();
+    for (const auto& entry : state.metadata.mMap) {
+        (*protoMap)[entry.first] = std::string(entry.second.cbegin(), entry.second.cend());
     }
 }
 
@@ -2138,6 +2173,10 @@ bool Layer::isRemovedFromCurrentState() const  {
 InputWindowInfo Layer::fillInputInfo() {
     InputWindowInfo info = mDrawingState.inputInfo;
 
+    if (info.displayId == ADISPLAY_ID_NONE) {
+        info.displayId = mDrawingState.layerStack;
+    }
+
     ui::Transform t = getTransform();
     const float xScale = t.sx();
     const float yScale = t.sy();
@@ -2148,7 +2187,10 @@ InputWindowInfo Layer::fillInputInfo() {
     }
 
     // Transform layer size to screen space and inset it by surface insets.
-    Rect layerBounds = getBufferSize(getDrawingState());
+    // If this is a portal window, set the touchableRegion to the layerBounds.
+    Rect layerBounds = info.portalToDisplayId == ADISPLAY_ID_NONE
+            ? getBufferSize(getDrawingState())
+            : info.touchableRegion.getBounds();
     if (!layerBounds.isValid()) {
         layerBounds = getCroppedBufferSize(getDrawingState());
     }
@@ -2170,6 +2212,10 @@ InputWindowInfo Layer::fillInputInfo() {
 
 bool Layer::hasInput() const {
     return mDrawingState.inputInfo.token != nullptr;
+}
+
+std::shared_ptr<compositionengine::Layer> Layer::getCompositionLayer() const {
+    return nullptr;
 }
 
 // ---------------------------------------------------------------------------

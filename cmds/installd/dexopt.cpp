@@ -314,9 +314,15 @@ class RunDex2Oat : public ExecVHelper {
         bool skip_compilation = vold_decrypt == "trigger_restart_min_framework" ||
                                 vold_decrypt == "1";
 
-        const std::string resolve_startup_string_arg =
+        std::string resolve_startup_string_arg =
+                MapPropertyToArg("persist.device_config.runtime.dex2oat_resolve_startup_strings",
+                                 "--resolve-startup-const-strings=%s");
+        if (resolve_startup_string_arg.empty()) {
+          // If empty, fall back to system property.
+          resolve_startup_string_arg =
                 MapPropertyToArg("dalvik.vm.dex2oat-resolve-startup-strings",
                                  "--resolve-startup-const-strings=%s");
+        }
 
         const std::string image_block_size_arg =
                 MapPropertyToArg("dalvik.vm.dex2oat-max-image-block-size",
@@ -333,8 +339,7 @@ class RunDex2Oat : public ExecVHelper {
             MapPropertyToArg("dalvik.vm.dex2oat-very-large", "--very-large-app-threshold=%s");
 
         // If the runtime was requested to use libartd.so, we'll run dex2oatd, otherwise dex2oat.
-        const char* dex2oat_bin = "/system/bin/dex2oat";
-        constexpr const char* kDex2oatDebugPath = "/system/bin/dex2oatd";
+        const char* dex2oat_bin = kDex2oatPath;
         // Do not use dex2oatd for release candidates (give dex2oat more soak time).
         bool is_release = android::base::GetProperty("ro.build.version.codename", "") == "REL";
         if (is_debug_runtime() ||
@@ -642,8 +647,7 @@ class RunProfman : public ExecVHelper {
                   const std::vector<std::string>& dex_locations,
                   bool copy_and_update,
                   bool store_aggregation_counters) {
-        const char* profman_bin =
-                is_debug_runtime() ? "/system/bin/profmand" : "/system/bin/profman";
+        const char* profman_bin = is_debug_runtime() ? kProfmanDebugPath: kProfmanPath;
 
         if (copy_and_update) {
             CHECK_EQ(1u, profile_fds.size());
@@ -1459,9 +1463,7 @@ class RunDexoptAnalyzer : public ExecVHelper {
                     const char* class_loader_context) {
         CHECK_GE(zip_fd, 0);
         const char* dexoptanalyzer_bin =
-                is_debug_runtime()
-                        ? "/system/bin/dexoptanalyzerd"
-                        : "/system/bin/dexoptanalyzer";
+            is_debug_runtime() ? kDexoptanalyzerDebugPath : kDexoptanalyzerPath;
 
         std::string dex_file_arg = "--dex-file=" + dex_file;
         std::string oat_fd_arg = "--oat-fd=" + std::to_string(oat_fd);

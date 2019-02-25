@@ -30,7 +30,6 @@
 #include <sys/prctl.h>
 
 #include <memory>
-#include <mutex>
 #include <string>
 
 #include <dlfcn.h>
@@ -262,7 +261,7 @@ bool GraphicsEnv::shouldUseAngle(std::string appName) {
 bool GraphicsEnv::shouldUseAngle() {
     // Make sure we are init'ed
     if (mAngleAppName.empty()) {
-        ALOGE("App name is empty. setAngleInfo() must be called first to enable ANGLE.");
+        ALOGV("App name is empty. setAngleInfo() has not been called to enable ANGLE.");
         return false;
     }
 
@@ -284,16 +283,7 @@ void GraphicsEnv::updateUseAngle() {
     } else {
         // The "Developer Options" value wasn't set to force the use of ANGLE.  Need to temporarily
         // load ANGLE and call the updatable opt-in/out logic:
-
-        // Check if ANGLE is enabled. Workaround for several bugs:
-        // b/119305693 b/119322355 b/119305887
-        // Something is not working correctly in the feature library
-        char prop[PROPERTY_VALUE_MAX];
-        property_get("debug.angle.enable", prop, "0");
-        void* featureSo = nullptr;
-        if (atoi(prop)) {
-            featureSo = loadLibrary("feature_support");
-        }
+        void* featureSo = loadLibrary("feature_support");
         if (featureSo) {
             ALOGV("loaded ANGLE's opt-in/out logic from namespace");
             mUseAngle = checkAngleRules(featureSo);
@@ -415,19 +405,26 @@ android_namespace_t* GraphicsEnv::getDriverNamespace() {
 }
 
 android_namespace_t* GraphicsEnv::getAngleNamespace() {
-    static std::once_flag once;
-    std::call_once(once, [this]() {
-        if (mAnglePath.empty()) return;
+    std::lock_guard<std::mutex> lock(mNamespaceMutex);
 
-        mAngleNamespace = android_create_namespace("ANGLE",
-                                                   nullptr,            // ld_library_path
-                                                   mAnglePath.c_str(), // default_library_path
-                                                   ANDROID_NAMESPACE_TYPE_SHARED |
-                                                           ANDROID_NAMESPACE_TYPE_ISOLATED,
-                                                   nullptr, // permitted_when_isolated_path
-                                                   nullptr);
-        if (!mAngleNamespace) ALOGD("Could not create ANGLE namespace from default");
-    });
+    if (mAngleNamespace) {
+        return mAngleNamespace;
+    }
+
+    if (mAnglePath.empty()) {
+        ALOGV("mAnglePath is empty, not creating ANGLE namespace");
+        return nullptr;
+    }
+
+    mAngleNamespace = android_create_namespace("ANGLE",
+                                               nullptr,            // ld_library_path
+                                               mAnglePath.c_str(), // default_library_path
+                                               ANDROID_NAMESPACE_TYPE_SHARED |
+                                                       ANDROID_NAMESPACE_TYPE_ISOLATED,
+                                               nullptr, // permitted_when_isolated_path
+                                               nullptr);
+
+    ALOGD_IF(!mAngleNamespace, "Could not create ANGLE namespace from default");
 
     return mAngleNamespace;
 }

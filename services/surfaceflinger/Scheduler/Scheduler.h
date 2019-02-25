@@ -73,7 +73,7 @@ public:
 
     /** Creates an EventThread connection. */
     sp<ConnectionHandle> createConnection(
-            const std::string& connectionName, int64_t phaseOffsetNs, ResyncCallback resyncCallback,
+            const char* connectionName, int64_t phaseOffsetNs, ResyncCallback resyncCallback,
             impl::EventThread::InterceptVSyncsCallback interceptCallback);
 
     sp<IDisplayEventConnection> createDisplayEventConnection(const sp<ConnectionHandle>& handle,
@@ -118,10 +118,12 @@ public:
     void setExpiredIdleTimerCallback(const ExpiredIdleTimerCallback& expiredTimerCallback);
     // Callback that gets invoked once the idle timer is reset.
     void setResetIdleTimerCallback(const ResetIdleTimerCallback& resetTimerCallback);
+    // Returns relevant information about Scheduler for dumpsys purposes.
+    std::string doDump();
 
 protected:
     virtual std::unique_ptr<EventThread> makeEventThread(
-            const std::string& connectionName, DispSync* dispSync, int64_t phaseOffsetNs,
+            const char* connectionName, DispSync* dispSync, int64_t phaseOffsetNs,
             impl::EventThread::InterceptVSyncsCallback interceptCallback);
 
 private:
@@ -147,7 +149,7 @@ private:
 
     // The offset in nanoseconds to use, when DispSync timestamps present fence
     // signaling time.
-    const nsecs_t mDispSyncPresentTimeOffset;
+    nsecs_t mDispSyncPresentTimeOffset;
 
     // Each connection has it's own ID. This variable keeps track of the count.
     static std::atomic<int64_t> sNextId;

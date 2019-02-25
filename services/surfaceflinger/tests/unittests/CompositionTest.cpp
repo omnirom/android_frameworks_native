@@ -701,7 +701,8 @@ struct SecureLayerProperties : public BaseLayerProperties<SecureLayerProperties>
         EXPECT_CALL(*test->mRenderEngine,
                     setupLayerBlending(true, false, false,
                                        half4(Base::COLOR[0], Base::COLOR[1], Base::COLOR[2],
-                                             Base::COLOR[3]), 0.0f))
+                                             Base::COLOR[3]),
+                                       0.0f))
                 .Times(1);
         EXPECT_CALL(*test->mRenderEngine, setSourceDataSpace(ui::Dataspace::UNKNOWN)).Times(1);
         EXPECT_CALL(*test->mRenderEngine, drawMesh(_)).Times(1);

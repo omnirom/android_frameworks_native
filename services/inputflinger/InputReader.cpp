@@ -57,6 +57,7 @@
 #include <android-base/stringprintf.h>
 #include <input/Keyboard.h>
 #include <input/VirtualKeyMap.h>
+#include <statslog.h>
 
 #define INDENT "  "
 #define INDENT2 "    "
@@ -71,18 +72,21 @@ namespace android {
 // --- Constants ---
 
 // Maximum number of slots supported when using the slot-based Multitouch Protocol B.
-static const size_t MAX_SLOTS = 32;
+static constexpr size_t MAX_SLOTS = 32;
 
 // Maximum amount of latency to add to touch events while waiting for data from an
 // external stylus.
-static const nsecs_t EXTERNAL_STYLUS_DATA_TIMEOUT = ms2ns(72);
+static constexpr nsecs_t EXTERNAL_STYLUS_DATA_TIMEOUT = ms2ns(72);
 
 // Maximum amount of time to wait on touch data before pushing out new pressure data.
-static const nsecs_t TOUCH_DATA_TIMEOUT = ms2ns(20);
+static constexpr nsecs_t TOUCH_DATA_TIMEOUT = ms2ns(20);
 
 // Artificial latency on synthetic events created from stylus data without corresponding touch
 // data.
-static const nsecs_t STYLUS_DATA_LATENCY = ms2ns(10);
+static constexpr nsecs_t STYLUS_DATA_LATENCY = ms2ns(10);
+
+// How often to report input event statistics
+static constexpr nsecs_t STATISTICS_REPORT_FREQUENCY = seconds_to_nanoseconds(5 * 60);
 
 // --- Static Functions ---
 
@@ -801,6 +805,30 @@ bool InputReader::isInputDeviceEnabled(int32_t deviceId) {
     return false;
 }
 
+bool InputReader::canDispatchToDisplay(int32_t deviceId, int32_t displayId) {
+    AutoMutex _l(mLock);
+
+    ssize_t deviceIndex = mDevices.indexOfKey(deviceId);
+    if (deviceIndex < 0) {
+        ALOGW("Ignoring invalid device id %" PRId32 ".", deviceId);
+        return false;
+    }
+
+    InputDevice* device = mDevices.valueAt(deviceIndex);
+    std::optional<int32_t> associatedDisplayId = device->getAssociatedDisplay();
+    // No associated display. By default, can dispatch to all displays.
+    if (!associatedDisplayId) {
+        return true;
+    }
+
+    if (*associatedDisplayId == ADISPLAY_ID_NONE) {
+        ALOGW("Device has associated, but no associated display id.");
+        return true;
+    }
+
+    return *associatedDisplayId == displayId;
+}
+
 void InputReader::dump(std::string& dump) {
     AutoMutex _l(mLock);
 
@@ -1271,6 +1299,18 @@ void InputDevice::notifyReset(nsecs_t when) {
     mContext->getListener()->notifyDeviceReset(&args);
 }
 
+std::optional<int32_t> InputDevice::getAssociatedDisplay() {
+    size_t numMappers = mMappers.size();
+    for (size_t i = 0; i < numMappers; i++) {
+        InputMapper* mapper = mMappers[i];
+        std::optional<int32_t> associatedDisplayId = mapper->getAssociatedDisplay();
+        if (associatedDisplayId) {
+            return associatedDisplayId;
+        }
+    }
+
+    return std::nullopt;
+}
 
 // --- CursorButtonAccumulator ---
 
@@ -2643,7 +2683,7 @@ void CursorInputMapper::configure(nsecs_t when,
         }
 
         // Update the PointerController if viewports changed.
-        if (mParameters.hasAssociatedDisplay) {
+        if (mParameters.mode == Parameters::MODE_POINTER) {
             getPolicy()->obtainPointerController(getDeviceId());
         }
         bumpGeneration();
@@ -2913,6 +2953,19 @@ void CursorInputMapper::fadePointer() {
     if (mPointerController != nullptr) {
         mPointerController->fade(PointerControllerInterface::TRANSITION_GRADUAL);
     }
+}
+
+std::optional<int32_t> CursorInputMapper::getAssociatedDisplay() {
+    if (mParameters.hasAssociatedDisplay) {
+        if (mParameters.mode == Parameters::MODE_POINTER) {
+            return std::make_optional(mPointerController->getDisplayId());
+        } else {
+            // If the device is orientationAware and not a mouse,
+            // it expects to dispatch events to any display
+            return std::make_optional(ADISPLAY_ID_NONE);
+        }
+    }
+    return std::nullopt;
 }
 
 // --- RotaryEncoderInputMapper ---
@@ -4287,12 +4340,25 @@ void TouchInputMapper::clearStylusDataPendingFlags() {
     mExternalStylusFusionTimeout = LLONG_MAX;
 }
 
+void TouchInputMapper::reportEventForStatistics(nsecs_t evdevTime) {
+    nsecs_t now = systemTime(CLOCK_MONOTONIC);
+    nsecs_t latency = now - evdevTime;
+    mStatistics.addValue(nanoseconds_to_microseconds(latency));
+    nsecs_t timeSinceLastReport = now - mStatistics.lastReportTime;
+    if (timeSinceLastReport > STATISTICS_REPORT_FREQUENCY) {
+        android::util::stats_write(android::util::TOUCH_EVENT_REPORTED,
+                mStatistics.min, mStatistics.max, mStatistics.mean(), mStatistics.stdev());
+        mStatistics.reset(now);
+    }
+}
+
 void TouchInputMapper::process(const RawEvent* rawEvent) {
     mCursorButtonAccumulator.process(rawEvent);
     mCursorScrollAccumulator.process(rawEvent);
     mTouchButtonAccumulator.process(rawEvent);
 
     if (rawEvent->type == EV_SYN && rawEvent->code == SYN_REPORT) {
+        reportEventForStatistics(rawEvent->when);
         sync(rawEvent->when);
     }
 }
@@ -6494,9 +6560,7 @@ void TouchInputMapper::dispatchMotion(nsecs_t when, uint32_t policyFlags, uint32
             ALOG_ASSERT(false);
         }
     }
-    const int32_t displayId = mPointerController != nullptr ?
-            mPointerController->getDisplayId() : mViewport.displayId;
-
+    const int32_t displayId = getAssociatedDisplay().value_or(ADISPLAY_ID_NONE);
     const int32_t deviceId = getDeviceId();
     std::vector<TouchVideoFrame> frames = mDevice->getEventHub()->getVideoFrames(deviceId);
     NotifyMotionArgs args(mContext->getNextSequenceNum(), when, deviceId,
@@ -6813,6 +6877,16 @@ bool TouchInputMapper::markSupportedKeyCodes(uint32_t sourceMask, size_t numCode
     return true;
 }
 
+std::optional<int32_t> TouchInputMapper::getAssociatedDisplay() {
+    if (mParameters.hasAssociatedDisplay) {
+        if (mDeviceMode == DEVICE_MODE_POINTER) {
+            return std::make_optional(mPointerController->getDisplayId());
+        } else {
+            return std::make_optional(mViewport.displayId);
+        }
+    }
+    return std::nullopt;
+}
 
 // --- SingleTouchInputMapper ---
 

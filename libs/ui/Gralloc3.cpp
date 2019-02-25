@@ -92,7 +92,7 @@ Gralloc3Mapper::Gralloc3Mapper() {
     }
 }
 
-bool Gralloc3Mapper::isSupported() const {
+bool Gralloc3Mapper::isLoaded() const {
     return mMapper != nullptr;
 }
 
@@ -192,7 +192,8 @@ void Gralloc3Mapper::getTransportSize(buffer_handle_t bufferHandle, uint32_t* ou
 }
 
 status_t Gralloc3Mapper::lock(buffer_handle_t bufferHandle, uint64_t usage, const Rect& bounds,
-                              int acquireFence, void** outData) const {
+                              int acquireFence, void** outData, int32_t* outBytesPerPixel,
+                              int32_t* outBytesPerStride) const {
     auto buffer = const_cast<native_handle_t*>(bufferHandle);
 
     IMapper::Rect accessRegion = sGralloc3Rect(bounds);
@@ -208,12 +209,19 @@ status_t Gralloc3Mapper::lock(buffer_handle_t bufferHandle, uint64_t usage, cons
 
     Error error;
     auto ret = mMapper->lock(buffer, usage, accessRegion, acquireFenceHandle,
-                             [&](const auto& tmpError, const auto& tmpData) {
+                             [&](const auto& tmpError, const auto& tmpData,
+                                 const auto& tmpBytesPerPixel, const auto& tmpBytesPerStride) {
                                  error = tmpError;
                                  if (error != Error::NONE) {
                                      return;
                                  }
                                  *outData = tmpData;
+                                 if (outBytesPerPixel) {
+                                     *outBytesPerPixel = tmpBytesPerPixel;
+                                 }
+                                 if (outBytesPerStride) {
+                                     *outBytesPerStride = tmpBytesPerStride;
+                                 }
                              });
 
     // we own acquireFence even on errors
@@ -314,7 +322,7 @@ Gralloc3Allocator::Gralloc3Allocator(const Gralloc3Mapper& mapper) : mMapper(map
     }
 }
 
-bool Gralloc3Allocator::isSupported() const {
+bool Gralloc3Allocator::isLoaded() const {
     return mAllocator != nullptr;
 }
 
