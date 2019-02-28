@@ -58,7 +58,7 @@ public:
 
         struct Header {
             uint32_t type;
-            uint32_t id;
+            PhysicalDisplayId displayId;
             nsecs_t timestamp __attribute__((aligned(8)));
         };
 
@@ -84,7 +84,7 @@ public:
      * or requestNextVsync to receive them.
      * Other events start being delivered immediately.
      */
-    DisplayEventReceiver(
+    explicit DisplayEventReceiver(
             ISurfaceComposer::VsyncSource vsyncSource = ISurfaceComposer::eVsyncSourceApp);
 
     /*

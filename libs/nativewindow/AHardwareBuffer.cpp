@@ -41,33 +41,11 @@ using namespace android;
 // ----------------------------------------------------------------------------
 
 int AHardwareBuffer_allocate(const AHardwareBuffer_Desc* desc, AHardwareBuffer** outBuffer) {
-    if (!outBuffer || !desc)
-        return BAD_VALUE;
-
-    if (!AHardwareBuffer_isValidPixelFormat(desc->format)) {
-        ALOGE("Invalid AHardwareBuffer pixel format %u (%#x))", desc->format, desc->format);
-        return BAD_VALUE;
-    }
+    if (!outBuffer || !desc) return BAD_VALUE;
+    if (!AHardwareBuffer_isValidDescription(desc, /*log=*/true)) return BAD_VALUE;
 
     int format = AHardwareBuffer_convertToPixelFormat(desc->format);
-    if (desc->rfu0 != 0 || desc->rfu1 != 0) {
-        ALOGE("AHardwareBuffer_Desc::rfu fields must be 0");
-        return BAD_VALUE;
-    }
-
-    if (desc->format == AHARDWAREBUFFER_FORMAT_BLOB && desc->height != 1) {
-        ALOGE("Height must be 1 when using the AHARDWAREBUFFER_FORMAT_BLOB format");
-        return BAD_VALUE;
-    }
-
-    if ((desc->usage & (AHARDWAREBUFFER_USAGE_CPU_READ_MASK | AHARDWAREBUFFER_USAGE_CPU_WRITE_MASK)) &&
-        (desc->usage & AHARDWAREBUFFER_USAGE_PROTECTED_CONTENT)) {
-        ALOGE("AHARDWAREBUFFER_USAGE_PROTECTED_CONTENT requires AHARDWAREBUFFER_USAGE_CPU_READ_NEVER "
-              "and AHARDWAREBUFFER_USAGE_CPU_WRITE_NEVER");
-        return BAD_VALUE;
-    }
-
-    uint64_t usage =  AHardwareBuffer_convertToGrallocUsageBits(desc->usage);
+    uint64_t usage = AHardwareBuffer_convertToGrallocUsageBits(desc->usage);
     sp<GraphicBuffer> gbuffer(new GraphicBuffer(
             desc->width, desc->height, format, desc->layers, usage,
             std::string("AHardwareBuffer pid [") + std::to_string(getpid()) + "]"));
@@ -122,19 +100,26 @@ int AHardwareBuffer_lock(AHardwareBuffer* buffer, uint64_t usage,
     if (usage & ~(AHARDWAREBUFFER_USAGE_CPU_READ_MASK |
                   AHARDWAREBUFFER_USAGE_CPU_WRITE_MASK)) {
         ALOGE("Invalid usage flags passed to AHardwareBuffer_lock; only "
-                " AHARDWAREBUFFER_USAGE_CPU_* flags are allowed");
+                "AHARDWAREBUFFER_USAGE_CPU_* flags are allowed");
         return BAD_VALUE;
     }
 
     usage = AHardwareBuffer_convertToGrallocUsageBits(usage);
-    GraphicBuffer* gBuffer = AHardwareBuffer_to_GraphicBuffer(buffer);
+    GraphicBuffer* gbuffer = AHardwareBuffer_to_GraphicBuffer(buffer);
+
+    if (gbuffer->getLayerCount() > 1) {
+        ALOGE("Buffer with multiple layers passed to AHardwareBuffer_lock; "
+                "only buffers with one layer are allowed");
+        return INVALID_OPERATION;
+    }
+
     Rect bounds;
     if (!rect) {
-        bounds.set(Rect(gBuffer->getWidth(), gBuffer->getHeight()));
+        bounds.set(Rect(gbuffer->getWidth(), gbuffer->getHeight()));
     } else {
         bounds.set(Rect(rect->left, rect->top, rect->right, rect->bottom));
     }
-    return gBuffer->lockAsync(usage, usage, bounds, outVirtualAddress, fence);
+    return gbuffer->lockAsync(usage, usage, bounds, outVirtualAddress, fence);
 }
 
 int AHardwareBuffer_unlock(AHardwareBuffer* buffer, int32_t* fence) {
@@ -274,6 +259,38 @@ int AHardwareBuffer_recvHandleFromUnixSocket(int socketFd, AHardwareBuffer** out
     return NO_ERROR;
 }
 
+int AHardwareBuffer_isSupported(const AHardwareBuffer_Desc* desc) {
+    if (!desc) return 0;
+    if (!AHardwareBuffer_isValidDescription(desc, /*log=*/false)) return 0;
+
+    bool supported = false;
+    GraphicBuffer* gBuffer = new GraphicBuffer();
+    status_t err = gBuffer->isSupported(desc->width, desc->height, desc->format, desc->layers,
+                                        desc->usage, &supported);
+
+    if (err == NO_ERROR) {
+        return supported;
+    }
+
+    // function isSupported is not implemented on device or an error occurred during HAL
+    // query.  Make a trial allocation.
+    AHardwareBuffer_Desc trialDesc = *desc;
+    trialDesc.width = 4;
+    trialDesc.height = desc->format == AHARDWAREBUFFER_FORMAT_BLOB ? 1 : 4;
+    if (desc->usage & AHARDWAREBUFFER_USAGE_GPU_CUBE_MAP) {
+        trialDesc.layers = desc->layers == 6 ? 6 : 12;
+    } else {
+        trialDesc.layers = desc->layers == 1 ? 1 : 2;
+    }
+    AHardwareBuffer* trialBuffer = nullptr;
+    int result = AHardwareBuffer_allocate(&trialDesc, &trialBuffer);
+    if (result == NO_ERROR) {
+        AHardwareBuffer_release(trialBuffer);
+        return 1;
+    }
+    return 0;
+}
+
 
 // ----------------------------------------------------------------------------
 // VNDK functions
@@ -286,6 +303,35 @@ const native_handle_t* AHardwareBuffer_getNativeHandle(
     return gbuffer->handle;
 }
 
+int AHardwareBuffer_createFromHandle(const AHardwareBuffer_Desc* desc,
+                                     const native_handle_t* handle, int32_t method,
+                                     AHardwareBuffer** outBuffer) {
+    static_assert(static_cast<int32_t>(AHARDWAREBUFFER_CREATE_FROM_HANDLE_METHOD_REGISTER) ==
+                  static_cast<int32_t>(GraphicBuffer::TAKE_UNREGISTERED_HANDLE));
+    static_assert(static_cast<int32_t>(AHARDWAREBUFFER_CREATE_FROM_HANDLE_METHOD_CLONE) ==
+                  static_cast<int32_t>(GraphicBuffer::CLONE_HANDLE));
+
+    if (!desc || !handle || !outBuffer) return BAD_VALUE;
+    if (!(method == AHARDWAREBUFFER_CREATE_FROM_HANDLE_METHOD_REGISTER ||
+          method == AHARDWAREBUFFER_CREATE_FROM_HANDLE_METHOD_CLONE))
+        return BAD_VALUE;
+    if (desc->rfu0 != 0 || desc->rfu1 != 0) return BAD_VALUE;
+    if (desc->format == AHARDWAREBUFFER_FORMAT_BLOB && desc->height != 1) return BAD_VALUE;
+
+    const int format = AHardwareBuffer_convertToPixelFormat(desc->format);
+    const uint64_t usage = AHardwareBuffer_convertToGrallocUsageBits(desc->usage);
+    const auto wrapMethod = static_cast<GraphicBuffer::HandleWrapMethod>(method);
+    sp<GraphicBuffer> gbuffer(new GraphicBuffer(handle, wrapMethod, desc->width, desc->height,
+                                                format, desc->layers, usage, desc->stride));
+    status_t err = gbuffer->initCheck();
+    if (err != 0 || gbuffer->handle == 0) return err;
+
+    *outBuffer = AHardwareBuffer_from_GraphicBuffer(gbuffer.get());
+    // Ensure the buffer doesn't get destroyed when the sp<> goes away.
+    AHardwareBuffer_acquire(*outBuffer);
+
+    return NO_ERROR;
+}
 
 // ----------------------------------------------------------------------------
 // Helpers implementation
@@ -293,14 +339,71 @@ const native_handle_t* AHardwareBuffer_getNativeHandle(
 
 namespace android {
 
-// A 1:1 mapping of AHardwaqreBuffer bitmasks to gralloc1 bitmasks.
-struct UsageMaskMapping {
-    uint64_t hardwareBufferMask;
-    uint64_t grallocMask;
-};
+bool AHardwareBuffer_isValidDescription(const AHardwareBuffer_Desc* desc, bool log) {
+    if (desc->width == 0 || desc->height == 0 || desc->layers == 0) {
+        ALOGE_IF(log, "Width, height and layers must all be nonzero");
+        return false;
+    }
 
-static inline bool containsBits(uint64_t mask, uint64_t bitsToCheck) {
-    return (mask & bitsToCheck) == bitsToCheck && bitsToCheck;
+    if (!AHardwareBuffer_isValidPixelFormat(desc->format)) {
+        ALOGE_IF(log, "Invalid AHardwareBuffer pixel format %u (%#x))",
+                desc->format, desc->format);
+        return false;
+    }
+
+    if (desc->rfu0 != 0 || desc->rfu1 != 0) {
+        ALOGE_IF(log, "AHardwareBuffer_Desc::rfu fields must be 0");
+        return false;
+    }
+
+    if (desc->format == AHARDWAREBUFFER_FORMAT_BLOB) {
+        if (desc->height != 1 || desc->layers != 1) {
+            ALOGE_IF(log, "Height and layers must be 1 for AHARDWAREBUFFER_FORMAT_BLOB");
+            return false;
+        }
+        const uint64_t blobInvalidGpuMask =
+            AHARDWAREBUFFER_USAGE_GPU_SAMPLED_IMAGE |
+            AHARDWAREBUFFER_USAGE_GPU_FRAMEBUFFER |
+            AHARDWAREBUFFER_USAGE_GPU_MIPMAP_COMPLETE |
+            AHARDWAREBUFFER_USAGE_GPU_CUBE_MAP;
+        if (desc->usage & blobInvalidGpuMask) {
+            ALOGE_IF(log, "Invalid GPU usage flag for AHARDWAREBUFFER_FORMAT_BLOB; "
+                    "only AHARDWAREBUFFER_USAGE_GPU_DATA_BUFFER is allowed");
+            return false;
+        }
+        if (desc->usage & AHARDWAREBUFFER_USAGE_VIDEO_ENCODE) {
+            ALOGE_IF(log, "AHARDWAREBUFFER_FORMAT_BLOB cannot be encoded as video");
+            return false;
+        }
+    } else {
+        if (desc->usage & AHARDWAREBUFFER_USAGE_SENSOR_DIRECT_DATA) {
+            ALOGE_IF(log, "AHARDWAREBUFFER_USAGE_SENSOR_DIRECT_DATA requires AHARDWAREBUFFER_FORMAT_BLOB");
+            return false;
+        }
+        if (desc->usage & AHARDWAREBUFFER_USAGE_GPU_DATA_BUFFER) {
+            ALOGE_IF(log, "AHARDWAREBUFFER_USAGE_GPU_DATA_BUFFER requires AHARDWAREBUFFER_FORMAT_BLOB");
+            return false;
+        }
+    }
+
+    if ((desc->usage & (AHARDWAREBUFFER_USAGE_CPU_READ_MASK | AHARDWAREBUFFER_USAGE_CPU_WRITE_MASK)) &&
+        (desc->usage & AHARDWAREBUFFER_USAGE_PROTECTED_CONTENT)) {
+        ALOGE_IF(log, "AHARDWAREBUFFER_USAGE_PROTECTED_CONTENT requires AHARDWAREBUFFER_USAGE_CPU_READ_NEVER "
+              "and AHARDWAREBUFFER_USAGE_CPU_WRITE_NEVER");
+        return false;
+    }
+
+    if (desc->usage & AHARDWAREBUFFER_USAGE_GPU_CUBE_MAP) {
+        if (desc->width != desc->height) {
+            ALOGE_IF(log, "Cube maps must be square");
+            return false;
+        }
+        if (desc->layers % 6 != 0) {
+            ALOGE_IF(log, "Cube map layers must be a multiple of 6");
+            return false;
+        }
+    }
+    return true;
 }
 
 bool AHardwareBuffer_isValidPixelFormat(uint32_t format) {
@@ -416,7 +519,7 @@ uint64_t AHardwareBuffer_convertToGrallocUsageBits(uint64_t usage) {
             "gralloc and AHardwareBuffer flags don't match");
     static_assert(AHARDWAREBUFFER_USAGE_GPU_SAMPLED_IMAGE == (uint64_t)BufferUsage::GPU_TEXTURE,
             "gralloc and AHardwareBuffer flags don't match");
-    static_assert(AHARDWAREBUFFER_USAGE_GPU_COLOR_OUTPUT == (uint64_t)BufferUsage::GPU_RENDER_TARGET,
+    static_assert(AHARDWAREBUFFER_USAGE_GPU_FRAMEBUFFER == (uint64_t)BufferUsage::GPU_RENDER_TARGET,
             "gralloc and AHardwareBuffer flags don't match");
     static_assert(AHARDWAREBUFFER_USAGE_PROTECTED_CONTENT == (uint64_t)BufferUsage::PROTECTED,
             "gralloc and AHardwareBuffer flags don't match");

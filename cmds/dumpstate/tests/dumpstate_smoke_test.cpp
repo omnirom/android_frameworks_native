@@ -53,6 +53,18 @@ class DumpstateListener : public IDumpstateListener {
     DumpstateListener(int fd, std::shared_ptr<std::vector<SectionInfo>> sections)
         : outFd_(fd), max_progress_(5000), sections_(sections) {
     }
+    binder::Status onProgress(int32_t progress) override {
+        dprintf(outFd_, "\rIn progress %d", progress);
+        return binder::Status::ok();
+    }
+    binder::Status onError(int32_t error_code) override {
+        dprintf(outFd_, "\rError %d", error_code);
+        return binder::Status::ok();
+    }
+    binder::Status onFinished() override {
+        dprintf(outFd_, "\rFinished");
+        return binder::Status::ok();
+    }
     binder::Status onProgressUpdated(int32_t progress) override {
         dprintf(outFd_, "\rIn progress %d/%d", progress, max_progress_);
         return binder::Status::ok();

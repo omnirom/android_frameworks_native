@@ -34,7 +34,10 @@
 
 namespace android {
 
-class DetachedBufferHandle;
+#ifndef LIBUI_IN_VNDK
+class BufferHubBuffer;
+#endif // LIBUI_IN_VNDK
+
 class GraphicBufferMapper;
 
 // ===========================================================================
@@ -118,23 +121,26 @@ public:
         // cannot be used directly, such as one from hidl_handle.
         CLONE_HANDLE,
     };
-    GraphicBuffer(const native_handle_t* handle, HandleWrapMethod method,
-            uint32_t width, uint32_t height,
-            PixelFormat format, uint32_t layerCount,
-            uint64_t usage, uint32_t stride);
+    GraphicBuffer(const native_handle_t* inHandle, HandleWrapMethod method, uint32_t inWidth,
+                  uint32_t inHeight, PixelFormat inFormat, uint32_t inLayerCount, uint64_t inUsage,
+                  uint32_t inStride);
 
     // These functions are deprecated because they only take 32 bits of usage
-    GraphicBuffer(const native_handle_t* handle, HandleWrapMethod method,
-            uint32_t width, uint32_t height,
-            PixelFormat format, uint32_t layerCount,
-            uint32_t usage, uint32_t stride)
-        : GraphicBuffer(handle, method, width, height, format, layerCount,
-                static_cast<uint64_t>(usage), stride) {}
+    GraphicBuffer(const native_handle_t* inHandle, HandleWrapMethod method, uint32_t inWidth,
+                  uint32_t inHeight, PixelFormat inFormat, uint32_t inLayerCount, uint32_t inUsage,
+                  uint32_t inStride)
+          : GraphicBuffer(inHandle, method, inWidth, inHeight, inFormat, inLayerCount,
+                          static_cast<uint64_t>(inUsage), inStride) {}
     GraphicBuffer(uint32_t inWidth, uint32_t inHeight, PixelFormat inFormat,
             uint32_t inLayerCount, uint32_t inUsage, uint32_t inStride,
             native_handle_t* inHandle, bool keepOwnership);
     GraphicBuffer(uint32_t inWidth, uint32_t inHeight, PixelFormat inFormat,
             uint32_t inUsage, std::string requestorName = "<Unknown>");
+
+#ifndef LIBUI_IN_VNDK
+    // Create a GraphicBuffer from an existing BufferHubBuffer.
+    GraphicBuffer(std::unique_ptr<BufferHubBuffer> buffer);
+#endif // LIBUI_IN_VNDK
 
     // return status
     status_t initCheck() const;
@@ -147,6 +153,7 @@ public:
     uint32_t getLayerCount() const      { return static_cast<uint32_t>(layerCount); }
     Rect getBounds() const              { return Rect(width, height); }
     uint64_t getId() const              { return mId; }
+    int32_t getBufferId() const { return mBufferId; }
 
     uint32_t getGenerationNumber() const { return mGenerationNumber; }
     void setGenerationNumber(uint32_t generation) {
@@ -162,23 +169,34 @@ public:
     bool needsReallocation(uint32_t inWidth, uint32_t inHeight,
             PixelFormat inFormat, uint32_t inLayerCount, uint64_t inUsage);
 
-    status_t lock(uint32_t inUsage, void** vaddr);
-    status_t lock(uint32_t inUsage, const Rect& rect, void** vaddr);
+    // For the following two lock functions, if bytesPerStride or bytesPerPixel
+    // are unknown or variable, -1 will be returned
+    status_t lock(uint32_t inUsage, void** vaddr, int32_t* outBytesPerPixel = nullptr,
+                  int32_t* outBytesPerStride = nullptr);
+    status_t lock(uint32_t inUsage, const Rect& rect, void** vaddr,
+                  int32_t* outBytesPerPixel = nullptr, int32_t* outBytesPerStride = nullptr);
     // For HAL_PIXEL_FORMAT_YCbCr_420_888
     status_t lockYCbCr(uint32_t inUsage, android_ycbcr *ycbcr);
     status_t lockYCbCr(uint32_t inUsage, const Rect& rect,
             android_ycbcr *ycbcr);
     status_t unlock();
-    status_t lockAsync(uint32_t inUsage, void** vaddr, int fenceFd);
-    status_t lockAsync(uint32_t inUsage, const Rect& rect, void** vaddr,
-            int fenceFd);
-    status_t lockAsync(uint64_t inProducerUsage, uint64_t inConsumerUsage,
-            const Rect& rect, void** vaddr, int fenceFd);
+    // For the following three lockAsync functions, if bytesPerStride or bytesPerPixel
+    // are unknown or variable, -1 will be returned
+    status_t lockAsync(uint32_t inUsage, void** vaddr, int fenceFd,
+                       int32_t* outBytesPerPixel = nullptr, int32_t* outBytesPerStride = nullptr);
+    status_t lockAsync(uint32_t inUsage, const Rect& rect, void** vaddr, int fenceFd,
+                       int32_t* outBytesPerPixel = nullptr, int32_t* outBytesPerStride = nullptr);
+    status_t lockAsync(uint64_t inProducerUsage, uint64_t inConsumerUsage, const Rect& rect,
+                       void** vaddr, int fenceFd, int32_t* outBytesPerPixel = nullptr,
+                       int32_t* outBytesPerStride = nullptr);
     status_t lockAsyncYCbCr(uint32_t inUsage, android_ycbcr *ycbcr,
             int fenceFd);
     status_t lockAsyncYCbCr(uint32_t inUsage, const Rect& rect,
             android_ycbcr *ycbcr, int fenceFd);
     status_t unlockAsync(int *fenceFd);
+
+    status_t isSupported(uint32_t inWidth, uint32_t inHeight, PixelFormat inFormat,
+                         uint32_t inLayerCount, uint64_t inUsage, bool* outSupported) const;
 
     ANativeWindowBuffer* getNativeBuffer() const;
 
@@ -191,10 +209,10 @@ public:
     status_t flatten(void*& buffer, size_t& size, int*& fds, size_t& count) const;
     status_t unflatten(void const*& buffer, size_t& size, int const*& fds, size_t& count);
 
-    // Sets and takes DetachedBuffer. Should only be called from BufferHub.
-    bool isDetachedBuffer() const;
-    status_t setDetachedBufferHandle(std::unique_ptr<DetachedBufferHandle> detachedBuffer);
-    std::unique_ptr<DetachedBufferHandle> takeDetachedBufferHandle();
+#ifndef LIBUI_IN_VNDK
+    // Returns whether this GraphicBuffer is backed by BufferHubBuffer.
+    bool isBufferHubBuffer() const;
+#endif // LIBUI_IN_VNDK
 
 private:
     ~GraphicBuffer();
@@ -226,10 +244,9 @@ private:
             PixelFormat inFormat, uint32_t inLayerCount,
             uint64_t inUsage, std::string requestorName);
 
-    status_t initWithHandle(const native_handle_t* handle,
-            HandleWrapMethod method, uint32_t width, uint32_t height,
-            PixelFormat format, uint32_t layerCount,
-            uint64_t usage, uint32_t stride);
+    status_t initWithHandle(const native_handle_t* inHandle, HandleWrapMethod method,
+                            uint32_t inWidth, uint32_t inHeight, PixelFormat inFormat,
+                            uint32_t inLayerCount, uint64_t inUsage, uint32_t inStride);
 
     void free_handle();
 
@@ -242,21 +259,21 @@ private:
 
     uint64_t mId;
 
+    // System unique buffer ID. Note that this is different from mId, which is process unique. For
+    // GraphicBuffer backed by BufferHub, the mBufferId is a system unique identifier that stays the
+    // same cross process for the same chunck of underlying memory. Also note that this only applies
+    // to GraphicBuffers that are backed by BufferHub.
+    int32_t mBufferId = -1;
+
     // Stores the generation number of this buffer. If this number does not
     // match the BufferQueue's internal generation number (set through
     // IGBP::setGenerationNumber), attempts to attach the buffer will fail.
     uint32_t mGenerationNumber;
 
-    // Stores a BufferHub handle that can be used to re-attach this GraphicBuffer back into a
-    // BufferHub producer/consumer set. In terms of GraphicBuffer's relationship with BufferHub,
-    // there are three different modes:
-    // 1. Legacy mode: GraphicBuffer is not backed by BufferHub and mDetachedBufferHandle must be
-    //    invalid.
-    // 2. Detached mode: GraphicBuffer is backed by BufferHub, but not part of a producer/consumer
-    //    set. In this mode, mDetachedBufferHandle must be valid.
-    // 3. Attached mode: GraphicBuffer is backed by BufferHub and it's part of a producer/consumer
-    //    set. In this mode, mDetachedBufferHandle must be invalid.
-    std::unique_ptr<DetachedBufferHandle> mDetachedBufferHandle;
+#ifndef LIBUI_IN_VNDK
+    // Stores a BufferHubBuffer that handles buffer signaling, identification.
+    std::unique_ptr<BufferHubBuffer> mBufferHubBuffer;
+#endif // LIBUI_IN_VNDK
 };
 
 }; // namespace android

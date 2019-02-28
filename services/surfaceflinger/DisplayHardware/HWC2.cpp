@@ -124,6 +124,12 @@ uint32_t Device::getMaxVirtualDisplayCount() const
     return mComposer->getMaxVirtualDisplayCount();
 }
 
+Error Device::getDisplayIdentificationData(hwc2_display_t hwcDisplayId, uint8_t* outPort,
+                                           std::vector<uint8_t>* outData) const {
+    auto intError = mComposer->getDisplayIdentificationData(hwcDisplayId, outPort, outData);
+    return static_cast<Error>(intError);
+}
+
 Error Device::createVirtualDisplay(uint32_t width, uint32_t height,
         PixelFormat* format, Display** outDisplay)
 {
@@ -137,12 +143,11 @@ Error Device::createVirtualDisplay(uint32_t width, uint32_t height,
         return error;
     }
 
-    auto display = std::make_unique<Display>(
-            *mComposer.get(), mPowerAdvisor, mCapabilities, displayId, DisplayType::Virtual);
+    auto display = std::make_unique<impl::Display>(*mComposer.get(), mPowerAdvisor, mCapabilities,
+                                                   displayId, DisplayType::Virtual);
     display->setConnected(true);
     *outDisplay = display.get();
     mDisplays.emplace(displayId, std::move(display));
-    mComposer->setClientTargetSlotCount((*outDisplay)->getId());
     ALOGI("Created virtual display");
     return Error::None;
 }
@@ -153,7 +158,7 @@ void Device::destroyDisplay(hwc2_display_t displayId)
     mDisplays.erase(displayId);
 }
 
-Error Device::onHotplug(hwc2_display_t displayId, Connection connection) {
+void Device::onHotplug(hwc2_display_t displayId, Connection connection) {
     if (connection == Connection::Connected) {
         // If we get a hotplug connected event for a display we already have,
         // destroy the display and recreate it. This will force us to requery
@@ -174,11 +179,11 @@ Error Device::onHotplug(hwc2_display_t displayId, Connection connection) {
             ALOGE("getDisplayType(%" PRIu64 ") failed: %s (%d). "
                     "Aborting hotplug attempt.",
                     displayId, to_string(error).c_str(), intError);
-            return Error::NoResources;
+            return;
         }
 
-        auto newDisplay = std::make_unique<Display>(
-                *mComposer.get(), mPowerAdvisor, mCapabilities, displayId, displayType);
+        auto newDisplay = std::make_unique<impl::Display>(*mComposer.get(), mPowerAdvisor,
+                                                          mCapabilities, displayId, displayType);
         newDisplay->setConnected(true);
         mDisplays.emplace(displayId, std::move(newDisplay));
     } else if (connection == Connection::Disconnected) {
@@ -192,7 +197,6 @@ Error Device::onHotplug(hwc2_display_t displayId, Connection connection) {
                   displayId);
         }
     }
-    return Error::None;
 }
 
 // Other Device methods
@@ -220,7 +224,36 @@ Error Device::flushCommands()
 }
 
 // Display methods
+Display::~Display() = default;
 
+Display::Config::Config(Display& display, hwc2_config_t id)
+      : mDisplay(display),
+        mId(id),
+        mWidth(-1),
+        mHeight(-1),
+        mVsyncPeriod(-1),
+        mDpiX(-1),
+        mDpiY(-1) {}
+
+Display::Config::Builder::Builder(Display& display, hwc2_config_t id)
+      : mConfig(new Config(display, id)) {}
+
+float Display::Config::Builder::getDefaultDensity() {
+    // Default density is based on TVs: 1080p displays get XHIGH density, lower-
+    // resolution displays get TV density. Maybe eventually we'll need to update
+    // it for 4k displays, though hopefully those will just report accurate DPI
+    // information to begin with. This is also used for virtual displays and
+    // older HWC implementations, so be careful about orientation.
+
+    auto longDimension = std::max(mConfig->mWidth, mConfig->mHeight);
+    if (longDimension >= 1080) {
+        return ACONFIGURATION_DENSITY_XHIGH;
+    } else {
+        return ACONFIGURATION_DENSITY_TV;
+    }
+}
+
+namespace impl {
 Display::Display(android::Hwc2::Composer& composer, android::Hwc2::PowerAdvisor& advisor,
                  const std::unordered_set<Capability>& capabilities, hwc2_display_t id,
                  DisplayType type)
@@ -230,6 +263,22 @@ Display::Display(android::Hwc2::Composer& composer, android::Hwc2::PowerAdvisor&
         mId(id),
         mIsConnected(false),
         mType(type) {
+    std::vector<Hwc2::DisplayCapability> tmpCapabilities;
+    auto error = static_cast<Error>(mComposer.getDisplayCapabilities(mId, &tmpCapabilities));
+    if (error == Error::None) {
+        for (auto capability : tmpCapabilities) {
+            mDisplayCapabilities.emplace(static_cast<DisplayCapability>(capability));
+        }
+    } else if (error == Error::Unsupported) {
+        if (capabilities.count(Capability::SkipClientColorTransform)) {
+            mDisplayCapabilities.emplace(DisplayCapability::SkipClientColorTransform);
+        }
+        bool dozeSupport = false;
+        error = static_cast<Error>(mComposer.getDozeSupport(mId, &dozeSupport));
+        if (error == Error::None && dozeSupport) {
+            mDisplayCapabilities.emplace(DisplayCapability::Doze);
+        }
+    }
     ALOGV("Created display %" PRIu64, id);
 }
 
@@ -252,35 +301,7 @@ Display::~Display() {
     }
 }
 
-Display::Config::Config(Display& display, hwc2_config_t id)
-  : mDisplay(display),
-    mId(id),
-    mWidth(-1),
-    mHeight(-1),
-    mVsyncPeriod(-1),
-    mDpiX(-1),
-    mDpiY(-1) {}
-
-Display::Config::Builder::Builder(Display& display, hwc2_config_t id)
-  : mConfig(new Config(display, id)) {}
-
-float Display::Config::Builder::getDefaultDensity() {
-    // Default density is based on TVs: 1080p displays get XHIGH density, lower-
-    // resolution displays get TV density. Maybe eventually we'll need to update
-    // it for 4k displays, though hopefully those will just report accurate DPI
-    // information to begin with. This is also used for virtual displays and
-    // older HWC implementations, so be careful about orientation.
-
-    auto longDimension = std::max(mConfig->mWidth, mConfig->mHeight);
-    if (longDimension >= 1080) {
-        return ACONFIGURATION_DENSITY_XHIGH;
-    } else {
-        return ACONFIGURATION_DENSITY_TV;
-    }
-}
-
 // Required by HWC2 display
-
 Error Display::acceptChanges()
 {
     auto intError = mComposer.acceptDisplayChanges(mId);
@@ -405,21 +426,17 @@ Error Display::getColorModes(std::vector<ColorMode>* outModes) const
     return static_cast<Error>(intError);
 }
 
-Error Display::getSupportedPerFrameMetadata(int32_t* outSupportedPerFrameMetadata) const
+int32_t Display::getSupportedPerFrameMetadata() const
 {
-    *outSupportedPerFrameMetadata = 0;
-    std::vector<Hwc2::PerFrameMetadataKey> tmpKeys;
-    auto intError = mComposer.getPerFrameMetadataKeys(mId, &tmpKeys);
-    auto error = static_cast<Error>(intError);
-    if (error != Error::None) {
-        return error;
-    }
+    int32_t supportedPerFrameMetadata = 0;
+
+    std::vector<Hwc2::PerFrameMetadataKey> tmpKeys = mComposer.getPerFrameMetadataKeys(mId);
+    std::set<Hwc2::PerFrameMetadataKey> keys(tmpKeys.begin(), tmpKeys.end());
 
     // Check whether a specific metadata type is supported. A metadata type is considered
     // supported if and only if all required fields are supported.
 
     // SMPTE2086
-    std::set<Hwc2::PerFrameMetadataKey> keys(tmpKeys.begin(), tmpKeys.end());
     if (hasMetadataKey(keys, Hwc2::PerFrameMetadataKey::DISPLAY_RED_PRIMARY_X) &&
         hasMetadataKey(keys, Hwc2::PerFrameMetadataKey::DISPLAY_RED_PRIMARY_Y) &&
         hasMetadataKey(keys, Hwc2::PerFrameMetadataKey::DISPLAY_GREEN_PRIMARY_X) &&
@@ -430,15 +447,20 @@ Error Display::getSupportedPerFrameMetadata(int32_t* outSupportedPerFrameMetadat
         hasMetadataKey(keys, Hwc2::PerFrameMetadataKey::WHITE_POINT_Y) &&
         hasMetadataKey(keys, Hwc2::PerFrameMetadataKey::MAX_LUMINANCE) &&
         hasMetadataKey(keys, Hwc2::PerFrameMetadataKey::MIN_LUMINANCE)) {
-        *outSupportedPerFrameMetadata |= HdrMetadata::Type::SMPTE2086;
+        supportedPerFrameMetadata |= HdrMetadata::Type::SMPTE2086;
     }
     // CTA861_3
     if (hasMetadataKey(keys, Hwc2::PerFrameMetadataKey::MAX_CONTENT_LIGHT_LEVEL) &&
         hasMetadataKey(keys, Hwc2::PerFrameMetadataKey::MAX_FRAME_AVERAGE_LIGHT_LEVEL)) {
-        *outSupportedPerFrameMetadata |= HdrMetadata::Type::CTA861_3;
+        supportedPerFrameMetadata |= HdrMetadata::Type::CTA861_3;
     }
 
-    return Error::None;
+    // HDR10PLUS
+    if (hasMetadataKey(keys, Hwc2::PerFrameMetadataKey::HDR10_PLUS_SEI)) {
+        supportedPerFrameMetadata |= HdrMetadata::Type::HDR10PLUS;
+    }
+
+    return supportedPerFrameMetadata;
 }
 
 Error Display::getRenderIntents(ColorMode colorMode,
@@ -507,15 +529,8 @@ Error Display::getType(DisplayType* outType) const
     return Error::None;
 }
 
-Error Display::supportsDoze(bool* outSupport) const
-{
-    bool intSupport = false;
-    auto intError = mComposer.getDozeSupport(mId, &intSupport);
-    auto error = static_cast<Error>(intError);
-    if (error != Error::None) {
-        return error;
-    }
-    *outSupport = static_cast<bool>(intSupport);
+Error Display::supportsDoze(bool* outSupport) const {
+    *outSupport = mDisplayCapabilities.count(DisplayCapability::Doze) > 0;
     return Error::None;
 }
 
@@ -536,6 +551,27 @@ Error Display::getHdrCapabilities(HdrCapabilities* outCapabilities) const
     *outCapabilities = HdrCapabilities(std::move(types),
             maxLuminance, maxAverageLuminance, minLuminance);
     return Error::None;
+}
+
+Error Display::getDisplayedContentSamplingAttributes(PixelFormat* outFormat,
+                                                     Dataspace* outDataspace,
+                                                     uint8_t* outComponentMask) const {
+    auto intError = mComposer.getDisplayedContentSamplingAttributes(mId, outFormat, outDataspace,
+                                                                    outComponentMask);
+    return static_cast<Error>(intError);
+}
+
+Error Display::setDisplayContentSamplingEnabled(bool enabled, uint8_t componentMask,
+                                                uint64_t maxFrames) const {
+    auto intError =
+            mComposer.setDisplayContentSamplingEnabled(mId, enabled, componentMask, maxFrames);
+    return static_cast<Error>(intError);
+}
+
+Error Display::getDisplayedContentSample(uint64_t maxFrames, uint64_t timestamp,
+                                         android::DisplayedFrameStats* outStats) const {
+    auto intError = mComposer.getDisplayedContentSample(mId, maxFrames, timestamp, outStats);
+    return static_cast<Error>(intError);
 }
 
 Error Display::getReleaseFences(
@@ -759,6 +795,7 @@ Layer* Display::getLayerById(hwc2_layer_t id) const
 
     return mLayers.at(id).get();
 }
+} // namespace impl
 
 // Layer methods
 
@@ -767,7 +804,8 @@ Layer::Layer(android::Hwc2::Composer& composer, const std::unordered_set<Capabil
   : mComposer(composer),
     mCapabilities(capabilities),
     mDisplayId(displayId),
-    mId(layerId)
+    mId(layerId),
+    mColorMatrix(android::mat4())
 {
     ALOGV("Created layer %" PRIu64 " on display %" PRIu64, layerId, displayId);
 }
@@ -874,37 +912,49 @@ Error Layer::setPerFrameMetadata(const int32_t supportedPerFrameMetadata,
     if (validTypes & HdrMetadata::SMPTE2086) {
         perFrameMetadatas.insert(perFrameMetadatas.end(),
                                  {{Hwc2::PerFrameMetadataKey::DISPLAY_RED_PRIMARY_X,
-                                         mHdrMetadata.smpte2086.displayPrimaryRed.x},
-                                   {Hwc2::PerFrameMetadataKey::DISPLAY_RED_PRIMARY_Y,
-                                         mHdrMetadata.smpte2086.displayPrimaryRed.y},
-                                   {Hwc2::PerFrameMetadataKey::DISPLAY_GREEN_PRIMARY_X,
-                                         mHdrMetadata.smpte2086.displayPrimaryGreen.x},
-                                   {Hwc2::PerFrameMetadataKey::DISPLAY_GREEN_PRIMARY_Y,
-                                         mHdrMetadata.smpte2086.displayPrimaryGreen.y},
-                                   {Hwc2::PerFrameMetadataKey::DISPLAY_BLUE_PRIMARY_X,
-                                         mHdrMetadata.smpte2086.displayPrimaryBlue.x},
-                                   {Hwc2::PerFrameMetadataKey::DISPLAY_BLUE_PRIMARY_Y,
-                                         mHdrMetadata.smpte2086.displayPrimaryBlue.y},
-                                   {Hwc2::PerFrameMetadataKey::WHITE_POINT_X,
-                                         mHdrMetadata.smpte2086.whitePoint.x},
-                                   {Hwc2::PerFrameMetadataKey::WHITE_POINT_Y,
-                                         mHdrMetadata.smpte2086.whitePoint.y},
-                                   {Hwc2::PerFrameMetadataKey::MAX_LUMINANCE,
-                                         mHdrMetadata.smpte2086.maxLuminance},
-                                   {Hwc2::PerFrameMetadataKey::MIN_LUMINANCE,
-                                         mHdrMetadata.smpte2086.minLuminance}});
+                                   mHdrMetadata.smpte2086.displayPrimaryRed.x},
+                                  {Hwc2::PerFrameMetadataKey::DISPLAY_RED_PRIMARY_Y,
+                                   mHdrMetadata.smpte2086.displayPrimaryRed.y},
+                                  {Hwc2::PerFrameMetadataKey::DISPLAY_GREEN_PRIMARY_X,
+                                   mHdrMetadata.smpte2086.displayPrimaryGreen.x},
+                                  {Hwc2::PerFrameMetadataKey::DISPLAY_GREEN_PRIMARY_Y,
+                                   mHdrMetadata.smpte2086.displayPrimaryGreen.y},
+                                  {Hwc2::PerFrameMetadataKey::DISPLAY_BLUE_PRIMARY_X,
+                                   mHdrMetadata.smpte2086.displayPrimaryBlue.x},
+                                  {Hwc2::PerFrameMetadataKey::DISPLAY_BLUE_PRIMARY_Y,
+                                   mHdrMetadata.smpte2086.displayPrimaryBlue.y},
+                                  {Hwc2::PerFrameMetadataKey::WHITE_POINT_X,
+                                   mHdrMetadata.smpte2086.whitePoint.x},
+                                  {Hwc2::PerFrameMetadataKey::WHITE_POINT_Y,
+                                   mHdrMetadata.smpte2086.whitePoint.y},
+                                  {Hwc2::PerFrameMetadataKey::MAX_LUMINANCE,
+                                   mHdrMetadata.smpte2086.maxLuminance},
+                                  {Hwc2::PerFrameMetadataKey::MIN_LUMINANCE,
+                                   mHdrMetadata.smpte2086.minLuminance}});
     }
 
     if (validTypes & HdrMetadata::CTA861_3) {
         perFrameMetadatas.insert(perFrameMetadatas.end(),
                                  {{Hwc2::PerFrameMetadataKey::MAX_CONTENT_LIGHT_LEVEL,
-                                         mHdrMetadata.cta8613.maxContentLightLevel},
-                                   {Hwc2::PerFrameMetadataKey::MAX_FRAME_AVERAGE_LIGHT_LEVEL,
-                                         mHdrMetadata.cta8613.maxFrameAverageLightLevel}});
+                                   mHdrMetadata.cta8613.maxContentLightLevel},
+                                  {Hwc2::PerFrameMetadataKey::MAX_FRAME_AVERAGE_LIGHT_LEVEL,
+                                   mHdrMetadata.cta8613.maxFrameAverageLightLevel}});
     }
 
-    auto intError = mComposer.setLayerPerFrameMetadata(mDisplayId, mId, perFrameMetadatas);
-    return static_cast<Error>(intError);
+    Error error = static_cast<Error>(
+            mComposer.setLayerPerFrameMetadata(mDisplayId, mId, perFrameMetadatas));
+
+    if (validTypes & HdrMetadata::HDR10PLUS) {
+        std::vector<Hwc2::PerFrameMetadataBlob> perFrameMetadataBlobs;
+        perFrameMetadataBlobs.push_back(
+                {Hwc2::PerFrameMetadataKey::HDR10_PLUS_SEI, mHdrMetadata.hdr10plus});
+        Error setMetadataBlobsError = static_cast<Error>(
+                mComposer.setLayerPerFrameMetadataBlobs(mDisplayId, mId, perFrameMetadataBlobs));
+        if (error == Error::None) {
+            return setMetadataBlobsError;
+        }
+    }
+    return error;
 }
 
 Error Layer::setDisplayFrame(const Rect& frame)
@@ -974,4 +1024,13 @@ Error Layer::setInfo(uint32_t type, uint32_t appId)
   return static_cast<Error>(intError);
 }
 
+// Composer HAL 2.3
+Error Layer::setColorTransform(const android::mat4& matrix) {
+    if (matrix == mColorMatrix) {
+        return Error::None;
+    }
+    mColorMatrix = matrix;
+    auto intError = mComposer.setLayerColorTransform(mDisplayId, mId, matrix.asArray());
+    return static_cast<Error>(intError);
+}
 } // namespace HWC2

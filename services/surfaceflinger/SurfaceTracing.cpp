@@ -20,66 +20,114 @@
 #include "SurfaceTracing.h"
 
 #include <android-base/file.h>
+#include <android-base/stringprintf.h>
 #include <log/log.h>
 #include <utils/SystemClock.h>
 #include <utils/Trace.h>
 
 namespace android {
 
-void SurfaceTracing::enable() {
+void SurfaceTracing::LayersTraceBuffer::reset(size_t newSize) {
+    // use the swap trick to make sure memory is released
+    std::queue<LayersTraceProto>().swap(mStorage);
+    mSizeInBytes = newSize;
+    mUsedInBytes = 0U;
+}
+
+void SurfaceTracing::LayersTraceBuffer::emplace(LayersTraceProto&& proto) {
+    auto protoSize = proto.ByteSize();
+    while (mUsedInBytes + protoSize > mSizeInBytes) {
+        if (mStorage.empty()) {
+            return;
+        }
+        mUsedInBytes -= mStorage.front().ByteSize();
+        mStorage.pop();
+    }
+    mUsedInBytes += protoSize;
+    mStorage.emplace();
+    mStorage.back().Swap(&proto);
+}
+
+void SurfaceTracing::LayersTraceBuffer::flush(LayersTraceFileProto* fileProto) {
+    fileProto->mutable_entry()->Reserve(mStorage.size());
+
+    while (!mStorage.empty()) {
+        auto entry = fileProto->add_entry();
+        entry->Swap(&mStorage.front());
+        mStorage.pop();
+    }
+}
+
+void SurfaceTracing::enable(size_t bufferSizeInByte) {
+    std::lock_guard<std::mutex> protoGuard(mTraceMutex);
+
     if (mEnabled) {
         return;
     }
-    ATRACE_CALL();
     mEnabled = true;
-    std::lock_guard<std::mutex> protoGuard(mTraceMutex);
-
-    mTrace.set_magic_number(uint64_t(LayersTraceFileProto_MagicNumber_MAGIC_NUMBER_H) << 32 |
-                            LayersTraceFileProto_MagicNumber_MAGIC_NUMBER_L);
+    mBuffer.reset(bufferSizeInByte);
 }
 
 status_t SurfaceTracing::disable() {
+    std::lock_guard<std::mutex> protoGuard(mTraceMutex);
+
     if (!mEnabled) {
         return NO_ERROR;
     }
-    ATRACE_CALL();
-    std::lock_guard<std::mutex> protoGuard(mTraceMutex);
     mEnabled = false;
     status_t err(writeProtoFileLocked());
     ALOGE_IF(err == PERMISSION_DENIED, "Could not save the proto file! Permission denied");
     ALOGE_IF(err == NOT_ENOUGH_DATA, "Could not save the proto file! There are missing fields");
-    mTrace.Clear();
+    mBuffer.reset(0);
     return err;
 }
 
-bool SurfaceTracing::isEnabled() {
+bool SurfaceTracing::isEnabled() const {
+    std::lock_guard<std::mutex> protoGuard(mTraceMutex);
     return mEnabled;
 }
 
 void SurfaceTracing::traceLayers(const char* where, LayersProto layers) {
     std::lock_guard<std::mutex> protoGuard(mTraceMutex);
+    if (!mEnabled) {
+        return;
+    }
 
-    LayersTraceProto* entry = mTrace.add_entry();
-    entry->set_elapsed_realtime_nanos(elapsedRealtimeNano());
-    entry->set_where(where);
-    entry->mutable_layers()->Swap(&layers);
+    LayersTraceProto entry;
+    entry.set_elapsed_realtime_nanos(elapsedRealtimeNano());
+    entry.set_where(where);
+    entry.mutable_layers()->Swap(&layers);
+
+    mBuffer.emplace(std::move(entry));
 }
 
 status_t SurfaceTracing::writeProtoFileLocked() {
     ATRACE_CALL();
 
-    if (!mTrace.IsInitialized()) {
-        return NOT_ENOUGH_DATA;
-    }
+    LayersTraceFileProto fileProto;
     std::string output;
-    if (!mTrace.SerializeToString(&output)) {
+
+    fileProto.set_magic_number(uint64_t(LayersTraceFileProto_MagicNumber_MAGIC_NUMBER_H) << 32 |
+                               LayersTraceFileProto_MagicNumber_MAGIC_NUMBER_L);
+    mBuffer.flush(&fileProto);
+
+    if (!fileProto.SerializeToString(&output)) {
         return PERMISSION_DENIED;
     }
-    if (!android::base::WriteStringToFile(output, mOutputFileName, true)) {
+    if (!android::base::WriteStringToFile(output, kDefaultFileName, true)) {
         return PERMISSION_DENIED;
     }
 
     return NO_ERROR;
+}
+
+void SurfaceTracing::dump(std::string& result) const {
+    std::lock_guard<std::mutex> protoGuard(mTraceMutex);
+
+    base::StringAppendF(&result, "Tracing state: %s\n", mEnabled ? "enabled" : "disabled");
+    base::StringAppendF(&result, "  number of entries: %zu (%.2fMB / %.2fMB)\n",
+                        mBuffer.frameCount(), float(mBuffer.used()) / float(1_MB),
+                        float(mBuffer.size()) / float(1_MB));
 }
 
 } // namespace android

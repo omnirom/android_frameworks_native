@@ -1,6 +1,7 @@
 // Build the unit tests for installd
 cc_test {
     name: "installd_utils_test",
+    test_suites: ["device-tests"],
     clang: true,
     srcs: ["installd_utils_test.cpp"],
     cflags: ["-Wall", "-Werror"],
@@ -18,6 +19,7 @@ cc_test {
 
 cc_test {
     name: "installd_cache_test",
+    test_suites: ["device-tests"],
     clang: true,
     srcs: ["installd_cache_test.cpp"],
     cflags: ["-Wall", "-Werror"],
@@ -26,6 +28,7 @@ cc_test {
         "libbinder",
         "libcrypto",
         "libcutils",
+        "libprocessgroup",
         "libselinux",
         "libutils",
     ],
@@ -39,6 +42,7 @@ cc_test {
 
 cc_test {
     name: "installd_service_test",
+    test_suites: ["device-tests"],
     clang: true,
     srcs: ["installd_service_test.cpp"],
     cflags: ["-Wall", "-Werror"],
@@ -47,6 +51,7 @@ cc_test {
         "libbinder",
         "libcrypto",
         "libcutils",
+        "libprocessgroup",
         "libselinux",
         "libutils",
     ],
@@ -60,6 +65,7 @@ cc_test {
 
 cc_test {
     name: "installd_dexopt_test",
+    test_suites: ["device-tests"],
     clang: true,
     srcs: ["installd_dexopt_test.cpp"],
     cflags: ["-Wall", "-Werror"],
@@ -68,6 +74,7 @@ cc_test {
         "libbinder",
         "libcrypto",
         "libcutils",
+        "libprocessgroup",
         "libselinux",
         "libutils",
     ],
@@ -81,6 +88,7 @@ cc_test {
 
 cc_test {
     name: "installd_otapreopt_test",
+    test_suites: ["device-tests"],
     clang: true,
     srcs: ["installd_otapreopt_test.cpp"],
     cflags: ["-Wall", "-Werror"],

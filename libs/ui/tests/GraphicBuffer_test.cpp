@@ -16,7 +16,7 @@
 
 #define LOG_TAG "GraphicBufferTest"
 
-#include <ui/DetachedBufferHandle.h>
+#include <ui/BufferHubBuffer.h>
 #include <ui/GraphicBuffer.h>
 
 #include <gtest/gtest.h>
@@ -35,30 +35,43 @@ constexpr uint64_t kTestUsage = GraphicBuffer::USAGE_SW_WRITE_OFTEN;
 
 class GraphicBufferTest : public testing::Test {};
 
-TEST_F(GraphicBufferTest, DetachedBuffer) {
-    sp<GraphicBuffer> buffer(
+TEST_F(GraphicBufferTest, CreateFromBufferHubBuffer) {
+    std::unique_ptr<BufferHubBuffer> b1 =
+            BufferHubBuffer::create(kTestWidth, kTestHeight, kTestLayerCount, kTestFormat,
+                                    kTestUsage, /*userMetadataSize=*/0);
+    ASSERT_NE(b1, nullptr);
+    EXPECT_TRUE(b1->isValid());
+
+    sp<GraphicBuffer> gb(new GraphicBuffer(std::move(b1)));
+    EXPECT_TRUE(gb->isBufferHubBuffer());
+
+    EXPECT_EQ(gb->getWidth(), kTestWidth);
+    EXPECT_EQ(gb->getHeight(), kTestHeight);
+    EXPECT_EQ(static_cast<uint32_t>(gb->getPixelFormat()), kTestFormat);
+    EXPECT_EQ(gb->getUsage(), kTestUsage);
+    EXPECT_EQ(gb->getLayerCount(), kTestLayerCount);
+}
+
+TEST_F(GraphicBufferTest, InvalidBufferIdForNoneBufferHubBuffer) {
+    sp<GraphicBuffer> gb(
             new GraphicBuffer(kTestWidth, kTestHeight, kTestFormat, kTestLayerCount, kTestUsage));
+    EXPECT_FALSE(gb->isBufferHubBuffer());
+    EXPECT_EQ(gb->getBufferId(), -1);
+}
 
-    // Currently a newly allocated GraphicBuffer is in legacy mode, i.e. not associated with
-    // BufferHub. But this may change in the future.
-    EXPECT_FALSE(buffer->isDetachedBuffer());
+TEST_F(GraphicBufferTest, BufferIdMatchesBufferHubBufferId) {
+    std::unique_ptr<BufferHubBuffer> b1 =
+            BufferHubBuffer::create(kTestWidth, kTestHeight, kTestLayerCount, kTestFormat,
+                                    kTestUsage, /*userMetadataSize=*/0);
+    EXPECT_NE(b1, nullptr);
+    EXPECT_TRUE(b1->isValid());
 
-    pdx::LocalChannelHandle channel{nullptr, 1234};
-    EXPECT_TRUE(channel.valid());
+    int b1_id = b1->id();
+    EXPECT_GE(b1_id, 0);
 
-    std::unique_ptr<DetachedBufferHandle> handle = DetachedBufferHandle::Create(std::move(channel));
-    EXPECT_FALSE(channel.valid());
-    EXPECT_TRUE(handle->isValid());
-    EXPECT_TRUE(handle->handle().valid());
-
-    buffer->setDetachedBufferHandle(std::move(handle));
-    EXPECT_TRUE(handle == nullptr);
-    EXPECT_TRUE(buffer->isDetachedBuffer());
-
-    handle = buffer->takeDetachedBufferHandle();
-    EXPECT_TRUE(handle != nullptr);
-    EXPECT_TRUE(handle->isValid());
-    EXPECT_FALSE(buffer->isDetachedBuffer());
+    sp<GraphicBuffer> gb(new GraphicBuffer(std::move(b1)));
+    EXPECT_TRUE(gb->isBufferHubBuffer());
+    EXPECT_EQ(gb->getBufferId(), b1_id);
 }
 
 } // namespace android

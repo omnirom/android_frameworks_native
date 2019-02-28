@@ -22,14 +22,12 @@ cc_library {
     export_include_dirs: ["include"],
     shared_libs: shared_libs,
     header_libs: header_libraries,
-    cppflags: ["-std=c++11"],
     cflags: [
         "-DLOG_TAG=\"VrVirtualTouchpad\"",
         "-Wall",
         "-Werror",
     ],
     name: "libvirtualtouchpad",
-    tags: ["optional"],
 }
 
 // Touchpad unit tests.
@@ -52,15 +50,11 @@ cc_test {
         "-Wall",
         "-Werror",
     ],
-    cppflags: [
-        "-std=c++11",
-    ],
     host_ldlibs: [
         "-llog",
     ],
     name: "VirtualTouchpad_test",
     stl: "libc++_static",
-    tags: ["optional"],
 }
 
 // Service.
@@ -88,7 +82,6 @@ cc_binary {
     static_libs: service_static_libs,
     shared_libs: service_shared_libs,
     header_libs: header_libraries,
-    cppflags: ["-std=c++11"],
     cflags: [
         "-DLOG_TAG=\"VrVirtualTouchpad\"",
         "-Wall",
@@ -96,7 +89,6 @@ cc_binary {
     ],
     host_ldlibs: ["-llog"],
     name: "virtual_touchpad",
-    tags: ["optional"],
     init_rc: ["virtual_touchpad.rc"],
     compile_multilib: "64",
     stl: "libc++_static",
@@ -121,7 +113,6 @@ cc_library {
     srcs: client_src,
     shared_libs: client_shared_libs,
     header_libs: header_libraries,
-    cppflags: ["-std=c++11"],
     cflags: [
         "-DLOG_TAG=\"VirtualTouchpadClient\"",
         "-Wall",
@@ -129,6 +120,5 @@ cc_library {
     ],
     host_ldlibs: ["-llog"],
     name: "libvirtualtouchpadclient",
-    tags: ["optional"],
     export_include_dirs: ["include"],
 }

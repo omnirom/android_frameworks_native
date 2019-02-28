@@ -49,14 +49,14 @@ Fence::Fence(base::unique_fd fenceFd) :
 static status_t dump(const base::unique_fd &fd) {
     CallStack stack("FENCE_DUMP");
 
-    struct sync_fence_info_data* finfo = sync_fence_info(fd);
-    struct sync_pt_info* pinfo = NULL;
+    struct sync_file_info* finfo = sync_file_info(fd);
+    struct sync_fence_info* pinfo = sync_get_fence_info(finfo);
 
     ALOGE(" ----- Printing sync-points under fence fd:%d status:%d name:%s -----",
             fd.get(), finfo->status, finfo->name);
-    while ((pinfo = sync_pt_info(finfo, pinfo)) != NULL) {
-        ALOGE("status:%d driver:%s obj:%s", pinfo->status,
-                pinfo->driver_name,  pinfo->obj_name);
+    for (size_t i = 0; i < finfo->num_fences; i++) {
+        ALOGE("status:%d driver:%s obj:%s", pinfo[i].status,
+                pinfo[i].driver_name,  pinfo[i].obj_name);
     }
 
     return NO_ERROR;
@@ -132,25 +132,25 @@ nsecs_t Fence::getSignalTime() const {
         return SIGNAL_TIME_INVALID;
     }
 
-    struct sync_fence_info_data* finfo = sync_fence_info(mFenceFd);
+    struct sync_file_info* finfo = sync_file_info(mFenceFd);
     if (finfo == NULL) {
-        ALOGE("sync_fence_info returned NULL for fd %d", mFenceFd.get());
+        ALOGE("sync_file_info returned NULL for fd %d", mFenceFd.get());
         return SIGNAL_TIME_INVALID;
     }
     if (finfo->status != 1) {
-        sync_fence_info_free(finfo);
+        sync_file_info_free(finfo);
         return SIGNAL_TIME_PENDING;
     }
 
-    struct sync_pt_info* pinfo = NULL;
     uint64_t timestamp = 0;
-    while ((pinfo = sync_pt_info(finfo, pinfo)) != NULL) {
-        if (pinfo->timestamp_ns > timestamp) {
-            timestamp = pinfo->timestamp_ns;
+    struct sync_fence_info* pinfo = sync_get_fence_info(finfo);
+    for (size_t i = 0; i < finfo->num_fences; i++) {
+        if (pinfo[i].timestamp_ns > timestamp) {
+            timestamp = pinfo[i].timestamp_ns;
         }
     }
-    sync_fence_info_free(finfo);
 
+    sync_file_info_free(finfo);
     return nsecs_t(timestamp);
 }
 

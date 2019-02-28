@@ -16,6 +16,8 @@ cc_test {
         "BufferItemConsumer_test.cpp",
         "BufferQueue_test.cpp",
         "CpuConsumer_test.cpp",
+        "EndToEndNativeInputTest.cpp",
+        "DisplayedContentSampling_test.cpp",
         "FillBuffer.cpp",
         "GLTest.cpp",
         "IGraphicBufferProducer_test.cpp",
@@ -35,6 +37,7 @@ cc_test {
     shared_libs: [
         "android.hardware.configstore@1.0",
         "android.hardware.configstore-utils",
+        "libbase",
         "liblog",
         "libEGL",
         "libGLESv1_CM",
@@ -44,15 +47,19 @@ cc_test {
         "libgui",
         "libhidlbase",
         "libhidltransport",
+        "libinput",
         "libui",
         "libutils",
         "libnativewindow"
     ],
 }
 
-// Build a separate binary for each source file to $(TARGET_OUT_DATA_NATIVE_TESTS)/$(LOCAL_MODULE)
+// Build a separate binary to $(TARGET_OUT_DATA_NATIVE_TESTS)/$(LOCAL_MODULE)
+// This test has a main method, and requires a separate binary to be built.
+// To add move tests like this, just add additional cc_test statements,
+// as opposed to adding more source files to this one.
 cc_test {
-    name: "libgui_separate_binary_test",
+    name: "SurfaceParcelable_test",
     test_suites: ["device-tests"],
 
     clang: true,
@@ -61,7 +68,6 @@ cc_test {
         "-Werror",
     ],
 
-    test_per_src: true,
     srcs: [
         "SurfaceParcelable_test.cpp",
     ],

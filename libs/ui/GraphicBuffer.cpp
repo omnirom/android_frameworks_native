@@ -22,7 +22,10 @@
 
 #include <grallocusage/GrallocUsageConversion.h>
 
-#include <ui/DetachedBufferHandle.h>
+#ifndef LIBUI_IN_VNDK
+#include <ui/BufferHubBuffer.h>
+#endif // LIBUI_IN_VNDK
+
 #include <ui/Gralloc2.h>
 #include <ui/GraphicBufferAllocator.h>
 #include <ui/GraphicBufferMapper.h>
@@ -65,12 +68,11 @@ GraphicBuffer::GraphicBuffer(uint32_t inWidth, uint32_t inHeight,
 {
 }
 
-GraphicBuffer::GraphicBuffer(uint32_t inWidth, uint32_t inHeight,
-        PixelFormat inFormat, uint32_t inLayerCount, uint64_t usage, std::string requestorName)
-    : GraphicBuffer()
-{
-    mInitCheck = initWithSize(inWidth, inHeight, inFormat, inLayerCount,
-            usage, std::move(requestorName));
+GraphicBuffer::GraphicBuffer(uint32_t inWidth, uint32_t inHeight, PixelFormat inFormat,
+                             uint32_t inLayerCount, uint64_t inUsage, std::string requestorName)
+      : GraphicBuffer() {
+    mInitCheck = initWithSize(inWidth, inHeight, inFormat, inLayerCount, inUsage,
+                              std::move(requestorName));
 }
 
 // deprecated
@@ -83,16 +85,29 @@ GraphicBuffer::GraphicBuffer(uint32_t inWidth, uint32_t inHeight,
 {
 }
 
-GraphicBuffer::GraphicBuffer(const native_handle_t* handle,
-        HandleWrapMethod method, uint32_t width, uint32_t height,
-        PixelFormat format, uint32_t layerCount,
-        uint64_t usage,
-        uint32_t stride)
-    : GraphicBuffer()
-{
-    mInitCheck = initWithHandle(handle, method, width, height, format,
-            layerCount, usage, stride);
+GraphicBuffer::GraphicBuffer(const native_handle_t* inHandle, HandleWrapMethod method,
+                             uint32_t inWidth, uint32_t inHeight, PixelFormat inFormat,
+                             uint32_t inLayerCount, uint64_t inUsage, uint32_t inStride)
+      : GraphicBuffer() {
+    mInitCheck = initWithHandle(inHandle, method, inWidth, inHeight, inFormat, inLayerCount,
+                                inUsage, inStride);
 }
+
+#ifndef LIBUI_IN_VNDK
+GraphicBuffer::GraphicBuffer(std::unique_ptr<BufferHubBuffer> buffer) : GraphicBuffer() {
+    if (buffer == nullptr) {
+        mInitCheck = BAD_VALUE;
+        return;
+    }
+
+    mInitCheck = initWithHandle(buffer->duplicateHandle(), /*method=*/TAKE_UNREGISTERED_HANDLE,
+                                buffer->desc().width, buffer->desc().height,
+                                static_cast<PixelFormat>(buffer->desc().format),
+                                buffer->desc().layers, buffer->desc().usage, buffer->desc().stride);
+    mBufferId = buffer->id();
+    mBufferHubBuffer = std::move(buffer);
+}
+#endif // LIBUI_IN_VNDK
 
 GraphicBuffer::~GraphicBuffer()
 {
@@ -123,7 +138,6 @@ void GraphicBuffer::dumpAllocationsToSystemLog()
 
 ANativeWindowBuffer* GraphicBuffer::getNativeBuffer() const
 {
-    LOG_ALWAYS_FATAL_IF(this == NULL, "getNativeBuffer() called on NULL GraphicBuffer");
     return static_cast<ANativeWindowBuffer*>(
             const_cast<GraphicBuffer*>(this));
 }
@@ -184,26 +198,24 @@ status_t GraphicBuffer::initWithSize(uint32_t inWidth, uint32_t inHeight,
     return err;
 }
 
-status_t GraphicBuffer::initWithHandle(const native_handle_t* handle,
-        HandleWrapMethod method, uint32_t width, uint32_t height,
-        PixelFormat format, uint32_t layerCount, uint64_t usage,
-        uint32_t stride)
-{
-    ANativeWindowBuffer::width  = static_cast<int>(width);
-    ANativeWindowBuffer::height = static_cast<int>(height);
-    ANativeWindowBuffer::stride = static_cast<int>(stride);
-    ANativeWindowBuffer::format = format;
-    ANativeWindowBuffer::usage  = usage;
-    ANativeWindowBuffer::usage_deprecated = int(usage);
+status_t GraphicBuffer::initWithHandle(const native_handle_t* inHandle, HandleWrapMethod method,
+                                       uint32_t inWidth, uint32_t inHeight, PixelFormat inFormat,
+                                       uint32_t inLayerCount, uint64_t inUsage, uint32_t inStride) {
+    ANativeWindowBuffer::width = static_cast<int>(inWidth);
+    ANativeWindowBuffer::height = static_cast<int>(inHeight);
+    ANativeWindowBuffer::stride = static_cast<int>(inStride);
+    ANativeWindowBuffer::format = inFormat;
+    ANativeWindowBuffer::usage = inUsage;
+    ANativeWindowBuffer::usage_deprecated = int(inUsage);
 
-    ANativeWindowBuffer::layerCount = layerCount;
+    ANativeWindowBuffer::layerCount = inLayerCount;
 
     mOwner = (method == WRAP_HANDLE) ? ownNone : ownHandle;
 
     if (method == TAKE_UNREGISTERED_HANDLE || method == CLONE_HANDLE) {
         buffer_handle_t importedHandle;
-        status_t err = mBufferMapper.importBuffer(handle, width, height,
-                layerCount, format, usage, stride, &importedHandle);
+        status_t err = mBufferMapper.importBuffer(inHandle, inWidth, inHeight, inLayerCount,
+                                                  inFormat, inUsage, inStride, &importedHandle);
         if (err != NO_ERROR) {
             initWithHandle(nullptr, WRAP_HANDLE, 0, 0, 0, 0, 0, 0);
 
@@ -211,28 +223,28 @@ status_t GraphicBuffer::initWithHandle(const native_handle_t* handle,
         }
 
         if (method == TAKE_UNREGISTERED_HANDLE) {
-            native_handle_close(handle);
-            native_handle_delete(const_cast<native_handle_t*>(handle));
+            native_handle_close(inHandle);
+            native_handle_delete(const_cast<native_handle_t*>(inHandle));
         }
 
-        handle = importedHandle;
-        mBufferMapper.getTransportSize(handle, &mTransportNumFds, &mTransportNumInts);
+        inHandle = importedHandle;
+        mBufferMapper.getTransportSize(inHandle, &mTransportNumFds, &mTransportNumInts);
     }
 
-    ANativeWindowBuffer::handle = handle;
+    ANativeWindowBuffer::handle = inHandle;
 
     return NO_ERROR;
 }
 
-status_t GraphicBuffer::lock(uint32_t inUsage, void** vaddr)
-{
+status_t GraphicBuffer::lock(uint32_t inUsage, void** vaddr, int32_t* outBytesPerPixel,
+                             int32_t* outBytesPerStride) {
     const Rect lockBounds(width, height);
-    status_t res = lock(inUsage, lockBounds, vaddr);
+    status_t res = lock(inUsage, lockBounds, vaddr, outBytesPerPixel, outBytesPerStride);
     return res;
 }
 
-status_t GraphicBuffer::lock(uint32_t inUsage, const Rect& rect, void** vaddr)
-{
+status_t GraphicBuffer::lock(uint32_t inUsage, const Rect& rect, void** vaddr,
+                             int32_t* outBytesPerPixel, int32_t* outBytesPerStride) {
     if (rect.left < 0 || rect.right  > width ||
         rect.top  < 0 || rect.bottom > height) {
         ALOGE("locking pixels (%d,%d,%d,%d) outside of buffer (w=%d, h=%d)",
@@ -240,7 +252,10 @@ status_t GraphicBuffer::lock(uint32_t inUsage, const Rect& rect, void** vaddr)
                 width, height);
         return BAD_VALUE;
     }
-    status_t res = getBufferMapper().lock(handle, inUsage, rect, vaddr);
+
+    status_t res = getBufferMapper().lock(handle, inUsage, rect, vaddr, outBytesPerPixel,
+                                          outBytesPerStride);
+
     return res;
 }
 
@@ -271,22 +286,22 @@ status_t GraphicBuffer::unlock()
     return res;
 }
 
-status_t GraphicBuffer::lockAsync(uint32_t inUsage, void** vaddr, int fenceFd)
-{
+status_t GraphicBuffer::lockAsync(uint32_t inUsage, void** vaddr, int fenceFd,
+                                  int32_t* outBytesPerPixel, int32_t* outBytesPerStride) {
     const Rect lockBounds(width, height);
-    status_t res = lockAsync(inUsage, lockBounds, vaddr, fenceFd);
+    status_t res =
+            lockAsync(inUsage, lockBounds, vaddr, fenceFd, outBytesPerPixel, outBytesPerStride);
     return res;
 }
 
-status_t GraphicBuffer::lockAsync(uint32_t inUsage, const Rect& rect,
-        void** vaddr, int fenceFd)
-{
-    return lockAsync(inUsage, inUsage, rect, vaddr, fenceFd);
+status_t GraphicBuffer::lockAsync(uint32_t inUsage, const Rect& rect, void** vaddr, int fenceFd,
+                                  int32_t* outBytesPerPixel, int32_t* outBytesPerStride) {
+    return lockAsync(inUsage, inUsage, rect, vaddr, fenceFd, outBytesPerPixel, outBytesPerStride);
 }
 
-status_t GraphicBuffer::lockAsync(uint64_t inProducerUsage,
-        uint64_t inConsumerUsage, const Rect& rect, void** vaddr, int fenceFd)
-{
+status_t GraphicBuffer::lockAsync(uint64_t inProducerUsage, uint64_t inConsumerUsage,
+                                  const Rect& rect, void** vaddr, int fenceFd,
+                                  int32_t* outBytesPerPixel, int32_t* outBytesPerStride) {
     if (rect.left < 0 || rect.right  > width ||
         rect.top  < 0 || rect.bottom > height) {
         ALOGE("locking pixels (%d,%d,%d,%d) outside of buffer (w=%d, h=%d)",
@@ -294,8 +309,10 @@ status_t GraphicBuffer::lockAsync(uint64_t inProducerUsage,
                 width, height);
         return BAD_VALUE;
     }
-    status_t res = getBufferMapper().lockAsync(handle, inProducerUsage,
-            inConsumerUsage, rect, vaddr, fenceFd);
+
+    status_t res = getBufferMapper().lockAsync(handle, inProducerUsage, inConsumerUsage, rect,
+                                               vaddr, fenceFd, outBytesPerPixel, outBytesPerStride);
+
     return res;
 }
 
@@ -325,6 +342,13 @@ status_t GraphicBuffer::unlockAsync(int *fenceFd)
 {
     status_t res = getBufferMapper().unlockAsync(handle, fenceFd);
     return res;
+}
+
+status_t GraphicBuffer::isSupported(uint32_t inWidth, uint32_t inHeight, PixelFormat inFormat,
+                                    uint32_t inLayerCount, uint64_t inUsage,
+                                    bool* outSupported) const {
+    return mBufferMapper.isSupported(inWidth, inHeight, inFormat, inLayerCount, inUsage,
+                                     outSupported);
 }
 
 size_t GraphicBuffer::getFlattenedSize() const {
@@ -491,23 +515,11 @@ status_t GraphicBuffer::unflatten(
     return NO_ERROR;
 }
 
-bool GraphicBuffer::isDetachedBuffer() const {
-    return mDetachedBufferHandle && mDetachedBufferHandle->isValid();
+#ifndef LIBUI_IN_VNDK
+bool GraphicBuffer::isBufferHubBuffer() const {
+    return mBufferHubBuffer != nullptr;
 }
-
-status_t GraphicBuffer::setDetachedBufferHandle(std::unique_ptr<DetachedBufferHandle> channel) {
-    if (isDetachedBuffer()) {
-        ALOGW("setDetachedBuffer: there is already a BufferHub channel associated with this "
-              "GraphicBuffer. Replacing the old one.");
-    }
-
-    mDetachedBufferHandle = std::move(channel);
-    return NO_ERROR;
-}
-
-std::unique_ptr<DetachedBufferHandle> GraphicBuffer::takeDetachedBufferHandle() {
-    return std::move(mDetachedBufferHandle);
-}
+#endif // LIBUI_IN_VNDK
 
 // ---------------------------------------------------------------------------
 

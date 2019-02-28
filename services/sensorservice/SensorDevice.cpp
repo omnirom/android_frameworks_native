@@ -13,7 +13,11 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
 #include "SensorDevice.h"
+
+#include "android/hardware/sensors/2.0/ISensorsCallback.h"
+#include "android/hardware/sensors/2.0/types.h"
 #include "SensorService.h"
 
 #include <android-base/logging.h>
@@ -26,9 +30,14 @@
 #include <cinttypes>
 #include <thread>
 
+using namespace android::hardware::sensors;
 using namespace android::hardware::sensors::V1_0;
 using namespace android::hardware::sensors::V1_0::implementation;
+using android::hardware::sensors::V2_0::ISensorsCallback;
+using android::hardware::sensors::V2_0::EventQueueFlagBits;
+using android::hardware::sensors::V2_0::WakeLockQueueFlagBits;
 using android::hardware::hidl_vec;
+using android::hardware::Return;
 using android::SensorDeviceUtils::HidlServiceRegistrationWaiter;
 
 namespace android {
@@ -51,12 +60,55 @@ static status_t StatusFromResult(Result result) {
     }
 }
 
+template<typename EnumType>
+constexpr typename std::underlying_type<EnumType>::type asBaseType(EnumType value) {
+    return static_cast<typename std::underlying_type<EnumType>::type>(value);
+}
+
+// Used internally by the framework to wake the Event FMQ. These values must start after
+// the last value of EventQueueFlagBits
+enum EventQueueFlagBitsInternal : uint32_t {
+    INTERNAL_WAKE =  1 << 16,
+};
+
+void SensorsHalDeathReceivier::serviceDied(
+        uint64_t /* cookie */,
+        const wp<::android::hidl::base::V1_0::IBase>& /* service */) {
+    ALOGW("Sensors HAL died, attempting to reconnect.");
+    SensorDevice::getInstance().prepareForReconnect();
+}
+
+struct SensorsCallback : public ISensorsCallback {
+    using Result = ::android::hardware::sensors::V1_0::Result;
+    Return<void> onDynamicSensorsConnected(
+            const hidl_vec<SensorInfo> &dynamicSensorsAdded) override {
+        return SensorDevice::getInstance().onDynamicSensorsConnected(dynamicSensorsAdded);
+    }
+
+    Return<void> onDynamicSensorsDisconnected(
+            const hidl_vec<int32_t> &dynamicSensorHandlesRemoved) override {
+        return SensorDevice::getInstance().onDynamicSensorsDisconnected(
+                dynamicSensorHandlesRemoved);
+    }
+};
+
 SensorDevice::SensorDevice()
-        : mHidlTransportErrors(20), mRestartWaiter(new HidlServiceRegistrationWaiter()) {
+        : mHidlTransportErrors(20),
+          mRestartWaiter(new HidlServiceRegistrationWaiter()),
+          mEventQueueFlag(nullptr),
+          mWakeLockQueueFlag(nullptr),
+          mReconnecting(false) {
     if (!connectHidlService()) {
         return;
     }
 
+    initializeSensorList();
+
+    mIsDirectReportSupported =
+           (checkReturn(mSensors->unregisterDirectChannel(-1)) != Result::INVALID_OPERATION);
+}
+
+void SensorDevice::initializeSensorList() {
     float minPowerMa = 0.001; // 1 microAmp
 
     checkReturn(mSensors->getSensorsList(
@@ -81,37 +133,208 @@ SensorDevice::SensorDevice()
                     checkReturn(mSensors->activate(list[i].sensorHandle, 0 /* enabled */));
                 }
             }));
+}
 
-    mIsDirectReportSupported =
-           (checkReturn(mSensors->unregisterDirectChannel(-1)) != Result::INVALID_OPERATION);
+SensorDevice::~SensorDevice() {
+    if (mEventQueueFlag != nullptr) {
+        hardware::EventFlag::deleteEventFlag(&mEventQueueFlag);
+        mEventQueueFlag = nullptr;
+    }
+
+    if (mWakeLockQueueFlag != nullptr) {
+        hardware::EventFlag::deleteEventFlag(&mWakeLockQueueFlag);
+        mWakeLockQueueFlag = nullptr;
+    }
 }
 
 bool SensorDevice::connectHidlService() {
+    HalConnectionStatus status = connectHidlServiceV2_0();
+    if (status == HalConnectionStatus::DOES_NOT_EXIST) {
+        status = connectHidlServiceV1_0();
+    }
+    return (status == HalConnectionStatus::CONNECTED);
+}
+
+SensorDevice::HalConnectionStatus SensorDevice::connectHidlServiceV1_0() {
     // SensorDevice will wait for HAL service to start if HAL is declared in device manifest.
     size_t retry = 10;
+    HalConnectionStatus connectionStatus = HalConnectionStatus::UNKNOWN;
 
     while (retry-- > 0) {
-        mSensors = ISensors::getService();
-        if (mSensors == nullptr) {
+        sp<V1_0::ISensors> sensors = V1_0::ISensors::getService();
+        if (sensors == nullptr) {
             // no sensor hidl service found
+            connectionStatus = HalConnectionStatus::DOES_NOT_EXIST;
             break;
         }
 
+        mSensors = new SensorServiceUtil::SensorsWrapperV1_0(sensors);
         mRestartWaiter->reset();
         // Poke ISensor service. If it has lingering connection from previous generation of
         // system server, it will kill itself. There is no intention to handle the poll result,
         // which will be done since the size is 0.
         if(mSensors->poll(0, [](auto, const auto &, const auto &) {}).isOk()) {
             // ok to continue
+            connectionStatus = HalConnectionStatus::CONNECTED;
             break;
         }
 
         // hidl service is restarting, pointer is invalid.
         mSensors = nullptr;
+        connectionStatus = HalConnectionStatus::FAILED_TO_CONNECT;
         ALOGI("%s unsuccessful, remaining retry %zu.", __FUNCTION__, retry);
         mRestartWaiter->wait();
     }
-    return (mSensors != nullptr);
+
+    return connectionStatus;
+}
+
+SensorDevice::HalConnectionStatus SensorDevice::connectHidlServiceV2_0() {
+    HalConnectionStatus connectionStatus = HalConnectionStatus::UNKNOWN;
+    sp<V2_0::ISensors> sensors = V2_0::ISensors::getService();
+
+    if (sensors == nullptr) {
+        connectionStatus = HalConnectionStatus::DOES_NOT_EXIST;
+    } else {
+        mSensors = new SensorServiceUtil::SensorsWrapperV2_0(sensors);
+
+        mEventQueue = std::make_unique<EventMessageQueue>(
+                SensorEventQueue::MAX_RECEIVE_BUFFER_EVENT_COUNT,
+                true /* configureEventFlagWord */);
+
+        mWakeLockQueue = std::make_unique<WakeLockQueue>(
+                SensorEventQueue::MAX_RECEIVE_BUFFER_EVENT_COUNT,
+                true /* configureEventFlagWord */);
+
+        hardware::EventFlag::deleteEventFlag(&mEventQueueFlag);
+        hardware::EventFlag::createEventFlag(mEventQueue->getEventFlagWord(), &mEventQueueFlag);
+
+        hardware::EventFlag::deleteEventFlag(&mWakeLockQueueFlag);
+        hardware::EventFlag::createEventFlag(mWakeLockQueue->getEventFlagWord(),
+                                             &mWakeLockQueueFlag);
+
+        CHECK(mSensors != nullptr && mEventQueue != nullptr &&
+                mWakeLockQueue != nullptr && mEventQueueFlag != nullptr &&
+                mWakeLockQueueFlag != nullptr);
+
+        status_t status = StatusFromResult(checkReturn(mSensors->initialize(
+                *mEventQueue->getDesc(),
+                *mWakeLockQueue->getDesc(),
+                new SensorsCallback())));
+
+        if (status != NO_ERROR) {
+            connectionStatus = HalConnectionStatus::FAILED_TO_CONNECT;
+            ALOGE("Failed to initialize Sensors HAL (%s)", strerror(-status));
+        } else {
+            connectionStatus = HalConnectionStatus::CONNECTED;
+            mSensorsHalDeathReceiver = new SensorsHalDeathReceivier();
+            sensors->linkToDeath(mSensorsHalDeathReceiver, 0 /* cookie */);
+        }
+    }
+
+    return connectionStatus;
+}
+
+void SensorDevice::prepareForReconnect() {
+    mReconnecting = true;
+
+    // Wake up the polling thread so it returns and allows the SensorService to initiate
+    // a reconnect.
+    mEventQueueFlag->wake(asBaseType(INTERNAL_WAKE));
+}
+
+void SensorDevice::reconnect() {
+    Mutex::Autolock _l(mLock);
+    mSensors = nullptr;
+
+    auto previousActivations = mActivationCount;
+    auto previousSensorList = mSensorList;
+
+    mActivationCount.clear();
+    mSensorList.clear();
+
+    if (connectHidlServiceV2_0() == HalConnectionStatus::CONNECTED) {
+        initializeSensorList();
+
+        if (sensorHandlesChanged(previousSensorList, mSensorList)) {
+            LOG_ALWAYS_FATAL("Sensor handles changed, cannot re-enable sensors.");
+        } else {
+            reactivateSensors(previousActivations);
+        }
+    }
+    mReconnecting = false;
+}
+
+bool SensorDevice::sensorHandlesChanged(const Vector<sensor_t>& oldSensorList,
+                                        const Vector<sensor_t>& newSensorList) {
+    bool didChange = false;
+
+    if (oldSensorList.size() != newSensorList.size()) {
+        didChange = true;
+    }
+
+    for (size_t i = 0; i < newSensorList.size() && !didChange; i++) {
+        bool found = false;
+        const sensor_t& newSensor = newSensorList[i];
+        for (size_t j = 0; j < oldSensorList.size() && !found; j++) {
+            const sensor_t& prevSensor = oldSensorList[j];
+            if (prevSensor.handle == newSensor.handle) {
+                found = true;
+                if (!sensorIsEquivalent(prevSensor, newSensor)) {
+                    didChange = true;
+                }
+            }
+        }
+
+        if (!found) {
+            // Could not find the new sensor in the old list of sensors, the lists must
+            // have changed.
+            didChange = true;
+        }
+    }
+    return didChange;
+}
+
+bool SensorDevice::sensorIsEquivalent(const sensor_t& prevSensor, const sensor_t& newSensor) {
+    bool equivalent = true;
+    if (prevSensor.handle != newSensor.handle ||
+            (strcmp(prevSensor.vendor, newSensor.vendor) != 0) ||
+            (strcmp(prevSensor.stringType, newSensor.stringType) != 0) ||
+            (strcmp(prevSensor.requiredPermission, newSensor.requiredPermission) != 0) ||
+            (prevSensor.version != newSensor.version) ||
+            (prevSensor.type != newSensor.type) ||
+            (std::abs(prevSensor.maxRange - newSensor.maxRange) > 0.001f) ||
+            (std::abs(prevSensor.resolution - newSensor.resolution) > 0.001f) ||
+            (std::abs(prevSensor.power - newSensor.power) > 0.001f) ||
+            (prevSensor.minDelay != newSensor.minDelay) ||
+            (prevSensor.fifoReservedEventCount != newSensor.fifoReservedEventCount) ||
+            (prevSensor.fifoMaxEventCount != newSensor.fifoMaxEventCount) ||
+            (prevSensor.maxDelay != newSensor.maxDelay) ||
+            (prevSensor.flags != newSensor.flags)) {
+        equivalent = false;
+    }
+    return equivalent;
+}
+
+void SensorDevice::reactivateSensors(const DefaultKeyedVector<int, Info>& previousActivations) {
+    for (size_t i = 0; i < mSensorList.size(); i++) {
+        int handle = mSensorList[i].handle;
+        ssize_t activationIndex = previousActivations.indexOfKey(handle);
+        if (activationIndex < 0 || previousActivations[activationIndex].numActiveClients() <= 0) {
+            continue;
+        }
+
+        const Info& info = previousActivations[activationIndex];
+        for (size_t j = 0; j < info.batchParams.size(); j++) {
+            const BatchParams& batchParams = info.batchParams[j];
+            status_t res = batchLocked(info.batchParams.keyAt(j), handle, 0 /* flags */,
+                    batchParams.mTSample, batchParams.mTBatch);
+
+            if (res == NO_ERROR) {
+                activateLocked(info.batchParams.keyAt(j), handle, true /* enabled */);
+            }
+        }
+    }
 }
 
 void SensorDevice::handleDynamicSensorConnection(int handle, bool connected) {
@@ -173,6 +396,19 @@ status_t SensorDevice::initCheck() const {
 ssize_t SensorDevice::poll(sensors_event_t* buffer, size_t count) {
     if (mSensors == nullptr) return NO_INIT;
 
+    ssize_t eventsRead = 0;
+    if (mSensors->supportsMessageQueues()) {
+        eventsRead = pollFmq(buffer, count);
+    } else if (mSensors->supportsPolling()) {
+        eventsRead = pollHal(buffer, count);
+    } else {
+        ALOGE("Must support polling or FMQ");
+        eventsRead = -1;
+    }
+    return eventsRead;
+}
+
+ssize_t SensorDevice::pollHal(sensors_event_t* buffer, size_t count) {
     ssize_t err;
     int numHidlTransportErrors = 0;
     bool hidlTransportError = false;
@@ -208,12 +444,95 @@ ssize_t SensorDevice::poll(sensors_event_t* buffer, size_t count) {
 
     if(numHidlTransportErrors > 0) {
         ALOGE("Saw %d Hidl transport failures", numHidlTransportErrors);
-        HidlTransportErrorLog errLog(time(NULL), numHidlTransportErrors);
+        HidlTransportErrorLog errLog(time(nullptr), numHidlTransportErrors);
         mHidlTransportErrors.add(errLog);
         mTotalHidlTransportErrors++;
     }
 
     return err;
+}
+
+ssize_t SensorDevice::pollFmq(sensors_event_t* buffer, size_t maxNumEventsToRead) {
+    ssize_t eventsRead = 0;
+    size_t availableEvents = mEventQueue->availableToRead();
+
+    if (availableEvents == 0) {
+        uint32_t eventFlagState = 0;
+
+        // Wait for events to become available. This is necessary so that the Event FMQ's read() is
+        // able to be called with the correct number of events to read. If the specified number of
+        // events is not available, then read() would return no events, possibly introducing
+        // additional latency in delivering events to applications.
+        mEventQueueFlag->wait(asBaseType(EventQueueFlagBits::READ_AND_PROCESS) |
+                              asBaseType(INTERNAL_WAKE), &eventFlagState);
+        availableEvents = mEventQueue->availableToRead();
+
+        if ((eventFlagState & asBaseType(EventQueueFlagBits::READ_AND_PROCESS)) &&
+                availableEvents == 0) {
+            ALOGW("Event FMQ wake without any events");
+        }
+
+        if ((eventFlagState & asBaseType(INTERNAL_WAKE)) && mReconnecting) {
+            ALOGD("Event FMQ internal wake, returning from poll with no events");
+            return DEAD_OBJECT;
+        }
+    }
+
+    size_t eventsToRead = std::min({availableEvents, maxNumEventsToRead, mEventBuffer.size()});
+    if (eventsToRead > 0) {
+        if (mEventQueue->read(mEventBuffer.data(), eventsToRead)) {
+            // Notify the Sensors HAL that sensor events have been read. This is required to support
+            // the use of writeBlocking by the Sensors HAL.
+            mEventQueueFlag->wake(asBaseType(EventQueueFlagBits::EVENTS_READ));
+
+            for (size_t i = 0; i < eventsToRead; i++) {
+                convertToSensorEvent(mEventBuffer[i], &buffer[i]);
+            }
+            eventsRead = eventsToRead;
+        } else {
+            ALOGW("Failed to read %zu events, currently %zu events available",
+                    eventsToRead, availableEvents);
+        }
+    }
+
+    return eventsRead;
+}
+
+Return<void> SensorDevice::onDynamicSensorsConnected(
+        const hidl_vec<SensorInfo> &dynamicSensorsAdded) {
+    // Allocate a sensor_t structure for each dynamic sensor added and insert
+    // it into the dictionary of connected dynamic sensors keyed by handle.
+    for (size_t i = 0; i < dynamicSensorsAdded.size(); ++i) {
+        const SensorInfo &info = dynamicSensorsAdded[i];
+
+        auto it = mConnectedDynamicSensors.find(info.sensorHandle);
+        CHECK(it == mConnectedDynamicSensors.end());
+
+        sensor_t *sensor = new sensor_t();
+        convertToSensor(info, sensor);
+
+        mConnectedDynamicSensors.insert(
+                std::make_pair(sensor->handle, sensor));
+    }
+
+    return Return<void>();
+}
+
+Return<void> SensorDevice::onDynamicSensorsDisconnected(
+        const hidl_vec<int32_t> &dynamicSensorHandlesRemoved) {
+    (void) dynamicSensorHandlesRemoved;
+    // TODO: Currently dynamic sensors do not seem to be removed
+    return Return<void>();
+}
+
+void SensorDevice::writeWakeLockHandled(uint32_t count) {
+    if (mSensors != nullptr && mSensors->supportsMessageQueues()) {
+        if (mWakeLockQueue->write(&count)) {
+            mWakeLockQueueFlag->wake(asBaseType(WakeLockQueueFlagBits::DATA_WRITTEN));
+        } else {
+            ALOGW("Failed to write wake lock handled");
+        }
+    }
 }
 
 void SensorDevice::autoDisable(void *ident, int handle) {
@@ -230,10 +549,15 @@ void SensorDevice::autoDisable(void *ident, int handle) {
 status_t SensorDevice::activate(void* ident, int handle, int enabled) {
     if (mSensors == nullptr) return NO_INIT;
 
-    status_t err(NO_ERROR);
+    Mutex::Autolock _l(mLock);
+    return activateLocked(ident, handle, enabled);
+}
+
+status_t SensorDevice::activateLocked(void* ident, int handle, int enabled) {
     bool actuateHardware = false;
 
-    Mutex::Autolock _l(mLock);
+    status_t err(NO_ERROR);
+
     ssize_t activationIndex = mActivationCount.indexOfKey(handle);
     if (activationIndex < 0) {
         ALOGW("Handle %d cannot be found in activation record", handle);
@@ -333,6 +657,11 @@ status_t SensorDevice::batch(
              ident, handle, flags, samplingPeriodNs, maxBatchReportLatencyNs);
 
     Mutex::Autolock _l(mLock);
+    return batchLocked(ident, handle, flags, samplingPeriodNs, maxBatchReportLatencyNs);
+}
+
+status_t SensorDevice::batchLocked(void* ident, int handle, int flags, int64_t samplingPeriodNs,
+                                   int64_t maxBatchReportLatencyNs) {
     ssize_t activationIndex = mActivationCount.indexOfKey(handle);
     if (activationIndex < 0) {
         ALOGW("Handle %d cannot be found in activation record", handle);
@@ -563,7 +892,7 @@ int32_t SensorDevice::configureDirectChannel(int32_t sensorHandle,
 
 // ---------------------------------------------------------------------------
 
-int SensorDevice::Info::numActiveClients() {
+int SensorDevice::Info::numActiveClients() const {
     SensorDevice& device(SensorDevice::getInstance());
     int num = 0;
     for (size_t i = 0; i < batchParams.size(); ++i) {
@@ -651,19 +980,9 @@ void SensorDevice::convertToSensorEvents(
         const hidl_vec<Event> &src,
         const hidl_vec<SensorInfo> &dynamicSensorsAdded,
         sensors_event_t *dst) {
-    // Allocate a sensor_t structure for each dynamic sensor added and insert
-    // it into the dictionary of connected dynamic sensors keyed by handle.
-    for (size_t i = 0; i < dynamicSensorsAdded.size(); ++i) {
-        const SensorInfo &info = dynamicSensorsAdded[i];
 
-        auto it = mConnectedDynamicSensors.find(info.sensorHandle);
-        CHECK(it == mConnectedDynamicSensors.end());
-
-        sensor_t *sensor = new sensor_t;
-        convertToSensor(info, sensor);
-
-        mConnectedDynamicSensors.insert(
-                std::make_pair(sensor->handle, sensor));
+    if (dynamicSensorsAdded.size() > 0) {
+        onDynamicSensorsConnected(dynamicSensorsAdded);
     }
 
     for (size_t i = 0; i < src.size(); ++i) {
@@ -672,8 +991,12 @@ void SensorDevice::convertToSensorEvents(
 }
 
 void SensorDevice::handleHidlDeath(const std::string & detail) {
-    // restart is the only option at present.
-    LOG_ALWAYS_FATAL("Abort due to ISensors hidl service failure, detail: %s.", detail.c_str());
+    if (!SensorDevice::getInstance().mSensors->supportsMessageQueues()) {
+        // restart is the only option at present.
+        LOG_ALWAYS_FATAL("Abort due to ISensors hidl service failure, detail: %s.", detail.c_str());
+    } else {
+        ALOGD("ISensors HAL died, death recipient will attempt reconnect");
+    }
 }
 
 // ---------------------------------------------------------------------------

@@ -41,7 +41,7 @@ message LayerProto {
   // The layer's crop in it's own bounds.
   optional RectProto crop = 14;
   // The layer's crop in it's parent's bounds.
-  optional RectProto final_crop = 15;
+  optional RectProto final_crop = 15 [deprecated=true];
   optional bool is_opaque = 16;
   optional bool invalidate = 17;
   optional string dataspace = 18;
@@ -74,8 +74,8 @@ message LayerProto {
   optional FloatRectProto hwc_crop = 31;
   // The layer's composer backend transform
   optional int32 hwc_transform = 32;
-  optional int32 window_type = 33;
-  optional int32 app_id = 34;
+  optional int32 window_type = 33 [deprecated=true];
+  optional int32 app_id = 34 [deprecated=true];
   // The layer's composition type
   optional int32 hwc_composition_type = 35;
   // If it's a buffer layer, indicate if the content is protected
@@ -84,6 +84,13 @@ message LayerProto {
   optional uint64 curr_frame = 37;
   // A list of barriers that the layer is waiting to update state.
   repeated BarrierLayerProto barrier_layer = 38;
+  // If active_buffer is not null, record its transform.
+  optional TransformProto buffer_transform = 39;
+  optional int32 effective_scaling_mode = 40;
+  // Layer's corner radius.
+  optional float corner_radius = 41;
+  // Metadata map. May be empty.
+  map<int32, bytes> metadata = 42;
 }
 
 message PositionProto {

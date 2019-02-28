@@ -17,11 +17,15 @@
 #ifndef ANDROID_SF_VIRTUAL_DISPLAY_SURFACE_H
 #define ANDROID_SF_VIRTUAL_DISPLAY_SURFACE_H
 
-#include "DisplaySurface.h"
-#include "HWComposerBufferCache.h"
+#include <optional>
+#include <string>
 
+#include <compositionengine/DisplaySurface.h>
+#include <compositionengine/impl/HwcBufferCache.h>
 #include <gui/ConsumerBase.h>
 #include <gui/IGraphicBufferProducer.h>
+
+#include "DisplayIdentification.h"
 
 // ---------------------------------------------------------------------------
 namespace android {
@@ -69,17 +73,14 @@ class IProducerListener;
  * the HWC output buffer. When HWC composition is complete, the scratch buffer
  * is released and the output buffer is queued to the sink.
  */
-class VirtualDisplaySurface : public DisplaySurface,
+class VirtualDisplaySurface : public compositionengine::DisplaySurface,
                               public BnGraphicBufferProducer,
                               private ConsumerBase {
 public:
-    friend class ExVirtualDisplaySurface;
-
-    VirtualDisplaySurface(HWComposer& hwc, int32_t dispId,
-            const sp<IGraphicBufferProducer>& sink,
-            const sp<IGraphicBufferProducer>& bqProducer,
-            const sp<IGraphicBufferConsumer>& bqConsumer,
-            const String8& name);
+    VirtualDisplaySurface(HWComposer& hwc, const std::optional<DisplayId>& displayId,
+                          const sp<IGraphicBufferProducer>& sink,
+                          const sp<IGraphicBufferProducer>& bqProducer,
+                          const sp<IGraphicBufferConsumer>& bqConsumer, const std::string& name);
 
     //
     // DisplaySurface interface
@@ -130,7 +131,6 @@ private:
             sp<Fence>* outFence, float outTransformMatrix[16]) override;
     virtual status_t getUniqueId(uint64_t* outId) const override;
     virtual status_t getConsumerUsage(uint64_t* outUsage) const override;
-    virtual void setOutputUsage(uint64_t flag);
 
     //
     // Utility methods
@@ -155,8 +155,8 @@ private:
     // Immutable after construction
     //
     HWComposer& mHwc;
-    const int32_t mDisplayId;
-    const String8 mDisplayName;
+    const std::optional<DisplayId> mDisplayId;
+    const std::string mDisplayName;
     sp<IGraphicBufferProducer> mSource[2]; // indexed by SOURCE_*
     uint32_t mDefaultOutputFormat;
 
@@ -253,7 +253,7 @@ private:
 
     bool mMustRecompose;
 
-    HWComposerBufferCache mHwcBufferCache;
+    compositionengine::impl::HwcBufferCache mHwcBufferCache;
 
     bool mForceHwcCopy;
 };

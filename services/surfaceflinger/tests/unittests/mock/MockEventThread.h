@@ -18,7 +18,7 @@
 
 #include <gmock/gmock.h>
 
-#include "EventThread.h"
+#include "Scheduler/EventThread.h"
 
 namespace android {
 namespace mock {
@@ -28,12 +28,17 @@ public:
     EventThread();
     ~EventThread() override;
 
-    MOCK_CONST_METHOD0(createEventConnection, sp<BnDisplayEventConnection>());
+    MOCK_CONST_METHOD2(createEventConnection,
+                       sp<EventThreadConnection>(ResyncCallback, ResetIdleTimerCallback));
     MOCK_METHOD0(onScreenReleased, void());
     MOCK_METHOD0(onScreenAcquired, void());
-    MOCK_METHOD2(onHotplugReceived, void(int, bool));
-    MOCK_CONST_METHOD1(dump, void(String8&));
+    MOCK_METHOD2(onHotplugReceived, void(PhysicalDisplayId, bool));
+    MOCK_CONST_METHOD1(dump, void(std::string&));
     MOCK_METHOD1(setPhaseOffset, void(nsecs_t phaseOffset));
+    MOCK_METHOD1(registerDisplayEventConnection,
+                 status_t(const sp<android::EventThreadConnection> &));
+    MOCK_METHOD2(setVsyncRate, void(uint32_t, const sp<android::EventThreadConnection> &));
+    MOCK_METHOD2(requestNextVsync, void(const sp<android::EventThreadConnection> &, bool));
 };
 
 } // namespace mock

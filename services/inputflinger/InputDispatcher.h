@@ -18,7 +18,9 @@
 #define _UI_INPUT_DISPATCHER_H
 
 #include <input/Input.h>
+#include <input/InputApplication.h>
 #include <input/InputTransport.h>
+#include <input/InputWindow.h>
 #include <utils/KeyedVector.h>
 #include <utils/Vector.h>
 #include <utils/threads.h>
@@ -27,14 +29,15 @@
 #include <utils/Looper.h>
 #include <utils/BitSet.h>
 #include <cutils/atomic.h>
+#include <unordered_map>
 
 #include <stddef.h>
 #include <unistd.h>
 #include <limits.h>
+#include <unordered_map>
 
-#include "InputWindow.h"
-#include "InputApplication.h"
 #include "InputListener.h"
+#include "InputReporterInterface.h"
 
 
 namespace android {
@@ -158,7 +161,9 @@ struct InputTarget {
 
     // Scaling factor to apply to MotionEvent as it is delivered.
     // (ignored for KeyEvents)
-    float scaleFactor;
+    float globalScaleFactor;
+    float windowXScale = 1.0f;
+    float windowYScale = 1.0f;
 
     // The subset of pointer ids to include in motion events dispatched to this input target
     // if FLAG_SPLIT is set.
@@ -207,11 +212,12 @@ public:
     /* Notifies the system that an application is not responding.
      * Returns a new timeout to continue waiting, or 0 to abort dispatch. */
     virtual nsecs_t notifyANR(const sp<InputApplicationHandle>& inputApplicationHandle,
-            const sp<InputWindowHandle>& inputWindowHandle,
+            const sp<IBinder>& token,
             const std::string& reason) = 0;
 
     /* Notifies the system that an input channel is unrecoverably broken. */
-    virtual void notifyInputChannelBroken(const sp<InputWindowHandle>& inputWindowHandle) = 0;
+    virtual void notifyInputChannelBroken(const sp<IBinder>& token) = 0;
+    virtual void notifyFocusChanged(const sp<IBinder>& oldToken, const sp<IBinder>& newToken) = 0;
 
     /* Gets the input dispatcher configuration. */
     virtual void getDispatcherConfiguration(InputDispatcherConfiguration* outConfig) = 0;
@@ -242,12 +248,12 @@ public:
     virtual void interceptMotionBeforeQueueing(nsecs_t when, uint32_t& policyFlags) = 0;
 
     /* Allows the policy a chance to intercept a key before dispatching. */
-    virtual nsecs_t interceptKeyBeforeDispatching(const sp<InputWindowHandle>& inputWindowHandle,
+    virtual nsecs_t interceptKeyBeforeDispatching(const sp<IBinder>& token,
             const KeyEvent* keyEvent, uint32_t policyFlags) = 0;
 
     /* Allows the policy a chance to perform default processing for an unhandled key.
      * Returns an alternate keycode to redispatch as a fallback, or 0 to give up. */
-    virtual bool dispatchUnhandledKey(const sp<InputWindowHandle>& inputWindowHandle,
+    virtual bool dispatchUnhandledKey(const sp<IBinder>& token,
             const KeyEvent* keyEvent, uint32_t policyFlags, KeyEvent* outFallbackKeyEvent) = 0;
 
     /* Notifies the policy about switch events.
@@ -299,7 +305,7 @@ public:
      *
      * This method may be called on any thread (usually by the input manager).
      */
-    virtual int32_t injectInputEvent(const InputEvent* event, int32_t displayId,
+    virtual int32_t injectInputEvent(const InputEvent* event,
             int32_t injectorPid, int32_t injectorUid, int32_t syncMode, int32_t timeoutMillis,
             uint32_t policyFlags) = 0;
 
@@ -307,14 +313,21 @@ public:
      *
      * This method may be called on any thread (usually by the input manager).
      */
-    virtual void setInputWindows(const Vector<sp<InputWindowHandle> >& inputWindowHandles) = 0;
+    virtual void setInputWindows(const Vector<sp<InputWindowHandle> >& inputWindowHandles,
+            int32_t displayId) = 0;
 
-    /* Sets the focused application.
+    /* Sets the focused application on the given display.
      *
      * This method may be called on any thread (usually by the input manager).
      */
     virtual void setFocusedApplication(
-            const sp<InputApplicationHandle>& inputApplicationHandle) = 0;
+            int32_t displayId, const sp<InputApplicationHandle>& inputApplicationHandle) = 0;
+
+    /* Sets the focused display.
+     *
+     * This method may be called on any thread (usually by the input manager).
+     */
+    virtual void setFocusedDisplay(int32_t displayId) = 0;
 
     /* Sets the input dispatching mode.
      *
@@ -330,21 +343,25 @@ public:
      */
     virtual void setInputFilterEnabled(bool enabled) = 0;
 
-    /* Transfers touch focus from the window associated with one channel to the
-     * window associated with the other channel.
+    /* Transfers touch focus from one window to another window.
      *
      * Returns true on success.  False if the window did not actually have touch focus.
      */
-    virtual bool transferTouchFocus(const sp<InputChannel>& fromChannel,
-            const sp<InputChannel>& toChannel) = 0;
+    virtual bool transferTouchFocus(const sp<IBinder>& fromToken, const sp<IBinder>& toToken) = 0;
 
-    /* Registers or unregister input channels that may be used as targets for input events.
-     * If monitor is true, the channel will receive a copy of all input events.
+    /* Registers input channels that may be used as targets for input events.
+     * If inputWindowHandle is null, and displayId is not ADISPLAY_ID_NONE,
+     * the channel will receive a copy of all input events form the specific displayId.
      *
-     * These methods may be called on any thread (usually by the input manager).
+     * This method may be called on any thread (usually by the input manager).
      */
-    virtual status_t registerInputChannel(const sp<InputChannel>& inputChannel,
-            const sp<InputWindowHandle>& inputWindowHandle, bool monitor) = 0;
+    virtual status_t registerInputChannel(
+            const sp<InputChannel>& inputChannel, int32_t displayId) = 0;
+
+    /* Unregister input channels that will no longer receive input events.
+     *
+     * This method may be called on any thread (usually by the input manager).
+     */
     virtual status_t unregisterInputChannel(const sp<InputChannel>& inputChannel) = 0;
 };
 
@@ -383,20 +400,22 @@ public:
     virtual void notifySwitch(const NotifySwitchArgs* args);
     virtual void notifyDeviceReset(const NotifyDeviceResetArgs* args);
 
-    virtual int32_t injectInputEvent(const InputEvent* event, int32_t displayId,
+    virtual int32_t injectInputEvent(const InputEvent* event,
             int32_t injectorPid, int32_t injectorUid, int32_t syncMode, int32_t timeoutMillis,
             uint32_t policyFlags);
 
-    virtual void setInputWindows(const Vector<sp<InputWindowHandle> >& inputWindowHandles);
-    virtual void setFocusedApplication(const sp<InputApplicationHandle>& inputApplicationHandle);
+    virtual void setInputWindows(const Vector<sp<InputWindowHandle> >& inputWindowHandles,
+            int32_t displayId);
+    virtual void setFocusedApplication(int32_t displayId,
+            const sp<InputApplicationHandle>& inputApplicationHandle);
+    virtual void setFocusedDisplay(int32_t displayId);
     virtual void setInputDispatchMode(bool enabled, bool frozen);
     virtual void setInputFilterEnabled(bool enabled);
 
-    virtual bool transferTouchFocus(const sp<InputChannel>& fromChannel,
-            const sp<InputChannel>& toChannel);
+    virtual bool transferTouchFocus(const sp<IBinder>& fromToken, const sp<IBinder>& toToken);
 
     virtual status_t registerInputChannel(const sp<InputChannel>& inputChannel,
-            const sp<InputWindowHandle>& inputWindowHandle, bool monitor);
+            int32_t displayId);
     virtual status_t unregisterInputChannel(const sp<InputChannel>& inputChannel);
 
 private:
@@ -406,7 +425,7 @@ private:
         T* prev;
 
     protected:
-        inline Link() : next(NULL), prev(NULL) { }
+        inline Link() : next(nullptr), prev(nullptr) { }
     };
 
     struct InjectionState {
@@ -433,6 +452,7 @@ private:
             TYPE_MOTION
         };
 
+        uint32_t sequenceNum;
         mutable int32_t refCount;
         int32_t type;
         nsecs_t eventTime;
@@ -441,20 +461,20 @@ private:
 
         bool dispatchInProgress; // initially false, set to true while dispatching
 
-        inline bool isInjected() const { return injectionState != NULL; }
+        inline bool isInjected() const { return injectionState != nullptr; }
 
         void release();
 
         virtual void appendDescription(std::string& msg) const = 0;
 
     protected:
-        EventEntry(int32_t type, nsecs_t eventTime, uint32_t policyFlags);
+        EventEntry(uint32_t sequenceNum, int32_t type, nsecs_t eventTime, uint32_t policyFlags);
         virtual ~EventEntry();
         void releaseInjectionState();
     };
 
     struct ConfigurationChangedEntry : EventEntry {
-        explicit ConfigurationChangedEntry(nsecs_t eventTime);
+        explicit ConfigurationChangedEntry(uint32_t sequenceNum, nsecs_t eventTime);
         virtual void appendDescription(std::string& msg) const;
 
     protected:
@@ -464,7 +484,7 @@ private:
     struct DeviceResetEntry : EventEntry {
         int32_t deviceId;
 
-        DeviceResetEntry(nsecs_t eventTime, int32_t deviceId);
+        DeviceResetEntry(uint32_t sequenceNum, nsecs_t eventTime, int32_t deviceId);
         virtual void appendDescription(std::string& msg) const;
 
     protected:
@@ -474,6 +494,7 @@ private:
     struct KeyEntry : EventEntry {
         int32_t deviceId;
         uint32_t source;
+        int32_t displayId;
         int32_t action;
         int32_t flags;
         int32_t keyCode;
@@ -493,9 +514,9 @@ private:
         InterceptKeyResult interceptKeyResult; // set based on the interception result
         nsecs_t interceptKeyWakeupTime; // used with INTERCEPT_KEY_RESULT_TRY_AGAIN_LATER
 
-        KeyEntry(nsecs_t eventTime,
-                int32_t deviceId, uint32_t source, uint32_t policyFlags, int32_t action,
-                int32_t flags, int32_t keyCode, int32_t scanCode, int32_t metaState,
+        KeyEntry(uint32_t sequenceNum, nsecs_t eventTime,
+                int32_t deviceId, uint32_t source, int32_t displayId, uint32_t policyFlags,
+                int32_t action, int32_t flags, int32_t keyCode, int32_t scanCode, int32_t metaState,
                 int32_t repeatCount, nsecs_t downTime);
         virtual void appendDescription(std::string& msg) const;
         void recycle();
@@ -508,26 +529,27 @@ private:
         nsecs_t eventTime;
         int32_t deviceId;
         uint32_t source;
+        int32_t displayId;
         int32_t action;
         int32_t actionButton;
         int32_t flags;
         int32_t metaState;
         int32_t buttonState;
+        MotionClassification classification;
         int32_t edgeFlags;
         float xPrecision;
         float yPrecision;
         nsecs_t downTime;
-        int32_t displayId;
         uint32_t pointerCount;
         PointerProperties pointerProperties[MAX_POINTERS];
         PointerCoords pointerCoords[MAX_POINTERS];
 
-        MotionEntry(nsecs_t eventTime,
-                int32_t deviceId, uint32_t source, uint32_t policyFlags,
+        MotionEntry(uint32_t sequenceNum, nsecs_t eventTime,
+                int32_t deviceId, uint32_t source, int32_t displayId, uint32_t policyFlags,
                 int32_t action, int32_t actionButton, int32_t flags,
-                int32_t metaState, int32_t buttonState, int32_t edgeFlags,
-                float xPrecision, float yPrecision, nsecs_t downTime,
-                int32_t displayId, uint32_t pointerCount,
+                int32_t metaState, int32_t buttonState, MotionClassification classification,
+                int32_t edgeFlags, float xPrecision, float yPrecision,
+                nsecs_t downTime, uint32_t pointerCount,
                 const PointerProperties* pointerProperties, const PointerCoords* pointerCoords,
                 float xOffset, float yOffset);
         virtual void appendDescription(std::string& msg) const;
@@ -544,7 +566,9 @@ private:
         int32_t targetFlags;
         float xOffset;
         float yOffset;
-        float scaleFactor;
+        float globalScaleFactor;
+        float windowXScale = 1.0f;
+        float windowYScale = 1.0f;
         nsecs_t deliveryTime; // time when the event was actually delivered
 
         // Set to the resolved action and flags when the event is enqueued.
@@ -552,7 +576,8 @@ private:
         int32_t resolvedFlags;
 
         DispatchEntry(EventEntry* eventEntry,
-                int32_t targetFlags, float xOffset, float yOffset, float scaleFactor);
+                int32_t targetFlags, float xOffset, float yOffset,
+                float globalScaleFactor, float windowXScale, float windowYScale);
         ~DispatchEntry();
 
         inline bool hasForegroundTarget() const {
@@ -600,11 +625,13 @@ private:
         nsecs_t eventTime;
         KeyEntry* keyEntry;
         sp<InputApplicationHandle> inputApplicationHandle;
-        sp<InputWindowHandle> inputWindowHandle;
         std::string reason;
         int32_t userActivityEventType;
         uint32_t seq;
         bool handled;
+        sp<InputChannel> inputChannel;
+        sp<IBinder> oldToken;
+        sp<IBinder> newToken;
     };
 
     // Generic queue implementation.
@@ -614,7 +641,7 @@ private:
         T* tail;
         uint32_t entryCount;
 
-        inline Queue() : head(NULL), tail(NULL), entryCount(0) {
+        inline Queue() : head(nullptr), tail(nullptr), entryCount(0) {
         }
 
         inline bool isEmpty() const {
@@ -629,7 +656,7 @@ private:
             } else {
                 head = entry;
             }
-            entry->next = NULL;
+            entry->next = nullptr;
             tail = entry;
         }
 
@@ -641,7 +668,7 @@ private:
             } else {
                 tail = entry;
             }
-            entry->prev = NULL;
+            entry->prev = nullptr;
             head = entry;
         }
 
@@ -664,9 +691,9 @@ private:
             T* entry = head;
             head = entry->next;
             if (head) {
-                head->prev = NULL;
+                head->prev = nullptr;
             } else {
-                tail = NULL;
+                tail = nullptr;
             }
             return entry;
         }
@@ -683,6 +710,10 @@ private:
             CANCEL_POINTER_EVENTS = 1,
             CANCEL_NON_POINTER_EVENTS = 2,
             CANCEL_FALLBACK_EVENTS = 3,
+
+            /* Cancel events where the display not specified. These events would go to the focused
+             * display. */
+            CANCEL_DISPLAY_UNSPECIFIED_EVENTS = 4,
         };
 
         // The criterion to use to determine which events should be canceled.
@@ -754,6 +785,7 @@ private:
         struct KeyMemento {
             int32_t deviceId;
             uint32_t source;
+            int32_t displayId;
             int32_t keyCode;
             int32_t scanCode;
             int32_t metaState;
@@ -765,11 +797,11 @@ private:
         struct MotionMemento {
             int32_t deviceId;
             uint32_t source;
+            int32_t displayId;
             int32_t flags;
             float xPrecision;
             float yPrecision;
             nsecs_t downTime;
-            int32_t displayId;
             uint32_t pointerCount;
             PointerProperties pointerProperties[MAX_POINTERS];
             PointerCoords pointerCoords[MAX_POINTERS];
@@ -812,7 +844,6 @@ private:
 
         Status status;
         sp<InputChannel> inputChannel; // never null
-        sp<InputWindowHandle> inputWindowHandle; // may be null
         bool monitor;
         InputPublisher inputPublisher;
         InputState inputState;
@@ -828,8 +859,7 @@ private:
         // yet received a "finished" response from the application.
         Queue<DispatchEntry> waitQueue;
 
-        explicit Connection(const sp<InputChannel>& inputChannel,
-                const sp<InputWindowHandle>& inputWindowHandle, bool monitor);
+        explicit Connection(const sp<InputChannel>& inputChannel, bool monitor);
 
         inline const std::string getInputChannelName() const { return inputChannel->getName(); }
 
@@ -891,15 +921,23 @@ private:
     // to transfer focus to a new application.
     EventEntry* mNextUnblockedEvent;
 
-    sp<InputWindowHandle> findTouchedWindowAtLocked(int32_t displayId, int32_t x, int32_t y);
+    sp<InputWindowHandle> findTouchedWindowAtLocked(int32_t displayId, int32_t x, int32_t y,
+            bool addOutsideTargets = false, bool addPortalWindows = false);
 
     // All registered connections mapped by channel file descriptor.
     KeyedVector<int, sp<Connection> > mConnectionsByFd;
 
+    struct IBinderHash {
+        std::size_t operator()(const sp<IBinder>& b) const {
+            return std::hash<IBinder *>{}(b.get());
+        }
+    };
+    std::unordered_map<sp<IBinder>, sp<InputChannel>, IBinderHash> mInputChannelsByToken;
+
     ssize_t getConnectionIndexLocked(const sp<InputChannel>& inputChannel);
 
-    // Input channels that will receive a copy of all input events.
-    Vector<sp<InputChannel> > mMonitoringChannels;
+    // Input channels that will receive a copy of all input events sent to the provided display.
+    std::unordered_map<int32_t, Vector<sp<InputChannel>>> mMonitoringChannelsByDisplay;
 
     // Event injection and synchronization.
     Condition mInjectionResultAvailableCondition;
@@ -932,6 +970,9 @@ private:
     };
     // Maps the key code replaced, device id tuple to the key code it was replaced with
     KeyedVector<KeyReplacement, int32_t> mReplacedKeys;
+    // Process certain Meta + Key combinations
+    void accelerateMetaShortcuts(const int32_t deviceId, const int32_t action,
+            int32_t& keyCode, int32_t& metaState);
 
     // Deferred command processing.
     bool haveCommandsLocked() const;
@@ -952,13 +993,15 @@ private:
     bool mDispatchFrozen;
     bool mInputFilterEnabled;
 
-    Vector<sp<InputWindowHandle> > mWindowHandles;
-
-    sp<InputWindowHandle> getWindowHandleLocked(const sp<InputChannel>& inputChannel) const;
+    std::unordered_map<int32_t, Vector<sp<InputWindowHandle>>> mWindowHandlesByDisplay;
+    // Get window handles by display, return an empty vector if not found.
+    Vector<sp<InputWindowHandle>> getWindowHandlesLocked(int32_t displayId) const;
+    sp<InputWindowHandle> getWindowHandleLocked(const sp<IBinder>& windowHandleToken) const;
+    sp<InputChannel> getInputChannelLocked(const sp<IBinder>& windowToken) const;
     bool hasWindowHandleLocked(const sp<InputWindowHandle>& windowHandle) const;
 
     // Focus tracking for keys, trackball, etc.
-    sp<InputWindowHandle> mFocusedWindowHandle;
+    std::unordered_map<int32_t, sp<InputWindowHandle>> mFocusedWindowHandlesByDisplay;
 
     // Focus tracking for touch.
     struct TouchedWindow {
@@ -974,13 +1017,20 @@ private:
         int32_t displayId; // id to the display that currently has a touch, others are rejected
         Vector<TouchedWindow> windows;
 
+        // This collects the portal windows that the touch has gone through. Each portal window
+        // targets a display (embedded display for most cases). With this info, we can add the
+        // monitoring channels of the displays touched.
+        Vector<sp<InputWindowHandle>> portalWindows;
+
         TouchState();
         ~TouchState();
         void reset();
         void copyFrom(const TouchState& other);
         void addOrUpdateWindow(const sp<InputWindowHandle>& windowHandle,
                 int32_t targetFlags, BitSet32 pointerIds);
+        void addPortalWindow(const sp<InputWindowHandle>& windowHandle);
         void removeWindow(const sp<InputWindowHandle>& windowHandle);
+        void removeWindowByToken(const sp<IBinder>& token);
         void filterNonAsIsTouchWindows();
         sp<InputWindowHandle> getFirstForegroundWindowHandle() const;
         bool isSlippery() const;
@@ -989,8 +1039,11 @@ private:
     KeyedVector<int32_t, TouchState> mTouchStatesByDisplay;
     TouchState mTempTouchState;
 
-    // Focused application.
-    sp<InputApplicationHandle> mFocusedApplicationHandle;
+    // Focused applications.
+    std::unordered_map<int32_t, sp<InputApplicationHandle>> mFocusedApplicationHandlesByDisplay;
+
+    // Top focused display.
+    int32_t mFocusedDisplayId;
 
     // Dispatcher state at time of last ANR.
     std::string mLastANRState;
@@ -1023,7 +1076,7 @@ private:
     nsecs_t mInputTargetWaitStartTime;
     nsecs_t mInputTargetWaitTimeoutTime;
     bool mInputTargetWaitTimeoutExpired;
-    sp<InputApplicationHandle> mInputTargetWaitApplicationHandle;
+    sp<IBinder> mInputTargetWaitApplicationToken;
 
     // Contains the last window which received a hover event.
     sp<InputWindowHandle> mLastHoverWindowHandle;
@@ -1033,11 +1086,15 @@ private:
             const sp<InputApplicationHandle>& applicationHandle,
             const sp<InputWindowHandle>& windowHandle,
             nsecs_t* nextWakeupTime, const char* reason);
+
+    void removeWindowByTokenLocked(const sp<IBinder>& token);
+
     void resumeAfterTargetsNotReadyTimeoutLocked(nsecs_t newTimeout,
             const sp<InputChannel>& inputChannel);
     nsecs_t getTimeSpentWaitingForApplicationLocked(nsecs_t currentTime);
     void resetANRTimeoutsLocked();
 
+    int32_t getTargetDisplayId(const EventEntry* entry);
     int32_t findFocusedWindowTargetsLocked(nsecs_t currentTime, const EventEntry* entry,
             Vector<InputTarget>& inputTargets, nsecs_t* nextWakeupTime);
     int32_t findTouchedWindowTargetsLocked(nsecs_t currentTime, const MotionEntry* entry,
@@ -1046,7 +1103,8 @@ private:
 
     void addWindowTargetLocked(const sp<InputWindowHandle>& windowHandle,
             int32_t targetFlags, BitSet32 pointerIds, Vector<InputTarget>& inputTargets);
-    void addMonitoringTargetsLocked(Vector<InputTarget>& inputTargets);
+    void addMonitoringTargetsLocked(Vector<InputTarget>& inputTargets, int32_t displayId,
+            float xOffset = 0, float yOffset = 0);
 
     void pokeUserActivityLocked(const EventEntry* eventEntry);
     bool checkInjectionPermission(const sp<InputWindowHandle>& windowHandle,
@@ -1111,6 +1169,8 @@ private:
             nsecs_t currentTime, const sp<Connection>& connection, uint32_t seq, bool handled);
     void onDispatchCycleBrokenLocked(
             nsecs_t currentTime, const sp<Connection>& connection);
+    void onFocusChangedLocked(const sp<InputWindowHandle>& oldFocus,
+            const sp<InputWindowHandle>& newFocus);
     void onANRLocked(
             nsecs_t currentTime, const sp<InputApplicationHandle>& applicationHandle,
             const sp<InputWindowHandle>& windowHandle,
@@ -1119,6 +1179,7 @@ private:
     // Outbound policy interactions.
     void doNotifyConfigurationChangedInterruptible(CommandEntry* commandEntry);
     void doNotifyInputChannelBrokenLockedInterruptible(CommandEntry* commandEntry);
+    void doNotifyFocusChangedLockedInterruptible(CommandEntry* commandEntry);
     void doNotifyANRLockedInterruptible(CommandEntry* commandEntry);
     void doInterceptKeyBeforeDispatchingLockedInterruptible(CommandEntry* commandEntry);
     void doDispatchCycleFinishedLockedInterruptible(CommandEntry* commandEntry);
@@ -1135,6 +1196,8 @@ private:
     void traceInboundQueueLengthLocked();
     void traceOutboundQueueLengthLocked(const sp<Connection>& connection);
     void traceWaitQueueLengthLocked(const sp<Connection>& connection);
+
+    sp<InputReporterInterface> mReporter;
 };
 
 /* Enqueues and dispatches input events, endlessly. */
