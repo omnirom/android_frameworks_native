@@ -64,6 +64,12 @@ public:
     constexpr static float sDefaultMinLumiance = 0.0;
     constexpr static float sDefaultMaxLumiance = 500.0;
 
+    // region in layer-stack space
+    mutable Region dirtyRegion;
+    // region in screen space
+    Region undefinedRegion;
+    bool lastCompositionHadVisibleLayers;
+
     enum {
         NO_LAYER_STACK = 0xFFFFFFFF,
     };

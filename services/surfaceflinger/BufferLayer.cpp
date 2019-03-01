@@ -553,6 +553,7 @@ bool BufferLayer::latchUnsignaledBuffers() {
         latch = atoi(value);
         propertyLoaded = true;
     }
+
     return latch;
 }
 
