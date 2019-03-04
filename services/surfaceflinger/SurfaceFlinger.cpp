@@ -2209,9 +2209,6 @@ void SurfaceFlinger::setUpHWComposer() {
         // - When a display is created with a private layer stack, we won't
         //   emit any black frames until a layer is added to the layer stack.
         bool mustRecompose = dirty && !(empty && wasEmpty);
-        const auto hwcId = mDisplays[dpy]->getHwcDisplayId();
-        mDisplays[dpy]->mustRecompose = mustRecompose;
-        ALOGV("hwcId %d, mustRecompose %d", hwcId, mustRecompose);
 
         ALOGV_IF(mDisplays[dpy]->getDisplayType() == DisplayDevice::DISPLAY_VIRTUAL,
                 "dpy[%zu]: %s composition (%sdirty %sempty %swasEmpty)", dpy,
@@ -2309,7 +2306,7 @@ void SurfaceFlinger::setUpHWComposer() {
 
     for (size_t displayId = 0; displayId < mDisplays.size(); ++displayId) {
         auto& displayDevice = mDisplays[displayId];
-        if (!displayDevice->isDisplayOn() || !displayDevice->mustRecompose) {
+        if (!displayDevice->isDisplayOn()) {
             continue;
         }
 
@@ -2354,7 +2351,7 @@ void SurfaceFlinger::postFramebuffer()
             continue;
         }
         const auto hwcId = displayDevice->getHwcDisplayId();
-        if (hwcId >= 0 && displayDevice->mustRecompose) {
+        if (hwcId >= 0) {
             getBE().mHwc->presentAndGetReleaseFences(hwcId);
         }
         displayDevice->onSwapBuffersCompleted();
@@ -3155,7 +3152,8 @@ void SurfaceFlinger::doDisplayComposition(
     // 1) It is being handled by hardware composer, which may need this to
     //    keep its virtual display state machine in sync, or
     // 2) There is work to be done (the dirty region isn't empty)
-    if (inDirtyRegion.isEmpty()) {
+    bool isHwcDisplay = displayDevice->getHwcDisplayId() >= 0;
+    if (!isHwcDisplay && inDirtyRegion.isEmpty()) {
         ALOGV("Skipping display composition");
         return;
     }
