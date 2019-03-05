@@ -51,6 +51,7 @@
 #include "SurfaceFlinger.h"
 #include "TransactionCompletedThread.h"
 
+#include "DisplayHardware/ComposerHal.h"
 #include "DisplayHardware/HWComposer.h"
 #include "RenderArea.h"
 
@@ -70,6 +71,7 @@ class LayerBE;
 
 namespace compositionengine {
 class Layer;
+class OutputLayer;
 }
 
 namespace impl {
@@ -349,8 +351,15 @@ public:
 
     void computeGeometry(const RenderArea& renderArea, renderengine::Mesh& mesh,
                          bool useIdentityTransform) const;
-    FloatRect computeBounds(const Region& activeTransparentRegion) const;
-    FloatRect computeBounds() const;
+    FloatRect getBounds(const Region& activeTransparentRegion) const;
+    FloatRect getBounds() const;
+
+    // Compute bounds for the layer and cache the results.
+    void computeBounds(FloatRect parentBounds, ui::Transform parentTransform);
+
+    // Get effective layer transform, taking into account all its parent transform with any
+    // scaling if the parent scaling more is not NATIVE_WINDOW_SCALING_MODE_FREEZE.
+    ui::Transform getTransformWithScale() const;
 
     int32_t getSequence() const { return sequence; }
 
@@ -412,7 +421,7 @@ public:
     void writeToProto(LayerProto* layerInfo,
                       LayerVector::StateSet stateSet = LayerVector::StateSet::Drawing);
 
-    void writeToProto(LayerProto* layerInfo, DisplayId displayId);
+    void writeToProto(LayerProto* layerInfo, const sp<DisplayDevice>& displayDevice);
 
     virtual Geometry getActiveGeometry(const Layer::State& s) const { return s.active_legacy; }
     virtual uint32_t getActiveWidth(const Layer::State& s) const { return s.active_legacy.w; }
@@ -436,17 +445,19 @@ public:
     virtual bool isHdrY410() const { return false; }
 
     void setGeometry(const sp<const DisplayDevice>& display, uint32_t z);
-    void forceClientComposition(DisplayId displayId);
-    bool getForceClientComposition(DisplayId displayId);
-    virtual void setPerFrameData(DisplayId displayId, const ui::Transform& transform,
-                                 const Rect& viewport, int32_t supportedPerFrameMetadata) = 0;
+    void forceClientComposition(const sp<DisplayDevice>& display);
+    bool getForceClientComposition(const sp<DisplayDevice>& display);
+    virtual void setPerFrameData(const sp<const DisplayDevice>& display,
+                                 const ui::Transform& transform, const Rect& viewport,
+                                 int32_t supportedPerFrameMetadata) = 0;
 
     // callIntoHwc exists so we can update our local state and call
     // acceptDisplayChanges without unnecessarily updating the device's state
-    void setCompositionType(DisplayId displayId, HWC2::Composition type, bool callIntoHwc = true);
-    HWC2::Composition getCompositionType(const std::optional<DisplayId>& displayId) const;
-    void setClearClientTarget(DisplayId displayId, bool clear);
-    bool getClearClientTarget(DisplayId displayId) const;
+    void setCompositionType(const sp<const DisplayDevice>& display,
+                            Hwc2::IComposerClient::Composition type);
+    Hwc2::IComposerClient::Composition getCompositionType(
+            const sp<const DisplayDevice>& display) const;
+    bool getClearClientTarget(const sp<const DisplayDevice>& display) const;
     void updateCursorPosition(const sp<const DisplayDevice>& display);
 
     /*
@@ -523,8 +534,7 @@ public:
      * operation, so this should be set only if needed). Typically this is used
      * to figure out if the content or size of a surface has changed.
      */
-    virtual bool latchBuffer(bool& /*recomputeVisibleRegions*/, nsecs_t /*latchTime*/,
-                             const sp<Fence>& /*releaseFence*/) {
+    virtual bool latchBuffer(bool& /*recomputeVisibleRegions*/, nsecs_t /*latchTime*/) {
         return {};
     }
 
@@ -560,27 +570,13 @@ public:
 
     // -----------------------------------------------------------------------
 
-    bool createHwcLayer(HWComposer* hwc, DisplayId displayId);
-    bool destroyHwcLayer(DisplayId displayId);
-    void destroyHwcLayersForAllDisplays();
-    void destroyAllHwcLayersPlusChildren();
+    bool createHwcLayer(HWComposer* hwc, const sp<DisplayDevice>& display);
+    bool destroyHwcLayer(const sp<DisplayDevice>& display);
+    bool destroyHwcLayersForAllDisplays();
+    bool destroyAllHwcLayersPlusChildren();
 
-    bool hasHwcLayer(DisplayId displayId) const { return getBE().mHwcLayers.count(displayId) > 0; }
-
-    HWC2::Layer* getHwcLayer(DisplayId displayId) {
-        if (!hasHwcLayer(displayId)) {
-            return nullptr;
-        }
-        return getBE().mHwcLayers[displayId].layer.get();
-    }
-
-    bool setHwcLayer(DisplayId displayId) {
-        if (!hasHwcLayer(displayId)) {
-            return false;
-        }
-        getBE().compositionInfo.hwc.hwcLayer = getBE().mHwcLayers[displayId].layer;
-        return true;
-    }
+    bool hasHwcLayer(const sp<const DisplayDevice>& displayDevice);
+    HWC2::Layer* getHwcLayer(const sp<const DisplayDevice>& displayDevice);
 
     // -----------------------------------------------------------------------
     void clearWithOpenGL(const RenderArea& renderArea) const;
@@ -593,7 +589,7 @@ public:
 
     /* always call base class first */
     static void miniDumpHeader(std::string& result);
-    void miniDump(std::string& result, DisplayId displayId) const;
+    void miniDump(std::string& result, const sp<DisplayDevice>& display) const;
     void dumpFrameStats(std::string& result) const;
     void dumpFrameEvents(std::string& result);
     void clearFrameStats();
@@ -643,7 +639,7 @@ public:
     ssize_t removeChild(const sp<Layer>& layer);
     sp<Layer> getParent() const { return mCurrentParent.promote(); }
     bool hasParent() const { return getParent() != nullptr; }
-    Rect computeScreenBounds(bool reduceTransparentRegion = true) const;
+    Rect getScreenBounds(bool reduceTransparentRegion = true) const;
     bool setChildLayer(const sp<Layer>& childLayer, int32_t z);
     bool setChildRelativeLayer(const sp<Layer>& childLayer,
             const sp<IBinder>& relativeToHandle, int32_t relativeZ);
@@ -659,6 +655,18 @@ public:
      * any buffer transformations. If the layer has no buffer then return INVALID_RECT.
      */
     virtual Rect getBufferSize(const Layer::State&) const { return Rect::INVALID_RECT; }
+
+    /**
+     * Returns the source bounds. If the bounds are not defined, it is inferred from the
+     * buffer size. Failing that, the bounds are determined from the passed in parent bounds.
+     * For the root layer, this is the display viewport size.
+     */
+    virtual FloatRect computeSourceBounds(const FloatRect& parentBounds) const {
+        return parentBounds;
+    }
+
+    compositionengine::OutputLayer* findOutputLayerForDisplay(
+            const sp<const DisplayDevice>& display) const;
 
 protected:
     // constant
@@ -816,6 +824,7 @@ protected:
     FenceTimeline mReleaseTimeline;
 
     // main thread
+    sp<NativeHandle> mSidebandStream;
     // Active buffer fields
     sp<GraphicBuffer> mActiveBuffer;
     sp<Fence> mActiveBufferFence;
@@ -879,28 +888,36 @@ private:
     LayerVector makeChildrenTraversalList(LayerVector::StateSet stateSet,
                                           const std::vector<Layer*>& layersInTree);
     /**
-     * Retuns the child bounds in layer space cropped to its bounds as well all its parent bounds.
-     * The cropped bounds must be transformed back from parent layer space to child layer space by
-     * applying the inverse of the child's transformation.
-     */
-    FloatRect cropChildBounds(const FloatRect& childBounds) const;
-
-    /**
      * Returns the cropped buffer size or the layer crop if the layer has no buffer. Return
      * INVALID_RECT if the layer has no buffer and no crop.
      * A layer with an invalid buffer size and no crop is considered to be boundless. The layer
      * bounds are constrained by its parent bounds.
      */
     Rect getCroppedBufferSize(const Layer::State& s) const;
+
+    // Cached properties computed from drawing state
+    // Effective transform taking into account parent transforms and any parent scaling.
+    ui::Transform mEffectiveTransform;
+
+    // Bounds of the layer before any transformation is applied and before it has been cropped
+    // by its parents.
+    FloatRect mSourceBounds;
+
+    // Bounds of the layer in layer space. This is the mSourceBounds cropped by its layer crop and
+    // its parent bounds.
+    FloatRect mBounds;
+
+    // Layer bounds in screen space.
+    FloatRect mScreenBounds;
 };
 
 } // namespace android
 
-#define RETURN_IF_NO_HWC_LAYER(displayId, ...)                                         \
+#define RETURN_IF_NO_HWC_LAYER(displayDevice, ...)                                     \
     do {                                                                               \
-        if (!hasHwcLayer(displayId)) {                                                 \
+        if (!hasHwcLayer(displayDevice)) {                                             \
             ALOGE("[%s] %s failed: no HWC layer found for display %s", mName.string(), \
-                  __FUNCTION__, to_string(displayId).c_str());                         \
+                  __FUNCTION__, displayDevice->getDebugName().c_str());                \
             return __VA_ARGS__;                                                        \
         }                                                                              \
     } while (false)

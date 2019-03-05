@@ -47,8 +47,8 @@ std::unique_ptr<BufferHubBuffer> BufferHubBuffer::create(uint32_t width, uint32_
     return buffer->isValid() ? std::move(buffer) : nullptr;
 }
 
-std::unique_ptr<BufferHubBuffer> BufferHubBuffer::import(const native_handle_t* token) {
-    if (token == nullptr) {
+std::unique_ptr<BufferHubBuffer> BufferHubBuffer::import(const sp<NativeHandle>& token) {
+    if (token == nullptr || token.get() == nullptr) {
         ALOGE("%s: token cannot be nullptr!", __FUNCTION__);
         return nullptr;
     }
@@ -78,15 +78,14 @@ BufferHubBuffer::BufferHubBuffer(uint32_t width, uint32_t height, uint32_t layer
     BufferHubStatus ret;
     sp<IBufferClient> client;
     BufferTraits bufferTraits;
-    IBufferHub::allocateBuffer_cb alloc_cb = [&](const auto& status, const auto& outClient,
-                                                 const auto& traits) {
+    IBufferHub::allocateBuffer_cb allocCb = [&](const auto& status, const auto& outClient,
+                                                const auto& outTraits) {
         ret = status;
         client = std::move(outClient);
-        bufferTraits = std::move(traits);
+        bufferTraits = std::move(outTraits);
     };
 
-    if (!bufferhub->allocateBuffer(desc, static_cast<uint32_t>(userMetadataSize), alloc_cb)
-                 .isOk()) {
+    if (!bufferhub->allocateBuffer(desc, static_cast<uint32_t>(userMetadataSize), allocCb).isOk()) {
         ALOGE("%s: allocateBuffer transaction failed!", __FUNCTION__);
         return;
     } else if (ret != BufferHubStatus::NO_ERROR) {
@@ -105,7 +104,7 @@ BufferHubBuffer::BufferHubBuffer(uint32_t width, uint32_t height, uint32_t layer
     mBufferClient = std::move(client);
 }
 
-BufferHubBuffer::BufferHubBuffer(const native_handle_t* token) {
+BufferHubBuffer::BufferHubBuffer(const sp<NativeHandle>& token) {
     sp<IBufferHub> bufferhub = IBufferHub::getService();
     if (bufferhub.get() == nullptr) {
         ALOGE("%s: BufferHub service not found!", __FUNCTION__);
@@ -115,16 +114,16 @@ BufferHubBuffer::BufferHubBuffer(const native_handle_t* token) {
     BufferHubStatus ret;
     sp<IBufferClient> client;
     BufferTraits bufferTraits;
-    IBufferHub::importBuffer_cb import_cb = [&](const auto& status, const auto& outClient,
-                                                const auto& traits) {
+    IBufferHub::importBuffer_cb importCb = [&](const auto& status, const auto& outClient,
+                                               const auto& outTraits) {
         ret = status;
         client = std::move(outClient);
-        bufferTraits = std::move(traits);
+        bufferTraits = std::move(outTraits);
     };
 
     // hidl_handle(native_handle_t*) simply creates a raw pointer reference withouth ownership
     // transfer.
-    if (!bufferhub->importBuffer(hidl_handle(token), import_cb).isOk()) {
+    if (!bufferhub->importBuffer(hidl_handle(token.get()->handle()), importCb).isOk()) {
         ALOGE("%s: importBuffer transaction failed!", __FUNCTION__);
         return;
     } else if (ret != BufferHubStatus::NO_ERROR) {
@@ -210,9 +209,9 @@ int BufferHubBuffer::initWithBufferTraits(const BufferTraits& bufferTraits) {
 
     // Populate shortcuts to the atomics in metadata.
     auto metadataHeader = mMetadata.metadataHeader();
-    mBufferState = &metadataHeader->buffer_state;
-    mFenceState = &metadataHeader->fence_state;
-    mActiveClientsBitMask = &metadataHeader->active_clients_bit_mask;
+    mBufferState = &metadataHeader->bufferState;
+    mFenceState = &metadataHeader->fenceState;
+    mActiveClientsBitMask = &metadataHeader->activeClientsBitMask;
     // The C++ standard recommends (but does not require) that lock-free atomic operations are
     // also address-free, that is, suitable for communication between processes using shared
     // memory.
@@ -230,7 +229,7 @@ int BufferHubBuffer::initWithBufferTraits(const BufferTraits& bufferTraits) {
     mClientStateMask = clientBitMask;
 
     // TODO(b/112012161) Set up shared fences.
-    ALOGD("%s: id=%d, buffer_state=%" PRIx32 ".", __FUNCTION__, mId,
+    ALOGD("%s: id=%d, mBufferState=%" PRIx32 ".", __FUNCTION__, mId,
           mBufferState->load(std::memory_order_acquire));
     return 0;
 }
@@ -328,7 +327,7 @@ bool BufferHubBuffer::isValid() const {
             mEventFd.get() >= 0 && mMetadata.isValid() && mBufferClient != nullptr;
 }
 
-native_handle_t* BufferHubBuffer::duplicate() {
+sp<NativeHandle> BufferHubBuffer::duplicate() {
     if (mBufferClient == nullptr) {
         ALOGE("%s: missing BufferClient!", __FUNCTION__);
         return nullptr;
@@ -336,12 +335,12 @@ native_handle_t* BufferHubBuffer::duplicate() {
 
     hidl_handle token;
     BufferHubStatus ret;
-    IBufferClient::duplicate_cb dup_cb = [&](const auto& outToken, const auto& status) {
+    IBufferClient::duplicate_cb dupCb = [&](const auto& outToken, const auto& status) {
         token = std::move(outToken);
         ret = status;
     };
 
-    if (!mBufferClient->duplicate(dup_cb).isOk()) {
+    if (!mBufferClient->duplicate(dupCb).isOk()) {
         ALOGE("%s: duplicate transaction failed!", __FUNCTION__);
         return nullptr;
     } else if (ret != BufferHubStatus::NO_ERROR) {
@@ -352,7 +351,7 @@ native_handle_t* BufferHubBuffer::duplicate() {
         return nullptr;
     }
 
-    return native_handle_clone(token.getNativeHandle());
+    return NativeHandle::create(native_handle_clone(token.getNativeHandle()), /*ownsHandle=*/true);
 }
 
 } // namespace android

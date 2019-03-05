@@ -18,6 +18,7 @@
 
 #include <compositionengine/Layer.h>
 #include <compositionengine/LayerFE.h>
+#include <compositionengine/impl/LayerCompositionState.h>
 #include <gmock/gmock.h>
 
 namespace android::compositionengine::mock {
@@ -28,6 +29,11 @@ public:
     virtual ~Layer();
 
     MOCK_CONST_METHOD0(getLayerFE, sp<LayerFE>());
+
+    MOCK_CONST_METHOD0(getState, const CompositionState&());
+    MOCK_METHOD0(editState, CompositionState&());
+
+    MOCK_CONST_METHOD1(dump, void(std::string&));
 };
 
 } // namespace android::compositionengine::mock
