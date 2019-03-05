@@ -226,6 +226,7 @@ public:
     virtual ~Layer();
 
     void setPrimaryDisplayOnly() { mPrimaryDisplayOnly = true; }
+    bool isPrimaryDisplayOnly() { return mPrimaryDisplayOnly; }
 
     // ------------------------------------------------------------------------
     // Geometry setting functions.
@@ -714,6 +715,7 @@ public:
     virtual void notifyAvailableFrames() {}
     virtual PixelFormat getPixelFormat() const { return PIXEL_FORMAT_NONE; }
     bool getPremultipledAlpha() const;
+    uint64_t getLayerId() {return mLayerId; }
 
 protected:
     // -----------------------------------------------------------------------
@@ -797,6 +799,8 @@ protected:
     wp<Layer> mDrawingParent;
 
     mutable LayerBE mBE;
+
+    uint64_t mLayerId;
 
 private:
     /**

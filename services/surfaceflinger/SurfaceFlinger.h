@@ -479,6 +479,7 @@ private:
                      const Vector<DisplayState>& /*displays*/) { }
     virtual void setDisplayAnimating(const sp<const DisplayDevice>& /*hw*/) { }
     virtual void handleMessageRefresh();
+    virtual void setLayerAsMask(const int32_t&, const uint64_t&) { };
 
     /* ------------------------------------------------------------------------
      * Message handling

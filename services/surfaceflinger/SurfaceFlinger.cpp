@@ -2244,6 +2244,9 @@ void SurfaceFlinger::setUpHWComposer() {
                             layer->forceClientComposition(hwcId);
                             continue;
                         }
+                        if (layer->isPrimaryDisplayOnly()) {
+                            setLayerAsMask(hwcId, layer->getLayerId());
+                        }
                     }
 
                     layer->setGeometry(displayDevice, i);
