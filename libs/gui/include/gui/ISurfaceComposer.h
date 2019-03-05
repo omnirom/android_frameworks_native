@@ -209,7 +209,8 @@ public:
                                    const ui::Dataspace reqDataspace,
                                    const ui::PixelFormat reqPixelFormat, Rect sourceCrop,
                                    uint32_t reqWidth, uint32_t reqHeight, bool useIdentityTransform,
-                                   Rotation rotation = eRotateNone) = 0;
+                                   Rotation rotation = eRotateNone,
+                                   bool captureSecureLayers = false) = 0;
     /**
      * Capture the specified screen. This requires READ_FRAME_BUFFER
      * permission.  This function will fail if there is a secure window on
@@ -359,6 +360,14 @@ public:
      * Removes a listener that was streaming median luma updates from SurfaceFlinger.
      */
     virtual status_t removeRegionSamplingListener(const sp<IRegionSamplingListener>& listener) = 0;
+
+    /*
+     * Sets the allowed display configurations to be used.
+     * The allowedConfigs in a vector of indexes corresponding to the configurations
+     * returned from getDisplayConfigs().
+     */
+    virtual status_t setAllowedDisplayConfigs(const sp<IBinder>& displayToken,
+                                              const std::vector<int32_t>& allowedConfigs) = 0;
 };
 
 // ----------------------------------------------------------------------------
@@ -406,6 +415,7 @@ public:
         GET_PHYSICAL_DISPLAY_IDS,
         ADD_REGION_SAMPLING_LISTENER,
         REMOVE_REGION_SAMPLING_LISTENER,
+        SET_ALLOWED_DISPLAY_CONFIGS,
         // Always append new enum to the end.
     };
 

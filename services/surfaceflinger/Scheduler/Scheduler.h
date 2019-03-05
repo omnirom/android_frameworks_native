@@ -105,11 +105,18 @@ public:
     // Should be called before the screen is turned off.
     void onScreenReleased(const sp<ConnectionHandle>& handle);
 
+    // Should be called when display config changed
+    void onConfigChanged(const sp<ConnectionHandle>& handle, PhysicalDisplayId displayId,
+                         int32_t configId);
+
     // Should be called when dumpsys command is received.
     void dump(const sp<ConnectionHandle>& handle, std::string& result) const;
 
     // Offers ability to modify phase offset in the event thread.
     void setPhaseOffset(const sp<ConnectionHandle>& handle, nsecs_t phaseOffset);
+
+    // pause/resume vsync callback generation to avoid sending vsync callbacks during config switch
+    void pauseVsyncCallback(const sp<ConnectionHandle>& handle, bool pause);
 
     void getDisplayStatInfo(DisplayStatInfo* stats);
 
@@ -198,7 +205,10 @@ private:
     std::array<int64_t, scheduler::ARRAY_SIZE> mTimeDifferences{};
     size_t mCounter = 0;
 
-    LayerHistory mLayerHistory;
+    // DetermineLayerTimestampStats is called from BufferQueueLayer::onFrameAvailable which
+    // can run on any thread, and cause failure.
+    std::mutex mLayerHistoryLock;
+    LayerHistory mLayerHistory GUARDED_BY(mLayerHistoryLock);
 
     // Timer that records time between requests for next vsync. If the time is higher than a given
     // interval, a callback is fired. Set this variable to >0 to use this feature.

@@ -132,7 +132,6 @@ LayerProtoParser::Layer LayerProtoParser::generateLayer(const LayerProto& layerP
 
 LayerProtoParser::Region LayerProtoParser::generateRegion(const RegionProto& regionProto) {
     LayerProtoParser::Region region;
-    region.id = regionProto.id();
     for (int i = 0; i < regionProto.rect_size(); i++) {
         const RectProto& rectProto = regionProto.rect(i);
         region.rects.push_back(generateRect(rectProto));
@@ -199,13 +198,13 @@ void LayerProtoParser::updateChildrenAndRelative(const LayerProto& layerProto,
         }
     }
 
-    if (layerProto.has_parent()) {
+    if (layerProto.parent() != -1) {
         if (layerMap.count(layerProto.parent()) > 0) {
             currLayer->parent = layerMap[layerProto.parent()];
         }
     }
 
-    if (layerProto.has_z_order_relative_of()) {
+    if (layerProto.z_order_relative_of() != -1) {
         if (layerMap.count(layerProto.z_order_relative_of()) > 0) {
             currLayer->zOrderRelativeOf = layerMap[layerProto.z_order_relative_of()];
         }

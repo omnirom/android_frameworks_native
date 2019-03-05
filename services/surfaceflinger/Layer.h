@@ -45,7 +45,6 @@
 
 #include "Client.h"
 #include "FrameTracker.h"
-#include "LayerBE.h"
 #include "LayerVector.h"
 #include "MonitoredProducer.h"
 #include "SurfaceFlinger.h"
@@ -67,7 +66,6 @@ class DisplayDevice;
 class GraphicBuffer;
 class SurfaceFlinger;
 class LayerDebugInfo;
-class LayerBE;
 
 namespace compositionengine {
 class Layer;
@@ -97,9 +95,6 @@ class Layer : public virtual compositionengine::LayerFE {
     static std::atomic<int32_t> sSequence;
 
 public:
-    friend class LayerBE;
-    LayerBE& getBE() { return mBE; }
-    LayerBE& getBE() const { return mBE; }
     mutable bool contentDirty{false};
     // regions below are in window-manager space
     Region visibleRegion;
@@ -292,7 +287,7 @@ public:
                                               uint64_t frameNumber);
     virtual void deferTransactionUntil_legacy(const sp<Layer>& barrierLayer, uint64_t frameNumber);
     virtual bool setOverrideScalingMode(int32_t overrideScalingMode);
-    virtual bool setMetadata(LayerMetadata data);
+    virtual bool setMetadata(const LayerMetadata& data);
     virtual bool reparentChildren(const sp<IBinder>& layer);
     virtual void setChildrenDrawingParent(const sp<Layer>& layer);
     virtual bool reparent(const sp<IBinder>& newParentHandle);
@@ -437,9 +432,15 @@ public:
 protected:
     virtual bool prepareClientLayer(const RenderArea& renderArea, const Region& clip,
                                     bool useIdentityTransform, Region& clearRegion,
-                                    renderengine::LayerSettings& layer) = 0;
+                                    const bool supportProtectedContent,
+                                    renderengine::LayerSettings& layer);
 
 public:
+    /*
+     * compositionengine::LayerFE overrides
+     */
+    void onLayerDisplayed(const sp<Fence>& releaseFence) override;
+
     virtual void setDefaultBufferSize(uint32_t /*w*/, uint32_t /*h*/) {}
 
     virtual bool isHdrY410() const { return false; }
@@ -459,11 +460,6 @@ public:
             const sp<const DisplayDevice>& display) const;
     bool getClearClientTarget(const sp<const DisplayDevice>& display) const;
     void updateCursorPosition(const sp<const DisplayDevice>& display);
-
-    /*
-     * called after page-flip
-     */
-    virtual void onLayerDisplayed(const sp<Fence>& releaseFence);
 
     virtual bool shouldPresentNow(nsecs_t /*expectedPresentTime*/) const { return false; }
     virtual void setTransformHint(uint32_t /*orientation*/) const { }
@@ -494,9 +490,10 @@ public:
      * false otherwise.
      */
     bool prepareClientLayer(const RenderArea& renderArea, const Region& clip, Region& clearRegion,
-                            renderengine::LayerSettings& layer);
+                            const bool supportProtectedContent, renderengine::LayerSettings& layer);
     bool prepareClientLayer(const RenderArea& renderArea, bool useIdentityTransform,
-                            Region& clearRegion, renderengine::LayerSettings& layer);
+                            Region& clearRegion, const bool supportProtectedContent,
+                            renderengine::LayerSettings& layer);
 
     /*
      * doTransaction - process the transaction. This is a good place to figure
@@ -569,11 +566,6 @@ public:
     virtual int32_t getQueuedFrameCount() const { return 0; }
 
     // -----------------------------------------------------------------------
-
-    bool createHwcLayer(HWComposer* hwc, const sp<DisplayDevice>& display);
-    bool destroyHwcLayer(const sp<DisplayDevice>& display);
-    bool destroyHwcLayersForAllDisplays();
-    bool destroyAllHwcLayersPlusChildren();
 
     bool hasHwcLayer(const sp<const DisplayDevice>& displayDevice);
     HWC2::Layer* getHwcLayer(const sp<const DisplayDevice>& displayDevice);
@@ -864,8 +856,6 @@ protected:
 
     wp<Layer> mCurrentParent;
     wp<Layer> mDrawingParent;
-
-    mutable LayerBE mBE;
 
     // Can only be accessed with the SF state lock held.
     bool mLayerDetached{false};

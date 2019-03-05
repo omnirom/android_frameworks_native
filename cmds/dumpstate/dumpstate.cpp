@@ -158,7 +158,7 @@ bool CopyFile(int in_fd, int out_fd) {
 }
 
 static bool CopyFileToFd(const std::string& input_file, int out_fd) {
-    MYLOGD("Going to copy bugreport file (%s) to %d\n", ds.path_.c_str(), out_fd);
+    MYLOGD("Going to copy file (%s) to %d\n", input_file.c_str(), out_fd);
 
     // Obtain a handle to the source file.
     android::base::unique_fd in_fd(OpenForRead(input_file));
@@ -166,14 +166,14 @@ static bool CopyFileToFd(const std::string& input_file, int out_fd) {
         if (CopyFile(in_fd.get(), out_fd)) {
             return true;
         }
-        MYLOGE("Failed to copy zip file: %s\n", strerror(errno));
+        MYLOGE("Failed to copy file: %s\n", strerror(errno));
     }
     return false;
 }
 
 static bool UnlinkAndLogOnError(const std::string& file) {
-    if (unlink(file.c_str()) != -1) {
-        MYLOGE("Failed to remove file (%s): %s\n", file.c_str(), strerror(errno));
+    if (unlink(file.c_str())) {
+        MYLOGE("Failed to unlink file (%s): %s\n", file.c_str(), strerror(errno));
         return false;
     }
     return true;
@@ -461,9 +461,7 @@ static bool dump_anrd_trace() {
             if (!ds.AddZipEntry("anrd_trace.txt", path)) {
                 MYLOGE("Unable to add anrd_trace file %s to zip file\n", path);
             } else {
-                if (remove(path)) {
-                    MYLOGE("Error removing anrd_trace file %s: %s", path, strerror(errno));
-                }
+                android::os::UnlinkAndLogOnError(path);
                 return true;
             }
         } else {
@@ -768,6 +766,17 @@ status_t Dumpstate::AddZipEntryFromFd(const std::string& entry_name, int fd,
                ZipWriter::ErrorCodeString(err));
         return UNKNOWN_ERROR;
     }
+    bool finished_entry = false;
+    auto finish_entry = [this, &finished_entry] {
+        if (!finished_entry) {
+            // This should only be called when we're going to return an earlier error,
+            // which would've been logged. This may imply the file is already corrupt
+            // and any further logging from FinishEntry is more likely to mislead than
+            // not.
+            this->zip_writer_->FinishEntry();
+        }
+    };
+    auto scope_guard = android::base::make_scope_guard(finish_entry);
     auto start = std::chrono::steady_clock::now();
     auto end = start + timeout;
     struct pollfd pfd = {fd, POLLIN};
@@ -784,11 +793,11 @@ status_t Dumpstate::AddZipEntryFromFd(const std::string& entry_name, int fd,
 
             int rc = TEMP_FAILURE_RETRY(poll(&pfd, 1, time_left_ms()));
             if (rc < 0) {
-                MYLOGE("Error in poll while adding from fd to zip entry %s:%s", entry_name.c_str(),
-                       strerror(errno));
+                MYLOGE("Error in poll while adding from fd to zip entry %s:%s\n",
+                       entry_name.c_str(), strerror(errno));
                 return -errno;
             } else if (rc == 0) {
-                MYLOGE("Timed out adding from fd to zip entry %s:%s Timeout:%lldms",
+                MYLOGE("Timed out adding from fd to zip entry %s:%s Timeout:%lldms\n",
                        entry_name.c_str(), strerror(errno), timeout.count());
                 return TIMED_OUT;
             }
@@ -809,6 +818,7 @@ status_t Dumpstate::AddZipEntryFromFd(const std::string& entry_name, int fd,
     }
 
     err = zip_writer_->FinishEntry();
+    finished_entry = true;
     if (err != 0) {
         MYLOGE("zip_writer_->FinishEntry(): %s\n", ZipWriter::ErrorCodeString(err));
         return UNKNOWN_ERROR;
@@ -1331,6 +1341,7 @@ static void dumpstate() {
     DumpFile("BINDER STATS", "/sys/kernel/debug/binder/stats");
     DumpFile("BINDER STATE", "/sys/kernel/debug/binder/state");
 
+    RunDumpsys("WINSCOPE TRACE", {"window", "trace"});
     /* Add window and surface trace files. */
     if (!PropertiesHelper::IsUserBuild()) {
         ds.AddDir(WMTRACE_DATA_DIR, false);
@@ -1592,13 +1603,8 @@ void Dumpstate::DumpstateBoard() {
     for (int i = 0; i < NUM_OF_DUMPS; i++) {
         paths.emplace_back(StringPrintf("%s/%s", ds.bugreport_internal_dir_.c_str(),
                                         kDumpstateBoardFiles[i].c_str()));
-        remover.emplace_back(android::base::make_scope_guard(std::bind(
-            [](std::string path) {
-                if (remove(path.c_str()) != 0 && errno != ENOENT) {
-                    MYLOGE("Could not remove(%s): %s\n", path.c_str(), strerror(errno));
-                }
-            },
-            paths[i])));
+        remover.emplace_back(android::base::make_scope_guard(
+            std::bind([](std::string path) { android::os::UnlinkAndLogOnError(path); }, paths[i])));
     }
 
     sp<IDumpstateDevice> dumpstate_device(IDumpstateDevice::getService());
@@ -1759,9 +1765,7 @@ bool Dumpstate::FinishZipFile() {
     ds.zip_file.reset(nullptr);
 
     MYLOGD("Removing temporary file %s\n", tmp_path_.c_str())
-    if (remove(tmp_path_.c_str()) != 0) {
-        MYLOGE("Failed to remove temporary file (%s): %s\n", tmp_path_.c_str(), strerror(errno));
-    }
+    android::os::UnlinkAndLogOnError(tmp_path_);
 
     return true;
 }
@@ -2345,6 +2349,7 @@ Dumpstate::RunStatus Dumpstate::RunInternal(int32_t calling_uid,
 
     register_sig_handler();
 
+    // TODO(b/111441001): maybe skip if already started?
     if (options_->do_start_service) {
         MYLOGI("Starting 'dumpstate' service\n");
         android::status_t ret;
@@ -2491,14 +2496,23 @@ Dumpstate::RunStatus Dumpstate::RunInternal(int32_t calling_uid,
             // Do an early return if there were errors. We make an exception for consent
             // timing out because it's possible the user got distracted. In this case the
             // bugreport is not shared but made available for manual retrieval.
+            MYLOGI("User denied consent. Returning\n");
             return status;
         }
-        if (options_->screenshot_fd.get() != -1) {
+        if (options_->do_fb && options_->screenshot_fd.get() != -1) {
             bool copy_succeeded = android::os::CopyFileToFd(screenshot_path_,
                                                             options_->screenshot_fd.get());
             if (copy_succeeded) {
                 android::os::UnlinkAndLogOnError(screenshot_path_);
             }
+        }
+        if (status == Dumpstate::RunStatus::USER_CONSENT_TIMED_OUT) {
+            MYLOGI(
+                "Did not receive user consent yet."
+                " Will not copy the bugreport artifacts to caller.\n");
+            // TODO(b/111441001):
+            // 1. cancel outstanding requests
+            // 2. check for result more frequently
         }
     }
 

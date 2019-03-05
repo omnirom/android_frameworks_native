@@ -69,10 +69,7 @@ using base::StringAppendF;
 std::atomic<int32_t> Layer::sSequence{1};
 
 Layer::Layer(const LayerCreationArgs& args)
-      : mFlinger(args.flinger),
-        mName(args.name),
-        mClientRef(args.client),
-        mBE{this, args.name.string()} {
+      : mFlinger(args.flinger), mName(args.name), mClientRef(args.client) {
     mCurrentCrop.makeInvalid();
 
     uint32_t layerFlags = 0;
@@ -125,8 +122,6 @@ Layer::~Layer() {
     }
 
     mFrameTracker.logAndResetStats(mName);
-
-    destroyAllHwcLayersPlusChildren();
 
     mFlinger->onLayerDestroyed();
 }
@@ -208,61 +203,6 @@ sp<IBinder> Layer::getHandle() {
 // ---------------------------------------------------------------------------
 // h/w composer set-up
 // ---------------------------------------------------------------------------
-
-bool Layer::createHwcLayer(HWComposer* hwc, const sp<DisplayDevice>& displayDevice) {
-    LOG_ALWAYS_FATAL_IF(!displayDevice->getId());
-    auto displayId = *displayDevice->getId();
-    auto outputLayer = findOutputLayerForDisplay(displayDevice);
-    LOG_ALWAYS_FATAL_IF(!outputLayer);
-
-    LOG_ALWAYS_FATAL_IF(outputLayer->getState().hwc.has_value(),
-                        "Already have a layer for display %s",
-                        displayDevice->getDisplayName().c_str());
-
-    auto layer = std::shared_ptr<HWC2::Layer>(
-            hwc->createLayer(displayId),
-            [hwc, displayId](HWC2::Layer* layer) {
-               hwc->destroyLayer(displayId, layer); });
-    if (!layer) {
-        return false;
-    }
-    auto& state = outputLayer->editState();
-    state.hwc.emplace(layer);
-    return true;
-}
-
-bool Layer::destroyHwcLayer(const sp<DisplayDevice>& displayDevice) {
-    auto outputLayer = findOutputLayerForDisplay(displayDevice);
-    if (outputLayer == nullptr) {
-        return false;
-    }
-    auto& state = outputLayer->editState();
-    bool result = state.hwc.has_value();
-    state.hwc.reset();
-    return result;
-}
-
-bool Layer::destroyHwcLayersForAllDisplays() {
-    bool destroyedAnyLayers = false;
-
-    for (const auto& [token, displayDevice] : mFlinger->mDisplays) {
-        if (destroyHwcLayer(displayDevice)) {
-            destroyedAnyLayers = true;
-        }
-    }
-
-    return destroyedAnyLayers;
-}
-
-bool Layer::destroyAllHwcLayersPlusChildren() {
-    bool result = destroyHwcLayersForAllDisplays();
-
-    for (const sp<Layer>& child : mDrawingChildren) {
-        result |= child->destroyAllHwcLayersPlusChildren();
-    }
-
-    return result;
-}
 
 bool Layer::hasHwcLayer(const sp<const DisplayDevice>& displayDevice) {
     auto outputLayer = findOutputLayerForDisplay(displayDevice);
@@ -740,18 +680,21 @@ void Layer::updateCursorPosition(const sp<const DisplayDevice>& display) {
 // ---------------------------------------------------------------------------
 
 bool Layer::prepareClientLayer(const RenderArea& renderArea, const Region& clip,
-                               Region& clearRegion, renderengine::LayerSettings& layer) {
-    return prepareClientLayer(renderArea, clip, false, clearRegion, layer);
+                               Region& clearRegion, const bool supportProtectedContent,
+                               renderengine::LayerSettings& layer) {
+    return prepareClientLayer(renderArea, clip, false, clearRegion, supportProtectedContent, layer);
 }
 
 bool Layer::prepareClientLayer(const RenderArea& renderArea, bool useIdentityTransform,
-                               Region& clearRegion, renderengine::LayerSettings& layer) {
+                               Region& clearRegion, const bool supportProtectedContent,
+                               renderengine::LayerSettings& layer) {
     return prepareClientLayer(renderArea, Region(renderArea.getBounds()), useIdentityTransform,
-                              clearRegion, layer);
+                              clearRegion, supportProtectedContent, layer);
 }
 
 bool Layer::prepareClientLayer(const RenderArea& /*renderArea*/, const Region& /*clip*/,
                                bool useIdentityTransform, Region& /*clearRegion*/,
+                               const bool /*supportProtectedContent*/,
                                renderengine::LayerSettings& layer) {
     FloatRect bounds = getBounds();
     half alpha = getAlpha();
@@ -1395,10 +1338,8 @@ bool Layer::setOverrideScalingMode(int32_t scalingMode) {
     return true;
 }
 
-bool Layer::setMetadata(LayerMetadata data) {
-    bool changed = data.mMap != mCurrentState.metadata.mMap;
-    if (!changed) return false;
-    mCurrentState.metadata = std::move(data);
+bool Layer::setMetadata(const LayerMetadata& data) {
+    if (!mCurrentState.metadata.merge(data, true /* eraseEmpty */)) return false;
     mCurrentState.sequence++;
     mCurrentState.modified = true;
     setTransactionFlags(eTransactionNeeded);
@@ -2099,26 +2040,26 @@ void Layer::writeToProto(LayerProto* layerInfo, LayerVector::StateSet stateSet) 
     }
 
     LayerProtoHelper::writeToProto(state.activeTransparentRegion_legacy,
-                                   layerInfo->mutable_transparent_region());
-    LayerProtoHelper::writeToProto(visibleRegion, layerInfo->mutable_visible_region());
-    LayerProtoHelper::writeToProto(surfaceDamageRegion, layerInfo->mutable_damage_region());
+                                   [&]() { return layerInfo->mutable_transparent_region(); });
+    LayerProtoHelper::writeToProto(visibleRegion,
+                                   [&]() { return layerInfo->mutable_visible_region(); });
+    LayerProtoHelper::writeToProto(surfaceDamageRegion,
+                                   [&]() { return layerInfo->mutable_damage_region(); });
 
     layerInfo->set_layer_stack(getLayerStack());
     layerInfo->set_z(state.z);
 
-    PositionProto* position = layerInfo->mutable_position();
-    position->set_x(transform.tx());
-    position->set_y(transform.ty());
+    LayerProtoHelper::writePositionToProto(transform.tx(), transform.ty(),
+                                           [&]() { return layerInfo->mutable_position(); });
 
-    PositionProto* requestedPosition = layerInfo->mutable_requested_position();
-    requestedPosition->set_x(requestedTransform.tx());
-    requestedPosition->set_y(requestedTransform.ty());
+    LayerProtoHelper::writePositionToProto(requestedTransform.tx(), requestedTransform.ty(), [&]() {
+        return layerInfo->mutable_requested_position();
+    });
 
-    SizeProto* size = layerInfo->mutable_size();
-    size->set_w(state.active_legacy.w);
-    size->set_h(state.active_legacy.h);
+    LayerProtoHelper::writeSizeToProto(state.active_legacy.w, state.active_legacy.h,
+                                       [&]() { return layerInfo->mutable_size(); });
 
-    LayerProtoHelper::writeToProto(state.crop_legacy, layerInfo->mutable_crop());
+    LayerProtoHelper::writeToProto(state.crop_legacy, [&]() { return layerInfo->mutable_crop(); });
     layerInfo->set_corner_radius(getRoundedCornerState().radius);
 
     layerInfo->set_is_opaque(isOpaque(state));
@@ -2128,8 +2069,9 @@ void Layer::writeToProto(LayerProto* layerInfo, LayerVector::StateSet stateSet) 
     layerInfo->set_dataspace(dataspaceDetails(static_cast<android_dataspace>(mCurrentDataSpace)));
 
     layerInfo->set_pixel_format(decodePixelFormat(getPixelFormat()));
-    LayerProtoHelper::writeToProto(getColor(), layerInfo->mutable_color());
-    LayerProtoHelper::writeToProto(state.color, layerInfo->mutable_requested_color());
+    LayerProtoHelper::writeToProto(getColor(), [&]() { return layerInfo->mutable_color(); });
+    LayerProtoHelper::writeToProto(state.color,
+                                   [&]() { return layerInfo->mutable_requested_color(); });
     layerInfo->set_flags(state.flags);
 
     LayerProtoHelper::writeToProto(transform, layerInfo->mutable_transform());
@@ -2138,16 +2080,21 @@ void Layer::writeToProto(LayerProto* layerInfo, LayerVector::StateSet stateSet) 
     auto parent = useDrawing ? mDrawingParent.promote() : mCurrentParent.promote();
     if (parent != nullptr) {
         layerInfo->set_parent(parent->sequence);
+    } else {
+        layerInfo->set_parent(-1);
     }
 
     auto zOrderRelativeOf = state.zOrderRelativeOf.promote();
     if (zOrderRelativeOf != nullptr) {
         layerInfo->set_z_order_relative_of(zOrderRelativeOf->sequence);
+    } else {
+        layerInfo->set_z_order_relative_of(-1);
     }
 
     auto buffer = mActiveBuffer;
     if (buffer != nullptr) {
-        LayerProtoHelper::writeToProto(buffer, layerInfo->mutable_active_buffer());
+        LayerProtoHelper::writeToProto(buffer,
+                                       [&]() { return layerInfo->mutable_active_buffer(); });
         LayerProtoHelper::writeToProto(ui::Transform(mCurrentTransform),
                                        layerInfo->mutable_buffer_transform());
     }
@@ -2171,9 +2118,11 @@ void Layer::writeToProto(LayerProto* layerInfo, LayerVector::StateSet stateSet) 
         (*protoMap)[entry.first] = std::string(entry.second.cbegin(), entry.second.cend());
     }
     LayerProtoHelper::writeToProto(mEffectiveTransform, layerInfo->mutable_effective_transform());
-    LayerProtoHelper::writeToProto(mSourceBounds, layerInfo->mutable_source_bounds());
-    LayerProtoHelper::writeToProto(mScreenBounds, layerInfo->mutable_screen_bounds());
-    LayerProtoHelper::writeToProto(mBounds, layerInfo->mutable_bounds());
+    LayerProtoHelper::writeToProto(mSourceBounds,
+                                   [&]() { return layerInfo->mutable_source_bounds(); });
+    LayerProtoHelper::writeToProto(mScreenBounds,
+                                   [&]() { return layerInfo->mutable_screen_bounds(); });
+    LayerProtoHelper::writeToProto(mBounds, [&]() { return layerInfo->mutable_bounds(); });
 }
 
 void Layer::writeToProto(LayerProto* layerInfo, const sp<DisplayDevice>& displayDevice) {
@@ -2187,10 +2136,10 @@ void Layer::writeToProto(LayerProto* layerInfo, const sp<DisplayDevice>& display
     const auto& compositionState = outputLayer->getState();
 
     const Rect& frame = compositionState.displayFrame;
-    LayerProtoHelper::writeToProto(frame, layerInfo->mutable_hwc_frame());
+    LayerProtoHelper::writeToProto(frame, [&]() { return layerInfo->mutable_hwc_frame(); });
 
     const FloatRect& crop = compositionState.sourceCrop;
-    LayerProtoHelper::writeToProto(crop, layerInfo->mutable_hwc_crop());
+    LayerProtoHelper::writeToProto(crop, [&]() { return layerInfo->mutable_hwc_crop(); });
 
     const int32_t transform =
             getCompositionLayer() ? static_cast<int32_t>(compositionState.bufferTransform) : 0;

@@ -153,6 +153,12 @@ void Scheduler::onScreenReleased(const sp<Scheduler::ConnectionHandle>& handle) 
     mConnections[handle->id]->thread->onScreenReleased();
 }
 
+void Scheduler::onConfigChanged(const sp<ConnectionHandle>& handle, PhysicalDisplayId displayId,
+                                int32_t configId) {
+    RETURN_IF_INVALID();
+    mConnections[handle->id]->thread->onConfigChanged(displayId, configId);
+}
+
 void Scheduler::dump(const sp<Scheduler::ConnectionHandle>& handle, std::string& result) const {
     RETURN_IF_INVALID();
     mConnections.at(handle->id)->thread->dump(result);
@@ -161,6 +167,12 @@ void Scheduler::dump(const sp<Scheduler::ConnectionHandle>& handle, std::string&
 void Scheduler::setPhaseOffset(const sp<Scheduler::ConnectionHandle>& handle, nsecs_t phaseOffset) {
     RETURN_IF_INVALID();
     mConnections[handle->id]->thread->setPhaseOffset(phaseOffset);
+}
+
+void Scheduler::pauseVsyncCallback(const android::sp<android::Scheduler::ConnectionHandle>& handle,
+                                   bool pause) {
+    RETURN_IF_INVALID();
+    mConnections[handle->id]->thread->pauseVsyncCallback(pause);
 }
 
 void Scheduler::getDisplayStatInfo(DisplayStatInfo* stats) {
@@ -293,6 +305,7 @@ void Scheduler::addFramePresentTimeForLayer(const nsecs_t framePresentTime, bool
 }
 
 void Scheduler::incrementFrameCounter() {
+    std::lock_guard<std::mutex> lock(mLayerHistoryLock);
     mLayerHistory.incrementCounter();
 }
 
@@ -317,25 +330,28 @@ void Scheduler::updateFrameSkipping(const int64_t skipCount) {
 
 void Scheduler::determineLayerTimestampStats(const std::string layerName,
                                              const nsecs_t framePresentTime) {
-    mLayerHistory.insert(layerName, framePresentTime);
     std::vector<int64_t> differencesMs;
-
-    // Traverse through the layer history, and determine the differences in present times.
-    nsecs_t newestPresentTime = framePresentTime;
     std::string differencesText = "";
-    for (int i = 1; i < mLayerHistory.getSize(); i++) {
-        std::unordered_map<std::string, nsecs_t> layers = mLayerHistory.get(i);
-        for (auto layer : layers) {
-            if (layer.first != layerName) {
-                continue;
+    {
+        std::lock_guard<std::mutex> lock(mLayerHistoryLock);
+        mLayerHistory.insert(layerName, framePresentTime);
+
+        // Traverse through the layer history, and determine the differences in present times.
+        nsecs_t newestPresentTime = framePresentTime;
+        for (int i = 1; i < mLayerHistory.getSize(); i++) {
+            std::unordered_map<std::string, nsecs_t> layers = mLayerHistory.get(i);
+            for (auto layer : layers) {
+                if (layer.first != layerName) {
+                    continue;
+                }
+                int64_t differenceMs = (newestPresentTime - layer.second) / 1000000;
+                // Dismiss noise.
+                if (differenceMs > 10 && differenceMs < 60) {
+                    differencesMs.push_back(differenceMs);
+                }
+                IF_ALOGV() { differencesText += (std::to_string(differenceMs) + " "); }
+                newestPresentTime = layer.second;
             }
-            int64_t differenceMs = (newestPresentTime - layer.second) / 1000000;
-            // Dismiss noise.
-            if (differenceMs > 10 && differenceMs < 60) {
-                differencesMs.push_back(differenceMs);
-            }
-            IF_ALOGV() { differencesText += (std::to_string(differenceMs) + " "); }
-            newestPresentTime = layer.second;
         }
     }
     ALOGV("Layer %s timestamp intervals: %s", layerName.c_str(), differencesText.c_str());
