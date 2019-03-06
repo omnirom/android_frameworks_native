@@ -37,6 +37,8 @@ class EventControlThread;
 class Scheduler {
 public:
     using ExpiredIdleTimerCallback = std::function<void()>;
+    using GetVsyncPeriod = std::function<nsecs_t()>;
+    using ResetIdleTimerCallback = std::function<void()>;
 
     // Enum to indicate whether to start the transaction early, or at vsync time.
     enum class TransactionStart { EARLY, NORMAL };
@@ -66,18 +68,27 @@ public:
         const std::unique_ptr<EventThread> thread;
     };
 
+    // Stores per-display state about VSYNC.
+    struct VsyncState {
+        explicit VsyncState(Scheduler& scheduler) : scheduler(scheduler) {}
+
+        void resync(const GetVsyncPeriod&);
+
+        Scheduler& scheduler;
+        std::atomic<nsecs_t> lastResyncTime = 0;
+    };
+
     explicit Scheduler(impl::EventControlThread::SetVSyncEnabledFunction function);
 
     virtual ~Scheduler();
 
     /** Creates an EventThread connection. */
     sp<ConnectionHandle> createConnection(const char* connectionName, int64_t phaseOffsetNs,
-                                          ResyncCallback, ResetIdleTimerCallback,
+                                          ResyncCallback,
                                           impl::EventThread::InterceptVSyncsCallback);
 
     sp<IDisplayEventConnection> createDisplayEventConnection(const sp<ConnectionHandle>& handle,
-                                                             ResyncCallback,
-                                                             ResetIdleTimerCallback);
+                                                             ResyncCallback);
 
     // Getter methods.
     EventThread* getEventThread(const sp<ConnectionHandle>& handle);
@@ -104,11 +115,13 @@ public:
 
     void enableHardwareVsync();
     void disableHardwareVsync(bool makeUnavailable);
-    void setVsyncPeriod(const nsecs_t period);
+    void resyncToHardwareVsync(bool makeAvailable, nsecs_t period);
+    // Creates a callback for resyncing.
+    ResyncCallback makeResyncCallback(GetVsyncPeriod&& getVsyncPeriod);
+    void setRefreshSkipCount(int count);
     void addResyncSample(const nsecs_t timestamp);
     void addPresentFence(const std::shared_ptr<FenceTime>& fenceTime);
     void setIgnorePresentFences(bool ignore);
-    void makeHWSyncAvailable(bool makeAvailable);
     nsecs_t expectedPresentTime();
     // Adds the present time for given layer to the history of present times.
     void addFramePresentTimeForLayer(const nsecs_t framePresentTime, bool isAutoTimestamp,
@@ -117,8 +130,13 @@ public:
     void incrementFrameCounter();
     // Callback that gets invoked once the idle timer expires.
     void setExpiredIdleTimerCallback(const ExpiredIdleTimerCallback& expiredTimerCallback);
+    // Callback that gets invoked once the idle timer is reset.
+    void setResetIdleTimerCallback(const ResetIdleTimerCallback& resetTimerCallback);
     // Returns relevant information about Scheduler for dumpsys purposes.
     std::string doDump();
+
+    // calls DispSync::dump() on primary disp sync
+    void dumpPrimaryDispSync(std::string& result) const;
 
 protected:
     virtual std::unique_ptr<EventThread> makeEventThread(
@@ -126,9 +144,10 @@ protected:
             impl::EventThread::InterceptVSyncsCallback interceptCallback);
 
 private:
+    friend class TestableScheduler;
+
     // Creates a connection on the given EventThread and forwards the given callbacks.
-    sp<EventThreadConnection> createConnectionInternal(EventThread*, ResyncCallback&&,
-                                                       ResetIdleTimerCallback&&);
+    sp<EventThreadConnection> createConnectionInternal(EventThread*, ResyncCallback&&);
 
     nsecs_t calculateAverage() const;
     void updateFrameSkipping(const int64_t skipCount);
@@ -140,9 +159,12 @@ private:
     void determineTimestampAverage(bool isAutoTimestamp, const nsecs_t framePresentTime);
     // Function that resets the idle timer.
     void resetIdleTimer();
+    // Function that is called when the timer resets.
+    void resetTimerCallback();
     // Function that is called when the timer expires.
     void expiredTimerCallback();
-
+    // Sets vsync period.
+    void setVsyncPeriod(const nsecs_t period);
 
     // If fences from sync Framework are supported.
     const bool mHasSyncFramework;
@@ -160,6 +182,7 @@ private:
     std::mutex mHWVsyncLock;
     bool mPrimaryHWVsyncEnabled GUARDED_BY(mHWVsyncLock);
     bool mHWVsyncAvailable GUARDED_BY(mHWVsyncLock);
+    const std::shared_ptr<VsyncState> mPrimaryVsyncState{std::make_shared<VsyncState>(*this)};
 
     std::unique_ptr<DispSync> mPrimaryDispSync;
     std::unique_ptr<EventControlThread> mEventControlThread;
@@ -184,6 +207,7 @@ private:
 
     std::mutex mCallbackLock;
     ExpiredIdleTimerCallback mExpiredTimerCallback GUARDED_BY(mCallbackLock);
+    ExpiredIdleTimerCallback mResetTimerCallback GUARDED_BY(mCallbackLock);
 };
 
 } // namespace android
