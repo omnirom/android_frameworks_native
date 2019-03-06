@@ -18,6 +18,8 @@
 #define ATRACE_TAG ATRACE_TAG_GRAPHICS
 
 #include <sys/types.h>
+#include <sys/stat.h>
+#include <fstream>
 #include <errno.h>
 #include <dlfcn.h>
 
@@ -2019,6 +2021,8 @@ void SurfaceFlinger::postComposition()
         mAnimFrameTracker.advanceFrame();
     }
 
+    dumpDrawCycle(false);
+
     mTimeStats->incrementTotalFrames();
     if (mHadClientComposition) {
         mTimeStats->incrementClientCompositionFrames();
@@ -2304,6 +2308,8 @@ void SurfaceFlinger::prepareFrame(const sp<DisplayDevice>& displayDevice) {
     if (!displayState.isEnabled) {
         return;
     }
+
+    dumpDrawCycle(true);
 
     status_t result = display->getRenderSurface()->prepareFrame();
     ALOGE_IF(result != NO_ERROR, "prepareFrame failed for %s: %d (%s)",
@@ -4307,6 +4313,14 @@ void SurfaceFlinger::setPowerMode(const sp<IBinder>& displayToken, int mode) {
 
 status_t SurfaceFlinger::doDump(int fd, const DumpArgs& args,
                                 bool asProto) NO_THREAD_SAFETY_ANALYSIS {
+
+    size_t numArgs = args.size();
+
+    if (numArgs && ((args[0] == String16("--file")) ||
+        (args[0] == String16("--allocated_buffers")))) {
+        return doDumpContinuous(fd, args);
+    }
+
     std::string result;
 
     IPCThreadState* ipc = IPCThreadState::self();
@@ -4370,6 +4384,117 @@ status_t SurfaceFlinger::doDump(int fd, const DumpArgs& args,
     }
     write(fd, result.c_str(), result.size());
     return NO_ERROR;
+}
+
+status_t SurfaceFlinger::doDumpContinuous(int fd, const DumpArgs& args) {
+    // Format: adb shell dumpsys SurfaceFlinger --file --no-limit
+    size_t numArgs = args.size();
+    status_t err = NO_ERROR;
+
+    if (args[0] == String16("--allocated_buffers")) {
+        std::string dumpsys;
+        GraphicBufferAllocator& alloc(GraphicBufferAllocator::get());
+        alloc.dump(dumpsys);
+        write(fd, dumpsys.c_str(), dumpsys.size());
+        return NO_ERROR;
+    }
+
+
+    Mutex::Autolock _l(mFileDump.lock);
+
+    // Same command is used to start and end dump.
+    mFileDump.running = !mFileDump.running;
+
+    if (mFileDump.running) {
+        std::ofstream ofs;
+        ofs.open(mFileDump.name, std::ofstream::out | std::ofstream::trunc);
+        if (!ofs) {
+            mFileDump.running = false;
+            err = UNKNOWN_ERROR;
+        } else {
+            ofs.close();
+            mFileDump.position = 0;
+            if (numArgs >= 2 && (args[1] == String16("--no-limit"))) {
+            mFileDump.noLimit = true;
+        } else {
+            mFileDump.noLimit = false;
+        }
+      }
+    }
+
+    std::string result;
+    result += mFileDump.running ? "Start" : "End";
+    result += mFileDump.noLimit ? " unlimited" : " fixed limit";
+    result += " dumpsys to file : ";
+    result += mFileDump.name;
+    result += "\n";
+
+    write(fd, result.c_str(), result.size());
+
+    return NO_ERROR;
+}
+
+void SurfaceFlinger::dumpDrawCycle(bool prePrepare) {
+    Mutex::Autolock _l(mFileDump.lock);
+
+    // User might stop dump collection in middle of prepare & commit.
+    // Collect dumpsys again after commit and replace.
+    if (!mFileDump.running && !mFileDump.replaceAfterCommit) {
+        return;
+    }
+
+    Vector<String16> args;
+    std::string dumpsys;
+
+    {
+        Mutex::Autolock lock(mStateLock);
+        dumpAllLocked(args, dumpsys);
+    }
+
+    char timeStamp[32];
+    char dataSize[32];
+    char hms[32];
+    long millis;
+    struct timeval tv;
+    struct tm *ptm;
+
+    gettimeofday(&tv, NULL);
+    ptm = localtime(&tv.tv_sec);
+    strftime (hms, sizeof (hms), "%H:%M:%S", ptm);
+    millis = tv.tv_usec / 1000;
+    snprintf(timeStamp, sizeof(timeStamp), "Timestamp: %s.%03ld", hms, millis);
+    snprintf(dataSize, sizeof(dataSize), "Size: %8zu", dumpsys.size());
+
+    std::fstream fs;
+    fs.open(mFileDump.name, std::ios::app);
+    if (!fs) {
+        ALOGE("Failed to open %s file for dumpsys", mFileDump.name);
+        return;
+    }
+
+    // Format:
+    //    | start code | after commit? | time stamp | dump size | dump data |
+    fs.seekp(mFileDump.position, std::ios::beg);
+
+    fs << "#@#@-- DUMPSYS START --@#@#" << std::endl;
+    fs << "PostCommit: " << ( prePrepare ? "false" : "true" ) << std::endl;
+    fs << timeStamp << std::endl;
+    fs << dataSize << std::endl;
+    fs << dumpsys << std::endl;
+
+    if (prePrepare) {
+        mFileDump.replaceAfterCommit = true;
+    } else {
+        mFileDump.replaceAfterCommit = false;
+        // Reposition only after commit.
+        // Keep file size to appx 20 MB limit by default, wrap around if exceeds.
+        mFileDump.position = fs.tellp();
+        if (!mFileDump.noLimit && (mFileDump.position > (20 * 1024 * 1024))) {
+            mFileDump.position = 0;
+        }
+    }
+
+    fs.close();
 }
 
 void SurfaceFlinger::listLayersLocked(std::string& result) const {
