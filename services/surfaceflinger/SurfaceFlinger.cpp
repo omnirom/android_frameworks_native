@@ -3439,6 +3439,12 @@ status_t SurfaceFlinger::addClientLayer(const sp<Client>& client,
         if (mNumLayers >= MAX_LAYERS) {
             ALOGE("AddClientLayer failed, mNumLayers (%zu) >= MAX_LAYERS (%zu)", mNumLayers,
                   MAX_LAYERS);
+            mCurrentState.traverseInZOrder([&](Layer* layer) {
+                const auto& p = layer->getParent();
+                ALOGE("layer (%s) ::  parent (%s).",
+                layer->getName().string(),
+                (p != nullptr) ? p->getName().string() : "no-parent");
+            });
             return NO_MEMORY;
         }
         if (parent == nullptr && addToCurrentState) {
