@@ -26,80 +26,78 @@ const size_t kUserMetadataSize = 0;
 class BufferNodeTest : public ::testing::Test {
 protected:
     void SetUp() override {
-        buffer_node =
+        mBufferNode =
                 new BufferNode(kWidth, kHeight, kLayerCount, kFormat, kUsage, kUserMetadataSize);
-        ASSERT_TRUE(buffer_node->IsValid());
+        ASSERT_TRUE(mBufferNode->isValid());
     }
 
     void TearDown() override {
-        if (buffer_node != nullptr) {
-            delete buffer_node;
+        if (mBufferNode != nullptr) {
+            delete mBufferNode;
         }
     }
 
-    BufferNode* buffer_node = nullptr;
+    BufferNode* mBufferNode = nullptr;
 };
 
 TEST_F(BufferNodeTest, TestCreateBufferNode) {
-    EXPECT_EQ(buffer_node->user_metadata_size(), kUserMetadataSize);
+    EXPECT_EQ(mBufferNode->userMetadataSize(), kUserMetadataSize);
     // Test the handle just allocated is good (i.e. able to be imported)
     GraphicBufferMapper& mapper = GraphicBufferMapper::get();
     const native_handle_t* outHandle;
     status_t ret =
-            mapper.importBuffer(buffer_node->buffer_handle(), buffer_node->buffer_desc().width,
-                                buffer_node->buffer_desc().height,
-                                buffer_node->buffer_desc().layers,
-                                buffer_node->buffer_desc().format, buffer_node->buffer_desc().usage,
-                                buffer_node->buffer_desc().stride, &outHandle);
+            mapper.importBuffer(mBufferNode->bufferHandle(), mBufferNode->bufferDesc().width,
+                                mBufferNode->bufferDesc().height, mBufferNode->bufferDesc().layers,
+                                mBufferNode->bufferDesc().format, mBufferNode->bufferDesc().usage,
+                                mBufferNode->bufferDesc().stride, &outHandle);
     EXPECT_EQ(ret, OK);
     EXPECT_THAT(outHandle, NotNull());
 }
 
-TEST_F(BufferNodeTest, TestAddNewActiveClientsBitToMask_twoNewClients) {
-    uint32_t new_client_state_mask_1 = buffer_node->AddNewActiveClientsBitToMask();
-    EXPECT_EQ(buffer_node->GetActiveClientsBitMask(), new_client_state_mask_1);
+TEST_F(BufferNodeTest, TestaddNewActiveClientsBitToMask_twoNewClients) {
+    uint32_t newClientStateMask1 = mBufferNode->addNewActiveClientsBitToMask();
+    EXPECT_EQ(mBufferNode->getActiveClientsBitMask(), newClientStateMask1);
 
     // Request and add a new client_state_mask again.
     // Active clients bit mask should be the union of the two new
     // client_state_masks.
-    uint32_t new_client_state_mask_2 = buffer_node->AddNewActiveClientsBitToMask();
-    EXPECT_EQ(buffer_node->GetActiveClientsBitMask(),
-              new_client_state_mask_1 | new_client_state_mask_2);
+    uint32_t newClientStateMask2 = mBufferNode->addNewActiveClientsBitToMask();
+    EXPECT_EQ(mBufferNode->getActiveClientsBitMask(), newClientStateMask1 | newClientStateMask2);
 }
 
-TEST_F(BufferNodeTest, TestAddNewActiveClientsBitToMask_32NewClients) {
-    uint32_t new_client_state_mask = 0U;
-    uint32_t current_mask = 0U;
-    uint32_t expected_mask = 0U;
+TEST_F(BufferNodeTest, TestaddNewActiveClientsBitToMask_32NewClients) {
+    uint32_t newClientStateMask = 0U;
+    uint32_t currentMask = 0U;
+    uint32_t expectedMask = 0U;
 
     for (int i = 0; i < BufferHubDefs::kMaxNumberOfClients; ++i) {
-        new_client_state_mask = buffer_node->AddNewActiveClientsBitToMask();
-        EXPECT_NE(new_client_state_mask, 0U);
-        EXPECT_FALSE(new_client_state_mask & current_mask);
-        expected_mask = current_mask | new_client_state_mask;
-        current_mask = buffer_node->GetActiveClientsBitMask();
-        EXPECT_EQ(current_mask, expected_mask);
+        newClientStateMask = mBufferNode->addNewActiveClientsBitToMask();
+        EXPECT_NE(newClientStateMask, 0U);
+        EXPECT_FALSE(newClientStateMask & currentMask);
+        expectedMask = currentMask | newClientStateMask;
+        currentMask = mBufferNode->getActiveClientsBitMask();
+        EXPECT_EQ(currentMask, expectedMask);
     }
 
     // Method should fail upon requesting for more than maximum allowable clients.
-    new_client_state_mask = buffer_node->AddNewActiveClientsBitToMask();
-    EXPECT_EQ(new_client_state_mask, 0U);
+    newClientStateMask = mBufferNode->addNewActiveClientsBitToMask();
+    EXPECT_EQ(newClientStateMask, 0U);
     EXPECT_EQ(errno, E2BIG);
 }
 
 TEST_F(BufferNodeTest, TestRemoveActiveClientsBitFromMask) {
-    buffer_node->AddNewActiveClientsBitToMask();
-    uint32_t current_mask = buffer_node->GetActiveClientsBitMask();
-    uint32_t new_client_state_mask = buffer_node->AddNewActiveClientsBitToMask();
-    EXPECT_NE(buffer_node->GetActiveClientsBitMask(), current_mask);
+    mBufferNode->addNewActiveClientsBitToMask();
+    uint32_t currentMask = mBufferNode->getActiveClientsBitMask();
+    uint32_t newClientStateMask = mBufferNode->addNewActiveClientsBitToMask();
+    EXPECT_NE(mBufferNode->getActiveClientsBitMask(), currentMask);
 
-    buffer_node->RemoveClientsBitFromMask(new_client_state_mask);
-    EXPECT_EQ(buffer_node->GetActiveClientsBitMask(), current_mask);
+    mBufferNode->removeClientsBitFromMask(newClientStateMask);
+    EXPECT_EQ(mBufferNode->getActiveClientsBitMask(), currentMask);
 
     // Remove the test_mask again to the active client bit mask should not modify
     // the value of active clients bit mask.
-    buffer_node->RemoveClientsBitFromMask(new_client_state_mask);
-    EXPECT_EQ(buffer_node->GetActiveClientsBitMask(), current_mask);
+    mBufferNode->removeClientsBitFromMask(newClientStateMask);
+    EXPECT_EQ(mBufferNode->getActiveClientsBitMask(), currentMask);
 }
 
 } // namespace

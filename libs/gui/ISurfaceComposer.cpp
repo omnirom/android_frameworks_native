@@ -275,12 +275,25 @@ public:
         remote()->transact(BnSurfaceComposer::DESTROY_DISPLAY, data, &reply);
     }
 
-    virtual sp<IBinder> getBuiltInDisplay(int32_t id)
-    {
+    virtual std::vector<PhysicalDisplayId> getPhysicalDisplayIds() const {
         Parcel data, reply;
         data.writeInterfaceToken(ISurfaceComposer::getInterfaceDescriptor());
-        data.writeInt32(id);
-        remote()->transact(BnSurfaceComposer::GET_BUILT_IN_DISPLAY, data, &reply);
+        if (remote()->transact(BnSurfaceComposer::GET_PHYSICAL_DISPLAY_IDS, data, &reply) ==
+            NO_ERROR) {
+            std::vector<PhysicalDisplayId> displayIds;
+            if (reply.readUint64Vector(&displayIds) == NO_ERROR) {
+                return displayIds;
+            }
+        }
+
+        return {};
+    }
+
+    virtual sp<IBinder> getPhysicalDisplayToken(PhysicalDisplayId displayId) const {
+        Parcel data, reply;
+        data.writeInterfaceToken(ISurfaceComposer::getInterfaceDescriptor());
+        data.writeUint64(displayId);
+        remote()->transact(BnSurfaceComposer::GET_PHYSICAL_DISPLAY_TOKEN, data, &reply);
         return reply.readStrongBinder();
     }
 
@@ -722,42 +735,6 @@ public:
         return error;
     }
 
-    virtual status_t cacheBuffer(const sp<IBinder>& token, const sp<GraphicBuffer>& buffer,
-                                 int32_t* outBufferId) {
-        Parcel data, reply;
-        data.writeInterfaceToken(ISurfaceComposer::getInterfaceDescriptor());
-
-        data.writeStrongBinder(token);
-        if (buffer) {
-            data.writeBool(true);
-            data.write(*buffer);
-        } else {
-            data.writeBool(false);
-        }
-
-        status_t result = remote()->transact(BnSurfaceComposer::CACHE_BUFFER, data, &reply);
-        if (result != NO_ERROR) {
-            return result;
-        }
-
-        int32_t id = -1;
-        result = reply.readInt32(&id);
-        if (result == NO_ERROR) {
-            *outBufferId = id;
-        }
-        return result;
-    }
-
-    virtual status_t uncacheBuffer(const sp<IBinder>& token, int32_t bufferId) {
-        Parcel data, reply;
-        data.writeInterfaceToken(ISurfaceComposer::getInterfaceDescriptor());
-
-        data.writeStrongBinder(token);
-        data.writeInt32(bufferId);
-
-        return remote()->transact(BnSurfaceComposer::UNCACHE_BUFFER, data, &reply);
-    }
-
     virtual status_t isWideColorDisplay(const sp<IBinder>& token,
                                         bool* outIsWideColorDisplay) const {
         Parcel data, reply;
@@ -932,10 +909,10 @@ status_t BnSurfaceComposer::onTransact(
             destroyDisplay(display);
             return NO_ERROR;
         }
-        case GET_BUILT_IN_DISPLAY: {
+        case GET_PHYSICAL_DISPLAY_TOKEN: {
             CHECK_INTERFACE(ISurfaceComposer, data, reply);
-            int32_t id = data.readInt32();
-            sp<IBinder> display(getBuiltInDisplay(id));
+            PhysicalDisplayId displayId = data.readUint64();
+            sp<IBinder> display = getPhysicalDisplayToken(displayId);
             reply->writeStrongBinder(display);
             return NO_ERROR;
         }
@@ -1238,48 +1215,6 @@ status_t BnSurfaceComposer::onTransact(
             }
             return error;
         }
-        case CACHE_BUFFER: {
-            CHECK_INTERFACE(ISurfaceComposer, data, reply);
-            sp<IBinder> token;
-            status_t result = data.readStrongBinder(&token);
-            if (result != NO_ERROR) {
-                ALOGE("cache buffer failure in reading token: %d", result);
-                return result;
-            }
-
-            sp<GraphicBuffer> buffer = new GraphicBuffer();
-            if (data.readBool()) {
-                result = data.read(*buffer);
-                if (result != NO_ERROR) {
-                    ALOGE("cache buffer failure in reading buffer: %d", result);
-                    return result;
-                }
-            }
-            int32_t bufferId = -1;
-            status_t error = cacheBuffer(token, buffer, &bufferId);
-            if (error == NO_ERROR) {
-                reply->writeInt32(bufferId);
-            }
-            return error;
-        }
-        case UNCACHE_BUFFER: {
-            CHECK_INTERFACE(ISurfaceComposer, data, reply);
-            sp<IBinder> token;
-            status_t result = data.readStrongBinder(&token);
-            if (result != NO_ERROR) {
-                ALOGE("uncache buffer failure in reading token: %d", result);
-                return result;
-            }
-
-            int32_t bufferId = -1;
-            result = data.readInt32(&bufferId);
-            if (result != NO_ERROR) {
-                ALOGE("uncache buffer failure in reading buffer id: %d", result);
-                return result;
-            }
-
-            return uncacheBuffer(token, bufferId);
-        }
         case IS_WIDE_COLOR_DISPLAY: {
             CHECK_INTERFACE(ISurfaceComposer, data, reply);
             sp<IBinder> display = nullptr;
@@ -1294,12 +1229,14 @@ status_t BnSurfaceComposer::onTransact(
             }
             return error;
         }
+        case GET_PHYSICAL_DISPLAY_IDS: {
+            CHECK_INTERFACE(ISurfaceComposer, data, reply);
+            return reply->writeUint64Vector(getPhysicalDisplayIds());
+        }
         default: {
             return BBinder::onTransact(code, data, reply, flags);
         }
     }
 }
 
-// ----------------------------------------------------------------------------
-
-};
+} // namespace android

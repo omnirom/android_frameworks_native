@@ -28,10 +28,11 @@ public:
     EventThread();
     ~EventThread() override;
 
-    MOCK_CONST_METHOD1(createEventConnection, sp<EventThreadConnection>(ResyncCallback));
+    MOCK_CONST_METHOD2(createEventConnection,
+                       sp<EventThreadConnection>(ResyncCallback, ResetIdleTimerCallback));
     MOCK_METHOD0(onScreenReleased, void());
     MOCK_METHOD0(onScreenAcquired, void());
-    MOCK_METHOD2(onHotplugReceived, void(DisplayType, bool));
+    MOCK_METHOD2(onHotplugReceived, void(PhysicalDisplayId, bool));
     MOCK_CONST_METHOD1(dump, void(std::string&));
     MOCK_METHOD1(setPhaseOffset, void(nsecs_t phaseOffset));
     MOCK_METHOD1(registerDisplayEventConnection,
