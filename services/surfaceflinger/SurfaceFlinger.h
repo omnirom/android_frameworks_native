@@ -781,6 +781,7 @@ private:
 
     // access must be protected by mStateLock
     mutable Mutex mStateLock;
+    mutable Mutex mDolphinStateLock;
     State mCurrentState{LayerVector::StateSet::Current};
     volatile int32_t mTransactionFlags;
     Condition mTransactionCV;
