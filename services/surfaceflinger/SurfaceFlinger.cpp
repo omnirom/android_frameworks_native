@@ -2047,6 +2047,7 @@ void SurfaceFlinger::forceResyncModel() {
 void SurfaceFlinger::rebuildLayerStacks() {
     ATRACE_CALL();
     ALOGV("rebuildLayerStacks");
+    Mutex::Autolock lock(mDolphinStateLock);
 
     // rebuild the visible layer list per screen
     if (CC_UNLIKELY(mVisibleRegionsDirty)) {
