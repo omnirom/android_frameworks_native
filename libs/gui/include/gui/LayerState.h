@@ -254,6 +254,7 @@ struct InputWindowCommands {
     };
 
     std::vector<TransferTouchFocusCommand> transferTouchFocusCommands;
+    bool syncInputWindows{false};
 
     void merge(const InputWindowCommands& other);
     void clear();

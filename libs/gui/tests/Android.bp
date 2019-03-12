@@ -23,6 +23,7 @@ cc_test {
         "IGraphicBufferProducer_test.cpp",
         "Malicious.cpp",
         "MultiTextureConsumer_test.cpp",
+        "RegionSampling_test.cpp",
         "StreamSplitter_test.cpp",
         "SurfaceTextureClient_test.cpp",
         "SurfaceTextureFBO_test.cpp",
@@ -86,4 +87,27 @@ cc_test {
     header_libs: [
         "libdvr_headers",
     ],
+}
+
+cc_test {
+    name: "SamplingDemo",
+
+    clang: true,
+    cflags: [
+        "-Wall",
+        "-Werror",
+    ],
+
+    srcs: [
+        "SamplingDemo.cpp",
+    ],
+
+    shared_libs: [
+        "libbinder",
+        "libcutils",
+        "libgui",
+        "liblog",
+        "libui",
+        "libutils",
+    ]
 }
