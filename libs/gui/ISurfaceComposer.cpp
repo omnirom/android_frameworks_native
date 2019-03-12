@@ -100,7 +100,7 @@ public:
                                    const ui::Dataspace reqDataspace,
                                    const ui::PixelFormat reqPixelFormat, Rect sourceCrop,
                                    uint32_t reqWidth, uint32_t reqHeight, bool useIdentityTransform,
-                                   ISurfaceComposer::Rotation rotation) {
+                                   ISurfaceComposer::Rotation rotation, bool captureSecureLayers) {
         Parcel data, reply;
         data.writeInterfaceToken(ISurfaceComposer::getInterfaceDescriptor());
         data.writeStrongBinder(display);
@@ -111,6 +111,7 @@ public:
         data.writeUint32(reqHeight);
         data.writeInt32(static_cast<int32_t>(useIdentityTransform));
         data.writeInt32(static_cast<int32_t>(rotation));
+        data.writeInt32(static_cast<int32_t>(captureSecureLayers));
         status_t result = remote()->transact(BnSurfaceComposer::CAPTURE_SCREEN, data, &reply);
         if (result != NO_ERROR) {
             ALOGE("captureScreen failed to transact: %d", result);
@@ -806,6 +807,32 @@ public:
         }
         return error;
     }
+
+    virtual status_t setAllowedDisplayConfigs(const sp<IBinder>& displayToken,
+                                              const std::vector<int32_t>& allowedConfigs) {
+        Parcel data, reply;
+        status_t result = data.writeInterfaceToken(ISurfaceComposer::getInterfaceDescriptor());
+        if (result != NO_ERROR) {
+            ALOGE("setAllowedDisplayConfigs failed to writeInterfaceToken: %d", result);
+            return result;
+        }
+        result = data.writeStrongBinder(displayToken);
+        if (result != NO_ERROR) {
+            ALOGE("setAllowedDisplayConfigs failed to writeStrongBinder: %d", result);
+            return result;
+        }
+        result = data.writeInt32Vector(allowedConfigs);
+        if (result != NO_ERROR) {
+            ALOGE("setAllowedDisplayConfigs failed to writeInt32Vector: %d", result);
+            return result;
+        }
+        result = remote()->transact(BnSurfaceComposer::SET_ALLOWED_DISPLAY_CONFIGS, data, &reply);
+        if (result != NO_ERROR) {
+            ALOGE("setAllowedDisplayConfigs failed to transact: %d", result);
+            return result;
+        }
+        return reply.readInt32();
+    }
 };
 
 // Out-of-line virtual method definition to trigger vtable emission in this
@@ -884,10 +911,11 @@ status_t BnSurfaceComposer::onTransact(
             uint32_t reqHeight = data.readUint32();
             bool useIdentityTransform = static_cast<bool>(data.readInt32());
             int32_t rotation = data.readInt32();
+            bool captureSecureLayers = static_cast<bool>(data.readInt32());
 
             status_t res = captureScreen(display, &outBuffer, reqDataspace, reqPixelFormat,
                                          sourceCrop, reqWidth, reqHeight, useIdentityTransform,
-                                         static_cast<ISurfaceComposer::Rotation>(rotation));
+                                         static_cast<ISurfaceComposer::Rotation>(rotation), captureSecureLayers);
             reply->writeInt32(res);
             if (res == NO_ERROR) {
                 reply->write(*outBuffer);
@@ -1316,6 +1344,15 @@ status_t BnSurfaceComposer::onTransact(
                 return result;
             }
             return removeRegionSamplingListener(listener);
+        }
+        case SET_ALLOWED_DISPLAY_CONFIGS: {
+            CHECK_INTERFACE(ISurfaceComposer, data, reply);
+            sp<IBinder> displayToken = data.readStrongBinder();
+            std::vector<int32_t> allowedConfigs;
+            data.readInt32Vector(&allowedConfigs);
+            status_t result = setAllowedDisplayConfigs(displayToken, allowedConfigs);
+            reply->writeInt32(result);
+            return result;
         }
         default: {
             return BBinder::onTransact(code, data, reply, flags);

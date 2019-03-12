@@ -33,6 +33,7 @@
 #include <gui/LayerState.h>
 #include <gui/OccupancyTracker.h>
 #include <hardware/hwcomposer_defs.h>
+#include <input/ISetInputWindowsListener.h>
 #include <layerproto/LayerProtoHeader.h>
 #include <math/mat4.h>
 #include <serviceutils/PriorityDumper.h>
@@ -46,6 +47,7 @@
 #include <utils/Trace.h>
 #include <utils/threads.h>
 
+#include "AllowedDisplayConfigs.h"
 #include "Barrier.h"
 #include "BufferStateLayerCache.h"
 #include "DisplayDevice.h"
@@ -53,9 +55,9 @@
 #include "DisplayHardware/HWComposer.h"
 #include "Effects/Daltonizer.h"
 #include "FrameTracker.h"
-#include "LayerBE.h"
 #include "LayerStats.h"
 #include "LayerVector.h"
+#include "RegionSamplingThread.h"
 #include "Scheduler/DispSync.h"
 #include "Scheduler/EventThread.h"
 #include "Scheduler/MessageQueue.h"
@@ -103,7 +105,6 @@ class Surface;
 class SurfaceFlingerBE;
 class TimeStats;
 class VSyncSource;
-struct CompositionInfo;
 
 namespace compositionengine {
 class DisplaySurface;
@@ -196,11 +197,16 @@ public:
     // use to differentiate callbacks from different hardware composer
     // instances. Each hardware composer instance gets a different sequence id.
     int32_t mComposerSequenceId;
-
-    std::map<wp<IBinder>, std::vector<CompositionInfo>> mCompositionInfo;
-    std::map<wp<IBinder>, std::vector<CompositionInfo>> mEndOfFrameCompositionInfo;
 };
 
+class SetInputWindowsListener : public BnSetInputWindowsListener {
+public:
+    SetInputWindowsListener(const sp<SurfaceFlinger>& flinger) : mFlinger(flinger) {}
+    void onSetInputWindowsFinished() override;
+
+private:
+    const sp<SurfaceFlinger> mFlinger;
+};
 
 class SurfaceFlinger : public BnSurfaceComposer,
                        public PriorityDumper,
@@ -348,6 +354,8 @@ public:
         return mTransactionCompletedThread;
     }
 
+    void setInputWindowsFinished();
+
 private:
     friend class Client;
     friend class DisplayEventConnection;
@@ -357,6 +365,7 @@ private:
     friend class BufferQueueLayer;
     friend class BufferStateLayer;
     friend class MonitoredProducer;
+    friend class RegionSamplingThread;
 
     // For unit tests
     friend class TestableSurfaceFlinger;
@@ -429,7 +438,8 @@ private:
     status_t captureScreen(const sp<IBinder>& displayToken, sp<GraphicBuffer>* outBuffer,
                            const ui::Dataspace reqDataspace, const ui::PixelFormat reqPixelFormat,
                            Rect sourceCrop, uint32_t reqWidth, uint32_t reqHeight,
-                           bool useIdentityTransform, ISurfaceComposer::Rotation rotation) override;
+                           bool useIdentityTransform, ISurfaceComposer::Rotation rotation,
+                           bool captureSecureLayers) override;
     status_t captureLayers(const sp<IBinder>& parentHandle, sp<GraphicBuffer>* outBuffer,
                            const ui::Dataspace reqDataspace, const ui::PixelFormat reqPixelFormat,
                            const Rect& sourceCrop, float frameScale, bool childrenOnly) override;
@@ -477,6 +487,9 @@ private:
     status_t addRegionSamplingListener(const Rect& samplingArea, const sp<IBinder>& stopLayerHandle,
                                        const sp<IRegionSamplingListener>& listener) override;
     status_t removeRegionSamplingListener(const sp<IRegionSamplingListener>& listener) override;
+    status_t setAllowedDisplayConfigs(const sp<IBinder>& displayToken,
+                                      const std::vector<int32_t>& allowedConfigs) override;
+
     /* ------------------------------------------------------------------------
      * DeathRecipient interface
      */
@@ -506,22 +519,28 @@ private:
     void signalLayerUpdate();
     void signalRefresh();
 
+    enum class ConfigEvent { None, Changed };
+
     // called on the main thread in response to initializeDisplays()
     void onInitializeDisplays() REQUIRES(mStateLock);
     // Sets the desired active config bit. It obtains the lock, and sets mDesiredActiveConfig.
-    void setDesiredActiveConfig(const sp<IBinder>& displayToken, int mode) REQUIRES(mStateLock);
-    // Calls setActiveConfig in HWC.
-    void setActiveConfigInHWC();
+    void setDesiredActiveConfig(const sp<IBinder>& displayToken, int mode, ConfigEvent event)
+            REQUIRES(mStateLock);
     // Once HWC has returned the present fence, this sets the active config and a new refresh
     // rate in SF. It also triggers HWC vsync.
     void setActiveConfigInternal() REQUIRES(mStateLock);
     // Active config is updated on INVALIDATE call in a state machine-like manner. When the
-    // desired config was set, HWC needs to update the pannel on the next refresh, and when
+    // desired config was set, HWC needs to update the panel on the next refresh, and when
     // we receive the fence back, we know that the process was complete. It returns whether
-    // the invalidate process should continue.
-    bool updateSetActiveConfigStateMachine();
+    // we need to wait for the next invalidate
+    bool performSetActiveConfig();
     // called on the main thread in response to setPowerMode()
     void setPowerModeInternal(const sp<DisplayDevice>& display, int mode) REQUIRES(mStateLock);
+
+    // called on the main thread in response to setAllowedDisplayConfigs()
+    void setAllowedDisplayConfigsInternal(
+            const sp<IBinder>& displayToken,
+            std::unique_ptr<const AllowedDisplayConfigs>&& allowedConfigs) REQUIRES(mStateLock);
 
     // Returns whether the transaction actually modified any state
     bool handleMessageTransaction();
@@ -624,6 +643,8 @@ private:
     status_t captureScreenCommon(RenderArea& renderArea, TraverseLayersFunction traverseLayers,
                                  sp<GraphicBuffer>* outBuffer, const ui::PixelFormat reqPixelFormat,
                                  bool useIdentityTransform);
+    status_t captureScreenCommon(RenderArea& renderArea, TraverseLayersFunction traverseLayers,
+                                 const sp<GraphicBuffer>& buffer, bool useIdentityTransform);
     status_t captureScreenImplLocked(const RenderArea& renderArea,
                                      TraverseLayersFunction traverseLayers,
                                      ANativeWindowBuffer* buffer, bool useIdentityTransform,
@@ -685,10 +706,6 @@ private:
     // mark a region of a layer stack dirty. this updates the dirty
     // region of all screens presenting this layer stack.
     void invalidateLayerStack(const sp<const Layer>& layer, const Region& dirty);
-
-    // Initialize structures containing information about the internal
-    // display's native color coordinates using default data
-    void initDefaultDisplayNativePrimaries();
 
     /* ------------------------------------------------------------------------
      * H/W composer
@@ -789,7 +806,10 @@ private:
 
     // Sets the refresh rate by switching active configs, if they are available for
     // the desired refresh rate.
-    void setRefreshRateTo(scheduler::RefreshRateConfigs::RefreshRateType) REQUIRES(mStateLock);
+    void setRefreshRateTo(scheduler::RefreshRateConfigs::RefreshRateType, ConfigEvent event)
+            REQUIRES(mStateLock);
+
+    bool isConfigAllowed(const DisplayId& displayId, int32_t config);
 
     /*
      * Display identification
@@ -974,6 +994,7 @@ private:
     int mDebugRegion;
     int mDebugDisableHWC;
     int mDebugDisableTransformHint;
+    bool mDebugEnableProtectedContent;
     volatile nsecs_t mDebugInSwapBuffers;
     volatile nsecs_t mDebugInTransaction;
     nsecs_t mLastTransactionTime;
@@ -988,6 +1009,9 @@ private:
     std::atomic<uint32_t> mFrameMissedCount{0};
 
     TransactionCompletedThread mTransactionCompletedThread;
+
+    bool mLumaSampling = true;
+    sp<RegionSamplingThread> mRegionSamplingThread = new RegionSamplingThread(*this);
 
     // Restrict layers to use two buffers in their bufferqueues.
     bool mLayerTripleBufferingDisabled = false;
@@ -1076,23 +1100,20 @@ private:
      * Scheduler
      */
     bool mUse90Hz = false;
+    bool mUseSmart90ForVideo = false;
     std::unique_ptr<Scheduler> mScheduler;
     sp<Scheduler::ConnectionHandle> mAppConnectionHandle;
     sp<Scheduler::ConnectionHandle> mSfConnectionHandle;
     std::unique_ptr<scheduler::RefreshRateStats> mRefreshRateStats;
 
-    // The following structs are used for configuring active config state at a desired time,
-    // which is once per vsync at invalidate time.
-    enum SetActiveConfigState {
-        NONE,            // not in progress
-        NOTIFIED_HWC,    // call to HWC has been made
-        REFRESH_RECEIVED // onRefresh was received from HWC
-    };
-    std::atomic<SetActiveConfigState> mSetActiveConfigState = SetActiveConfigState::NONE;
+    std::mutex mAllowedConfigsLock;
+    std::unordered_map<DisplayId, std::unique_ptr<const AllowedDisplayConfigs>> mAllowedConfigs
+            GUARDED_BY(mAllowedConfigsLock);
 
     struct ActiveConfigInfo {
         int configId;
         sp<IBinder> displayToken;
+        ConfigEvent event;
 
         bool operator!=(const ActiveConfigInfo& other) const {
             if (configId != other.configId) {
@@ -1109,6 +1130,11 @@ private:
     // This bit can be set at any point in time when the system wants the new config.
     ActiveConfigInfo mDesiredActiveConfig GUARDED_BY(mActiveConfigLock);
 
+    // below flags are set by main thread only
+    bool mDesiredActiveConfigChanged GUARDED_BY(mActiveConfigLock) = false;
+    bool mWaitForNextInvalidate = false;
+    bool mCheckPendingFence = false;
+
     /* ------------------------------------------------------------------------ */
     sp<IInputFlinger> mInputFlinger;
 
@@ -1117,6 +1143,9 @@ private:
     InputWindowCommands mInputWindowCommands;
 
     ui::DisplayPrimaries mInternalDisplayPrimaries;
+
+    sp<SetInputWindowsListener> mSetInputWindowsListener;
+    bool mPendingSyncInputWindows GUARDED_BY(mStateLock);
 };
 }; // namespace android
 

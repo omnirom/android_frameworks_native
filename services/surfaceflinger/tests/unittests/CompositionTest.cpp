@@ -312,7 +312,7 @@ struct BaseDisplayVariant {
                 .WillRepeatedly(
                         [](const renderengine::DisplaySettings& displaySettings,
                            const std::vector<renderengine::LayerSettings>& /*layerSettings*/,
-                           ANativeWindowBuffer*, base::unique_fd*) -> status_t {
+                           ANativeWindowBuffer*, base::unique_fd&&, base::unique_fd*) -> status_t {
                             EXPECT_EQ(DEFAULT_DISPLAY_MAX_LUMINANCE, displaySettings.maxLuminance);
                             EXPECT_EQ(Rect(DEFAULT_DISPLAY_WIDTH, DEFAULT_DISPLAY_HEIGHT),
                                       displaySettings.physicalDisplay);
@@ -351,7 +351,7 @@ struct BaseDisplayVariant {
                 .WillRepeatedly(
                         [](const renderengine::DisplaySettings& displaySettings,
                            const std::vector<renderengine::LayerSettings>& /*layerSettings*/,
-                           ANativeWindowBuffer*, base::unique_fd*) -> status_t {
+                           ANativeWindowBuffer*, base::unique_fd&&, base::unique_fd*) -> status_t {
                             EXPECT_EQ(DEFAULT_DISPLAY_MAX_LUMINANCE, displaySettings.maxLuminance);
                             EXPECT_EQ(Rect(DEFAULT_DISPLAY_WIDTH, DEFAULT_DISPLAY_HEIGHT),
                                       displaySettings.physicalDisplay);
@@ -580,7 +580,8 @@ struct BaseLayerProperties {
         EXPECT_CALL(*test->mRenderEngine, drawLayers)
                 .WillOnce([](const renderengine::DisplaySettings& displaySettings,
                              const std::vector<renderengine::LayerSettings>& layerSettings,
-                             ANativeWindowBuffer*, base::unique_fd*) -> status_t {
+                             ANativeWindowBuffer*, base::unique_fd&&,
+                             base::unique_fd*) -> status_t {
                     EXPECT_EQ(DEFAULT_DISPLAY_MAX_LUMINANCE, displaySettings.maxLuminance);
                     EXPECT_EQ(Rect(DEFAULT_DISPLAY_WIDTH, DEFAULT_DISPLAY_HEIGHT),
                               displaySettings.physicalDisplay);
@@ -624,7 +625,8 @@ struct BaseLayerProperties {
         EXPECT_CALL(*test->mRenderEngine, drawLayers)
                 .WillOnce([](const renderengine::DisplaySettings& displaySettings,
                              const std::vector<renderengine::LayerSettings>& layerSettings,
-                             ANativeWindowBuffer*, base::unique_fd*) -> status_t {
+                             ANativeWindowBuffer*, base::unique_fd&&,
+                             base::unique_fd*) -> status_t {
                     EXPECT_EQ(DEFAULT_DISPLAY_MAX_LUMINANCE, displaySettings.maxLuminance);
                     EXPECT_EQ(Rect(DEFAULT_DISPLAY_WIDTH, DEFAULT_DISPLAY_HEIGHT),
                               displaySettings.physicalDisplay);
@@ -693,7 +695,8 @@ struct SecureLayerProperties : public BaseLayerProperties<SecureLayerProperties>
         EXPECT_CALL(*test->mRenderEngine, drawLayers)
                 .WillOnce([](const renderengine::DisplaySettings& displaySettings,
                              const std::vector<renderengine::LayerSettings>& layerSettings,
-                             ANativeWindowBuffer*, base::unique_fd*) -> status_t {
+                             ANativeWindowBuffer*, base::unique_fd&&,
+                             base::unique_fd*) -> status_t {
                     EXPECT_EQ(DEFAULT_DISPLAY_MAX_LUMINANCE, displaySettings.maxLuminance);
                     EXPECT_EQ(Rect(DEFAULT_DISPLAY_WIDTH, DEFAULT_DISPLAY_HEIGHT),
                               displaySettings.physicalDisplay);
@@ -766,16 +769,16 @@ struct BaseLayerVariant {
     }
 
     static void injectLayer(CompositionTest* test, sp<Layer> layer) {
-        std::vector<std::unique_ptr<compositionengine::OutputLayer>> outputLayers;
-        outputLayers.emplace_back(
-                test->mDisplay->getCompositionDisplay()
-                        ->getOrCreateOutputLayer(layer->getCompositionLayer(), layer));
-        test->mDisplay->getCompositionDisplay()->setOutputLayersOrderedByZ(std::move(outputLayers));
-
         EXPECT_CALL(*test->mComposer, createLayer(HWC_DISPLAY, _))
                 .WillOnce(DoAll(SetArgPointee<1>(HWC_LAYER), Return(Error::NONE)));
 
-        layer->createHwcLayer(&test->mFlinger.getHwComposer(), test->mDisplay);
+        std::vector<std::unique_ptr<compositionengine::OutputLayer>> outputLayers;
+        outputLayers.emplace_back(test->mDisplay->getCompositionDisplay()
+                                          ->getOrCreateOutputLayer(DEFAULT_DISPLAY_ID,
+                                                                   layer->getCompositionLayer(),
+                                                                   layer));
+
+        test->mDisplay->getCompositionDisplay()->setOutputLayersOrderedByZ(std::move(outputLayers));
 
         Mock::VerifyAndClear(test->mComposer);
 
@@ -791,10 +794,6 @@ struct BaseLayerVariant {
 
         test->mDisplay->getCompositionDisplay()->setOutputLayersOrderedByZ(
                 std::vector<std::unique_ptr<compositionengine::OutputLayer>>());
-
-        for (auto layer : test->mFlinger.mutableDrawingState().layersSortedByZ) {
-            layer->destroyHwcLayer(test->mDisplay);
-        }
         test->mFlinger.mutableDrawingState().layersSortedByZ.clear();
     }
 };
