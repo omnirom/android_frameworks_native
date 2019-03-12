@@ -48,6 +48,8 @@ uint64_t getValid10UsageBits() {
         for (const auto bit : hardware::hidl_enum_range<BufferUsage>()) {
             bits = bits | bit;
         }
+        // TODO(b/72323293, b/72703005): Remove these invalid bits from callers
+        bits = bits | ((1 << 10) | (1 << 13) | (1 << 21) | (1 << 27));
         return bits;
     }();
     return valid10UsageBits;

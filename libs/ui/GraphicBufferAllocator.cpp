@@ -109,9 +109,6 @@ status_t GraphicBufferAllocator::allocate(uint32_t width, uint32_t height,
     if (layerCount < 1)
         layerCount = 1;
 
-    // TODO(b/72323293, b/72703005): Remove these invalid bits from callers
-    usage &= ~static_cast<uint64_t>((1 << 10) | (1 << 13) | (1 << 21) | (1 << 27));
-
     status_t error =
             mAllocator->allocate(width, height, format, layerCount, usage, 1, stride, handle);
     if (error == NO_ERROR) {
