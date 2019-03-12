@@ -105,6 +105,7 @@ Layer::Layer(const LayerCreationArgs& args)
     mCurrentState.cornerRadius = 0.0f;
     mCurrentState.api = -1;
     mCurrentState.hasColorTransform = false;
+    mCurrentState.colorSpaceAgnostic = false;
 
     // drawing state & current state are identical
     mDrawingState = mCurrentState;
@@ -149,7 +150,7 @@ void Layer::onRemovedFromCurrentState() {
             strongRelative->removeZOrderRelative(this);
             mFlinger->setTransactionFlags(eTraversalNeeded);
         }
-        mCurrentState.zOrderRelativeOf = nullptr;
+        setZOrderRelativeOf(nullptr);
     }
 
     // Since we are no longer reachable from CurrentState SurfaceFlinger
@@ -1078,13 +1079,6 @@ uint32_t Layer::doTransaction(uint32_t flags) {
         mNeedsFiltering = (!getActiveTransform(c).preserveRects() || type >= ui::Transform::SCALE);
     }
 
-    // If the layer is hidden, signal and clear out all local sync points so
-    // that transactions for layers depending on this layer's frames becoming
-    // visible are not blocked
-    if (c.flags & layer_state_t::eLayerHidden) {
-        clearSyncPoints();
-    }
-
     if (mCurrentState.inputInfoChanged) {
         flags |= eInputInfoChanged;
         mCurrentState.inputInfoChanged = false;
@@ -1171,7 +1165,7 @@ bool Layer::setLayer(int32_t z) {
         if (strongRelative != nullptr) {
             strongRelative->removeZOrderRelative(this);
         }
-        mCurrentState.zOrderRelativeOf = nullptr;
+        setZOrderRelativeOf(nullptr);
     }
     setTransactionFlags(eTransactionNeeded);
     return true;
@@ -1188,6 +1182,13 @@ void Layer::addZOrderRelative(const wp<Layer>& relative) {
     mCurrentState.zOrderRelatives.add(relative);
     mCurrentState.modified = true;
     mCurrentState.sequence++;
+    setTransactionFlags(eTransactionNeeded);
+}
+
+void Layer::setZOrderRelativeOf(const wp<Layer>& relativeOf) {
+    mCurrentState.zOrderRelativeOf = relativeOf;
+    mCurrentState.sequence++;
+    mCurrentState.modified = true;
     setTransactionFlags(eTransactionNeeded);
 }
 
@@ -1214,7 +1215,7 @@ bool Layer::setRelativeLayer(const sp<IBinder>& relativeToHandle, int32_t relati
     if (oldZOrderRelativeOf != nullptr) {
         oldZOrderRelativeOf->removeZOrderRelative(this);
     }
-    mCurrentState.zOrderRelativeOf = relative;
+    setZOrderRelativeOf(relative);
     relative->addZOrderRelative(this);
 
     setTransactionFlags(eTransactionNeeded);
@@ -1357,6 +1358,17 @@ bool Layer::setLayerStack(uint32_t layerStack) {
     if (mCurrentState.layerStack == layerStack) return false;
     mCurrentState.sequence++;
     mCurrentState.layerStack = layerStack;
+    mCurrentState.modified = true;
+    setTransactionFlags(eTransactionNeeded);
+    return true;
+}
+
+bool Layer::setColorSpaceAgnostic(const bool agnostic) {
+    if (mCurrentState.colorSpaceAgnostic == agnostic) {
+        return false;
+    }
+    mCurrentState.sequence++;
+    mCurrentState.colorSpaceAgnostic = agnostic;
     mCurrentState.modified = true;
     setTransactionFlags(eTransactionNeeded);
     return true;
@@ -1769,18 +1781,6 @@ bool Layer::isLegacyDataSpace() const {
 
 void Layer::setParent(const sp<Layer>& layer) {
     mCurrentParent = layer;
-}
-
-void Layer::clearSyncPoints() {
-    for (const auto& child : mCurrentChildren) {
-        child->clearSyncPoints();
-    }
-
-    Mutex::Autolock lock(mLocalSyncPointMutex);
-    for (auto& point : mLocalSyncPoints) {
-        point->setFrameAvailable();
-    }
-    mLocalSyncPoints.clear();
 }
 
 int32_t Layer::getZ() const {

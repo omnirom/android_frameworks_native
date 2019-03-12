@@ -342,10 +342,6 @@ status_t BufferQueueLayer::updateActiveBuffer() {
     return NO_ERROR;
 }
 
-bool BufferQueueLayer::useCachedBufferForClientComposition() const {
-    return mConsumer->getAndSetCurrentBufferCacheHint();
-}
-
 status_t BufferQueueLayer::updateFrameNumber(nsecs_t latchTime) {
     mPreviousFrameNumber = mCurrentFrameNumber;
     mCurrentFrameNumber = mConsumer->getFrameNumber();
@@ -366,7 +362,7 @@ void BufferQueueLayer::setHwcLayerBuffer(const sp<const DisplayDevice>& display)
     uint32_t hwcSlot = 0;
     sp<GraphicBuffer> hwcBuffer;
     (*outputLayer->editState().hwc)
-            .hwcBufferCache.getHwcBuffer(mActiveBufferSlot, mActiveBuffer, &hwcSlot, &hwcBuffer);
+            .hwcBufferCache.getHwcBuffer(mActiveBuffer, &hwcSlot, &hwcBuffer);
 
     auto acquireFence = mConsumer->getCurrentFence();
     auto error = hwcLayer->setBuffer(hwcSlot, hwcBuffer, acquireFence);
