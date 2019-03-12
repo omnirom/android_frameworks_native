@@ -3024,12 +3024,31 @@ void SurfaceFlinger::computeVisibleRegions(const sp<const DisplayDevice>& displa
 
     outDirtyRegion.clear();
 
+    Layer* layerOfInterest = NULL;
+    bool bIgnoreLayer = false;
+    mDrawingState.traverseInReverseZOrder([&](Layer* layer) {
+        if (layer->isSecureDisplay()) {
+            bIgnoreLayer = true;
+            if (displayDevice->isPrimary()) {
+                layerOfInterest = layer;
+            }
+            return;
+        }
+    });
+
     mDrawingState.traverseInReverseZOrder([&](Layer* layer) {
         // start with the whole surface at its current location
         const Layer::State& s(layer->getDrawingState());
 
         // only consider the layers on the given layer stack
         if (!display->belongsInOutput(layer->getLayerStack(), layer->getPrimaryDisplayOnly())) {
+            return;
+        }
+
+        if (bIgnoreLayer && layerOfInterest != layer) {
+            Region visibleNonTransRegion;
+            visibleNonTransRegion.set(Rect(0, 0));
+            layer->setVisibleNonTransparentRegion(visibleNonTransRegion);
             return;
         }
 
@@ -5583,6 +5602,9 @@ void SurfaceFlinger::renderScreenImplLocked(const RenderArea& renderArea,
 
     Region clearRegion = Region::INVALID_REGION;
     traverseLayers([&](Layer* layer) {
+        if (layer->isSecureDisplay()) {
+            return;
+        }
         renderengine::LayerSettings layerSettings;
         bool prepared = layer->prepareClientLayer(renderArea, useIdentityTransform, clearRegion,
                                                   layerSettings);

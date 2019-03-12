@@ -383,6 +383,11 @@ public:
     bool isSecure() const;
 
     /*
+     * isSecureDisplay - true if this display is secure, false otherwise
+     */
+    bool isSecureDisplay() const;
+
+    /*
      * isVisible - true if this layer is visible, false otherwise
      */
     virtual bool isVisible() const = 0;
