@@ -615,7 +615,8 @@ public:
                            const ui::Dataspace /*reqDataspace*/,
                            const ui::PixelFormat /*reqPixelFormat*/, Rect /*sourceCrop*/,
                            uint32_t /*reqWidth*/, uint32_t /*reqHeight*/,
-                           bool /*useIdentityTransform*/, Rotation /*rotation*/) override {
+                           bool /*useIdentityTransform*/, Rotation /*rotation*/,
+                           bool /*captureSecureLayers*/) override {
         return NO_ERROR;
     }
     virtual status_t captureLayers(const sp<IBinder>& /*parentHandle*/,
@@ -668,6 +669,20 @@ public:
     status_t getProtectedContentSupport(bool* /*outSupported*/) const override { return NO_ERROR; }
 
     status_t isWideColorDisplay(const sp<IBinder>&, bool*) const override { return NO_ERROR; }
+
+    status_t addRegionSamplingListener(const Rect& /*samplingArea*/,
+                                       const sp<IBinder>& /*stopLayerHandle*/,
+                                       const sp<IRegionSamplingListener>& /*listener*/) override {
+        return NO_ERROR;
+    }
+    status_t removeRegionSamplingListener(
+            const sp<IRegionSamplingListener>& /*listener*/) override {
+        return NO_ERROR;
+    }
+    status_t setAllowedDisplayConfigs(const sp<IBinder>& /*displayToken*/,
+                                      const std::vector<int32_t>& /*allowedConfigs*/) override {
+        return NO_ERROR;
+    }
 
 protected:
     IBinder* onAsBinder() override { return nullptr; }

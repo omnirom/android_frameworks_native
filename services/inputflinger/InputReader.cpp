@@ -4550,7 +4550,8 @@ void TouchInputMapper::cookAndDispatch(nsecs_t when) {
             mPointerController->setButtonState(mCurrentRawState.buttonState);
             mPointerController->setSpots(mCurrentCookedState.cookedPointerData.pointerCoords,
                     mCurrentCookedState.cookedPointerData.idToIndex,
-                    mCurrentCookedState.cookedPointerData.touchingIdBits);
+                    mCurrentCookedState.cookedPointerData.touchingIdBits,
+                    mViewport.displayId);
         }
 
         if (!mCurrentMotionAborted) {
@@ -5314,7 +5315,8 @@ void TouchInputMapper::dispatchPointerGestures(nsecs_t when, uint32_t policyFlag
         if (mPointerGesture.currentGestureMode == PointerGesture::FREEFORM) {
             mPointerController->setSpots(mPointerGesture.currentGestureCoords,
                      mPointerGesture.currentGestureIdToIndex,
-                     mPointerGesture.currentGestureIdBits);
+                     mPointerGesture.currentGestureIdBits,
+                     mPointerController->getDisplayId());
         }
     } else {
         mPointerController->setPresentation(PointerControllerInterface::PRESENTATION_POINTER);
@@ -6563,6 +6565,8 @@ void TouchInputMapper::dispatchMotion(nsecs_t when, uint32_t policyFlags, uint32
     const int32_t displayId = getAssociatedDisplay().value_or(ADISPLAY_ID_NONE);
     const int32_t deviceId = getDeviceId();
     std::vector<TouchVideoFrame> frames = mDevice->getEventHub()->getVideoFrames(deviceId);
+    std::for_each(frames.begin(), frames.end(),
+            [this](TouchVideoFrame& frame) { frame.rotate(this->mSurfaceOrientation); });
     NotifyMotionArgs args(mContext->getNextSequenceNum(), when, deviceId,
             source, displayId, policyFlags,
             action, actionButton, flags, metaState, buttonState, MotionClassification::NONE,

@@ -27,18 +27,24 @@ class BpGpuService : public BpInterface<IGpuService> {
 public:
     explicit BpGpuService(const sp<IBinder>& impl) : BpInterface<IGpuService>(impl) {}
 
-    virtual void setGpuStats(const std::string driverPackageName,
-                             const std::string driverVersionName, const uint64_t driverVersionCode,
-                             const std::string appPackageName) {
+    virtual void setGpuStats(const std::string& driverPackageName,
+                             const std::string& driverVersionName, uint64_t driverVersionCode,
+                             int64_t driverBuildTime, const std::string& appPackageName,
+                             GraphicsEnv::Driver driver, bool isDriverLoaded,
+                             int64_t driverLoadingTime) {
         Parcel data, reply;
         data.writeInterfaceToken(IGpuService::getInterfaceDescriptor());
 
         data.writeUtf8AsUtf16(driverPackageName);
         data.writeUtf8AsUtf16(driverVersionName);
         data.writeUint64(driverVersionCode);
+        data.writeInt64(driverBuildTime);
         data.writeUtf8AsUtf16(appPackageName);
+        data.writeInt32(static_cast<int32_t>(driver));
+        data.writeBool(isDriverLoaded);
+        data.writeInt64(driverLoadingTime);
 
-        remote()->transact(BnGpuService::SET_GPU_STATS, data, &reply);
+        remote()->transact(BnGpuService::SET_GPU_STATS, data, &reply, IBinder::FLAG_ONEWAY);
     }
 };
 
@@ -62,10 +68,24 @@ status_t BnGpuService::onTransact(uint32_t code, const Parcel& data, Parcel* rep
             uint64_t driverVersionCode;
             if ((status = data.readUint64(&driverVersionCode)) != OK) return status;
 
+            int64_t driverBuildTime;
+            if ((status = data.readInt64(&driverBuildTime)) != OK) return status;
+
             std::string appPackageName;
             if ((status = data.readUtf8FromUtf16(&appPackageName)) != OK) return status;
 
-            setGpuStats(driverPackageName, driverVersionName, driverVersionCode, appPackageName);
+            int32_t driver;
+            if ((status = data.readInt32(&driver)) != OK) return status;
+
+            bool isDriverLoaded;
+            if ((status = data.readBool(&isDriverLoaded)) != OK) return status;
+
+            int64_t driverLoadingTime;
+            if ((status = data.readInt64(&driverLoadingTime)) != OK) return status;
+
+            setGpuStats(driverPackageName, driverVersionName, driverVersionCode, driverBuildTime,
+                        appPackageName, static_cast<GraphicsEnv::Driver>(driver), isDriverLoaded,
+                        driverLoadingTime);
 
             return OK;
         }

@@ -105,7 +105,8 @@ struct RenderEngineTest : public ::testing::Test {
                            std::vector<renderengine::LayerSettings> layers,
                            sp<GraphicBuffer> buffer) {
         base::unique_fd fence;
-        status_t status = sRE->drawLayers(settings, layers, buffer->getNativeBuffer(), &fence);
+        status_t status = sRE->drawLayers(settings, layers, buffer->getNativeBuffer(),
+                                          base::unique_fd(), &fence);
 
         int fd = fence.release();
         if (fd >= 0) {
@@ -209,7 +210,7 @@ struct RenderEngineTest : public ::testing::Test {
 };
 
 std::unique_ptr<renderengine::RenderEngine> RenderEngineTest::sRE =
-        renderengine::RenderEngine::create(static_cast<int32_t>(ui::PixelFormat::RGBA_8888), 0);
+        renderengine::RenderEngine::create(static_cast<int32_t>(ui::PixelFormat::RGBA_8888), 0, 1);
 
 struct ColorSourceVariant {
     static void fillColor(renderengine::LayerSettings& layer, half r, half g, half b,

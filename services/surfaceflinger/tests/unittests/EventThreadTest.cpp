@@ -44,6 +44,7 @@ public:
     MOCK_METHOD1(setVSyncEnabled, void(bool));
     MOCK_METHOD1(setCallback, void(VSyncSource::Callback*));
     MOCK_METHOD1(setPhaseOffset, void(nsecs_t));
+    MOCK_METHOD1(pauseVsyncCallback, void(bool));
 };
 
 } // namespace
@@ -71,6 +72,7 @@ protected:
 
     void expectVSyncSetEnabledCallReceived(bool expectedState);
     void expectVSyncSetPhaseOffsetCallReceived(nsecs_t expectedPhaseOffset);
+    void expectVSyncPauseVsyncCallbackCallReceived(bool expectedPause);
     VSyncSource::Callback* expectVSyncSetCallbackCallReceived();
     void expectInterceptCallReceived(nsecs_t expectedTimestamp);
     void expectVsyncEventReceivedByConnection(const char* name,
@@ -79,10 +81,13 @@ protected:
     void expectVsyncEventReceivedByConnection(nsecs_t expectedTimestamp, unsigned expectedCount);
     void expectHotplugEventReceivedByConnection(PhysicalDisplayId expectedDisplayId,
                                                 bool expectedConnected);
+    void expectConfigChangedEventReceivedByConnection(PhysicalDisplayId expectedDisplayId,
+                                                      int32_t expectedConfigId);
 
     AsyncCallRecorder<void (*)(bool)> mVSyncSetEnabledCallRecorder;
     AsyncCallRecorder<void (*)(VSyncSource::Callback*)> mVSyncSetCallbackCallRecorder;
     AsyncCallRecorder<void (*)(nsecs_t)> mVSyncSetPhaseOffsetCallRecorder;
+    AsyncCallRecorder<void (*)(bool)> mVSyncPauseVsyncCallbackCallRecorder;
     AsyncCallRecorder<void (*)()> mResyncCallRecorder;
     AsyncCallRecorder<void (*)()> mResetIdleTimerCallRecorder;
     AsyncCallRecorder<void (*)(nsecs_t)> mInterceptVSyncCallRecorder;
@@ -107,6 +112,9 @@ EventThreadTest::EventThreadTest() {
 
     EXPECT_CALL(mVSyncSource, setPhaseOffset(_))
             .WillRepeatedly(Invoke(mVSyncSetPhaseOffsetCallRecorder.getInvocable()));
+
+    EXPECT_CALL(mVSyncSource, pauseVsyncCallback(_))
+            .WillRepeatedly(Invoke(mVSyncPauseVsyncCallbackCallRecorder.getInvocable()));
 
     createThread();
     mConnection = createConnection(mConnectionEventCallRecorder);
@@ -157,6 +165,12 @@ void EventThreadTest::expectVSyncSetPhaseOffsetCallReceived(nsecs_t expectedPhas
     EXPECT_EQ(expectedPhaseOffset, std::get<0>(args.value()));
 }
 
+void EventThreadTest::expectVSyncPauseVsyncCallbackCallReceived(bool expectedPause) {
+    auto args = mVSyncPauseVsyncCallbackCallRecorder.waitForCall();
+    ASSERT_TRUE(args.has_value());
+    EXPECT_EQ(expectedPause, std::get<0>(args.value()));
+}
+
 VSyncSource::Callback* EventThreadTest::expectVSyncSetCallbackCallReceived() {
     auto callbackSet = mVSyncSetCallbackCallRecorder.waitForCall();
     return callbackSet.has_value() ? std::get<0>(callbackSet.value()) : nullptr;
@@ -198,6 +212,16 @@ void EventThreadTest::expectHotplugEventReceivedByConnection(PhysicalDisplayId e
     EXPECT_EQ(DisplayEventReceiver::DISPLAY_EVENT_HOTPLUG, event.header.type);
     EXPECT_EQ(expectedDisplayId, event.header.displayId);
     EXPECT_EQ(expectedConnected, event.hotplug.connected);
+}
+
+void EventThreadTest::expectConfigChangedEventReceivedByConnection(
+        PhysicalDisplayId expectedDisplayId, int32_t expectedConfigId) {
+    auto args = mConnectionEventCallRecorder.waitForCall();
+    ASSERT_TRUE(args.has_value());
+    const auto& event = std::get<0>(args.value());
+    EXPECT_EQ(DisplayEventReceiver::DISPLAY_EVENT_CONFIG_CHANGED, event.header.type);
+    EXPECT_EQ(expectedDisplayId, event.header.displayId);
+    EXPECT_EQ(expectedConfigId, event.config.configId);
 }
 
 namespace {
@@ -406,6 +430,16 @@ TEST_F(EventThreadTest, setPhaseOffsetForwardsToVSyncSource) {
     expectVSyncSetPhaseOffsetCallReceived(321);
 }
 
+TEST_F(EventThreadTest, pauseVsyncCallbackForwardsToVSyncSource) {
+    mThread->pauseVsyncCallback(true);
+    expectVSyncPauseVsyncCallbackCallReceived(true);
+}
+
+TEST_F(EventThreadTest, resumeVsyncCallbackForwardsToVSyncSource) {
+    mThread->pauseVsyncCallback(false);
+    expectVSyncPauseVsyncCallbackCallReceived(false);
+}
+
 TEST_F(EventThreadTest, postHotplugInternalDisconnect) {
     mThread->onHotplugReceived(INTERNAL_DISPLAY_ID, false);
     expectHotplugEventReceivedByConnection(INTERNAL_DISPLAY_ID, false);
@@ -424,6 +458,16 @@ TEST_F(EventThreadTest, postHotplugExternalDisconnect) {
 TEST_F(EventThreadTest, postHotplugExternalConnect) {
     mThread->onHotplugReceived(EXTERNAL_DISPLAY_ID, true);
     expectHotplugEventReceivedByConnection(EXTERNAL_DISPLAY_ID, true);
+}
+
+TEST_F(EventThreadTest, postConfigChangedPrimary) {
+    mThread->onConfigChanged(INTERNAL_DISPLAY_ID, 7);
+    expectConfigChangedEventReceivedByConnection(INTERNAL_DISPLAY_ID, 7);
+}
+
+TEST_F(EventThreadTest, postConfigChangedExternal) {
+    mThread->onConfigChanged(EXTERNAL_DISPLAY_ID, 5);
+    expectConfigChangedEventReceivedByConnection(EXTERNAL_DISPLAY_ID, 5);
 }
 
 } // namespace

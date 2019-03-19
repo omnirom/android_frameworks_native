@@ -17,6 +17,7 @@
 #undef LOG_TAG
 #define LOG_TAG "CompositionTest"
 
+#include <compositionengine/Display.h>
 #include <compositionengine/mock/DisplaySurface.h>
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
@@ -32,6 +33,7 @@
 #include "ColorLayer.h"
 #include "Layer.h"
 
+#include "TestableScheduler.h"
 #include "TestableSurfaceFlinger.h"
 #include "mock/DisplayHardware/MockComposer.h"
 #include "mock/MockDispSync.h"
@@ -89,11 +91,9 @@ public:
                 ::testing::UnitTest::GetInstance()->current_test_info();
         ALOGD("**** Setting up for %s.%s\n", test_info->test_case_name(), test_info->name());
 
-        mFlinger.mutableEventControlThread().reset(mEventControlThread);
-        mFlinger.mutableEventThread().reset(mEventThread);
         mFlinger.mutableEventQueue().reset(mMessageQueue);
+        setupScheduler();
 
-        mFlinger.mutablePrimaryDispSync().reset(mPrimaryDispSync);
         EXPECT_CALL(*mPrimaryDispSync, computeNextRefresh(0)).WillRepeatedly(Return(0));
         EXPECT_CALL(*mPrimaryDispSync, getPeriod())
                 .WillRepeatedly(Return(FakeHwcDisplayInjector::DEFAULT_REFRESH_RATE));
@@ -123,6 +123,18 @@ public:
         Mock::VerifyAndClear(mComposer);
     }
 
+    void setupScheduler() {
+        mScheduler = new TestableScheduler();
+        mScheduler->mutableEventControlThread().reset(mEventControlThread);
+        mScheduler->mutablePrimaryDispSync().reset(mPrimaryDispSync);
+        EXPECT_CALL(*mEventThread.get(), registerDisplayEventConnection(_));
+        sp<Scheduler::ConnectionHandle> connectionHandle =
+                mScheduler->addConnection(std::move(mEventThread));
+        mFlinger.mutableSfConnectionHandle() = std::move(connectionHandle);
+
+        mFlinger.mutableScheduler().reset(mScheduler);
+    }
+
     void setupForceGeometryDirty() {
         // TODO: This requires the visible region and other related
         // state to be set, and is problematic for BufferLayers since they are
@@ -144,6 +156,7 @@ public:
 
     std::unordered_set<HWC2::Capability> mDefaultCapabilities = {HWC2::Capability::SidebandStream};
 
+    TestableScheduler* mScheduler;
     TestableSurfaceFlinger mFlinger;
     sp<DisplayDevice> mDisplay;
     sp<DisplayDevice> mExternalDisplay;
@@ -154,7 +167,7 @@ public:
     sp<GraphicBuffer> mBuffer = new GraphicBuffer();
     ANativeWindowBuffer* mNativeWindowBuffer = mBuffer->getNativeBuffer();
 
-    mock::EventThread* mEventThread = new mock::EventThread();
+    std::unique_ptr<mock::EventThread> mEventThread = std::make_unique<mock::EventThread>();
     mock::EventControlThread* mEventControlThread = new mock::EventControlThread();
 
     Hwc2::mock::Composer* mComposer = nullptr;
@@ -299,7 +312,7 @@ struct BaseDisplayVariant {
                 .WillRepeatedly(
                         [](const renderengine::DisplaySettings& displaySettings,
                            const std::vector<renderengine::LayerSettings>& /*layerSettings*/,
-                           ANativeWindowBuffer*, base::unique_fd*) -> status_t {
+                           ANativeWindowBuffer*, base::unique_fd&&, base::unique_fd*) -> status_t {
                             EXPECT_EQ(DEFAULT_DISPLAY_MAX_LUMINANCE, displaySettings.maxLuminance);
                             EXPECT_EQ(Rect(DEFAULT_DISPLAY_WIDTH, DEFAULT_DISPLAY_HEIGHT),
                                       displaySettings.physicalDisplay);
@@ -338,7 +351,7 @@ struct BaseDisplayVariant {
                 .WillRepeatedly(
                         [](const renderengine::DisplaySettings& displaySettings,
                            const std::vector<renderengine::LayerSettings>& /*layerSettings*/,
-                           ANativeWindowBuffer*, base::unique_fd*) -> status_t {
+                           ANativeWindowBuffer*, base::unique_fd&&, base::unique_fd*) -> status_t {
                             EXPECT_EQ(DEFAULT_DISPLAY_MAX_LUMINANCE, displaySettings.maxLuminance);
                             EXPECT_EQ(Rect(DEFAULT_DISPLAY_WIDTH, DEFAULT_DISPLAY_HEIGHT),
                                       displaySettings.physicalDisplay);
@@ -481,7 +494,7 @@ struct BaseLayerProperties {
 
         EXPECT_CALL(*test->mRenderEngine, useNativeFenceSync()).WillRepeatedly(Return(true));
         bool ignoredRecomputeVisibleRegions;
-        layer->latchBuffer(ignoredRecomputeVisibleRegions, 0, Fence::NO_FENCE);
+        layer->latchBuffer(ignoredRecomputeVisibleRegions, 0);
         Mock::VerifyAndClear(test->mRenderEngine);
     }
 
@@ -567,7 +580,8 @@ struct BaseLayerProperties {
         EXPECT_CALL(*test->mRenderEngine, drawLayers)
                 .WillOnce([](const renderengine::DisplaySettings& displaySettings,
                              const std::vector<renderengine::LayerSettings>& layerSettings,
-                             ANativeWindowBuffer*, base::unique_fd*) -> status_t {
+                             ANativeWindowBuffer*, base::unique_fd&&,
+                             base::unique_fd*) -> status_t {
                     EXPECT_EQ(DEFAULT_DISPLAY_MAX_LUMINANCE, displaySettings.maxLuminance);
                     EXPECT_EQ(Rect(DEFAULT_DISPLAY_WIDTH, DEFAULT_DISPLAY_HEIGHT),
                               displaySettings.physicalDisplay);
@@ -611,7 +625,8 @@ struct BaseLayerProperties {
         EXPECT_CALL(*test->mRenderEngine, drawLayers)
                 .WillOnce([](const renderengine::DisplaySettings& displaySettings,
                              const std::vector<renderengine::LayerSettings>& layerSettings,
-                             ANativeWindowBuffer*, base::unique_fd*) -> status_t {
+                             ANativeWindowBuffer*, base::unique_fd&&,
+                             base::unique_fd*) -> status_t {
                     EXPECT_EQ(DEFAULT_DISPLAY_MAX_LUMINANCE, displaySettings.maxLuminance);
                     EXPECT_EQ(Rect(DEFAULT_DISPLAY_WIDTH, DEFAULT_DISPLAY_HEIGHT),
                               displaySettings.physicalDisplay);
@@ -680,7 +695,8 @@ struct SecureLayerProperties : public BaseLayerProperties<SecureLayerProperties>
         EXPECT_CALL(*test->mRenderEngine, drawLayers)
                 .WillOnce([](const renderengine::DisplaySettings& displaySettings,
                              const std::vector<renderengine::LayerSettings>& layerSettings,
-                             ANativeWindowBuffer*, base::unique_fd*) -> status_t {
+                             ANativeWindowBuffer*, base::unique_fd&&,
+                             base::unique_fd*) -> status_t {
                     EXPECT_EQ(DEFAULT_DISPLAY_MAX_LUMINANCE, displaySettings.maxLuminance);
                     EXPECT_EQ(Rect(DEFAULT_DISPLAY_WIDTH, DEFAULT_DISPLAY_HEIGHT),
                               displaySettings.physicalDisplay);
@@ -746,7 +762,7 @@ struct BaseLayerVariant {
         layerDrawingState.active.h = 100;
         layerDrawingState.color = half4(LayerProperties::COLOR[0], LayerProperties::COLOR[1],
                                         LayerProperties::COLOR[2], LayerProperties::COLOR[3]);
-
+        layer->computeBounds(FloatRect(0, 0, 100, 100), ui::Transform());
         layer->setVisibleRegion(Region(Rect(0, 0, 100, 100)));
 
         return layer;
@@ -756,9 +772,13 @@ struct BaseLayerVariant {
         EXPECT_CALL(*test->mComposer, createLayer(HWC_DISPLAY, _))
                 .WillOnce(DoAll(SetArgPointee<1>(HWC_LAYER), Return(Error::NONE)));
 
-        const auto displayId = test->mDisplay->getId();
-        ASSERT_TRUE(displayId);
-        layer->createHwcLayer(&test->mFlinger.getHwComposer(), *displayId);
+        std::vector<std::unique_ptr<compositionengine::OutputLayer>> outputLayers;
+        outputLayers.emplace_back(test->mDisplay->getCompositionDisplay()
+                                          ->getOrCreateOutputLayer(DEFAULT_DISPLAY_ID,
+                                                                   layer->getCompositionLayer(),
+                                                                   layer));
+
+        test->mDisplay->getCompositionDisplay()->setOutputLayersOrderedByZ(std::move(outputLayers));
 
         Mock::VerifyAndClear(test->mComposer);
 
@@ -771,11 +791,9 @@ struct BaseLayerVariant {
     static void cleanupInjectedLayers(CompositionTest* test) {
         EXPECT_CALL(*test->mComposer, destroyLayer(HWC_DISPLAY, HWC_LAYER))
                 .WillOnce(Return(Error::NONE));
-        const auto displayId = test->mDisplay->getId();
-        ASSERT_TRUE(displayId);
-        for (auto layer : test->mFlinger.mutableDrawingState().layersSortedByZ) {
-            layer->destroyHwcLayer(*displayId);
-        }
+
+        test->mDisplay->getCompositionDisplay()->setOutputLayersOrderedByZ(
+                std::vector<std::unique_ptr<compositionengine::OutputLayer>>());
         test->mFlinger.mutableDrawingState().layersSortedByZ.clear();
     }
 };
@@ -963,8 +981,8 @@ struct RECompositionResultVariant : public CompositionResultBaseVariant {
 };
 
 struct ForcedClientCompositionResultVariant : public RECompositionResultVariant {
-    static void setupLayerState(CompositionTest*, sp<Layer> layer) {
-        layer->forceClientComposition(DEFAULT_DISPLAY_ID);
+    static void setupLayerState(CompositionTest* test, sp<Layer> layer) {
+        layer->forceClientComposition(test->mDisplay);
     }
 
     template <typename Case>

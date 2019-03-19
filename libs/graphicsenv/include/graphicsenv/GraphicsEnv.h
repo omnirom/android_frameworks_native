@@ -28,11 +28,43 @@ namespace android {
 struct NativeLoaderNamespace;
 
 class GraphicsEnv {
+public:
+    enum Api {
+        API_GL = 0,
+        API_VK = 1,
+    };
+
+    enum Driver {
+        NONE = 0,
+        GL = 1,
+        GL_UPDATED = 2,
+        VULKAN = 3,
+        VULKAN_UPDATED = 4,
+        ANGLE = 5,
+    };
+
+private:
     struct GpuStats {
         std::string driverPackageName;
         std::string driverVersionName;
         uint64_t driverVersionCode;
+        int64_t driverBuildTime;
         std::string appPackageName;
+        Driver glDriverToLoad;
+        Driver glDriverFallback;
+        Driver vkDriverToLoad;
+        Driver vkDriverFallback;
+
+        GpuStats()
+              : driverPackageName(""),
+                driverVersionName(""),
+                driverVersionCode(0),
+                driverBuildTime(0),
+                appPackageName(""),
+                glDriverToLoad(Driver::NONE),
+                glDriverFallback(Driver::NONE),
+                vkDriverToLoad(Driver::NONE),
+                vkDriverFallback(Driver::NONE) {}
     };
 
 public:
@@ -45,11 +77,18 @@ public:
     // (drivers must be stored uncompressed and page aligned); such elements
     // in the search path must have a '!' after the zip filename, e.g.
     //     /data/app/com.example.driver/base.apk!/lib/arm64-v8a
-    void setDriverPath(const std::string path);
+    // Also set additional required sphal libraries to the linker for loading
+    // graphics drivers. The string is a list of libraries separated by ':',
+    // which is required by android_link_namespaces.
+    void setDriverPathAndSphalLibraries(const std::string path, const std::string sphalLibraries);
     android_namespace_t* getDriverNamespace();
-    void setGpuStats(const std::string driverPackageName, const std::string driverVersionName,
-                     const uint64_t versionCode, const std::string appPackageName);
-    void sendGpuStats();
+    void setGpuStats(const std::string& driverPackageName, const std::string& driverVersionName,
+                     uint64_t versionCode, int64_t driverBuildTime,
+                     const std::string& appPackageName);
+    void setDriverToLoad(Driver driver);
+    void setDriverLoaded(Api api, bool isDriverLoaded, int64_t driverLoadingTime);
+    void clearDriverLoadingInfo(Api api);
+    void sendGpuStatsLocked(Driver driver, bool isDriverLoaded, int64_t driverLoadingTime);
 
     bool shouldUseAngle(std::string appName);
     bool shouldUseAngle();
@@ -74,18 +113,22 @@ public:
     const std::string& getDebugLayersGLES();
 
 private:
+    enum UseAngle { UNKNOWN, YES, NO };
+
     void* loadLibrary(std::string name);
     bool checkAngleRules(void* so);
     void updateUseAngle();
 
     GraphicsEnv() = default;
     std::string mDriverPath;
+    std::string mSphalLibraries;
+    std::mutex mStatsLock;
     GpuStats mGpuStats;
     std::string mAnglePath;
     std::string mAngleAppName;
     std::string mAngleDeveloperOptIn;
     std::vector<char> mRulesBuffer;
-    bool mUseAngle;
+    UseAngle mUseAngle = UNKNOWN;
     std::string mDebugLayers;
     std::string mDebugLayersGLES;
     std::string mLayerPaths;

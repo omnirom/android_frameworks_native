@@ -29,6 +29,7 @@
 #include <ui/DebugUtils.h>
 
 #include "DisplayIdentificationTest.h"
+#include "TestableScheduler.h"
 #include "TestableSurfaceFlinger.h"
 #include "mock/DisplayHardware/MockComposer.h"
 #include "mock/MockDispSync.h"
@@ -94,6 +95,8 @@ public:
     DisplayTransactionTest();
     ~DisplayTransactionTest() override;
 
+    void setupScheduler();
+
     // --------------------------------------------------------------------
     // Mock/Fake injection
 
@@ -116,6 +119,7 @@ public:
     // --------------------------------------------------------------------
     // Test instances
 
+    TestableScheduler* mScheduler;
     TestableSurfaceFlinger mFlinger;
     mock::EventThread* mEventThread = new mock::EventThread();
     mock::EventThread* mSFEventThread = new mock::EventThread();
@@ -160,13 +164,10 @@ DisplayTransactionTest::DisplayTransactionTest() {
         return nullptr;
     });
 
-    mFlinger.mutableEventControlThread().reset(mEventControlThread);
-    mFlinger.mutableEventThread().reset(mEventThread);
-    mFlinger.mutableSFEventThread().reset(mSFEventThread);
+    setupScheduler();
     mFlinger.mutableEventQueue().reset(mMessageQueue);
     mFlinger.setupRenderEngine(std::unique_ptr<renderengine::RenderEngine>(mRenderEngine));
     mFlinger.mutableInterceptor().reset(mSurfaceInterceptor);
-    mFlinger.mutablePrimaryDispSync().reset(mPrimaryDispSync);
 
     injectMockComposer(0);
 }
@@ -175,6 +176,22 @@ DisplayTransactionTest::~DisplayTransactionTest() {
     const ::testing::TestInfo* const test_info =
             ::testing::UnitTest::GetInstance()->current_test_info();
     ALOGD("**** Tearing down after %s.%s\n", test_info->test_case_name(), test_info->name());
+}
+
+void DisplayTransactionTest::setupScheduler() {
+    mScheduler = new TestableScheduler();
+    mScheduler->mutableEventControlThread().reset(mEventControlThread);
+    mScheduler->mutablePrimaryDispSync().reset(mPrimaryDispSync);
+    EXPECT_CALL(*mEventThread, registerDisplayEventConnection(_));
+    EXPECT_CALL(*mSFEventThread, registerDisplayEventConnection(_));
+
+    sp<Scheduler::ConnectionHandle> sfConnectionHandle =
+            mScheduler->addConnection(std::unique_ptr<EventThread>(mSFEventThread));
+    mFlinger.mutableSfConnectionHandle() = std::move(sfConnectionHandle);
+    sp<Scheduler::ConnectionHandle> appConnectionHandle =
+            mScheduler->addConnection(std::unique_ptr<EventThread>(mEventThread));
+    mFlinger.mutableAppConnectionHandle() = std::move(appConnectionHandle);
+    mFlinger.mutableScheduler().reset(mScheduler);
 }
 
 void DisplayTransactionTest::injectMockComposer(int virtualDisplayCount) {
@@ -1106,8 +1123,8 @@ TEST_F(DisplayTransactionTest, resetDisplayStateClearsState) {
     // Preconditions
 
     // vsync is enabled and available
-    mFlinger.mutablePrimaryHWVsyncEnabled() = true;
-    mFlinger.mutableHWVsyncAvailable() = true;
+    mScheduler->mutablePrimaryHWVsyncEnabled() = true;
+    mScheduler->mutableHWVsyncAvailable() = true;
 
     // A display exists
     auto existing = Case::Display::makeFakeExistingDisplayInjector(this);
@@ -1131,8 +1148,8 @@ TEST_F(DisplayTransactionTest, resetDisplayStateClearsState) {
     // Postconditions
 
     // vsyncs should be off and not available.
-    EXPECT_FALSE(mFlinger.mutablePrimaryHWVsyncEnabled());
-    EXPECT_FALSE(mFlinger.mutableHWVsyncAvailable());
+    EXPECT_FALSE(mScheduler->mutablePrimaryHWVsyncEnabled());
+    EXPECT_FALSE(mScheduler->mutableHWVsyncAvailable());
 
     // The display should have been removed from the display map.
     EXPECT_FALSE(hasDisplayDevice(existing.token()));
@@ -1303,32 +1320,6 @@ void GetDisplayNativePrimaries::checkDummyDisplayNativePrimaries(
 TEST_F(GetDisplayNativePrimaries, nullDisplayToken) {
     ui::DisplayPrimaries primaries;
     EXPECT_EQ(BAD_VALUE, mFlinger.getDisplayNativePrimaries(nullptr, primaries));
-}
-
-TEST_F(GetDisplayNativePrimaries, internalDisplayWithDefaultPrimariesData) {
-    auto injector = SimplePrimaryDisplayCase::Display::makeFakeExistingDisplayInjector(this);
-    injector.inject();
-    auto internalDisplayToken = injector.token();
-    // A nullptr would trigger a different execution path than what's being tested here
-    EXPECT_NE(nullptr, internalDisplayToken.get());
-
-    mFlinger.initDefaultDisplayNativePrimaries();
-
-    ui::DisplayPrimaries primaries;
-    // Expecting sRGB primaries
-    EXPECT_EQ(NO_ERROR, mFlinger.getDisplayNativePrimaries(internalDisplayToken, primaries));
-    EXPECT_EQ(primaries.red.X, 0.4123f);
-    EXPECT_EQ(primaries.red.Y, 0.2126f);
-    EXPECT_EQ(primaries.red.Z, 0.0193f);
-    EXPECT_EQ(primaries.green.X, 0.3576f);
-    EXPECT_EQ(primaries.green.Y, 0.7152f);
-    EXPECT_EQ(primaries.green.Z, 0.1192f);
-    EXPECT_EQ(primaries.blue.X, 0.1805f);
-    EXPECT_EQ(primaries.blue.Y, 0.0722f);
-    EXPECT_EQ(primaries.blue.Z, 0.9506f);
-    EXPECT_EQ(primaries.white.X, 0.9505f);
-    EXPECT_EQ(primaries.white.Y, 1.0000f);
-    EXPECT_EQ(primaries.white.Z, 1.0891f);
 }
 
 TEST_F(GetDisplayNativePrimaries, internalDisplayWithPrimariesData) {
@@ -1557,7 +1548,6 @@ void HandleTransactionLockedTest::setupCommonCallExpectationsForConnectProcessin
     Case::PerFrameMetadataSupport::setupComposerCallExpectations(this);
 
     EXPECT_CALL(*mSurfaceInterceptor, saveDisplayCreation(_)).Times(1);
-
     expectHotplugReceived<Case, true>(mEventThread);
     expectHotplugReceived<Case, true>(mSFEventThread);
 }
@@ -3008,7 +2998,7 @@ struct DisplayPowerCase {
     }
 
     static void setInitialPrimaryHWVsyncEnabled(DisplayTransactionTest* test, bool enabled) {
-        test->mFlinger.mutablePrimaryHWVsyncEnabled() = enabled;
+        test->mScheduler->mutablePrimaryHWVsyncEnabled() = enabled;
     }
 
     static void setupRepaintEverythingCallExpectations(DisplayTransactionTest* test) {

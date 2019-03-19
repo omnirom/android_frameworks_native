@@ -146,6 +146,14 @@ void Output::dumpBase(std::string& out) const {
     } else {
         out.append("    No render surface!\n");
     }
+
+    out.append("\n   %d Layers", mOutputLayersOrderedByZ.size());
+    for (const auto& outputLayer : mOutputLayersOrderedByZ) {
+        if (!outputLayer) {
+            continue;
+        }
+        outputLayer->dump(out);
+    }
 }
 
 compositionengine::DisplayColorProfile* Output::getDisplayColorProfile() const {
@@ -209,13 +217,14 @@ compositionengine::OutputLayer* Output::getOutputLayerForLayer(
 }
 
 std::unique_ptr<compositionengine::OutputLayer> Output::getOrCreateOutputLayer(
-        std::shared_ptr<compositionengine::Layer> layer, sp<compositionengine::LayerFE> layerFE) {
+        std::optional<DisplayId> displayId, std::shared_ptr<compositionengine::Layer> layer,
+        sp<compositionengine::LayerFE> layerFE) {
     for (auto& outputLayer : mOutputLayersOrderedByZ) {
         if (outputLayer && &outputLayer->getLayer() == layer.get()) {
             return std::move(outputLayer);
         }
     }
-    return createOutputLayer(*this, layer, layerFE);
+    return createOutputLayer(mCompositionEngine, displayId, *this, layer, layerFE);
 }
 
 void Output::setOutputLayersOrderedByZ(OutputLayers&& layers) {

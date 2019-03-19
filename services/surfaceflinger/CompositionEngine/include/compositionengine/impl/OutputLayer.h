@@ -17,8 +17,12 @@
 #pragma once
 
 #include <memory>
+#include <string>
 
 #include <compositionengine/OutputLayer.h>
+#include <compositionengine/impl/OutputLayerCompositionState.h>
+
+#include "DisplayHardware/DisplayIdentification.h"
 
 namespace android::compositionengine::impl {
 
@@ -28,18 +32,27 @@ public:
                 sp<compositionengine::LayerFE>);
     ~OutputLayer() override;
 
+    void initialize(const CompositionEngine&, std::optional<DisplayId>);
+
     const compositionengine::Output& getOutput() const override;
     compositionengine::Layer& getLayer() const override;
     compositionengine::LayerFE& getLayerFE() const override;
+
+    const OutputLayerCompositionState& getState() const override;
+    OutputLayerCompositionState& editState() override;
+
+    void dump(std::string& result) const override;
 
 private:
     const compositionengine::Output& mOutput;
     std::shared_ptr<compositionengine::Layer> mLayer;
     sp<compositionengine::LayerFE> mLayerFE;
+
+    OutputLayerCompositionState mState;
 };
 
 std::unique_ptr<compositionengine::OutputLayer> createOutputLayer(
-        const compositionengine::Output&, std::shared_ptr<compositionengine::Layer>,
-        sp<compositionengine::LayerFE>);
+        const CompositionEngine&, std::optional<DisplayId>, const compositionengine::Output&,
+        std::shared_ptr<compositionengine::Layer>, sp<compositionengine::LayerFE>);
 
 } // namespace android::compositionengine::impl

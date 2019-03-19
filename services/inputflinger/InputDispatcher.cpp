@@ -401,7 +401,7 @@ void InputDispatcher::dispatchOnceInnerLocked(nsecs_t* nextWakeupTime) {
     case EventEntry::TYPE_KEY: {
         KeyEntry* typedEntry = static_cast<KeyEntry*>(mPendingEvent);
         if (isAppSwitchDue) {
-            if (isAppSwitchKeyEventLocked(typedEntry)) {
+            if (isAppSwitchKeyEvent(typedEntry)) {
                 resetPendingAppSwitchLocked(true);
                 isAppSwitchDue = false;
             } else if (dropReason == DROP_REASON_NOT_DROPPED) {
@@ -409,7 +409,7 @@ void InputDispatcher::dispatchOnceInnerLocked(nsecs_t* nextWakeupTime) {
             }
         }
         if (dropReason == DROP_REASON_NOT_DROPPED
-                && isStaleEventLocked(currentTime, typedEntry)) {
+                && isStaleEvent(currentTime, typedEntry)) {
             dropReason = DROP_REASON_STALE;
         }
         if (dropReason == DROP_REASON_NOT_DROPPED && mNextUnblockedEvent) {
@@ -425,7 +425,7 @@ void InputDispatcher::dispatchOnceInnerLocked(nsecs_t* nextWakeupTime) {
             dropReason = DROP_REASON_APP_SWITCH;
         }
         if (dropReason == DROP_REASON_NOT_DROPPED
-                && isStaleEventLocked(currentTime, typedEntry)) {
+                && isStaleEvent(currentTime, typedEntry)) {
             dropReason = DROP_REASON_STALE;
         }
         if (dropReason == DROP_REASON_NOT_DROPPED && mNextUnblockedEvent) {
@@ -463,7 +463,7 @@ bool InputDispatcher::enqueueInboundEventLocked(EventEntry* entry) {
         // If the application takes too long to catch up then we drop all events preceding
         // the app switch key.
         KeyEntry* keyEntry = static_cast<KeyEntry*>(entry);
-        if (isAppSwitchKeyEventLocked(keyEntry)) {
+        if (isAppSwitchKeyEvent(keyEntry)) {
             if (keyEntry->action == AKEY_EVENT_ACTION_DOWN) {
                 mAppSwitchSawKeyDown = true;
             } else if (keyEntry->action == AKEY_EVENT_ACTION_UP) {
@@ -615,13 +615,13 @@ void InputDispatcher::dropInboundEventLocked(EventEntry* entry, DropReason dropR
     }
 }
 
-bool InputDispatcher::isAppSwitchKeyCode(int32_t keyCode) {
+static bool isAppSwitchKeyCode(int32_t keyCode) {
     return keyCode == AKEYCODE_HOME
             || keyCode == AKEYCODE_ENDCALL
             || keyCode == AKEYCODE_APP_SWITCH;
 }
 
-bool InputDispatcher::isAppSwitchKeyEventLocked(KeyEntry* keyEntry) {
+bool InputDispatcher::isAppSwitchKeyEvent(KeyEntry* keyEntry) {
     return ! (keyEntry->flags & AKEY_EVENT_FLAG_CANCELED)
             && isAppSwitchKeyCode(keyEntry->keyCode)
             && (keyEntry->policyFlags & POLICY_FLAG_TRUSTED)
@@ -644,7 +644,7 @@ void InputDispatcher::resetPendingAppSwitchLocked(bool handled) {
 #endif
 }
 
-bool InputDispatcher::isStaleEventLocked(nsecs_t currentTime, EventEntry* entry) {
+bool InputDispatcher::isStaleEvent(nsecs_t currentTime, EventEntry* entry) {
     return currentTime - entry->eventTime >= STALE_EVENT_TIMEOUT;
 }
 
@@ -756,7 +756,7 @@ bool InputDispatcher::dispatchConfigurationChangedLocked(
 
     // Enqueue a command to run outside the lock to tell the policy that the configuration changed.
     CommandEntry* commandEntry = postCommandLocked(
-            & InputDispatcher::doNotifyConfigurationChangedInterruptible);
+            & InputDispatcher::doNotifyConfigurationChangedLockedInterruptible);
     commandEntry->eventTime = entry->eventTime;
     return true;
 }
@@ -811,7 +811,7 @@ bool InputDispatcher::dispatchKeyLocked(nsecs_t currentTime, KeyEntry* entry,
 
         entry->dispatchInProgress = true;
 
-        logOutboundKeyDetailsLocked("dispatchKey - ", entry);
+        logOutboundKeyDetails("dispatchKey - ", entry);
     }
 
     // Handle case where the policy asked us to try again later last time.
@@ -878,7 +878,7 @@ bool InputDispatcher::dispatchKeyLocked(nsecs_t currentTime, KeyEntry* entry,
     return true;
 }
 
-void InputDispatcher::logOutboundKeyDetailsLocked(const char* prefix, const KeyEntry* entry) {
+void InputDispatcher::logOutboundKeyDetails(const char* prefix, const KeyEntry* entry) {
 #if DEBUG_OUTBOUND_EVENT_DETAILS
     ALOGD("%seventTime=%" PRId64 ", deviceId=%d, source=0x%x, displayId=%" PRId32 ", "
             "policyFlags=0x%x, action=0x%x, flags=0x%x, keyCode=0x%x, scanCode=0x%x, "
@@ -896,7 +896,7 @@ bool InputDispatcher::dispatchMotionLocked(
     if (! entry->dispatchInProgress) {
         entry->dispatchInProgress = true;
 
-        logOutboundMotionDetailsLocked("dispatchMotion - ", entry);
+        logOutboundMotionDetails("dispatchMotion - ", entry);
     }
 
     // Clean up if dropping the event.
@@ -968,7 +968,7 @@ bool InputDispatcher::dispatchMotionLocked(
 }
 
 
-void InputDispatcher::logOutboundMotionDetailsLocked(const char* prefix, const MotionEntry* entry) {
+void InputDispatcher::logOutboundMotionDetails(const char* prefix, const MotionEntry* entry) {
 #if DEBUG_OUTBOUND_EVENT_DETAILS
     ALOGD("%seventTime=%" PRId64 ", deviceId=%d, source=0x%x, displayId=%" PRId32
             ", policyFlags=0x%x, "
@@ -1049,7 +1049,7 @@ int32_t InputDispatcher::handleTargetsNotReadyLocked(nsecs_t currentTime,
         if (mInputTargetWaitCause != INPUT_TARGET_WAIT_CAUSE_APPLICATION_NOT_READY) {
 #if DEBUG_FOCUS
             ALOGD("Waiting for application to become ready for input: %s.  Reason: %s",
-                    getApplicationWindowLabelLocked(applicationHandle, windowHandle).c_str(),
+                    getApplicationWindowLabel(applicationHandle, windowHandle).c_str(),
                     reason);
 #endif
             nsecs_t timeout;
@@ -1233,8 +1233,7 @@ int32_t InputDispatcher::findFocusedWindowTargetsLocked(nsecs_t currentTime,
 Failed:
 Unresponsive:
     nsecs_t timeSpentWaitingForApplication = getTimeSpentWaitingForApplicationLocked(currentTime);
-    updateDispatchStatisticsLocked(currentTime, entry,
-            injectionResult, timeSpentWaitingForApplication);
+    updateDispatchStatistics(currentTime, entry, injectionResult, timeSpentWaitingForApplication);
 #if DEBUG_FOCUS
     ALOGD("findFocusedWindow finished: injectionResult=%d, "
             "timeSpentWaitingForApplication=%0.1fms",
@@ -1654,8 +1653,7 @@ Unresponsive:
     mTempTouchState.reset();
 
     nsecs_t timeSpentWaitingForApplication = getTimeSpentWaitingForApplicationLocked(currentTime);
-    updateDispatchStatisticsLocked(currentTime, entry,
-            injectionResult, timeSpentWaitingForApplication);
+    updateDispatchStatistics(currentTime, entry, injectionResult, timeSpentWaitingForApplication);
 #if DEBUG_FOCUS
     ALOGD("findTouchedWindow finished: injectionResult=%d, injectionPermission=%d, "
             "timeSpentWaitingForApplication=%0.1fms",
@@ -1857,7 +1855,7 @@ std::string InputDispatcher::checkWindowReadyForMoreInputLocked(nsecs_t currentT
     return "";
 }
 
-std::string InputDispatcher::getApplicationWindowLabelLocked(
+std::string InputDispatcher::getApplicationWindowLabel(
         const sp<InputApplicationHandle>& applicationHandle,
         const sp<InputWindowHandle>& windowHandle) {
     if (applicationHandle != nullptr) {
@@ -1956,7 +1954,7 @@ void InputDispatcher::prepareDispatchCycleLocked(nsecs_t currentTime,
 #if DEBUG_FOCUS
             ALOGD("channel '%s' ~ Split motion event.",
                     connection->getInputChannelName().c_str());
-            logOutboundMotionDetailsLocked("  ", splitMotionEntry);
+            logOutboundMotionDetails("  ", splitMotionEntry);
 #endif
             enqueueDispatchEntriesLocked(currentTime, connection,
                     splitMotionEntry, inputTarget);
@@ -2076,12 +2074,12 @@ void InputDispatcher::enqueueDispatchEntryLocked(
 
     // Remember that we are waiting for this dispatch to complete.
     if (dispatchEntry->hasForegroundTarget()) {
-        incrementPendingForegroundDispatchesLocked(eventEntry);
+        incrementPendingForegroundDispatches(eventEntry);
     }
 
     // Enqueue the dispatch entry.
     connection->outboundQueue.enqueueAtTail(dispatchEntry);
-    traceOutboundQueueLengthLocked(connection);
+    traceOutboundQueueLength(connection);
 }
 
 void InputDispatcher::startDispatchCycleLocked(nsecs_t currentTime,
@@ -2196,9 +2194,9 @@ void InputDispatcher::startDispatchCycleLocked(nsecs_t currentTime,
 
         // Re-enqueue the event on the wait queue.
         connection->outboundQueue.dequeue(dispatchEntry);
-        traceOutboundQueueLengthLocked(connection);
+        traceOutboundQueueLength(connection);
         connection->waitQueue.enqueueAtTail(dispatchEntry);
-        traceWaitQueueLengthLocked(connection);
+        traceWaitQueueLength(connection);
     }
 }
 
@@ -2229,9 +2227,9 @@ void InputDispatcher::abortBrokenDispatchCycleLocked(nsecs_t currentTime,
 
     // Clear the dispatch queues.
     drainDispatchQueueLocked(&connection->outboundQueue);
-    traceOutboundQueueLengthLocked(connection);
+    traceOutboundQueueLength(connection);
     drainDispatchQueueLocked(&connection->waitQueue);
-    traceWaitQueueLengthLocked(connection);
+    traceWaitQueueLength(connection);
 
     // The connection appears to be unrecoverably broken.
     // Ignore already broken or zombie connections.
@@ -2323,7 +2321,7 @@ int InputDispatcher::handleReceiveCallback(int fd, int events, void* data) {
     } // release lock
 }
 
-void InputDispatcher::synthesizeCancelationEventsForAllConnectionsLocked(
+void InputDispatcher::synthesizeCancelationEventsForAllConnectionsLocked (
         const CancelationOptions& options) {
     for (size_t i = 0; i < mConnectionsByFd.size(); i++) {
         synthesizeCancelationEventsForConnectionLocked(
@@ -2331,7 +2329,7 @@ void InputDispatcher::synthesizeCancelationEventsForAllConnectionsLocked(
     }
 }
 
-void InputDispatcher::synthesizeCancelationEventsForMonitorsLocked(
+void InputDispatcher::synthesizeCancelationEventsForMonitorsLocked (
         const CancelationOptions& options) {
     for (auto& it : mMonitoringChannelsByDisplay) {
         const Vector<sp<InputChannel>>& monitoringChannels = it.second;
@@ -2374,11 +2372,11 @@ void InputDispatcher::synthesizeCancelationEventsForConnectionLocked(
             EventEntry* cancelationEventEntry = cancelationEvents.itemAt(i);
             switch (cancelationEventEntry->type) {
             case EventEntry::TYPE_KEY:
-                logOutboundKeyDetailsLocked("cancel - ",
+                logOutboundKeyDetails("cancel - ",
                         static_cast<KeyEntry*>(cancelationEventEntry));
                 break;
             case EventEntry::TYPE_MOTION:
-                logOutboundMotionDetailsLocked("cancel - ",
+                logOutboundMotionDetails("cancel - ",
                         static_cast<MotionEntry*>(cancelationEventEntry));
                 break;
             }
@@ -2673,7 +2671,7 @@ void InputDispatcher::notifyMotion(const NotifyMotionArgs* args) {
     policyFlags |= POLICY_FLAG_TRUSTED;
 
     android::base::Timer t;
-    mPolicy->interceptMotionBeforeQueueing(args->eventTime, /*byref*/ policyFlags);
+    mPolicy->interceptMotionBeforeQueueing(args->displayId, args->eventTime, /*byref*/ policyFlags);
     if (t.duration() > SLOW_INTERCEPTION_THRESHOLD) {
         ALOGW("Excessive delay in interceptMotionBeforeQueueing; took %s ms",
                 std::to_string(t.duration().count()).c_str());
@@ -2821,6 +2819,7 @@ int32_t InputDispatcher::injectInputEvent(const InputEvent* event,
         size_t pointerCount = motionEvent->getPointerCount();
         const PointerProperties* pointerProperties = motionEvent->getPointerProperties();
         int32_t actionButton = motionEvent->getActionButton();
+        int32_t displayId = motionEvent->getDisplayId();
         if (! validateMotionEvent(action, actionButton, pointerCount, pointerProperties)) {
             return INPUT_EVENT_INJECTION_FAILED;
         }
@@ -2828,7 +2827,7 @@ int32_t InputDispatcher::injectInputEvent(const InputEvent* event,
         if (!(policyFlags & POLICY_FLAG_FILTERED)) {
             nsecs_t eventTime = motionEvent->getEventTime();
             android::base::Timer t;
-            mPolicy->interceptMotionBeforeQueueing(eventTime, /*byref*/ policyFlags);
+            mPolicy->interceptMotionBeforeQueueing(displayId, eventTime, /*byref*/ policyFlags);
             if (t.duration() > SLOW_INTERCEPTION_THRESHOLD) {
                 ALOGW("Excessive delay in interceptMotionBeforeQueueing; took %s ms",
                         std::to_string(t.duration().count()).c_str());
@@ -2993,7 +2992,7 @@ void InputDispatcher::setInjectionResultLocked(EventEntry* entry, int32_t inject
     }
 }
 
-void InputDispatcher::incrementPendingForegroundDispatchesLocked(EventEntry* entry) {
+void InputDispatcher::incrementPendingForegroundDispatches(EventEntry* entry) {
     InjectionState* injectionState = entry->injectionState;
     if (injectionState) {
         injectionState->pendingForegroundDispatches += 1;
@@ -3013,7 +3012,7 @@ void InputDispatcher::decrementPendingForegroundDispatchesLocked(EventEntry* ent
 
 Vector<sp<InputWindowHandle>> InputDispatcher::getWindowHandlesLocked(int32_t displayId) const {
     std::unordered_map<int32_t, Vector<sp<InputWindowHandle>>>::const_iterator it =
-        mWindowHandlesByDisplay.find(displayId);
+            mWindowHandlesByDisplay.find(displayId);
     if(it != mWindowHandlesByDisplay.end()) {
         return it->second;
     }
@@ -3037,8 +3036,7 @@ sp<InputWindowHandle> InputDispatcher::getWindowHandleLocked(
     return nullptr;
 }
 
-bool InputDispatcher::hasWindowHandleLocked(
-        const sp<InputWindowHandle>& windowHandle) const {
+bool InputDispatcher::hasWindowHandleLocked(const sp<InputWindowHandle>& windowHandle) const {
     for (auto& it : mWindowHandlesByDisplay) {
         const Vector<sp<InputWindowHandle>> windowHandles = it.second;
         size_t numWindows = windowHandles.size();
@@ -3074,7 +3072,7 @@ sp<InputChannel> InputDispatcher::getInputChannelLocked(const sp<IBinder>& token
  * For removed handle, check if need to send a cancel event if already in touch.
  */
 void InputDispatcher::setInputWindows(const Vector<sp<InputWindowHandle>>& inputWindowHandles,
-        int32_t displayId) {
+        int32_t displayId, const sp<ISetInputWindowsListener>& setInputWindowsListener) {
 #if DEBUG_FOCUS
     ALOGD("setInputWindows displayId=%" PRId32, displayId);
 #endif
@@ -3224,6 +3222,10 @@ void InputDispatcher::setInputWindows(const Vector<sp<InputWindowHandle>>& input
 
     // Wake up poll loop since it may need to make new input dispatching choices.
     mLooper->wake();
+
+    if (setInputWindowsListener) {
+        setInputWindowsListener->onSetInputWindowsFinished();
+    }
 }
 
 void InputDispatcher::setFocusedApplication(
@@ -3883,7 +3885,7 @@ void InputDispatcher::onANRLocked(
     float waitDuration = (currentTime - waitStartTime) * 0.000001f;
     ALOGI("Application is not responding: %s.  "
             "It has been %0.1fms since event, %0.1fms since wait started.  Reason: %s",
-            getApplicationWindowLabelLocked(applicationHandle, windowHandle).c_str(),
+            getApplicationWindowLabel(applicationHandle, windowHandle).c_str(),
             dispatchLatency, waitDuration, reason);
 
     // Capture a record of the InputDispatcher state at the time of the ANR.
@@ -3896,7 +3898,7 @@ void InputDispatcher::onANRLocked(
     mLastANRState += INDENT "ANR:\n";
     mLastANRState += StringPrintf(INDENT2 "Time: %s\n", timestr);
     mLastANRState += StringPrintf(INDENT2 "Window: %s\n",
-            getApplicationWindowLabelLocked(applicationHandle, windowHandle).c_str());
+            getApplicationWindowLabel(applicationHandle, windowHandle).c_str());
     mLastANRState += StringPrintf(INDENT2 "DispatchLatency: %0.1fms\n", dispatchLatency);
     mLastANRState += StringPrintf(INDENT2 "WaitDuration: %0.1fms\n", waitDuration);
     mLastANRState += StringPrintf(INDENT2 "Reason: %s\n", reason);
@@ -3910,7 +3912,7 @@ void InputDispatcher::onANRLocked(
     commandEntry->reason = reason;
 }
 
-void InputDispatcher::doNotifyConfigurationChangedInterruptible(
+void InputDispatcher::doNotifyConfigurationChangedLockedInterruptible (
         CommandEntry* commandEntry) {
     mLock.unlock();
 
@@ -4026,10 +4028,10 @@ void InputDispatcher::doDispatchCycleFinishedLockedInterruptible(
         // a few things.
         if (dispatchEntry == connection->findWaitQueueEntry(seq)) {
             connection->waitQueue.dequeue(dispatchEntry);
-            traceWaitQueueLengthLocked(connection);
+            traceWaitQueueLength(connection);
             if (restartEvent && connection->status == Connection::STATUS_NORMAL) {
                 connection->outboundQueue.enqueueAtHead(dispatchEntry);
-                traceOutboundQueueLengthLocked(connection);
+                traceOutboundQueueLength(connection);
             } else {
                 releaseDispatchEntryLocked(dispatchEntry);
             }
@@ -4241,7 +4243,7 @@ void InputDispatcher::initializeKeyEvent(KeyEvent* event, const KeyEntry* entry)
             entry->downTime, entry->eventTime);
 }
 
-void InputDispatcher::updateDispatchStatisticsLocked(nsecs_t currentTime, const EventEntry* entry,
+void InputDispatcher::updateDispatchStatistics(nsecs_t currentTime, const EventEntry* entry,
         int32_t injectionResult, nsecs_t timeSpentWaitingForApplication) {
     // TODO Write some statistics about how long we spend waiting.
 }
@@ -4252,7 +4254,7 @@ void InputDispatcher::traceInboundQueueLengthLocked() {
     }
 }
 
-void InputDispatcher::traceOutboundQueueLengthLocked(const sp<Connection>& connection) {
+void InputDispatcher::traceOutboundQueueLength(const sp<Connection>& connection) {
     if (ATRACE_ENABLED()) {
         char counterName[40];
         snprintf(counterName, sizeof(counterName), "oq:%s", connection->getWindowName().c_str());
@@ -4260,7 +4262,7 @@ void InputDispatcher::traceOutboundQueueLengthLocked(const sp<Connection>& conne
     }
 }
 
-void InputDispatcher::traceWaitQueueLengthLocked(const sp<Connection>& connection) {
+void InputDispatcher::traceWaitQueueLength(const sp<Connection>& connection) {
     if (ATRACE_ENABLED()) {
         char counterName[40];
         snprintf(counterName, sizeof(counterName), "wq:%s", connection->getWindowName().c_str());

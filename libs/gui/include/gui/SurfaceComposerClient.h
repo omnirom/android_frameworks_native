@@ -111,6 +111,12 @@ public:
     // returned by getDisplayInfo
     static status_t setActiveConfig(const sp<IBinder>& display, int id);
 
+    // Sets the allowed display configurations to be used.
+    // The allowedConfigs in a vector of indexes corresponding to the configurations
+    // returned from getDisplayConfigs().
+    static status_t setAllowedDisplayConfigs(const sp<IBinder>& displayToken,
+                                             const std::vector<int32_t>& allowedConfigs);
+
     // Gets the list of supported color modes for the given display
     static status_t getDisplayColorModes(const sp<IBinder>& display,
             Vector<ui::ColorMode>* outColorModes);
@@ -378,6 +384,7 @@ public:
 #ifndef NO_INPUT
         Transaction& setInputWindowInfo(const sp<SurfaceControl>& sc, const InputWindowInfo& info);
         Transaction& transferTouchFocus(const sp<IBinder>& fromToken, const sp<IBinder>& toToken);
+        Transaction& syncInputWindows();
 #endif
 
         // Set a color transform matrix on the given layer on the built-in display.
@@ -450,6 +457,10 @@ class ScreenshotClient {
 public:
     // if cropping isn't required, callers may pass in a default Rect, e.g.:
     //   capture(display, producer, Rect(), reqWidth, ...);
+    static status_t capture(const sp<IBinder>& display, const ui::Dataspace reqDataSpace,
+                            const ui::PixelFormat reqPixelFormat, Rect sourceCrop,
+                            uint32_t reqWidth, uint32_t reqHeight, bool useIdentityTransform,
+                            uint32_t rotation, bool captureSecureLayers, sp<GraphicBuffer>* outBuffer);
     static status_t capture(const sp<IBinder>& display, const ui::Dataspace reqDataSpace,
                             const ui::PixelFormat reqPixelFormat, Rect sourceCrop,
                             uint32_t reqWidth, uint32_t reqHeight, bool useIdentityTransform,

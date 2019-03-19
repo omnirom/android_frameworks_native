@@ -54,6 +54,15 @@ public:
         mEarlyOffsets = early;
         mEarlyGlOffsets = earlyGl;
         mLateOffsets = late;
+
+        if (mSfConnectionHandle && late.sf != mOffsets.load().sf) {
+            mScheduler->setPhaseOffset(mSfConnectionHandle, late.sf);
+        }
+
+        if (mAppConnectionHandle && late.app != mOffsets.load().app) {
+            mScheduler->setPhaseOffset(mAppConnectionHandle, late.app);
+        }
+
         mOffsets = late;
     }
 
@@ -124,7 +133,7 @@ private:
             changed = true;
         }
         if (desired.app != current.app) {
-            if (mSfConnectionHandle != nullptr) {
+            if (mAppConnectionHandle != nullptr) {
                 mScheduler->setPhaseOffset(mAppConnectionHandle, desired.app);
             } else {
                 mAppEventThread->setPhaseOffset(desired.app);

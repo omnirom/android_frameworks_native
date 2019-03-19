@@ -91,11 +91,10 @@ int ProducerChannel::InitializeBuffer() {
 
   // Using placement new here to reuse shared memory instead of new allocation
   // and also initialize the value to zero.
-  buffer_state_ =
-      new (&metadata_header_->buffer_state) std::atomic<uint32_t>(0);
-  fence_state_ = new (&metadata_header_->fence_state) std::atomic<uint32_t>(0);
+  buffer_state_ = new (&metadata_header_->bufferState) std::atomic<uint32_t>(0);
+  fence_state_ = new (&metadata_header_->fenceState) std::atomic<uint32_t>(0);
   active_clients_bit_mask_ =
-      new (&metadata_header_->active_clients_bit_mask) std::atomic<uint32_t>(0);
+      new (&metadata_header_->activeClientsBitMask) std::atomic<uint32_t>(0);
 
   // Producer channel is never created after consumer channel, and one buffer
   // only have one fixed producer for now. Thus, it is correct to assume
@@ -183,7 +182,7 @@ BufferHubChannel::BufferInfo ProducerChannel::GetBufferInfo() const {
                     buffer_.height(), buffer_.layer_count(), buffer_.format(),
                     buffer_.usage(),
                     buffer_state_->load(std::memory_order_acquire),
-                    signaled_mask, metadata_header_->queue_index);
+                    signaled_mask, metadata_header_->queueIndex);
 }
 
 void ProducerChannel::HandleImpulse(Message& message) {
@@ -393,8 +392,8 @@ Status<RemoteChannelHandle> ProducerChannel::OnNewConsumer(Message& message) {
 Status<void> ProducerChannel::OnProducerPost(Message&,
                                              LocalFence acquire_fence) {
   ATRACE_NAME("ProducerChannel::OnProducerPost");
-  ALOGD("ProducerChannel::OnProducerPost: buffer_id=%d, state=0x%x",
-        buffer_id(), buffer_state_->load(std::memory_order_acquire));
+  ALOGD_IF(TRACE, "%s: buffer_id=%d, state=0x%x", __FUNCTION__, buffer_id(),
+           buffer_state_->load(std::memory_order_acquire));
 
   epoll_event event;
   event.events = 0;
@@ -438,7 +437,7 @@ Status<void> ProducerChannel::OnProducerPost(Message&,
 
 Status<LocalFence> ProducerChannel::OnProducerGain(Message& /*message*/) {
   ATRACE_NAME("ProducerChannel::OnGain");
-  ALOGW("ProducerChannel::OnGain: buffer_id=%d", buffer_id());
+  ALOGD_IF(TRACE, "%s: buffer_id=%d", __FUNCTION__, buffer_id());
 
   ClearAvailable();
   post_fence_.close();
@@ -547,7 +546,7 @@ Status<void> ProducerChannel::OnConsumerRelease(Message&,
           "%s: orphaned buffer detected during the this acquire/release cycle: "
           "id=%d orphaned=0x%" PRIx32 " queue_index=%" PRId64 ".",
           __FUNCTION__, buffer_id(), orphaned_consumer_bit_mask_,
-          metadata_header_->queue_index);
+          metadata_header_->queueIndex);
       orphaned_consumer_bit_mask_ = 0;
     }
   }
@@ -581,7 +580,7 @@ void ProducerChannel::OnConsumerOrphaned(const uint32_t& consumer_state_mask) {
       "consumer_state_mask=%" PRIx32 " queue_index=%" PRId64
       " buffer_state=%" PRIx32 " fence_state=%" PRIx32 ".",
       __FUNCTION__, buffer_id(), consumer_state_mask,
-      metadata_header_->queue_index,
+      metadata_header_->queueIndex,
       buffer_state_->load(std::memory_order_acquire),
       fence_state_->load(std::memory_order_acquire));
 }

@@ -26,6 +26,7 @@
 
 #include <gui/IDisplayEventConnection.h>
 #include <gui/IGraphicBufferProducer.h>
+#include <gui/IRegionSamplingListener.h>
 #include <gui/ISurfaceComposer.h>
 #include <gui/ISurfaceComposerClient.h>
 #include <gui/LayerDebugInfo.h>
@@ -99,7 +100,7 @@ public:
                                    const ui::Dataspace reqDataspace,
                                    const ui::PixelFormat reqPixelFormat, Rect sourceCrop,
                                    uint32_t reqWidth, uint32_t reqHeight, bool useIdentityTransform,
-                                   ISurfaceComposer::Rotation rotation) {
+                                   ISurfaceComposer::Rotation rotation, bool captureSecureLayers) {
         Parcel data, reply;
         data.writeInterfaceToken(ISurfaceComposer::getInterfaceDescriptor());
         data.writeStrongBinder(display);
@@ -110,6 +111,7 @@ public:
         data.writeUint32(reqHeight);
         data.writeInt32(static_cast<int32_t>(useIdentityTransform));
         data.writeInt32(static_cast<int32_t>(rotation));
+        data.writeInt32(static_cast<int32_t>(captureSecureLayers));
         status_t result = remote()->transact(BnSurfaceComposer::CAPTURE_SCREEN, data, &reply);
         if (result != NO_ERROR) {
             ALOGE("captureScreen failed to transact: %d", result);
@@ -754,6 +756,83 @@ public:
         error = reply.readBool(outIsWideColorDisplay);
         return error;
     }
+
+    virtual status_t addRegionSamplingListener(const Rect& samplingArea,
+                                               const sp<IBinder>& stopLayerHandle,
+                                               const sp<IRegionSamplingListener>& listener) {
+        Parcel data, reply;
+        status_t error = data.writeInterfaceToken(ISurfaceComposer::getInterfaceDescriptor());
+        if (error != NO_ERROR) {
+            ALOGE("addRegionSamplingListener: Failed to write interface token");
+            return error;
+        }
+        error = data.write(samplingArea);
+        if (error != NO_ERROR) {
+            ALOGE("addRegionSamplingListener: Failed to write sampling area");
+            return error;
+        }
+        error = data.writeStrongBinder(stopLayerHandle);
+        if (error != NO_ERROR) {
+            ALOGE("addRegionSamplingListener: Failed to write stop layer handle");
+            return error;
+        }
+        error = data.writeStrongBinder(IInterface::asBinder(listener));
+        if (error != NO_ERROR) {
+            ALOGE("addRegionSamplingListener: Failed to write listener");
+            return error;
+        }
+        error = remote()->transact(BnSurfaceComposer::ADD_REGION_SAMPLING_LISTENER, data, &reply);
+        if (error != NO_ERROR) {
+            ALOGE("addRegionSamplingListener: Failed to transact");
+        }
+        return error;
+    }
+
+    virtual status_t removeRegionSamplingListener(const sp<IRegionSamplingListener>& listener) {
+        Parcel data, reply;
+        status_t error = data.writeInterfaceToken(ISurfaceComposer::getInterfaceDescriptor());
+        if (error != NO_ERROR) {
+            ALOGE("addRegionSamplingListener: Failed to write interface token");
+            return error;
+        }
+        error = data.writeStrongBinder(IInterface::asBinder(listener));
+        if (error != NO_ERROR) {
+            ALOGE("addRegionSamplingListener: Failed to write listener");
+            return error;
+        }
+        error = remote()->transact(BnSurfaceComposer::REMOVE_REGION_SAMPLING_LISTENER, data,
+                                   &reply);
+        if (error != NO_ERROR) {
+            ALOGE("addRegionSamplingListener: Failed to transact");
+        }
+        return error;
+    }
+
+    virtual status_t setAllowedDisplayConfigs(const sp<IBinder>& displayToken,
+                                              const std::vector<int32_t>& allowedConfigs) {
+        Parcel data, reply;
+        status_t result = data.writeInterfaceToken(ISurfaceComposer::getInterfaceDescriptor());
+        if (result != NO_ERROR) {
+            ALOGE("setAllowedDisplayConfigs failed to writeInterfaceToken: %d", result);
+            return result;
+        }
+        result = data.writeStrongBinder(displayToken);
+        if (result != NO_ERROR) {
+            ALOGE("setAllowedDisplayConfigs failed to writeStrongBinder: %d", result);
+            return result;
+        }
+        result = data.writeInt32Vector(allowedConfigs);
+        if (result != NO_ERROR) {
+            ALOGE("setAllowedDisplayConfigs failed to writeInt32Vector: %d", result);
+            return result;
+        }
+        result = remote()->transact(BnSurfaceComposer::SET_ALLOWED_DISPLAY_CONFIGS, data, &reply);
+        if (result != NO_ERROR) {
+            ALOGE("setAllowedDisplayConfigs failed to transact: %d", result);
+            return result;
+        }
+        return reply.readInt32();
+    }
 };
 
 // Out-of-line virtual method definition to trigger vtable emission in this
@@ -832,10 +911,11 @@ status_t BnSurfaceComposer::onTransact(
             uint32_t reqHeight = data.readUint32();
             bool useIdentityTransform = static_cast<bool>(data.readInt32());
             int32_t rotation = data.readInt32();
+            bool captureSecureLayers = static_cast<bool>(data.readInt32());
 
             status_t res = captureScreen(display, &outBuffer, reqDataspace, reqPixelFormat,
                                          sourceCrop, reqWidth, reqHeight, useIdentityTransform,
-                                         static_cast<ISurfaceComposer::Rotation>(rotation));
+                                         static_cast<ISurfaceComposer::Rotation>(rotation), captureSecureLayers);
             reply->writeInt32(res);
             if (res == NO_ERROR) {
                 reply->write(*outBuffer);
@@ -1232,6 +1312,47 @@ status_t BnSurfaceComposer::onTransact(
         case GET_PHYSICAL_DISPLAY_IDS: {
             CHECK_INTERFACE(ISurfaceComposer, data, reply);
             return reply->writeUint64Vector(getPhysicalDisplayIds());
+        }
+        case ADD_REGION_SAMPLING_LISTENER: {
+            CHECK_INTERFACE(ISurfaceComposer, data, reply);
+            Rect samplingArea;
+            status_t result = data.read(samplingArea);
+            if (result != NO_ERROR) {
+                ALOGE("addRegionSamplingListener: Failed to read sampling area");
+                return result;
+            }
+            sp<IBinder> stopLayerHandle;
+            result = data.readNullableStrongBinder(&stopLayerHandle);
+            if (result != NO_ERROR) {
+                ALOGE("addRegionSamplingListener: Failed to read stop layer handle");
+                return result;
+            }
+            sp<IRegionSamplingListener> listener;
+            result = data.readNullableStrongBinder(&listener);
+            if (result != NO_ERROR) {
+                ALOGE("addRegionSamplingListener: Failed to read listener");
+                return result;
+            }
+            return addRegionSamplingListener(samplingArea, stopLayerHandle, listener);
+        }
+        case REMOVE_REGION_SAMPLING_LISTENER: {
+            CHECK_INTERFACE(ISurfaceComposer, data, reply);
+            sp<IRegionSamplingListener> listener;
+            status_t result = data.readNullableStrongBinder(&listener);
+            if (result != NO_ERROR) {
+                ALOGE("removeRegionSamplingListener: Failed to read listener");
+                return result;
+            }
+            return removeRegionSamplingListener(listener);
+        }
+        case SET_ALLOWED_DISPLAY_CONFIGS: {
+            CHECK_INTERFACE(ISurfaceComposer, data, reply);
+            sp<IBinder> displayToken = data.readStrongBinder();
+            std::vector<int32_t> allowedConfigs;
+            data.readInt32Vector(&allowedConfigs);
+            status_t result = setAllowedDisplayConfigs(displayToken, allowedConfigs);
+            reply->writeInt32(result);
+            return result;
         }
         default: {
             return BBinder::onTransact(code, data, reply, flags);

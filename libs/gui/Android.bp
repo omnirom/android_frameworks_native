@@ -99,6 +99,7 @@ cc_defaults {
         "IGraphicBufferConsumer.cpp",
         "IGraphicBufferProducer.cpp",
         "IProducerListener.cpp",
+        "IRegionSamplingListener.cpp",
         "ISurfaceComposer.cpp",
         "ISurfaceComposerClient.cpp",
         "ITransactionCompletedListener.cpp",

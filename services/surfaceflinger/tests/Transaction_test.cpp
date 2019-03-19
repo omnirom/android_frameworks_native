@@ -33,6 +33,7 @@
 #include <gui/Surface.h>
 #include <gui/SurfaceComposerClient.h>
 #include <private/gui/ComposerService.h>
+#include <private/android_filesystem_config.h>
 
 #include <ui/ColorSpace.h>
 #include <ui/DisplayInfo.h>
@@ -41,6 +42,8 @@
 
 #include <math.h>
 #include <math/vec3.h>
+#include <sys/types.h>
+#include <unistd.h>
 
 #include "BufferGenerator.h"
 
@@ -1199,6 +1202,56 @@ TEST_P(LayerTypeTransactionTest, SetFlagsSecure) {
     Transaction().setFlags(layer, 0, layer_state_t::eLayerSecure).apply(true);
     ASSERT_EQ(NO_ERROR,
               composer->captureScreen(mDisplay, &outBuffer, Rect(), 0, 0, false));
+}
+
+/** RAII Wrapper around get/seteuid */
+class UIDFaker {
+    uid_t oldId;
+public:
+    UIDFaker(uid_t uid) {
+        oldId = geteuid();
+        seteuid(uid);
+    }
+    ~UIDFaker() {
+        seteuid(oldId);
+    }
+};
+
+TEST_F(LayerTransactionTest, SetFlagsSecureEUidSystem) {
+    sp<SurfaceControl> layer;
+    ASSERT_NO_FATAL_FAILURE(layer = createLayer("test", 32, 32));
+    ASSERT_NO_FATAL_FAILURE(fillBufferQueueLayerColor(layer, Color::RED, 32, 32));
+
+    sp<ISurfaceComposer> composer = ComposerService::getComposerService();
+    sp<GraphicBuffer> outBuffer;
+    Transaction()
+            .setFlags(layer, layer_state_t::eLayerSecure, layer_state_t::eLayerSecure)
+            .apply(true);
+    ASSERT_EQ(PERMISSION_DENIED,
+              composer->captureScreen(mDisplay, &outBuffer, Rect(), 0, 0, false));
+
+    UIDFaker f(AID_SYSTEM);
+
+    // By default the system can capture screenshots with secure layers but they
+    // will be blacked out
+    ASSERT_EQ(NO_ERROR,
+              composer->captureScreen(mDisplay, &outBuffer, Rect(), 0, 0, false));
+
+    {
+        SCOPED_TRACE("as system");
+        auto shot = screenshot();
+        shot->expectColor(Rect(0, 0, 32, 32), Color::BLACK);
+    }
+
+    // Here we pass captureSecureLayers = true and since we are AID_SYSTEM we should be able
+    // to receive them...we are expected to take care with the results.
+    ASSERT_EQ(NO_ERROR,
+              composer->captureScreen(mDisplay, &outBuffer,
+                      ui::Dataspace::V0_SRGB, ui::PixelFormat::RGBA_8888,
+                      Rect(), 0, 0, false,
+                      ISurfaceComposer::eRotateNone, true));
+    ScreenCapture sc(outBuffer);
+    sc.expectColor(Rect(0, 0, 32, 32), Color::RED);
 }
 
 TEST_P(LayerRenderTypeTransactionTest, SetTransparentRegionHintBasic_BufferQueue) {
@@ -5126,23 +5179,35 @@ public:
         SurfaceComposerClient::Transaction().show(mChild).apply(true);
     }
 
-    void verify() {
+    void verify(std::function<void()> verifyStartingState) {
+        // Verify starting state before a screenshot is taken.
+        verifyStartingState();
+
+        // Verify child layer does not inherit any of the properties of its
+        // parent when its screenshot is captured.
         auto fgHandle = mFGSurfaceControl->getHandle();
         ScreenCapture::captureChildLayers(&mCapture, fgHandle);
         mCapture->checkPixel(10, 10, 0, 0, 0);
         mCapture->expectChildColor(0, 0);
+
+        // Verify all assumptions are still true after the screenshot is taken.
+        verifyStartingState();
     }
 
     std::unique_ptr<ScreenCapture> mCapture;
     sp<SurfaceControl> mChild;
 };
 
+// Regression test b/76099859
 TEST_F(ScreenCaptureChildOnlyTest, CaptureLayerIgnoresParentVisibility) {
 
     SurfaceComposerClient::Transaction().hide(mFGSurfaceControl).apply(true);
 
     // Even though the parent is hidden we should still capture the child.
-    verify();
+
+    // Before and after reparenting, verify child is properly hidden
+    // when rendering full-screen.
+    verify([&] { screenshot()->expectBGColor(64, 64); });
 }
 
 TEST_F(ScreenCaptureChildOnlyTest, CaptureLayerIgnoresParentCrop) {
@@ -5151,25 +5216,19 @@ TEST_F(ScreenCaptureChildOnlyTest, CaptureLayerIgnoresParentCrop) {
             .apply(true);
 
     // Even though the parent is cropped out we should still capture the child.
-    verify();
+
+    // Before and after reparenting, verify child is cropped by parent.
+    verify([&] { screenshot()->expectBGColor(65, 65); });
 }
 
+// Regression test b/124372894
 TEST_F(ScreenCaptureChildOnlyTest, CaptureLayerIgnoresTransform) {
-
-    SurfaceComposerClient::Transaction().setMatrix(mFGSurfaceControl, 2, 0, 0, 2);
+    SurfaceComposerClient::Transaction().setMatrix(mFGSurfaceControl, 2, 0, 0, 2).apply(true);
 
     // We should not inherit the parent scaling.
-    verify();
-}
 
-TEST_F(ScreenCaptureChildOnlyTest, RegressionTest76099859) {
-    SurfaceComposerClient::Transaction().hide(mFGSurfaceControl).apply(true);
-
-    // Even though the parent is hidden we should still capture the child.
-    verify();
-
-    // Verify everything was properly hidden when rendering the full-screen.
-    screenshot()->expectBGColor(0,0);
+    // Before and after reparenting, verify child is properly scaled.
+    verify([&] { screenshot()->expectChildColor(80, 80); });
 }
 
 
