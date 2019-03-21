@@ -618,6 +618,10 @@ protected:
               : mFlinger(flinger), mLayer(layer) {}
     };
 
+#ifdef TARGET_NEEDS_HWC_ONFIRSTREF
+    virtual void onFirstRef();
+#endif`
+
     friend class impl::SurfaceInterceptor;
 
     void commitTransaction(const State& stateToCommit);

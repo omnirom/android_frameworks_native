@@ -155,6 +155,13 @@ cc_library_shared {
     lto: {
         thin: true,
     },
+    product_variables: {
+        omnirom: {
+            avoid_calling_into_HWC_onFirstRef: {
+                cflags: ["-DTARGET_NEEDS_HWC_ONFIRSTREF"],
+            },
+        },
+    },
 }
 
 cc_binary {
