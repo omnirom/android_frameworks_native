@@ -48,7 +48,12 @@ BufferStateLayer::BufferStateLayer(const LayerCreationArgs& args) : BufferLayer(
     mOverrideScalingMode = NATIVE_WINDOW_SCALING_MODE_SCALE_TO_WINDOW;
     mCurrentState.dataspace = ui::Dataspace::V0_SRGB;
 }
-BufferStateLayer::~BufferStateLayer() = default;
+BufferStateLayer::~BufferStateLayer() {
+    if (mActiveBuffer != nullptr) {
+        auto& engine(mFlinger->getRenderEngine());
+        engine.unbindExternalTextureBuffer(mActiveBuffer->getId());
+    }
+}
 
 // -----------------------------------------------------------------------
 // Interface implementation for Layer
@@ -468,7 +473,7 @@ status_t BufferStateLayer::bindTextureImage() {
     const State& s(getDrawingState());
     auto& engine(mFlinger->getRenderEngine());
 
-    return engine.bindExternalTextureBuffer(mTextureName, s.buffer, s.acquireFence, false);
+    return engine.bindExternalTextureBuffer(mTextureName, s.buffer, s.acquireFence);
 }
 
 status_t BufferStateLayer::updateTexImage(bool& /*recomputeVisibleRegions*/, nsecs_t latchTime) {
@@ -542,6 +547,11 @@ status_t BufferStateLayer::updateActiveBuffer() {
         return BAD_VALUE;
     }
 
+    if (mActiveBuffer != nullptr) {
+        // todo: get this to work with BufferStateLayerCache
+        auto& engine(mFlinger->getRenderEngine());
+        engine.unbindExternalTextureBuffer(mActiveBuffer->getId());
+    }
     mActiveBuffer = s.buffer;
     mActiveBufferFence = s.acquireFence;
     auto& layerCompositionState = getCompositionLayer()->editState().frontEnd;
@@ -549,11 +559,6 @@ status_t BufferStateLayer::updateActiveBuffer() {
     layerCompositionState.bufferSlot = 0;
 
     return NO_ERROR;
-}
-
-bool BufferStateLayer::useCachedBufferForClientComposition() const {
-    // TODO: Store a proper staleness bit to support EGLImage caching.
-    return false;
 }
 
 status_t BufferStateLayer::updateFrameNumber(nsecs_t /*latchTime*/) {
@@ -565,14 +570,17 @@ status_t BufferStateLayer::updateFrameNumber(nsecs_t /*latchTime*/) {
 void BufferStateLayer::setHwcLayerBuffer(const sp<const DisplayDevice>& display) {
     const auto outputLayer = findOutputLayerForDisplay(display);
     LOG_FATAL_IF(!outputLayer || !outputLayer->getState().hwc);
-    auto& hwcLayer = (*outputLayer->getState().hwc).hwcLayer;
+    auto& hwcInfo = *outputLayer->editState().hwc;
+    auto& hwcLayer = hwcInfo.hwcLayer;
 
     const State& s(getDrawingState());
 
-    // TODO(marissaw): support more than one slot
+    // obtain slot
     uint32_t hwcSlot = 0;
+    sp<GraphicBuffer> buffer;
+    hwcInfo.hwcBufferCache.getHwcBuffer(s.buffer, &hwcSlot, &buffer);
 
-    auto error = hwcLayer->setBuffer(hwcSlot, s.buffer, s.acquireFence);
+    auto error = hwcLayer->setBuffer(hwcSlot, buffer, s.acquireFence);
     if (error != HWC2::Error::None) {
         ALOGE("[%s] Failed to set buffer %p: %s (%d)", mName.string(),
               s.buffer->handle, to_string(error).c_str(), static_cast<int32_t>(error));

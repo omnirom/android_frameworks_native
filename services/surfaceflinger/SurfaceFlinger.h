@@ -53,6 +53,7 @@
 #include "DisplayDevice.h"
 #include "DisplayHardware/HWC2.h"
 #include "DisplayHardware/HWComposer.h"
+#include "DisplayHardware/PowerAdvisor.h"
 #include "Effects/Daltonizer.h"
 #include "FrameTracker.h"
 #include "LayerStats.h"
@@ -489,6 +490,8 @@ private:
     status_t removeRegionSamplingListener(const sp<IRegionSamplingListener>& listener) override;
     status_t setAllowedDisplayConfigs(const sp<IBinder>& displayToken,
                                       const std::vector<int32_t>& allowedConfigs) override;
+    status_t getAllowedDisplayConfigs(const sp<IBinder>& displayToken,
+                                      std::vector<int32_t>* outAllowedConfigs) override;
 
     /* ------------------------------------------------------------------------
      * DeathRecipient interface
@@ -519,13 +522,11 @@ private:
     void signalLayerUpdate();
     void signalRefresh();
 
-    enum class ConfigEvent { None, Changed };
-
     // called on the main thread in response to initializeDisplays()
     void onInitializeDisplays() REQUIRES(mStateLock);
     // Sets the desired active config bit. It obtains the lock, and sets mDesiredActiveConfig.
-    void setDesiredActiveConfig(const sp<IBinder>& displayToken, int mode, ConfigEvent event)
-            REQUIRES(mStateLock);
+    void setDesiredActiveConfig(const sp<IBinder>& displayToken, int mode,
+                                Scheduler::ConfigEvent event) REQUIRES(mStateLock);
     // Once HWC has returned the present fence, this sets the active config and a new refresh
     // rate in SF. It also triggers HWC vsync.
     void setActiveConfigInternal() REQUIRES(mStateLock);
@@ -806,8 +807,8 @@ private:
 
     // Sets the refresh rate by switching active configs, if they are available for
     // the desired refresh rate.
-    void setRefreshRateTo(scheduler::RefreshRateConfigs::RefreshRateType, ConfigEvent event)
-            REQUIRES(mStateLock);
+    void setRefreshRateTo(scheduler::RefreshRateConfigs::RefreshRateType,
+                          Scheduler::ConfigEvent event) REQUIRES(mStateLock);
 
     bool isConfigAllowed(const DisplayId& displayId, int32_t config);
 
@@ -1106,6 +1107,9 @@ private:
     sp<Scheduler::ConnectionHandle> mSfConnectionHandle;
     std::unique_ptr<scheduler::RefreshRateStats> mRefreshRateStats;
 
+    std::unordered_map<DisplayId, std::shared_ptr<scheduler::RefreshRateConfigs>>
+            mRefreshRateConfigs;
+
     std::mutex mAllowedConfigsLock;
     std::unordered_map<DisplayId, std::unique_ptr<const AllowedDisplayConfigs>> mAllowedConfigs
             GUARDED_BY(mAllowedConfigsLock);
@@ -1113,7 +1117,7 @@ private:
     struct ActiveConfigInfo {
         int configId;
         sp<IBinder> displayToken;
-        ConfigEvent event;
+        Scheduler::ConfigEvent event;
 
         bool operator!=(const ActiveConfigInfo& other) const {
             if (configId != other.configId) {
@@ -1141,11 +1145,11 @@ private:
     InputWindowCommands mPendingInputWindowCommands GUARDED_BY(mStateLock);
     // Should only be accessed by the main thread.
     InputWindowCommands mInputWindowCommands;
-
     ui::DisplayPrimaries mInternalDisplayPrimaries;
 
     sp<SetInputWindowsListener> mSetInputWindowsListener;
     bool mPendingSyncInputWindows GUARDED_BY(mStateLock);
+    Hwc2::impl::PowerAdvisor mPowerAdvisor;
 };
 }; // namespace android
 

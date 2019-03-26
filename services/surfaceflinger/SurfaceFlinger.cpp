@@ -62,7 +62,6 @@
 #include <ui/GraphicBufferAllocator.h>
 #include <ui/PixelFormat.h>
 #include <ui/UiConfig.h>
-#include <utils/CallStack.h>
 #include <utils/StopWatch.h>
 #include <utils/String16.h>
 #include <utils/String8.h>
@@ -110,7 +109,6 @@
 
 #include <android/hardware/configstore/1.0/ISurfaceFlingerConfigs.h>
 #include <android/hardware/configstore/1.1/ISurfaceFlingerConfigs.h>
-#include <android/hardware/configstore/1.2/ISurfaceFlingerConfigs.h>
 #include <android/hardware/configstore/1.1/types.h>
 #include <configstore/Utils.h>
 
@@ -202,9 +200,6 @@ const String16 sHardwareTest("android.permission.HARDWARE_TEST");
 const String16 sAccessSurfaceFlinger("android.permission.ACCESS_SURFACE_FLINGER");
 const String16 sReadFramebuffer("android.permission.READ_FRAME_BUFFER");
 const String16 sDump("android.permission.DUMP");
-
-constexpr float kDefaultRefreshRate = 60.f;
-constexpr float kPerformanceRefreshRate = 90.f;
 
 // ---------------------------------------------------------------------------
 int64_t SurfaceFlinger::dispSyncPresentTimeOffset;
@@ -576,11 +571,11 @@ void SurfaceFlinger::bootFinished()
         if (mUse90Hz) {
             mPhaseOffsets->setRefreshRateType(
                     scheduler::RefreshRateConfigs::RefreshRateType::PERFORMANCE);
-            setRefreshRateTo(RefreshRateType::PERFORMANCE, ConfigEvent::None);
+            setRefreshRateTo(RefreshRateType::PERFORMANCE, Scheduler::ConfigEvent::None);
         } else {
             mPhaseOffsets->setRefreshRateType(
                     scheduler::RefreshRateConfigs::RefreshRateType::DEFAULT);
-            setRefreshRateTo(RefreshRateType::DEFAULT, ConfigEvent::None);
+            setRefreshRateTo(RefreshRateType::DEFAULT, Scheduler::ConfigEvent::None);
         }
     }));
 }
@@ -705,18 +700,17 @@ void SurfaceFlinger::init() {
     }
 
     if (mUse90Hz) {
-        mScheduler->setExpiredIdleTimerCallback([this] {
-            Mutex::Autolock lock(mStateLock);
-            setRefreshRateTo(RefreshRateType::DEFAULT, ConfigEvent::None);
-        });
-        mScheduler->setResetIdleTimerCallback([this] {
-            Mutex::Autolock lock(mStateLock);
-            setRefreshRateTo(RefreshRateType::PERFORMANCE, ConfigEvent::None);
-        });
+        mScheduler->setChangeRefreshRateCallback(
+                [this](RefreshRateType type, Scheduler::ConfigEvent event) {
+                    Mutex::Autolock lock(mStateLock);
+                    setRefreshRateTo(type, event);
+                });
     }
-    mRefreshRateStats = std::make_unique<scheduler::RefreshRateStats>(getHwComposer().getConfigs(
-                                                                              *display->getId()),
-                                                                      mTimeStats);
+    mRefreshRateConfigs[*display->getId()] = std::make_shared<scheduler::RefreshRateConfigs>(
+            getHwComposer().getConfigs(*display->getId()));
+    mRefreshRateStats =
+            std::make_unique<scheduler::RefreshRateStats>(mRefreshRateConfigs[*display->getId()],
+                                                          mTimeStats);
 
     ALOGV("Done initializing");
 }
@@ -920,16 +914,8 @@ int SurfaceFlinger::getActiveConfig(const sp<IBinder>& displayToken) {
 }
 
 void SurfaceFlinger::setDesiredActiveConfig(const sp<IBinder>& displayToken, int mode,
-                                            ConfigEvent event) {
+                                            Scheduler::ConfigEvent event) {
     ATRACE_CALL();
-
-    Vector<DisplayInfo> configs;
-    // Lock is acquired by setRefreshRateTo.
-    getDisplayConfigsLocked(displayToken, &configs);
-    if (mode < 0 || mode >= static_cast<int>(configs.size())) {
-        ALOGE("Attempt to set active config %d for display with %zu configs", mode, configs.size());
-        return;
-    }
 
     // Lock is acquired by setRefreshRateTo.
     const auto display = getDisplayDeviceLocked(displayToken);
@@ -949,9 +935,11 @@ void SurfaceFlinger::setDesiredActiveConfig(const sp<IBinder>& displayToken, int
     }
 
     // Don't check against the current mode yet. Worst case we set the desired
-    // config twice.
+    // config twice. However event generation config might have changed so we need to update it
+    // accordingly
     std::lock_guard<std::mutex> lock(mActiveConfigLock);
-    mDesiredActiveConfig = ActiveConfigInfo{mode, displayToken, event};
+    const Scheduler::ConfigEvent desiredConfig = mDesiredActiveConfig.event | event;
+    mDesiredActiveConfig = ActiveConfigInfo{mode, displayToken, desiredConfig};
 
     if (!mDesiredActiveConfigChanged) {
         // This is the first time we set the desired
@@ -984,7 +972,7 @@ void SurfaceFlinger::setActiveConfigInternal() {
 
     mScheduler->resyncToHardwareVsync(true, getVsyncPeriod());
     ATRACE_INT("ActiveConfigMode", mUpcomingActiveConfig.configId);
-    if (mUpcomingActiveConfig.event != ConfigEvent::None) {
+    if (mUpcomingActiveConfig.event != Scheduler::ConfigEvent::None) {
         mScheduler->onConfigChanged(mAppConnectionHandle, display->getId()->value,
                                     mUpcomingActiveConfig.configId);
     }
@@ -1309,7 +1297,7 @@ status_t SurfaceFlinger::getCompositionPreference(
 status_t SurfaceFlinger::addRegionSamplingListener(const Rect& samplingArea,
                                                    const sp<IBinder>& stopLayerHandle,
                                                    const sp<IRegionSamplingListener>& listener) {
-    if (!listener) {
+    if (!listener || samplingArea == Rect::INVALID_RECT) {
         return BAD_VALUE;
     }
     mRegionSamplingThread->addListener(samplingArea, stopLayerHandle, listener);
@@ -1317,6 +1305,9 @@ status_t SurfaceFlinger::addRegionSamplingListener(const Rect& samplingArea,
 }
 
 status_t SurfaceFlinger::removeRegionSamplingListener(const sp<IRegionSamplingListener>& listener) {
+    if (!listener) {
+        return BAD_VALUE;
+    }
     mRegionSamplingThread->removeListener(listener);
     return NO_ERROR;
 }
@@ -1422,7 +1413,8 @@ bool SurfaceFlinger::isConfigAllowed(const DisplayId& displayId, int32_t config)
     return mAllowedConfigs[displayId]->isConfigAllowed(config);
 }
 
-void SurfaceFlinger::setRefreshRateTo(RefreshRateType refreshRate, ConfigEvent event) {
+void SurfaceFlinger::setRefreshRateTo(RefreshRateType refreshRate, Scheduler::ConfigEvent event) {
+    ATRACE_CALL();
     mPhaseOffsets->setRefreshRateType(refreshRate);
 
     const auto [early, gl, late] = mPhaseOffsets->getCurrentOffsets();
@@ -1432,47 +1424,23 @@ void SurfaceFlinger::setRefreshRateTo(RefreshRateType refreshRate, ConfigEvent e
         return;
     }
 
-    // TODO(b/113612090): There should be a message queue flush here. Because this esentially
-    // runs on a mainthread, we cannot call postMessageSync. This can be resolved in a better
-    // manner, once the setActiveConfig is synchronous, and is executed at a known time in a
-    // refresh cycle.
-
     // Don't do any updating if the current fps is the same as the new one.
-    const nsecs_t currentVsyncPeriod = getVsyncPeriod();
-    if (currentVsyncPeriod == 0) {
-        return;
-    }
-
-    // TODO(b/113612090): Consider having an enum value for correct refresh rates, rather than
-    // floating numbers.
-    const float currentFps = 1e9 / currentVsyncPeriod;
-    const float newFps = refreshRate == RefreshRateType::PERFORMANCE ? kPerformanceRefreshRate
-                                                                     : kDefaultRefreshRate;
-    if (std::abs(currentFps - newFps) <= 1) {
-        return;
-    }
-
     const auto displayId = getInternalDisplayIdLocked();
     LOG_ALWAYS_FATAL_IF(!displayId);
+    const auto displayToken = getInternalDisplayTokenLocked();
 
-    auto configs = getHwComposer().getConfigs(*displayId);
-    for (int i = 0; i < configs.size(); i++) {
-        if (!isConfigAllowed(*displayId, i)) {
-            ALOGV("Skipping config %d as it is not part of allowed configs", i);
-            continue;
-        }
-
-        const nsecs_t vsyncPeriod = configs.at(i)->getVsyncPeriod();
-        if (vsyncPeriod == 0) {
-            continue;
-        }
-        const float fps = 1e9 / vsyncPeriod;
-        // TODO(b/113612090): There should be a better way at determining which config
-        // has the right refresh rate.
-        if (std::abs(fps - newFps) <= 1) {
-            setDesiredActiveConfig(getInternalDisplayTokenLocked(), i, event);
-        }
+    auto desiredConfigId = mRefreshRateConfigs[*displayId]->getRefreshRate(refreshRate).configId;
+    const auto display = getDisplayDeviceLocked(displayToken);
+    if (desiredConfigId == display->getActiveConfig()) {
+        return;
     }
+
+    if (!isConfigAllowed(*displayId, desiredConfigId)) {
+        ALOGV("Skipping config %d as it is not part of allowed configs", desiredConfigId);
+        return;
+    }
+
+    setDesiredActiveConfig(getInternalDisplayTokenLocked(), desiredConfigId, event);
 }
 
 void SurfaceFlinger::onHotplugReceived(int32_t sequenceId, hwc2_display_t hwcDisplayId,
@@ -1786,6 +1754,13 @@ void SurfaceFlinger::calculateWorkingSet() {
         if (mDrawingState.colorMatrixChanged) {
             display->setColorTransform(mDrawingState.colorMatrix);
         }
+        Dataspace targetDataspace = Dataspace::UNKNOWN;
+        if (useColorManagement) {
+            ColorMode colorMode;
+            RenderIntent renderIntent;
+            pickColorMode(displayDevice, &colorMode, &targetDataspace, &renderIntent);
+            display->setColorMode(colorMode, targetDataspace, renderIntent);
+        }
         for (auto& layer : displayDevice->getVisibleLayersSortedByZ()) {
             if (layer->isHdrY410()) {
                 layer->forceClientComposition(displayDevice);
@@ -1817,15 +1792,7 @@ void SurfaceFlinger::calculateWorkingSet() {
 
             const auto& displayState = display->getState();
             layer->setPerFrameData(displayDevice, displayState.transform, displayState.viewport,
-                                   displayDevice->getSupportedPerFrameMetadata());
-        }
-
-        if (useColorManagement) {
-            ColorMode  colorMode;
-            Dataspace dataSpace;
-            RenderIntent renderIntent;
-            pickColorMode(displayDevice, &colorMode, &dataSpace, &renderIntent);
-            display->setColorMode(colorMode, dataSpace, renderIntent);
+                                   displayDevice->getSupportedPerFrameMetadata(), targetDataspace);
         }
     }
 
@@ -1968,78 +1935,22 @@ void SurfaceFlinger::setCompositorTimingSnapped(const DisplayStatInfo& stats,
     getBE().mCompositorTiming.presentLatency = snappedCompositeToPresentLatency;
 }
 
-// debug patch for b/119477596 - add stack guards to catch stack
-// corruptions and disable clang optimizations.
-// The code below is temporary and planned to be removed once stack
-// corruptions are found.
-#pragma clang optimize off
-class StackGuard {
-public:
-    StackGuard(const char* name, const char* func, int line) {
-        guarders.reserve(MIN_CAPACITY);
-        guarders.push_back({this, name, func, line});
-        validate();
-    }
-    ~StackGuard() {
-        for (auto i = guarders.end() - 1; i >= guarders.begin(); --i) {
-            if (i->guard == this) {
-                guarders.erase(i);
-                break;
-            }
-        }
-    }
-
-    static void validate() {
-        for (const auto& guard : guarders) {
-            if (guard.guard->cookie != COOKIE_VALUE) {
-                ALOGE("%s:%d: Stack corruption detected at %s", guard.func, guard.line, guard.name);
-                CallStack stack(LOG_TAG);
-                abort();
-            }
-        }
-    }
-
-private:
-    uint64_t cookie = COOKIE_VALUE;
-    static constexpr uint64_t COOKIE_VALUE = 0xc0febebedeadbeef;
-    static constexpr size_t MIN_CAPACITY = 16;
-
-    struct GuarderElement {
-        StackGuard* guard;
-        const char* name;
-        const char* func;
-        int line;
-    };
-
-    static std::vector<GuarderElement> guarders;
-};
-std::vector<StackGuard::GuarderElement> StackGuard::guarders;
-
-#define DEFINE_STACK_GUARD(__n) StackGuard __n##StackGuard(#__n, __FUNCTION__, __LINE__);
-
-#define ASSERT_ON_STACK_GUARD() StackGuard::validate();
 void SurfaceFlinger::postComposition()
 {
-    DEFINE_STACK_GUARD(begin);
     ATRACE_CALL();
     ALOGV("postComposition");
 
     // Release any buffers which were replaced this frame
     nsecs_t dequeueReadyTime = systemTime();
-    DEFINE_STACK_GUARD(dequeueReadyTime);
     for (auto& layer : mLayersWithQueuedFrames) {
         layer->releasePendingBuffer(dequeueReadyTime);
     }
-    ASSERT_ON_STACK_GUARD();
 
     // |mStateLock| not needed as we are on the main thread
     const auto displayDevice = getDefaultDisplayDeviceLocked();
-    DEFINE_STACK_GUARD(displayDevice);
 
     getBE().mGlCompositionDoneTimeline.updateSignalTimes();
     std::shared_ptr<FenceTime> glCompositionDoneFenceTime;
-    DEFINE_STACK_GUARD(glCompositionDoneFenceTime);
-
     if (displayDevice && getHwComposer().hasClientComposition(displayDevice->getId())) {
         glCompositionDoneFenceTime =
                 std::make_shared<FenceTime>(displayDevice->getCompositionDisplay()
@@ -2050,52 +1961,37 @@ void SurfaceFlinger::postComposition()
         glCompositionDoneFenceTime = FenceTime::NO_FENCE;
     }
 
-    ASSERT_ON_STACK_GUARD();
-
     getBE().mDisplayTimeline.updateSignalTimes();
     mPreviousPresentFence = displayDevice ? getHwComposer().getPresentFence(*displayDevice->getId())
                                           : Fence::NO_FENCE;
     auto presentFenceTime = std::make_shared<FenceTime>(mPreviousPresentFence);
-    DEFINE_STACK_GUARD(presentFenceTime);
     getBE().mDisplayTimeline.push(presentFenceTime);
 
     DisplayStatInfo stats;
-    DEFINE_STACK_GUARD(stats);
     mScheduler->getDisplayStatInfo(&stats);
-
-    ASSERT_ON_STACK_GUARD();
 
     // We use the mRefreshStartTime which might be sampled a little later than
     // when we started doing work for this frame, but that should be okay
     // since updateCompositorTiming has snapping logic.
     updateCompositorTiming(stats, mRefreshStartTime, presentFenceTime);
     CompositorTiming compositorTiming;
-    DEFINE_STACK_GUARD(compositorTiming);
-
     {
         std::lock_guard<std::mutex> lock(getBE().mCompositorTimingLock);
-        DEFINE_STACK_GUARD(lock);
         compositorTiming = getBE().mCompositorTiming;
-
-        ASSERT_ON_STACK_GUARD();
     }
 
     mDrawingState.traverseInZOrder([&](Layer* layer) {
         bool frameLatched =
                 layer->onPostComposition(displayDevice->getId(), glCompositionDoneFenceTime,
                                          presentFenceTime, compositorTiming);
-        DEFINE_STACK_GUARD(frameLatched);
         if (frameLatched) {
             recordBufferingStats(layer->getName().string(),
                     layer->getOccupancyHistory(false));
         }
-        ASSERT_ON_STACK_GUARD();
     });
 
     if (presentFenceTime->isValid()) {
-        ASSERT_ON_STACK_GUARD();
         mScheduler->addPresentFence(presentFenceTime);
-        ASSERT_ON_STACK_GUARD();
     }
 
     if (!hasSyncFramework) {
@@ -2105,41 +2001,28 @@ void SurfaceFlinger::postComposition()
         }
     }
 
-    ASSERT_ON_STACK_GUARD();
-
     if (mAnimCompositionPending) {
         mAnimCompositionPending = false;
 
         if (presentFenceTime->isValid()) {
             mAnimFrameTracker.setActualPresentFence(
                     std::move(presentFenceTime));
-
-            ASSERT_ON_STACK_GUARD();
         } else if (displayDevice && getHwComposer().isConnected(*displayDevice->getId())) {
             // The HWC doesn't support present fences, so use the refresh
             // timestamp instead.
             const nsecs_t presentTime =
                     getHwComposer().getRefreshTimestamp(*displayDevice->getId());
-            DEFINE_STACK_GUARD(presentTime);
-
             mAnimFrameTracker.setActualPresentTime(presentTime);
-            ASSERT_ON_STACK_GUARD();
         }
         mAnimFrameTracker.advanceFrame();
     }
-
-    ASSERT_ON_STACK_GUARD();
 
     mTimeStats->incrementTotalFrames();
     if (mHadClientComposition) {
         mTimeStats->incrementClientCompositionFrames();
     }
 
-    ASSERT_ON_STACK_GUARD();
-
     mTimeStats->setPresentFenceGlobal(presentFenceTime);
-
-    ASSERT_ON_STACK_GUARD();
 
     if (displayDevice && getHwComposer().isConnected(*displayDevice->getId()) &&
         !displayDevice->isPoweredOn()) {
@@ -2147,38 +2030,29 @@ void SurfaceFlinger::postComposition()
     }
 
     nsecs_t currentTime = systemTime();
-    DEFINE_STACK_GUARD(currentTime);
     if (mHasPoweredOff) {
         mHasPoweredOff = false;
     } else {
         nsecs_t elapsedTime = currentTime - getBE().mLastSwapTime;
-        DEFINE_STACK_GUARD(elapsedTime);
         size_t numPeriods = static_cast<size_t>(elapsedTime / stats.vsyncPeriod);
-        DEFINE_STACK_GUARD(numPeriods);
         if (numPeriods < SurfaceFlingerBE::NUM_BUCKETS - 1) {
             getBE().mFrameBuckets[numPeriods] += elapsedTime;
         } else {
             getBE().mFrameBuckets[SurfaceFlingerBE::NUM_BUCKETS - 1] += elapsedTime;
         }
         getBE().mTotalTime += elapsedTime;
-
-        ASSERT_ON_STACK_GUARD();
     }
     getBE().mLastSwapTime = currentTime;
-    ASSERT_ON_STACK_GUARD();
 
     {
         std::lock_guard lock(mTexturePoolMutex);
-        DEFINE_STACK_GUARD(lock);
         const size_t refillCount = mTexturePoolSize - mTexturePool.size();
-        DEFINE_STACK_GUARD(refillCount);
         if (refillCount > 0) {
             const size_t offset = mTexturePool.size();
             mTexturePool.resize(mTexturePoolSize);
             getRenderEngine().genTextures(refillCount, mTexturePool.data() + offset);
             ATRACE_INT("TexturePoolSize", mTexturePool.size());
         }
-        ASSERT_ON_STACK_GUARD();
     }
 
     mTransactionCompletedThread.addPresentFence(mPreviousPresentFence);
@@ -2187,10 +2061,7 @@ void SurfaceFlinger::postComposition()
     if (mLumaSampling) {
         mRegionSamplingThread->sampleNow();
     }
-
-    ASSERT_ON_STACK_GUARD();
 }
-#pragma clang optimize on // b/119477596
 
 void SurfaceFlinger::computeLayerBounds() {
     for (const auto& pair : mDisplays) {
@@ -3476,6 +3347,16 @@ bool SurfaceFlinger::doComposeSurfaces(const sp<DisplayDevice>& displayDevice,
     // Perform some cleanup steps if we used client composition.
     if (hasClientComposition) {
         clientCompositionDisplay.clearRegion = clearRegion;
+
+        // We boost GPU frequency here because there will be color spaces conversion
+        // and it's expensive. We boost the GPU frequency so that GPU composition can
+        // finish in time. We must reset GPU frequency afterwards, because high frequency
+        // consumes extra battery.
+        const bool expensiveRenderingExpected =
+                clientCompositionDisplay.outputDataspace == Dataspace::DISPLAY_P3;
+        if (expensiveRenderingExpected && displayId) {
+            mPowerAdvisor.setExpensiveRenderingExpected(*displayId, true);
+        }
         if (!debugRegion.isEmpty()) {
             Region::const_iterator it = debugRegion.begin();
             Region::const_iterator end = debugRegion.end();
@@ -3491,6 +3372,9 @@ bool SurfaceFlinger::doComposeSurfaces(const sp<DisplayDevice>& displayDevice,
         }
         renderEngine.drawLayers(clientCompositionDisplay, clientCompositionLayers,
                                 buf->getNativeBuffer(), std::move(fd), readyFence);
+        if (expensiveRenderingExpected && displayId) {
+            mPowerAdvisor.setExpensiveRenderingExpected(*displayId, false);
+        }
     }
     return true;
 }
@@ -4023,6 +3907,11 @@ uint32_t SurfaceFlinger::setClientStateLocked(const ComposerState& composerState
     }
     if (what & layer_state_t::eMetadataChanged) {
         if (layer->setMetadata(s.metadata)) flags |= eTraversalNeeded;
+    }
+    if (what & layer_state_t::eColorSpaceAgnosticChanged) {
+        if (layer->setColorSpaceAgnostic(s.colorSpaceAgnostic)) {
+            flags |= eTraversalNeeded;
+        }
     }
     std::vector<sp<CallbackHandle>> callbackHandles;
     if ((what & layer_state_t::eListenerCallbacksChanged) && (!s.listenerCallbacks.empty())) {
@@ -4937,6 +4826,7 @@ status_t SurfaceFlinger::CheckTransactCodeCredentials(uint32_t code) {
         case GET_HDR_CAPABILITIES:
         case SET_ACTIVE_CONFIG:
         case SET_ALLOWED_DISPLAY_CONFIGS:
+        case GET_ALLOWED_DISPLAY_CONFIGS:
         case SET_ACTIVE_COLOR_MODE:
         case INJECT_VSYNC:
         case SET_POWER_MODE:
@@ -5784,17 +5674,14 @@ void SurfaceFlinger::setAllowedDisplayConfigsInternal(
     // make sure that the current config is still allowed
     int currentConfigIndex = getHwComposer().getActiveConfigIndex(*displayId);
     if (!isConfigAllowed(*displayId, currentConfigIndex)) {
-        // TODO(b/122906558): stop querying HWC for the available configs and instead use the cached
-        // configs queried on boot
-        auto configs = getHwComposer().getConfigs(*displayId);
-
-        for (int i = 0; i < configs.size(); i++) {
-            if (isConfigAllowed(*displayId, i)) {
+        for (const auto& [type, config] : mRefreshRateConfigs[*displayId]->getRefreshRates()) {
+            if (isConfigAllowed(*displayId, config.configId)) {
                 // TODO: we switch to the first allowed config. In the future
                 // we may want to enhance this logic to pick a similar config
                 // to the current one
-                ALOGV("Old config is not allowed - switching to config %d", i);
-                setDesiredActiveConfig(displayToken, i, ConfigEvent::Changed);
+                ALOGV("Old config is not allowed - switching to config %d", config.configId);
+                setDesiredActiveConfig(displayToken, config.configId,
+                                       Scheduler::ConfigEvent::Changed);
                 break;
             }
         }
@@ -5833,6 +5720,36 @@ status_t SurfaceFlinger::setAllowedDisplayConfigs(const android::sp<android::IBi
     postMessageSync(new LambdaMessage([&]() NO_THREAD_SAFETY_ANALYSIS {
         setAllowedDisplayConfigsInternal(displayToken, std::move(allowedDisplayConfigs));
     }));
+    return NO_ERROR;
+}
+
+status_t SurfaceFlinger::getAllowedDisplayConfigs(const android::sp<android::IBinder>& displayToken,
+                                                  std::vector<int32_t>* outAllowedConfigs) {
+    ATRACE_CALL();
+
+    if (!displayToken) {
+        ALOGE("getAllowedDisplayConfigs: displayToken is null");
+        return BAD_VALUE;
+    }
+
+    if (!outAllowedConfigs) {
+        ALOGE("getAllowedDisplayConfigs: outAllowedConfigs is null");
+        return BAD_VALUE;
+    }
+
+    ConditionalLock stateLock(mStateLock, std::this_thread::get_id() != mMainThreadId);
+    const auto displayId = getPhysicalDisplayIdLocked(displayToken);
+    if (!displayId) {
+        ALOGE("getAllowedDisplayConfigs: display not found");
+        return NAME_NOT_FOUND;
+    }
+
+    std::lock_guard allowedConfigLock(mAllowedConfigsLock);
+    auto allowedConfigIterator = mAllowedConfigs.find(displayId.value());
+    if (allowedConfigIterator != mAllowedConfigs.end()) {
+        allowedConfigIterator->second->getAllowedConfigs(outAllowedConfigs);
+    }
+
     return NO_ERROR;
 }
 
