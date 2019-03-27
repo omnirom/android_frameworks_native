@@ -32,6 +32,7 @@
 #include <utils/Log.h>
 #include <utils/String8.h>
 #include <utils/Trace.h>
+#include <utils/CallStack.h>
 
 namespace android {
 
@@ -45,12 +46,32 @@ Fence::Fence(base::unique_fd fenceFd) :
     mFenceFd(std::move(fenceFd)) {
 }
 
+static status_t dump(const base::unique_fd &fd) {
+    CallStack stack("FENCE_DUMP");
+
+    struct sync_fence_info_data* finfo = sync_fence_info(fd);
+    struct sync_pt_info* pinfo = NULL;
+
+    ALOGE(" ----- Printing sync-points under fence fd:%d status:%d name:%s -----",
+            fd.get(), finfo->status, finfo->name);
+    while ((pinfo = sync_pt_info(finfo, pinfo)) != NULL) {
+        ALOGE("status:%d driver:%s obj:%s", pinfo->status,
+                pinfo->driver_name,  pinfo->obj_name);
+    }
+
+    return NO_ERROR;
+}
+
 status_t Fence::wait(int timeout) {
     ATRACE_CALL();
     if (mFenceFd == -1) {
         return NO_ERROR;
     }
     int err = sync_wait(mFenceFd, timeout);
+    if (err < 0 && (timeout == TIMEOUT_NEVER || timeout >100)) {
+        ALOGE("ERROR :Fence didnt signal in %dms. Initiating dump", timeout);
+        dump(mFenceFd);
+    }
     return err < 0 ? -errno : status_t(NO_ERROR);
 }
 
@@ -62,8 +83,10 @@ status_t Fence::waitForever(const char* logname) {
     int warningTimeout = 3000;
     int err = sync_wait(mFenceFd, warningTimeout);
     if (err < 0 && errno == ETIME) {
-        ALOGE("%s: fence %d didn't signal in %u ms", logname, mFenceFd.get(),
-                warningTimeout);
+        ALOGE("%s: fence %d didn't signal in %u ms --Initializing dump",
+              logname, mFenceFd.get(), warningTimeout);
+        dump(mFenceFd);
+
         err = sync_wait(mFenceFd, TIMEOUT_NEVER);
     }
     return err < 0 ? -errno : status_t(NO_ERROR);

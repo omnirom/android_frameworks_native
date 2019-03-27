@@ -149,7 +149,7 @@ public:
     // DisplayDevice::DisplayType of the display is returned as an output param.
     bool onVsync(hwc2_display_t displayId, int64_t timestamp,
                  int32_t* outDisplay);
-    void onHotplug(hwc2_display_t displayId, int32_t displayType, HWC2::Connection connection);
+    bool onHotplug(hwc2_display_t displayId, int32_t displayType, HWC2::Connection connection);
 
     void setVsyncEnabled(int32_t displayId, HWC2::Vsync enabled);
 
@@ -183,7 +183,7 @@ private:
     // For unit tests
     friend TestableSurfaceFlinger;
 
-    static const int32_t VIRTUAL_DISPLAY_ID_BASE = 2;
+    static const int32_t VIRTUAL_DISPLAY_ID_BASE = HWC_DISPLAY_VIRTUAL;
 
     bool isValidDisplay(int32_t displayId) const;
     static void validateChange(HWC2::Composition from, HWC2::Composition to);

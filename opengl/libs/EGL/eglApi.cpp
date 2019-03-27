@@ -456,7 +456,7 @@ EGLBoolean eglGetConfigAttrib(EGLDisplay dpy, EGLConfig config,
 // Translates EGL color spaces to Android data spaces.
 static android_dataspace dataSpaceFromEGLColorSpace(EGLint colorspace) {
     if (colorspace == EGL_GL_COLORSPACE_LINEAR_KHR) {
-        return HAL_DATASPACE_SRGB_LINEAR;
+        return HAL_DATASPACE_UNKNOWN;
     } else if (colorspace == EGL_GL_COLORSPACE_SRGB_KHR) {
         return HAL_DATASPACE_SRGB;
     } else if (colorspace == EGL_GL_COLORSPACE_DISPLAY_P3_EXT) {
@@ -561,6 +561,15 @@ static EGLBoolean processAttributes(egl_display_ptr dp, NativeWindowType window,
                     copyAttribute = true;
                     break;
                 }
+            }
+
+            // If the driver doesn't understand it, we should map sRGB-encoded P3 to
+            // sRGB rather than just dropping the colorspace on the floor.
+            // For this format, the driver is expected to apply the sRGB
+            // transfer function during framebuffer operations.
+            if (!copyAttribute && attr[1] == EGL_GL_COLORSPACE_DISPLAY_P3_EXT) {
+                strippedAttribList->push_back(attr[0]);
+                strippedAttribList->push_back(EGL_GL_COLORSPACE_SRGB_KHR);
             }
         }
         if (copyAttribute) {

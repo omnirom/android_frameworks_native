@@ -27,6 +27,8 @@
 
 #include "RenderEngine/RenderEngine.h"
 
+#include <dlfcn.h>
+
 #include <gui/BufferItem.h>
 #include <gui/BufferQueue.h>
 #include <gui/LayerDebugInfo.h>
@@ -199,6 +201,10 @@ void BufferLayer::onDraw(const RenderArea& renderArea, const Region& clip,
     }
 
     bool blackOutLayer = isProtected() || (isSecure() && !renderArea.isSecure());
+
+    if (!hasHdrDisplay()) {
+        blackOutLayer = blackOutLayer|| isHDRLayer();
+    }
 
     auto& engine(mFlinger->getRenderEngine());
 
@@ -385,6 +391,7 @@ Region BufferLayer::latchBuffer(bool& recomputeVisibleRegions, nsecs_t latchTime
         // replicated in LayerBE until FE/BE is ready to be synchronized
         getBE().compositionInfo.hwc.sidebandStream = mSidebandStream;
         if (getBE().compositionInfo.hwc.sidebandStream != nullptr) {
+            mCurrentState.modified = true;
             setTransactionFlags(eTransactionNeeded);
             mFlinger->setTransactionFlags(eTraversalNeeded);
         }
@@ -481,10 +488,15 @@ Region BufferLayer::latchBuffer(bool& recomputeVisibleRegions, nsecs_t latchTime
 
         // Remove any stale buffers that have been dropped during
         // updateTexImage
-        while (mQueueItems[0].mFrameNumber != currentFrameNumber) {
+        while (mQueuedFrames > 0 && mQueueItems[0].mFrameNumber != currentFrameNumber) {
             mTimeStats.removeTimeRecord(getName().c_str(), mQueueItems[0].mFrameNumber);
             mQueueItems.removeAt(0);
             android_atomic_dec(&mQueuedFrames);
+        }
+
+        if (mQueuedFrames == 0) {
+            ALOGE("[%s] mQueuedFrames is zero !!!", mName.string());
+            return outDirtyRegion;
         }
 
         const std::string layerName(getName().c_str());
@@ -758,6 +770,19 @@ void BufferLayer::onFrameAvailable(const BufferItem& item) {
         // Wake up any pending callbacks
         mLastFrameNumberReceived = item.mFrameNumber;
         mQueueItemCondition.broadcast();
+    }
+
+    if (mFlinger->mDolphinFuncsEnabled) {
+        const Vector< sp<Layer> >& visibleLayersSortedByZ =
+            mFlinger->getLayerSortedByZForHwcDisplay(0);
+        bool isTransparentRegion = this->visibleNonTransparentRegion.isEmpty();
+        int visibleLayerNum = visibleLayersSortedByZ.size();
+        Rect crop = this->getContentCrop();
+        int32_t width = crop.getWidth();
+        int32_t height = crop.getHeight();
+        String8 mName = this->getName();
+        mFlinger->mDolphinOnFrameAvailable(isTransparentRegion, visibleLayerNum,
+                                           width, height, mName);
     }
 
     mFlinger->signalLayerUpdate();

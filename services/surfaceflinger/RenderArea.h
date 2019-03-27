@@ -30,6 +30,7 @@ public:
     virtual bool isSecure() const = 0;
     virtual bool needsFiltering() const = 0;
     virtual Rect getSourceCrop() const = 0;
+    virtual std::string getType() const = 0;
 
     virtual void render(std::function<void()> drawLayers) { drawLayers(); }
 

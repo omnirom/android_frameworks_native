@@ -51,6 +51,7 @@
 #include "MonitoredProducer.h"
 #include "SurfaceFlinger.h"
 #include "clz.h"
+#include "gralloc_priv.h"
 
 #include "DisplayHardware/HWComposer.h"
 
@@ -877,6 +878,11 @@ void Layer::computeGeometry(const RenderArea& renderArea, Mesh& mesh,
 bool Layer::isSecure() const {
     const Layer::State& s(mDrawingState);
     return (s.flags & layer_state_t::eLayerSecure);
+}
+
+bool Layer::isSecureDisplay() const {
+    const sp<GraphicBuffer>& activeBuffer(mActiveBuffer);
+    return activeBuffer && (activeBuffer->getUsage() & GRALLOC_USAGE_PRIVATE_SECURE_DISPLAY);
 }
 
 void Layer::setVisibleRegion(const Region& visibleRegion) {
@@ -1921,7 +1927,8 @@ void Layer::commitChildList() {
     mDrawingParent = mCurrentParent;
 }
 
-void Layer::writeToProto(LayerProto* layerInfo, LayerVector::StateSet stateSet) {
+void Layer::writeToProto(LayerProto* layerInfo, LayerVector::StateSet stateSet,
+                         bool enableRegionDump) {
     const bool useDrawing = stateSet == LayerVector::StateSet::Drawing;
     const LayerVector& children = useDrawing ? mDrawingChildren : mCurrentChildren;
     const State& state = useDrawing ? mDrawingState : mCurrentState;
@@ -1944,10 +1951,12 @@ void Layer::writeToProto(LayerProto* layerInfo, LayerVector::StateSet stateSet) 
         }
     }
 
-    LayerProtoHelper::writeToProto(state.activeTransparentRegion,
-                                   layerInfo->mutable_transparent_region());
-    LayerProtoHelper::writeToProto(visibleRegion, layerInfo->mutable_visible_region());
-    LayerProtoHelper::writeToProto(surfaceDamageRegion, layerInfo->mutable_damage_region());
+    if (enableRegionDump) {
+        LayerProtoHelper::writeToProto(state.activeTransparentRegion,
+                                       layerInfo->mutable_transparent_region());
+        LayerProtoHelper::writeToProto(visibleRegion, layerInfo->mutable_visible_region());
+        LayerProtoHelper::writeToProto(surfaceDamageRegion, layerInfo->mutable_damage_region());
+    }
 
     layerInfo->set_layer_stack(getLayerStack());
     layerInfo->set_z(state.z);

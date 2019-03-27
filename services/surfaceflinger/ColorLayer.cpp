@@ -57,8 +57,7 @@ void ColorLayer::onDraw(const RenderArea& renderArea, const Region& /* clip */,
 }
 
 bool ColorLayer::isVisible() const {
-    const Layer::State& s(getDrawingState());
-    return !isHiddenByPolicy() && s.color.a;
+    return !isHiddenByPolicy() && getAlpha();
 }
 
 void ColorLayer::setPerFrameData(const sp<const DisplayDevice>& displayDevice) {
