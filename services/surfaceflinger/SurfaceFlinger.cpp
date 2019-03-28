@@ -5212,6 +5212,13 @@ status_t SurfaceFlinger::onTransact(uint32_t code, const Parcel& data, Parcel* r
                 mDebugEnableProtectedContent = n;
                 return NO_ERROR;
             }
+            case 20000: {
+              int disp = data.readInt32();
+              int mode = data.readInt32();
+              ALOGI("Debug: Set display = %d, power mode = %d", disp, mode);
+              setPowerMode(getPhysicalDisplayToken(disp), mode);
+              return NO_ERROR;
+            }
         }
     }
     return err;
