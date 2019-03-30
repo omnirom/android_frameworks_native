@@ -34,6 +34,7 @@
 #include <vendor/display/config/1.1/IDisplayConfig.h>
 #include <vendor/display/config/1.2/IDisplayConfig.h>
 #include <vendor/display/config/1.6/IDisplayConfig.h>
+#include <vendor/display/config/1.7/IDisplayConfig.h>
 
 namespace android {
 
@@ -50,6 +51,7 @@ protected:
     virtual void setDisplayAnimating(const sp<const DisplayDevice>& hw);
     virtual bool IsHWCDisabled() { return mDebugDisableHWC; }
     virtual void handleMessageRefresh();
+    virtual void setLayerAsMask(const int32_t& dispId, const uint64_t& layerId);
     virtual ~ExSurfaceFlinger();
 
     bool mDebugLogs;

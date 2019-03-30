@@ -2047,6 +2047,7 @@ void SurfaceFlinger::forceResyncModel() {
 void SurfaceFlinger::rebuildLayerStacks() {
     ATRACE_CALL();
     ALOGV("rebuildLayerStacks");
+    Mutex::Autolock lock(mDolphinStateLock);
 
     // rebuild the visible layer list per screen
     if (CC_UNLIKELY(mVisibleRegionsDirty)) {
@@ -2209,9 +2210,6 @@ void SurfaceFlinger::setUpHWComposer() {
         // - When a display is created with a private layer stack, we won't
         //   emit any black frames until a layer is added to the layer stack.
         bool mustRecompose = dirty && !(empty && wasEmpty);
-        const auto hwcId = mDisplays[dpy]->getHwcDisplayId();
-        mDisplays[dpy]->mustRecompose = mustRecompose;
-        ALOGV("hwcId %d, mustRecompose %d", hwcId, mustRecompose);
 
         ALOGV_IF(mDisplays[dpy]->getDisplayType() == DisplayDevice::DISPLAY_VIRTUAL,
                 "dpy[%zu]: %s composition (%sdirty %sempty %swasEmpty)", dpy,
@@ -2243,6 +2241,9 @@ void SurfaceFlinger::setUpHWComposer() {
                         if (!layer->createHwcLayer(getBE().mHwc.get(), hwcId)) {
                             layer->forceClientComposition(hwcId);
                             continue;
+                        }
+                        if (layer->isPrimaryDisplayOnly()) {
+                            setLayerAsMask(hwcId, layer->getLayerId());
                         }
                     }
 
@@ -2306,7 +2307,7 @@ void SurfaceFlinger::setUpHWComposer() {
 
     for (size_t displayId = 0; displayId < mDisplays.size(); ++displayId) {
         auto& displayDevice = mDisplays[displayId];
-        if (!displayDevice->isDisplayOn() || !displayDevice->mustRecompose) {
+        if (!displayDevice->isDisplayOn()) {
             continue;
         }
 
@@ -2351,7 +2352,7 @@ void SurfaceFlinger::postFramebuffer()
             continue;
         }
         const auto hwcId = displayDevice->getHwcDisplayId();
-        if (hwcId >= 0 && displayDevice->mustRecompose) {
+        if (hwcId >= 0) {
             getBE().mHwc->presentAndGetReleaseFences(hwcId);
         }
         displayDevice->onSwapBuffersCompleted();
@@ -3152,7 +3153,8 @@ void SurfaceFlinger::doDisplayComposition(
     // 1) It is being handled by hardware composer, which may need this to
     //    keep its virtual display state machine in sync, or
     // 2) There is work to be done (the dirty region isn't empty)
-    if (inDirtyRegion.isEmpty()) {
+    bool isHwcDisplay = displayDevice->getHwcDisplayId() >= 0;
+    if (!isHwcDisplay && inDirtyRegion.isEmpty()) {
         ALOGV("Skipping display composition");
         return;
     }
@@ -3335,6 +3337,12 @@ status_t SurfaceFlinger::addClientLayer(const sp<Client>& client,
         if (mNumLayers >= MAX_LAYERS) {
             ALOGE("AddClientLayer failed, mNumLayers (%zu) >= MAX_LAYERS (%zu)", mNumLayers,
                   MAX_LAYERS);
+            mCurrentState.traverseInZOrder([&](Layer* layer) {
+                const auto& p = layer->getParent();
+                ALOGE("layer (%s) ::  parent (%s).",
+                layer->getName().string(),
+                (p != nullptr) ? p->getName().string() : "no-parent");
+            });
             return NO_MEMORY;
         }
         if (parent == nullptr) {
@@ -4628,6 +4636,12 @@ void SurfaceFlinger::dumpAllLocked(const Vector<String16>& args, size_t& index,
     result.append("\n");
 
     /*
+     * Tracing state
+     */
+    mTracing.dump(result);
+    result.append("\n");
+
+    /*
      * HWC layer minidump
      */
     for (size_t d = 0; d < mDisplays.size(); d++) {
@@ -4974,12 +4988,12 @@ status_t SurfaceFlinger::onTransact(
             case 1025: { // Set layer tracing
                 n = data.readInt32();
                 if (n) {
-                    ALOGV("LayerTracing enabled");
+                    ALOGD("LayerTracing enabled");
                     mTracing.enable();
                     doTracing("tracing.enable");
                     reply->writeInt32(NO_ERROR);
                 } else {
-                    ALOGV("LayerTracing disabled");
+                    ALOGD("LayerTracing disabled");
                     status_t err = mTracing.disable();
                     reply->writeInt32(err);
                 }

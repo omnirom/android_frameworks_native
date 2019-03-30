@@ -479,6 +479,7 @@ private:
                      const Vector<DisplayState>& /*displays*/) { }
     virtual void setDisplayAnimating(const sp<const DisplayDevice>& /*hw*/) { }
     virtual void handleMessageRefresh();
+    virtual void setLayerAsMask(const int32_t&, const uint64_t&) { };
 
     /* ------------------------------------------------------------------------
      * Message handling
@@ -780,6 +781,7 @@ private:
 
     // access must be protected by mStateLock
     mutable Mutex mStateLock;
+    mutable Mutex mDolphinStateLock;
     State mCurrentState{LayerVector::StateSet::Current};
     volatile int32_t mTransactionFlags;
     Condition mTransactionCV;
