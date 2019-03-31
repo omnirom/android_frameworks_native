@@ -209,6 +209,22 @@ int32_t wcg_composition_pixel_format(PixelFormat defaultValue) {
     return static_cast<int32_t>(defaultValue);
 }
 
+int32_t set_idle_timer_ms(int32_t defaultValue) {
+    auto temp = SurfaceFlingerProperties::set_idle_timer_ms();
+    if (temp.has_value()) {
+        return *temp;
+    }
+    return defaultValue;
+}
+
+bool use_smart_90_for_video(bool defaultValue) {
+    auto temp = SurfaceFlingerProperties::use_smart_90_for_video();
+    if (temp.has_value()) {
+        return *temp;
+    }
+    return defaultValue;
+}
+
 #define DISPLAY_PRIMARY_SIZE 3
 
 constexpr float kSrgbRedX = 0.4123f;

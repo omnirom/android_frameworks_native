@@ -22,7 +22,9 @@
 
 #include <string>
 
+#include <android/hardware_buffer.h>
 #include <ui/ANativeObjectBase.h>
+#include <ui/GraphicBufferMapper.h>
 #include <ui/PixelFormat.h>
 #include <ui/Rect.h>
 #include <utils/Flattenable.h>
@@ -78,6 +80,10 @@ public:
 
     static sp<GraphicBuffer> from(ANativeWindowBuffer *);
 
+    static GraphicBuffer* fromAHardwareBuffer(AHardwareBuffer*);
+    static GraphicBuffer const* fromAHardwareBuffer(AHardwareBuffer const*);
+    AHardwareBuffer* toAHardwareBuffer();
+    AHardwareBuffer const* toAHardwareBuffer() const;
 
     // Create a GraphicBuffer to be unflatten'ed into or be reallocated.
     GraphicBuffer();
@@ -208,6 +214,10 @@ public:
     size_t getFdCount() const;
     status_t flatten(void*& buffer, size_t& size, int*& fds, size_t& count) const;
     status_t unflatten(void const*& buffer, size_t& size, int const*& fds, size_t& count);
+
+    GraphicBufferMapper::Version getBufferMapperVersion() const {
+        return mBufferMapper.getMapperVersion();
+    }
 
 #ifndef LIBUI_IN_VNDK
     // Returns whether this GraphicBuffer is backed by BufferHubBuffer.

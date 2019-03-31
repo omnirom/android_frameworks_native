@@ -323,7 +323,8 @@ void BufferLayerConsumer::computeCurrentTransformMatrixLocked() {
                                        mCurrentTextureBuffer == nullptr
                                                ? nullptr
                                                : mCurrentTextureBuffer->graphicBuffer(),
-                                       mCurrentCrop, mCurrentTransform, mFilteringEnabled);
+                                       getCurrentCropLocked(), mCurrentTransform,
+                                       mFilteringEnabled);
 }
 
 nsecs_t BufferLayerConsumer::getTimestamp() {
@@ -380,6 +381,10 @@ sp<GraphicBuffer> BufferLayerConsumer::getCurrentBuffer(int* outSlot, sp<Fence>*
 
 Rect BufferLayerConsumer::getCurrentCrop() const {
     Mutex::Autolock lock(mMutex);
+    return getCurrentCropLocked();
+}
+
+Rect BufferLayerConsumer::getCurrentCropLocked() const {
     return (mCurrentScalingMode == NATIVE_WINDOW_SCALING_MODE_SCALE_CROP)
             ? GLConsumer::scaleDownCrop(mCurrentCrop, mDefaultWidth, mDefaultHeight)
             : mCurrentCrop;
@@ -496,7 +501,7 @@ void BufferLayerConsumer::dumpLocked(String8& result, const char* prefix) const 
 
 BufferLayerConsumer::Image::~Image() {
     if (mGraphicBuffer != nullptr) {
-        ALOGE("Destroying buffer: %" PRId64, mGraphicBuffer->getId());
+        ALOGV("Destroying buffer: %" PRId64, mGraphicBuffer->getId());
         mRE.unbindExternalTextureBuffer(mGraphicBuffer->getId());
     }
 }

@@ -73,13 +73,13 @@ extern "C" {
  */
 class DurationReporter {
   public:
-    explicit DurationReporter(const std::string& title, bool log_only = false);
+    explicit DurationReporter(const std::string& title, bool logcat_only = false);
 
     ~DurationReporter();
 
   private:
     std::string title_;
-    bool log_only_;
+    bool logcat_only_;
     uint64_t started_;
 
     DISALLOW_COPY_AND_ASSIGN(DurationReporter);
@@ -291,6 +291,12 @@ class Dumpstate {
     // TODO: temporary method until Dumpstate object is properly set
     void SetProgress(std::unique_ptr<Progress> progress);
 
+    // Dumps Dalvik and native stack traces, sets the trace file location to path
+    // if it succeeded.
+    // Note that it returns early if user consent is denied with status USER_CONSENT_DENIED.
+    // Returns OK in all other cases.
+    RunStatus DumpTraces(const char** path);
+
     void DumpstateBoard();
 
     /*
@@ -326,6 +332,13 @@ class Dumpstate {
 
     /* Sets runtime options. */
     void SetOptions(std::unique_ptr<DumpOptions> options);
+
+    /*
+     * Returns true if user consent is necessary and has been denied.
+     * Consent is only necessary if the caller has asked to copy over the bugreport to a file they
+     * provided.
+     */
+    bool IsUserConsentDenied() const;
 
     /*
      * Structure to hold options that determine the behavior of dumpstate.
@@ -542,9 +555,6 @@ bool redirect_to_existing_file(FILE* redirect, char* path);
 
 /* create leading directories, if necessary */
 void create_parent_dirs(const char *path);
-
-/* dump Dalvik and native stack traces, return the trace file location (NULL if none) */
-const char *dump_traces();
 
 /* for each process in the system, run the specified function */
 void for_each_pid(for_each_pid_func func, const char *header);

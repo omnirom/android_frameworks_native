@@ -92,12 +92,13 @@ void LayerProtoHelper::writeToProto(const half4 color, std::function<ColorProto*
 
 void LayerProtoHelper::writeToProto(const ui::Transform& transform,
                                     TransformProto* transformProto) {
-    const uint32_t type = transform.getType();
+    const uint32_t type = transform.getType() | (transform.getOrientation() << 8);
     transformProto->set_type(type);
 
-    if (type &
-        (ui::Transform::SCALE | ui::Transform::ROTATE | ui::Transform::TRANSLATE |
-         ui::Transform::UNKNOWN)) {
+    // Rotations that are 90/180/270 have their own type so the transform matrix can be
+    // reconstructed later. All other rotation have the type UKNOWN so we need to save the transform
+    // values in that case.
+    if (type & (ui::Transform::SCALE | ui::Transform::UNKNOWN)) {
         transformProto->set_dsdx(transform[0][0]);
         transformProto->set_dtdx(transform[0][1]);
         transformProto->set_dsdy(transform[1][0]);
@@ -115,6 +116,42 @@ void LayerProtoHelper::writeToProto(const sp<GraphicBuffer>& buffer,
         activeBufferProto->set_height(buffer->getHeight());
         activeBufferProto->set_stride(buffer->getStride());
         activeBufferProto->set_format(buffer->format);
+    }
+}
+
+void LayerProtoHelper::writeToProto(
+        const InputWindowInfo& inputInfo, const wp<Layer>& touchableRegionBounds,
+        std::function<InputWindowInfoProto*()> getInputWindowInfoProto) {
+    if (inputInfo.token == nullptr) {
+        return;
+    }
+
+    InputWindowInfoProto* proto = getInputWindowInfoProto();
+    proto->set_layout_params_flags(inputInfo.layoutParamsFlags);
+    proto->set_layout_params_type(inputInfo.layoutParamsType);
+
+    LayerProtoHelper::writeToProto({inputInfo.frameLeft, inputInfo.frameTop, inputInfo.frameRight,
+                                    inputInfo.frameBottom},
+                                   [&]() { return proto->mutable_frame(); });
+    LayerProtoHelper::writeToProto(inputInfo.touchableRegion,
+                                   [&]() { return proto->mutable_touchable_region(); });
+
+    proto->set_surface_inset(inputInfo.surfaceInset);
+    proto->set_visible(inputInfo.visible);
+    proto->set_can_receive_keys(inputInfo.canReceiveKeys);
+    proto->set_has_focus(inputInfo.hasFocus);
+    proto->set_has_wallpaper(inputInfo.hasWallpaper);
+
+    proto->set_global_scale_factor(inputInfo.globalScaleFactor);
+    proto->set_window_x_scale(inputInfo.windowXScale);
+    proto->set_window_y_scale(inputInfo.windowYScale);
+    proto->set_replace_touchable_region_with_crop(inputInfo.replaceTouchableRegionWithCrop);
+    auto cropLayer = touchableRegionBounds.promote();
+    if (cropLayer != nullptr) {
+        proto->set_crop_layer_id(cropLayer->sequence);
+        LayerProtoHelper::writeToProto(cropLayer->getScreenBounds(
+                                               false /* reduceTransparentRegion */),
+                                       [&]() { return proto->mutable_touchable_region_crop(); });
     }
 }
 
