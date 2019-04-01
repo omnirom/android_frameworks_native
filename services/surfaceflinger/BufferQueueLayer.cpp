@@ -424,6 +424,21 @@ void BufferQueueLayer::onFrameAvailable(const BufferItem& item) {
     mFlinger->mInterceptor->saveBufferUpdate(this, item.mGraphicBuffer->getWidth(),
                                              item.mGraphicBuffer->getHeight(), item.mFrameNumber);
 
+    if (mFlinger->mDolphinFuncsEnabled) {
+        Mutex::Autolock lock(mFlinger->mDolphinStateLock);
+        const auto displayId = mFlinger->getInternalDisplayIdLocked();
+        const Vector< sp<Layer> >& visibleLayersSortedByZ =
+            mFlinger->getLayerSortedByZForHwcDisplay(*displayId);
+        bool isTransparentRegion = this->visibleNonTransparentRegion.isEmpty();
+        int visibleLayerNum = visibleLayersSortedByZ.size();
+        Rect crop = this->getContentCrop();
+        int32_t width = crop.getWidth();
+        int32_t height = crop.getHeight();
+        String8 name = this->getName();
+        mFlinger->mDolphinOnFrameAvailable(isTransparentRegion, visibleLayerNum,
+                                           width, height, name);
+    }
+
     // If this layer is orphaned, then we run a fake vsync pulse so that
     // dequeueBuffer doesn't block indefinitely.
     if (isRemovedFromCurrentState()) {

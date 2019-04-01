@@ -941,6 +941,7 @@ private:
 
     // access must be protected by mStateLock
     mutable Mutex mStateLock;
+    mutable Mutex mDolphinStateLock;
     State mCurrentState{LayerVector::StateSet::Current};
     std::atomic<int32_t> mTransactionFlags{0};
     Condition mTransactionCV;
@@ -1167,6 +1168,13 @@ private:
     sp<SetInputWindowsListener> mSetInputWindowsListener;
     bool mPendingSyncInputWindows GUARDED_BY(mStateLock);
     Hwc2::impl::PowerAdvisor mPowerAdvisor;
+    bool mDolphinFuncsEnabled = false;
+    void *mDolphinHandle = nullptr;
+    void (*mDolphinOnFrameAvailable)(bool isTransparent, int num, int32_t width, int32_t height,
+                                     String8 name) = nullptr;
+    bool (*mDolphinInit)() = nullptr;
+    bool (*mDolphinMonitor)(int number) = nullptr;
+    void (*mDolphinRefresh)() = nullptr;
 };
 }; // namespace android
 
