@@ -399,6 +399,23 @@ SurfaceFlinger::SurfaceFlinger(surfaceflinger::Factory& factory)
         // for production purposes later on.
         setenv("TREBLE_TESTING_OVERRIDE", "true", true);
     }
+
+    mDolphinHandle = dlopen("libdolphin.so", RTLD_NOW);
+    if (!mDolphinHandle) {
+        ALOGW("Unable to open libdolphin.so: %s.", dlerror());
+    } else {
+        mDolphinInit = (bool (*) ())dlsym(mDolphinHandle, "dolphinInit");
+        mDolphinOnFrameAvailable =
+            (void (*) (bool, int, int32_t, int32_t, String8))dlsym(mDolphinHandle,
+                                                                   "dolphinOnFrameAvailable");
+        mDolphinMonitor = (bool (*) (int))dlsym(mDolphinHandle, "dolphinMonitor");
+        mDolphinRefresh = (void (*) ())dlsym(mDolphinHandle, "dolphinRefresh");
+        if (mDolphinInit != nullptr && mDolphinOnFrameAvailable != nullptr &&
+            mDolphinMonitor != nullptr && mDolphinRefresh != nullptr) {
+            if (mDolphinInit()) mDolphinFuncsEnabled = true;
+        }
+        if (!mDolphinFuncsEnabled) dlclose(mDolphinHandle);
+    }
 }
 
 void SurfaceFlinger::onFirstRef()
@@ -408,6 +425,7 @@ void SurfaceFlinger::onFirstRef()
 
 SurfaceFlinger::~SurfaceFlinger()
 {
+    if (mDolphinFuncsEnabled) dlclose(mDolphinHandle);
 }
 
 void SurfaceFlinger::binderDied(const wp<IBinder>& /* who */)
@@ -1613,6 +1631,27 @@ void SurfaceFlinger::onMessageReceived(int32_t what) {
                 }
             }
 
+            if (mDolphinFuncsEnabled) {
+                int maxQueuedFrames = 0;
+                mDrawingState.traverseInZOrder([&](Layer* layer) {
+                    if (layer->hasReadyFrame()) {
+                        nsecs_t expectedPresentTime;
+                        expectedPresentTime = mScheduler->expectedPresentTime();
+                        if (layer->shouldPresentNow(expectedPresentTime)) {
+                            int layerQueuedFrames = layer->getQueuedFrameCount();
+                            if (maxQueuedFrames < layerQueuedFrames &&
+                                    !layer->visibleNonTransparentRegion.isEmpty()) {
+                                maxQueuedFrames = layerQueuedFrames;
+                            }
+                        }
+                    }
+                });
+                if(mDolphinMonitor(maxQueuedFrames)) {
+                    signalLayerUpdate();
+                    break;
+                }
+            }
+
             // Now that we're going to make it to the handleMessageTransaction()
             // call below it's safe to call updateVrFlinger(), which will
             // potentially trigger a display handoff.
@@ -1634,6 +1673,9 @@ void SurfaceFlinger::onMessageReceived(int32_t what) {
             break;
         }
         case MessageQueue::REFRESH: {
+            if (mDolphinFuncsEnabled) {
+                mDolphinRefresh();
+            }
             handleMessageRefresh();
             break;
         }
@@ -2087,6 +2129,7 @@ void SurfaceFlinger::computeLayerBounds() {
 void SurfaceFlinger::rebuildLayerStacks() {
     ATRACE_CALL();
     ALOGV("rebuildLayerStacks");
+    Mutex::Autolock lock(mDolphinStateLock);
 
     // rebuild the visible layer list per screen
     if (CC_UNLIKELY(mVisibleRegionsDirty)) {
