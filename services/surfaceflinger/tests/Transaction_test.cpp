@@ -32,8 +32,9 @@
 #include <gui/LayerState.h>
 #include <gui/Surface.h>
 #include <gui/SurfaceComposerClient.h>
-#include <private/gui/ComposerService.h>
+#include <hardware/hwcomposer_defs.h>
 #include <private/android_filesystem_config.h>
+#include <private/gui/ComposerService.h>
 
 #include <ui/ColorSpace.h>
 #include <ui/DisplayInfo.h>
@@ -198,12 +199,15 @@ static void fillSurfaceRGBA8(const sp<SurfaceControl>& sc, uint8_t r, uint8_t g,
 class ScreenCapture : public RefBase {
 public:
     static void captureScreen(std::unique_ptr<ScreenCapture>* sc) {
+        captureScreen(sc, SurfaceComposerClient::getInternalDisplayToken());
+    }
+
+    static void captureScreen(std::unique_ptr<ScreenCapture>* sc, sp<IBinder> displayToken) {
         const auto sf = ComposerService::getComposerService();
-        const auto token = sf->getInternalDisplayToken();
         SurfaceComposerClient::Transaction().apply(true);
 
         sp<GraphicBuffer> outBuffer;
-        ASSERT_EQ(NO_ERROR, sf->captureScreen(token, &outBuffer, Rect(), 0, 0, false));
+        ASSERT_EQ(NO_ERROR, sf->captureScreen(displayToken, &outBuffer, Rect(), 0, 0, false));
         *sc = std::make_unique<ScreenCapture>(outBuffer);
     }
 
@@ -480,6 +484,12 @@ protected:
         std::unique_ptr<ScreenCapture> screenshot;
         ScreenCapture::captureScreen(&screenshot);
         return screenshot;
+    }
+
+    void asTransaction(const std::function<void(Transaction&)>& exec) {
+        Transaction t;
+        exec(t);
+        t.apply(true);
     }
 
     static status_t getBuffer(sp<GraphicBuffer>* outBuffer, sp<Fence>* outFence) {
@@ -2013,8 +2023,8 @@ TEST_P(LayerRenderTypeTransactionTest, SetCropBasic_BufferState) {
 
     Transaction().setCrop(layer, crop).apply();
     auto shot = getScreenCapture();
-    shot->expectColor(Rect(0, 0, 32, 32), Color::RED);
-    shot->expectBorder(Rect(0, 0, 32, 32), Color::BLACK);
+    shot->expectColor(Rect(0, 0, mDisplayWidth, mDisplayHeight), Color::RED);
+    shot->expectBorder(Rect(0, 0, mDisplayWidth, mDisplayHeight), Color::BLACK);
 }
 
 TEST_P(LayerRenderTypeTransactionTest, SetCropEmpty_BufferQueue) {
@@ -2044,13 +2054,13 @@ TEST_P(LayerRenderTypeTransactionTest, SetCropEmpty_BufferState) {
     {
         SCOPED_TRACE("empty rect");
         Transaction().setCrop(layer, Rect(8, 8, 8, 8)).apply();
-        getScreenCapture()->expectColor(Rect(0, 0, 32, 32), Color::RED);
+        getScreenCapture()->expectColor(Rect(0, 0, mDisplayWidth, mDisplayHeight), Color::RED);
     }
 
     {
         SCOPED_TRACE("negative rect");
         Transaction().setCrop(layer, Rect(8, 8, 0, 0)).apply();
-        getScreenCapture()->expectColor(Rect(0, 0, 32, 32), Color::RED);
+        getScreenCapture()->expectColor(Rect(0, 0, mDisplayWidth, mDisplayHeight), Color::RED);
     }
 }
 
@@ -2067,37 +2077,36 @@ TEST_P(LayerRenderTypeTransactionTest, SetCropOutOfBounds_BufferQueue) {
 
 TEST_P(LayerRenderTypeTransactionTest, SetCropOutOfBounds_BufferState) {
     sp<SurfaceControl> layer;
-    ASSERT_NO_FATAL_FAILURE(layer = createLayer("test", mDisplayWidth, mDisplayHeight / 2,
-                                                ISurfaceComposerClient::eFXSurfaceBufferState));
+    ASSERT_NO_FATAL_FAILURE(
+            layer = createLayer("test", 32, 64, ISurfaceComposerClient::eFXSurfaceBufferState));
     sp<GraphicBuffer> buffer =
-            new GraphicBuffer(mDisplayWidth, mDisplayHeight / 2, PIXEL_FORMAT_RGBA_8888, 1,
+            new GraphicBuffer(32, 64, PIXEL_FORMAT_RGBA_8888, 1,
                               BufferUsage::CPU_READ_OFTEN | BufferUsage::CPU_WRITE_OFTEN |
                                       BufferUsage::COMPOSER_OVERLAY,
                               "test");
-    fillGraphicBufferColor(buffer, Rect(0, 0, mDisplayWidth, mDisplayHeight / 4), Color::BLUE);
-    fillGraphicBufferColor(buffer, Rect(0, mDisplayHeight / 4, mDisplayWidth, mDisplayHeight / 2),
-                           Color::RED);
+    fillGraphicBufferColor(buffer, Rect(0, 0, 32, 16), Color::BLUE);
+    fillGraphicBufferColor(buffer, Rect(0, 16, 32, 64), Color::RED);
+
+    Transaction().setFrame(layer, Rect(0, 0, 64, 64)).apply();
 
     Transaction().setBuffer(layer, buffer).apply();
 
     // Partially out of bounds in the negative (upper left) direction
-    Transaction().setCrop(layer, Rect(-128, -128, mDisplayWidth, mDisplayHeight / 4)).apply();
+    Transaction().setCrop(layer, Rect(-128, -128, 32, 16)).apply();
     {
         SCOPED_TRACE("out of bounds, negative (upper left) direction");
         auto shot = getScreenCapture();
-        shot->expectColor(Rect(0, 0, mDisplayWidth, mDisplayHeight / 2), Color::BLUE);
-        shot->expectBorder(Rect(0, 0, mDisplayWidth, mDisplayHeight / 2), Color::BLACK);
+        shot->expectColor(Rect(0, 0, 64, 64), Color::BLUE);
+        shot->expectBorder(Rect(0, 0, 64, 64), Color::BLACK);
     }
 
     // Partially out of bounds in the positive (lower right) direction
-    Transaction()
-            .setCrop(layer, Rect(0, mDisplayHeight / 4, mDisplayWidth + 1, mDisplayHeight))
-            .apply();
+    Transaction().setCrop(layer, Rect(0, 16, 128, 128)).apply();
     {
         SCOPED_TRACE("out of bounds, positive (lower right) direction");
         auto shot = getScreenCapture();
-        shot->expectColor(Rect(0, 0, mDisplayWidth, mDisplayHeight / 2), Color::RED);
-        shot->expectBorder(Rect(0, 0, mDisplayWidth, mDisplayHeight / 2), Color::BLACK);
+        shot->expectColor(Rect(0, 0, 64, 64), Color::RED);
+        shot->expectBorder(Rect(0, 0, 64, 64), Color::BLACK);
     }
 
     // Fully out of buffer space bounds
@@ -2105,9 +2114,9 @@ TEST_P(LayerRenderTypeTransactionTest, SetCropOutOfBounds_BufferState) {
     {
         SCOPED_TRACE("Fully out of bounds");
         auto shot = getScreenCapture();
-        shot->expectColor(Rect(0, 0, mDisplayWidth, mDisplayHeight / 4), Color::BLUE);
-        shot->expectColor(Rect(0, mDisplayHeight / 4, mDisplayWidth, mDisplayHeight / 2),
-                          Color::RED);
+        shot->expectColor(Rect(0, 0, 64, 16), Color::BLUE);
+        shot->expectColor(Rect(0, 16, 64, 64), Color::RED);
+        shot->expectBorder(Rect(0, 0, 64, 64), Color::BLACK);
     }
 }
 
@@ -2284,8 +2293,8 @@ TEST_P(LayerRenderTypeTransactionTest, SetFrameDefaultParentless_BufferState) {
 
     // A parentless layer will default to a frame with the same size as the buffer
     auto shot = getScreenCapture();
-    shot->expectColor(Rect(0, 0, 10, 10), Color::RED);
-    shot->expectBorder(Rect(0, 0, 10, 10), Color::BLACK);
+    shot->expectColor(Rect(0, 0, mDisplayWidth, mDisplayHeight), Color::RED);
+    shot->expectBorder(Rect(0, 0, mDisplayWidth, mDisplayHeight), Color::BLACK);
 }
 
 TEST_P(LayerRenderTypeTransactionTest, SetFrameDefaultBSParent_BufferState) {
@@ -2368,8 +2377,8 @@ TEST_P(LayerRenderTypeTransactionTest, SetBufferBasic_BufferState) {
     ASSERT_NO_FATAL_FAILURE(fillBufferStateLayerColor(layer, Color::RED, 32, 32));
 
     auto shot = getScreenCapture();
-    shot->expectColor(Rect(0, 0, 32, 32), Color::RED);
-    shot->expectBorder(Rect(0, 0, 32, 32), Color::BLACK);
+    shot->expectColor(Rect(0, 0, mDisplayWidth, mDisplayHeight), Color::RED);
+    shot->expectBorder(Rect(0, 0, mDisplayWidth, mDisplayHeight), Color::BLACK);
 }
 
 TEST_P(LayerRenderTypeTransactionTest, SetBufferMultipleBuffers_BufferState) {
@@ -2382,8 +2391,8 @@ TEST_P(LayerRenderTypeTransactionTest, SetBufferMultipleBuffers_BufferState) {
     {
         SCOPED_TRACE("set buffer 1");
         auto shot = getScreenCapture();
-        shot->expectColor(Rect(0, 0, 32, 32), Color::RED);
-        shot->expectBorder(Rect(0, 0, 32, 32), Color::BLACK);
+        shot->expectColor(Rect(0, 0, mDisplayWidth, mDisplayHeight), Color::RED);
+        shot->expectBorder(Rect(0, 0, mDisplayWidth, mDisplayHeight), Color::BLACK);
     }
 
     ASSERT_NO_FATAL_FAILURE(fillBufferStateLayerColor(layer, Color::BLUE, 32, 32));
@@ -2391,8 +2400,8 @@ TEST_P(LayerRenderTypeTransactionTest, SetBufferMultipleBuffers_BufferState) {
     {
         SCOPED_TRACE("set buffer 2");
         auto shot = getScreenCapture();
-        shot->expectColor(Rect(0, 0, 32, 32), Color::BLUE);
-        shot->expectBorder(Rect(0, 0, 32, 32), Color::BLACK);
+        shot->expectColor(Rect(0, 0, mDisplayWidth, mDisplayHeight), Color::BLUE);
+        shot->expectBorder(Rect(0, 0, mDisplayWidth, mDisplayHeight), Color::BLACK);
     }
 
     ASSERT_NO_FATAL_FAILURE(fillBufferStateLayerColor(layer, Color::RED, 32, 32));
@@ -2400,8 +2409,8 @@ TEST_P(LayerRenderTypeTransactionTest, SetBufferMultipleBuffers_BufferState) {
     {
         SCOPED_TRACE("set buffer 3");
         auto shot = getScreenCapture();
-        shot->expectColor(Rect(0, 0, 32, 32), Color::RED);
-        shot->expectBorder(Rect(0, 0, 32, 32), Color::BLACK);
+        shot->expectColor(Rect(0, 0, mDisplayWidth, mDisplayHeight), Color::RED);
+        shot->expectBorder(Rect(0, 0, mDisplayWidth, mDisplayHeight), Color::BLACK);
     }
 }
 
@@ -2483,8 +2492,8 @@ TEST_P(LayerRenderTypeTransactionTest, SetBufferCaching_BufferState) {
 
             Color color = colors[idx % colors.size()];
             auto shot = screenshot();
-            shot->expectColor(Rect(0, 0, 32, 32), color);
-            shot->expectBorder(Rect(0, 0, 32, 32), Color::BLACK);
+            shot->expectColor(Rect(0, 0, mDisplayWidth, mDisplayHeight), color);
+            shot->expectBorder(Rect(0, 0, mDisplayWidth, mDisplayHeight), Color::BLACK);
         }
         idx++;
     }
@@ -2519,8 +2528,8 @@ TEST_P(LayerRenderTypeTransactionTest, SetBufferCaching_LeastRecentlyUsed_Buffer
 
             Color color = colors[idx % colors.size()];
             auto shot = screenshot();
-            shot->expectColor(Rect(0, 0, 32, 32), color);
-            shot->expectBorder(Rect(0, 0, 32, 32), Color::BLACK);
+            shot->expectColor(Rect(0, 0, mDisplayWidth, mDisplayHeight), color);
+            shot->expectBorder(Rect(0, 0, mDisplayWidth, mDisplayHeight), Color::BLACK);
         }
         idx++;
     }
@@ -2555,8 +2564,8 @@ TEST_P(LayerRenderTypeTransactionTest, SetBufferCaching_DestroyedBuffer_BufferSt
 
             Color color = colors[idx % colors.size()];
             auto shot = screenshot();
-            shot->expectColor(Rect(0, 0, 32, 32), color);
-            shot->expectBorder(Rect(0, 0, 32, 32), Color::BLACK);
+            shot->expectColor(Rect(0, 0, mDisplayWidth, mDisplayHeight), color);
+            shot->expectBorder(Rect(0, 0, mDisplayWidth, mDisplayHeight), Color::BLACK);
         }
         if (idx == 0) {
             buffers[0].clear();
@@ -2654,8 +2663,8 @@ TEST_P(LayerRenderTypeTransactionTest, SetFenceBasic_BufferState) {
     std::this_thread::sleep_for(200ms);
 
     auto shot = getScreenCapture();
-    shot->expectColor(Rect(0, 0, 32, 32), Color::RED);
-    shot->expectBorder(Rect(0, 0, 32, 32), Color::BLACK);
+    shot->expectColor(Rect(0, 0, mDisplayWidth, mDisplayHeight), Color::RED);
+    shot->expectBorder(Rect(0, 0, mDisplayWidth, mDisplayHeight), Color::BLACK);
 }
 
 TEST_P(LayerRenderTypeTransactionTest, SetFenceNull_BufferState) {
@@ -2678,8 +2687,8 @@ TEST_P(LayerRenderTypeTransactionTest, SetFenceNull_BufferState) {
             .apply();
 
     auto shot = getScreenCapture();
-    shot->expectColor(Rect(0, 0, 32, 32), Color::RED);
-    shot->expectBorder(Rect(0, 0, 32, 32), Color::BLACK);
+    shot->expectColor(Rect(0, 0, mDisplayWidth, mDisplayHeight), Color::RED);
+    shot->expectBorder(Rect(0, 0, mDisplayWidth, mDisplayHeight), Color::BLACK);
 }
 
 TEST_P(LayerRenderTypeTransactionTest, SetDataspaceBasic_BufferState) {
@@ -2700,8 +2709,8 @@ TEST_P(LayerRenderTypeTransactionTest, SetDataspaceBasic_BufferState) {
             .apply();
 
     auto shot = getScreenCapture();
-    shot->expectColor(Rect(0, 0, 32, 32), Color::RED);
-    shot->expectBorder(Rect(0, 0, 32, 32), Color::BLACK);
+    shot->expectColor(Rect(0, 0, mDisplayWidth, mDisplayHeight), Color::RED);
+    shot->expectBorder(Rect(0, 0, mDisplayWidth, mDisplayHeight), Color::BLACK);
 }
 
 TEST_P(LayerRenderTypeTransactionTest, SetHdrMetadataBasic_BufferState) {
@@ -2724,8 +2733,8 @@ TEST_P(LayerRenderTypeTransactionTest, SetHdrMetadataBasic_BufferState) {
             .apply();
 
     auto shot = getScreenCapture();
-    shot->expectColor(Rect(0, 0, 32, 32), Color::RED);
-    shot->expectBorder(Rect(0, 0, 32, 32), Color::BLACK);
+    shot->expectColor(Rect(0, 0, mDisplayWidth, mDisplayHeight), Color::RED);
+    shot->expectBorder(Rect(0, 0, mDisplayWidth, mDisplayHeight), Color::BLACK);
 }
 
 TEST_P(LayerRenderTypeTransactionTest, SetSurfaceDamageRegionBasic_BufferState) {
@@ -2748,8 +2757,8 @@ TEST_P(LayerRenderTypeTransactionTest, SetSurfaceDamageRegionBasic_BufferState) 
             .apply();
 
     auto shot = getScreenCapture();
-    shot->expectColor(Rect(0, 0, 32, 32), Color::RED);
-    shot->expectBorder(Rect(0, 0, 32, 32), Color::BLACK);
+    shot->expectColor(Rect(0, 0, mDisplayWidth, mDisplayHeight), Color::RED);
+    shot->expectBorder(Rect(0, 0, mDisplayWidth, mDisplayHeight), Color::BLACK);
 }
 
 TEST_P(LayerRenderTypeTransactionTest, SetApiBasic_BufferState) {
@@ -2770,8 +2779,8 @@ TEST_P(LayerRenderTypeTransactionTest, SetApiBasic_BufferState) {
             .apply();
 
     auto shot = getScreenCapture();
-    shot->expectColor(Rect(0, 0, 32, 32), Color::RED);
-    shot->expectBorder(Rect(0, 0, 32, 32), Color::BLACK);
+    shot->expectColor(Rect(0, 0, mDisplayWidth, mDisplayHeight), Color::RED);
+    shot->expectBorder(Rect(0, 0, mDisplayWidth, mDisplayHeight), Color::BLACK);
 }
 
 TEST_F(LayerTransactionTest, SetSidebandStreamNull_BufferState) {
@@ -4086,11 +4095,6 @@ protected:
         fillSurfaceRGBA8(mSyncSurfaceControl, 31, 31, 31);
     }
 
-    void asTransaction(const std::function<void(Transaction&)>& exec) {
-        Transaction t;
-        exec(t);
-        t.apply(true);
-    }
 
     sp<SurfaceControl> mBGSurfaceControl;
     sp<SurfaceControl> mFGSurfaceControl;
@@ -4303,7 +4307,7 @@ class ChildLayerTest : public LayerUpdateTest {
 protected:
     void SetUp() override {
         LayerUpdateTest::SetUp();
-        mChild = createSurface(mClient, "Child surface", 10, 10, PIXEL_FORMAT_RGBA_8888, 0,
+        mChild = createSurface(mClient, "Child surface", 10, 15, PIXEL_FORMAT_RGBA_8888, 0,
                                mFGSurfaceControl.get());
         fillSurfaceRGBA8(mChild, 200, 200, 200);
 
@@ -4406,6 +4410,32 @@ TEST_F(ChildLayerTest, ChildLayerScaling) {
         mCapture->expectChildColor(10, 10);
         mCapture->expectChildColor(19, 19);
         mCapture->expectFGColor(20, 20);
+    }
+}
+
+// A child with a scale transform should be cropped by its parent bounds.
+TEST_F(ChildLayerTest, ChildLayerScalingCroppedByParent) {
+    asTransaction([&](Transaction& t) {
+        t.setPosition(mFGSurfaceControl, 0, 0);
+        t.setPosition(mChild, 0, 0);
+    });
+
+    // Find the boundary between the parent and child.
+    {
+        mCapture = screenshot();
+        mCapture->expectChildColor(0, 0);
+        mCapture->expectChildColor(9, 9);
+        mCapture->expectFGColor(10, 10);
+    }
+
+    asTransaction([&](Transaction& t) { t.setMatrix(mChild, 10.0, 0, 0, 10.0); });
+
+    // The child should fill its parent bounds and be cropped by it.
+    {
+        mCapture = screenshot();
+        mCapture->expectChildColor(0, 0);
+        mCapture->expectChildColor(63, 63);
+        mCapture->expectBGColor(64, 64);
     }
 }
 
@@ -4645,8 +4675,8 @@ TEST_F(ChildLayerTest, ChildrenInheritNonTransformScalingFromParent) {
         mCapture = screenshot();
         // We've positioned the child in the top left.
         mCapture->expectChildColor(0, 0);
-        // But it's only 10x10.
-        mCapture->expectFGColor(10, 10);
+        // But it's only 10x15.
+        mCapture->expectFGColor(10, 15);
     }
 
     asTransaction([&](Transaction& t) {
@@ -4660,9 +4690,9 @@ TEST_F(ChildLayerTest, ChildrenInheritNonTransformScalingFromParent) {
         // We've positioned the child in the top left.
         mCapture->expectChildColor(0, 0);
         mCapture->expectChildColor(10, 10);
-        mCapture->expectChildColor(19, 19);
-        // And now it should be scaled all the way to 20x20
-        mCapture->expectFGColor(20, 20);
+        mCapture->expectChildColor(19, 29);
+        // And now it should be scaled all the way to 20x30
+        mCapture->expectFGColor(20, 30);
     }
 }
 
@@ -4678,8 +4708,9 @@ TEST_F(ChildLayerTest, ChildrenWithParentBufferTransform) {
         mCapture = screenshot();
         // We've positioned the child in the top left.
         mCapture->expectChildColor(0, 0);
-        // But it's only 10x10.
-        mCapture->expectFGColor(10, 10);
+        mCapture->expectChildColor(9, 14);
+        // But it's only 10x15.
+        mCapture->expectFGColor(10, 15);
     }
     // We set things up as in b/37673612 so that there is a mismatch between the buffer size and
     // the WM specified state size.
@@ -4697,6 +4728,115 @@ TEST_F(ChildLayerTest, ChildrenWithParentBufferTransform) {
         mCapture = screenshot();
         mCapture->expectChildColor(0, 0);
         mCapture->expectFGColor(10, 10);
+    }
+}
+
+// A child with a buffer transform from its parents should be cropped by its parent bounds.
+TEST_F(ChildLayerTest, ChildCroppedByParentWithBufferTransform) {
+    asTransaction([&](Transaction& t) {
+        t.show(mChild);
+        t.setPosition(mChild, 0, 0);
+        t.setPosition(mFGSurfaceControl, 0, 0);
+        t.setSize(mChild, 100, 100);
+    });
+    fillSurfaceRGBA8(mChild, 200, 200, 200);
+
+    {
+        mCapture = screenshot();
+
+        mCapture->expectChildColor(0, 0);
+        mCapture->expectChildColor(63, 63);
+        mCapture->expectBGColor(64, 64);
+    }
+
+    asTransaction([&](Transaction& t) { t.setSize(mFGSurfaceControl, 128, 64); });
+    sp<Surface> s = mFGSurfaceControl->getSurface();
+    auto anw = static_cast<ANativeWindow*>(s.get());
+    // Apply a 90 transform on the buffer.
+    native_window_set_buffers_transform(anw, NATIVE_WINDOW_TRANSFORM_ROT_90);
+    native_window_set_buffers_dimensions(anw, 64, 128);
+    fillSurfaceRGBA8(mFGSurfaceControl, 195, 63, 63);
+    waitForPostedBuffers();
+
+    // The child should be cropped by the new parent bounds.
+    {
+        mCapture = screenshot();
+        mCapture->expectChildColor(0, 0);
+        mCapture->expectChildColor(99, 63);
+        mCapture->expectFGColor(100, 63);
+        mCapture->expectBGColor(128, 64);
+    }
+}
+
+// A child with a scale transform from its parents should be cropped by its parent bounds.
+TEST_F(ChildLayerTest, ChildCroppedByParentWithBufferScale) {
+    asTransaction([&](Transaction& t) {
+        t.show(mChild);
+        t.setPosition(mChild, 0, 0);
+        t.setPosition(mFGSurfaceControl, 0, 0);
+        t.setSize(mChild, 200, 200);
+    });
+    fillSurfaceRGBA8(mChild, 200, 200, 200);
+
+    {
+        mCapture = screenshot();
+
+        mCapture->expectChildColor(0, 0);
+        mCapture->expectChildColor(63, 63);
+        mCapture->expectBGColor(64, 64);
+    }
+
+    asTransaction([&](Transaction& t) {
+        t.setOverrideScalingMode(mFGSurfaceControl, NATIVE_WINDOW_SCALING_MODE_SCALE_TO_WINDOW);
+        // Set a scaling by 2.
+        t.setSize(mFGSurfaceControl, 128, 128);
+    });
+
+    // Child should inherit its parents scale but should be cropped by its parent bounds.
+    {
+        mCapture = screenshot();
+        mCapture->expectChildColor(0, 0);
+        mCapture->expectChildColor(127, 127);
+        mCapture->expectBGColor(128, 128);
+    }
+}
+
+// Regression test for b/127368943
+// Child should ignore the buffer transform but apply parent scale transform.
+TEST_F(ChildLayerTest, ChildrenWithParentBufferTransformAndScale) {
+    asTransaction([&](Transaction& t) {
+        t.show(mChild);
+        t.setPosition(mChild, 0, 0);
+        t.setPosition(mFGSurfaceControl, 0, 0);
+    });
+
+    {
+        mCapture = screenshot();
+        mCapture->expectChildColor(0, 0);
+        mCapture->expectChildColor(9, 14);
+        mCapture->expectFGColor(10, 15);
+    }
+
+    // Change the size of the foreground to 128 * 64 so we can test rotation as well.
+    asTransaction([&](Transaction& t) {
+        t.setOverrideScalingMode(mFGSurfaceControl, NATIVE_WINDOW_SCALING_MODE_SCALE_TO_WINDOW);
+        t.setSize(mFGSurfaceControl, 128, 64);
+    });
+    sp<Surface> s = mFGSurfaceControl->getSurface();
+    auto anw = static_cast<ANativeWindow*>(s.get());
+    // Apply a 90 transform on the buffer and submit a buffer half the expected size so that we
+    // have an effective scale of 2.0 applied to the buffer along with a rotation transform.
+    native_window_set_buffers_transform(anw, NATIVE_WINDOW_TRANSFORM_ROT_90);
+    native_window_set_buffers_dimensions(anw, 32, 64);
+    fillSurfaceRGBA8(mFGSurfaceControl, 195, 63, 63);
+    waitForPostedBuffers();
+
+    // The child should ignore the buffer transform but apply the 2.0 scale from parent.
+    {
+        mCapture = screenshot();
+        mCapture->expectChildColor(0, 0);
+        mCapture->expectChildColor(19, 29);
+        mCapture->expectFGColor(20, 30);
     }
 }
 
@@ -4853,6 +4993,7 @@ TEST_F(ChildLayerTest, ChildLayerRelativeLayer) {
         mCapture->checkPixel(10, 10, 255, 255, 255);
     }
 }
+
 class BoundlessLayerTest : public LayerUpdateTest {
 protected:
     std::unique_ptr<ScreenCapture> mCapture;
@@ -5419,6 +5560,164 @@ TEST_F(DereferenceSurfaceControlTest, LayerInTransaction) {
         auto shot = screenshot();
         shot->expectColor(Rect(0, 0, 20, 20), Color::BLUE);
     }
+}
+
+class MultiDisplayLayerBoundsTest : public LayerTransactionTest {
+protected:
+    virtual void SetUp() {
+        LayerTransactionTest::SetUp();
+        ASSERT_EQ(NO_ERROR, mClient->initCheck());
+
+        mMainDisplay = SurfaceComposerClient::getInternalDisplayToken();
+        SurfaceComposerClient::getDisplayInfo(mMainDisplay, &mMainDisplayInfo);
+
+        sp<IGraphicBufferConsumer> consumer;
+        BufferQueue::createBufferQueue(&mProducer, &consumer);
+        consumer->setConsumerName(String8("Virtual disp consumer"));
+        consumer->setDefaultBufferSize(mMainDisplayInfo.w, mMainDisplayInfo.h);
+    }
+
+    virtual void TearDown() {
+        SurfaceComposerClient::destroyDisplay(mVirtualDisplay);
+        LayerTransactionTest::TearDown();
+        mColorLayer = 0;
+    }
+
+    void createDisplay(const Rect& layerStackRect, uint32_t layerStack) {
+        mVirtualDisplay =
+                SurfaceComposerClient::createDisplay(String8("VirtualDisplay"), false /*secure*/);
+        asTransaction([&](Transaction& t) {
+            t.setDisplaySurface(mVirtualDisplay, mProducer);
+            t.setDisplayLayerStack(mVirtualDisplay, layerStack);
+            t.setDisplayProjection(mVirtualDisplay, mMainDisplayInfo.orientation, layerStackRect,
+                                   Rect(mMainDisplayInfo.w, mMainDisplayInfo.h));
+        });
+    }
+
+    void createColorLayer(uint32_t layerStack) {
+        mColorLayer =
+                createSurface(mClient, "ColorLayer", 0 /* buffer width */, 0 /* buffer height */,
+                              PIXEL_FORMAT_RGBA_8888, ISurfaceComposerClient::eFXSurfaceColor);
+        ASSERT_TRUE(mColorLayer != nullptr);
+        ASSERT_TRUE(mColorLayer->isValid());
+        asTransaction([&](Transaction& t) {
+            t.setLayerStack(mColorLayer, layerStack);
+            t.setCrop_legacy(mColorLayer, Rect(0, 0, 30, 40));
+            t.setLayer(mColorLayer, INT32_MAX - 2);
+            t.setColor(mColorLayer,
+                       half3{mExpectedColor.r / 255.0f, mExpectedColor.g / 255.0f,
+                             mExpectedColor.b / 255.0f});
+            t.show(mColorLayer);
+        });
+    }
+
+    DisplayInfo mMainDisplayInfo;
+    sp<IBinder> mMainDisplay;
+    sp<IBinder> mVirtualDisplay;
+    sp<IGraphicBufferProducer> mProducer;
+    sp<SurfaceControl> mColorLayer;
+    Color mExpectedColor = {63, 63, 195, 255};
+};
+
+TEST_F(MultiDisplayLayerBoundsTest, RenderLayerInVirtualDisplay) {
+    createDisplay({mMainDisplayInfo.viewportW, mMainDisplayInfo.viewportH}, 1 /* layerStack */);
+    createColorLayer(1 /* layerStack */);
+
+    asTransaction([&](Transaction& t) { t.setPosition(mColorLayer, 10, 10); });
+
+    // Verify color layer does not render on main display.
+    std::unique_ptr<ScreenCapture> sc;
+    ScreenCapture::captureScreen(&sc, mMainDisplay);
+    sc->expectColor(Rect(10, 10, 40, 50), {0, 0, 0, 255});
+    sc->expectColor(Rect(0, 0, 9, 9), {0, 0, 0, 255});
+
+    // Verify color layer renders correctly on virtual display.
+    ScreenCapture::captureScreen(&sc, mVirtualDisplay);
+    sc->expectColor(Rect(10, 10, 40, 50), mExpectedColor);
+    sc->expectColor(Rect(1, 1, 9, 9), {0, 0, 0, 0});
+}
+
+TEST_F(MultiDisplayLayerBoundsTest, RenderLayerInMirroredVirtualDisplay) {
+    // Create a display and set its layer stack to the main display's layer stack so
+    // the contents of the main display are mirrored on to the virtual display.
+
+    // Assumption here is that the new mirrored display has the same viewport as the
+    // primary display that it is mirroring.
+    createDisplay({mMainDisplayInfo.viewportW, mMainDisplayInfo.viewportH}, 0 /* layerStack */);
+    createColorLayer(0 /* layerStack */);
+
+    asTransaction([&](Transaction& t) { t.setPosition(mColorLayer, 10, 10); });
+
+    // Verify color layer renders correctly on main display and it is mirrored on the
+    // virtual display.
+    std::unique_ptr<ScreenCapture> sc;
+    ScreenCapture::captureScreen(&sc, mMainDisplay);
+    sc->expectColor(Rect(10, 10, 40, 50), mExpectedColor);
+    sc->expectColor(Rect(0, 0, 9, 9), {0, 0, 0, 255});
+
+    ScreenCapture::captureScreen(&sc, mVirtualDisplay);
+    sc->expectColor(Rect(10, 10, 40, 50), mExpectedColor);
+    sc->expectColor(Rect(0, 0, 9, 9), {0, 0, 0, 255});
+}
+
+class DisplayActiveConfigTest : public ::testing::Test {
+protected:
+    void SetUp() override {
+        mDisplayToken = SurfaceComposerClient::getInternalDisplayToken();
+        SurfaceComposerClient::getDisplayConfigs(mDisplayToken, &mDisplayconfigs);
+        EXPECT_GT(mDisplayconfigs.size(), 0);
+
+        // set display power to on to make sure config can be changed
+        SurfaceComposerClient::setDisplayPowerMode(mDisplayToken, HWC_POWER_MODE_NORMAL);
+    }
+
+    sp<IBinder> mDisplayToken;
+    Vector<DisplayInfo> mDisplayconfigs;
+};
+
+TEST_F(DisplayActiveConfigTest, allConfigsAllowed) {
+    std::vector<int32_t> allowedConfigs;
+
+    // Add all configs to the allowed configs
+    for (int i = 0; i < mDisplayconfigs.size(); i++) {
+        allowedConfigs.push_back(i);
+    }
+
+    status_t res = SurfaceComposerClient::setAllowedDisplayConfigs(mDisplayToken, allowedConfigs);
+    EXPECT_EQ(res, NO_ERROR);
+
+    std::vector<int32_t> outConfigs;
+    res = SurfaceComposerClient::getAllowedDisplayConfigs(mDisplayToken, &outConfigs);
+    EXPECT_EQ(res, NO_ERROR);
+    EXPECT_EQ(allowedConfigs, outConfigs);
+}
+
+TEST_F(DisplayActiveConfigTest, changeAllowedConfig) {
+    // we need at least 2 configs available for this test
+    if (mDisplayconfigs.size() <= 1) return;
+
+    int activeConfig = SurfaceComposerClient::getActiveConfig(mDisplayToken);
+
+    // We want to set the allowed config to everything but the active config
+    std::vector<int32_t> allowedConfigs;
+    for (int i = 0; i < mDisplayconfigs.size(); i++) {
+        if (i != activeConfig) {
+            allowedConfigs.push_back(i);
+        }
+    }
+
+    status_t res = SurfaceComposerClient::setAllowedDisplayConfigs(mDisplayToken, allowedConfigs);
+    EXPECT_EQ(res, NO_ERROR);
+
+    // Allow some time for the config change
+    std::this_thread::sleep_for(200ms);
+
+    int newActiveConfig = SurfaceComposerClient::getActiveConfig(mDisplayToken);
+    EXPECT_NE(activeConfig, newActiveConfig);
+
+    // Make sure the new config is part of allowed config
+    EXPECT_TRUE(std::find(allowedConfigs.begin(), allowedConfigs.end(), newActiveConfig) !=
+                allowedConfigs.end());
 }
 
 } // namespace android

@@ -35,18 +35,21 @@ public:
 
     bool setColor(const half3& color) override;
 
+    bool setDataspace(ui::Dataspace dataspace) override;
+
     void setPerFrameData(const sp<const DisplayDevice>& display, const ui::Transform& transform,
                          const Rect& viewport, int32_t supportedPerFrameMetadata,
                          const ui::Dataspace targetDataspace) override;
 
+    void commitTransaction(const State& stateToCommit) override;
+
     bool onPreComposition(nsecs_t /*refreshStartTime*/) override { return false; }
 
 protected:
-    FloatRect computeCrop(const sp<const DisplayDevice>& /*display*/) const override { return {}; }
-    bool prepareClientLayer(const RenderArea& renderArea, const Region& clip,
-                            bool useIdentityTransform, Region& clearRegion,
-                            const bool supportProtectedContent,
-                            renderengine::LayerSettings& layer) override;
+    virtual bool prepareClientLayer(const RenderArea& renderArea, const Region& clip,
+                                    bool useIdentityTransform, Region& clearRegion,
+                                    const bool supportProtectedContent,
+                                    renderengine::LayerSettings& layer);
 
 private:
     std::shared_ptr<compositionengine::Layer> mCompositionLayer;

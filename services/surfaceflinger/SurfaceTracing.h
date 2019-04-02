@@ -18,31 +18,47 @@
 
 #include <layerproto/LayerProtoHeader.h>
 #include <utils/Errors.h>
+#include <utils/StrongPointer.h>
 
+#include <android-base/thread_annotations.h>
+#include <condition_variable>
 #include <memory>
 #include <mutex>
 #include <queue>
+#include <thread>
 
 using namespace android::surfaceflinger;
 
 namespace android {
 
+class SurfaceFlinger;
+
 constexpr auto operator""_MB(unsigned long long const num) {
     return num * 1024 * 1024;
 }
-
 /*
  * SurfaceTracing records layer states during surface flinging.
  */
 class SurfaceTracing {
 public:
-    void enable() { enable(kDefaultBufferCapInByte); }
-    void enable(size_t bufferSizeInByte);
-    status_t disable();
-    void traceLayers(const char* where, LayersProto);
-
+    SurfaceTracing(SurfaceFlinger& flinger);
+    void enable();
+    bool disable();
+    status_t writeToFile();
     bool isEnabled() const;
+    void notify(const char* where);
+
+    void setBufferSize(size_t bufferSizeInByte);
+    void writeToFileAsync();
     void dump(std::string& result) const;
+
+    enum : uint32_t {
+        TRACE_CRITICAL = 1 << 0,
+        TRACE_INPUT = 1 << 1,
+        TRACE_EXTRA = 1 << 2,
+        TRACE_ALL = 0xffffffff
+    };
+    void setTraceFlags(uint32_t flags);
 
 private:
     static constexpr auto kDefaultBufferCapInByte = 100_MB;
@@ -54,6 +70,7 @@ private:
         size_t used() const { return mUsedInBytes; }
         size_t frameCount() const { return mStorage.size(); }
 
+        void setSize(size_t newSize) { mSizeInBytes = newSize; }
         void reset(size_t newSize);
         void emplace(LayersTraceProto&& proto);
         void flush(LayersTraceFileProto* fileProto);
@@ -64,11 +81,29 @@ private:
         std::queue<LayersTraceProto> mStorage;
     };
 
-    status_t writeProtoFileLocked();
+    void mainLoop();
+    void addFirstEntry();
+    LayersTraceProto traceWhenNotified();
+    LayersTraceProto traceLayersLocked(const char* where) REQUIRES(mSfLock);
 
-    bool mEnabled = false;
-    mutable std::mutex mTraceMutex;
-    LayersTraceBuffer mBuffer;
+    // Returns true if trace is enabled.
+    bool addTraceToBuffer(LayersTraceProto& entry);
+    void writeProtoFileLocked() REQUIRES(mTraceLock);
+
+    const SurfaceFlinger& mFlinger;
+    status_t mLastErr = NO_ERROR;
+    std::thread mThread;
+    std::condition_variable mCanStartTrace;
+
+    std::mutex& mSfLock;
+    uint32_t mTraceFlags GUARDED_BY(mSfLock) = TRACE_ALL;
+    const char* mWhere GUARDED_BY(mSfLock) = "";
+
+    mutable std::mutex mTraceLock;
+    LayersTraceBuffer mBuffer GUARDED_BY(mTraceLock);
+    size_t mBufferSize GUARDED_BY(mTraceLock) = kDefaultBufferCapInByte;
+    bool mEnabled GUARDED_BY(mTraceLock) = false;
+    bool mWriteToFile GUARDED_BY(mTraceLock) = false;
 };
 
 } // namespace android
