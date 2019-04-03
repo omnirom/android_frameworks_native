@@ -25,6 +25,7 @@
 
 #include <binder/Binder.h>
 #include <binder/IBinder.h>
+#include <utils/Vector.h>
 
 inline bool isUserCommand(transaction_code_t code) {
     return code >= FIRST_CALL_TRANSACTION && code <= LAST_CALL_TRANSACTION;
@@ -66,6 +67,7 @@ struct ABBinder : public AIBinder, public ::android::BBinder {
     ABBinder* asABBinder() override { return this; }
 
     const ::android::String16& getInterfaceDescriptor() const override;
+    ::android::status_t dump(int fd, const ::android::Vector<::android::String16>& args) override;
     ::android::status_t onTransact(uint32_t code, const ::android::Parcel& data,
                                    ::android::Parcel* reply, binder_flags_t flags) override;
 
@@ -106,9 +108,13 @@ struct AIBinder_Class {
 
     const ::android::String16& getInterfaceDescriptor() const { return mInterfaceDescriptor; }
 
+    // required to be non-null, implemented for every class
     const AIBinder_Class_onCreate onCreate;
     const AIBinder_Class_onDestroy onDestroy;
     const AIBinder_Class_onTransact onTransact;
+
+    // optional methods for a class
+    AIBinder_onDump onDump;
 
    private:
     // This must be a String16 since BBinder virtual getInterfaceDescriptor returns a reference to
@@ -122,13 +128,14 @@ struct AIBinder_Class {
 //
 // When the AIBinder_DeathRecipient is dropped, so are the actual underlying death recipients. When
 // the IBinder dies, only a wp to it is kept.
-struct AIBinder_DeathRecipient {
+struct AIBinder_DeathRecipient : ::android::RefBase {
     // One of these is created for every linkToDeath. This is to be able to recover data when a
     // binderDied receipt only gives us information about the IBinder.
     struct TransferDeathRecipient : ::android::IBinder::DeathRecipient {
         TransferDeathRecipient(const ::android::wp<::android::IBinder>& who, void* cookie,
-                               const AIBinder_DeathRecipient_onBinderDied& onDied)
-            : mWho(who), mCookie(cookie), mOnDied(onDied) {}
+                               const ::android::wp<AIBinder_DeathRecipient>& parentRecipient,
+                               const AIBinder_DeathRecipient_onBinderDied onDied)
+            : mWho(who), mCookie(cookie), mParentRecipient(parentRecipient), mOnDied(onDied) {}
 
         void binderDied(const ::android::wp<::android::IBinder>& who) override;
 
@@ -138,14 +145,24 @@ struct AIBinder_DeathRecipient {
        private:
         ::android::wp<::android::IBinder> mWho;
         void* mCookie;
-        const AIBinder_DeathRecipient_onBinderDied& mOnDied;
+
+        ::android::wp<AIBinder_DeathRecipient> mParentRecipient;
+
+        // This is kept separately from AIBinder_DeathRecipient in case the death recipient is
+        // deleted while the death notification is fired
+        const AIBinder_DeathRecipient_onBinderDied mOnDied;
     };
 
     explicit AIBinder_DeathRecipient(AIBinder_DeathRecipient_onBinderDied onDied);
-    binder_status_t linkToDeath(AIBinder* binder, void* cookie);
-    binder_status_t unlinkToDeath(AIBinder* binder, void* cookie);
+    binder_status_t linkToDeath(::android::sp<::android::IBinder>, void* cookie);
+    binder_status_t unlinkToDeath(::android::sp<::android::IBinder> binder, void* cookie);
 
    private:
+    // When the user of this API deletes a Bp object but not the death recipient, the
+    // TransferDeathRecipient object can't be cleaned up. This is called whenever a new
+    // TransferDeathRecipient is linked, and it ensures that mDeathRecipients can't grow unbounded.
+    void pruneDeadTransferEntriesLocked();
+
     std::mutex mDeathRecipientsMutex;
     std::vector<::android::sp<TransferDeathRecipient>> mDeathRecipients;
     AIBinder_DeathRecipient_onBinderDied mOnDied;

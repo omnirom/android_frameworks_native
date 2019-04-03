@@ -104,6 +104,39 @@ class ICInterface : public SharedRefBase {
      * this will be checked using AIBinder_isRemote.
      */
     virtual bool isRemote() = 0;
+
+    /**
+     * Dumps information about the interface. By default, dumps nothing.
+     */
+    virtual inline binder_status_t dump(int /*fd*/, const char** /*args*/, uint32_t /*numArgs*/);
+
+    /**
+     * Interprets this binder as this underlying interface if this has stored an ICInterface in the
+     * binder's user data.
+     *
+     * This does not do type checking and should only be used when the binder is known to originate
+     * from ICInterface. Most likely, you want to use I*::fromBinder.
+     */
+    static inline std::shared_ptr<ICInterface> asInterface(AIBinder* binder);
+
+    /**
+     * Helper method to create a class
+     */
+    static inline AIBinder_Class* defineClass(const char* interfaceDescriptor,
+                                              AIBinder_Class_onTransact onTransact);
+
+   private:
+    class ICInterfaceData {
+       public:
+        std::shared_ptr<ICInterface> interface;
+
+        static inline std::shared_ptr<ICInterface> getInterface(AIBinder* binder);
+
+        static inline void* onCreate(void* args);
+        static inline void onDestroy(void* userData);
+        static inline binder_status_t onDump(AIBinder* binder, int fd, const char** args,
+                                             uint32_t numArgs);
+    };
 };
 
 /**
@@ -117,7 +150,7 @@ class BnCInterface : public INTERFACE {
 
     SpAIBinder asBinder() override;
 
-    bool isRemote() override { return true; }
+    bool isRemote() override { return false; }
 
    protected:
     /**
@@ -144,9 +177,62 @@ class BpCInterface : public INTERFACE {
 
     bool isRemote() override { return AIBinder_isRemote(mBinder.get()); }
 
+    binder_status_t dump(int fd, const char** args, uint32_t numArgs) override {
+        return AIBinder_dump(asBinder().get(), fd, args, numArgs);
+    }
+
    private:
     SpAIBinder mBinder;
 };
+
+// END OF CLASS DECLARATIONS
+
+binder_status_t ICInterface::dump(int /*fd*/, const char** /*args*/, uint32_t /*numArgs*/) {
+    return STATUS_OK;
+}
+
+std::shared_ptr<ICInterface> ICInterface::asInterface(AIBinder* binder) {
+    return ICInterfaceData::getInterface(binder);
+}
+
+AIBinder_Class* ICInterface::defineClass(const char* interfaceDescriptor,
+                                         AIBinder_Class_onTransact onTransact) {
+    AIBinder_Class* clazz = AIBinder_Class_define(interfaceDescriptor, ICInterfaceData::onCreate,
+                                                  ICInterfaceData::onDestroy, onTransact);
+    if (clazz == nullptr) {
+        return nullptr;
+    }
+
+    // We can't know if this method is overriden by a subclass interface, so we must register
+    // ourselves. The default (nothing to dump) is harmless.
+    AIBinder_Class_setOnDump(clazz, ICInterfaceData::onDump);
+    return clazz;
+}
+
+std::shared_ptr<ICInterface> ICInterface::ICInterfaceData::getInterface(AIBinder* binder) {
+    if (binder == nullptr) return nullptr;
+
+    void* userData = AIBinder_getUserData(binder);
+    if (userData == nullptr) return nullptr;
+
+    return static_cast<ICInterfaceData*>(userData)->interface;
+}
+
+void* ICInterface::ICInterfaceData::onCreate(void* args) {
+    std::shared_ptr<ICInterface> interface = static_cast<ICInterface*>(args)->ref<ICInterface>();
+    ICInterfaceData* data = new ICInterfaceData{interface};
+    return static_cast<void*>(data);
+}
+
+void ICInterface::ICInterfaceData::onDestroy(void* userData) {
+    delete static_cast<ICInterfaceData*>(userData);
+}
+
+binder_status_t ICInterface::ICInterfaceData::onDump(AIBinder* binder, int fd, const char** args,
+                                                     uint32_t numArgs) {
+    std::shared_ptr<ICInterface> interface = getInterface(binder);
+    return interface->dump(fd, args, numArgs);
+}
 
 template <typename INTERFACE>
 SpAIBinder BnCInterface<INTERFACE>::asBinder() {

@@ -14,8 +14,7 @@
  * limitations under the License.
  */
 
-#ifndef ANDROID_DISPSYNC_H
-#define ANDROID_DISPSYNC_H
+#pragma once
 
 #include <stddef.h>
 
@@ -35,10 +34,16 @@ class DispSync {
 public:
     class Callback {
     public:
-        virtual ~Callback() = default;
+        Callback() = default;
+        virtual ~Callback();
         virtual void onDispSyncEvent(nsecs_t when) = 0;
+
+    protected:
+        Callback(Callback const&) = delete;
+        Callback& operator=(Callback const&) = delete;
     };
 
+    DispSync() = default;
     virtual ~DispSync();
 
     virtual void reset() = 0;
@@ -49,14 +54,19 @@ public:
     virtual void setPeriod(nsecs_t period) = 0;
     virtual nsecs_t getPeriod() = 0;
     virtual void setRefreshSkipCount(int count) = 0;
-    virtual status_t addEventListener(const char* name, nsecs_t phase, Callback* callback) = 0;
-    virtual status_t removeEventListener(Callback* callback) = 0;
+    virtual status_t addEventListener(const char* name, nsecs_t phase, Callback* callback,
+                                      nsecs_t lastCallbackTime) = 0;
+    virtual status_t removeEventListener(Callback* callback, nsecs_t* outLastCallback) = 0;
     virtual status_t changePhaseOffset(Callback* callback, nsecs_t phase) = 0;
     virtual nsecs_t computeNextRefresh(int periodOffset) const = 0;
     virtual void setIgnorePresentFences(bool ignore) = 0;
     virtual nsecs_t expectedPresentTime() = 0;
 
     virtual void dump(std::string& result) const = 0;
+
+protected:
+    DispSync(DispSync const&) = delete;
+    DispSync& operator=(DispSync const&) = delete;
 };
 
 namespace impl {
@@ -130,12 +140,21 @@ public:
     // given phase offset from the hardware vsync events.  The callback is
     // called from a separate thread and it should return reasonably quickly
     // (i.e. within a few hundred microseconds).
-    status_t addEventListener(const char* name, nsecs_t phase, Callback* callback) override;
+    // If the callback was previously registered, and the last clock time the
+    // callback was invoked was known to the caller (e.g. via removeEventListener),
+    // then the caller may pass that through to lastCallbackTime, so that
+    // callbacks do not accidentally double-fire if they are unregistered and
+    // reregistered in rapid succession.
+    status_t addEventListener(const char* name, nsecs_t phase, Callback* callback,
+                              nsecs_t lastCallbackTime) override;
 
     // removeEventListener removes an already-registered event callback.  Once
     // this method returns that callback will no longer be called by the
     // DispSync object.
-    status_t removeEventListener(Callback* callback) override;
+    // outLastCallbackTime will contain the last time that the callback was invoked.
+    // If the caller wishes to reregister the same callback, they should pass the
+    // callback time back into lastCallbackTime (see addEventListener).
+    status_t removeEventListener(Callback* callback, nsecs_t* outLastCallbackTime) override;
 
     // changePhaseOffset changes the phase offset of an already-registered event callback. The
     // method will make sure that there is no skipping or double-firing on the listener per frame,
@@ -204,7 +223,7 @@ private:
     // These member variables are the state used during the resynchronization
     // process to store information about the hardware vsync event times used
     // to compute the model.
-    nsecs_t mResyncSamples[MAX_RESYNC_SAMPLES];
+    nsecs_t mResyncSamples[MAX_RESYNC_SAMPLES] = {0};
     size_t mFirstResyncSample;
     size_t mNumResyncSamples;
     int mNumResyncSamplesSincePresent;
@@ -239,5 +258,3 @@ private:
 } // namespace impl
 
 } // namespace android
-
-#endif // ANDROID_DISPSYNC_H
