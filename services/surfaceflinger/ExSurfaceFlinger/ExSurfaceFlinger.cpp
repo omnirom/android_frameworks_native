@@ -312,4 +312,16 @@ void ExSurfaceFlinger::handleMessageRefresh() {
     }
 }
 
+void ExSurfaceFlinger::setLayerAsMask(const int32_t& dispId, const uint64_t& layerId) {
+    using vendor::display::config::V1_7::IDisplayConfig;
+    android::sp<IDisplayConfig> disp_config_v1_7 = IDisplayConfig::getService();
+
+    if (!disp_config_v1_7 || (dispId < 0)) {
+      ALOGI("disp_config_v1_7 not found or dispId %d", dispId);
+      return;
+    }
+
+    disp_config_v1_7->setLayerAsMask(dispId, layerId);
+    ALOGI("setLayerAsMask dispId %d layerId %d", dispId, (uint32_t)layerId);
+}
 }; // namespace android
