@@ -5370,9 +5370,9 @@ status_t SurfaceFlinger::CheckTransactCodeCredentials(uint32_t code) {
         code == IBinder::SYSPROPS_TRANSACTION) {
         return OK;
     }
-    // Numbers from 1000 to 1034 are currently used for backdoors. The code
+    // Numbers from 1000 to 1035 and 20000 are currently used for backdoors. The code
     // in onTransact verifies that the user is root, and has access to use SF.
-    if (code >= 1000 && code <= 1035) {
+    if ((code >= 1000 && code <= 1035) || (code == 20000)) {
         ALOGV("Accessing SurfaceFlinger through backdoor code: %u", code);
         return OK;
     }
@@ -5709,9 +5709,9 @@ status_t SurfaceFlinger::onTransact(uint32_t code, const Parcel& data, Parcel* r
                 return NO_ERROR;
             }
             case 20000: {
-              int disp = data.readInt32();
+              uint64_t disp = data.readUint64();
               int mode = data.readInt32();
-              ALOGI("Debug: Set display = %d, power mode = %d", disp, mode);
+              ALOGI("Debug: Set display = %llu, power mode = %d", (unsigned long long)disp, mode);
               setPowerMode(getPhysicalDisplayToken(disp), mode);
               return NO_ERROR;
             }
