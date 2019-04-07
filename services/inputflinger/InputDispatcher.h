@@ -23,6 +23,8 @@
 #include <input/InputTransport.h>
 #include <input/InputWindow.h>
 #include <input/ISetInputWindowsListener.h>
+#include <optional>
+#include <ui/Region.h>
 #include <utils/threads.h>
 #include <utils/Timers.h>
 #include <utils/RefBase.h>
@@ -272,6 +274,13 @@ public:
      */
     virtual bool checkInjectEventsPermissionNonReentrant(
             int32_t injectorPid, int32_t injectorUid) = 0;
+
+    /* Notifies the policy that a pointer down event has occurred outside the current focused
+     * window.
+     *
+     * The touchedToken passed as an argument is the window that received the input event.
+     */
+    virtual void onPointerDownOutsideFocus(const sp<IBinder>& touchedToken) = 0;
 };
 
 
@@ -351,19 +360,35 @@ public:
     virtual bool transferTouchFocus(const sp<IBinder>& fromToken, const sp<IBinder>& toToken) = 0;
 
     /* Registers input channels that may be used as targets for input events.
-     * If inputWindowHandle is null, and displayId is not ADISPLAY_ID_NONE,
-     * the channel will receive a copy of all input events form the specific displayId.
      *
      * This method may be called on any thread (usually by the input manager).
      */
     virtual status_t registerInputChannel(
             const sp<InputChannel>& inputChannel, int32_t displayId) = 0;
 
+    /* Registers input channels to be used to monitor input events.
+     *
+     * Each monitor must target a specific display and will only receive input events sent to that
+     * display. If the monitor is a gesture monitor, it will only receive pointer events on the
+     * targeted display.
+     *
+     * This method may be called on any thread (usually by the input manager).
+     */
+    virtual status_t registerInputMonitor(
+            const sp<InputChannel>& inputChannel, int32_t displayId, bool gestureMonitor) = 0;
+
     /* Unregister input channels that will no longer receive input events.
      *
      * This method may be called on any thread (usually by the input manager).
      */
     virtual status_t unregisterInputChannel(const sp<InputChannel>& inputChannel) = 0;
+
+    /* Allows an input monitor steal the current pointer stream away from normal input windows.
+     *
+     * This method may be called on any thread (usually by the input manager).
+     */
+    virtual status_t pilferPointers(const sp<IBinder>& token) = 0;
+
 };
 
 /* Dispatches events to input targets.  Some functions of the input dispatcher, such as
@@ -390,35 +415,39 @@ protected:
 public:
     explicit InputDispatcher(const sp<InputDispatcherPolicyInterface>& policy);
 
-    virtual void dump(std::string& dump);
-    virtual void monitor();
+    virtual void dump(std::string& dump) override;
+    virtual void monitor() override;
 
-    virtual void dispatchOnce();
+    virtual void dispatchOnce() override;
 
-    virtual void notifyConfigurationChanged(const NotifyConfigurationChangedArgs* args);
-    virtual void notifyKey(const NotifyKeyArgs* args);
-    virtual void notifyMotion(const NotifyMotionArgs* args);
-    virtual void notifySwitch(const NotifySwitchArgs* args);
-    virtual void notifyDeviceReset(const NotifyDeviceResetArgs* args);
+    virtual void notifyConfigurationChanged(const NotifyConfigurationChangedArgs* args) override;
+    virtual void notifyKey(const NotifyKeyArgs* args) override;
+    virtual void notifyMotion(const NotifyMotionArgs* args) override;
+    virtual void notifySwitch(const NotifySwitchArgs* args) override;
+    virtual void notifyDeviceReset(const NotifyDeviceResetArgs* args) override;
 
     virtual int32_t injectInputEvent(const InputEvent* event,
             int32_t injectorPid, int32_t injectorUid, int32_t syncMode, int32_t timeoutMillis,
-            uint32_t policyFlags);
+            uint32_t policyFlags) override;
 
     virtual void setInputWindows(const std::vector<sp<InputWindowHandle> >& inputWindowHandles,
             int32_t displayId,
-            const sp<ISetInputWindowsListener>& setInputWindowsListener = nullptr);
+            const sp<ISetInputWindowsListener>& setInputWindowsListener = nullptr) override;
     virtual void setFocusedApplication(int32_t displayId,
-            const sp<InputApplicationHandle>& inputApplicationHandle);
-    virtual void setFocusedDisplay(int32_t displayId);
-    virtual void setInputDispatchMode(bool enabled, bool frozen);
-    virtual void setInputFilterEnabled(bool enabled);
+            const sp<InputApplicationHandle>& inputApplicationHandle) override;
+    virtual void setFocusedDisplay(int32_t displayId) override;
+    virtual void setInputDispatchMode(bool enabled, bool frozen) override;
+    virtual void setInputFilterEnabled(bool enabled) override;
 
-    virtual bool transferTouchFocus(const sp<IBinder>& fromToken, const sp<IBinder>& toToken);
+    virtual bool transferTouchFocus(const sp<IBinder>& fromToken, const sp<IBinder>& toToken)
+            override;
 
     virtual status_t registerInputChannel(const sp<InputChannel>& inputChannel,
-            int32_t displayId);
-    virtual status_t unregisterInputChannel(const sp<InputChannel>& inputChannel);
+            int32_t displayId) override;
+    virtual status_t registerInputMonitor(const sp<InputChannel>& inputChannel,
+            int32_t displayId, bool isGestureMonitor) override;
+    virtual status_t unregisterInputChannel(const sp<InputChannel>& inputChannel) override;
+    virtual status_t pilferPointers(const sp<IBinder>& token) override;
 
 private:
     template <typename T>
@@ -712,10 +741,6 @@ private:
             CANCEL_POINTER_EVENTS = 1,
             CANCEL_NON_POINTER_EVENTS = 2,
             CANCEL_FALLBACK_EVENTS = 3,
-
-            /* Cancel events where the display not specified. These events would go to the focused
-             * display. */
-            CANCEL_DISPLAY_UNSPECIFIED_EVENTS = 4,
         };
 
         // The criterion to use to determine which events should be canceled.
@@ -724,14 +749,16 @@ private:
         // Descriptive reason for the cancelation.
         const char* reason;
 
-        // The specific keycode of the key event to cancel, or -1 to cancel any key event.
-        int32_t keyCode;
+        // The specific keycode of the key event to cancel, or nullopt to cancel any key event.
+        std::optional<int32_t> keyCode = std::nullopt;
 
-        // The specific device id of events to cancel, or -1 to cancel events from any device.
-        int32_t deviceId;
+        // The specific device id of events to cancel, or nullopt to cancel events from any device.
+        std::optional<int32_t> deviceId = std::nullopt;
 
-        CancelationOptions(Mode mode, const char* reason) :
-                mode(mode), reason(reason), keyCode(-1), deviceId(-1) { }
+        // The specific display id of events to cancel, or nullopt to cancel events on any display.
+        std::optional<int32_t> displayId = std::nullopt;
+
+        CancelationOptions(Mode mode, const char* reason) : mode(mode), reason(reason) { }
     };
 
     /* Tracks dispatched key and motion event state so that cancelation events can be
@@ -871,6 +898,12 @@ private:
         DispatchEntry* findWaitQueueEntry(uint32_t seq);
     };
 
+    struct Monitor {
+        sp<InputChannel> inputChannel; // never null
+
+        explicit Monitor(const sp<InputChannel>& inputChannel);
+    };
+
     enum DropReason {
         DROP_REASON_NOT_DROPPED = 0,
         DROP_REASON_POLICY = 1,
@@ -936,11 +969,23 @@ private:
     std::unordered_map<sp<IBinder>, sp<InputChannel>, IBinderHash> mInputChannelsByToken
             GUARDED_BY(mLock);
 
+    // Finds the display ID of the gesture monitor identified by the provided token.
+    std::optional<int32_t> findGestureMonitorDisplayByTokenLocked(const sp<IBinder>& token)
+            REQUIRES(mLock);
+
     ssize_t getConnectionIndexLocked(const sp<InputChannel>& inputChannel) REQUIRES(mLock);
 
     // Input channels that will receive a copy of all input events sent to the provided display.
-    std::unordered_map<int32_t, std::vector<sp<InputChannel>>> mMonitoringChannelsByDisplay
+    std::unordered_map<int32_t, std::vector<Monitor>> mGlobalMonitorsByDisplay
             GUARDED_BY(mLock);
+
+    // Input channels that will receive pointer events that start within the corresponding display.
+    // These are a bit special when compared to global monitors since they'll cause gesture streams
+    // to continue even when there isn't a touched window,and have the ability to steal the rest of
+    // the pointer stream in order to claim it for a system gesture.
+    std::unordered_map<int32_t, std::vector<Monitor>> mGestureMonitorsByDisplay
+            GUARDED_BY(mLock);
+
 
     // Event injection and synchronization.
     std::condition_variable mInjectionResultAvailable;
@@ -1016,6 +1061,16 @@ private:
         int32_t targetFlags;
         BitSet32 pointerIds;        // zero unless target flag FLAG_SPLIT is set
     };
+
+    // For tracking the offsets we need to apply when adding gesture monitor targets.
+    struct TouchedMonitor {
+        Monitor monitor;
+        float xOffset = 0.f;
+        float yOffset = 0.f;
+
+        explicit TouchedMonitor(const Monitor& monitor, float xOffset, float yOffset);
+    };
+
     struct TouchState {
         bool down;
         bool split;
@@ -1029,6 +1084,8 @@ private:
         // monitoring channels of the displays touched.
         std::vector<sp<InputWindowHandle>> portalWindows;
 
+        std::vector<TouchedMonitor> gestureMonitors;
+
         TouchState();
         ~TouchState();
         void reset();
@@ -1036,9 +1093,11 @@ private:
         void addOrUpdateWindow(const sp<InputWindowHandle>& windowHandle,
                 int32_t targetFlags, BitSet32 pointerIds);
         void addPortalWindow(const sp<InputWindowHandle>& windowHandle);
+        void addGestureMonitors(const std::vector<TouchedMonitor>& monitors);
         void removeWindow(const sp<InputWindowHandle>& windowHandle);
         void removeWindowByToken(const sp<IBinder>& token);
         void filterNonAsIsTouchWindows();
+        void filterNonMonitors();
         sp<InputWindowHandle> getFirstForegroundWindowHandle() const;
         bool isSlippery() const;
     };
@@ -1108,12 +1167,18 @@ private:
     int32_t findTouchedWindowTargetsLocked(nsecs_t currentTime, const MotionEntry* entry,
             std::vector<InputTarget>& inputTargets, nsecs_t* nextWakeupTime,
             bool* outConflictingPointerActions) REQUIRES(mLock);
+    std::vector<TouchedMonitor> findTouchedGestureMonitorsLocked(int32_t displayId,
+            const std::vector<sp<InputWindowHandle>>& portalWindows) REQUIRES(mLock);
+    void addGestureMonitors(const std::vector<Monitor>& monitors,
+            std::vector<TouchedMonitor>& outTouchedMonitors, float xOffset = 0, float yOffset = 0);
 
     void addWindowTargetLocked(const sp<InputWindowHandle>& windowHandle,
             int32_t targetFlags, BitSet32 pointerIds, std::vector<InputTarget>& inputTargets)
             REQUIRES(mLock);
-    void addMonitoringTargetsLocked(std::vector<InputTarget>& inputTargets, int32_t displayId,
-            float xOffset = 0, float yOffset = 0) REQUIRES(mLock);
+    void addMonitoringTargetLocked(const Monitor& monitor, float xOffset, float yOffset,
+            std::vector<InputTarget>& inputTargets) REQUIRES(mLock);
+    void addGlobalMonitoringTargetsLocked(std::vector<InputTarget>& inputTargets,
+            int32_t displayId, float xOffset = 0, float yOffset = 0) REQUIRES(mLock);
 
     void pokeUserActivityLocked(const EventEntry* eventEntry) REQUIRES(mLock);
     bool checkInjectionPermission(const sp<InputWindowHandle>& windowHandle,
@@ -1136,8 +1201,9 @@ private:
             EventEntry* eventEntry, const InputTarget* inputTarget) REQUIRES(mLock);
     void enqueueDispatchEntriesLocked(nsecs_t currentTime, const sp<Connection>& connection,
             EventEntry* eventEntry, const InputTarget* inputTarget) REQUIRES(mLock);
-    void enqueueDispatchEntry(const sp<Connection>& connection,
-            EventEntry* eventEntry, const InputTarget* inputTarget, int32_t dispatchMode);
+    void enqueueDispatchEntryLocked(const sp<Connection>& connection,
+            EventEntry* eventEntry, const InputTarget* inputTarget, int32_t dispatchMode)
+            REQUIRES(mLock);
     void startDispatchCycleLocked(nsecs_t currentTime, const sp<Connection>& connection)
             REQUIRES(mLock);
     void finishDispatchCycleLocked(nsecs_t currentTime, const sp<Connection>& connection,
@@ -1147,11 +1213,16 @@ private:
     void drainDispatchQueue(Queue<DispatchEntry>* queue);
     void releaseDispatchEntry(DispatchEntry* dispatchEntry);
     static int handleReceiveCallback(int fd, int events, void* data);
+    // The action sent should only be of type AMOTION_EVENT_*
+    void dispatchPointerDownOutsideFocus(uint32_t source, int32_t action,
+            const sp<IBinder>& newToken) REQUIRES(mLock);
 
     void synthesizeCancelationEventsForAllConnectionsLocked(
             const CancelationOptions& options) REQUIRES(mLock);
     void synthesizeCancelationEventsForMonitorsLocked(
             const CancelationOptions& options) REQUIRES(mLock);
+    void synthesizeCancelationEventsForMonitorsLocked(const CancelationOptions& options,
+            std::unordered_map<int32_t, std::vector<Monitor>>& monitorsByDisplay) REQUIRES(mLock);
     void synthesizeCancelationEventsForInputChannelLocked(const sp<InputChannel>& channel,
             const CancelationOptions& options) REQUIRES(mLock);
     void synthesizeCancelationEventsForConnectionLocked(const sp<Connection>& connection,
@@ -1165,10 +1236,14 @@ private:
 
     // Dump state.
     void dumpDispatchStateLocked(std::string& dump) REQUIRES(mLock);
+    void dumpMonitors(std::string& dump, const std::vector<Monitor>& monitors);
     void logDispatchStateLocked() REQUIRES(mLock);
 
     // Registration.
     void removeMonitorChannelLocked(const sp<InputChannel>& inputChannel) REQUIRES(mLock);
+    void removeMonitorChannelLocked(const sp<InputChannel>& inputChannel,
+        std::unordered_map<int32_t, std::vector<Monitor>>& monitorsByDisplay)
+            REQUIRES(mLock);
     status_t unregisterInputChannelLocked(const sp<InputChannel>& inputChannel, bool notify)
             REQUIRES(mLock);
 
@@ -1200,6 +1275,8 @@ private:
             DispatchEntry* dispatchEntry, MotionEntry* motionEntry, bool handled) REQUIRES(mLock);
     void doPokeUserActivityLockedInterruptible(CommandEntry* commandEntry) REQUIRES(mLock);
     void initializeKeyEvent(KeyEvent* event, const KeyEntry* entry);
+    void doOnPointerDownOutsideFocusLockedInterruptible(CommandEntry* commandEntry)
+            REQUIRES(mLock);
 
     // Statistics gathering.
     void updateDispatchStatistics(nsecs_t currentTime, const EventEntry* entry,
