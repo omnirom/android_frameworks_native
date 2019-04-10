@@ -31,6 +31,7 @@ using ::android::Parcel;
 using ::android::sp;
 using ::android::status_t;
 using ::android::String16;
+using ::android::String8;
 using ::android::wp;
 
 namespace ABBinderTag {
@@ -67,8 +68,6 @@ AIBinder::AIBinder(const AIBinder_Class* clazz) : mClazz(clazz) {}
 AIBinder::~AIBinder() {}
 
 bool AIBinder::associateClass(const AIBinder_Class* clazz) {
-    using ::android::String8;
-
     if (clazz == nullptr) return false;
     if (mClazz == clazz) return true;
 
@@ -117,6 +116,33 @@ ABBinder::~ABBinder() {
 
 const String16& ABBinder::getInterfaceDescriptor() const {
     return getClass()->getInterfaceDescriptor();
+}
+
+status_t ABBinder::dump(int fd, const ::android::Vector<String16>& args) {
+    AIBinder_onDump onDump = getClass()->onDump;
+
+    if (onDump == nullptr) {
+        return STATUS_OK;
+    }
+
+    // technically UINT32_MAX would be okay here, but INT32_MAX is expected since this may be
+    // null in Java
+    if (args.size() > INT32_MAX) {
+        LOG(ERROR) << "ABBinder::dump received too many arguments: " << args.size();
+        return STATUS_BAD_VALUE;
+    }
+
+    std::vector<String8> utf8Args;  // owns memory of utf8s
+    utf8Args.reserve(args.size());
+    std::vector<const char*> utf8Pointers;  // what can be passed over NDK API
+    utf8Pointers.reserve(args.size());
+
+    for (size_t i = 0; i < args.size(); i++) {
+        utf8Args.push_back(String8(args[i]));
+        utf8Pointers.push_back(utf8Args[i].c_str());
+    }
+
+    return onDump(this, fd, utf8Pointers.data(), utf8Pointers.size());
 }
 
 status_t ABBinder::onTransact(transaction_code_t code, const Parcel& data, Parcel* reply,
@@ -232,10 +258,29 @@ AIBinder_Class* AIBinder_Class_define(const char* interfaceDescriptor,
     return new AIBinder_Class(interfaceDescriptor, onCreate, onDestroy, onTransact);
 }
 
+void AIBinder_Class_setOnDump(AIBinder_Class* clazz, AIBinder_onDump onDump) {
+    CHECK(clazz != nullptr) << "setOnDump requires non-null clazz";
+
+    // this is required to be called before instances are instantiated
+    clazz->onDump = onDump;
+}
+
 void AIBinder_DeathRecipient::TransferDeathRecipient::binderDied(const wp<IBinder>& who) {
     CHECK(who == mWho);
 
     mOnDied(mCookie);
+
+    sp<AIBinder_DeathRecipient> recipient = mParentRecipient.promote();
+    sp<IBinder> strongWho = who.promote();
+
+    // otherwise this will be cleaned up later with pruneDeadTransferEntriesLocked
+    if (recipient != nullptr && strongWho != nullptr) {
+        status_t result = recipient->unlinkToDeath(strongWho, mCookie);
+        if (result != ::android::DEAD_OBJECT) {
+            LOG(WARNING) << "Unlinking to dead binder resulted in: " << result;
+        }
+    }
+
     mWho = nullptr;
 }
 
@@ -244,24 +289,34 @@ AIBinder_DeathRecipient::AIBinder_DeathRecipient(AIBinder_DeathRecipient_onBinde
     CHECK(onDied != nullptr);
 }
 
-binder_status_t AIBinder_DeathRecipient::linkToDeath(AIBinder* binder, void* cookie) {
+void AIBinder_DeathRecipient::pruneDeadTransferEntriesLocked() {
+    mDeathRecipients.erase(std::remove_if(mDeathRecipients.begin(), mDeathRecipients.end(),
+                                          [](const sp<TransferDeathRecipient>& tdr) {
+                                              return tdr->getWho() == nullptr;
+                                          }),
+                           mDeathRecipients.end());
+}
+
+binder_status_t AIBinder_DeathRecipient::linkToDeath(sp<IBinder> binder, void* cookie) {
     CHECK(binder != nullptr);
 
     std::lock_guard<std::mutex> l(mDeathRecipientsMutex);
 
     sp<TransferDeathRecipient> recipient =
-            new TransferDeathRecipient(binder->getBinder(), cookie, mOnDied);
+            new TransferDeathRecipient(binder, cookie, this, mOnDied);
 
-    status_t status = binder->getBinder()->linkToDeath(recipient, cookie, 0 /*flags*/);
+    status_t status = binder->linkToDeath(recipient, cookie, 0 /*flags*/);
     if (status != STATUS_OK) {
         return PruneStatusT(status);
     }
 
     mDeathRecipients.push_back(recipient);
+
+    pruneDeadTransferEntriesLocked();
     return STATUS_OK;
 }
 
-binder_status_t AIBinder_DeathRecipient::unlinkToDeath(AIBinder* binder, void* cookie) {
+binder_status_t AIBinder_DeathRecipient::unlinkToDeath(sp<IBinder> binder, void* cookie) {
     CHECK(binder != nullptr);
 
     std::lock_guard<std::mutex> l(mDeathRecipientsMutex);
@@ -269,10 +324,10 @@ binder_status_t AIBinder_DeathRecipient::unlinkToDeath(AIBinder* binder, void* c
     for (auto it = mDeathRecipients.rbegin(); it != mDeathRecipients.rend(); ++it) {
         sp<TransferDeathRecipient> recipient = *it;
 
-        if (recipient->getCookie() == cookie && recipient->getWho() == binder->getBinder()) {
+        if (recipient->getCookie() == cookie && recipient->getWho() == binder) {
             mDeathRecipients.erase(it.base() - 1);
 
-            status_t status = binder->getBinder()->unlinkToDeath(recipient, cookie, 0 /*flags*/);
+            status_t status = binder->unlinkToDeath(recipient, cookie, 0 /*flags*/);
             if (status != ::android::OK) {
                 LOG(ERROR) << __func__
                            << ": removed reference to death recipient but unlink failed.";
@@ -325,6 +380,30 @@ binder_status_t AIBinder_ping(AIBinder* binder) {
     return PruneStatusT(binder->getBinder()->pingBinder());
 }
 
+binder_status_t AIBinder_dump(AIBinder* binder, int fd, const char** args, uint32_t numArgs) {
+    if (binder == nullptr) {
+        return STATUS_UNEXPECTED_NULL;
+    }
+
+    ABBinder* bBinder = binder->asABBinder();
+    if (bBinder != nullptr) {
+        AIBinder_onDump onDump = binder->getClass()->onDump;
+        if (onDump == nullptr) {
+            return STATUS_OK;
+        }
+        return PruneStatusT(onDump(bBinder, fd, args, numArgs));
+    }
+
+    ::android::Vector<String16> utf16Args;
+    utf16Args.setCapacity(numArgs);
+    for (uint32_t i = 0; i < numArgs; i++) {
+        utf16Args.push(String16(String8(args[i])));
+    }
+
+    status_t status = binder->getBinder()->dump(fd, utf16Args);
+    return PruneStatusT(status);
+}
+
 binder_status_t AIBinder_linkToDeath(AIBinder* binder, AIBinder_DeathRecipient* recipient,
                                      void* cookie) {
     if (binder == nullptr || recipient == nullptr) {
@@ -333,7 +412,7 @@ binder_status_t AIBinder_linkToDeath(AIBinder* binder, AIBinder_DeathRecipient* 
     }
 
     // returns binder_status_t
-    return recipient->linkToDeath(binder, cookie);
+    return recipient->linkToDeath(binder->getBinder(), cookie);
 }
 
 binder_status_t AIBinder_unlinkToDeath(AIBinder* binder, AIBinder_DeathRecipient* recipient,
@@ -344,7 +423,7 @@ binder_status_t AIBinder_unlinkToDeath(AIBinder* binder, AIBinder_DeathRecipient
     }
 
     // returns binder_status_t
-    return recipient->unlinkToDeath(binder, cookie);
+    return recipient->unlinkToDeath(binder->getBinder(), cookie);
 }
 
 uid_t AIBinder_getCallingUid() {
@@ -498,9 +577,15 @@ AIBinder_DeathRecipient* AIBinder_DeathRecipient_new(
         LOG(ERROR) << __func__ << ": requires non-null onBinderDied parameter.";
         return nullptr;
     }
-    return new AIBinder_DeathRecipient(onBinderDied);
+    auto ret = new AIBinder_DeathRecipient(onBinderDied);
+    ret->incStrong(nullptr);
+    return ret;
 }
 
 void AIBinder_DeathRecipient_delete(AIBinder_DeathRecipient* recipient) {
-    delete recipient;
+    if (recipient == nullptr) {
+        return;
+    }
+
+    recipient->decStrong(nullptr);
 }

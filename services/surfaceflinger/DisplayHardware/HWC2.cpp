@@ -148,7 +148,6 @@ Error Device::createVirtualDisplay(uint32_t width, uint32_t height,
     display->setConnected(true);
     *outDisplay = display.get();
     mDisplays.emplace(displayId, std::move(display));
-    mComposer->setClientTargetSlotCount((*outDisplay)->getId());
     ALOGI("Created virtual display");
     return Error::None;
 }
@@ -277,6 +276,11 @@ Display::Display(android::Hwc2::Composer& composer,
         error = static_cast<Error>(mComposer.getDozeSupport(mId, &dozeSupport));
         if (error == Error::None && dozeSupport) {
             mDisplayCapabilities.emplace(DisplayCapability::Doze);
+        }
+        bool brightnessSupport = false;
+        error = static_cast<Error>(mComposer.getDisplayBrightnessSupport(mId, &brightnessSupport));
+        if (error == Error::None && brightnessSupport) {
+            mDisplayCapabilities.emplace(DisplayCapability::Brightness);
         }
     }
     ALOGV("Created display %" PRIu64, id);
@@ -709,6 +713,11 @@ Error Display::presentOrValidate(uint32_t* outNumTypes, uint32_t* outNumRequests
         *outNumRequests = numRequests;
     }
     return error;
+}
+
+Error Display::setDisplayBrightness(float brightness) const {
+    auto intError = mComposer.setDisplayBrightness(mId, brightness);
+    return static_cast<Error>(intError);
 }
 
 // For use by Device

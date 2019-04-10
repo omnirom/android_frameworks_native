@@ -132,7 +132,7 @@ private:
             sp<Fence>* outFence, float outTransformMatrix[16]) override;
     virtual status_t getUniqueId(uint64_t* outId) const override;
     virtual status_t getConsumerUsage(uint64_t* outUsage) const override;
-    virtual void setOutputUsage(uint64_t flag) ;
+    virtual void setOutputUsage(uint64_t flag);
 
     //
     // Utility methods

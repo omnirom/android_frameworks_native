@@ -286,3 +286,24 @@ prop {
     access: Readonly
     prop_name: "ro.surface_flinger.display_primary_white"
 }
+
+# setIdleTimerMs indicates what is considered a timeout in milliseconds for Scheduler. This value is
+# used by the Scheduler to trigger inactivity callbacks that will switch the display to a lower
+# refresh rate. Setting this property to 0 means there is no timer.
+prop {
+    api_name: "set_idle_timer_ms"
+    type: Integer
+    scope: Internal
+    access: Readonly
+    prop_name: "ro.surface_flinger.set_idle_timer_ms"
+}
+
+# useSmart90ForVideo indicates whether Scheduler should detect content FPS, and try to adjust the
+# screen refresh rate based on that.
+prop {
+    api_name: "use_smart_90_for_video"
+    type: Boolean
+    scope: Internal
+    access: Readonly
+    prop_name: "ro.surface_flinger.use_smart_90_for_video"
+}

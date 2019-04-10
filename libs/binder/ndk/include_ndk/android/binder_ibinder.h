@@ -179,6 +179,31 @@ __attribute__((warn_unused_result)) AIBinder_Class* AIBinder_Class_define(
         __INTRODUCED_IN(29);
 
 /**
+ * Dump information about an AIBinder (usually for debugging).
+ *
+ * When no arguments are provided, a brief overview of the interview should be given.
+ *
+ * \param binder interface being dumped
+ * \param fd file descriptor to be dumped to, should be flushed, ownership is not passed.
+ * \param args array of null-terminated strings for dump (may be null if numArgs is 0)
+ * \param numArgs number of args to be sent
+ *
+ * \return binder_status_t result of transaction (if remote, for instance)
+ */
+typedef binder_status_t (*AIBinder_onDump)(AIBinder* binder, int fd, const char** args,
+                                           uint32_t numArgs);
+
+/**
+ * This sets the implementation of the dump method for a class.
+ *
+ * If this isn't set, nothing will be dumped when dump is called (for instance with
+ * android.os.Binder#dump). Must be called before any instance of the class is created.
+ *
+ * \param dump function to call when an instance of this binder class is being dumped.
+ */
+void AIBinder_Class_setOnDump(AIBinder_Class* clazz, AIBinder_onDump onDump) __INTRODUCED_IN(29);
+
+/**
  * Creates a new binder object of the appropriate class.
  *
  * Ownership of args is passed to this object. The lifecycle is implemented with AIBinder_incStrong
@@ -237,6 +262,21 @@ bool AIBinder_isAlive(const AIBinder* binder) __INTRODUCED_IN(29);
 binder_status_t AIBinder_ping(AIBinder* binder) __INTRODUCED_IN(29);
 
 /**
+ * Built-in transaction for all binder objects. This dumps information about a given binder.
+ *
+ * See also AIBinder_Class_setOnDump, AIBinder_onDump
+ *
+ * \param binder the binder to dump information about
+ * \param fd where information should be dumped to
+ * \param args null-terminated arguments to pass (may be null if numArgs is 0)
+ * \param numArgs number of args to send
+ *
+ * \return STATUS_OK if dump succeeds (or if there is nothing to dump)
+ */
+binder_status_t AIBinder_dump(AIBinder* binder, int fd, const char** args, uint32_t numArgs)
+        __INTRODUCED_IN(29);
+
+/**
  * Registers for notifications that the associated binder is dead. The same death recipient may be
  * associated with multiple different binders. If the binder is local, then no death recipient will
  * be given (since if the local process dies, then no recipient will exist to recieve a
@@ -260,6 +300,11 @@ binder_status_t AIBinder_linkToDeath(AIBinder* binder, AIBinder_DeathRecipient* 
  * Stops registration for the associated binder dying. Does not delete the recipient. This function
  * may return a binder transaction failure and in case the death recipient cannot be found, it
  * returns STATUS_NAME_NOT_FOUND.
+ *
+ * This only ever needs to be called when the AIBinder_DeathRecipient remains for use with other
+ * AIBinder objects. If the death recipient is deleted, all binders will automatically be unlinked.
+ * If the binder dies, it will automatically unlink. If the binder is deleted, it will be
+ * automatically unlinked.
  *
  * \param binder the binder object to remove a previously linked death recipient from.
  * \param recipient the callback to remove.
