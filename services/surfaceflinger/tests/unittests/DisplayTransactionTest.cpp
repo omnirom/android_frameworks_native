@@ -179,7 +179,7 @@ DisplayTransactionTest::~DisplayTransactionTest() {
 }
 
 void DisplayTransactionTest::setupScheduler() {
-    mScheduler = new TestableScheduler();
+    mScheduler = new TestableScheduler(mFlinger.mutableRefreshRateConfigs());
     mScheduler->mutableEventControlThread().reset(mEventControlThread);
     mScheduler->mutablePrimaryDispSync().reset(mPrimaryDispSync);
     EXPECT_CALL(*mEventThread, registerDisplayEventConnection(_));
@@ -2830,7 +2830,6 @@ struct EventThreadIsSupportedVariant : public EventThreadBaseSupportedVariant {
 
 struct DispSyncIsSupportedVariant {
     static void setupBeginResyncCallExpectations(DisplayTransactionTest* test) {
-        EXPECT_CALL(*test->mPrimaryDispSync, reset()).Times(1);
         EXPECT_CALL(*test->mPrimaryDispSync, setPeriod(DEFAULT_REFRESH_RATE)).Times(1);
         EXPECT_CALL(*test->mPrimaryDispSync, beginResync()).Times(1);
     }
