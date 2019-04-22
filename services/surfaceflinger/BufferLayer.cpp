@@ -773,6 +773,7 @@ void BufferLayer::onFrameAvailable(const BufferItem& item) {
     }
 
     if (mFlinger->mDolphinFuncsEnabled) {
+        Mutex::Autolock lock(mFlinger->mDolphinStateLock);
         const Vector< sp<Layer> >& visibleLayersSortedByZ =
             mFlinger->getLayerSortedByZForHwcDisplay(0);
         bool isTransparentRegion = this->visibleNonTransparentRegion.isEmpty();
