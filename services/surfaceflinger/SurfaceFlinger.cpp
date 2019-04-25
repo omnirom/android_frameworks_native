@@ -2063,21 +2063,17 @@ void SurfaceFlinger::forceResyncModel() {
     const nsecs_t period = activeConfig->getVsyncPeriod();
 
     // Model resync should happen at every fps change.
-    // Upon increase in vsync period start resync immediately.
-    // Upon decrease wait for one frame time for vsync to update.
-    // Post that resync can be triggered.
+    // Upon increase/decrease in vsync period start resync immediately.
+    // Initial set of vsync wakeups happen at ref_time + N * period where N = 1, 2, 3 ..
+    // Since if doesnt make use of timestamp to compute period, resync can be triggered
+    // as soon as change is fps(period) is observed.
 
     if (period > vsyncPeriod.at(vsyncPeriod.size() - 1)) {
       resyncToHardwareVsync(true);
       vsyncPeriod.push_back(period);
     } else if (period < vsyncPeriod.at(vsyncPeriod.size() - 1)) {
-      // Wait for one more cycle to elapse
-      vsyncPeriod.push_back(period);
-    } else {
-      if (vsyncPeriod.size() != 1) {
-        // Vsync period changed. Trigger resync.
-        resyncToHardwareVsync(true);
-      }
+      // Vsync period changed. Trigger resync.
+      resyncToHardwareVsync(true);
       vsyncPeriod = {};
     }
 }
