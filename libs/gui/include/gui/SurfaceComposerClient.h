@@ -37,6 +37,7 @@
 #include <ui/PixelFormat.h>
 
 #include <gui/CpuConsumer.h>
+#include <gui/ISurfaceComposer.h>
 #include <gui/ITransactionCompletedListener.h>
 #include <gui/LayerState.h>
 #include <gui/SurfaceControl.h>
@@ -508,7 +509,8 @@ public:
     static status_t capture(const sp<IBinder>& display, const ui::Dataspace reqDataSpace,
                             const ui::PixelFormat reqPixelFormat, Rect sourceCrop,
                             uint32_t reqWidth, uint32_t reqHeight, bool useIdentityTransform,
-                            uint32_t rotation, bool captureSecureLayers, sp<GraphicBuffer>* outBuffer);
+                            uint32_t rotation, bool captureSecureLayers,
+                            sp<GraphicBuffer>* outBuffer, bool& outCapturedSecureLayers);
     static status_t capture(const sp<IBinder>& display, const ui::Dataspace reqDataSpace,
                             const ui::PixelFormat reqPixelFormat, Rect sourceCrop,
                             uint32_t reqWidth, uint32_t reqHeight, bool useIdentityTransform,
@@ -516,10 +518,12 @@ public:
     static status_t captureLayers(const sp<IBinder>& layerHandle, const ui::Dataspace reqDataSpace,
                                   const ui::PixelFormat reqPixelFormat, Rect sourceCrop,
                                   float frameScale, sp<GraphicBuffer>* outBuffer);
-    static status_t captureChildLayers(const sp<IBinder>& layerHandle,
-                                       const ui::Dataspace reqDataSpace,
-                                       const ui::PixelFormat reqPixelFormat, Rect sourceCrop,
-                                       float frameScale, sp<GraphicBuffer>* outBuffer);
+    static status_t captureChildLayers(
+            const sp<IBinder>& layerHandle, const ui::Dataspace reqDataSpace,
+            const ui::PixelFormat reqPixelFormat, Rect sourceCrop,
+            const std::unordered_set<sp<IBinder>, ISurfaceComposer::SpHash<IBinder>>&
+                    excludeHandles,
+            float frameScale, sp<GraphicBuffer>* outBuffer);
 };
 
 // ---------------------------------------------------------------------------
