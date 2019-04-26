@@ -734,6 +734,7 @@ private:
                                Region& opaqueRegion);
 
     sp<DisplayDevice> getVsyncSource();
+    void updateVsyncSource();
     void preComposition();
     void postComposition();
     void getCompositorTiming(CompositorTiming* compositorTiming);
