@@ -838,6 +838,7 @@ private:
     void invalidateHwcGeometry();
 
     sp<DisplayDevice> getVsyncSource();
+    void updateVsyncSource();
     void postComposition();
     void getCompositorTiming(CompositorTiming* compositorTiming);
     void updateCompositorTiming(const DisplayStatInfo& stats, nsecs_t compositeTime,
