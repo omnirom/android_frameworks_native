@@ -199,6 +199,7 @@ public:
         Region transparentRegionHint;
 
         sp<GraphicBuffer> buffer;
+        client_cache_t clientCacheId;
         sp<Fence> acquireFence;
         HdrMetadata hdrMetadata;
         Region surfaceDamageRegion;
@@ -312,9 +313,10 @@ public:
     virtual bool setCrop(const Rect& /*crop*/) { return false; };
     virtual bool setFrame(const Rect& /*frame*/) { return false; };
     virtual bool setBuffer(const sp<GraphicBuffer>& /*buffer*/, nsecs_t /*postTime*/,
-                           nsecs_t /*desiredPresentTime*/) {
+                           nsecs_t /*desiredPresentTime*/,
+                           const client_cache_t& /*clientCacheId*/) {
         return false;
-    }
+    };
     virtual bool setAcquireFence(const sp<Fence>& /*fence*/) { return false; };
     virtual bool setDataspace(ui::Dataspace /*dataspace*/) { return false; };
     virtual bool setHdrMetadata(const HdrMetadata& /*hdrMetadata*/) { return false; };
@@ -606,9 +608,6 @@ public:
     bool hasHwcLayer(const sp<const DisplayDevice>& displayDevice);
     HWC2::Layer* getHwcLayer(const sp<const DisplayDevice>& displayDevice);
 
-    // -----------------------------------------------------------------------
-    void clearWithOpenGL(const RenderArea& renderArea) const;
-
     inline const State& getDrawingState() const { return mDrawingState; }
     inline const State& getCurrentState() const { return mCurrentState; }
     inline State& getCurrentState() { return mCurrentState; }
@@ -732,12 +731,7 @@ protected:
      * crop coordinates, transforming them into layer space.
      */
     void setupRoundedCornersCropCoordinates(Rect win, const FloatRect& roundedCornersCrop) const;
-
-    // drawing
-    void clearWithOpenGL(const RenderArea& renderArea, float r, float g, float b,
-                         float alpha) const;
     void setParent(const sp<Layer>& layer);
-
     LayerVector makeTraversalList(LayerVector::StateSet stateSet, bool* outSkipRelativeZUsers);
     void addZOrderRelative(const wp<Layer>& relative);
     void removeZOrderRelative(const wp<Layer>& relative);
@@ -802,6 +796,8 @@ public:
         wp<Layer> owner;
     };
 
+    // Creates a new handle each time, so we only expect
+    // this to be called once.
     sp<IBinder> getHandle();
     const String8& getName() const;
     virtual void notifyAvailableFrames() {}
@@ -935,6 +931,8 @@ private:
     FloatRect mScreenBounds;
 
     void setZOrderRelativeOf(const wp<Layer>& relativeOf);
+
+    bool mGetHandleCalled = false;
 };
 
 } // namespace android
