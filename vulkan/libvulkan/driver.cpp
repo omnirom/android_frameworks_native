@@ -537,6 +537,7 @@ void CreateInfoWrapper::FilterExtension(const char* name) {
                 // Extensions we don't need to do anything about at this level
                 break;
 
+            case ProcHook::KHR_bind_memory2:
             case ProcHook::KHR_incremental_present:
             case ProcHook::KHR_shared_presentable_image:
             case ProcHook::KHR_swapchain:
@@ -577,6 +578,7 @@ void CreateInfoWrapper::FilterExtension(const char* name) {
                 // return now as these extensions do not require HAL support
                 return;
             case ProcHook::EXT_hdr_metadata:
+            case ProcHook::KHR_bind_memory2:
                 hook_extensions_.set(ext_bit);
                 break;
             case ProcHook::ANDROID_external_memory_android_hardware_buffer:
@@ -981,7 +983,12 @@ VkResult EnumerateDeviceExtensionProperties(
 
             memcpy(prop.extensionName, VK_KHR_SWAPCHAIN_EXTENSION_NAME,
                    sizeof(VK_KHR_SWAPCHAIN_EXTENSION_NAME));
-            prop.specVersion = VK_KHR_SWAPCHAIN_SPEC_VERSION;
+
+            if (prop.specVersion >= 8) {
+                prop.specVersion = VK_KHR_SWAPCHAIN_SPEC_VERSION;
+            } else {
+                prop.specVersion = 68;
+            }
         }
     }
 
