@@ -75,6 +75,7 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
+#include <list>
 
 using namespace android::surfaceflinger;
 
@@ -292,7 +293,7 @@ public:
 
     // enable/disable h/w composer event
     // TODO: this should be made accessible only to EventThread
-    void setPrimaryVsyncEnabled(bool enabled);
+    void setVsyncEnabled(bool enabled);
 
     // called on the main thread by MessageQueue when an internal message
     // is received
@@ -730,6 +731,7 @@ private:
     void computeVisibleRegions(const sp<const DisplayDevice>& display, Region& dirtyRegion,
                                Region& opaqueRegion);
 
+    sp<DisplayDevice> getVsyncSource();
     void preComposition();
     void postComposition();
     void getCompositorTiming(CompositorTiming* compositorTiming);
@@ -739,8 +741,8 @@ private:
                                     nsecs_t compositeToPresentLatency);
     void rebuildLayerStacks();
 
-    ui::Dataspace getBestDataspace(const sp<const DisplayDevice>& display,
-                                   ui::Dataspace* outHdrDataSpace) const;
+    ui::Dataspace getBestDataspace(const sp<DisplayDevice>& display, ui::Dataspace* outHdrDataSpace,
+                                   bool* outIsHdrClientComposition) const;
 
     // Returns the appropriate ColorMode, Dataspace and RenderIntent for the
     // DisplayDevice. The function only returns the supported ColorMode,
@@ -1001,6 +1003,7 @@ private:
 
     // don't use a lock for these, we don't care
     int mDebugRegion = 0;
+    bool mVsyncSourceReliableOnDoze = false;
     bool mDebugDisableHWC = false;
     bool mDebugDisableTransformHint = false;
     volatile nsecs_t mDebugInTransaction = 0;
@@ -1082,6 +1085,10 @@ private:
     bool mHasPoweredOff = false;
 
     size_t mNumLayers = 0;
+    // Vsync Source
+    sp<DisplayDevice> mActiveVsyncSource = NULL;
+    sp<DisplayDevice> mNextVsyncSource = NULL;
+    std::list<sp<DisplayDevice>> mDisplaysList;
 
     // Verify that transaction is being called by an approved process:
     // either AID_GRAPHICS or AID_SYSTEM.
@@ -1160,6 +1167,9 @@ private:
     Hwc2::impl::PowerAdvisor mPowerAdvisor;
 
     std::unique_ptr<RefreshRateOverlay> mRefreshRateOverlay;
+
+    // Flag used to set override allowed display configs from backdoor
+    bool mDebugDisplayConfigSetByBackdoor = false;
 
     bool mDolphinFuncsEnabled = false;
     void *mDolphinHandle = nullptr;
