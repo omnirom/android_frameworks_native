@@ -379,6 +379,13 @@ SurfaceFlinger::SurfaceFlinger(Factory& factory) : SurfaceFlinger(factory, SkipI
     property_get("debug.sf.luma_sampling", value, "1");
     mLumaSampling = atoi(value);
 
+    char property[PROPERTY_VALUE_MAX] = {0};
+    if((property_get("vendor.display.vsync_reliable_on_doze", property, "0") > 0) &&
+        (!strncmp(property, "1", PROPERTY_VALUE_MAX ) ||
+        (!strncasecmp(property,"true", PROPERTY_VALUE_MAX )))) {
+        mVsyncSourceReliableOnDoze = true;
+    }
+
     const auto [early, gl, late] = mPhaseOffsets->getCurrentOffsets();
     mVsyncModulator.setPhaseOffsets(early, gl, late);
 
@@ -629,7 +636,7 @@ void SurfaceFlinger::init() {
     Mutex::Autolock _l(mStateLock);
     // start the EventThread
     mScheduler =
-            getFactory().createScheduler([this](bool enabled) { setPrimaryVsyncEnabled(enabled); },
+            getFactory().createScheduler([this](bool enabled) { setVsyncEnabled(enabled); },
                                          mRefreshRateConfigs);
     auto resyncCallback =
             mScheduler->makeResyncCallback(std::bind(&SurfaceFlinger::getVsyncPeriod, this));
@@ -884,7 +891,9 @@ status_t SurfaceFlinger::getDisplayConfigs(const sp<IBinder>& displayToken,
         info.xdpi = xdpi;
         info.ydpi = ydpi;
         info.fps = 1e9 / hwConfig->getVsyncPeriod();
-        info.appVsyncOffset = mPhaseOffsets->getCurrentAppOffset();
+        const auto refreshRateType = mRefreshRateConfigs.getRefreshRateType(hwConfig->getId());
+        const auto offset = mPhaseOffsets->getOffsetsForRefreshRate(refreshRateType);
+        info.appVsyncOffset = offset.late.app;
 
         // This is how far in advance a buffer must be queued for
         // presentation at a given time.  If you want a buffer to appear
@@ -898,8 +907,7 @@ status_t SurfaceFlinger::getDisplayConfigs(const sp<IBinder>& displayToken,
         //
         // We add an additional 1ms to allow for processing time and
         // differences between the ideal and actual refresh rate.
-        info.presentationDeadline =
-                hwConfig->getVsyncPeriod() - mPhaseOffsets->getCurrentSfOffset() + 1000000;
+        info.presentationDeadline = hwConfig->getVsyncPeriod() - offset.late.sf + 1000000;
 
         // All non-virtual displays are currently considered secure.
         info.secure = true;
@@ -1426,11 +1434,6 @@ void SurfaceFlinger::onVsyncReceived(int32_t sequenceId, hwc2_display_t hwcDispl
         return;
     }
 
-    if (hwcDisplayId != getHwComposer().getInternalHwcDisplayId()) {
-        // For now, we don't do anything with external display vsyncs.
-        return;
-    }
-
     bool periodChanged = false;
     mScheduler->addResyncSample(timestamp, &periodChanged);
     if (periodChanged) {
@@ -1509,12 +1512,25 @@ void SurfaceFlinger::onRefreshReceived(int sequenceId, hwc2_display_t /*hwcDispl
     repaintEverythingForHWC();
 }
 
-void SurfaceFlinger::setPrimaryVsyncEnabled(bool enabled) {
+void SurfaceFlinger::setVsyncEnabled(bool enabled) {
     ATRACE_CALL();
     Mutex::Autolock lock(mStateLock);
-    if (const auto displayId = getInternalDisplayIdLocked()) {
-        getHwComposer().setVsyncEnabled(*displayId,
-                                        enabled ? HWC2::Vsync::Enable : HWC2::Vsync::Disable);
+    auto displayId = getInternalDisplayIdLocked();
+    if (mNextVsyncSource) {
+        // Disable current vsync source before enabling the next source
+        if (mActiveVsyncSource && (mActiveVsyncSource != mNextVsyncSource)) {
+            displayId = mActiveVsyncSource->getId();
+            getHwComposer().setVsyncEnabled(*displayId, HWC2::Vsync::Disable);
+        }
+        displayId = mNextVsyncSource->getId();
+    } else if (mActiveVsyncSource) {
+        displayId = mActiveVsyncSource->getId();
+    }
+    getHwComposer().setVsyncEnabled(*displayId,
+        enabled ? HWC2::Vsync::Enable : HWC2::Vsync::Disable);
+    if (mNextVsyncSource) {
+        mActiveVsyncSource = mNextVsyncSource;
+        mNextVsyncSource = NULL;
     }
 }
 
@@ -2236,6 +2252,47 @@ void SurfaceFlinger::rebuildLayerStacks() {
     }
 }
 
+sp<DisplayDevice> SurfaceFlinger::getVsyncSource() {
+    // Return the vsync source from the active displays based on
+    // the order in which they are connected. Normally the order
+    // of priority is Primary (Built-in/Pluggable) followed by
+    // Secondary built-ins followed by pluggable.
+    for (const auto& display : mDisplaysList) {
+        int mode = display->getPowerMode();
+        if (display->isVirtual() || (mode == HWC_POWER_MODE_OFF) ||
+            (mode == HWC_POWER_MODE_DOZE_SUSPEND)) {
+            continue;
+        }
+
+        if (mVsyncSourceReliableOnDoze) {
+            if ((mode == HWC_POWER_MODE_NORMAL) ||
+                (mode == HWC_POWER_MODE_DOZE)) {
+              return display;
+            }
+        } else if (mode == HWC_POWER_MODE_NORMAL) {
+            return display;
+        }
+    }
+
+    // In-case active displays are not present, source the vsync from
+    // the display which is in doze mode even if it is unreliable
+    // in the same order of display priority as above.
+    if (!mVsyncSourceReliableOnDoze) {
+        for (const auto& display : mDisplaysList) {
+            int mode = display->getPowerMode();
+            if (display->isVirtual()) {
+                continue;
+            }
+
+            if (mode == HWC_POWER_MODE_DOZE) {
+                return display;
+            }
+        }
+    }
+
+    return NULL;
+}
+
 // Returns a data space that fits all visible layers.  The returned data space
 // can only be one of
 //  - Dataspace::SRGB (use legacy dataspace and let HWC saturate when colors are enhanced)
@@ -2245,8 +2302,9 @@ void SurfaceFlinger::rebuildLayerStacks() {
 //  - Dataspace::UNKNOWN
 //  - Dataspace::BT2020_HLG
 //  - Dataspace::BT2020_PQ
-Dataspace SurfaceFlinger::getBestDataspace(const sp<const DisplayDevice>& display,
-                                           Dataspace* outHdrDataSpace) const {
+Dataspace SurfaceFlinger::getBestDataspace(const sp<DisplayDevice>& display,
+                                           Dataspace* outHdrDataSpace,
+                                           bool* outIsHdrClientComposition) const {
     Dataspace bestDataSpace = Dataspace::V0_SRGB;
     *outHdrDataSpace = Dataspace::UNKNOWN;
 
@@ -2267,6 +2325,7 @@ Dataspace SurfaceFlinger::getBestDataspace(const sp<const DisplayDevice>& displa
             case Dataspace::BT2020_ITU_PQ:
                 bestDataSpace = Dataspace::DISPLAY_P3;
                 *outHdrDataSpace = Dataspace::BT2020_PQ;
+                *outIsHdrClientComposition = layer->getForceClientComposition(display);
                 break;
             case Dataspace::BT2020_HLG:
             case Dataspace::BT2020_ITU_HLG:
@@ -2296,7 +2355,8 @@ void SurfaceFlinger::pickColorMode(const sp<DisplayDevice>& display, ColorMode* 
     }
 
     Dataspace hdrDataSpace;
-    Dataspace bestDataSpace = getBestDataspace(display, &hdrDataSpace);
+    bool isHdrClientComposition = false;
+    Dataspace bestDataSpace = getBestDataspace(display, &hdrDataSpace, &isHdrClientComposition);
 
     auto* profile = display->getCompositionDisplay()->getDisplayColorProfile();
 
@@ -2312,8 +2372,8 @@ void SurfaceFlinger::pickColorMode(const sp<DisplayDevice>& display, ColorMode* 
     }
 
     // respect hdrDataSpace only when there is no legacy HDR support
-    const bool isHdr =
-            hdrDataSpace != Dataspace::UNKNOWN && !profile->hasLegacyHdrSupport(hdrDataSpace);
+    const bool isHdr = hdrDataSpace != Dataspace::UNKNOWN &&
+            !profile->hasLegacyHdrSupport(hdrDataSpace) && !isHdrClientComposition;
     if (isHdr) {
         bestDataSpace = hdrDataSpace;
     }
@@ -2530,6 +2590,8 @@ void SurfaceFlinger::processDisplayHotplugEventsLocked() {
                 mInterceptor->saveDisplayDeletion(state.sequenceId);
                 mCurrentState.displays.removeItemsAt(index);
             }
+            mDisplaysList.remove(getDisplayDeviceLocked(mPhysicalDisplayTokens[info->id]));
+            mNextVsyncSource = getVsyncSource();
             mPhysicalDisplayTokens.erase(info->id);
         }
 
@@ -2762,6 +2824,7 @@ void SurfaceFlinger::processDisplayChangesLocked() {
                                       setupNewDisplayDeviceInternal(displayToken, displayId, state,
                                                                     dispSurface, producer));
                     if (!state.isVirtual()) {
+                        mDisplaysList.push_back(getDisplayDeviceLocked(displayToken));
                         LOG_ALWAYS_FATAL_IF(!displayId);
                         dispatchDisplayHotplugEvent(displayId->value, true);
                     }
@@ -4359,7 +4422,11 @@ void SurfaceFlinger::setPowerModeInternal(const sp<DisplayDevice>& display, int 
         return;
     }
 
+    mActiveVsyncSource = getVsyncSource();
+
     display->setPowerMode(mode);
+
+    mNextVsyncSource = getVsyncSource();
 
     if (mInterceptor->isEnabled()) {
         mInterceptor->savePowerModeUpdate(display->getSequenceId(), mode);
@@ -5206,7 +5273,7 @@ status_t SurfaceFlinger::CheckTransactCodeCredentials(uint32_t code) {
     }
     // Numbers from 1000 to 1034 are currently used for backdoors. The code
     // in onTransact verifies that the user is root, and has access to use SF.
-    if (code >= 1000 && code <= 1034) {
+    if (code >= 1000 && code <= 1035) {
         ALOGV("Accessing SurfaceFlinger through backdoor code: %u", code);
         return OK;
     }
@@ -5526,6 +5593,19 @@ status_t SurfaceFlinger::onTransact(uint32_t code, const Parcel& data, Parcel* r
                     mRefreshRateOverlay->changeRefreshRate(mDesiredActiveConfig.type);
                 } else if (!n) {
                     mRefreshRateOverlay.reset();
+                }
+                return NO_ERROR;
+            }
+            case 1035: {
+                n = data.readInt32();
+                mDebugDisplayConfigSetByBackdoor = false;
+                if (n >= 0) {
+                    const auto displayToken = getInternalDisplayToken();
+                    status_t result = setAllowedDisplayConfigs(displayToken, {n});
+                    if (result != NO_ERROR) {
+                        return result;
+                    }
+                    mDebugDisplayConfigSetByBackdoor = true;
                 }
                 return NO_ERROR;
             }
@@ -6071,6 +6151,11 @@ status_t SurfaceFlinger::setAllowedDisplayConfigs(const sp<IBinder>& displayToke
 
     if (!displayToken || allowedConfigs.empty()) {
         return BAD_VALUE;
+    }
+
+    if (mDebugDisplayConfigSetByBackdoor) {
+        // ignore this request as config is overridden by backdoor
+        return NO_ERROR;
     }
 
     postMessageSync(new LambdaMessage([&]() NO_THREAD_SAFETY_ANALYSIS {

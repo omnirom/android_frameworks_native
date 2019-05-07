@@ -573,6 +573,7 @@ status_t HWComposer::presentAndGetReleaseFences(DisplayId displayId) {
         return NO_ERROR;
     }
 
+    displayData.lastPresentFence = Fence::NO_FENCE;
     auto error = hwcDisplay->present(&displayData.lastPresentFence);
     RETURN_IF_HWC_ERROR_FOR("present", error, displayId, UNKNOWN_ERROR);
 
@@ -595,9 +596,6 @@ status_t HWComposer::setPowerMode(DisplayId displayId, int32_t intMode) {
     }
 
     auto mode = static_cast<HWC2::PowerMode>(intMode);
-    if (mode == HWC2::PowerMode::Off) {
-        setVsyncEnabled(displayId, HWC2::Vsync::Disable);
-    }
 
     auto& hwcDisplay = displayData.hwcDisplay;
     switch (mode) {
