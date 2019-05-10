@@ -2313,8 +2313,8 @@ void SurfaceFlinger::postComposition()
 
     getBE().mDisplayTimeline.updateSignalTimes();
     mPreviousPresentFences[1] = mPreviousPresentFences[0];
-    mPreviousPresentFences[0] = displayDevice
-            ? getHwComposer().getPresentFence(*displayDevice->getId())
+    mPreviousPresentFences[0] = mActiveVsyncSource
+            ? getHwComposer().getPresentFence(*mActiveVsyncSource->getId())
             : Fence::NO_FENCE;
     auto presentFenceTime = std::make_shared<FenceTime>(mPreviousPresentFences[0]);
     getBE().mDisplayTimeline.push(presentFenceTime);
