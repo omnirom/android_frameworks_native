@@ -47,7 +47,7 @@ Fence::Fence(base::unique_fd fenceFd) :
 }
 
 static status_t dump(const base::unique_fd &fd) {
-    CallStack stack("FENCE_DUMP");
+    ATRACE_CALL();
 
     struct sync_file_info* finfo = sync_file_info(fd);
     struct sync_fence_info* pinfo = sync_get_fence_info(finfo);
