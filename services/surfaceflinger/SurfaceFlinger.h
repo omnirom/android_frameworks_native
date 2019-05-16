@@ -46,6 +46,7 @@
 #include <utils/Trace.h>
 #include <utils/threads.h>
 
+#include "ClientCache.h"
 #include "DisplayDevice.h"
 #include "DisplayHardware/HWC2.h"
 #include "DisplayHardware/PowerAdvisor.h"
@@ -310,11 +311,16 @@ public:
         const sp<IGraphicBufferProducer>& bufferProducer) const;
 
     inline void onLayerCreated() { mNumLayers++; }
-    inline void onLayerDestroyed() { mNumLayers--; }
+    inline void onLayerDestroyed(Layer* layer) {
+        mNumLayers--;
+        mOffscreenLayers.erase(layer);
+    }
 
     TransactionCompletedThread& getTransactionCompletedThread() {
         return mTransactionCompletedThread;
     }
+
+    sp<Layer> fromHandle(const sp<IBinder>& handle) REQUIRES(mStateLock);
 
 private:
     friend class BufferLayer;
@@ -389,7 +395,7 @@ private:
                              const Vector<DisplayState>& displays, uint32_t flags,
                              const sp<IBinder>& applyToken,
                              const InputWindowCommands& inputWindowCommands,
-                             int64_t desiredPresentTime, const cached_buffer_t& uncacheBuffer,
+                             int64_t desiredPresentTime, const client_cache_t& uncacheBuffer,
                              const std::vector<ListenerCallbacks>& listenerCallbacks) override;
     void bootFinished() override;
     bool authenticateSurfaceTexture(
@@ -548,7 +554,7 @@ private:
                                const Vector<DisplayState>& displays, uint32_t flags,
                                const InputWindowCommands& inputWindowCommands,
                                const int64_t desiredPresentTime,
-                               const cached_buffer_t& uncacheBuffer,
+                               const client_cache_t& uncacheBuffer,
                                const std::vector<ListenerCallbacks>& listenerCallbacks,
                                const int64_t postTime, bool privileged, bool isMainThread = false)
             REQUIRES(mStateLock);
@@ -563,6 +569,7 @@ private:
     uint32_t setTransactionFlags(uint32_t flags, Scheduler::TransactionStart transactionStart);
     void latchAndReleaseBuffer(const sp<Layer>& layer);
     void commitTransaction() REQUIRES(mStateLock);
+    void commitOffscreenLayers();
     bool containsAnyInvalidClientState(const Vector<ComposerState>& states);
     bool transactionIsReadyToBeApplied(int64_t desiredPresentTime,
                                        const Vector<ComposerState>& states);
@@ -578,7 +585,8 @@ private:
      */
     status_t createLayer(const String8& name, const sp<Client>& client, uint32_t w, uint32_t h,
                          PixelFormat format, uint32_t flags, LayerMetadata metadata,
-                         sp<IBinder>* handle, sp<IGraphicBufferProducer>* gbp, sp<Layer>* parent);
+                         sp<IBinder>* handle, sp<IGraphicBufferProducer>* gbp,
+                         const sp<IBinder>& parentHandle, const sp<Layer>& parentLayer = nullptr);
 
     status_t createBufferQueueLayer(const sp<Client>& client, const String8& name, uint32_t w,
                                     uint32_t h, uint32_t flags, LayerMetadata metadata,
@@ -606,12 +614,10 @@ private:
     void markLayerPendingRemovalLocked(const sp<Layer>& layer);
 
     // add a layer to SurfaceFlinger
-    status_t addClientLayer(const sp<Client>& client,
-            const sp<IBinder>& handle,
-            const sp<IGraphicBufferProducer>& gbc,
-            const sp<Layer>& lbc,
-            const sp<Layer>& parent,
-            bool addToCurrentState);
+    status_t addClientLayer(const sp<Client>& client, const sp<IBinder>& handle,
+                            const sp<IGraphicBufferProducer>& gbc, const sp<Layer>& lbc,
+                            const sp<IBinder>& parentHandle, const sp<Layer>& parentLayer,
+                            bool addToCurrentState);
 
     // Traverse through all the layers and compute and cache its bounds.
     void computeLayerBounds();
@@ -829,6 +835,8 @@ private:
         return hwcDisplayId ? getHwComposer().toPhysicalDisplayId(*hwcDisplayId) : std::nullopt;
     }
 
+    bool previousFrameMissed();
+
     /*
      * Debugging & dumpsys
      */
@@ -974,7 +982,7 @@ private:
     std::vector<sp<Layer>> mLayersWithQueuedFrames;
     // Tracks layers that need to update a display's dirty region.
     std::vector<sp<Layer>> mLayersPendingRefresh;
-    sp<Fence> mPreviousPresentFence = Fence::NO_FENCE;
+    std::array<sp<Fence>, 2> mPreviousPresentFences = {Fence::NO_FENCE, Fence::NO_FENCE};
     // True if in the previous frame at least one layer was composed via the GPU.
     bool mHadClientComposition = false;
     // True if in the previous frame at least one layer was composed via HW Composer.
@@ -1000,6 +1008,9 @@ private:
     // it may be read from other threads with mStateLock held
     std::map<wp<IBinder>, sp<DisplayDevice>> mDisplays;
     std::unordered_map<DisplayId, sp<IBinder>> mPhysicalDisplayTokens;
+
+    // protected by mStateLock
+    std::unordered_map<BBinder*, wp<Layer>> mLayersByLocalBinderToken;
 
     // don't use a lock for these, we don't care
     int mDebugRegion = 0;
@@ -1052,7 +1063,7 @@ private:
     struct TransactionState {
         TransactionState(const Vector<ComposerState>& composerStates,
                          const Vector<DisplayState>& displayStates, uint32_t transactionFlags,
-                         int64_t desiredPresentTime, const cached_buffer_t& uncacheBuffer,
+                         int64_t desiredPresentTime, const client_cache_t& uncacheBuffer,
                          const std::vector<ListenerCallbacks>& listenerCallbacks, int64_t postTime,
                          bool privileged)
               : states(composerStates),
@@ -1068,7 +1079,7 @@ private:
         Vector<DisplayState> displays;
         uint32_t flags;
         const int64_t desiredPresentTime;
-        cached_buffer_t buffer;
+        client_cache_t buffer;
         std::vector<ListenerCallbacks> callback;
         const int64_t postTime;
         bool privileged;
@@ -1170,6 +1181,12 @@ private:
 
     // Flag used to set override allowed display configs from backdoor
     bool mDebugDisplayConfigSetByBackdoor = false;
+
+    // A set of layers that have no parent so they are not drawn on screen.
+    // Should only be accessed by the main thread.
+    // The Layer pointer is removed from the set when the destructor is called so there shouldn't
+    // be any issues with a raw pointer referencing an invalid object.
+    std::unordered_set<Layer*> mOffscreenLayers;
 
     bool mDolphinFuncsEnabled = false;
     void *mDolphinHandle = nullptr;

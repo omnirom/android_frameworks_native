@@ -132,8 +132,7 @@ Layer::~Layer() {
     }
 
     mFrameTracker.logAndResetStats(mName);
-
-    mFlinger->onLayerDestroyed();
+    mFlinger->onLayerDestroyed(this);
 }
 
 // ---------------------------------------------------------------------------
@@ -207,6 +206,11 @@ bool Layer::getPremultipledAlpha() const {
 
 sp<IBinder> Layer::getHandle() {
     Mutex::Autolock _l(mLock);
+    if (mGetHandleCalled) {
+        ALOGE("Get handle called twice" );
+        return nullptr;
+    }
+    mGetHandleCalled = true;
     return new Handle(mFlinger, this);
 }
 
@@ -384,13 +388,6 @@ void Layer::setupRoundedCornersCropCoordinates(Rect win,
     win.right -= roundedCornersCrop.left;
     win.top -= roundedCornersCrop.top;
     win.bottom -= roundedCornersCrop.top;
-
-    renderengine::Mesh::VertexArray<vec2> cropCoords(
-            getCompositionLayer()->editState().reMesh.getCropCoordArray<vec2>());
-    cropCoords[0] = vec2(win.left, win.top);
-    cropCoords[1] = vec2(win.left, win.top + win.getHeight());
-    cropCoords[2] = vec2(win.right, win.top + win.getHeight());
-    cropCoords[3] = vec2(win.right, win.top);
 }
 
 void Layer::latchGeometry(compositionengine::LayerFECompositionState& compositionState) const {
@@ -540,18 +537,6 @@ bool Layer::prepareClientLayer(const RenderArea& /*renderArea*/, const Region& /
     layer.alpha = alpha;
     layer.sourceDataspace = mCurrentDataSpace;
     return true;
-}
-
-void Layer::clearWithOpenGL(const RenderArea& renderArea, float red, float green, float blue,
-                            float alpha) const {
-    auto& engine(mFlinger->getRenderEngine());
-    computeGeometry(renderArea, getCompositionLayer()->editState().reMesh, false);
-    engine.setupFillWithColor(red, green, blue, alpha);
-    engine.drawMesh(getCompositionLayer()->getState().reMesh);
-}
-
-void Layer::clearWithOpenGL(const RenderArea& renderArea) const {
-    clearWithOpenGL(renderArea, 0, 0, 0, 0);
 }
 
 void Layer::setCompositionType(const sp<const DisplayDevice>& display,
@@ -1905,6 +1890,7 @@ void Layer::writeToProto(LayerProto* layerInfo, LayerVector::StateSet stateSet,
 
         layerInfo->set_is_opaque(isOpaque(state));
         layerInfo->set_invalidate(contentDirty);
+        layerInfo->set_is_protected(isProtected());
 
         // XXX (b/79210409) mCurrentDataSpace is not protected
         layerInfo->set_dataspace(

@@ -121,7 +121,7 @@ filegroup {
         "BufferLayerConsumer.cpp",
         "BufferQueueLayer.cpp",
         "BufferStateLayer.cpp",
-        "BufferStateLayerCache.cpp",
+        "ClientCache.cpp",
         "Client.cpp",
         "ColorLayer.cpp",
         "ContainerLayer.cpp",

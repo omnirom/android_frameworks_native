@@ -540,15 +540,13 @@ bool GLESRenderEngine::waitFence(base::unique_fd fenceFd) {
         return false;
     }
 
-    EGLint attribs[] = {EGL_SYNC_NATIVE_FENCE_FD_ANDROID, fenceFd, EGL_NONE};
+    // release the fd and transfer the ownership to EGLSync
+    EGLint attribs[] = {EGL_SYNC_NATIVE_FENCE_FD_ANDROID, fenceFd.release(), EGL_NONE};
     EGLSyncKHR sync = eglCreateSyncKHR(mEGLDisplay, EGL_SYNC_NATIVE_FENCE_ANDROID, attribs);
     if (sync == EGL_NO_SYNC_KHR) {
         ALOGE("failed to create EGL native fence sync: %#x", eglGetError());
         return false;
     }
-
-    // fenceFd is now owned by EGLSync
-    (void)fenceFd.release();
 
     // XXX: The spec draft is inconsistent as to whether this should return an
     // EGLint or void.  Ignore the return value for now, as it's not strictly
@@ -1313,7 +1311,9 @@ void GLESRenderEngine::dump(std::string& result) {
     StringAppendF(&result, "GLES: %s, %s, %s\n", extensions.getVendor(), extensions.getRenderer(),
                   extensions.getVersion());
     StringAppendF(&result, "%s\n", extensions.getExtensions());
-    StringAppendF(&result, "RenderEngine is in protected context : %d\n", mInProtectedContext);
+    StringAppendF(&result, "RenderEngine supports protected context: %d\n",
+                  supportsProtectedContent());
+    StringAppendF(&result, "RenderEngine is in protected context: %d\n", mInProtectedContext);
     StringAppendF(&result, "RenderEngine program cache size for unprotected context: %zu\n",
                   cache.getSize(mEGLContext));
     StringAppendF(&result, "RenderEngine program cache size for protected context: %zu\n",
