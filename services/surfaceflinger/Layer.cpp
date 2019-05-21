@@ -72,7 +72,10 @@ using base::StringAppendF;
 std::atomic<int32_t> Layer::sSequence{1};
 
 Layer::Layer(const LayerCreationArgs& args)
-      : mFlinger(args.flinger), mName(args.name), mClientRef(args.client) {
+      : mFlinger(args.flinger),
+        mName(args.name),
+        mClientRef(args.client),
+        mWindowType(args.metadata.getInt32(METADATA_WINDOW_TYPE, 0)) {
     mCurrentCrop.makeInvalid();
 
     uint32_t layerFlags = 0;
@@ -117,6 +120,8 @@ Layer::Layer(const LayerCreationArgs& args)
     mFrameEventHistory.initializeCompositorTiming(compositorTiming);
     mFrameTracker.setDisplayRefreshPeriod(compositorTiming.interval);
 
+    mSchedulerLayerHandle = mFlinger->mScheduler->registerLayer(mName.c_str(), mWindowType);
+
     mFlinger->onLayerCreated();
 }
 
@@ -127,8 +132,7 @@ Layer::~Layer() {
     }
 
     mFrameTracker.logAndResetStats(mName);
-
-    mFlinger->onLayerDestroyed();
+    mFlinger->onLayerDestroyed(this);
 }
 
 // ---------------------------------------------------------------------------
@@ -202,6 +206,11 @@ bool Layer::getPremultipledAlpha() const {
 
 sp<IBinder> Layer::getHandle() {
     Mutex::Autolock _l(mLock);
+    if (mGetHandleCalled) {
+        ALOGE("Get handle called twice" );
+        return nullptr;
+    }
+    mGetHandleCalled = true;
     return new Handle(mFlinger, this);
 }
 
@@ -379,13 +388,6 @@ void Layer::setupRoundedCornersCropCoordinates(Rect win,
     win.right -= roundedCornersCrop.left;
     win.top -= roundedCornersCrop.top;
     win.bottom -= roundedCornersCrop.top;
-
-    renderengine::Mesh::VertexArray<vec2> cropCoords(
-            getCompositionLayer()->editState().reMesh.getCropCoordArray<vec2>());
-    cropCoords[0] = vec2(win.left, win.top);
-    cropCoords[1] = vec2(win.left, win.top + win.getHeight());
-    cropCoords[2] = vec2(win.right, win.top + win.getHeight());
-    cropCoords[3] = vec2(win.right, win.top);
 }
 
 void Layer::latchGeometry(compositionengine::LayerFECompositionState& compositionState) const {
@@ -535,18 +537,6 @@ bool Layer::prepareClientLayer(const RenderArea& /*renderArea*/, const Region& /
     layer.alpha = alpha;
     layer.sourceDataspace = mCurrentDataSpace;
     return true;
-}
-
-void Layer::clearWithOpenGL(const RenderArea& renderArea, float red, float green, float blue,
-                            float alpha) const {
-    auto& engine(mFlinger->getRenderEngine());
-    computeGeometry(renderArea, getCompositionLayer()->editState().reMesh, false);
-    engine.setupFillWithColor(red, green, blue, alpha);
-    engine.drawMesh(getCompositionLayer()->getState().reMesh);
-}
-
-void Layer::clearWithOpenGL(const RenderArea& renderArea) const {
-    clearWithOpenGL(renderArea, 0, 0, 0, 0);
 }
 
 void Layer::setCompositionType(const sp<const DisplayDevice>& display,
@@ -1232,10 +1222,8 @@ uint32_t Layer::getEffectiveUsage(uint32_t usage) const {
 
 void Layer::updateTransformHint(const sp<const DisplayDevice>& display) const {
     uint32_t orientation = 0;
-    // Disable setting transform hint if the debug flag is set or if the
-    // getTransformToDisplayInverse flag is set and the client wants to submit buffers
-    // in one orientation.
-    if (!mFlinger->mDebugDisableTransformHint && !getTransformToDisplayInverse()) {
+    // Disable setting transform hint if the debug flag is set.
+    if (!mFlinger->mDebugDisableTransformHint) {
         // The transform hint is used to improve performance, but we can
         // only have a single transform hint, it cannot
         // apply to all displays.
@@ -1305,6 +1293,7 @@ void Layer::miniDumpHeader(std::string& result) {
     result.append("-----------------------------\n");
     result.append(" Layer name\n");
     result.append("           Z | ");
+    result.append(" Window Type | ");
     result.append(" Comp Type | ");
     result.append(" Transform | ");
     result.append("  Disp Frame (LTRB) | ");
@@ -1341,6 +1330,7 @@ void Layer::miniDump(std::string& result, const sp<DisplayDevice>& displayDevice
     } else {
         StringAppendF(&result, "  %10d | ", layerState.z);
     }
+    StringAppendF(&result, "  %10d | ", mWindowType);
     StringAppendF(&result, "%10s | ", toString(getCompositionType(displayDevice)).c_str());
     StringAppendF(&result, "%10s | ",
                   toString(getCompositionLayer() ? compositionState.bufferTransform
@@ -1811,7 +1801,9 @@ Layer::RoundedCornerState Layer::getRoundedCornerState() const {
         }
     }
     const float radius = getDrawingState().cornerRadius;
-    return radius > 0 ? RoundedCornerState(getBounds(), radius) : RoundedCornerState();
+    return radius > 0 && getCrop(getDrawingState()).isValid()
+            ? RoundedCornerState(getCrop(getDrawingState()).toFloatRect(), radius)
+            : RoundedCornerState();
 }
 
 void Layer::commitChildList() {
@@ -1898,6 +1890,7 @@ void Layer::writeToProto(LayerProto* layerInfo, LayerVector::StateSet stateSet,
 
         layerInfo->set_is_opaque(isOpaque(state));
         layerInfo->set_invalidate(contentDirty);
+        layerInfo->set_is_protected(isProtected());
 
         // XXX (b/79210409) mCurrentDataSpace is not protected
         layerInfo->set_dataspace(

@@ -20,6 +20,7 @@
 #include <stdint.h>
 #include <sys/types.h>
 
+#include <binder/IBinder.h>
 #include <binder/IInterface.h>
 
 #include <gui/ITransactionCompletedListener.h>
@@ -37,12 +38,13 @@
 #include <utils/Vector.h>
 
 #include <optional>
+#include <unordered_set>
 #include <vector>
 
 namespace android {
 // ----------------------------------------------------------------------------
 
-struct cached_buffer_t;
+struct client_cache_t;
 struct ComposerState;
 struct DisplayState;
 struct DisplayInfo;
@@ -135,7 +137,7 @@ public:
                                      const sp<IBinder>& applyToken,
                                      const InputWindowCommands& inputWindowCommands,
                                      int64_t desiredPresentTime,
-                                     const cached_buffer_t& uncacheBuffer,
+                                     const client_cache_t& uncacheBuffer,
                                      const std::vector<ListenerCallbacks>& listenerCallbacks) = 0;
 
     /* signal that we're done booting.
@@ -210,7 +212,7 @@ public:
      * it) around its center.
      */
     virtual status_t captureScreen(const sp<IBinder>& display, sp<GraphicBuffer>* outBuffer,
-                                   const ui::Dataspace reqDataspace,
+                                   bool& outCapturedSecureLayers, const ui::Dataspace reqDataspace,
                                    const ui::PixelFormat reqPixelFormat, Rect sourceCrop,
                                    uint32_t reqWidth, uint32_t reqHeight, bool useIdentityTransform,
                                    Rotation rotation = eRotateNone,
@@ -239,9 +241,16 @@ public:
     virtual status_t captureScreen(const sp<IBinder>& display, sp<GraphicBuffer>* outBuffer,
                                    Rect sourceCrop, uint32_t reqWidth, uint32_t reqHeight,
                                    bool useIdentityTransform, Rotation rotation = eRotateNone) {
-        return captureScreen(display, outBuffer, ui::Dataspace::V0_SRGB, ui::PixelFormat::RGBA_8888,
-                             sourceCrop, reqWidth, reqHeight, useIdentityTransform, rotation);
+        bool outIgnored;
+        return captureScreen(display, outBuffer, outIgnored, ui::Dataspace::V0_SRGB,
+                             ui::PixelFormat::RGBA_8888, sourceCrop, reqWidth, reqHeight,
+                             useIdentityTransform, rotation);
     }
+
+    template <class AA>
+    struct SpHash {
+        size_t operator()(const sp<AA>& k) const { return std::hash<AA*>()(k.get()); }
+    };
 
     /**
      * Capture a subtree of the layer hierarchy, potentially ignoring the root node.
@@ -250,10 +259,12 @@ public:
      * of the buffer. The caller should pick the data space and pixel format
      * that it can consume.
      */
-    virtual status_t captureLayers(const sp<IBinder>& layerHandleBinder,
-                                   sp<GraphicBuffer>* outBuffer, const ui::Dataspace reqDataspace,
-                                   const ui::PixelFormat reqPixelFormat, const Rect& sourceCrop,
-                                   float frameScale = 1.0, bool childrenOnly = false) = 0;
+    virtual status_t captureLayers(
+            const sp<IBinder>& layerHandleBinder, sp<GraphicBuffer>* outBuffer,
+            const ui::Dataspace reqDataspace, const ui::PixelFormat reqPixelFormat,
+            const Rect& sourceCrop,
+            const std::unordered_set<sp<IBinder>, SpHash<IBinder>>& excludeHandles,
+            float frameScale = 1.0, bool childrenOnly = false) = 0;
 
     /**
      * Capture a subtree of the layer hierarchy into an sRGB buffer with RGBA_8888 pixel format,
@@ -263,7 +274,7 @@ public:
                            const Rect& sourceCrop, float frameScale = 1.0,
                            bool childrenOnly = false) {
         return captureLayers(layerHandleBinder, outBuffer, ui::Dataspace::V0_SRGB,
-                             ui::PixelFormat::RGBA_8888, sourceCrop, frameScale, childrenOnly);
+                             ui::PixelFormat::RGBA_8888, sourceCrop, {}, frameScale, childrenOnly);
     }
 
     /* Clears the frame statistics for animations.

@@ -381,17 +381,19 @@ void SurfaceComposerClient::doDropReferenceTransaction(const sp<IBinder>& handle
     s.state.parentHandleForChild = nullptr;
 
     composerStates.add(s);
-    sf->setTransactionState(composerStates, displayStates, 0, nullptr, {}, -1, {}, {});
+    sp<IBinder> applyToken = IInterface::asBinder(TransactionCompletedListener::getIInstance());
+    sf->setTransactionState(composerStates, displayStates, 0, applyToken, {}, -1, {}, {});
 }
 
 void SurfaceComposerClient::doUncacheBufferTransaction(uint64_t cacheId) {
     sp<ISurfaceComposer> sf(ComposerService::getComposerService());
 
-    cached_buffer_t uncacheBuffer;
+    client_cache_t uncacheBuffer;
     uncacheBuffer.token = BufferCache::getInstance().getToken();
-    uncacheBuffer.cacheId = cacheId;
+    uncacheBuffer.id = cacheId;
 
-    sf->setTransactionState({}, {}, 0, nullptr, {}, -1, uncacheBuffer, {});
+    sp<IBinder> applyToken = IInterface::asBinder(TransactionCompletedListener::getIInstance());
+    sf->setTransactionState({}, {}, 0, applyToken, {}, -1, uncacheBuffer, {});
 }
 
 void SurfaceComposerClient::Transaction::cacheBuffers() {
@@ -422,7 +424,7 @@ void SurfaceComposerClient::Transaction::cacheBuffers() {
         }
         s->what |= layer_state_t::eCachedBufferChanged;
         s->cachedBuffer.token = BufferCache::getInstance().getToken();
-        s->cachedBuffer.cacheId = cacheId;
+        s->cachedBuffer.id = cacheId;
 
         // If we have more buffers than the size of the cache, we should stop caching so we don't
         // evict other buffers in this transaction
@@ -1147,8 +1149,12 @@ SurfaceComposerClient::Transaction& SurfaceComposerClient::Transaction::setGeome
 
     int x = dst.left;
     int y = dst.top;
-    float xScale = dst.getWidth() / static_cast<float>(source.getWidth());
-    float yScale = dst.getHeight() / static_cast<float>(source.getHeight());
+
+    float sourceWidth = source.getWidth();
+    float sourceHeight = source.getHeight();
+
+    float xScale = sourceWidth < 0 ? 1.0f : dst.getWidth() / sourceWidth;
+    float yScale = sourceHeight < 0 ? 1.0f : dst.getHeight() / sourceHeight;
     float matrix[4] = {1, 0, 0, 1};
 
     switch (transform) {
@@ -1542,13 +1548,15 @@ status_t SurfaceComposerClient::setDisplayBrightness(const sp<IBinder>& displayT
 status_t ScreenshotClient::capture(const sp<IBinder>& display, const ui::Dataspace reqDataSpace,
                                    const ui::PixelFormat reqPixelFormat, Rect sourceCrop,
                                    uint32_t reqWidth, uint32_t reqHeight, bool useIdentityTransform,
-                                   uint32_t rotation, bool captureSecureLayers, sp<GraphicBuffer>* outBuffer) {
+                                   uint32_t rotation, bool captureSecureLayers,
+                                   sp<GraphicBuffer>* outBuffer, bool& outCapturedSecureLayers) {
     sp<ISurfaceComposer> s(ComposerService::getComposerService());
     if (s == nullptr) return NO_INIT;
-    status_t ret = s->captureScreen(display, outBuffer, reqDataSpace, reqPixelFormat, sourceCrop,
-            reqWidth, reqHeight, useIdentityTransform,
-            static_cast<ISurfaceComposer::Rotation>(rotation),
-            captureSecureLayers);
+    status_t ret =
+            s->captureScreen(display, outBuffer, outCapturedSecureLayers, reqDataSpace,
+                             reqPixelFormat, sourceCrop, reqWidth, reqHeight, useIdentityTransform,
+                             static_cast<ISurfaceComposer::Rotation>(rotation),
+                             captureSecureLayers);
     if (ret != NO_ERROR) {
         return ret;
     }
@@ -1559,8 +1567,9 @@ status_t ScreenshotClient::capture(const sp<IBinder>& display, const ui::Dataspa
                                    const ui::PixelFormat reqPixelFormat, Rect sourceCrop,
                                    uint32_t reqWidth, uint32_t reqHeight, bool useIdentityTransform,
                                    uint32_t rotation, sp<GraphicBuffer>* outBuffer) {
-    return capture(display, reqDataSpace, reqPixelFormat, sourceCrop, reqWidth,
-            reqHeight, useIdentityTransform, rotation, false, outBuffer);
+    bool ignored;
+    return capture(display, reqDataSpace, reqPixelFormat, sourceCrop, reqWidth, reqHeight,
+                   useIdentityTransform, rotation, false, outBuffer, ignored);
 }
 
 status_t ScreenshotClient::captureLayers(const sp<IBinder>& layerHandle,
@@ -1570,18 +1579,20 @@ status_t ScreenshotClient::captureLayers(const sp<IBinder>& layerHandle,
     sp<ISurfaceComposer> s(ComposerService::getComposerService());
     if (s == nullptr) return NO_INIT;
     status_t ret = s->captureLayers(layerHandle, outBuffer, reqDataSpace, reqPixelFormat,
-                                    sourceCrop, frameScale, false /* childrenOnly */);
+                                    sourceCrop, {}, frameScale, false /* childrenOnly */);
     return ret;
 }
 
-status_t ScreenshotClient::captureChildLayers(const sp<IBinder>& layerHandle,
-                                              const ui::Dataspace reqDataSpace,
-                                              const ui::PixelFormat reqPixelFormat, Rect sourceCrop,
-                                              float frameScale, sp<GraphicBuffer>* outBuffer) {
+status_t ScreenshotClient::captureChildLayers(
+        const sp<IBinder>& layerHandle, const ui::Dataspace reqDataSpace,
+        const ui::PixelFormat reqPixelFormat, Rect sourceCrop,
+        const std::unordered_set<sp<IBinder>, ISurfaceComposer::SpHash<IBinder>>& excludeHandles,
+        float frameScale, sp<GraphicBuffer>* outBuffer) {
     sp<ISurfaceComposer> s(ComposerService::getComposerService());
     if (s == nullptr) return NO_INIT;
-    status_t ret = s->captureLayers(layerHandle, outBuffer, reqDataSpace, reqPixelFormat,
-                                    sourceCrop, frameScale, true /* childrenOnly */);
+    status_t ret =
+            s->captureLayers(layerHandle, outBuffer, reqDataSpace, reqPixelFormat, sourceCrop,
+                             excludeHandles, frameScale, true /* childrenOnly */);
     return ret;
 }
 // ----------------------------------------------------------------------------

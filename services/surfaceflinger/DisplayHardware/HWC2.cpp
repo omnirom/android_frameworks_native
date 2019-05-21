@@ -276,11 +276,6 @@ Display::Display(android::Hwc2::Composer& composer,
         if (error == Error::None && dozeSupport) {
             mDisplayCapabilities.emplace(DisplayCapability::Doze);
         }
-        bool brightnessSupport = false;
-        error = static_cast<Error>(mComposer.getDisplayBrightnessSupport(mId, &brightnessSupport));
-        if (error == Error::None && brightnessSupport) {
-            mDisplayCapabilities.emplace(DisplayCapability::Brightness);
-        }
     }
     ALOGV("Created display %" PRIu64, id);
 }
@@ -1034,9 +1029,13 @@ Error Layer::setColorTransform(const android::mat4& matrix) {
     if (matrix == mColorMatrix) {
         return Error::None;
     }
-    mColorMatrix = matrix;
     auto intError = mComposer.setLayerColorTransform(mDisplayId, mId, matrix.asArray());
-    return static_cast<Error>(intError);
+    Error error = static_cast<Error>(intError);
+    if (error != Error::None) {
+        return error;
+    }
+    mColorMatrix = matrix;
+    return error;
 }
 
 } // namespace impl

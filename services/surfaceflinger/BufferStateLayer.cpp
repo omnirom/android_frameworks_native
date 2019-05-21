@@ -26,6 +26,7 @@
 #include <compositionengine/OutputLayer.h>
 #include <compositionengine/impl/LayerCompositionState.h>
 #include <compositionengine/impl/OutputLayerCompositionState.h>
+#include <gui/BufferQueue.h>
 #include <private/gui/SyncFeatures.h>
 #include <renderengine/Image.h>
 
@@ -44,7 +45,8 @@ const std::array<float, 16> BufferStateLayer::IDENTITY_MATRIX{
 };
 // clang-format on
 
-BufferStateLayer::BufferStateLayer(const LayerCreationArgs& args) : BufferLayer(args) {
+BufferStateLayer::BufferStateLayer(const LayerCreationArgs& args)
+      : BufferLayer(args), mHwcSlotGenerator(new HwcSlotGenerator()) {
     mOverrideScalingMode = NATIVE_WINDOW_SCALING_MODE_SCALE_TO_WINDOW;
     mCurrentState.dataspace = ui::Dataspace::V0_SRGB;
 }
@@ -209,14 +211,25 @@ bool BufferStateLayer::setFrame(const Rect& frame) {
     return true;
 }
 
-bool BufferStateLayer::setBuffer(const sp<GraphicBuffer>& buffer) {
+bool BufferStateLayer::setBuffer(const sp<GraphicBuffer>& buffer, nsecs_t postTime,
+                                 nsecs_t desiredPresentTime, const client_cache_t& clientCacheId) {
     if (mCurrentState.buffer) {
         mReleasePreviousBuffer = true;
     }
 
     mCurrentState.buffer = buffer;
+    mCurrentState.clientCacheId = clientCacheId;
     mCurrentState.modified = true;
     setTransactionFlags(eTransactionNeeded);
+
+    mFlinger->mTimeStats->setPostTime(getSequence(), getFrameNumber(), getName().c_str(), postTime);
+    mDesiredPresentTime = desiredPresentTime;
+
+    if (mFlinger->mUseSmart90ForVideo) {
+        const nsecs_t presentTime = (mDesiredPresentTime == -1) ? 0 : mDesiredPresentTime;
+        mFlinger->mScheduler->addLayerPresentTime(mSchedulerLayerHandle, presentTime);
+    }
+
     return true;
 }
 
@@ -348,14 +361,6 @@ FloatRect BufferStateLayer::computeSourceBounds(const FloatRect& parentBounds) c
     return parentBounds;
 }
 
-void BufferStateLayer::setPostTime(nsecs_t postTime) {
-    mFlinger->mTimeStats->setPostTime(getSequence(), getFrameNumber(), getName().c_str(), postTime);
-}
-
-void BufferStateLayer::setDesiredPresentTime(nsecs_t desiredPresentTime) {
-    mDesiredPresentTime = desiredPresentTime;
-}
-
 // -----------------------------------------------------------------------
 
 // -----------------------------------------------------------------------
@@ -367,6 +372,14 @@ bool BufferStateLayer::fenceHasSignaled() const {
     }
 
     return getDrawingState().acquireFence->getStatus() == Fence::Status::Signaled;
+}
+
+bool BufferStateLayer::framePresentTimeIsCurrent() const {
+    if (!hasFrameUpdate() || isRemovedFromCurrentState()) {
+        return true;
+    }
+
+    return mDesiredPresentTime <= mFlinger->mScheduler->expectedPresentTime();
 }
 
 nsecs_t BufferStateLayer::getDesiredPresentTime() {
@@ -587,8 +600,8 @@ void BufferStateLayer::setHwcLayerBuffer(const sp<const DisplayDevice>& display)
 
     uint32_t hwcSlot;
     sp<GraphicBuffer> buffer;
-    hwcInfo.hwcBufferCache.getHwcBuffer(BufferQueue::INVALID_BUFFER_SLOT, s.buffer, &hwcSlot,
-                                        &buffer);
+    hwcInfo.hwcBufferCache.getHwcBuffer(mHwcSlotGenerator->getHwcCacheSlot(s.clientCacheId),
+                                        s.buffer, &hwcSlot, &buffer);
 
     auto error = hwcLayer->setBuffer(hwcSlot, buffer, s.acquireFence);
     if (error != HWC2::Error::None) {
@@ -607,4 +620,76 @@ void BufferStateLayer::onFirstRef() {
     }
 }
 
+void BufferStateLayer::HwcSlotGenerator::bufferErased(const client_cache_t& clientCacheId) {
+    std::lock_guard lock(mMutex);
+    if (!clientCacheId.isValid()) {
+        ALOGE("invalid process, failed to erase buffer");
+        return;
+    }
+    eraseBufferLocked(clientCacheId);
+}
+
+uint32_t BufferStateLayer::HwcSlotGenerator::getHwcCacheSlot(const client_cache_t& clientCacheId) {
+    std::lock_guard<std::mutex> lock(mMutex);
+    auto itr = mCachedBuffers.find(clientCacheId);
+    if (itr == mCachedBuffers.end()) {
+        return addCachedBuffer(clientCacheId);
+    }
+    auto& [hwcCacheSlot, counter] = itr->second;
+    counter = mCounter++;
+    return hwcCacheSlot;
+}
+
+uint32_t BufferStateLayer::HwcSlotGenerator::addCachedBuffer(const client_cache_t& clientCacheId)
+        REQUIRES(mMutex) {
+    if (!clientCacheId.isValid()) {
+        ALOGE("invalid process, returning invalid slot");
+        return BufferQueue::INVALID_BUFFER_SLOT;
+    }
+
+    ClientCache::getInstance().registerErasedRecipient(clientCacheId, wp<ErasedRecipient>(this));
+
+    uint32_t hwcCacheSlot = getFreeHwcCacheSlot();
+    mCachedBuffers[clientCacheId] = {hwcCacheSlot, mCounter++};
+    return hwcCacheSlot;
+}
+
+uint32_t BufferStateLayer::HwcSlotGenerator::getFreeHwcCacheSlot() REQUIRES(mMutex) {
+    if (mFreeHwcCacheSlots.empty()) {
+        evictLeastRecentlyUsed();
+    }
+
+    uint32_t hwcCacheSlot = mFreeHwcCacheSlots.top();
+    mFreeHwcCacheSlots.pop();
+    return hwcCacheSlot;
+}
+
+void BufferStateLayer::HwcSlotGenerator::evictLeastRecentlyUsed() REQUIRES(mMutex) {
+    uint64_t minCounter = UINT_MAX;
+    client_cache_t minClientCacheId = {};
+    for (const auto& [clientCacheId, slotCounter] : mCachedBuffers) {
+        const auto& [hwcCacheSlot, counter] = slotCounter;
+        if (counter < minCounter) {
+            minCounter = counter;
+            minClientCacheId = clientCacheId;
+        }
+    }
+    eraseBufferLocked(minClientCacheId);
+
+    ClientCache::getInstance().unregisterErasedRecipient(minClientCacheId, this);
+}
+
+void BufferStateLayer::HwcSlotGenerator::eraseBufferLocked(const client_cache_t& clientCacheId)
+        REQUIRES(mMutex) {
+    auto itr = mCachedBuffers.find(clientCacheId);
+    if (itr == mCachedBuffers.end()) {
+        return;
+    }
+    auto& [hwcCacheSlot, counter] = itr->second;
+
+    // TODO send to hwc cache and resources
+
+    mFreeHwcCacheSlots.push(hwcCacheSlot);
+    mCachedBuffers.erase(clientCacheId);
+}
 } // namespace android

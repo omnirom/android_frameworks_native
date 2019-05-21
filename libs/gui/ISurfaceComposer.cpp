@@ -69,7 +69,7 @@ public:
                                      const sp<IBinder>& applyToken,
                                      const InputWindowCommands& commands,
                                      int64_t desiredPresentTime,
-                                     const cached_buffer_t& uncacheBuffer,
+                                     const client_cache_t& uncacheBuffer,
                                      const std::vector<ListenerCallbacks>& listenerCallbacks) {
         Parcel data, reply;
         data.writeInterfaceToken(ISurfaceComposer::getInterfaceDescriptor());
@@ -88,8 +88,8 @@ public:
         data.writeStrongBinder(applyToken);
         commands.write(data);
         data.writeInt64(desiredPresentTime);
-        data.writeStrongBinder(uncacheBuffer.token);
-        data.writeUint64(uncacheBuffer.cacheId);
+        data.writeWeakBinder(uncacheBuffer.token);
+        data.writeUint64(uncacheBuffer.id);
 
         if (data.writeVectorSize(listenerCallbacks) == NO_ERROR) {
             for (const auto& [listener, callbackIds] : listenerCallbacks) {
@@ -109,7 +109,7 @@ public:
     }
 
     virtual status_t captureScreen(const sp<IBinder>& display, sp<GraphicBuffer>* outBuffer,
-                                   const ui::Dataspace reqDataspace,
+                                   bool& outCapturedSecureLayers, const ui::Dataspace reqDataspace,
                                    const ui::PixelFormat reqPixelFormat, Rect sourceCrop,
                                    uint32_t reqWidth, uint32_t reqHeight, bool useIdentityTransform,
                                    ISurfaceComposer::Rotation rotation, bool captureSecureLayers) {
@@ -137,20 +137,27 @@ public:
 
         *outBuffer = new GraphicBuffer();
         reply.read(**outBuffer);
+        outCapturedSecureLayers = reply.readBool();
 
         return result;
     }
 
-    virtual status_t captureLayers(const sp<IBinder>& layerHandleBinder,
-                                   sp<GraphicBuffer>* outBuffer, const ui::Dataspace reqDataspace,
-                                   const ui::PixelFormat reqPixelFormat, const Rect& sourceCrop,
-                                   float frameScale, bool childrenOnly) {
+    virtual status_t captureLayers(
+            const sp<IBinder>& layerHandleBinder, sp<GraphicBuffer>* outBuffer,
+            const ui::Dataspace reqDataspace, const ui::PixelFormat reqPixelFormat,
+            const Rect& sourceCrop,
+            const std::unordered_set<sp<IBinder>, SpHash<IBinder>>& excludeLayers, float frameScale,
+            bool childrenOnly) {
         Parcel data, reply;
         data.writeInterfaceToken(ISurfaceComposer::getInterfaceDescriptor());
         data.writeStrongBinder(layerHandleBinder);
         data.writeInt32(static_cast<int32_t>(reqDataspace));
         data.writeInt32(static_cast<int32_t>(reqPixelFormat));
         data.write(sourceCrop);
+        data.writeInt32(excludeLayers.size());
+        for (auto el : excludeLayers) {
+            data.writeStrongBinder(el);
+        }
         data.writeFloat(frameScale);
         data.writeBool(childrenOnly);
         status_t result = remote()->transact(BnSurfaceComposer::CAPTURE_LAYERS, data, &reply);
@@ -984,9 +991,9 @@ status_t BnSurfaceComposer::onTransact(
 
             int64_t desiredPresentTime = data.readInt64();
 
-            cached_buffer_t uncachedBuffer;
-            uncachedBuffer.token = data.readStrongBinder();
-            uncachedBuffer.cacheId = data.readUint64();
+            client_cache_t uncachedBuffer;
+            uncachedBuffer.token = data.readWeakBinder();
+            uncachedBuffer.id = data.readUint64();
 
             std::vector<ListenerCallbacks> listenerCallbacks;
             int32_t listenersSize = data.readInt32();
@@ -1021,12 +1028,17 @@ status_t BnSurfaceComposer::onTransact(
             int32_t rotation = data.readInt32();
             bool captureSecureLayers = static_cast<bool>(data.readInt32());
 
-            status_t res = captureScreen(display, &outBuffer, reqDataspace, reqPixelFormat,
-                                         sourceCrop, reqWidth, reqHeight, useIdentityTransform,
-                                         static_cast<ISurfaceComposer::Rotation>(rotation), captureSecureLayers);
+            bool capturedSecureLayers = false;
+            status_t res = captureScreen(display, &outBuffer, capturedSecureLayers, reqDataspace,
+                                         reqPixelFormat, sourceCrop, reqWidth, reqHeight,
+                                         useIdentityTransform,
+                                         static_cast<ISurfaceComposer::Rotation>(rotation),
+                                         captureSecureLayers);
+
             reply->writeInt32(res);
             if (res == NO_ERROR) {
                 reply->write(*outBuffer);
+                reply->writeBool(capturedSecureLayers);
             }
             return NO_ERROR;
         }
@@ -1038,11 +1050,20 @@ status_t BnSurfaceComposer::onTransact(
             sp<GraphicBuffer> outBuffer;
             Rect sourceCrop(Rect::EMPTY_RECT);
             data.read(sourceCrop);
+
+            std::unordered_set<sp<IBinder>, SpHash<IBinder>> excludeHandles;
+            int numExcludeHandles = data.readInt32();
+            excludeHandles.reserve(numExcludeHandles);
+            for (int i = 0; i < numExcludeHandles; i++) {
+                excludeHandles.emplace(data.readStrongBinder());
+            }
+
             float frameScale = data.readFloat();
             bool childrenOnly = data.readBool();
 
-            status_t res = captureLayers(layerHandleBinder, &outBuffer, reqDataspace,
-                                         reqPixelFormat, sourceCrop, frameScale, childrenOnly);
+            status_t res =
+                    captureLayers(layerHandleBinder, &outBuffer, reqDataspace, reqPixelFormat,
+                                  sourceCrop, excludeHandles, frameScale, childrenOnly);
             reply->writeInt32(res);
             if (res == NO_ERROR) {
                 reply->write(*outBuffer);

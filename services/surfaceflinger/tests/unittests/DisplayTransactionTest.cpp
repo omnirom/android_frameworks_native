@@ -179,7 +179,7 @@ DisplayTransactionTest::~DisplayTransactionTest() {
 }
 
 void DisplayTransactionTest::setupScheduler() {
-    mScheduler = new TestableScheduler();
+    mScheduler = new TestableScheduler(mFlinger.mutableRefreshRateConfigs());
     mScheduler->mutableEventControlThread().reset(mEventControlThread);
     mScheduler->mutablePrimaryDispSync().reset(mPrimaryDispSync);
     EXPECT_CALL(*mEventThread, registerDisplayEventConnection(_));
@@ -358,6 +358,9 @@ struct DisplayVariant {
                 .WillRepeatedly(Return(0));
         EXPECT_CALL(*test->mNativeWindow, perform(NATIVE_WINDOW_SET_USAGE64))
                 .WillRepeatedly(Return(0));
+        EXPECT_CALL(*test->mNativeWindow, perform(NATIVE_WINDOW_API_DISCONNECT))
+                .WillRepeatedly(Return(0));
+
         return injector;
     }
 
@@ -375,6 +378,8 @@ struct DisplayVariant {
         EXPECT_CALL(*test->mNativeWindow, perform(NATIVE_WINDOW_API_CONNECT))
                 .WillRepeatedly(Return(0));
         EXPECT_CALL(*test->mNativeWindow, perform(NATIVE_WINDOW_SET_USAGE64))
+                .WillRepeatedly(Return(0));
+        EXPECT_CALL(*test->mNativeWindow, perform(NATIVE_WINDOW_API_DISCONNECT))
                 .WillRepeatedly(Return(0));
     }
 
@@ -1198,6 +1203,7 @@ public:
         EXPECT_CALL(*mNativeWindow, perform(NATIVE_WINDOW_SET_BUFFERS_FORMAT)).Times(1);
         EXPECT_CALL(*mNativeWindow, perform(NATIVE_WINDOW_API_CONNECT)).Times(1);
         EXPECT_CALL(*mNativeWindow, perform(NATIVE_WINDOW_SET_USAGE64)).Times(1);
+        EXPECT_CALL(*mNativeWindow, perform(NATIVE_WINDOW_API_DISCONNECT)).Times(1);
         auto displayDevice = mInjector.inject();
 
         displayDevice->getCompositionDisplay()
@@ -2141,6 +2147,7 @@ TEST_F(HandleTransactionLockedTest, processesDisplayWidthChanges) {
     EXPECT_CALL(*nativeWindow, perform(NATIVE_WINDOW_SET_BUFFERS_FORMAT)).Times(1);
     EXPECT_CALL(*nativeWindow, perform(NATIVE_WINDOW_API_CONNECT)).Times(1);
     EXPECT_CALL(*nativeWindow, perform(NATIVE_WINDOW_SET_USAGE64)).Times(1);
+    EXPECT_CALL(*nativeWindow, perform(NATIVE_WINDOW_API_DISCONNECT)).Times(1);
     display.inject();
 
     // There is a change to the viewport state
@@ -2185,6 +2192,7 @@ TEST_F(HandleTransactionLockedTest, processesDisplayHeightChanges) {
     EXPECT_CALL(*nativeWindow, perform(NATIVE_WINDOW_SET_BUFFERS_FORMAT)).Times(1);
     EXPECT_CALL(*nativeWindow, perform(NATIVE_WINDOW_API_CONNECT)).Times(1);
     EXPECT_CALL(*nativeWindow, perform(NATIVE_WINDOW_SET_USAGE64)).Times(1);
+    EXPECT_CALL(*nativeWindow, perform(NATIVE_WINDOW_API_DISCONNECT)).Times(1);
     display.inject();
 
     // There is a change to the viewport state
@@ -2830,7 +2838,6 @@ struct EventThreadIsSupportedVariant : public EventThreadBaseSupportedVariant {
 
 struct DispSyncIsSupportedVariant {
     static void setupBeginResyncCallExpectations(DisplayTransactionTest* test) {
-        EXPECT_CALL(*test->mPrimaryDispSync, reset()).Times(1);
         EXPECT_CALL(*test->mPrimaryDispSync, setPeriod(DEFAULT_REFRESH_RATE)).Times(1);
         EXPECT_CALL(*test->mPrimaryDispSync, beginResync()).Times(1);
     }

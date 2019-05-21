@@ -126,7 +126,7 @@ TEST_F(SurfaceTest, QueuesToWindowComposerIsTrueWhenPurgatorized) {
 }
 
 // This test probably doesn't belong here.
-TEST_F(SurfaceTest, ScreenshotsOfProtectedBuffersSucceed) {
+TEST_F(SurfaceTest, ScreenshotsOfProtectedBuffersDontSucceed) {
     sp<ANativeWindow> anw(mSurface);
 
     // Verify the screenshot works with no protected buffers.
@@ -136,8 +136,9 @@ TEST_F(SurfaceTest, ScreenshotsOfProtectedBuffersSucceed) {
     ASSERT_FALSE(display == nullptr);
 
     sp<GraphicBuffer> outBuffer;
+    bool ignored;
     ASSERT_EQ(NO_ERROR,
-              sf->captureScreen(display, &outBuffer, ui::Dataspace::V0_SRGB,
+              sf->captureScreen(display, &outBuffer, ignored, ui::Dataspace::V0_SRGB,
                                 ui::PixelFormat::RGBA_8888, Rect(), 64, 64, false));
 
     ASSERT_EQ(NO_ERROR, native_window_api_connect(anw.get(),
@@ -169,7 +170,7 @@ TEST_F(SurfaceTest, ScreenshotsOfProtectedBuffersSucceed) {
         ASSERT_EQ(NO_ERROR, anw->queueBuffer(anw.get(), buf, -1));
     }
     ASSERT_EQ(NO_ERROR,
-              sf->captureScreen(display, &outBuffer, ui::Dataspace::V0_SRGB,
+              sf->captureScreen(display, &outBuffer, ignored, ui::Dataspace::V0_SRGB,
                                 ui::PixelFormat::RGBA_8888, Rect(), 64, 64, false));
 }
 
@@ -560,8 +561,7 @@ public:
                              const Vector<DisplayState>& /*displays*/, uint32_t /*flags*/,
                              const sp<IBinder>& /*applyToken*/,
                              const InputWindowCommands& /*inputWindowCommands*/,
-                             int64_t /*desiredPresentTime*/,
-                             const cached_buffer_t& /*cachedBuffer*/,
+                             int64_t /*desiredPresentTime*/, const client_cache_t& /*cachedBuffer*/,
                              const std::vector<ListenerCallbacks>& /*listenerCallbacks*/) override {
     }
 
@@ -615,6 +615,7 @@ public:
     status_t setActiveColorMode(const sp<IBinder>& /*display*/,
         ColorMode /*colorMode*/) override { return NO_ERROR; }
     status_t captureScreen(const sp<IBinder>& /*display*/, sp<GraphicBuffer>* /*outBuffer*/,
+                           bool& /* outCapturedSecureLayers */,
                            const ui::Dataspace /*reqDataspace*/,
                            const ui::PixelFormat /*reqPixelFormat*/, Rect /*sourceCrop*/,
                            uint32_t /*reqWidth*/, uint32_t /*reqHeight*/,
@@ -622,12 +623,13 @@ public:
                            bool /*captureSecureLayers*/) override {
         return NO_ERROR;
     }
-    virtual status_t captureLayers(const sp<IBinder>& /*parentHandle*/,
-                                   sp<GraphicBuffer>* /*outBuffer*/,
-                                   const ui::Dataspace /*reqDataspace*/,
-                                   const ui::PixelFormat /*reqPixelFormat*/,
-                                   const Rect& /*sourceCrop*/, float /*frameScale*/,
-                                   bool /*childrenOnly*/) override {
+    virtual status_t captureLayers(
+            const sp<IBinder>& /*parentHandle*/, sp<GraphicBuffer>* /*outBuffer*/,
+            const ui::Dataspace /*reqDataspace*/, const ui::PixelFormat /*reqPixelFormat*/,
+            const Rect& /*sourceCrop*/,
+            const std::unordered_set<sp<IBinder>,
+                                     ISurfaceComposer::SpHash<IBinder>>& /*excludeHandles*/,
+            float /*frameScale*/, bool /*childrenOnly*/) override {
         return NO_ERROR;
     }
     status_t clearAnimationFrameStats() override { return NO_ERROR; }

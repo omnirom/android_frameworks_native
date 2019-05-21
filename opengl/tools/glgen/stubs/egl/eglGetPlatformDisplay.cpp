@@ -6,9 +6,9 @@ android_eglGetPlatformDisplay
     const char * _exceptionType = NULL;
     const char * _exceptionMessage = NULL;
     EGLDisplay _returnValue = (EGLDisplay) 0;
-    EGLAttrib *attrib_list_base = (EGLAttrib *) 0;
+    jlong *attrib_list_base = (jlong *) 0;
     jint _remaining;
-    EGLAttrib *attrib_list = (EGLAttrib *) 0;
+    WrappedEGLAttribs attrib_list;
 
     if (!attrib_list_ref) {
         _exception = 1;
@@ -23,14 +23,14 @@ android_eglGetPlatformDisplay
         goto exit;
     }
     _remaining = _env->GetArrayLength(attrib_list_ref) - offset;
-    attrib_list_base = (EGLAttrib *)
+    attrib_list_base = (jlong *)
         _env->GetLongArrayElements(attrib_list_ref, (jboolean *)0);
-    attrib_list = attrib_list_base + offset;
+    attrib_list.init(attrib_list_base + offset, _remaining);
 
     _returnValue = eglGetPlatformDisplay(
         (EGLenum)platform,
         (void *)native_display,
-        (EGLAttrib *)attrib_list
+        attrib_list.attribs
     );
 
 exit:

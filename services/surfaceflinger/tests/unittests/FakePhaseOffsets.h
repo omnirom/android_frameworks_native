@@ -33,6 +33,11 @@ public:
     nsecs_t getCurrentAppOffset() override { return FAKE_PHASE_OFFSET_NS; }
     nsecs_t getCurrentSfOffset() override { return FAKE_PHASE_OFFSET_NS; }
 
+    PhaseOffsets::Offsets getOffsetsForRefreshRate(
+            RefreshRateConfigs::RefreshRateType /*refreshRateType*/) const override {
+        return getCurrentOffsets();
+    }
+
     // Returns early, early GL, and late offsets for Apps and SF.
     PhaseOffsets::Offsets getCurrentOffsets() const override {
         return Offsets{{FAKE_PHASE_OFFSET_NS, FAKE_PHASE_OFFSET_NS},
@@ -43,6 +48,8 @@ public:
     // This function should be called when the device is switching between different
     // refresh rates, to properly update the offsets.
     void setRefreshRateType(RefreshRateConfigs::RefreshRateType /*refreshRateType*/) override {}
+
+    nsecs_t getOffsetThresholdForNextVsync() const override { return FAKE_PHASE_OFFSET_NS; }
 
     // Returns current offsets in human friendly format.
     void dump(std::string& /*result*/) const override {}

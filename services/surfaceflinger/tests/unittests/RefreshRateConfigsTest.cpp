@@ -37,7 +37,9 @@ using RefreshRate = RefreshRateConfigs::RefreshRate;
 class RefreshRateConfigsTest : public testing::Test {
 protected:
     static constexpr int CONFIG_ID_60 = 0;
+    static constexpr hwc2_config_t HWC2_CONFIG_ID_60 = 0;
     static constexpr int CONFIG_ID_90 = 1;
+    static constexpr hwc2_config_t HWC2_CONFIG_ID_90 = 1;
     static constexpr int64_t VSYNC_60 = 16666667;
     static constexpr int64_t VSYNC_90 = 11111111;
 
@@ -49,6 +51,8 @@ protected:
         ASSERT_EQ(left.name, right.name);
         ASSERT_EQ(left.fps, right.fps);
     }
+
+    RefreshRateConfigs mConfigs;
 };
 
 RefreshRateConfigsTest::RefreshRateConfigsTest() {
@@ -69,26 +73,27 @@ namespace {
  */
 TEST_F(RefreshRateConfigsTest, zeroDeviceConfigs_storesPowerSavingConfig) {
     std::vector<std::shared_ptr<const HWC2::Display::Config>> displayConfigs;
-    RefreshRateConfigs configs(displayConfigs);
+    mConfigs.populate(displayConfigs);
 
     // We always store a configuration for screen off.
-    const auto& rates = configs.getRefreshRates();
+    const auto& rates = mConfigs.getRefreshRates();
     ASSERT_EQ(1, rates.size());
     const auto& powerSavingRate = rates.find(RefreshRateType::POWER_SAVING);
     ASSERT_NE(rates.end(), powerSavingRate);
     ASSERT_EQ(rates.end(), rates.find(RefreshRateType::PERFORMANCE));
     ASSERT_EQ(rates.end(), rates.find(RefreshRateType::DEFAULT));
 
-    RefreshRate expectedConfig = RefreshRate{SCREEN_OFF_CONFIG_ID, "ScreenOff", 0};
+    RefreshRate expectedConfig =
+            RefreshRate{SCREEN_OFF_CONFIG_ID, "ScreenOff", 0, HWC2_SCREEN_OFF_CONFIG_ID};
     assertRatesEqual(expectedConfig, *powerSavingRate->second);
 
-    ASSERT_TRUE(configs.getRefreshRate(RefreshRateType::POWER_SAVING));
-    assertRatesEqual(expectedConfig, *configs.getRefreshRate(RefreshRateType::POWER_SAVING));
-    ASSERT_FALSE(configs.getRefreshRate(RefreshRateType::PERFORMANCE));
-    ASSERT_FALSE(configs.getRefreshRate(RefreshRateType::DEFAULT));
+    ASSERT_TRUE(mConfigs.getRefreshRate(RefreshRateType::POWER_SAVING));
+    assertRatesEqual(expectedConfig, *mConfigs.getRefreshRate(RefreshRateType::POWER_SAVING));
+    ASSERT_FALSE(mConfigs.getRefreshRate(RefreshRateType::PERFORMANCE));
+    ASSERT_FALSE(mConfigs.getRefreshRate(RefreshRateType::DEFAULT));
 
     // Sanity check that getRefreshRate() does not modify the underlying configs.
-    ASSERT_EQ(1, configs.getRefreshRates().size());
+    ASSERT_EQ(1, mConfigs.getRefreshRates().size());
 }
 
 TEST_F(RefreshRateConfigsTest, oneDeviceConfig_storesDefaultConfig) {
@@ -97,9 +102,9 @@ TEST_F(RefreshRateConfigsTest, oneDeviceConfig_storesDefaultConfig) {
     auto config60 = HWC2::Display::Config::Builder(*display, CONFIG_ID_60);
     config60.setVsyncPeriod(VSYNC_60);
     displayConfigs.push_back(config60.build());
-    RefreshRateConfigs configs(displayConfigs);
+    mConfigs.populate(displayConfigs);
 
-    const auto& rates = configs.getRefreshRates();
+    const auto& rates = mConfigs.getRefreshRates();
     ASSERT_EQ(2, rates.size());
     const auto& powerSavingRate = rates.find(RefreshRateType::POWER_SAVING);
     const auto& defaultRate = rates.find(RefreshRateType::DEFAULT);
@@ -107,20 +112,21 @@ TEST_F(RefreshRateConfigsTest, oneDeviceConfig_storesDefaultConfig) {
     ASSERT_NE(rates.end(), defaultRate);
     ASSERT_EQ(rates.end(), rates.find(RefreshRateType::PERFORMANCE));
 
-    RefreshRate expectedPowerSavingConfig = RefreshRate{SCREEN_OFF_CONFIG_ID, "ScreenOff", 0};
+    RefreshRate expectedPowerSavingConfig =
+            RefreshRate{SCREEN_OFF_CONFIG_ID, "ScreenOff", 0, HWC2_SCREEN_OFF_CONFIG_ID};
     assertRatesEqual(expectedPowerSavingConfig, *powerSavingRate->second);
-    RefreshRate expectedDefaultConfig = RefreshRate{CONFIG_ID_60, "60fps", 60};
+    RefreshRate expectedDefaultConfig = RefreshRate{CONFIG_ID_60, "60fps", 60, HWC2_CONFIG_ID_60};
     assertRatesEqual(expectedDefaultConfig, *defaultRate->second);
 
-    ASSERT_TRUE(configs.getRefreshRate(RefreshRateType::POWER_SAVING));
+    ASSERT_TRUE(mConfigs.getRefreshRate(RefreshRateType::POWER_SAVING));
     assertRatesEqual(expectedPowerSavingConfig,
-                     *configs.getRefreshRate(RefreshRateType::POWER_SAVING));
-    ASSERT_TRUE(configs.getRefreshRate(RefreshRateType::DEFAULT));
-    assertRatesEqual(expectedDefaultConfig, *configs.getRefreshRate(RefreshRateType::DEFAULT));
-    ASSERT_FALSE(configs.getRefreshRate(RefreshRateType::PERFORMANCE));
+                     *mConfigs.getRefreshRate(RefreshRateType::POWER_SAVING));
+    ASSERT_TRUE(mConfigs.getRefreshRate(RefreshRateType::DEFAULT));
+    assertRatesEqual(expectedDefaultConfig, *mConfigs.getRefreshRate(RefreshRateType::DEFAULT));
+    ASSERT_FALSE(mConfigs.getRefreshRate(RefreshRateType::PERFORMANCE));
 
     // Sanity check that getRefreshRate() does not modify the underlying configs.
-    ASSERT_EQ(2, configs.getRefreshRates().size());
+    ASSERT_EQ(2, mConfigs.getRefreshRates().size());
 }
 
 TEST_F(RefreshRateConfigsTest, twoDeviceConfigs_storesPerformanceConfig) {
@@ -132,9 +138,9 @@ TEST_F(RefreshRateConfigsTest, twoDeviceConfigs_storesPerformanceConfig) {
     auto config90 = HWC2::Display::Config::Builder(*display, CONFIG_ID_90);
     config90.setVsyncPeriod(VSYNC_90);
     displayConfigs.push_back(config90.build());
-    RefreshRateConfigs configs(displayConfigs);
+    mConfigs.populate(displayConfigs);
 
-    const auto& rates = configs.getRefreshRates();
+    const auto& rates = mConfigs.getRefreshRates();
     ASSERT_EQ(3, rates.size());
     const auto& powerSavingRate = rates.find(RefreshRateType::POWER_SAVING);
     const auto& defaultRate = rates.find(RefreshRateType::DEFAULT);
@@ -143,21 +149,23 @@ TEST_F(RefreshRateConfigsTest, twoDeviceConfigs_storesPerformanceConfig) {
     ASSERT_NE(rates.end(), defaultRate);
     ASSERT_NE(rates.end(), performanceRate);
 
-    RefreshRate expectedPowerSavingConfig = RefreshRate{SCREEN_OFF_CONFIG_ID, "ScreenOff", 0};
+    RefreshRate expectedPowerSavingConfig =
+            RefreshRate{SCREEN_OFF_CONFIG_ID, "ScreenOff", 0, HWC2_SCREEN_OFF_CONFIG_ID};
     assertRatesEqual(expectedPowerSavingConfig, *powerSavingRate->second);
-    RefreshRate expectedDefaultConfig = RefreshRate{CONFIG_ID_60, "60fps", 60};
+    RefreshRate expectedDefaultConfig = RefreshRate{CONFIG_ID_60, "60fps", 60, HWC2_CONFIG_ID_60};
     assertRatesEqual(expectedDefaultConfig, *defaultRate->second);
-    RefreshRate expectedPerformanceConfig = RefreshRate{CONFIG_ID_90, "90fps", 90};
+    RefreshRate expectedPerformanceConfig =
+            RefreshRate{CONFIG_ID_90, "90fps", 90, HWC2_CONFIG_ID_90};
     assertRatesEqual(expectedPerformanceConfig, *performanceRate->second);
 
-    ASSERT_TRUE(configs.getRefreshRate(RefreshRateType::POWER_SAVING));
+    ASSERT_TRUE(mConfigs.getRefreshRate(RefreshRateType::POWER_SAVING));
     assertRatesEqual(expectedPowerSavingConfig,
-                     *configs.getRefreshRate(RefreshRateType::POWER_SAVING));
-    ASSERT_TRUE(configs.getRefreshRate(RefreshRateType::DEFAULT));
-    assertRatesEqual(expectedDefaultConfig, *configs.getRefreshRate(RefreshRateType::DEFAULT));
-    ASSERT_TRUE(configs.getRefreshRate(RefreshRateType::PERFORMANCE));
+                     *mConfigs.getRefreshRate(RefreshRateType::POWER_SAVING));
+    ASSERT_TRUE(mConfigs.getRefreshRate(RefreshRateType::DEFAULT));
+    assertRatesEqual(expectedDefaultConfig, *mConfigs.getRefreshRate(RefreshRateType::DEFAULT));
+    ASSERT_TRUE(mConfigs.getRefreshRate(RefreshRateType::PERFORMANCE));
     assertRatesEqual(expectedPerformanceConfig,
-                     *configs.getRefreshRate(RefreshRateType::PERFORMANCE));
+                     *mConfigs.getRefreshRate(RefreshRateType::PERFORMANCE));
 }
 } // namespace
 } // namespace scheduler
