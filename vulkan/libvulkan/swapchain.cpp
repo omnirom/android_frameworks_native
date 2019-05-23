@@ -222,6 +222,15 @@ struct Swapchain {
             window,
             &refresh_duration);
     }
+    uint64_t get_refresh_duration()
+    {
+        ANativeWindow* window = surface.window.get();
+        native_window_get_refresh_cycle_duration(
+            window,
+            &refresh_duration);
+        return static_cast<uint64_t>(refresh_duration);
+
+    }
 
     Surface& surface;
     uint32_t num_images;
@@ -1162,7 +1171,9 @@ VkResult CreateSwapchainKHR(VkDevice device,
     }
     uint32_t min_undequeued_buffers = static_cast<uint32_t>(query_value);
     uint32_t num_images =
-        (create_info->minImageCount - 1) + min_undequeued_buffers;
+        (swap_interval ? create_info->minImageCount
+                       : std::max(3u, create_info->minImageCount)) -
+        1 + min_undequeued_buffers;
 
     // Lower layer insists that we have at least two buffers. This is wasteful
     // and we'd like to relax it in the shared case, but not all the pieces are
@@ -1730,8 +1741,7 @@ VkResult GetRefreshCycleDurationGOOGLE(
     Swapchain& swapchain = *SwapchainFromHandle(swapchain_handle);
     VkResult result = VK_SUCCESS;
 
-    pDisplayTimingProperties->refreshDuration =
-            static_cast<uint64_t>(swapchain.refresh_duration);
+    pDisplayTimingProperties->refreshDuration = swapchain.get_refresh_duration();
 
     return result;
 }
