@@ -1671,7 +1671,7 @@ void SurfaceFlinger::onMessageReceived(int32_t what) NO_THREAD_SAFETY_ANALYSIS {
             }
 
             // For now, only propagate backpressure when missing a hwc frame.
-            if (hwcFrameMissed) {
+            if (hwcFrameMissed && !gpuFrameMissed) {
                 if (mPropagateBackpressure) {
                     signalLayerUpdate();
                     break;
@@ -3461,8 +3461,11 @@ bool SurfaceFlinger::doComposeSurfaces(const sp<DisplayDevice>& displayDevice,
                     break;
                 }
             }
-            if (needsProtected != renderEngine.isProtected() &&
-                renderEngine.useProtectedContext(needsProtected)) {
+            if (needsProtected != renderEngine.isProtected()) {
+                renderEngine.useProtectedContext(needsProtected);
+            }
+            if (needsProtected != display->getRenderSurface()->isProtected() &&
+                needsProtected == renderEngine.isProtected()) {
                 display->getRenderSurface()->setProtected(needsProtected);
             }
         }

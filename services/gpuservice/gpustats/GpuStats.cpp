@@ -19,10 +19,11 @@
 
 #include "GpuStats.h"
 
-#include <unordered_set>
-
+#include <cutils/properties.h>
 #include <log/log.h>
 #include <utils/Trace.h>
+
+#include <unordered_set>
 
 namespace android {
 
@@ -68,8 +69,8 @@ static void addLoadingTime(GraphicsEnv::Driver driver, int64_t driverLoadingTime
 
 void GpuStats::insert(const std::string& driverPackageName, const std::string& driverVersionName,
                       uint64_t driverVersionCode, int64_t driverBuildTime,
-                      const std::string& appPackageName, GraphicsEnv::Driver driver,
-                      bool isDriverLoaded, int64_t driverLoadingTime) {
+                      const std::string& appPackageName, const int32_t vulkanVersion,
+                      GraphicsEnv::Driver driver, bool isDriverLoaded, int64_t driverLoadingTime) {
     ATRACE_CALL();
 
     std::lock_guard<std::mutex> lock(mLock);
@@ -79,11 +80,13 @@ void GpuStats::insert(const std::string& driverPackageName, const std::string& d
           "\tdriverVersionCode[%" PRIu64 "]\n"
           "\tdriverBuildTime[%" PRId64 "]\n"
           "\tappPackageName[%s]\n"
+          "\tvulkanVersion[%d]\n"
           "\tdriver[%d]\n"
           "\tisDriverLoaded[%d]\n"
           "\tdriverLoadingTime[%" PRId64 "]",
           driverPackageName.c_str(), driverVersionName.c_str(), driverVersionCode, driverBuildTime,
-          appPackageName.c_str(), static_cast<int32_t>(driver), isDriverLoaded, driverLoadingTime);
+          appPackageName.c_str(), vulkanVersion, static_cast<int32_t>(driver), isDriverLoaded,
+          driverLoadingTime);
 
     if (!mGlobalStats.count(driverVersionCode)) {
         GpuStatsGlobalInfo globalInfo;
@@ -94,6 +97,7 @@ void GpuStats::insert(const std::string& driverPackageName, const std::string& d
         globalInfo.driverVersionName = driverVersionName;
         globalInfo.driverVersionCode = driverVersionCode;
         globalInfo.driverBuildTime = driverBuildTime;
+        globalInfo.vulkanVersion = vulkanVersion;
         mGlobalStats.insert({driverVersionCode, globalInfo});
     } else if (!addLoadingCount(driver, isDriverLoaded, &mGlobalStats[driverVersionCode])) {
         return;
@@ -115,6 +119,16 @@ void GpuStats::insert(const std::string& driverPackageName, const std::string& d
     }
 
     addLoadingTime(driver, driverLoadingTime, &mAppStats[appStatsKey]);
+}
+
+void GpuStats::interceptSystemDriverStatsLocked() {
+    // Append cpuVulkanVersion and glesVersion to system driver stats
+    if (!mGlobalStats.count(0) || mGlobalStats[0].glesVersion) {
+        return;
+    }
+
+    mGlobalStats[0].cpuVulkanVersion = property_get_int32("ro.cpuvulkan.version", 0);
+    mGlobalStats[0].glesVersion = property_get_int32("ro.opengles.version", 0);
 }
 
 void GpuStats::dump(const Vector<String16>& args, std::string* result) {
@@ -173,6 +187,8 @@ void GpuStats::dump(const Vector<String16>& args, std::string* result) {
 }
 
 void GpuStats::dumpGlobalLocked(std::string* result) {
+    interceptSystemDriverStatsLocked();
+
     for (const auto& ele : mGlobalStats) {
         result->append(ele.second.toString());
         result->append("\n");
@@ -192,6 +208,8 @@ void GpuStats::pullGlobalStats(std::vector<GpuStatsGlobalInfo>* outStats) {
     std::lock_guard<std::mutex> lock(mLock);
     outStats->clear();
     outStats->reserve(mGlobalStats.size());
+
+    interceptSystemDriverStatsLocked();
 
     for (const auto& ele : mGlobalStats) {
         outStats->emplace_back(ele.second);
