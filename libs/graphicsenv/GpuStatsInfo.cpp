@@ -34,6 +34,9 @@ status_t GpuStatsGlobalInfo::writeToParcel(Parcel* parcel) const {
     if ((status = parcel->writeInt32(glLoadingFailureCount)) != OK) return status;
     if ((status = parcel->writeInt32(vkLoadingCount)) != OK) return status;
     if ((status = parcel->writeInt32(vkLoadingFailureCount)) != OK) return status;
+    if ((status = parcel->writeInt32(vulkanVersion)) != OK) return status;
+    if ((status = parcel->writeInt32(cpuVulkanVersion)) != OK) return status;
+    if ((status = parcel->writeInt32(glesVersion)) != OK) return status;
     return OK;
 }
 
@@ -47,6 +50,9 @@ status_t GpuStatsGlobalInfo::readFromParcel(const Parcel* parcel) {
     if ((status = parcel->readInt32(&glLoadingFailureCount)) != OK) return status;
     if ((status = parcel->readInt32(&vkLoadingCount)) != OK) return status;
     if ((status = parcel->readInt32(&vkLoadingFailureCount)) != OK) return status;
+    if ((status = parcel->readInt32(&vulkanVersion)) != OK) return status;
+    if ((status = parcel->readInt32(&cpuVulkanVersion)) != OK) return status;
+    if ((status = parcel->readInt32(&glesVersion)) != OK) return status;
     return OK;
 }
 
@@ -60,6 +66,9 @@ std::string GpuStatsGlobalInfo::toString() const {
     StringAppendF(&result, "glLoadingFailureCount = %d\n", glLoadingFailureCount);
     StringAppendF(&result, "vkLoadingCount = %d\n", vkLoadingCount);
     StringAppendF(&result, "vkLoadingFailureCount = %d\n", vkLoadingFailureCount);
+    StringAppendF(&result, "vulkanVersion = %d\n", vulkanVersion);
+    StringAppendF(&result, "cpuVulkanVersion = %d\n", cpuVulkanVersion);
+    StringAppendF(&result, "glesVersion = %d\n", glesVersion);
     return result;
 }
 
