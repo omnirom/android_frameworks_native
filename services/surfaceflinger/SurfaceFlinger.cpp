@@ -1515,7 +1515,7 @@ void SurfaceFlinger::setVsyncEnabled(bool enabled) {
     auto displayId = getInternalDisplayIdLocked();
     if (mNextVsyncSource) {
         // Disable current vsync source before enabling the next source
-        if (mActiveVsyncSource && (mActiveVsyncSource != mNextVsyncSource)) {
+        if (mActiveVsyncSource) {
             displayId = mActiveVsyncSource->getId();
             getHwComposer().setVsyncEnabled(*displayId, HWC2::Vsync::Disable);
         }
@@ -2056,8 +2056,8 @@ void SurfaceFlinger::postComposition()
 
     getBE().mDisplayTimeline.updateSignalTimes();
     mPreviousPresentFences[1] = mPreviousPresentFences[0];
-    mPreviousPresentFences[0] = displayDevice
-            ? getHwComposer().getPresentFence(*displayDevice->getId())
+    mPreviousPresentFences[0] = mActiveVsyncSource
+            ? getHwComposer().getPresentFence(*mActiveVsyncSource->getId())
             : Fence::NO_FENCE;
     auto presentFenceTime = std::make_shared<FenceTime>(mPreviousPresentFences[0]);
     getBE().mDisplayTimeline.push(presentFenceTime);
@@ -2307,6 +2307,24 @@ sp<DisplayDevice> SurfaceFlinger::getVsyncSource() {
     }
 
     return NULL;
+}
+
+void SurfaceFlinger::updateVsyncSource()
+            NO_THREAD_SAFETY_ANALYSIS {
+    nsecs_t vsync = getVsyncPeriod();
+
+    if (mNextVsyncSource == NULL) {
+        // Switch off vsync for the last enabled source
+        mScheduler->disableHardwareVsync(true);
+        mScheduler->onScreenReleased(mAppConnectionHandle);
+    } else if (mNextVsyncSource && (mActiveVsyncSource == NULL)) {
+        mScheduler->onScreenAcquired(mAppConnectionHandle);
+        mScheduler->resyncToHardwareVsync(true, vsync);
+    } else if ((mNextVsyncSource != NULL) &&
+        (mActiveVsyncSource != NULL)) {
+        // Switch vsync to the new source
+        mScheduler->resyncToHardwareVsync(true, vsync);
+    }
 }
 
 // Returns a data space that fits all visible layers.  The returned data space
@@ -2608,6 +2626,7 @@ void SurfaceFlinger::processDisplayHotplugEventsLocked() {
             }
             mDisplaysList.remove(getDisplayDeviceLocked(mPhysicalDisplayTokens[info->id]));
             mNextVsyncSource = getVsyncSource();
+            updateVsyncSource();
             mPhysicalDisplayTokens.erase(info->id);
         }
 
@@ -4526,6 +4545,11 @@ void SurfaceFlinger::setPowerModeInternal(const sp<DisplayDevice>& display, int 
 
     mNextVsyncSource = getVsyncSource();
 
+    // Dummy display created by LibSurfaceFlinger unit test
+    // for setPowerModeInternal test cases.
+    bool isDummyDisplay = (std::find(mDisplaysList.begin(),
+        mDisplaysList.end(), display) == mDisplaysList.end());
+
     if (mInterceptor->isEnabled()) {
         mInterceptor->savePowerModeUpdate(display->getSequenceId(), mode);
     }
@@ -4533,32 +4557,28 @@ void SurfaceFlinger::setPowerModeInternal(const sp<DisplayDevice>& display, int 
     if (currentMode == HWC_POWER_MODE_OFF) {
         // Turn on the display
         getHwComposer().setPowerMode(*displayId, mode);
-        if (display->isPrimary() && mode != HWC_POWER_MODE_DOZE_SUSPEND) {
-            mScheduler->onScreenAcquired(mAppConnectionHandle);
-            mScheduler->resyncToHardwareVsync(true, getVsyncPeriod());
+        if (isDummyDisplay) {
+            if (display->isPrimary() && mode != HWC_POWER_MODE_DOZE_SUSPEND) {
+                mScheduler->onScreenAcquired(mAppConnectionHandle);
+                mScheduler->resyncToHardwareVsync(true, getVsyncPeriod());
+            }
+        } else {
+            updateVsyncSource();
         }
 
         mVisibleRegionsDirty = true;
         mHasPoweredOff = true;
         repaintEverything();
-
-        struct sched_param param = {0};
-        param.sched_priority = 1;
-        if (sched_setscheduler(0, SCHED_FIFO, &param) != 0) {
-            ALOGW("Couldn't set SCHED_FIFO on display on");
-        }
     } else if (mode == HWC_POWER_MODE_OFF) {
         // Turn off the display
-        struct sched_param param = {0};
-        if (sched_setscheduler(0, SCHED_OTHER, &param) != 0) {
-            ALOGW("Couldn't set SCHED_OTHER on display off");
+        if (isDummyDisplay) {
+            if (display->isPrimary() && currentMode != HWC_POWER_MODE_DOZE_SUSPEND) {
+                mScheduler->disableHardwareVsync(true);
+                mScheduler->onScreenReleased(mAppConnectionHandle);
+            }
+        } else {
+            updateVsyncSource();
         }
-
-        if (display->isPrimary() && currentMode != HWC_POWER_MODE_DOZE_SUSPEND) {
-            mScheduler->disableHardwareVsync(true);
-            mScheduler->onScreenReleased(mAppConnectionHandle);
-        }
-
         getHwComposer().setPowerMode(*displayId, mode);
         mVisibleRegionsDirty = true;
         // from this point on, SF will stop drawing on this display
@@ -4566,20 +4586,41 @@ void SurfaceFlinger::setPowerModeInternal(const sp<DisplayDevice>& display, int 
                mode == HWC_POWER_MODE_NORMAL) {
         // Update display while dozing
         getHwComposer().setPowerMode(*displayId, mode);
-        if (display->isPrimary() && currentMode == HWC_POWER_MODE_DOZE_SUSPEND) {
-            mScheduler->onScreenAcquired(mAppConnectionHandle);
-            mScheduler->resyncToHardwareVsync(true, getVsyncPeriod());
+        if (isDummyDisplay) {
+            if (display->isPrimary() && currentMode == HWC_POWER_MODE_DOZE_SUSPEND) {
+                mScheduler->onScreenAcquired(mAppConnectionHandle);
+                mScheduler->resyncToHardwareVsync(true, getVsyncPeriod());
+            }
+        } else {
+            updateVsyncSource();
         }
     } else if (mode == HWC_POWER_MODE_DOZE_SUSPEND) {
         // Leave display going to doze
-        if (display->isPrimary()) {
-            mScheduler->disableHardwareVsync(true);
-            mScheduler->onScreenReleased(mAppConnectionHandle);
+        if (isDummyDisplay) {
+            if (display->isPrimary()) {
+                mScheduler->disableHardwareVsync(true);
+                mScheduler->onScreenReleased(mAppConnectionHandle);
+            }
+        } else {
+            updateVsyncSource();
         }
         getHwComposer().setPowerMode(*displayId, mode);
     } else {
         ALOGE("Attempting to set unknown power mode: %d\n", mode);
         getHwComposer().setPowerMode(*displayId, mode);
+    }
+
+    const sp<DisplayDevice> vsyncSource = getVsyncSource();
+    struct sched_param param = {0};
+    if (vsyncSource != NULL) {
+        param.sched_priority = 1;
+        if (sched_setscheduler(0, SCHED_FIFO, &param) != 0) {
+            ALOGW("Couldn't set SCHED_FIFO on display on");
+        }
+    } else {
+        if (sched_setscheduler(0, SCHED_OTHER, &param) != 0) {
+            ALOGW("Couldn't set SCHED_OTHER on display off");
+        }
     }
 
     if (display->isPrimary()) {
@@ -5372,9 +5413,9 @@ status_t SurfaceFlinger::CheckTransactCodeCredentials(uint32_t code) {
         code == IBinder::SYSPROPS_TRANSACTION) {
         return OK;
     }
-    // Numbers from 1000 to 1034 are currently used for backdoors. The code
+    // Numbers from 1000 to 1035 and 20000 are currently used for backdoors. The code
     // in onTransact verifies that the user is root, and has access to use SF.
-    if (code >= 1000 && code <= 1035) {
+    if ((code >= 1000 && code <= 1035) || (code == 20000)) {
         ALOGV("Accessing SurfaceFlinger through backdoor code: %u", code);
         return OK;
     }
@@ -5711,9 +5752,9 @@ status_t SurfaceFlinger::onTransact(uint32_t code, const Parcel& data, Parcel* r
                 return NO_ERROR;
             }
             case 20000: {
-              int disp = data.readInt32();
+              uint64_t disp = data.readUint64();
               int mode = data.readInt32();
-              ALOGI("Debug: Set display = %d, power mode = %d", disp, mode);
+              ALOGI("Debug: Set display = %llu, power mode = %d", (unsigned long long)disp, mode);
               setPowerMode(getPhysicalDisplayToken(disp), mode);
               return NO_ERROR;
             }
