@@ -247,6 +247,9 @@ public:
                              useIdentityTransform, rotation);
     }
 
+    virtual status_t captureScreen(uint64_t displayOrLayerStack, ui::Dataspace* outDataspace,
+                                   sp<GraphicBuffer>* outBuffer) = 0;
+
     template <class AA>
     struct SpHash {
         size_t operator()(const sp<AA>& k) const { return std::hash<AA*>()(k.get()); }
@@ -422,6 +425,16 @@ public:
      */
     virtual status_t setDisplayBrightness(const sp<IBinder>& displayToken,
                                           float brightness) const = 0;
+
+    /*
+     * Sends a power hint to the composer. This function is asynchronous.
+     *
+     * hintId
+     *      hint id according to android::hardware::power::V1_0::PowerHint
+     *
+     * Returns NO_ERROR upon success.
+     */
+    virtual status_t notifyPowerHint(int32_t hintId) = 0;
 };
 
 // ----------------------------------------------------------------------------
@@ -473,6 +486,8 @@ public:
         GET_ALLOWED_DISPLAY_CONFIGS,
         GET_DISPLAY_BRIGHTNESS_SUPPORT,
         SET_DISPLAY_BRIGHTNESS,
+        CAPTURE_SCREEN_BY_ID,
+        NOTIFY_POWER_HINT,
         // Always append new enum to the end.
     };
 

@@ -142,6 +142,28 @@ public:
         return result;
     }
 
+    virtual status_t captureScreen(uint64_t displayOrLayerStack, ui::Dataspace* outDataspace,
+                                   sp<GraphicBuffer>* outBuffer) {
+        Parcel data, reply;
+        data.writeInterfaceToken(ISurfaceComposer::getInterfaceDescriptor());
+        data.writeUint64(displayOrLayerStack);
+        status_t result = remote()->transact(BnSurfaceComposer::CAPTURE_SCREEN_BY_ID, data, &reply);
+        if (result != NO_ERROR) {
+            ALOGE("captureScreen failed to transact: %d", result);
+            return result;
+        }
+        result = reply.readInt32();
+        if (result != NO_ERROR) {
+            ALOGE("captureScreen failed to readInt32: %d", result);
+            return result;
+        }
+
+        *outDataspace = static_cast<ui::Dataspace>(reply.readInt32());
+        *outBuffer = new GraphicBuffer();
+        reply.read(**outBuffer);
+        return result;
+    }
+
     virtual status_t captureLayers(
             const sp<IBinder>& layerHandleBinder, sp<GraphicBuffer>* outBuffer,
             const ui::Dataspace reqDataspace, const ui::PixelFormat reqPixelFormat,
@@ -933,6 +955,27 @@ public:
         }
         return NO_ERROR;
     }
+
+    virtual status_t notifyPowerHint(int32_t hintId) {
+        Parcel data, reply;
+        status_t error = data.writeInterfaceToken(ISurfaceComposer::getInterfaceDescriptor());
+        if (error != NO_ERROR) {
+            ALOGE("notifyPowerHint: failed to write interface token: %d", error);
+            return error;
+        }
+        error = data.writeInt32(hintId);
+        if (error != NO_ERROR) {
+            ALOGE("notifyPowerHint: failed to write hintId: %d", error);
+            return error;
+        }
+        error = remote()->transact(BnSurfaceComposer::NOTIFY_POWER_HINT, data, &reply,
+                                   IBinder::FLAG_ONEWAY);
+        if (error != NO_ERROR) {
+            ALOGE("notifyPowerHint: failed to transact: %d", error);
+            return error;
+        }
+        return NO_ERROR;
+    }
 };
 
 // Out-of-line virtual method definition to trigger vtable emission in this
@@ -1039,6 +1082,19 @@ status_t BnSurfaceComposer::onTransact(
             if (res == NO_ERROR) {
                 reply->write(*outBuffer);
                 reply->writeBool(capturedSecureLayers);
+            }
+            return NO_ERROR;
+        }
+        case CAPTURE_SCREEN_BY_ID: {
+            CHECK_INTERFACE(ISurfaceComposer, data, reply);
+            uint64_t displayOrLayerStack = data.readUint64();
+            ui::Dataspace outDataspace = ui::Dataspace::V0_SRGB;
+            sp<GraphicBuffer> outBuffer;
+            status_t res = captureScreen(displayOrLayerStack, &outDataspace, &outBuffer);
+            reply->writeInt32(res);
+            if (res == NO_ERROR) {
+                reply->writeInt32(static_cast<int32_t>(outDataspace));
+                reply->write(*outBuffer);
             }
             return NO_ERROR;
         }
@@ -1520,6 +1576,16 @@ status_t BnSurfaceComposer::onTransact(
                 return error;
             }
             return setDisplayBrightness(displayToken, brightness);
+        }
+        case NOTIFY_POWER_HINT: {
+            CHECK_INTERFACE(ISurfaceComposer, data, reply);
+            int32_t hintId;
+            status_t error = data.readInt32(&hintId);
+            if (error != NO_ERROR) {
+                ALOGE("notifyPowerHint: failed to read hintId: %d", error);
+                return error;
+            }
+            return notifyPowerHint(hintId);
         }
         default: {
             return BBinder::onTransact(code, data, reply, flags);
