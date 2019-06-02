@@ -483,6 +483,8 @@ private:
     void onHotplugReceived(int32_t sequenceId, hwc2_display_t hwcDisplayId,
                            HWC2::Connection connection) override;
     void onRefreshReceived(int32_t sequenceId, hwc2_display_t hwcDisplayId) override;
+    // For Async power mode
+    void setPowerModeOnMainThread(const sp<IBinder>& displayToken, int mode);
 
     /* ------------------------------------------------------------------------
      * Message handling
