@@ -117,6 +117,10 @@
 #include <android/hardware/configstore/1.1/types.h>
 #include <android/hardware/power/1.0/IPower.h>
 #include <configstore/Utils.h>
+#include <vendor/display/config/1.1/IDisplayConfig.h>
+#include <vendor/display/config/1.2/IDisplayConfig.h>
+#include <vendor/display/config/1.6/IDisplayConfig.h>
+#include <vendor/display/config/1.7/IDisplayConfig.h>
 
 #include <layerproto/LayerProtoParser.h>
 #include "SurfaceFlingerProperties.h"
@@ -2903,6 +2907,16 @@ void SurfaceFlinger::processDisplayChangesLocked() {
                     mDisplays.emplace(displayToken,
                                       setupNewDisplayDeviceInternal(displayToken, displayId, state,
                                                                     dispSurface, producer));
+                    // Check if power mode override is available and supported by HWC.
+                    using vendor::display::config::V1_7::IDisplayConfig;
+                    android::sp<IDisplayConfig> disp_config_v1_7 = IDisplayConfig::getService();
+                    if (disp_config_v1_7 != NULL) {
+                        const auto hwcDisplayId = getHwComposer().fromPhysicalDisplayId(*displayId);
+                        if (disp_config_v1_7->isPowerModeOverrideSupported(*hwcDisplayId)) {
+                            sp<DisplayDevice> display = getDisplayDeviceLocked(displayToken);
+                            display->setPowerModeOverrideConfig(true);
+                        }
+                    }
                     if (!state.isVirtual()) {
                         mDisplaysList.push_back(getDisplayDeviceLocked(displayToken));
                         LOG_ALWAYS_FATAL_IF(!displayId);
@@ -4679,7 +4693,7 @@ void SurfaceFlinger::setPowerModeInternal(const sp<DisplayDevice>& display, int 
     ALOGD("Finished setting power mode %d on display %s", mode, to_string(*displayId).c_str());
 }
 
-void SurfaceFlinger::setPowerMode(const sp<IBinder>& displayToken, int mode) {
+void SurfaceFlinger::setPowerModeOnMainThread(const sp<IBinder>& displayToken, int mode) {
     postMessageSync(new LambdaMessage([&]() NO_THREAD_SAFETY_ANALYSIS {
         const auto display = getDisplayDevice(displayToken);
         if (!display) {
@@ -4691,6 +4705,66 @@ void SurfaceFlinger::setPowerMode(const sp<IBinder>& displayToken, int mode) {
             setPowerModeInternal(display, mode);
         }
     }));
+}
+
+void SurfaceFlinger::setPowerMode(const sp<IBinder>& displayToken, int mode) {
+    sp<DisplayDevice> display(getDisplayDevice(displayToken));
+    const auto displayId = display->getId();
+    const auto hwcDisplayId = getHwComposer().fromPhysicalDisplayId(*displayId);
+
+    if (!display) {
+        ALOGE("Attempt to set power mode %d for invalid display token %p", mode,
+              displayToken.get());
+        return;
+    } else if (display->isVirtual()) {
+        ALOGW("Attempt to set power mode %d for virtual display", mode);
+        return;
+    }
+
+    // Fallback to default power state behavior as HWC does not support power mode override.
+    using vendor::display::config::V1_7::IDisplayConfig;
+    static android::sp<IDisplayConfig> disp_config_v1_7 = IDisplayConfig::getService();
+    if ((disp_config_v1_7 == NULL) || !display->getPowerModeOverrideConfig()) {
+       setPowerModeOnMainThread(displayToken, mode);
+       return;
+    }
+
+    // Call into HWC to change hardware power state first, followed by surfaceflinger
+    // power state while stepping up i.e. off -> on, dozesuspend -> doze/on.
+    // Let surfaceflinger power state change happen first, followed by hardware power
+    // state while stepping down i.e. on -> off, doze/on -> dozesuspend.
+    IDisplayConfig::PowerMode hwcMode = IDisplayConfig::PowerMode::Off;
+    switch (mode) {
+        case HWC_POWER_MODE_DOZE:         hwcMode = IDisplayConfig::PowerMode::Doze;        break;
+        case HWC_POWER_MODE_NORMAL:       hwcMode = IDisplayConfig::PowerMode::On;          break;
+        case HWC_POWER_MODE_DOZE_SUSPEND: hwcMode = IDisplayConfig::PowerMode::DozeSuspend; break;
+        default:                          hwcMode = IDisplayConfig::PowerMode::Off;         break;
+    }
+
+    bool step_up = false;
+    int currentMode = display->getPowerMode();
+    if (currentMode == HWC_POWER_MODE_OFF) {
+        if (mode == HWC_POWER_MODE_DOZE || mode == HWC_POWER_MODE_NORMAL) {
+            step_up = true;
+        }
+    } else if (currentMode == HWC_POWER_MODE_DOZE_SUSPEND) {
+        if (mode == HWC_POWER_MODE_DOZE || mode == HWC_POWER_MODE_NORMAL) {
+            step_up = true;
+        }
+    }
+
+    // Change hardware state first while stepping up.
+    if (step_up) {
+        disp_config_v1_7->setPowerMode(*hwcDisplayId, hwcMode);
+    }
+
+    // Change SF state now.
+    setPowerModeOnMainThread(displayToken, mode);
+
+    // Change hardware state now while stepping down.
+    if (!step_up) {
+        disp_config_v1_7->setPowerMode(*hwcDisplayId, hwcMode);
+    }
 }
 
 // ---------------------------------------------------------------------------
