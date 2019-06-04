@@ -1522,7 +1522,7 @@ status_t SurfaceFlinger::notifyPowerHint(int32_t hintId) {
 // ----------------------------------------------------------------------------
 
 sp<IDisplayEventConnection> SurfaceFlinger::createDisplayEventConnection(
-        ISurfaceComposer::VsyncSource vsyncSource) {
+        ISurfaceComposer::VsyncSource vsyncSource, ISurfaceComposer::ConfigChanged configChanged) {
     auto resyncCallback = mScheduler->makeResyncCallback([this] {
         Mutex::Autolock lock(mStateLock);
         return getVsyncPeriod();
@@ -1531,7 +1531,8 @@ sp<IDisplayEventConnection> SurfaceFlinger::createDisplayEventConnection(
     const auto& handle =
             vsyncSource == eVsyncSourceSurfaceFlinger ? mSfConnectionHandle : mAppConnectionHandle;
 
-    return mScheduler->createDisplayEventConnection(handle, std::move(resyncCallback));
+    return mScheduler->createDisplayEventConnection(handle, std::move(resyncCallback),
+                                                    configChanged);
 }
 
 // ----------------------------------------------------------------------------
