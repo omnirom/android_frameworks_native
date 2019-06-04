@@ -274,8 +274,12 @@ status_t BufferQueueProducer::waitForFreeSlotThenRelock(FreeSlotCaller caller,
         // This check is only done if a buffer has already been queued
         if (mCore->mBufferHasBeenQueued &&
                 dequeuedCount >= mCore->mMaxDequeuedBufferCount) {
-            BQ_LOGE("%s: attempting to exceed the max dequeued buffer count "
-                    "(%d)", callerString, mCore->mMaxDequeuedBufferCount);
+            // Supress error logs when timeout is non-negative.
+            if (mDequeueTimeout < 0) {
+                BQ_LOGE("%s: attempting to exceed the max dequeued buffer "
+                        "count (%d)", callerString,
+                        mCore->mMaxDequeuedBufferCount);
+            }
             return INVALID_OPERATION;
         }
 
@@ -882,7 +886,7 @@ status_t BufferQueueProducer::queueBuffer(int slot,
         item.mFence = acquireFence;
         item.mFenceTime = acquireFenceTime;
         item.mIsDroppable = mCore->mAsyncMode ||
-                (!mCore->mLegacyBufferDrop && mConsumerIsSurfaceFlinger) ||
+                (mConsumerIsSurfaceFlinger && mCore->mQueueBufferCanDrop) ||
                 (mCore->mLegacyBufferDrop && mCore->mQueueBufferCanDrop) ||
                 (mCore->mSharedBufferMode && mCore->mSharedBufferSlot == slot);
         item.mSurfaceDamage = surfaceDamage;
@@ -1493,7 +1497,9 @@ status_t BufferQueueProducer::setDequeueTimeout(nsecs_t timeout) {
     BQ_LOGV("setDequeueTimeout: %" PRId64, timeout);
 
     std::lock_guard<std::mutex> lock(mCore->mMutex);
-    int delta = mCore->getMaxBufferCountLocked(mCore->mAsyncMode, false,
+    bool dequeueBufferCannotBlock =
+            timeout >= 0 ? false : mCore->mDequeueBufferCannotBlock;
+    int delta = mCore->getMaxBufferCountLocked(mCore->mAsyncMode, dequeueBufferCannotBlock,
             mCore->mMaxBufferCount) - mCore->getMaxBufferCountLocked();
     if (!mCore->adjustAvailableSlotsLocked(delta)) {
         BQ_LOGE("setDequeueTimeout: BufferQueue failed to adjust the number of "
@@ -1502,11 +1508,9 @@ status_t BufferQueueProducer::setDequeueTimeout(nsecs_t timeout) {
     }
 
     mDequeueTimeout = timeout;
-    if (timeout >= 0) {
-        mCore->mDequeueBufferCannotBlock = false;
-        if (timeout != 0) {
-            mCore->mQueueBufferCanDrop = false;
-        }
+    mCore->mDequeueBufferCannotBlock = dequeueBufferCannotBlock;
+    if (timeout > 0) {
+        mCore->mQueueBufferCanDrop = false;
     }
 
     VALIDATE_CONSISTENCY();
