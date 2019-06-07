@@ -434,6 +434,10 @@ void SurfaceFlinger::onFirstRef()
 SurfaceFlinger::~SurfaceFlinger()
 {
     if (mDolphinFuncsEnabled) dlclose(mDolphinHandle);
+    // debug total open files
+    if (mFileOpen.debugFileCountFd >= 0) {
+        close(mFileOpen.debugFileCountFd);
+    }
 }
 
 void SurfaceFlinger::binderDied(const wp<IBinder>& /* who */)
@@ -748,6 +752,9 @@ void SurfaceFlinger::init() {
 
     mRefreshRateConfigs.populate(getHwComposer().getConfigs(*display->getId()));
     mRefreshRateStats.setConfigMode(getHwComposer().getActiveConfigIndex(*display->getId()));
+
+    // debug open files count by process
+     mFileOpen.debugFileCountFd = open(mFileOpen.debugCountOpenFiles, O_WRONLY|O_CREAT,0664);
 
     ALOGV("Done initializing");
 }
@@ -4963,12 +4970,72 @@ void SurfaceFlinger::dumpMemoryAllocations(bool dump)
     }
 }
 
+void SurfaceFlinger::printOpenFds() {
+    char path[100] = "";
+    snprintf(path, sizeof(path), "/proc/%d/fd", getpid());
+    DIR *dir = opendir(path);
+    if (!dir) {
+        return;
+    }
+    struct dirent* de;
+    char timeStamp[32];
+    char hms[32];
+    char formatting[30] = "=======================\n";
+    long millis;
+    struct timeval tv;
+    struct tm *ptm;
+    int count = 1;
+    gettimeofday(&tv, NULL);
+    ptm = localtime(&tv.tv_sec);
+    strftime (hms, sizeof (hms), "%H:%M:%S", ptm);
+    millis = tv.tv_usec / 1000;
+    snprintf(timeStamp, sizeof(timeStamp), "Timestamp: %s.%03ld\n", hms, millis);
+    write(mFileOpen.debugFileCountFd, timeStamp, strlen(timeStamp));
+    write(mFileOpen.debugFileCountFd, formatting, strlen(formatting));
+    while ((de = readdir(dir))) {
+        if (!strcmp(de->d_name, ".") || !strcmp(de->d_name, "..")) {
+            continue;
+        }
+        char name[300] = "";
+        char pathFull[300] = "";
+        size_t name_size = 0;
+        snprintf(pathFull, sizeof(pathFull) - 1, "%s/%s",path,de->d_name);
+        if ((name_size = readlink(pathFull, name, sizeof(name) - 1)) >= 0) {
+             char formatString[300 +3];
+             name[name_size] = '\0';
+             snprintf(formatString, sizeof(formatString) - 1, "%d. %s\n", count++, name);
+             write(mFileOpen.debugFileCountFd, formatString, strlen(formatString));
+        }
+    }
+    closedir(dir);
+    write(mFileOpen.debugFileCountFd, formatting, strlen(formatting));
+}
+
 void SurfaceFlinger::dumpDrawCycle(bool prePrepare) {
     Mutex::Autolock _l(mFileDump.lock);
 
     dumpMemoryAllocations(prePrepare);
     // User might stop dump collection in middle of prepare & commit.
     // Collect dumpsys again after commit and replace.
+
+    // debug total open files count;
+    static int maxdumpCount =200;
+    if (mFileOpen.debugFileCountFd >= 0) {
+        int tmpFd = dup(mFileOpen.debugFileCountFd);
+        if (tmpFd >=0) {
+            if (tmpFd > (mFileOpen.maxFilecount + 100)) {
+                ALOGE("Total file open count =%d", tmpFd);
+                printOpenFds();
+                mFileOpen.maxFilecount = tmpFd;
+            }
+            close(tmpFd);
+            tmpFd = -1;
+        }
+        if (!maxdumpCount--) {
+            maxdumpCount =200;
+            lseek(mFileOpen.debugFileCountFd,0,SEEK_SET);
+        }
+    }
     if (!mFileDump.running && !mFileDump.replaceAfterCommit) {
         return;
     }
