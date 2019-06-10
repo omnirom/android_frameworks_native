@@ -157,6 +157,10 @@ public:
     int getActiveConfig() const;
     void setActiveConfig(int mode);
 
+    // PowerMode Override Config
+    void setPowerModeOverrideConfig(bool supported);
+    bool getPowerModeOverrideConfig() const;
+
     // release HWC resources (if any) for removable displays
     void disconnect();
 
@@ -208,6 +212,9 @@ private:
 
     // TODO(b/74619554): Remove special cases for primary display.
     const bool mIsPrimary;
+
+    // PowerMode Override
+    bool mIsPowerModeOverride;
 };
 
 struct DisplayDeviceState {

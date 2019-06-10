@@ -115,7 +115,12 @@
 #include <android/hardware/configstore/1.0/ISurfaceFlingerConfigs.h>
 #include <android/hardware/configstore/1.1/ISurfaceFlingerConfigs.h>
 #include <android/hardware/configstore/1.1/types.h>
+#include <android/hardware/power/1.0/IPower.h>
 #include <configstore/Utils.h>
+#include <vendor/display/config/1.1/IDisplayConfig.h>
+#include <vendor/display/config/1.2/IDisplayConfig.h>
+#include <vendor/display/config/1.6/IDisplayConfig.h>
+#include <vendor/display/config/1.7/IDisplayConfig.h>
 
 #include <layerproto/LayerProtoParser.h>
 #include "SurfaceFlingerProperties.h"
@@ -127,6 +132,7 @@ using namespace android::hardware::configstore;
 using namespace android::hardware::configstore::V1_0;
 using namespace android::sysprop;
 
+using android::hardware::power::V1_0::PowerHint;
 using base::StringAppendF;
 using ui::ColorMode;
 using ui::Dataspace;
@@ -621,7 +627,11 @@ uint32_t SurfaceFlinger::getNewTexture() {
 }
 
 void SurfaceFlinger::deleteTextureAsync(uint32_t texture) {
-    postMessageAsync(new LambdaMessage([=] { getRenderEngine().deleteTextures(1, &texture); }));
+    std::lock_guard lock(mTexturePoolMutex);
+    // We don't change the pool size, so the fix-up logic in postComposition will decide whether
+    // to actually delete this or not based on mTexturePoolSize
+    mTexturePool.push_back(texture);
+    ATRACE_INT("TexturePoolSize", mTexturePool.size());
 }
 
 // Do not call property_set on main thread which will be blocked by init
@@ -726,13 +736,15 @@ void SurfaceFlinger::init() {
         ALOGE("Run StartPropertySetThread failed!");
     }
 
-    if (mScheduler->isIdleTimerEnabled()) {
-        mScheduler->setChangeRefreshRateCallback(
-                [this](RefreshRateType type, Scheduler::ConfigEvent event) {
-                    Mutex::Autolock lock(mStateLock);
-                    setRefreshRateTo(type, event);
-                });
-    }
+    mScheduler->setChangeRefreshRateCallback(
+            [this](RefreshRateType type, Scheduler::ConfigEvent event) {
+                Mutex::Autolock lock(mStateLock);
+                setRefreshRateTo(type, event);
+            });
+    mScheduler->setGetVsyncPeriodCallback([this] {
+        Mutex::Autolock lock(mStateLock);
+        return getVsyncPeriod();
+    });
 
     mRefreshRateConfigs.populate(getHwComposer().getConfigs(*display->getId()));
     mRefreshRateStats.setConfigMode(getHwComposer().getActiveConfigIndex(*display->getId()));
@@ -1010,7 +1022,7 @@ bool SurfaceFlinger::performSetActiveConfig() {
     if (mCheckPendingFence) {
         if (previousFrameMissed()) {
             // fence has not signaled yet. wait for the next invalidate
-            mEventQueue->invalidateForHWC();
+            mEventQueue->invalidate();
             return true;
         }
 
@@ -1061,7 +1073,7 @@ bool SurfaceFlinger::performSetActiveConfig() {
 
     // we need to submit an empty frame to HWC to start the process
     mCheckPendingFence = true;
-    mEventQueue->invalidateForHWC();
+    mEventQueue->invalidate();
     return false;
 }
 
@@ -1072,6 +1084,7 @@ status_t SurfaceFlinger::getDisplayColorModes(const sp<IBinder>& displayToken,
     }
 
     std::vector<ColorMode> modes;
+    bool isInternalDisplay = false;
     {
         ConditionalLock lock(mStateLock, std::this_thread::get_id() != mMainThreadId);
 
@@ -1081,9 +1094,20 @@ status_t SurfaceFlinger::getDisplayColorModes(const sp<IBinder>& displayToken,
         }
 
         modes = getHwComposer().getColorModes(*displayId);
+        isInternalDisplay = displayId == getInternalDisplayIdLocked();
     }
     outColorModes->clear();
-    std::copy(modes.cbegin(), modes.cend(), std::back_inserter(*outColorModes));
+
+    // If it's built-in display and the configuration claims it's not wide color capable,
+    // filter out all wide color modes. The typical reason why this happens is that the
+    // hardware is not good enough to support GPU composition of wide color, and thus the
+    // OEMs choose to disable this capability.
+    if (isInternalDisplay && !hasWideColorDisplay) {
+        std::remove_copy_if(modes.cbegin(), modes.cend(), std::back_inserter(*outColorModes),
+                            isWideColorMode);
+    } else {
+        std::copy(modes.cbegin(), modes.cend(), std::back_inserter(*outColorModes));
+    }
 
     return NO_ERROR;
 }
@@ -1230,6 +1254,13 @@ status_t SurfaceFlinger::isWideColorDisplay(const sp<IBinder>& displayToken,
     if (!display) {
         return BAD_VALUE;
     }
+
+    // Use hasWideColorDisplay to override built-in display.
+    const auto displayId = display->getId();
+    if (displayId && displayId == getInternalDisplayIdLocked()) {
+        *outIsWideColorDisplay = hasWideColorDisplay;
+        return NO_ERROR;
+    }
     *outIsWideColorDisplay = display->hasWideColorGamut();
     return NO_ERROR;
 }
@@ -1357,6 +1388,16 @@ status_t SurfaceFlinger::setDisplayBrightness(const sp<IBinder>& displayToken,
     return getHwComposer().setDisplayBrightness(*displayId, brightness);
 }
 
+status_t SurfaceFlinger::notifyPowerHint(int32_t hintId) {
+    PowerHint powerHint = static_cast<PowerHint>(hintId);
+
+    if (powerHint == PowerHint::INTERACTION) {
+        mScheduler->notifyTouchEvent();
+    }
+
+    return NO_ERROR;
+}
+
 // ----------------------------------------------------------------------------
 
 sp<IDisplayEventConnection> SurfaceFlinger::createDisplayEventConnection(
@@ -1379,10 +1420,12 @@ void SurfaceFlinger::waitForEvent() {
 }
 
 void SurfaceFlinger::signalTransaction() {
+    mScheduler->resetIdleTimer();
     mEventQueue->invalidate();
 }
 
 void SurfaceFlinger::signalLayerUpdate() {
+    mScheduler->resetIdleTimer();
     mEventQueue->invalidate();
 }
 
@@ -1671,7 +1714,7 @@ void SurfaceFlinger::onMessageReceived(int32_t what) NO_THREAD_SAFETY_ANALYSIS {
             }
 
             // For now, only propagate backpressure when missing a hwc frame.
-            if (hwcFrameMissed) {
+            if (hwcFrameMissed && !gpuFrameMissed) {
                 if (mPropagateBackpressure) {
                     signalLayerUpdate();
                     break;
@@ -2143,11 +2186,17 @@ void SurfaceFlinger::postComposition()
 
     {
         std::lock_guard lock(mTexturePoolMutex);
-        const size_t refillCount = mTexturePoolSize - mTexturePool.size();
-        if (refillCount > 0) {
+        if (mTexturePool.size() < mTexturePoolSize) {
+            const size_t refillCount = mTexturePoolSize - mTexturePool.size();
             const size_t offset = mTexturePool.size();
             mTexturePool.resize(mTexturePoolSize);
             getRenderEngine().genTextures(refillCount, mTexturePool.data() + offset);
+            ATRACE_INT("TexturePoolSize", mTexturePool.size());
+        } else if (mTexturePool.size() > mTexturePoolSize) {
+            const size_t deleteCount = mTexturePool.size() - mTexturePoolSize;
+            const size_t offset = mTexturePoolSize;
+            getRenderEngine().deleteTextures(deleteCount, mTexturePool.data() + offset);
+            mTexturePool.resize(mTexturePoolSize);
             ATRACE_INT("TexturePoolSize", mTexturePool.size());
         }
     }
@@ -2858,6 +2907,16 @@ void SurfaceFlinger::processDisplayChangesLocked() {
                     mDisplays.emplace(displayToken,
                                       setupNewDisplayDeviceInternal(displayToken, displayId, state,
                                                                     dispSurface, producer));
+                    // Check if power mode override is available and supported by HWC.
+                    using vendor::display::config::V1_7::IDisplayConfig;
+                    android::sp<IDisplayConfig> disp_config_v1_7 = IDisplayConfig::getService();
+                    if (disp_config_v1_7 != NULL) {
+                        const auto hwcDisplayId = getHwComposer().fromPhysicalDisplayId(*displayId);
+                        if (disp_config_v1_7->isPowerModeOverrideSupported(*hwcDisplayId)) {
+                            sp<DisplayDevice> display = getDisplayDeviceLocked(displayToken);
+                            display->setPowerModeOverrideConfig(true);
+                        }
+                    }
                     if (!state.isVirtual()) {
                         mDisplaysList.push_back(getDisplayDeviceLocked(displayToken));
                         LOG_ALWAYS_FATAL_IF(!displayId);
@@ -3461,8 +3520,11 @@ bool SurfaceFlinger::doComposeSurfaces(const sp<DisplayDevice>& displayDevice,
                     break;
                 }
             }
-            if (needsProtected != renderEngine.isProtected() &&
-                renderEngine.useProtectedContext(needsProtected)) {
+            if (needsProtected != renderEngine.isProtected()) {
+                renderEngine.useProtectedContext(needsProtected);
+            }
+            if (needsProtected != display->getRenderSurface()->isProtected() &&
+                needsProtected == renderEngine.isProtected()) {
                 display->getRenderSurface()->setProtected(needsProtected);
             }
         }
@@ -3725,7 +3787,7 @@ bool SurfaceFlinger::flushTransactionQueues() {
                 it = mTransactionQueues.erase(it);
                 mTransactionCV.broadcast();
             } else {
-                std::next(it, 1);
+                it = std::next(it, 1);
             }
         }
     }
@@ -4631,7 +4693,7 @@ void SurfaceFlinger::setPowerModeInternal(const sp<DisplayDevice>& display, int 
     ALOGD("Finished setting power mode %d on display %s", mode, to_string(*displayId).c_str());
 }
 
-void SurfaceFlinger::setPowerMode(const sp<IBinder>& displayToken, int mode) {
+void SurfaceFlinger::setPowerModeOnMainThread(const sp<IBinder>& displayToken, int mode) {
     postMessageSync(new LambdaMessage([&]() NO_THREAD_SAFETY_ANALYSIS {
         const auto display = getDisplayDevice(displayToken);
         if (!display) {
@@ -4643,6 +4705,66 @@ void SurfaceFlinger::setPowerMode(const sp<IBinder>& displayToken, int mode) {
             setPowerModeInternal(display, mode);
         }
     }));
+}
+
+void SurfaceFlinger::setPowerMode(const sp<IBinder>& displayToken, int mode) {
+    sp<DisplayDevice> display(getDisplayDevice(displayToken));
+    const auto displayId = display->getId();
+    const auto hwcDisplayId = getHwComposer().fromPhysicalDisplayId(*displayId);
+
+    if (!display) {
+        ALOGE("Attempt to set power mode %d for invalid display token %p", mode,
+              displayToken.get());
+        return;
+    } else if (display->isVirtual()) {
+        ALOGW("Attempt to set power mode %d for virtual display", mode);
+        return;
+    }
+
+    // Fallback to default power state behavior as HWC does not support power mode override.
+    using vendor::display::config::V1_7::IDisplayConfig;
+    static android::sp<IDisplayConfig> disp_config_v1_7 = IDisplayConfig::getService();
+    if ((disp_config_v1_7 == NULL) || !display->getPowerModeOverrideConfig()) {
+       setPowerModeOnMainThread(displayToken, mode);
+       return;
+    }
+
+    // Call into HWC to change hardware power state first, followed by surfaceflinger
+    // power state while stepping up i.e. off -> on, dozesuspend -> doze/on.
+    // Let surfaceflinger power state change happen first, followed by hardware power
+    // state while stepping down i.e. on -> off, doze/on -> dozesuspend.
+    IDisplayConfig::PowerMode hwcMode = IDisplayConfig::PowerMode::Off;
+    switch (mode) {
+        case HWC_POWER_MODE_DOZE:         hwcMode = IDisplayConfig::PowerMode::Doze;        break;
+        case HWC_POWER_MODE_NORMAL:       hwcMode = IDisplayConfig::PowerMode::On;          break;
+        case HWC_POWER_MODE_DOZE_SUSPEND: hwcMode = IDisplayConfig::PowerMode::DozeSuspend; break;
+        default:                          hwcMode = IDisplayConfig::PowerMode::Off;         break;
+    }
+
+    bool step_up = false;
+    int currentMode = display->getPowerMode();
+    if (currentMode == HWC_POWER_MODE_OFF) {
+        if (mode == HWC_POWER_MODE_DOZE || mode == HWC_POWER_MODE_NORMAL) {
+            step_up = true;
+        }
+    } else if (currentMode == HWC_POWER_MODE_DOZE_SUSPEND) {
+        if (mode == HWC_POWER_MODE_DOZE || mode == HWC_POWER_MODE_NORMAL) {
+            step_up = true;
+        }
+    }
+
+    // Change hardware state first while stepping up.
+    if (step_up) {
+        disp_config_v1_7->setPowerMode(*hwcDisplayId, hwcMode);
+    }
+
+    // Change SF state now.
+    setPowerModeOnMainThread(displayToken, mode);
+
+    // Change hardware state now while stepping down.
+    if (!step_up) {
+        disp_config_v1_7->setPowerMode(*hwcDisplayId, hwcMode);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -5034,7 +5156,7 @@ void SurfaceFlinger::dumpDisplayIdentificationData(std::string& result) const {
 }
 
 void SurfaceFlinger::dumpWideColorInfo(std::string& result) const {
-    StringAppendF(&result, "Device has wide color display: %d\n", hasWideColorDisplay);
+    StringAppendF(&result, "Device has wide color built-in display: %d\n", hasWideColorDisplay);
     StringAppendF(&result, "Device uses color management: %d\n", useColorManagement);
     StringAppendF(&result, "DisplayColorSetting: %s\n",
                   decodeDisplayColorSetting(mDisplayColorSetting).c_str());
@@ -5336,7 +5458,8 @@ status_t SurfaceFlinger::CheckTransactCodeCredentials(uint32_t code) {
         case SET_POWER_MODE:
         case GET_DISPLAYED_CONTENT_SAMPLING_ATTRIBUTES:
         case SET_DISPLAY_CONTENT_SAMPLING_ENABLED:
-        case GET_DISPLAYED_CONTENT_SAMPLE: {
+        case GET_DISPLAYED_CONTENT_SAMPLE:
+        case NOTIFY_POWER_HINT: {
             if (!callingThreadHasUnscopedSurfaceFlingerAccess()) {
                 IPCThreadState* ipc = IPCThreadState::self();
                 ALOGE("Permission Denial: can't access SurfaceFlinger pid=%d, uid=%d",
@@ -5401,6 +5524,14 @@ status_t SurfaceFlinger::CheckTransactCodeCredentials(uint32_t code) {
         case CONNECT_DISPLAY_UNUSED:
         case CREATE_GRAPHIC_BUFFER_ALLOC_UNUSED: {
             ALOGE("Attempting to access SurfaceFlinger with unused code: %u", code);
+            return PERMISSION_DENIED;
+        }
+        case CAPTURE_SCREEN_BY_ID: {
+            IPCThreadState* ipc = IPCThreadState::self();
+            const int uid = ipc->getCallingUid();
+            if (uid == AID_ROOT || uid == AID_GRAPHICS || uid == AID_SYSTEM || uid == AID_SHELL) {
+                return OK;
+            }
             return PERMISSION_DENIED;
         }
     }
@@ -5730,9 +5861,13 @@ status_t SurfaceFlinger::onTransact(uint32_t code, const Parcel& data, Parcel* r
                 // TODO(b/129297325): expose this via developer menu option
                 n = data.readInt32();
                 if (n && !mRefreshRateOverlay) {
-                    std::lock_guard<std::mutex> lock(mActiveConfigLock);
+                    RefreshRateType type;
+                    {
+                        std::lock_guard<std::mutex> lock(mActiveConfigLock);
+                        type = mDesiredActiveConfig.type;
+                    }
                     mRefreshRateOverlay = std::make_unique<RefreshRateOverlay>(*this);
-                    mRefreshRateOverlay->changeRefreshRate(mDesiredActiveConfig.type);
+                    mRefreshRateOverlay->changeRefreshRate(type);
                 } else if (!n) {
                     mRefreshRateOverlay.reset();
                 }
@@ -5770,7 +5905,7 @@ void SurfaceFlinger::repaintEverything() {
 
 void SurfaceFlinger::repaintEverythingForHWC() {
     mRepaintEverything = true;
-    mEventQueue->invalidateForHWC();
+    mEventQueue->invalidate();
 }
 
 // A simple RAII class to disconnect from an ANativeWindow* when it goes out of scope
@@ -5822,6 +5957,66 @@ status_t SurfaceFlinger::captureScreen(const sp<IBinder>& displayToken,
                                     std::placeholders::_1);
     return captureScreenCommon(renderArea, traverseLayers, outBuffer, reqPixelFormat,
                                useIdentityTransform, outCapturedSecureLayers);
+}
+
+static Dataspace pickDataspaceFromColorMode(const ColorMode colorMode) {
+    switch (colorMode) {
+        case ColorMode::DISPLAY_P3:
+        case ColorMode::BT2100_PQ:
+        case ColorMode::BT2100_HLG:
+        case ColorMode::DISPLAY_BT2020:
+            return Dataspace::DISPLAY_P3;
+        default:
+            return Dataspace::V0_SRGB;
+    }
+}
+
+const sp<DisplayDevice> SurfaceFlinger::getDisplayByIdOrLayerStack(uint64_t displayOrLayerStack) {
+    const sp<IBinder> displayToken = getPhysicalDisplayTokenLocked(DisplayId{displayOrLayerStack});
+    if (displayToken) {
+        return getDisplayDeviceLocked(displayToken);
+    }
+    // Couldn't find display by displayId. Try to get display by layerStack since virtual displays
+    // may not have a displayId.
+    for (const auto& [token, display] : mDisplays) {
+        if (display->getLayerStack() == displayOrLayerStack) {
+            return display;
+        }
+    }
+    return nullptr;
+}
+
+status_t SurfaceFlinger::captureScreen(uint64_t displayOrLayerStack, Dataspace* outDataspace,
+                                       sp<GraphicBuffer>* outBuffer) {
+    sp<DisplayDevice> display;
+    uint32_t width;
+    uint32_t height;
+    ui::Transform::orientation_flags captureOrientation;
+    {
+        Mutex::Autolock _l(mStateLock);
+        display = getDisplayByIdOrLayerStack(displayOrLayerStack);
+        if (!display) {
+            return BAD_VALUE;
+        }
+
+        width = uint32_t(display->getViewport().width());
+        height = uint32_t(display->getViewport().height());
+
+        captureOrientation = fromSurfaceComposerRotation(
+                static_cast<ISurfaceComposer::Rotation>(display->getOrientation()));
+        *outDataspace =
+                pickDataspaceFromColorMode(display->getCompositionDisplay()->getState().colorMode);
+    }
+
+    DisplayRenderArea renderArea(display, Rect(), width, height, *outDataspace, captureOrientation,
+                                 false /* captureSecureLayers */);
+
+    auto traverseLayers = std::bind(&SurfaceFlinger::traverseLayersInDisplay, this, display,
+                                    std::placeholders::_1);
+    bool ignored = false;
+    return captureScreenCommon(renderArea, traverseLayers, outBuffer, ui::PixelFormat::RGBA_8888,
+                               false /* useIdentityTransform */,
+                               ignored /* outCapturedSecureLayers */);
 }
 
 status_t SurfaceFlinger::captureLayers(

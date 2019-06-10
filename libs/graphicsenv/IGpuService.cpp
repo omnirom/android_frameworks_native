@@ -30,8 +30,8 @@ public:
     virtual void setGpuStats(const std::string& driverPackageName,
                              const std::string& driverVersionName, uint64_t driverVersionCode,
                              int64_t driverBuildTime, const std::string& appPackageName,
-                             GraphicsEnv::Driver driver, bool isDriverLoaded,
-                             int64_t driverLoadingTime) {
+                             const int32_t vulkanVersion, GraphicsEnv::Driver driver,
+                             bool isDriverLoaded, int64_t driverLoadingTime) {
         Parcel data, reply;
         data.writeInterfaceToken(IGpuService::getInterfaceDescriptor());
 
@@ -40,6 +40,7 @@ public:
         data.writeUint64(driverVersionCode);
         data.writeInt64(driverBuildTime);
         data.writeUtf8AsUtf16(appPackageName);
+        data.writeInt32(vulkanVersion);
         data.writeInt32(static_cast<int32_t>(driver));
         data.writeBool(isDriverLoaded);
         data.writeInt64(driverLoadingTime);
@@ -90,6 +91,17 @@ public:
         outStats->clear();
         return reply.readParcelableVector(outStats);
     }
+
+    virtual void setCpuVulkanInUse(const std::string& appPackageName,
+                                   const uint64_t driverVersionCode) {
+        Parcel data, reply;
+        data.writeInterfaceToken(IGpuService::getInterfaceDescriptor());
+
+        data.writeUtf8AsUtf16(appPackageName);
+        data.writeUint64(driverVersionCode);
+
+        remote()->transact(BnGpuService::SET_CPU_VULKAN_IN_USE, data, &reply, IBinder::FLAG_ONEWAY);
+    }
 };
 
 IMPLEMENT_META_INTERFACE(GpuService, "android.graphicsenv.IGpuService");
@@ -118,6 +130,9 @@ status_t BnGpuService::onTransact(uint32_t code, const Parcel& data, Parcel* rep
             std::string appPackageName;
             if ((status = data.readUtf8FromUtf16(&appPackageName)) != OK) return status;
 
+            int32_t vulkanVersion;
+            if ((status = data.readInt32(&vulkanVersion)) != OK) return status;
+
             int32_t driver;
             if ((status = data.readInt32(&driver)) != OK) return status;
 
@@ -128,8 +143,8 @@ status_t BnGpuService::onTransact(uint32_t code, const Parcel& data, Parcel* rep
             if ((status = data.readInt64(&driverLoadingTime)) != OK) return status;
 
             setGpuStats(driverPackageName, driverVersionName, driverVersionCode, driverBuildTime,
-                        appPackageName, static_cast<GraphicsEnv::Driver>(driver), isDriverLoaded,
-                        driverLoadingTime);
+                        appPackageName, vulkanVersion, static_cast<GraphicsEnv::Driver>(driver),
+                        isDriverLoaded, driverLoadingTime);
 
             return OK;
         }
@@ -156,6 +171,19 @@ status_t BnGpuService::onTransact(uint32_t code, const Parcel& data, Parcel* rep
             if (result != OK) return result;
 
             if ((status = reply->writeParcelableVector(stats)) != OK) return status;
+
+            return OK;
+        }
+        case SET_CPU_VULKAN_IN_USE: {
+            CHECK_INTERFACE(IGpuService, data, reply);
+
+            std::string appPackageName;
+            if ((status = data.readUtf8FromUtf16(&appPackageName)) != OK) return status;
+
+            uint64_t driverVersionCode;
+            if ((status = data.readUint64(&driverVersionCode)) != OK) return status;
+
+            setCpuVulkanInUse(appPackageName, driverVersionCode);
 
             return OK;
         }
