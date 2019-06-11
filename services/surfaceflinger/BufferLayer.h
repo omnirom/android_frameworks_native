@@ -107,6 +107,9 @@ public:
     // Returns the current scaling mode, unless mOverrideScalingMode
     // is set, in which case, it returns mOverrideScalingMode
     uint32_t getEffectiveScalingMode() const override;
+
+    // For animation Hint
+    virtual bool isScreenshot() const { return mScreenshot; }
     // -----------------------------------------------------------------------
 
     // -----------------------------------------------------------------------
@@ -170,6 +173,9 @@ protected:
                             bool useIdentityTransform, Region& clearRegion,
                             const bool supportProtectedContent,
                             renderengine::LayerSettings& layer) override;
+
+    // for animation Hint
+    bool mScreenshot;
 
 private:
     // Returns true if this layer requires filtering
