@@ -44,11 +44,7 @@ struct egl_connection_t {
         GLESv2_INDEX = 1
     };
 
-    inline egl_connection_t() : dso(nullptr),
-                                libEgl(nullptr),
-                                libGles1(nullptr),
-                                libGles2(nullptr),
-                                systemDriverUnloaded(false) {
+    inline egl_connection_t() : dso(nullptr) {
 
         char const* const* entries = platform_names;
         EGLFuncPointer* curr = reinterpret_cast<EGLFuncPointer*>(&platform);
@@ -80,7 +76,6 @@ struct egl_connection_t {
     void*               libGles1;
     void*               libGles2;
 
-    bool                systemDriverUnloaded;
     bool                shouldUseAngle; // Should we attempt to load ANGLE
     bool                angleDecided;   // Have we tried to load ANGLE
     bool                useAngle;       // Was ANGLE successfully loaded

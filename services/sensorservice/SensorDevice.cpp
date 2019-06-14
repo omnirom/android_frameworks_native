@@ -45,9 +45,7 @@ namespace android {
 
 ANDROID_SINGLETON_STATIC_INSTANCE(SensorDevice)
 
-namespace {
-
-status_t statusFromResult(Result result) {
+static status_t StatusFromResult(Result result) {
     switch (result) {
         case Result::OK:
             return OK;
@@ -72,8 +70,6 @@ constexpr typename std::underlying_type<EnumType>::type asBaseType(EnumType valu
 enum EventQueueFlagBitsInternal : uint32_t {
     INTERNAL_WAKE =  1 << 16,
 };
-
-}  // anonymous namespace
 
 void SensorsHalDeathReceivier::serviceDied(
         uint64_t /* cookie */,
@@ -109,7 +105,7 @@ SensorDevice::SensorDevice()
     initializeSensorList();
 
     mIsDirectReportSupported =
-            (checkReturnAndGetStatus(mSensors->unregisterDirectChannel(-1)) != INVALID_OPERATION);
+           (checkReturn(mSensors->unregisterDirectChannel(-1)) != Result::INVALID_OPERATION);
 }
 
 void SensorDevice::initializeSensorList() {
@@ -126,7 +122,7 @@ void SensorDevice::initializeSensorList() {
                     convertToSensor(list[i], &sensor);
                     // Sanity check and clamp power if it is 0 (or close)
                     if (sensor.power < minPowerMa) {
-                        ALOGI("Reported power %f not deemed sane, clamping to %f",
+                        ALOGE("Reported power %f not deemed sane, clamping to %f",
                               sensor.power, minPowerMa);
                         sensor.power = minPowerMa;
                     }
@@ -221,10 +217,10 @@ SensorDevice::HalConnectionStatus SensorDevice::connectHidlServiceV2_0() {
                 mWakeLockQueue != nullptr && mEventQueueFlag != nullptr &&
                 mWakeLockQueueFlag != nullptr);
 
-        status_t status = checkReturnAndGetStatus(mSensors->initialize(
+        status_t status = StatusFromResult(checkReturn(mSensors->initialize(
                 *mEventQueue->getDesc(),
                 *mWakeLockQueue->getDesc(),
-                new SensorsCallback()));
+                new SensorsCallback())));
 
         if (status != NO_ERROR) {
             connectionStatus = HalConnectionStatus::FAILED_TO_CONNECT;
@@ -274,8 +270,6 @@ bool SensorDevice::sensorHandlesChanged(const Vector<sensor_t>& oldSensorList,
     bool didChange = false;
 
     if (oldSensorList.size() != newSensorList.size()) {
-        ALOGI("Sensor list size changed from %zu to %zu", oldSensorList.size(),
-              newSensorList.size());
         didChange = true;
     }
 
@@ -287,7 +281,6 @@ bool SensorDevice::sensorHandlesChanged(const Vector<sensor_t>& oldSensorList,
             if (prevSensor.handle == newSensor.handle) {
                 found = true;
                 if (!sensorIsEquivalent(prevSensor, newSensor)) {
-                    ALOGI("Sensor %s not equivalent to previous version", newSensor.name);
                     didChange = true;
                 }
             }
@@ -296,7 +289,6 @@ bool SensorDevice::sensorHandlesChanged(const Vector<sensor_t>& oldSensorList,
         if (!found) {
             // Could not find the new sensor in the old list of sensors, the lists must
             // have changed.
-            ALOGI("Sensor %s (handle %d) did not exist before", newSensor.name, newSensor.handle);
             didChange = true;
         }
     }
@@ -431,7 +423,7 @@ ssize_t SensorDevice::pollHal(sensors_event_t* buffer, size_t count) {
                         convertToSensorEvents(events, dynamicSensorsAdded, buffer);
                         err = (ssize_t)events.size();
                     } else {
-                        err = statusFromResult(result);
+                        err = StatusFromResult(result);
                     }
                 });
 
@@ -629,7 +621,7 @@ status_t SensorDevice::activateLocked(void* ident, int handle, int enabled) {
     if (actuateHardware) {
         ALOGD_IF(DEBUG_CONNECTIONS, "\t>>> actuating h/w activate handle=%d enabled=%d", handle,
                  enabled);
-        err = checkReturnAndGetStatus(mSensors->activate(handle, enabled));
+        err = StatusFromResult(checkReturn(mSensors->activate(handle, enabled)));
         ALOGE_IF(err, "Error %s sensor %d (%s)", enabled ? "activating" : "disabling", handle,
                  strerror(-err));
 
@@ -702,8 +694,9 @@ status_t SensorDevice::batchLocked(void* ident, int handle, int flags, int64_t s
     if (prevBestBatchParams != info.bestBatchParams) {
         ALOGD_IF(DEBUG_CONNECTIONS, "\t>>> actuating h/w BATCH 0x%08x %" PRId64 " %" PRId64, handle,
                  info.bestBatchParams.mTSample, info.bestBatchParams.mTBatch);
-        err = checkReturnAndGetStatus(mSensors->batch(
-                handle, info.bestBatchParams.mTSample, info.bestBatchParams.mTBatch));
+        err = StatusFromResult(
+                checkReturn(mSensors->batch(
+                    handle, info.bestBatchParams.mTSample, info.bestBatchParams.mTBatch)));
         if (err != NO_ERROR) {
             ALOGE("sensor batch failed %p 0x%08x %" PRId64 " %" PRId64 " err=%s",
                   mSensors.get(), handle, info.bestBatchParams.mTSample,
@@ -727,7 +720,7 @@ status_t SensorDevice::flush(void* ident, int handle) {
     if (mSensors == nullptr) return NO_INIT;
     if (isClientDisabled(ident)) return INVALID_OPERATION;
     ALOGD_IF(DEBUG_CONNECTIONS, "\t>>> actuating h/w flush %d", handle);
-    return checkReturnAndGetStatus(mSensors->flush(handle));
+    return StatusFromResult(checkReturn(mSensors->flush(handle)));
 }
 
 bool SensorDevice::isClientDisabled(void* ident) {
@@ -760,14 +753,16 @@ void SensorDevice::enableAllSensors() {
         const int sensor_handle = mActivationCount.keyAt(i);
         ALOGD_IF(DEBUG_CONNECTIONS, "\t>> reenable actuating h/w sensor enable handle=%d ",
                    sensor_handle);
-        status_t err = checkReturnAndGetStatus(mSensors->batch(
-                sensor_handle,
-                info.bestBatchParams.mTSample,
-                info.bestBatchParams.mTBatch));
+        status_t err = StatusFromResult(
+                checkReturn(mSensors->batch(
+                    sensor_handle,
+                    info.bestBatchParams.mTSample,
+                    info.bestBatchParams.mTBatch)));
         ALOGE_IF(err, "Error calling batch on sensor %d (%s)", sensor_handle, strerror(-err));
 
         if (err == NO_ERROR) {
-            err = checkReturnAndGetStatus(mSensors->activate(sensor_handle, 1 /* enabled */));
+            err = StatusFromResult(
+                    checkReturn(mSensors->activate(sensor_handle, 1 /* enabled */)));
             ALOGE_IF(err, "Error activating sensor %d (%s)", sensor_handle, strerror(-err));
         }
 
@@ -815,13 +810,14 @@ status_t SensorDevice::injectSensorData(
     Event ev;
     convertFromSensorEvent(*injected_sensor_event, &ev);
 
-    return checkReturnAndGetStatus(mSensors->injectSensorData(ev));
+    return StatusFromResult(checkReturn(mSensors->injectSensorData(ev)));
 }
 
 status_t SensorDevice::setMode(uint32_t mode) {
     if (mSensors == nullptr) return NO_INIT;
-    return checkReturnAndGetStatus(mSensors->setOperationMode(
-            static_cast<hardware::sensors::V1_0::OperationMode>(mode)));
+    return StatusFromResult(
+            checkReturn(mSensors->setOperationMode(
+                    static_cast<hardware::sensors::V1_0::OperationMode>(mode))));
 }
 
 int32_t SensorDevice::registerDirectChannel(const sensors_direct_mem_t* memory) {
@@ -859,7 +855,7 @@ int32_t SensorDevice::registerDirectChannel(const sensors_direct_mem_t* memory) 
                 if (result == Result::OK) {
                     ret = channelHandle;
                 } else {
-                    ret = statusFromResult(result);
+                    ret = StatusFromResult(result);
                 }
             }));
     return ret;
@@ -898,12 +894,12 @@ int32_t SensorDevice::configureDirectChannel(int32_t sensorHandle,
     checkReturn(mSensors->configDirectReport(sensorHandle, channelHandle, rate,
             [&ret, rate] (auto result, auto token) {
                 if (rate == RateLevel::STOP) {
-                    ret = statusFromResult(result);
+                    ret = StatusFromResult(result);
                 } else {
                     if (result == Result::OK) {
                         ret = token;
                     } else {
-                        ret = statusFromResult(result);
+                        ret = StatusFromResult(result);
                     }
                 }
             }));
@@ -1012,17 +1008,12 @@ void SensorDevice::convertToSensorEvents(
 }
 
 void SensorDevice::handleHidlDeath(const std::string & detail) {
-    if (!mSensors->supportsMessageQueues()) {
+    if (!SensorDevice::getInstance().mSensors->supportsMessageQueues()) {
         // restart is the only option at present.
         LOG_ALWAYS_FATAL("Abort due to ISensors hidl service failure, detail: %s.", detail.c_str());
     } else {
         ALOGD("ISensors HAL died, death recipient will attempt reconnect");
     }
-}
-
-status_t SensorDevice::checkReturnAndGetStatus(const Return<Result>& ret) {
-    checkReturn(ret);
-    return (!ret.isOk()) ? DEAD_OBJECT : statusFromResult(ret);
 }
 
 // ---------------------------------------------------------------------------
