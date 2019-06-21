@@ -64,7 +64,8 @@ DisplayDevice::DisplayDevice(DisplayDeviceCreationArgs&& args)
         mIsVirtual(args.isVirtual),
         mOrientation(),
         mActiveConfig(0),
-        mIsPrimary(args.isPrimary) {
+        mIsPrimary(args.isPrimary),
+        mIsPowerModeOverride(false) {
     mCompositionDisplay->createRenderSurface(
             compositionengine::RenderSurfaceCreationArgs{ANativeWindow_getWidth(
                                                                  args.nativeWindow.get()),
@@ -155,6 +156,14 @@ void DisplayDevice::setActiveConfig(int mode) {
 
 int DisplayDevice::getActiveConfig()  const {
     return mActiveConfig;
+}
+
+void DisplayDevice::setPowerModeOverrideConfig(bool supported) {
+    mIsPowerModeOverride = supported;
+}
+
+bool DisplayDevice::getPowerModeOverrideConfig() const {
+    return mIsPowerModeOverride;
 }
 
 // ----------------------------------------------------------------------------

@@ -55,6 +55,22 @@ const VkSurfaceTransformFlagsKHR kSupportedTransforms =
     // VK_SURFACE_TRANSFORM_HORIZONTAL_MIRROR_ROTATE_270_BIT_KHR |
     VK_SURFACE_TRANSFORM_INHERIT_BIT_KHR;
 
+int TranslateVulkanToNativeTransform(VkSurfaceTransformFlagBitsKHR transform) {
+    switch (transform) {
+        // TODO: See TODO in TranslateNativeToVulkanTransform
+        case VK_SURFACE_TRANSFORM_ROTATE_90_BIT_KHR:
+            return NATIVE_WINDOW_TRANSFORM_ROT_90;
+        case VK_SURFACE_TRANSFORM_ROTATE_180_BIT_KHR:
+            return NATIVE_WINDOW_TRANSFORM_ROT_180;
+        case VK_SURFACE_TRANSFORM_ROTATE_270_BIT_KHR:
+            return NATIVE_WINDOW_TRANSFORM_ROT_270;
+        case VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR:
+        case VK_SURFACE_TRANSFORM_INHERIT_BIT_KHR:
+        default:
+            return 0;
+    }
+}
+
 VkSurfaceTransformFlagBitsKHR TranslateNativeToVulkanTransform(int native) {
     // Native and Vulkan transforms are isomorphic, but are represented
     // differently. Vulkan transforms are built up of an optional horizontal
@@ -210,10 +226,12 @@ enum { MIN_NUM_FRAMES_AGO = 5 };
 struct Swapchain {
     Swapchain(Surface& surface_,
               uint32_t num_images_,
-              VkPresentModeKHR present_mode)
+              VkPresentModeKHR present_mode,
+              int pre_transform_)
         : surface(surface_),
           num_images(num_images_),
           mailbox_mode(present_mode == VK_PRESENT_MODE_MAILBOX_KHR),
+          pre_transform(pre_transform_),
           frame_timestamps_enabled(false),
           shared(present_mode == VK_PRESENT_MODE_SHARED_DEMAND_REFRESH_KHR ||
                  present_mode == VK_PRESENT_MODE_SHARED_CONTINUOUS_REFRESH_KHR) {
@@ -222,10 +240,20 @@ struct Swapchain {
             window,
             &refresh_duration);
     }
+    uint64_t get_refresh_duration()
+    {
+        ANativeWindow* window = surface.window.get();
+        native_window_get_refresh_cycle_duration(
+            window,
+            &refresh_duration);
+        return static_cast<uint64_t>(refresh_duration);
+
+    }
 
     Surface& surface;
     uint32_t num_images;
     bool mailbox_mode;
+    int pre_transform;
     bool frame_timestamps_enabled;
     int64_t refresh_duration;
     bool shared;
@@ -1162,7 +1190,9 @@ VkResult CreateSwapchainKHR(VkDevice device,
     }
     uint32_t min_undequeued_buffers = static_cast<uint32_t>(query_value);
     uint32_t num_images =
-        (create_info->minImageCount - 1) + min_undequeued_buffers;
+        (swap_interval ? create_info->minImageCount
+                       : std::max(3u, create_info->minImageCount)) -
+        1 + min_undequeued_buffers;
 
     // Lower layer insists that we have at least two buffers. This is wasteful
     // and we'd like to relax it in the shared case, but not all the pieces are
@@ -1226,9 +1256,9 @@ VkResult CreateSwapchainKHR(VkDevice device,
                                          VK_SYSTEM_ALLOCATION_SCOPE_OBJECT);
     if (!mem)
         return VK_ERROR_OUT_OF_HOST_MEMORY;
-    Swapchain* swapchain =
-        new (mem) Swapchain(surface, num_images, create_info->presentMode);
-
+    Swapchain* swapchain = new (mem)
+        Swapchain(surface, num_images, create_info->presentMode,
+                  TranslateVulkanToNativeTransform(create_info->preTransform));
     // -- Dequeue all buffers and create a VkImage for each --
     // Any failures during or after this must cancel the dequeued buffers.
 
@@ -1702,6 +1732,19 @@ VkResult QueuePresentKHR(VkQueue queue, const VkPresentInfoKHR* present_info) {
                 ReleaseSwapchainImage(device, window, fence, img);
                 OrphanSwapchain(device, &swapchain);
             }
+            int window_transform_hint;
+            err = window->query(window, NATIVE_WINDOW_TRANSFORM_HINT,
+                                &window_transform_hint);
+            if (err != 0) {
+                ALOGE("NATIVE_WINDOW_TRANSFORM_HINT query failed: %s (%d)",
+                      strerror(-err), err);
+                swapchain_result = WorstPresentResult(
+                    swapchain_result, VK_ERROR_SURFACE_LOST_KHR);
+            }
+            if (swapchain.pre_transform != window_transform_hint) {
+                swapchain_result =
+                    WorstPresentResult(swapchain_result, VK_SUBOPTIMAL_KHR);
+            }
         } else {
             ReleaseSwapchainImage(device, nullptr, fence, img);
             swapchain_result = VK_ERROR_OUT_OF_DATE_KHR;
@@ -1730,8 +1773,7 @@ VkResult GetRefreshCycleDurationGOOGLE(
     Swapchain& swapchain = *SwapchainFromHandle(swapchain_handle);
     VkResult result = VK_SUCCESS;
 
-    pDisplayTimingProperties->refreshDuration =
-            static_cast<uint64_t>(swapchain.refresh_duration);
+    pDisplayTimingProperties->refreshDuration = swapchain.get_refresh_duration();
 
     return result;
 }

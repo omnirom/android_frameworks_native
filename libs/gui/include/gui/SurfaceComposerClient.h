@@ -201,6 +201,16 @@ public:
      */
     static status_t setDisplayBrightness(const sp<IBinder>& displayToken, float brightness);
 
+    /*
+     * Sends a power hint to the composer. This function is asynchronous.
+     *
+     * hintId
+     *      hint id according to android::hardware::power::V1_0::PowerHint
+     *
+     * Returns NO_ERROR upon success.
+     */
+    static status_t notifyPowerHint(int32_t hintId);
+
     // ------------------------------------------------------------------------
     // surface creation / destruction
 
@@ -515,6 +525,8 @@ public:
                             const ui::PixelFormat reqPixelFormat, Rect sourceCrop,
                             uint32_t reqWidth, uint32_t reqHeight, bool useIdentityTransform,
                             uint32_t rotation, sp<GraphicBuffer>* outBuffer);
+    static status_t capture(uint64_t displayOrLayerStack, ui::Dataspace* outDataspace,
+                            sp<GraphicBuffer>* outBuffer);
     static status_t captureLayers(const sp<IBinder>& layerHandle, const ui::Dataspace reqDataSpace,
                                   const ui::PixelFormat reqPixelFormat, Rect sourceCrop,
                                   float frameScale, sp<GraphicBuffer>* outBuffer);

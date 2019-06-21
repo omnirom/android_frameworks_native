@@ -35,8 +35,10 @@ public:
     // Insert new gpu stats into global stats and app stats.
     void insert(const std::string& driverPackageName, const std::string& driverVersionName,
                 uint64_t driverVersionCode, int64_t driverBuildTime,
-                const std::string& appPackageName, GraphicsEnv::Driver driver, bool isDriverLoaded,
-                int64_t driverLoadingTime);
+                const std::string& appPackageName, const int32_t vulkanVersion,
+                GraphicsEnv::Driver driver, bool isDriverLoaded, int64_t driverLoadingTime);
+    // Set CPU Vulkan in use signal into app stats.
+    void setCpuVulkanInUse(const std::string& appPackageName, const uint64_t driverVersionCode);
     // dumpsys interface
     void dump(const Vector<String16>& args, std::string* result);
     // Pull gpu global stats
@@ -52,6 +54,8 @@ private:
     void dumpGlobalLocked(std::string* result);
     // Dump app stats
     void dumpAppLocked(std::string* result);
+    // Append cpuVulkanVersion and glesVersion to system driver stats
+    void interceptSystemDriverStatsLocked();
 
     // Below limits the memory usage of GpuStats to be less than 10KB. This is
     // the preferred number for statsd while maintaining nice data quality.

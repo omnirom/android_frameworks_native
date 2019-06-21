@@ -64,6 +64,7 @@ public:
     DispSyncThread(const char* name, bool showTraceDetailedInfo)
           : mName(name),
             mStop(false),
+            mModelLocked(false),
             mPeriod(0),
             mPhase(0),
             mReferenceTime(0),
@@ -78,6 +79,11 @@ public:
         Mutex::Autolock lock(mMutex);
 
         mPhase = phase;
+        if (mReferenceTime != referenceTime) {
+            for (auto& eventListener : mEventListeners) {
+                eventListener.mHasFired = false;
+            }
+        }
         mReferenceTime = referenceTime;
         if (mPeriod != 0 && mPeriod != period && mReferenceTime != 0) {
             // Inflate the reference time to be the most recent predicted
@@ -104,6 +110,16 @@ public:
         Mutex::Autolock lock(mMutex);
         mStop = true;
         mCond.signal();
+    }
+
+    void lockModel() {
+        Mutex::Autolock lock(mMutex);
+        mModelLocked = true;
+    }
+
+    void unlockModel() {
+        Mutex::Autolock lock(mMutex);
+        mModelLocked = false;
     }
 
     virtual bool threadLoop() {
@@ -210,17 +226,14 @@ public:
             const nsecs_t baseTime = now - mReferenceTime;
             const nsecs_t numPeriodsSinceReference = baseTime / mPeriod;
             const nsecs_t predictedReference = mReferenceTime + numPeriodsSinceReference * mPeriod;
-            listener.mLastEventTime = predictedReference + mPhase + listener.mPhase;
-            // If we're very close in time to the predicted last event time,
-            // and we're not very close to the next predicted last event time
-            // then we need to back up the last event time so that we can
-            // attempt to fire an event immediately.
-            //
-            // Otherwise, keep the last event time that we predicted so that
-            // we don't wake up early.
-            if (isShorterThanPeriod(now - listener.mLastEventTime) &&
-                !isShorterThanPeriod(listener.mLastEventTime + mPeriod - now)) {
-                listener.mLastEventTime -= mPeriod;
+            const nsecs_t phaseCorrection = mPhase + listener.mPhase;
+            const nsecs_t predictedLastEventTime = predictedReference + phaseCorrection;
+            if (predictedLastEventTime >= now) {
+                // Make sure that the last event time does not exceed the current time.
+                // If it would, then back the last event time by a period.
+                listener.mLastEventTime = predictedLastEventTime - mPeriod;
+            } else {
+                listener.mLastEventTime = predictedLastEventTime;
             }
         } else {
             listener.mLastEventTime = now + mPhase - mWakeupLatency;
@@ -291,6 +304,7 @@ private:
         nsecs_t mLastEventTime;
         nsecs_t mLastCallbackTime;
         DispSync::Callback* mCallback;
+        bool mHasFired = false;
     };
 
     struct CallbackInvocation {
@@ -316,7 +330,7 @@ private:
 
     // Sanity check that the duration is close enough in length to a period without
     // falling into double-rate vsyncs.
-    bool isShorterThanPeriod(nsecs_t duration) {
+    bool isCloseToPeriod(nsecs_t duration) {
         // Ratio of 3/5 is arbitrary, but it must be greater than 1/2.
         return duration < (3 * mPeriod) / 5;
     }
@@ -332,9 +346,15 @@ private:
             nsecs_t t = computeListenerNextEventTimeLocked(eventListener, onePeriodAgo);
 
             if (t < now) {
-                if (isShorterThanPeriod(now - eventListener.mLastCallbackTime)) {
+                if (isCloseToPeriod(now - eventListener.mLastCallbackTime)) {
                     eventListener.mLastEventTime = t;
                     ALOGV("[%s] [%s] Skipping event due to model error", mName,
+                          eventListener.mName);
+                    continue;
+                }
+                if (eventListener.mHasFired && !mModelLocked) {
+                    eventListener.mLastEventTime = t;
+                    ALOGV("[%s] [%s] Skipping event due to already firing", mName,
                           eventListener.mName);
                     continue;
                 }
@@ -346,6 +366,7 @@ private:
                 callbackInvocations.push_back(ci);
                 eventListener.mLastEventTime = t;
                 eventListener.mLastCallbackTime = now;
+                eventListener.mHasFired = true;
             }
         }
 
@@ -392,7 +413,7 @@ private:
 
         // Check that it's been slightly more than half a period since the last
         // event so that we don't accidentally fall into double-rate vsyncs
-        if (isShorterThanPeriod(t - listener.mLastEventTime)) {
+        if (isCloseToPeriod(t - listener.mLastEventTime)) {
             t += mPeriod;
             ALOGV("[%s] Modifying t -> %" PRId64, mName, ns2us(t));
         }
@@ -413,6 +434,7 @@ private:
     const char* const mName;
 
     bool mStop;
+    bool mModelLocked;
 
     nsecs_t mPeriod;
     nsecs_t mPhase;
@@ -500,6 +522,7 @@ void DispSync::resetLocked() {
     mNumResyncSamples = 0;
     mFirstResyncSample = 0;
     mNumResyncSamplesSincePresent = 0;
+    mThread->unlockModel();
     resetErrorLocked();
 }
 
@@ -522,6 +545,7 @@ bool DispSync::addPresentFence(const std::shared_ptr<FenceTime>& fenceTime) {
 void DispSync::beginResync() {
     Mutex::Autolock lock(mMutex);
     ALOGV("[%s] beginResync", mName);
+    mThread->unlockModel();
     mModelUpdated = false;
     mNumResyncSamples = 0;
 }
@@ -584,10 +608,15 @@ bool DispSync::addResyncSample(nsecs_t timestamp, bool* periodChanged) {
     // resync again
     bool modelLocked = mModelUpdated && mError < (kErrorThreshold / 2) && mPendingPeriod == 0;
     ALOGV("[%s] addResyncSample returning %s", mName, modelLocked ? "locked" : "unlocked");
+    if (modelLocked) {
+        mThread->lockModel();
+    }
     return !modelLocked;
 }
 
-void DispSync::endResync() {}
+void DispSync::endResync() {
+    mThread->lockModel();
+}
 
 status_t DispSync::addEventListener(const char* name, nsecs_t phase, Callback* callback,
                                     nsecs_t lastCallbackTime) {

@@ -112,8 +112,11 @@ interface IInstalld {
     void destroyAppDataSnapshot(@nullable @utf8InCpp String uuid, @utf8InCpp String packageName,
             int userId, long ceSnapshotInode, int snapshotId, int storageFlags);
 
+    void migrateLegacyObbData();
+
     const int FLAG_STORAGE_DE = 0x1;
     const int FLAG_STORAGE_CE = 0x2;
+    const int FLAG_STORAGE_EXTERNAL = 0x4;
 
     const int FLAG_CLEAR_CACHE_ONLY = 0x10;
     const int FLAG_CLEAR_CODE_CACHE_ONLY = 0x20;
