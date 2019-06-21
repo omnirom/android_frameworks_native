@@ -310,8 +310,8 @@ SurfaceFlinger::SurfaceFlinger(Factory& factory) : SurfaceFlinger(factory, SkipI
 
     mDefaultCompositionDataspace =
             static_cast<ui::Dataspace>(default_composition_dataspace(Dataspace::V0_SRGB));
-    mWideColorGamutCompositionDataspace =
-            static_cast<ui::Dataspace>(wcg_composition_dataspace(Dataspace::V0_SRGB));
+    mWideColorGamutCompositionDataspace = static_cast<ui::Dataspace>(wcg_composition_dataspace(
+            hasWideColorDisplay ? Dataspace::DISPLAY_P3 : Dataspace::V0_SRGB));
     defaultCompositionDataspace = mDefaultCompositionDataspace;
     wideColorGamutCompositionDataspace = mWideColorGamutCompositionDataspace;
     defaultCompositionPixelFormat = static_cast<ui::PixelFormat>(
@@ -2202,7 +2202,14 @@ void SurfaceFlinger::postComposition()
     }
 
     mTransactionCompletedThread.addPresentFence(mPreviousPresentFences[0]);
-    mTransactionCompletedThread.sendCallbacks();
+
+    // Lock the mStateLock in case SurfaceFlinger is in the middle of applying a transaction.
+    // If we do not lock here, a callback could be sent without all of its SurfaceControls and
+    // metrics.
+    {
+        Mutex::Autolock _l(mStateLock);
+        mTransactionCompletedThread.sendCallbacks();
+    }
 
     if (mLumaSampling && mRegionSamplingThread) {
         mRegionSamplingThread->notifyNewContent();
