@@ -4907,9 +4907,66 @@ status_t SurfaceFlinger::doDumpContinuous(int fd, const DumpArgs& args) {
     return NO_ERROR;
 }
 
+void SurfaceFlinger::dumpMemoryAllocations(bool dump)
+{
+    if (!dump) {
+        return;
+    }
+    std::string dumpsys;
+    GraphicBufferAllocator& alloc(GraphicBufferAllocator::get());
+    alloc.dump(dumpsys);
+    std::string tmp(dumpsys);
+    size_t pos = tmp.find("Total allocated");
+    if (!pos) {
+        return;
+    }
+    tmp = tmp.substr(pos);
+    pos = tmp.find(":");
+    if (!pos) {
+        return;
+    }
+    tmp = tmp.substr(pos + 1);
+    std::string::size_type sz;
+    int currentSize = std::stoi (tmp,&sz);
+    if (currentSize > mMemoryDump.mMaxAllocationLimit + 10*1024) {
+        ALOGW("Total allocated buffer limit crossed %d", currentSize);
+        alloc.dumpToSystemLog();
+        char timeStamp[32];
+        char dataSize[32];
+        char hms[32];
+        long millis;
+        struct timeval tv;
+        struct tm *ptm;
+        gettimeofday(&tv, NULL);
+        ptm = localtime(&tv.tv_sec);
+        strftime (hms, sizeof (hms), "%H:%M:%S", ptm);
+        millis = tv.tv_usec / 1000;
+        snprintf(timeStamp, sizeof(timeStamp), "Timestamp: %s.%03ld", hms, millis);
+        snprintf(dataSize, sizeof(dataSize), "Size: %8zu", dumpsys.size());
+        std::fstream fs;
+        fs.open(mMemoryDump.mMemoryAllocFileName, std::ios::app);
+        if (!fs) {
+            ALOGE("Failed to open %s file for dumpsys", mMemoryDump.mMemoryAllocFileName);
+            return;
+        }
+        fs.seekp(mMemoryDump.mMemoryAllocFilePos, std::ios::beg);
+        fs << "#@#@--SF Memory utilzation --@#@#" << std::endl;
+        fs << timeStamp << std::endl;
+        fs << dataSize << std::endl;
+        fs << dumpsys << std::endl;
+        mMemoryDump.mMemoryAllocFilePos = fs.tellp();
+        mMemoryDump.mMaxAllocationLimit = currentSize;
+        if (mMemoryDump.mMemoryAllocFilePos > (20 * 1024 * 1024)) {
+            mMemoryDump.mMemoryAllocFilePos = 0;
+        }
+        fs.close();
+    }
+}
+
 void SurfaceFlinger::dumpDrawCycle(bool prePrepare) {
     Mutex::Autolock _l(mFileDump.lock);
 
+    dumpMemoryAllocations(prePrepare);
     // User might stop dump collection in middle of prepare & commit.
     // Collect dumpsys again after commit and replace.
     if (!mFileDump.running && !mFileDump.replaceAfterCommit) {
