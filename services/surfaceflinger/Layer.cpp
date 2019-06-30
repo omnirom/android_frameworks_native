@@ -19,12 +19,7 @@
 #define LOG_TAG "Layer"
 #define ATRACE_TAG ATRACE_TAG_GRAPHICS
 
-#include <math.h>
-#include <stdint.h>
-#include <stdlib.h>
-#include <sys/types.h>
-#include <algorithm>
-#include <mutex>
+#include "Layer.h"
 
 #include <android-base/stringprintf.h>
 #include <compositionengine/Display.h>
@@ -39,7 +34,11 @@
 #include <gui/BufferItem.h>
 #include <gui/LayerDebugInfo.h>
 #include <gui/Surface.h>
+#include <math.h>
 #include <renderengine/RenderEngine.h>
+#include <stdint.h>
+#include <stdlib.h>
+#include <sys/types.h>
 #include <ui/DebugUtils.h>
 #include <ui/GraphicBuffer.h>
 #include <ui/PixelFormat.h>
@@ -49,12 +48,15 @@
 #include <utils/StopWatch.h>
 #include <utils/Trace.h>
 
+#include <algorithm>
+#include <mutex>
+#include <sstream>
+
 #include "BufferLayer.h"
 #include "ColorLayer.h"
 #include "Colorizer.h"
 #include "DisplayDevice.h"
 #include "DisplayHardware/HWComposer.h"
-#include "Layer.h"
 #include "LayerProtoHelper.h"
 #include "LayerRejecter.h"
 #include "MonitoredProducer.h"
@@ -146,28 +148,47 @@ Layer::~Layer() {
  */
 void Layer::onLayerDisplayed(const sp<Fence>& /*releaseFence*/) {}
 
-void Layer::onRemovedFromCurrentState() {
-    mRemovedFromCurrentState = true;
+void Layer::removeRemoteSyncPoints() {
+    for (auto& point : mRemoteSyncPoints) {
+        point->setTransactionApplied();
+    }
+    mRemoteSyncPoints.clear();
 
-    // the layer is removed from SF mCurrentState to mLayersPendingRemoval
-    if (mCurrentState.zOrderRelativeOf != nullptr) {
-        sp<Layer> strongRelative = mCurrentState.zOrderRelativeOf.promote();
-        if (strongRelative != nullptr) {
-            strongRelative->removeZOrderRelative(this);
-            mFlinger->setTransactionFlags(eTraversalNeeded);
+    {
+        Mutex::Autolock pendingStateLock(mPendingStateMutex);
+        for (State pendingState : mPendingStates) {
+            pendingState.barrierLayer_legacy = nullptr;
         }
+    }
+}
+
+void Layer::removeRelativeZ(const std::vector<Layer*>& layersInTree) {
+    if (mCurrentState.zOrderRelativeOf == nullptr) {
+        return;
+    }
+
+    sp<Layer> strongRelative = mCurrentState.zOrderRelativeOf.promote();
+    if (strongRelative == nullptr) {
+        setZOrderRelativeOf(nullptr);
+        return;
+    }
+
+    if (!std::binary_search(layersInTree.begin(), layersInTree.end(), strongRelative.get())) {
+        strongRelative->removeZOrderRelative(this);
+        mFlinger->setTransactionFlags(eTraversalNeeded);
         setZOrderRelativeOf(nullptr);
     }
+}
+
+void Layer::removeFromCurrentState() {
+    mRemovedFromCurrentState = true;
 
     // Since we are no longer reachable from CurrentState SurfaceFlinger
     // will no longer invoke doTransaction for us, and so we will
     // never finish applying transactions. We signal the sync point
     // now so that another layer will not become indefinitely
     // blocked.
-    for (auto& point: mRemoteSyncPoints) {
-        point->setTransactionApplied();
-    }
-    mRemoteSyncPoints.clear();
+    removeRemoteSyncPoints();
 
     {
     Mutex::Autolock syncLock(mLocalSyncPointMutex);
@@ -177,11 +198,16 @@ void Layer::onRemovedFromCurrentState() {
     mLocalSyncPoints.clear();
     }
 
-    for (const auto& child : mCurrentChildren) {
-        child->onRemovedFromCurrentState();
-    }
-
     mFlinger->markLayerPendingRemovalLocked(this);
+}
+
+void Layer::onRemovedFromCurrentState() {
+    auto layersInTree = getLayersInTree(LayerVector::StateSet::Current);
+    std::sort(layersInTree.begin(), layersInTree.end());
+    for (const auto& layer : layersInTree) {
+        layer->removeFromCurrentState();
+        layer->removeRelativeZ(layersInTree);
+    }
 }
 
 void Layer::addToCurrentState() {
@@ -660,6 +686,7 @@ void Layer::pushPendingState() {
     if (!mCurrentState.modified) {
         return;
     }
+    ATRACE_CALL();
 
     // If this transaction is waiting on the receipt of a frame, generate a sync
     // point and send it to the remote layer.
@@ -674,8 +701,11 @@ void Layer::pushPendingState() {
             // to be applied as per normal (no synchronization).
             mCurrentState.barrierLayer_legacy = nullptr;
         } else {
-            auto syncPoint = std::make_shared<SyncPoint>(mCurrentState.frameNumber_legacy);
+            auto syncPoint = std::make_shared<SyncPoint>(mCurrentState.frameNumber_legacy, this);
             if (barrierLayer->addSyncPoint(syncPoint)) {
+                std::stringstream ss;
+                ss << "Adding sync point " << mCurrentState.frameNumber_legacy;
+                ATRACE_NAME(ss.str().c_str());
                 mRemoteSyncPoints.push_back(std::move(syncPoint));
             } else {
                 // We already missed the frame we're supposed to synchronize
@@ -693,6 +723,7 @@ void Layer::pushPendingState() {
 }
 
 void Layer::popPendingState(State* stateToCommit) {
+    ATRACE_CALL();
     *stateToCommit = mPendingStates[0];
 
     mPendingStates.removeAt(0);
@@ -724,6 +755,7 @@ bool Layer::applyPendingStates(State* stateToCommit) {
             }
 
             if (mRemoteSyncPoints.front()->frameIsAvailable()) {
+                ATRACE_NAME("frameIsAvailable");
                 // Apply the state update
                 popPendingState(stateToCommit);
                 stateUpdateAvailable = true;
@@ -732,6 +764,7 @@ bool Layer::applyPendingStates(State* stateToCommit) {
                 mRemoteSyncPoints.front()->setTransactionApplied();
                 mRemoteSyncPoints.pop_front();
             } else {
+                ATRACE_NAME("!frameIsAvailable");
                 break;
             }
         } else {
@@ -1178,6 +1211,7 @@ uint32_t Layer::getLayerStack() const {
 }
 
 void Layer::deferTransactionUntil_legacy(const sp<Layer>& barrierLayer, uint64_t frameNumber) {
+    ATRACE_CALL();
     mCurrentState.barrierLayer_legacy = barrierLayer;
     mCurrentState.frameNumber_legacy = frameNumber;
     // We don't set eTransactionNeeded, because just receiving a deferral
@@ -1517,6 +1551,7 @@ bool Layer::detachChildren() {
         if (client != nullptr && parentClient != client) {
             child->mLayerDetached = true;
             child->detachChildren();
+            child->removeRemoteSyncPoints();
         }
     }
 
