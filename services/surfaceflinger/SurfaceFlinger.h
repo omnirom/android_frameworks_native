@@ -928,6 +928,14 @@ private:
         return doDump(fd, args, asProto);
     }
 
+    // debug open file counit by process
+    struct {
+      const char *debugCountOpenFiles = "/data/misc/wmtrace/sfopenfiles.txt";
+      int debugFileCountFd = -1;
+      int maxFilecount = 2048;
+    } mFileOpen;
+    void printOpenFds();
+
     /* ------------------------------------------------------------------------
      * VrFlinger
      */
