@@ -121,6 +121,7 @@
 #include <vendor/display/config/1.2/IDisplayConfig.h>
 #include <vendor/display/config/1.6/IDisplayConfig.h>
 #include <vendor/display/config/1.7/IDisplayConfig.h>
+#include <vendor/display/config/1.9/IDisplayConfig.h>
 
 #include <layerproto/LayerProtoParser.h>
 #include "SurfaceFlingerProperties.h"
@@ -1959,6 +1960,35 @@ bool SurfaceFlinger::handleMessageInvalidate() {
     return refreshNeeded;
 }
 
+void SurfaceFlinger::setDisplayAnimating(const sp<DisplayDevice>& hw) {
+    static android::sp<vendor::display::config::V1_1::IDisplayConfig> disp_config_v1_1 =
+                                        vendor::display::config::V1_1::IDisplayConfig::getService();
+
+    const std::optional<DisplayId>& displayId = hw->getId();
+    const auto dpy = getHwComposer().fromPhysicalDisplayId(*displayId);
+
+    if (disp_config_v1_1 == NULL || !dpy || hw->getIsDisplayBuiltInType()) {
+        return;
+    }
+
+    bool hasScreenshot = false;
+    mDrawingState.traverseInZOrder([&](Layer* layer) {
+      if (layer->getLayerStack() == hw->getLayerStack()) {
+          if (layer->isScreenshot()) {
+              hasScreenshot = true;
+          }
+      }
+    });
+
+    if (hasScreenshot == hw->getAnimating()) {
+        return;
+    }
+
+    disp_config_v1_1->setDisplayAnimating(*dpy, hasScreenshot);
+    hw->setAnimating(hasScreenshot);
+}
+
+
 void SurfaceFlinger::calculateWorkingSet() {
     ATRACE_CALL();
     ALOGV(__FUNCTION__);
@@ -1968,6 +1998,7 @@ void SurfaceFlinger::calculateWorkingSet() {
         mGeometryInvalid = false;
         for (const auto& [token, displayDevice] : mDisplays) {
             auto display = displayDevice->getCompositionDisplay();
+            setDisplayAnimating(displayDevice);
 
             uint32_t zOrder = 0;
 
@@ -3043,13 +3074,31 @@ void SurfaceFlinger::processDisplayChangesLocked() {
                                       setupNewDisplayDeviceInternal(displayToken, displayId, state,
                                                                     dispSurface, producer));
                     // Check if power mode override is available and supported by HWC.
-                    using vendor::display::config::V1_7::IDisplayConfig;
-                    android::sp<IDisplayConfig> disp_config_v1_7 = IDisplayConfig::getService();
-                    if (disp_config_v1_7 != NULL) {
-                        const auto hwcDisplayId = getHwComposer().fromPhysicalDisplayId(*displayId);
-                        if (disp_config_v1_7->isPowerModeOverrideSupported(*hwcDisplayId)) {
-                            sp<DisplayDevice> display = getDisplayDeviceLocked(displayToken);
-                            display->setPowerModeOverrideConfig(true);
+                    {
+                        using vendor::display::config::V1_7::IDisplayConfig;
+                        android::sp<IDisplayConfig> disp_config_v1_7 =
+                            IDisplayConfig::getService();
+                        if (disp_config_v1_7 != NULL) {
+                             const auto hwcDisplayId =
+                                 getHwComposer().fromPhysicalDisplayId(*displayId);
+                            if (disp_config_v1_7->isPowerModeOverrideSupported(*hwcDisplayId)) {
+                                sp<DisplayDevice> display = getDisplayDeviceLocked(displayToken);
+                                display->setPowerModeOverrideConfig(true);
+                            }
+                        }
+                    }
+
+                    {
+                        using vendor::display::config::V1_9::IDisplayConfig;
+                        android::sp<IDisplayConfig> disp_config_v1_9 =
+                            IDisplayConfig::getService();
+                        if (disp_config_v1_9 != NULL) {
+                            const auto hwcDisplayId =
+                                getHwComposer().fromPhysicalDisplayId(*displayId);
+                            if (disp_config_v1_9->isBuiltInDisplay(*hwcDisplayId)) {
+                                sp<DisplayDevice> display = getDisplayDeviceLocked(displayToken);
+                                display->setIsDisplayBuiltInType(true);
+                            }
                         }
                     }
                     if (!state.isVirtual()) {

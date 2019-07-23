@@ -65,7 +65,9 @@ DisplayDevice::DisplayDevice(DisplayDeviceCreationArgs&& args)
         mOrientation(),
         mActiveConfig(0),
         mIsPrimary(args.isPrimary),
-        mIsPowerModeOverride(false) {
+        mIsPowerModeOverride(false),
+        mIsAnimating(false),
+        mIsDisplayBuiltInType(false) {
     mCompositionDisplay->createRenderSurface(
             compositionengine::RenderSurfaceCreationArgs{ANativeWindow_getWidth(
                                                                  args.nativeWindow.get()),
@@ -164,6 +166,22 @@ void DisplayDevice::setPowerModeOverrideConfig(bool supported) {
 
 bool DisplayDevice::getPowerModeOverrideConfig() const {
     return mIsPowerModeOverride;
+}
+
+void DisplayDevice::setAnimating(bool isAnimating) {
+    mIsAnimating = isAnimating;
+}
+
+bool DisplayDevice::getAnimating() const {
+    return mIsAnimating;
+}
+
+void DisplayDevice::setIsDisplayBuiltInType(bool isBuiltInType) {
+    mIsDisplayBuiltInType = isBuiltInType;
+}
+
+bool DisplayDevice::getIsDisplayBuiltInType() const {
+    return mIsDisplayBuiltInType;
 }
 
 // ----------------------------------------------------------------------------

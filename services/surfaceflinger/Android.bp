@@ -35,6 +35,7 @@ cc_defaults {
         "vendor.display.config@1.2",
         "vendor.display.config@1.6",
         "vendor.display.config@1.7",
+        "vendor.display.config@1.9",
         "libbase",
         "libbinder",
         "libbufferhubqueue",
