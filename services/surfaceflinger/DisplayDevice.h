@@ -161,6 +161,11 @@ public:
     void setPowerModeOverrideConfig(bool supported);
     bool getPowerModeOverrideConfig() const;
 
+    // For animation hint
+    bool getAnimating() const;
+    void setAnimating(bool isAnimating);
+    bool getIsDisplayBuiltInType() const;
+    void setIsDisplayBuiltInType(bool isBuiltIn);
     // release HWC resources (if any) for removable displays
     void disconnect();
 
@@ -215,6 +220,9 @@ private:
 
     // PowerMode Override
     bool mIsPowerModeOverride;
+    // For animation hint
+    bool mIsAnimating;
+    bool mIsDisplayBuiltInType;
 };
 
 struct DisplayDeviceState {
