@@ -106,6 +106,24 @@ private:
     mutable Mutex               mLock;
     mutable sp<Surface>         mSurfaceData;
     bool                        mOwned;
+
+    // VpsExtension
+    class VpsExtension {
+    public:
+        VpsExtension();
+        VpsExtension(const sp<IBinder> handle, sp<IGraphicBufferProducer>* gbp, bool flag);
+        ~VpsExtension();
+        void init() const;
+    private:
+        bool mIsEnable;
+        sp<IGraphicBufferProducer>* mGbp;
+        sp<IBinder> mHandle;
+        bool mFlag;
+        void* mLibHandler;
+        void* mFuncInit;
+        void* mFuncDeinit;
+    };
+    VpsExtension mExtension;
 };
 
 }; // namespace android

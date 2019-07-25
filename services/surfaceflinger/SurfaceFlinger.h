@@ -908,7 +908,6 @@ private:
 
     status_t doDumpContinuous(int fd, const DumpArgs& args);
     void dumpDrawCycle(bool prePrepare);
-
     struct {
       Mutex lock;
       const char *name = "/data/misc/wmtrace/dumpsys.txt";
@@ -918,9 +917,24 @@ private:
       long int position = 0;
     } mFileDump;
 
+    void dumpMemoryAllocations(bool dump);
+    struct {
+      const char *mMemoryAllocFileName = "/data/misc/wmtrace/sf_memory.txt";
+      int mMaxAllocationLimit = 1024*1024;
+      int mMemoryAllocFilePos = 0;
+    } mMemoryDump;
+
     status_t dumpAll(int fd, const DumpArgs& args, bool asProto) override {
         return doDump(fd, args, asProto);
     }
+
+    // debug open file counit by process
+    struct {
+      const char *debugCountOpenFiles = "/data/misc/wmtrace/sfopenfiles.txt";
+      int debugFileCountFd = -1;
+      int maxFilecount = 2048;
+    } mFileOpen;
+    void printOpenFds();
 
     /* ------------------------------------------------------------------------
      * VrFlinger

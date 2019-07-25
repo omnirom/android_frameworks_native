@@ -80,7 +80,8 @@ VirtualDisplaySurface::VirtualDisplaySurface(HWComposer& hwc,
         mDbgLastCompositionType(COMPOSITION_UNKNOWN),
         mMustRecompose(false),
         mForceHwcCopy(SurfaceFlinger::useHwcForRgbToYuv),
-        mSecure(secure) {
+        mSecure(secure),
+        mSinkUsage(0) {
     mSource[SOURCE_SINK] = sink;
     mSource[SOURCE_SCRATCH] = bqProducer;
 

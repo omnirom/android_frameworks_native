@@ -197,8 +197,14 @@ status_t TransactionCompletedThread::addCallbackHandle(const sp<CallbackHandle>&
     }
 
     transactionStats->latchTime = handle->latchTime;
-    transactionStats->surfaceStats.emplace_back(handle->surfaceControl, handle->acquireTime,
-                                                handle->previousReleaseFence);
+    // If the layer has already been destroyed, don't add the SurfaceControl to the callback.
+    // The client side keeps a sp<> to the SurfaceControl so if the SurfaceControl has been
+    // destroyed the client side is dead and there won't be anyone to send the callback to.
+    sp<IBinder> surfaceControl = handle->surfaceControl.promote();
+    if (surfaceControl) {
+        transactionStats->surfaceStats.emplace_back(surfaceControl, handle->acquireTime,
+                                                    handle->previousReleaseFence);
+    }
     return NO_ERROR;
 }
 
@@ -219,6 +225,7 @@ void TransactionCompletedThread::threadMain() {
 
     while (mKeepRunning) {
         mConditionVariable.wait(mMutex);
+        std::vector<ListenerStats> completedListenerStats;
 
         // For each listener
         auto completedTransactionsItr = mCompletedTransactions.begin();
@@ -264,11 +271,27 @@ void TransactionCompletedThread::threadMain() {
             } else {
                 completedTransactionsItr++;
             }
+
+            completedListenerStats.push_back(std::move(listenerStats));
         }
 
         if (mPresentFence) {
             mPresentFence.clear();
         }
+
+        // If everyone else has dropped their reference to a layer and its listener is dead,
+        // we are about to cause the layer to be deleted. If this happens at the wrong time and
+        // we are holding mMutex, we will cause a deadlock.
+        //
+        // The deadlock happens because this thread is holding on to mMutex and when we delete
+        // the layer, it grabs SF's mStateLock. A different SF binder thread grabs mStateLock,
+        // then call's TransactionCompletedThread::run() which tries to grab mMutex.
+        //
+        // To avoid this deadlock, we need to unlock mMutex when dropping our last reference to
+        // to the layer.
+        mMutex.unlock();
+        completedListenerStats.clear();
+        mMutex.lock();
     }
 }
 
