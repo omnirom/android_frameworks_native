@@ -47,6 +47,8 @@ uint64_t getValidUsageBits() {
              hardware::hidl_enum_range<hardware::graphics::common::V1_2::BufferUsage>()) {
             bits = bits | bit;
         }
+        // TODO(b/72323293, b/72703005): Remove these invalid bits from callers
+        bits = bits | ((1 << 13) | (1 << 21));
         return bits;
     }();
     return validUsageBits;
