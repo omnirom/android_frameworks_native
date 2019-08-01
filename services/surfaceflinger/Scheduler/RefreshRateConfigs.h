@@ -100,38 +100,43 @@ public:
                       return a.second > b.second;
                   });
 
-        // When the configs are ordered by the resync rate. We assume that the first one is DEFAULT.
-        nsecs_t vsyncPeriod = configIdToVsyncPeriod[0].second;
-        if (vsyncPeriod != 0) {
-            const float fps = 1e9 / vsyncPeriod;
-            const int configId = configIdToVsyncPeriod[0].first;
-            mRefreshRates.emplace(RefreshRateType::DEFAULT,
-                                  std::make_shared<RefreshRate>(
+        int32_t active_width = configs.at(mActiveConfig)->getWidth();
+        int32_t active_height = configs.at(mActiveConfig)->getHeight();
+
+        int max_supported_type = (int)RefreshRateType::PERFORMANCE;
+        int type = (int)RefreshRateType::DEFAULT;
+
+        // When the configs are ordered by refresh rate. We assume that the first one is DEFAULT,
+        // the second one is PERFORMANCE, eg. the higher rate.
+
+        for (int j = 0; j < configIdToVsyncPeriod.size(); j++) {
+            const int configId = configIdToVsyncPeriod[j].first;
+
+            // Populate mRefreshRates with configs having the same resolution as active config.
+            // Resolution change or SF::setActiveConfig will re-populate the mRefreshRates map.
+            if ((active_width != configs.at(configId)->getWidth()) ||
+                (active_height != configs.at(configId)->getHeight())) {
+                continue;
+            }
+
+            nsecs_t vsyncPeriod = configIdToVsyncPeriod[j].second;
+            if ((vsyncPeriod != 0) && (type <= max_supported_type)) {
+                const float fps = 1e9 / vsyncPeriod;
+                mRefreshRates.emplace(static_cast<RefreshRateType>(type),
+                                      std::make_shared<RefreshRate>(
                                           RefreshRate{configId, base::StringPrintf("%2.ffps", fps),
                                                       static_cast<uint32_t>(fps),
                                                       configs.at(configId)->getId()}));
-        }
-
-        if (configs.size() < 2) {
-            return;
-        }
-
-        // When the configs are ordered by the resync rate. We assume that the last one is
-        // PERFORMANCE, eg. the highest rate.
-        vsyncPeriod = configIdToVsyncPeriod.back().second;
-        if (vsyncPeriod != 0) {
-            const float fps = 1e9 / vsyncPeriod;
-            const int configId = configIdToVsyncPeriod.back().first;
-            mRefreshRates.emplace(RefreshRateType::PERFORMANCE,
-                                  std::make_shared<RefreshRate>(
-                                          RefreshRate{configId, base::StringPrintf("%2.ffps", fps),
-                                                      static_cast<uint32_t>(fps),
-                                                      configs.at(configId)->getId()}));
+                type++;
+            }
         }
     }
 
+    void setActiveConfig(int config) { mActiveConfig = config; }
+
 private:
     std::map<RefreshRateType, std::shared_ptr<RefreshRate>> mRefreshRates;
+    int mActiveConfig = 0;
 };
 
 } // namespace scheduler
