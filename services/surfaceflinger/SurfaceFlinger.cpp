@@ -616,13 +616,16 @@ void SurfaceFlinger::bootFinished()
         mBootStage = BootStage::FINISHED;
 
         // set the refresh rate according to the policy
-        const auto& performanceRefreshRate =
-                mRefreshRateConfigs.getRefreshRate(RefreshRateType::PERFORMANCE);
+        int maxSupportedType = (int)RefreshRateType::PERF2;
+        int minSupportedType = (int)RefreshRateType::LOW0;
 
-        if (performanceRefreshRate && isDisplayConfigAllowed(performanceRefreshRate->configId)) {
-            setRefreshRateTo(RefreshRateType::PERFORMANCE, Scheduler::ConfigEvent::None);
-        } else {
-            setRefreshRateTo(RefreshRateType::DEFAULT, Scheduler::ConfigEvent::None);
+        for (int type = maxSupportedType; type >= minSupportedType; type--) {
+            RefreshRateType refreshRateType = static_cast<RefreshRateType>(type);
+            const auto& refreshRate = mRefreshRateConfigs.getRefreshRate(refreshRateType);
+            if (refreshRate && isDisplayConfigAllowed(refreshRate->configId)) {
+                setRefreshRateTo(refreshRateType, Scheduler::ConfigEvent::None);
+                return;
+            }
         }
     }));
 }
