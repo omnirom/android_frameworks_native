@@ -4907,8 +4907,6 @@ void SurfaceFlinger::setPowerModeOnMainThread(const sp<IBinder>& displayToken, i
 
 void SurfaceFlinger::setPowerMode(const sp<IBinder>& displayToken, int mode) {
     sp<DisplayDevice> display(getDisplayDevice(displayToken));
-    const auto displayId = display->getId();
-    const auto hwcDisplayId = getHwComposer().fromPhysicalDisplayId(*displayId);
 
     if (!display) {
         ALOGE("Attempt to set power mode %d for invalid display token %p", mode,
@@ -4918,6 +4916,9 @@ void SurfaceFlinger::setPowerMode(const sp<IBinder>& displayToken, int mode) {
         ALOGW("Attempt to set power mode %d for virtual display", mode);
         return;
     }
+
+    const auto displayId = display->getId();
+    const auto hwcDisplayId = getHwComposer().fromPhysicalDisplayId(*displayId);
 
     // Fallback to default power state behavior as HWC does not support power mode override.
     using vendor::display::config::V1_7::IDisplayConfig;
