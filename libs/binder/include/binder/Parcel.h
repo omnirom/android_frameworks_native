@@ -399,7 +399,7 @@ public:
     bool                replaceCallingWorkSourceUid(uid_t uid);
     // Returns the work source provided by the caller. This can only be trusted for trusted calling
     // uid.
-    uid_t               readCallingWorkSourceUid();
+    uid_t               readCallingWorkSourceUid() const;
     void                readRequestHeaders() const;
 
 private:
@@ -931,23 +931,6 @@ inline TextOutput& operator<<(TextOutput& to, const Parcel& parcel)
     parcel.print(to);
     return to;
 }
-
-// ---------------------------------------------------------------------------
-
-// Generic acquire and release of objects.
-void acquire_object(const sp<ProcessState>& proc,
-                    const flat_binder_object& obj, const void* who);
-void release_object(const sp<ProcessState>& proc,
-                    const flat_binder_object& obj, const void* who);
-
-void flatten_binder(const sp<ProcessState>& proc,
-                    const sp<IBinder>& binder, flat_binder_object* out);
-void flatten_binder(const sp<ProcessState>& proc,
-                    const wp<IBinder>& binder, flat_binder_object* out);
-status_t unflatten_binder(const sp<ProcessState>& proc,
-                          const flat_binder_object& flat, sp<IBinder>* out);
-status_t unflatten_binder(const sp<ProcessState>& proc,
-                          const flat_binder_object& flat, wp<IBinder>* out);
 
 }; // namespace android
 
