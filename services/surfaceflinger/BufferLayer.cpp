@@ -779,10 +779,14 @@ void BufferLayer::onFrameAvailable(const BufferItem& item) {
 
     if (mFlinger->mDolphinFuncsEnabled) {
         Mutex::Autolock lock(mFlinger->mDolphinStateLock);
-        const Vector< sp<Layer> >& visibleLayersSortedByZ =
-            mFlinger->getLayerSortedByZForHwcDisplay(0);
+        int visibleLayerNum = 0;
+        {
+            Mutex::Autolock lock(mFlinger->mStateLock);
+            const Vector< sp<Layer> >& visibleLayersSortedByZ =
+                mFlinger->getLayerSortedByZForHwcDisplay(0);
+            visibleLayerNum = visibleLayersSortedByZ.size();
+        }
         bool isTransparentRegion = this->visibleNonTransparentRegion.isEmpty();
-        int visibleLayerNum = visibleLayersSortedByZ.size();
         Rect crop = this->getContentCrop();
         int32_t width = crop.getWidth();
         int32_t height = crop.getHeight();
