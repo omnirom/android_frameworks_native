@@ -121,10 +121,12 @@
 #include <vendor/display/config/1.2/IDisplayConfig.h>
 #include <vendor/display/config/1.6/IDisplayConfig.h>
 #include <vendor/display/config/1.7/IDisplayConfig.h>
+#include <vendor/display/config/1.9/IDisplayConfig.h>
 
 #include <layerproto/LayerProtoParser.h>
 #include "SurfaceFlingerProperties.h"
 #include "gralloc_priv.h"
+#include "smomo_interface.h"
 
 namespace android {
 
@@ -408,6 +410,12 @@ SurfaceFlinger::SurfaceFlinger(Factory& factory) : SurfaceFlinger(factory, SkipI
         setenv("TREBLE_TESTING_OVERRIDE", "true", true);
     }
 
+    property_get("vendor.display.use_smooth_motion", value, "0");
+    int_value = atoi(value);
+    if (int_value) {
+        mUseSmoMo = true;
+    }
+
     mDolphinHandle = dlopen("libdolphin.so", RTLD_NOW);
     if (!mDolphinHandle) {
         ALOGW("Unable to open libdolphin.so: %s.", dlerror());
@@ -437,6 +445,11 @@ SurfaceFlinger::~SurfaceFlinger()
     // debug total open files
     if (mFileOpen.debugFileCountFd >= 0) {
         close(mFileOpen.debugFileCountFd);
+    }
+
+    if(mUseSmoMo) {
+        mSmoMoDestroyFunc(mSmoMo);
+        dlclose(mSmoMoLibHandle);
     }
 }
 
@@ -766,6 +779,41 @@ void SurfaceFlinger::init() {
 
     // debug open files count by process
      mFileOpen.debugFileCountFd = open(mFileOpen.debugCountOpenFiles, O_WRONLY|O_CREAT,0664);
+
+    if (mUseSmoMo) {
+        mSmoMoLibHandle = dlopen("libsmomo.qti.so", RTLD_NOW);
+        if (!mSmoMoLibHandle) {
+            ALOGE("Unable to open libsmomo: %s", dlerror());
+        } else {
+             mSmoMoCreateFunc =
+                    reinterpret_cast<CreateSmoMoFuncPtr>(dlsym(mSmoMoLibHandle, "CreateSmomo"));
+             mSmoMoDestroyFunc =
+                    reinterpret_cast<DestroySmoMoFuncPtr>(dlsym(mSmoMoLibHandle, "DestroySmomo"));
+             if (mSmoMoCreateFunc && mSmoMoDestroyFunc) {
+                mSmoMo = mSmoMoCreateFunc();
+             } else {
+                ALOGE("Can't load libsmomo symbols: %s", dlerror());
+             }
+        }
+
+        if (mSmoMo) {
+            mSmoMo->SetChangeRefreshRateCallback(
+                [this](int32_t refreshRate) {
+                    Mutex::Autolock lock(mStateLock);
+                    setRefreshRateTo(refreshRate);
+                });
+
+            std::vector<float> refreshRates;
+            for (const auto& hwConfig : getHwComposer().getConfigs(*display->getId())) {
+                refreshRates.push_back(1e9 / hwConfig->getVsyncPeriod());
+            }
+            mSmoMo->SetDisplayRefreshRates(refreshRates);
+
+            ALOGI("SmoMo is enabled");
+        } else {
+            mUseSmoMo = false;
+        }
+    }
 
     ALOGV("Done initializing");
 }
@@ -1536,6 +1584,48 @@ void SurfaceFlinger::setRefreshRateTo(RefreshRateType refreshRate, Scheduler::Co
     setDesiredActiveConfig({refreshRate, desiredConfigId, event});
 }
 
+void SurfaceFlinger::setRefreshRateTo(int32_t refreshRate) {
+    //TODO: phase offset
+    if (mBootStage != BootStage::FINISHED) {
+        return;
+    }
+    ATRACE_CALL();
+
+    // Don't do any updating if the current fps is the same as the new one.
+    const nsecs_t currentVsyncPeriod = getVsyncPeriod();
+    if (currentVsyncPeriod == 0) {
+        return;
+    }
+
+    const float currentFps = 1e9 / currentVsyncPeriod;
+    const float newFps = static_cast<float>(refreshRate);
+    if (std::abs(currentFps - newFps) <= 1) {
+        return;
+    }
+
+    const auto displayId = getInternalDisplayIdLocked();
+    LOG_ALWAYS_FATAL_IF(!displayId);
+    auto configs = getHwComposer().getConfigs(*displayId);
+
+    int desiredConfigId = -1;
+    for (int i = 0; i < configs.size(); i++) {
+        const nsecs_t vsyncPeriod = configs.at(i)->getVsyncPeriod();
+        const float fps = 1e9 / vsyncPeriod;
+        if (std::abs(fps - newFps) <= 1) {
+            desiredConfigId = i;
+            break;
+        }
+    }
+
+    if (desiredConfigId < 0) {
+        ALOGV("Skipping refresh rate change request for unsupported rate.");
+        return;
+    }
+
+    setDesiredActiveConfig({scheduler::RefreshRateConfigs::RefreshRateType::DEFAULT,
+        desiredConfigId, Scheduler::ConfigEvent::Changed});
+}
+
 void SurfaceFlinger::onHotplugReceived(int32_t sequenceId, hwc2_display_t hwcDisplayId,
                                        HWC2::Connection connection) {
     ALOGV("%s(%d, %" PRIu64 ", %s)", __FUNCTION__, sequenceId, hwcDisplayId,
@@ -1870,6 +1960,35 @@ bool SurfaceFlinger::handleMessageInvalidate() {
     return refreshNeeded;
 }
 
+void SurfaceFlinger::setDisplayAnimating(const sp<DisplayDevice>& hw) {
+    static android::sp<vendor::display::config::V1_1::IDisplayConfig> disp_config_v1_1 =
+                                        vendor::display::config::V1_1::IDisplayConfig::getService();
+
+    const std::optional<DisplayId>& displayId = hw->getId();
+    const auto dpy = getHwComposer().fromPhysicalDisplayId(*displayId);
+
+    if (disp_config_v1_1 == NULL || !dpy || hw->getIsDisplayBuiltInType()) {
+        return;
+    }
+
+    bool hasScreenshot = false;
+    mDrawingState.traverseInZOrder([&](Layer* layer) {
+      if (layer->getLayerStack() == hw->getLayerStack()) {
+          if (layer->isScreenshot()) {
+              hasScreenshot = true;
+          }
+      }
+    });
+
+    if (hasScreenshot == hw->getAnimating()) {
+        return;
+    }
+
+    disp_config_v1_1->setDisplayAnimating(*dpy, hasScreenshot);
+    hw->setAnimating(hasScreenshot);
+}
+
+
 void SurfaceFlinger::calculateWorkingSet() {
     ATRACE_CALL();
     ALOGV(__FUNCTION__);
@@ -1879,6 +1998,7 @@ void SurfaceFlinger::calculateWorkingSet() {
         mGeometryInvalid = false;
         for (const auto& [token, displayDevice] : mDisplays) {
             auto display = displayDevice->getCompositionDisplay();
+            setDisplayAnimating(displayDevice);
 
             uint32_t zOrder = 0;
 
@@ -2231,6 +2351,27 @@ void SurfaceFlinger::postComposition()
 
     if (mLumaSampling && mRegionSamplingThread) {
         mRegionSamplingThread->notifyNewContent();
+    }
+
+    if (mUseSmoMo) {
+        Mutex::Autolock lock(mStateLock);
+
+        float refreshRate = 1e9 / getVsyncPeriod();
+
+        std::vector<smomo::SmomoLayerStats> layers;
+
+        // Disable SmoMo by passing empty layer stack in multiple display case
+        if (mDisplays.size() == 1) {
+            for (const auto& layer : displayDevice->getVisibleLayersSortedByZ()) {
+                smomo::SmomoLayerStats layerStats = {
+                    layer->getName().string(),
+                    layer->getSequence(),
+                };
+                layers.push_back(layerStats);
+            }
+        }
+
+        mSmoMo->UpdateSmomoState(layers, refreshRate);
     }
 
     // Even though ATRACE_INT64 already checks if tracing is enabled, it doesn't prevent the
@@ -2933,13 +3074,31 @@ void SurfaceFlinger::processDisplayChangesLocked() {
                                       setupNewDisplayDeviceInternal(displayToken, displayId, state,
                                                                     dispSurface, producer));
                     // Check if power mode override is available and supported by HWC.
-                    using vendor::display::config::V1_7::IDisplayConfig;
-                    android::sp<IDisplayConfig> disp_config_v1_7 = IDisplayConfig::getService();
-                    if (disp_config_v1_7 != NULL) {
-                        const auto hwcDisplayId = getHwComposer().fromPhysicalDisplayId(*displayId);
-                        if (disp_config_v1_7->isPowerModeOverrideSupported(*hwcDisplayId)) {
-                            sp<DisplayDevice> display = getDisplayDeviceLocked(displayToken);
-                            display->setPowerModeOverrideConfig(true);
+                    {
+                        using vendor::display::config::V1_7::IDisplayConfig;
+                        android::sp<IDisplayConfig> disp_config_v1_7 =
+                            IDisplayConfig::getService();
+                        if (disp_config_v1_7 != NULL) {
+                             const auto hwcDisplayId =
+                                 getHwComposer().fromPhysicalDisplayId(*displayId);
+                            if (disp_config_v1_7->isPowerModeOverrideSupported(*hwcDisplayId)) {
+                                sp<DisplayDevice> display = getDisplayDeviceLocked(displayToken);
+                                display->setPowerModeOverrideConfig(true);
+                            }
+                        }
+                    }
+
+                    {
+                        using vendor::display::config::V1_9::IDisplayConfig;
+                        android::sp<IDisplayConfig> disp_config_v1_9 =
+                            IDisplayConfig::getService();
+                        if (disp_config_v1_9 != NULL) {
+                            const auto hwcDisplayId =
+                                getHwComposer().fromPhysicalDisplayId(*displayId);
+                            if (disp_config_v1_9->isBuiltInDisplay(*hwcDisplayId)) {
+                                sp<DisplayDevice> display = getDisplayDeviceLocked(displayToken);
+                                display->setIsDisplayBuiltInType(true);
+                            }
                         }
                     }
                     if (!state.isVirtual()) {

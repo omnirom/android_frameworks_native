@@ -30,6 +30,7 @@
 #include "SurfaceInterceptor.h"
 
 #include "TimeStats/TimeStats.h"
+#include "smomo_interface.h"
 
 namespace android {
 
@@ -109,7 +110,18 @@ bool BufferQueueLayer::shouldPresentNow(nsecs_t expectedPresentTime) const {
              "relative to expectedPresent %" PRId64,
              mName.string(), addedTime, expectedPresentTime);
 
-    const bool isDue = addedTime < expectedPresentTime;
+    bool isDue = addedTime < expectedPresentTime;
+
+    if (isDue && mFlinger->mUseSmoMo) {
+        smomo::SmomoBufferStats bufferStats = {
+            getSequence(),
+            getQueuedFrameCount(),
+            mQueueItems[0].mIsAutoTimestamp,
+            mQueueItems[0].mTimestamp,
+        };
+        isDue = mFlinger->mSmoMo->ShouldPresentNow(bufferStats, expectedPresentTime);
+    }
+
     return isDue || !isPlausible;
 }
 
@@ -486,6 +498,16 @@ void BufferQueueLayer::onFrameAvailable(const BufferItem& item) {
         String8 name = this->getName();
         mFlinger->mDolphinOnFrameAvailable(isTransparentRegion, visibleLayerNum,
                                            width, height, name);
+    }
+
+    if (mFlinger->mUseSmoMo) {
+        smomo::SmomoBufferStats bufferStats = {
+            getSequence(),
+            getQueuedFrameCount(),
+            item.mIsAutoTimestamp,
+            item.mTimestamp,
+        };
+        mFlinger->mSmoMo->CollectLayerStats(bufferStats);
     }
 
     // If this layer is orphaned, then we run a fake vsync pulse so that

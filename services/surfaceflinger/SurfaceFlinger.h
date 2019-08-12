@@ -80,6 +80,12 @@
 
 using namespace android::surfaceflinger;
 
+namespace smomo {
+class SmomoIntf;
+} // namespace smomo
+
+using smomo::SmomoIntf;
+
 namespace android {
 
 class Client;
@@ -485,6 +491,8 @@ private:
     void onRefreshReceived(int32_t sequenceId, hwc2_display_t hwcDisplayId) override;
     // For Async power mode
     void setPowerModeOnMainThread(const sp<IBinder>& displayToken, int mode);
+    // For Animation Hint
+    void setDisplayAnimating(const sp<DisplayDevice>& hw);
 
     /* ------------------------------------------------------------------------
      * Message handling
@@ -811,6 +819,7 @@ private:
     // Sets the refresh rate by switching active configs, if they are available for
     // the desired refresh rate.
     void setRefreshRateTo(RefreshRateType, Scheduler::ConfigEvent event) REQUIRES(mStateLock);
+    void setRefreshRateTo(int32_t refreshRate) REQUIRES(mStateLock);
 
     bool isDisplayConfigAllowed(int32_t configId) REQUIRES(mStateLock);
 
@@ -1216,6 +1225,15 @@ private:
     bool (*mDolphinInit)() = nullptr;
     bool (*mDolphinMonitor)(int number) = nullptr;
     void (*mDolphinRefresh)() = nullptr;
+
+    bool mUseSmoMo = false;
+    SmomoIntf* mSmoMo = nullptr;
+    void *mSmoMoLibHandle = nullptr;
+
+    using CreateSmoMoFuncPtr = std::add_pointer<SmomoIntf*()>::type;
+    using DestroySmoMoFuncPtr = std::add_pointer<void(SmomoIntf*)>::type;
+    CreateSmoMoFuncPtr mSmoMoCreateFunc;
+    DestroySmoMoFuncPtr mSmoMoDestroyFunc;
 };
 
 } // namespace android
