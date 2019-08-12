@@ -5097,6 +5097,13 @@ void SurfaceFlinger::dumpMemoryAllocations(bool dump)
     if (!dump) {
         return;
     }
+
+    {
+       Mutex::Autolock lock(mLayerCountLock);
+       if (mNumLayers < 50) {
+           return;
+       }
+    }
     std::string dumpsys;
     GraphicBufferAllocator& alloc(GraphicBufferAllocator::get());
     alloc.dump(dumpsys);
