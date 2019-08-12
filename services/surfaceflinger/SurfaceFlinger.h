@@ -316,10 +316,18 @@ public:
     bool authenticateSurfaceTextureLocked(
         const sp<IGraphicBufferProducer>& bufferProducer) const;
 
-    inline void onLayerCreated() { mNumLayers++; }
+    inline void onLayerCreated() {
+         {
+           Mutex::Autolock lock(mLayerCountLock);
+           mNumLayers++;
+         }
+    }
     inline void onLayerDestroyed(Layer* layer) {
-        mNumLayers--;
-        mOffscreenLayers.erase(layer);
+          {
+            Mutex::Autolock lock(mLayerCountLock);
+            mNumLayers--;
+          }
+          mOffscreenLayers.erase(layer);
     }
 
     TransactionCompletedThread& getTransactionCompletedThread() {
@@ -963,6 +971,7 @@ private:
     // access must be protected by mStateLock
     mutable Mutex mStateLock;
     mutable Mutex mDolphinStateLock;
+    mutable Mutex mLayerCountLock;
     State mCurrentState{LayerVector::StateSet::Current};
     std::atomic<int32_t> mTransactionFlags = 0;
     Condition mTransactionCV;
