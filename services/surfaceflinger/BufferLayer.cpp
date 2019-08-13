@@ -778,21 +778,19 @@ void BufferLayer::onFrameAvailable(const BufferItem& item) {
     }
 
     if (mFlinger->mDolphinFuncsEnabled) {
-        Mutex::Autolock lock(mFlinger->mDolphinStateLock);
-        int visibleLayerNum = 0;
+        bool isTransparentRegion;
+        Rect crop;
+        int32_t width,height;
+        String8 name;
         {
             Mutex::Autolock lock(mFlinger->mStateLock);
-            const Vector< sp<Layer> >& visibleLayersSortedByZ =
-                mFlinger->getLayerSortedByZForHwcDisplay(0);
-            visibleLayerNum = visibleLayersSortedByZ.size();
+            isTransparentRegion = this->visibleNonTransparentRegion.isEmpty();
+            crop = this->getContentCrop();
+            width = crop.getWidth();
+            height = crop.getHeight();
+            name = this->getName();
         }
-        bool isTransparentRegion = this->visibleNonTransparentRegion.isEmpty();
-        Rect crop = this->getContentCrop();
-        int32_t width = crop.getWidth();
-        int32_t height = crop.getHeight();
-        String8 mName = this->getName();
-        mFlinger->mDolphinOnFrameAvailable(isTransparentRegion, visibleLayerNum,
-                                           width, height, mName);
+        mFlinger->mDolphinOnFrameAvailable(isTransparentRegion, width, height, name);
     }
 
     mFlinger->signalLayerUpdate();

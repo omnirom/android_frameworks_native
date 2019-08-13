@@ -405,8 +405,8 @@ SurfaceFlinger::SurfaceFlinger() : SurfaceFlinger(SkipInitialization) {
     } else {
         mDolphinInit = (bool (*) ())dlsym(mDolphinHandle, "dolphinInit");
         mDolphinOnFrameAvailable =
-            (void (*) (bool, int, int32_t, int32_t, String8))dlsym(mDolphinHandle,
-                                                                   "dolphinOnFrameAvailable");
+            (void (*) (bool, int32_t, int32_t, String8))dlsym(mDolphinHandle,
+                                                              "dolphinOnFrameAvailable");
         mDolphinMonitor = (bool (*) (int))dlsym(mDolphinHandle, "dolphinMonitor");
         mDolphinRefresh = (void (*) ())dlsym(mDolphinHandle, "dolphinRefresh");
         if (mDolphinInit != nullptr && mDolphinOnFrameAvailable != nullptr &&
@@ -2081,7 +2081,6 @@ void SurfaceFlinger::forceResyncModel() {
 void SurfaceFlinger::rebuildLayerStacks() {
     ATRACE_CALL();
     ALOGV("rebuildLayerStacks");
-    Mutex::Autolock lock(mDolphinStateLock);
 
     // rebuild the visible layer list per screen
     if (CC_UNLIKELY(mVisibleRegionsDirty)) {

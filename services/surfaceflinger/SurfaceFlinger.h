@@ -783,7 +783,6 @@ private:
 
     // access must be protected by mStateLock
     mutable Mutex mStateLock;
-    mutable Mutex mDolphinStateLock;
     State mCurrentState{LayerVector::StateSet::Current};
     volatile int32_t mTransactionFlags;
     Condition mTransactionCV;
@@ -938,7 +937,7 @@ private:
 
     bool mDolphinFuncsEnabled = false;
     void *mDolphinHandle = nullptr;
-    void (*mDolphinOnFrameAvailable)(bool isTransparent, int num, int32_t width, int32_t height,
+    void (*mDolphinOnFrameAvailable)(bool isTransparent, int32_t width, int32_t height,
                                      String8 name) = nullptr;
     bool (*mDolphinInit)() = nullptr;
     bool (*mDolphinMonitor)(int number) = nullptr;
