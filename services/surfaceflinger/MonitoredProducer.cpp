@@ -60,7 +60,15 @@ status_t MonitoredProducer::dequeueBuffer(int* slot, sp<Fence>* fence, uint32_t 
                                           PixelFormat format, uint64_t usage,
                                           uint64_t* outBufferAge,
                                           FrameEventHistoryDelta* outTimestamps) {
-    return mProducer->dequeueBuffer(slot, fence, w, h, format, usage, outBufferAge, outTimestamps);
+    nsecs_t dequeueStartTime = systemTime();
+    status_t result = mProducer->dequeueBuffer(slot, fence, w, h, format, usage, outBufferAge, outTimestamps);
+    if (result == OK) {
+        sp<Layer> layer = mLayer.promote();
+        if (layer != nullptr) {
+            layer->setDequeueLatency(systemTime() - dequeueStartTime);
+        }
+    }
+    return result;
 }
 
 status_t MonitoredProducer::detachBuffer(int slot) {
