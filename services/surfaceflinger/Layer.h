@@ -226,6 +226,9 @@ public:
     void setPrimaryDisplayOnly() { mPrimaryDisplayOnly = true; }
     bool getPrimaryDisplayOnly() const { return mPrimaryDisplayOnly; }
 
+    void setDequeueLatency(const nsecs_t latency) { mDequeueLatency = latency; }
+    nsecs_t getDequeueLatency() const { return mDequeueLatency; }
+
     // ------------------------------------------------------------------------
     // Geometry setting functions.
     //
@@ -858,6 +861,9 @@ protected:
     ConsumerFrameEventHistory mFrameEventHistory;
     FenceTimeline mAcquireTimeline;
     FenceTimeline mReleaseTimeline;
+
+    // latest buffer dequeue latency
+    std::atomic<nsecs_t> mDequeueLatency{0};
 
     // main thread
     sp<NativeHandle> mSidebandStream;
