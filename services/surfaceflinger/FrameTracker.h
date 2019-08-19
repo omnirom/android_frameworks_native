@@ -92,6 +92,9 @@ public:
     // dumpStats dump appends the current frame display time history to the result string.
     void dumpStats(std::string& result) const;
 
+    //get previous frame gfx info.
+    nsecs_t getPreviousGfxInfo();
+
 private:
     struct FrameRecord {
         FrameRecord() :

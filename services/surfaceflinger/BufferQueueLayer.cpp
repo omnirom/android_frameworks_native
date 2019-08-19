@@ -30,6 +30,7 @@
 #include "SurfaceInterceptor.h"
 
 #include "TimeStats/TimeStats.h"
+#include "frame_extn_intf.h"
 #include "smomo_interface.h"
 
 namespace android {
@@ -485,21 +486,6 @@ void BufferQueueLayer::onFrameAvailable(const BufferItem& item) {
     mFlinger->mInterceptor->saveBufferUpdate(this, item.mGraphicBuffer->getWidth(),
                                              item.mGraphicBuffer->getHeight(), item.mFrameNumber);
 
-    if (mFlinger->mDolphinFuncsEnabled) {
-        Mutex::Autolock lock(mFlinger->mDolphinStateLock);
-        const auto displayId = mFlinger->getInternalDisplayIdLocked();
-        const Vector< sp<Layer> >& visibleLayersSortedByZ =
-            mFlinger->getLayerSortedByZForHwcDisplay(*displayId);
-        bool isTransparentRegion = this->visibleNonTransparentRegion.isEmpty();
-        int visibleLayerNum = visibleLayersSortedByZ.size();
-        Rect crop = this->getContentCrop();
-        int32_t width = crop.getWidth();
-        int32_t height = crop.getHeight();
-        String8 name = this->getName();
-        mFlinger->mDolphinOnFrameAvailable(isTransparentRegion, visibleLayerNum,
-                                           width, height, name);
-    }
-
     if (mFlinger->mUseSmoMo) {
         smomo::SmomoBufferStats bufferStats = {
             getSequence(),
@@ -515,6 +501,33 @@ void BufferQueueLayer::onFrameAvailable(const BufferItem& item) {
     if (isRemovedFromCurrentState()) {
         fakeVsync();
     } else {
+        if (mFlinger->mFrameExtn && mFlinger->mDolphinFuncsEnabled) {
+            composer::FrameInfo frameInfo;
+            Rect crop;
+            frameInfo.version.major = (uint8_t)(1);
+            frameInfo.version.minor = (uint8_t)(0);
+            frameInfo.max_queued_frames = mFlinger->mMaxQueuedFrames;
+            frameInfo.num_idle = mFlinger->mNumIdle;
+            frameInfo.max_queued_layer_name = mFlinger->mNameLayerMax.c_str();
+            frameInfo.current_timestamp = systemTime(SYSTEM_TIME_MONOTONIC);
+            frameInfo.previous_timestamp = mLastTimeStamp;
+            frameInfo.vsync_timestamp = mFlinger->mVsyncTimeStamp;
+            frameInfo.refresh_timestamp = mFlinger->mRefreshTimeStamp;
+            frameInfo.ref_latency = mFrameTracker.getPreviousGfxInfo();
+            DisplayStatInfo stats;
+            mFlinger->mScheduler->getDisplayStatInfo(&stats);
+            frameInfo.vsync_period = stats.vsyncPeriod;
+            mLastTimeStamp = frameInfo.current_timestamp;
+            {
+                Mutex::Autolock lock(mFlinger->mStateLock);
+                frameInfo.transparent_region = this->visibleNonTransparentRegion.isEmpty();
+                crop = this->getContentCrop();
+                frameInfo.width = crop.getWidth();
+                frameInfo.height = crop.getHeight();
+                frameInfo.layer_name = this->getName().c_str();
+            }
+            mFlinger->mFrameExtn->SetFrameInfo(frameInfo);
+        }
         mFlinger->signalLayerUpdate();
     }
     mConsumer->onBufferAvailable(item);
