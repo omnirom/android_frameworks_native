@@ -101,8 +101,6 @@ PhaseOffsets::Offsets PhaseOffsets::getOffsetsForRefreshRate(
         android::scheduler::RefreshRateConfigs::RefreshRateType refreshRateType) const {
     switch (refreshRateType) {
         case RefreshRateConfigs::RefreshRateType::PERFORMANCE:
-        case RefreshRateConfigs::RefreshRateType::PERF1:
-        case RefreshRateConfigs::RefreshRateType::PERF2:
             return mHighRefreshRateOffsets;
         default:
             return mDefaultRefreshRateOffsets;
