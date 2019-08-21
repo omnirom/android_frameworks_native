@@ -774,10 +774,8 @@ void SurfaceFlinger::init() {
         return getVsyncPeriod();
     });
 
-    int active_config = getHwComposer().getActiveConfigIndex(*display->getId());
-    mRefreshRateConfigs.setActiveConfig(active_config);
     mRefreshRateConfigs.populate(getHwComposer().getConfigs(*display->getId()));
-    mRefreshRateStats.setConfigMode(active_config);
+    mRefreshRateStats.setConfigMode(getHwComposer().getActiveConfigIndex(*display->getId()));
 
     // debug open files count by process
      mFileOpen.debugFileCountFd = open(mFileOpen.debugCountOpenFiles, O_WRONLY|O_CREAT,0664);
@@ -1056,13 +1054,6 @@ status_t SurfaceFlinger::setActiveConfig(const sp<IBinder>& displayToken, int mo
 
     std::vector<int32_t> allowedConfig;
     allowedConfig.push_back(mode);
-
-    const auto display = getDisplayDeviceLocked(displayToken);
-    // RefreshRateConfigs are only supported on Primary display.
-    if (display && display->isPrimary()) {
-        mRefreshRateConfigs.setActiveConfig(mode);
-        mRefreshRateConfigs.populate(getHwComposer().getConfigs(*display->getId()));
-    }
 
     return setAllowedDisplayConfigs(displayToken, allowedConfig);
 }
@@ -6188,12 +6179,6 @@ status_t SurfaceFlinger::onTransact(uint32_t code, const Parcel& data, Parcel* r
                 mDebugDisplayConfigSetByBackdoor = false;
                 if (n >= 0) {
                     const auto displayToken = getInternalDisplayToken();
-                    const auto display = getDisplayDeviceLocked(displayToken);
-                    // RefreshRateConfigs are only supported on Primary display.
-                    if (display && display->isPrimary()) {
-                        mRefreshRateConfigs.setActiveConfig(n);
-                        mRefreshRateConfigs.populate(getHwComposer().getConfigs(*display->getId()));
-                    }
                     status_t result = setAllowedDisplayConfigs(displayToken, {n});
                     if (result != NO_ERROR) {
                         return result;
