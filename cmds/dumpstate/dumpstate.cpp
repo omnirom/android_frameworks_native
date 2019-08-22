@@ -428,7 +428,7 @@ static void dump_dev_files(const char *title, const char *driverpath, const char
 // 2. send a SIGUSR1 to its pid which will dump anrd's trace.
 // 3. wait until the trace generation completes and add to the zip file.
 static bool dump_anrd_trace() {
-    unsigned int pid;
+    int pid;
     char buf[50], path[PATH_MAX];
     struct dirent *trace;
     struct stat st;
@@ -455,7 +455,7 @@ static bool dump_anrd_trace() {
         }
 
         // send SIGUSR1 to the anrd to generate a trace.
-        sprintf(buf, "%u", pid);
+        sprintf(buf, "%d", pid);
         if (RunCommand("ANRD_DUMP", {"kill", "-SIGUSR1", buf},
                        CommandOptions::WithTimeout(1).Build())) {
             MYLOGE("anrd signal timed out. Please manually collect trace\n");
@@ -1428,7 +1428,6 @@ static Dumpstate::RunStatus dumpstate() {
     DumpFile("BINDER STATS", "/sys/kernel/debug/binder/stats");
     DumpFile("BINDER STATE", "/sys/kernel/debug/binder/state");
 
-    RunDumpsys("WINSCOPE TRACE", {"window", "trace"});
     /* Add window and surface trace files. */
     if (!PropertiesHelper::IsUserBuild()) {
         ds.AddDir(WMTRACE_DATA_DIR, false);
