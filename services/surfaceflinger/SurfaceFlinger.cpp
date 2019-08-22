@@ -851,8 +851,12 @@ void SurfaceFlinger::init() {
                 });
 
             std::vector<float> refreshRates;
-            for (const auto& hwConfig : getHwComposer().getConfigs(*display->getId())) {
-                refreshRates.push_back(1e9 / hwConfig->getVsyncPeriod());
+            auto iter = mRefreshRateConfigs.getRefreshRates().cbegin();
+            while (iter != mRefreshRateConfigs.getRefreshRates().cend()) {
+                if (iter->second->fps > 0) {
+                    refreshRates.push_back(iter->second->fps);
+                }
+                ++iter;
             }
             mSmoMo->SetDisplayRefreshRates(refreshRates);
 
@@ -1639,45 +1643,18 @@ void SurfaceFlinger::setRefreshRateTo(RefreshRateType refreshRate, Scheduler::Co
 }
 
 void SurfaceFlinger::setRefreshRateTo(int32_t refreshRate) {
-    //TODO: phase offset
-    if (mBootStage != BootStage::FINISHED) {
-        return;
-    }
-    ATRACE_CALL();
+    RefreshRateType newRefreshRateType = RefreshRateType::DEFAULT;
 
-    // Don't do any updating if the current fps is the same as the new one.
-    const nsecs_t currentVsyncPeriod = getVsyncPeriod();
-    if (currentVsyncPeriod == 0) {
-        return;
-    }
-
-    const float currentFps = 1e9 / currentVsyncPeriod;
-    const float newFps = static_cast<float>(refreshRate);
-    if (std::abs(currentFps - newFps) <= 1) {
-        return;
-    }
-
-    const auto displayId = getInternalDisplayIdLocked();
-    LOG_ALWAYS_FATAL_IF(!displayId);
-    auto configs = getHwComposer().getConfigs(*displayId);
-
-    int desiredConfigId = -1;
-    for (int i = 0; i < configs.size(); i++) {
-        const nsecs_t vsyncPeriod = configs.at(i)->getVsyncPeriod();
-        const float fps = 1e9 / vsyncPeriod;
-        if (std::abs(fps - newFps) <= 1) {
-            desiredConfigId = i;
+    auto iter = mRefreshRateConfigs.getRefreshRates().cbegin();
+    while (iter != mRefreshRateConfigs.getRefreshRates().cend()) {
+        if (iter->second->fps == refreshRate) {
+            newRefreshRateType = iter->first;
             break;
         }
+        ++iter;
     }
 
-    if (desiredConfigId < 0) {
-        ALOGV("Skipping refresh rate change request for unsupported rate.");
-        return;
-    }
-
-    setDesiredActiveConfig({scheduler::RefreshRateConfigs::RefreshRateType::DEFAULT,
-        desiredConfigId, Scheduler::ConfigEvent::Changed});
+    setRefreshRateTo(newRefreshRateType, Scheduler::ConfigEvent::Changed);
 }
 
 void SurfaceFlinger::onHotplugReceived(int32_t sequenceId, hwc2_display_t hwcDisplayId,
@@ -2430,10 +2407,10 @@ void SurfaceFlinger::postComposition()
     }
 
     if (mUseSmoMo) {
+        ATRACE_NAME("SmoMoUpdateState");
         Mutex::Autolock lock(mStateLock);
 
-        float refreshRate = 1e9 / getVsyncPeriod();
-
+        uint32_t fps = 0;
         std::vector<smomo::SmomoLayerStats> layers;
 
         // Disable SmoMo by passing empty layer stack in multiple display case
@@ -2445,9 +2422,25 @@ void SurfaceFlinger::postComposition()
                 };
                 layers.push_back(layerStats);
             }
+
+            auto iter = mRefreshRateConfigs.getRefreshRates().cbegin();
+            while (iter != mRefreshRateConfigs.getRefreshRates().cend()) {
+                if (iter->second->configId == displayDevice->getActiveConfig()) {
+                    fps = iter->second->fps;
+                    break;
+                }
+                ++iter;
+            }
+
+            if (!fps) {
+                const auto refreshRate = mRefreshRateConfigs.getRefreshRate(RefreshRateType::DEFAULT);
+                if (refreshRate) {
+                    fps = refreshRate->fps;
+                }
+            }
         }
 
-        mSmoMo->UpdateSmomoState(layers, refreshRate);
+        mSmoMo->UpdateSmomoState(layers, fps);
     }
 
     // Even though ATRACE_INT64 already checks if tracing is enabled, it doesn't prevent the
