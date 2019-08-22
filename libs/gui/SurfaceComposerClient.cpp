@@ -365,6 +365,9 @@ SurfaceComposerClient::Transaction& SurfaceComposerClient::Transaction::merge(Tr
     mContainsBuffer = other.mContainsBuffer;
     other.mContainsBuffer = false;
 
+    mEarlyWakeup = mEarlyWakeup || other.mEarlyWakeup;
+    other.mEarlyWakeup = false;
+
     return *this;
 }
 
@@ -623,6 +626,7 @@ SurfaceComposerClient::Transaction& SurfaceComposerClient::Transaction::setRelat
     layer_state_t* s = getLayerState(sc);
     if (!s) {
         mStatus = BAD_INDEX;
+        return *this;
     }
     s->what |= layer_state_t::eRelativeLayerChanged;
     s->what &= ~layer_state_t::eLayerChanged;
@@ -1052,6 +1056,7 @@ SurfaceComposerClient::Transaction& SurfaceComposerClient::Transaction::detachCh
     layer_state_t* s = getLayerState(sc);
     if (!s) {
         mStatus = BAD_INDEX;
+        return *this;
     }
     s->what |= layer_state_t::eDetachChildren;
 
