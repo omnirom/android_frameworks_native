@@ -121,10 +121,12 @@
 #include <vendor/display/config/1.2/IDisplayConfig.h>
 #include <vendor/display/config/1.6/IDisplayConfig.h>
 #include <vendor/display/config/1.7/IDisplayConfig.h>
+#include <vendor/display/config/1.9/IDisplayConfig.h>
 
 #include <layerproto/LayerProtoParser.h>
 #include "SurfaceFlingerProperties.h"
 #include "gralloc_priv.h"
+#include "smomo_interface.h"
 
 namespace android {
 
@@ -361,6 +363,11 @@ SurfaceFlinger::SurfaceFlinger(Factory& factory) : SurfaceFlinger(factory, SkipI
     mPropagateBackpressure = !atoi(value);
     ALOGI_IF(!mPropagateBackpressure, "Disabling backpressure propagation");
 
+    property_get("debug.sf.enable_gl_backpressure", value, "0");
+    mPropagateBackpressureClientComposition = atoi(value);
+    ALOGI_IF(mPropagateBackpressureClientComposition,
+             "Enabling backpressure propagation for Client Composition");
+
     property_get("debug.sf.enable_hwc_vds", value, "0");
     mUseHwcVirtualDisplays = atoi(value);
     ALOGI_IF(mUseHwcVirtualDisplays, "Enabling HWC virtual displays");
@@ -408,6 +415,12 @@ SurfaceFlinger::SurfaceFlinger(Factory& factory) : SurfaceFlinger(factory, SkipI
         setenv("TREBLE_TESTING_OVERRIDE", "true", true);
     }
 
+    property_get("vendor.display.use_smooth_motion", value, "0");
+    int_value = atoi(value);
+    if (int_value) {
+        mUseSmoMo = true;
+    }
+
     mDolphinHandle = dlopen("libdolphin.so", RTLD_NOW);
     if (!mDolphinHandle) {
         ALOGW("Unable to open libdolphin.so: %s.", dlerror());
@@ -434,6 +447,11 @@ void SurfaceFlinger::onFirstRef()
 SurfaceFlinger::~SurfaceFlinger()
 {
     if (mDolphinFuncsEnabled) dlclose(mDolphinHandle);
+
+    if(mUseSmoMo) {
+        mSmoMoDestroyFunc(mSmoMo);
+        dlclose(mSmoMoLibHandle);
+    }
 }
 
 void SurfaceFlinger::binderDied(const wp<IBinder>& /* who */)
@@ -594,13 +612,16 @@ void SurfaceFlinger::bootFinished()
         mBootStage = BootStage::FINISHED;
 
         // set the refresh rate according to the policy
-        const auto& performanceRefreshRate =
-                mRefreshRateConfigs.getRefreshRate(RefreshRateType::PERFORMANCE);
+        int maxSupportedType = (int)RefreshRateType::PERF2;
+        int minSupportedType = (int)RefreshRateType::LOW0;
 
-        if (performanceRefreshRate && isDisplayConfigAllowed(performanceRefreshRate->configId)) {
-            setRefreshRateTo(RefreshRateType::PERFORMANCE, Scheduler::ConfigEvent::None);
-        } else {
-            setRefreshRateTo(RefreshRateType::DEFAULT, Scheduler::ConfigEvent::None);
+        for (int type = maxSupportedType; type >= minSupportedType; type--) {
+            RefreshRateType refreshRateType = static_cast<RefreshRateType>(type);
+            const auto& refreshRate = mRefreshRateConfigs.getRefreshRate(refreshRateType);
+            if (refreshRate && isDisplayConfigAllowed(refreshRate->configId)) {
+                setRefreshRateTo(refreshRateType, Scheduler::ConfigEvent::None);
+                return;
+            }
         }
     }));
 }
@@ -757,8 +778,45 @@ void SurfaceFlinger::init() {
         return getVsyncPeriod();
     });
 
+    int active_config = getHwComposer().getActiveConfigIndex(*display->getId());
+    mRefreshRateConfigs.setActiveConfig(active_config);
     mRefreshRateConfigs.populate(getHwComposer().getConfigs(*display->getId()));
-    mRefreshRateStats.setConfigMode(getHwComposer().getActiveConfigIndex(*display->getId()));
+    mRefreshRateStats.setConfigMode(active_config);
+
+    if (mUseSmoMo) {
+        mSmoMoLibHandle = dlopen("libsmomo.qti.so", RTLD_NOW);
+        if (!mSmoMoLibHandle) {
+            ALOGE("Unable to open libsmomo: %s", dlerror());
+        } else {
+             mSmoMoCreateFunc =
+                    reinterpret_cast<CreateSmoMoFuncPtr>(dlsym(mSmoMoLibHandle, "CreateSmomo"));
+             mSmoMoDestroyFunc =
+                    reinterpret_cast<DestroySmoMoFuncPtr>(dlsym(mSmoMoLibHandle, "DestroySmomo"));
+             if (mSmoMoCreateFunc && mSmoMoDestroyFunc) {
+                mSmoMo = mSmoMoCreateFunc();
+             } else {
+                ALOGE("Can't load libsmomo symbols: %s", dlerror());
+             }
+        }
+
+        if (mSmoMo) {
+            mSmoMo->SetChangeRefreshRateCallback(
+                [this](int32_t refreshRate) {
+                    Mutex::Autolock lock(mStateLock);
+                    setRefreshRateTo(refreshRate);
+                });
+
+            std::vector<float> refreshRates;
+            for (const auto& hwConfig : getHwComposer().getConfigs(*display->getId())) {
+                refreshRates.push_back(1e9 / hwConfig->getVsyncPeriod());
+            }
+            mSmoMo->SetDisplayRefreshRates(refreshRates);
+
+            ALOGI("SmoMo is enabled");
+        } else {
+            mUseSmoMo = false;
+        }
+    }
 
     ALOGV("Done initializing");
 }
@@ -999,6 +1057,13 @@ status_t SurfaceFlinger::setActiveConfig(const sp<IBinder>& displayToken, int mo
 
     std::vector<int32_t> allowedConfig;
     allowedConfig.push_back(mode);
+
+    const auto display = getDisplayDeviceLocked(displayToken);
+    // RefreshRateConfigs are only supported on Primary display.
+    if (display && display->isPrimary()) {
+        mRefreshRateConfigs.setActiveConfig(mode);
+        mRefreshRateConfigs.populate(getHwComposer().getConfigs(*display->getId()));
+    }
 
     return setAllowedDisplayConfigs(displayToken, allowedConfig);
 }
@@ -1529,6 +1594,48 @@ void SurfaceFlinger::setRefreshRateTo(RefreshRateType refreshRate, Scheduler::Co
     setDesiredActiveConfig({refreshRate, desiredConfigId, event});
 }
 
+void SurfaceFlinger::setRefreshRateTo(int32_t refreshRate) {
+    //TODO: phase offset
+    if (mBootStage != BootStage::FINISHED) {
+        return;
+    }
+    ATRACE_CALL();
+
+    // Don't do any updating if the current fps is the same as the new one.
+    const nsecs_t currentVsyncPeriod = getVsyncPeriod();
+    if (currentVsyncPeriod == 0) {
+        return;
+    }
+
+    const float currentFps = 1e9 / currentVsyncPeriod;
+    const float newFps = static_cast<float>(refreshRate);
+    if (std::abs(currentFps - newFps) <= 1) {
+        return;
+    }
+
+    const auto displayId = getInternalDisplayIdLocked();
+    LOG_ALWAYS_FATAL_IF(!displayId);
+    auto configs = getHwComposer().getConfigs(*displayId);
+
+    int desiredConfigId = -1;
+    for (int i = 0; i < configs.size(); i++) {
+        const nsecs_t vsyncPeriod = configs.at(i)->getVsyncPeriod();
+        const float fps = 1e9 / vsyncPeriod;
+        if (std::abs(fps - newFps) <= 1) {
+            desiredConfigId = i;
+            break;
+        }
+    }
+
+    if (desiredConfigId < 0) {
+        ALOGV("Skipping refresh rate change request for unsupported rate.");
+        return;
+    }
+
+    setDesiredActiveConfig({scheduler::RefreshRateConfigs::RefreshRateType::DEFAULT,
+        desiredConfigId, Scheduler::ConfigEvent::Changed});
+}
+
 void SurfaceFlinger::onHotplugReceived(int32_t sequenceId, hwc2_display_t hwcDisplayId,
                                        HWC2::Connection connection) {
     ALOGV("%s(%d, %" PRIu64 ", %s)", __FUNCTION__, sequenceId, hwcDisplayId,
@@ -1724,9 +1831,9 @@ void SurfaceFlinger::onMessageReceived(int32_t what) NO_THREAD_SAFETY_ANALYSIS {
                 break;
             }
 
-            // For now, only propagate backpressure when missing a hwc frame.
-            if (hwcFrameMissed && !gpuFrameMissed) {
-                if (mPropagateBackpressure) {
+            if (frameMissed && mPropagateBackpressure) {
+                if ((hwcFrameMissed && !gpuFrameMissed) ||
+                    mPropagateBackpressureClientComposition) {
                     signalLayerUpdate();
                     break;
                 }
@@ -1863,6 +1970,35 @@ bool SurfaceFlinger::handleMessageInvalidate() {
     return refreshNeeded;
 }
 
+void SurfaceFlinger::setDisplayAnimating(const sp<DisplayDevice>& hw) {
+    static android::sp<vendor::display::config::V1_1::IDisplayConfig> disp_config_v1_1 =
+                                        vendor::display::config::V1_1::IDisplayConfig::getService();
+
+    const std::optional<DisplayId>& displayId = hw->getId();
+    const auto dpy = getHwComposer().fromPhysicalDisplayId(*displayId);
+
+    if (disp_config_v1_1 == NULL || !dpy || hw->getIsDisplayBuiltInType()) {
+        return;
+    }
+
+    bool hasScreenshot = false;
+    mDrawingState.traverseInZOrder([&](Layer* layer) {
+      if (layer->getLayerStack() == hw->getLayerStack()) {
+          if (layer->isScreenshot()) {
+              hasScreenshot = true;
+          }
+      }
+    });
+
+    if (hasScreenshot == hw->getAnimating()) {
+        return;
+    }
+
+    disp_config_v1_1->setDisplayAnimating(*dpy, hasScreenshot);
+    hw->setAnimating(hasScreenshot);
+}
+
+
 void SurfaceFlinger::calculateWorkingSet() {
     ATRACE_CALL();
     ALOGV(__FUNCTION__);
@@ -1872,6 +2008,7 @@ void SurfaceFlinger::calculateWorkingSet() {
         mGeometryInvalid = false;
         for (const auto& [token, displayDevice] : mDisplays) {
             auto display = displayDevice->getCompositionDisplay();
+            setDisplayAnimating(displayDevice);
 
             uint32_t zOrder = 0;
 
@@ -2224,6 +2361,27 @@ void SurfaceFlinger::postComposition()
 
     if (mLumaSampling && mRegionSamplingThread) {
         mRegionSamplingThread->notifyNewContent();
+    }
+
+    if (mUseSmoMo) {
+        Mutex::Autolock lock(mStateLock);
+
+        float refreshRate = 1e9 / getVsyncPeriod();
+
+        std::vector<smomo::SmomoLayerStats> layers;
+
+        // Disable SmoMo by passing empty layer stack in multiple display case
+        if (mDisplays.size() == 1) {
+            for (const auto& layer : displayDevice->getVisibleLayersSortedByZ()) {
+                smomo::SmomoLayerStats layerStats = {
+                    layer->getName().string(),
+                    layer->getSequence(),
+                };
+                layers.push_back(layerStats);
+            }
+        }
+
+        mSmoMo->UpdateSmomoState(layers, refreshRate);
     }
 
     // Even though ATRACE_INT64 already checks if tracing is enabled, it doesn't prevent the
@@ -2926,13 +3084,31 @@ void SurfaceFlinger::processDisplayChangesLocked() {
                                       setupNewDisplayDeviceInternal(displayToken, displayId, state,
                                                                     dispSurface, producer));
                     // Check if power mode override is available and supported by HWC.
-                    using vendor::display::config::V1_7::IDisplayConfig;
-                    android::sp<IDisplayConfig> disp_config_v1_7 = IDisplayConfig::getService();
-                    if (disp_config_v1_7 != NULL) {
-                        const auto hwcDisplayId = getHwComposer().fromPhysicalDisplayId(*displayId);
-                        if (disp_config_v1_7->isPowerModeOverrideSupported(*hwcDisplayId)) {
-                            sp<DisplayDevice> display = getDisplayDeviceLocked(displayToken);
-                            display->setPowerModeOverrideConfig(true);
+                    {
+                        using vendor::display::config::V1_7::IDisplayConfig;
+                        android::sp<IDisplayConfig> disp_config_v1_7 =
+                            IDisplayConfig::getService();
+                        if (disp_config_v1_7 != NULL) {
+                             const auto hwcDisplayId =
+                                 getHwComposer().fromPhysicalDisplayId(*displayId);
+                            if (disp_config_v1_7->isPowerModeOverrideSupported(*hwcDisplayId)) {
+                                sp<DisplayDevice> display = getDisplayDeviceLocked(displayToken);
+                                display->setPowerModeOverrideConfig(true);
+                            }
+                        }
+                    }
+
+                    {
+                        using vendor::display::config::V1_9::IDisplayConfig;
+                        android::sp<IDisplayConfig> disp_config_v1_9 =
+                            IDisplayConfig::getService();
+                        if (disp_config_v1_9 != NULL) {
+                            const auto hwcDisplayId =
+                                getHwComposer().fromPhysicalDisplayId(*displayId);
+                            if (disp_config_v1_9->isBuiltInDisplay(*hwcDisplayId)) {
+                                sp<DisplayDevice> display = getDisplayDeviceLocked(displayToken);
+                                display->setIsDisplayBuiltInType(true);
+                            }
                         }
                     }
                     if (!state.isVirtual()) {
@@ -4727,8 +4903,6 @@ void SurfaceFlinger::setPowerModeOnMainThread(const sp<IBinder>& displayToken, i
 
 void SurfaceFlinger::setPowerMode(const sp<IBinder>& displayToken, int mode) {
     sp<DisplayDevice> display(getDisplayDevice(displayToken));
-    const auto displayId = display->getId();
-    const auto hwcDisplayId = getHwComposer().fromPhysicalDisplayId(*displayId);
 
     if (!display) {
         ALOGE("Attempt to set power mode %d for invalid display token %p", mode,
@@ -4738,6 +4912,9 @@ void SurfaceFlinger::setPowerMode(const sp<IBinder>& displayToken, int mode) {
         ALOGW("Attempt to set power mode %d for virtual display", mode);
         return;
     }
+
+    const auto displayId = display->getId();
+    const auto hwcDisplayId = getHwComposer().fromPhysicalDisplayId(*displayId);
 
     // Fallback to default power state behavior as HWC does not support power mode override.
     using vendor::display::config::V1_7::IDisplayConfig;
@@ -4923,6 +5100,13 @@ void SurfaceFlinger::dumpMemoryAllocations(bool dump)
     if (!dump) {
         return;
     }
+
+    {
+       Mutex::Autolock lock(mLayerCountLock);
+       if (mNumLayers < 50) {
+           return;
+       }
+    }
     std::string dumpsys;
     GraphicBufferAllocator& alloc(GraphicBufferAllocator::get());
     alloc.dump(dumpsys);
@@ -4981,8 +5165,8 @@ void SurfaceFlinger::printOpenFds() {
     if (!dir) {
         return;
     }
-    mFileOpen.debugFileCountFd = open(mFileOpen.debugCountOpenFiles, O_WRONLY|O_CREAT,0664);
-    if (mFileOpen.debugFileCountFd < 0) {
+    int debugFileCountFd = open(mFileOpen.debugCountOpenFiles, O_WRONLY|O_CREAT|O_APPEND, 0664);
+    if (debugFileCountFd < 0) {
         return;
     }
     struct dirent* de;
@@ -4996,15 +5180,15 @@ void SurfaceFlinger::printOpenFds() {
     static int maxDumpCount = 200;
     if (!maxDumpCount--) {
         maxDumpCount = 200;
-        lseek(mFileOpen.debugFileCountFd, 0, SEEK_SET);
+        lseek(debugFileCountFd, 0, SEEK_SET);
     }
     gettimeofday(&tv, NULL);
     ptm = localtime(&tv.tv_sec);
     strftime (hms, sizeof (hms), "%H:%M:%S", ptm);
     millis = tv.tv_usec / 1000;
     snprintf(timeStamp, sizeof(timeStamp), "Timestamp: %s.%03ld\n", hms, millis);
-    write(mFileOpen.debugFileCountFd, timeStamp, strlen(timeStamp));
-    write(mFileOpen.debugFileCountFd, formatting, strlen(formatting));
+    write(debugFileCountFd, timeStamp, strlen(timeStamp));
+    write(debugFileCountFd, formatting, strlen(formatting));
     while ((de = readdir(dir))) {
         if (!strcmp(de->d_name, ".") || !strcmp(de->d_name, "..")) {
             continue;
@@ -5017,13 +5201,12 @@ void SurfaceFlinger::printOpenFds() {
              char formatString[300 +3];
              name[name_size] = '\0';
              snprintf(formatString, sizeof(formatString) - 1, "%d. %s\n", count++, name);
-             write(mFileOpen.debugFileCountFd, formatString, strlen(formatString));
+             write(debugFileCountFd, formatString, strlen(formatString));
         }
     }
     closedir(dir);
-    write(mFileOpen.debugFileCountFd, formatting, strlen(formatting));
-    close(mFileOpen.debugFileCountFd);
-    mFileOpen.debugFileCountFd = -1;
+    write(debugFileCountFd, formatting, strlen(formatting));
+    close(debugFileCountFd);
 }
 
 void SurfaceFlinger::dumpDrawCycle(bool prePrepare) {
@@ -5035,13 +5218,14 @@ void SurfaceFlinger::dumpDrawCycle(bool prePrepare) {
 
     // debug total open files count;
     int tmpFd = dup(0);
-    if (tmpFd > (mFileOpen.maxFilecount + 100)) {
-        ALOGE("Total file open count =%d", tmpFd);
+    if (tmpFd > (mFileOpen.lastFdcount + 100) && prePrepare) {
+        ALOGE("Total open file count = %d", tmpFd);
         printOpenFds();
-        mFileOpen.maxFilecount = tmpFd;
+        mFileOpen.lastFdcount = tmpFd;
     }
-    close(tmpFd);
-    tmpFd = -1;
+    if (tmpFd > 0) {
+        close(tmpFd);
+    }
     if (!mFileDump.running && !mFileDump.replaceAfterCommit) {
         return;
     }
@@ -6015,6 +6199,12 @@ status_t SurfaceFlinger::onTransact(uint32_t code, const Parcel& data, Parcel* r
                 mDebugDisplayConfigSetByBackdoor = false;
                 if (n >= 0) {
                     const auto displayToken = getInternalDisplayToken();
+                    const auto display = getDisplayDeviceLocked(displayToken);
+                    // RefreshRateConfigs are only supported on Primary display.
+                    if (display && display->isPrimary()) {
+                        mRefreshRateConfigs.setActiveConfig(n);
+                        mRefreshRateConfigs.populate(getHwComposer().getConfigs(*display->getId()));
+                    }
                     status_t result = setAllowedDisplayConfigs(displayToken, {n});
                     if (result != NO_ERROR) {
                         return result;

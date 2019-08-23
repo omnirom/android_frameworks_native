@@ -80,6 +80,12 @@
 
 using namespace android::surfaceflinger;
 
+namespace smomo {
+class SmomoIntf;
+} // namespace smomo
+
+using smomo::SmomoIntf;
+
 namespace android {
 
 class Client;
@@ -310,10 +316,18 @@ public:
     bool authenticateSurfaceTextureLocked(
         const sp<IGraphicBufferProducer>& bufferProducer) const;
 
-    inline void onLayerCreated() { mNumLayers++; }
+    inline void onLayerCreated() {
+         {
+           Mutex::Autolock lock(mLayerCountLock);
+           mNumLayers++;
+         }
+    }
     inline void onLayerDestroyed(Layer* layer) {
-        mNumLayers--;
-        mOffscreenLayers.erase(layer);
+          {
+            Mutex::Autolock lock(mLayerCountLock);
+            mNumLayers--;
+          }
+          mOffscreenLayers.erase(layer);
     }
 
     TransactionCompletedThread& getTransactionCompletedThread() {
@@ -485,6 +499,8 @@ private:
     void onRefreshReceived(int32_t sequenceId, hwc2_display_t hwcDisplayId) override;
     // For Async power mode
     void setPowerModeOnMainThread(const sp<IBinder>& displayToken, int mode);
+    // For Animation Hint
+    void setDisplayAnimating(const sp<DisplayDevice>& hw);
 
     /* ------------------------------------------------------------------------
      * Message handling
@@ -811,6 +827,7 @@ private:
     // Sets the refresh rate by switching active configs, if they are available for
     // the desired refresh rate.
     void setRefreshRateTo(RefreshRateType, Scheduler::ConfigEvent event) REQUIRES(mStateLock);
+    void setRefreshRateTo(int32_t refreshRate) REQUIRES(mStateLock);
 
     bool isDisplayConfigAllowed(int32_t configId) REQUIRES(mStateLock);
 
@@ -931,8 +948,7 @@ private:
     // debug open file counit by process
     struct {
       const char *debugCountOpenFiles = "/data/misc/wmtrace/sfopenfiles.txt";
-      int debugFileCountFd = -1;
-      int maxFilecount = 2048;
+      int lastFdcount = 2048;
     } mFileOpen;
     void printOpenFds();
 
@@ -955,6 +971,7 @@ private:
     // access must be protected by mStateLock
     mutable Mutex mStateLock;
     mutable Mutex mDolphinStateLock;
+    mutable Mutex mLayerCountLock;
     State mCurrentState{LayerVector::StateSet::Current};
     std::atomic<int32_t> mTransactionFlags = 0;
     Condition mTransactionCV;
@@ -1041,6 +1058,7 @@ private:
     volatile nsecs_t mDebugInTransaction = 0;
     bool mForceFullDamage = false;
     bool mPropagateBackpressure = true;
+    bool mPropagateBackpressureClientComposition = false;
     std::unique_ptr<SurfaceInterceptor> mInterceptor;
     SurfaceTracing mTracing{*this};
     bool mTracingEnabled = false;
@@ -1216,6 +1234,15 @@ private:
     bool (*mDolphinInit)() = nullptr;
     bool (*mDolphinMonitor)(int number) = nullptr;
     void (*mDolphinRefresh)() = nullptr;
+
+    bool mUseSmoMo = false;
+    SmomoIntf* mSmoMo = nullptr;
+    void *mSmoMoLibHandle = nullptr;
+
+    using CreateSmoMoFuncPtr = std::add_pointer<SmomoIntf*()>::type;
+    using DestroySmoMoFuncPtr = std::add_pointer<void(SmomoIntf*)>::type;
+    CreateSmoMoFuncPtr mSmoMoCreateFunc;
+    DestroySmoMoFuncPtr mSmoMoDestroyFunc;
 };
 
 } // namespace android
