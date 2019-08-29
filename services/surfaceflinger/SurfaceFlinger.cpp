@@ -398,6 +398,14 @@ SurfaceFlinger::SurfaceFlinger(Factory& factory) : SurfaceFlinger(factory, SkipI
         mVsyncSourceReliableOnDoze = true;
     }
 
+    // If mPluggableVsyncPrioritized is true then the order of priority of V-syncs is Pluggable
+    // followed by Primary and Secondary built-ins.
+    if((property_get("vendor.display.pluggable_vsync_prioritized", property, "0") > 0) &&
+        (!strncmp(property, "1", PROPERTY_VALUE_MAX ) ||
+        (!strncasecmp(property,"true", PROPERTY_VALUE_MAX )))) {
+        mPluggableVsyncPrioritized = true;
+    }
+
     const auto [early, gl, late] = mPhaseOffsets->getCurrentOffsets();
     mVsyncModulator.setPhaseOffsets(early, gl, late);
 
@@ -2494,10 +2502,12 @@ void SurfaceFlinger::rebuildLayerStacks() {
 }
 
 sp<DisplayDevice> SurfaceFlinger::getVsyncSource() {
-    // Return the vsync source from the active displays based on
-    // the order in which they are connected. Normally the order
-    // of priority is Primary (Built-in/Pluggable) followed by
-    // Secondary built-ins followed by pluggable.
+    // Return the vsync source from the active displays based on the order in which they are
+    // connected.
+    // Normally the order of priority is Primary (Built-in/Pluggable) followed by Secondary
+    // built-ins followed by Pluggable. But if mPluggableVsyncPrioritized is true then the
+    // order of priority is Pluggables followed by Primary and Secondary built-ins.
+
     for (const auto& display : mDisplaysList) {
         int mode = display->getPowerMode();
         if (display->isVirtual() || (mode == HWC_POWER_MODE_OFF) ||
@@ -3112,7 +3122,20 @@ void SurfaceFlinger::processDisplayChangesLocked() {
                         }
                     }
                     if (!state.isVirtual()) {
-                        mDisplaysList.push_back(getDisplayDeviceLocked(displayToken));
+                        sp<DisplayDevice> display = getDisplayDeviceLocked(displayToken);
+                        if (mPluggableVsyncPrioritized && !display->getIsDisplayBuiltInType()) {
+                            // Insert the pluggable display just before the first built-in display
+                            // so that the earlier pluggable display remains the V-sync source.
+                            auto it = mDisplaysList.begin();
+                            for (; it != mDisplaysList.end(); it++ ) {
+                                if((*it)->getIsDisplayBuiltInType()) {
+                                    break;
+                                }
+                            }
+                            mDisplaysList.insert(it, display);
+                        } else {
+                            mDisplaysList.push_back(display);
+                        }
                         LOG_ALWAYS_FATAL_IF(!displayId);
                         dispatchDisplayHotplugEvent(displayId->value, true);
                     }
