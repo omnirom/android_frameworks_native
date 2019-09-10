@@ -27,7 +27,7 @@ class DispSyncSource final : public VSyncSource, private DispSync::Callback {
 public:
     DispSyncSource(DispSync* dispSync, nsecs_t phaseOffset, bool traceVsync, const char* name);
 
-    ~DispSyncSource() override = default;
+    ~DispSyncSource();
 
     // The following methods are implementation of VSyncSource.
     void setVSyncEnabled(bool enable) override;
@@ -54,6 +54,8 @@ private:
     std::mutex mVsyncMutex;
     nsecs_t mPhaseOffset GUARDED_BY(mVsyncMutex);
     bool mEnabled GUARDED_BY(mVsyncMutex) = false;
+    void *mDolphinHandle = nullptr;
+    bool (*mDolphinCheck)(const char* name) = nullptr;
 };
 
 } // namespace android
