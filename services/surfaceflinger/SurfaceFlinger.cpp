@@ -2539,6 +2539,7 @@ void SurfaceFlinger::processDisplayHotplugEventsLocked() {
                 (event.display < DisplayDevice::NUM_BUILTIN_DISPLAY_TYPES)) {
                 // Display no longer exists.
                 mActiveDisplays.reset(event.display);
+                mVsyncSources.reset(event.display);
             }
         }
 
