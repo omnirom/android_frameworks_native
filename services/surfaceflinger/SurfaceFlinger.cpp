@@ -377,6 +377,10 @@ SurfaceFlinger::SurfaceFlinger(Factory& factory) : SurfaceFlinger(factory, SkipI
     mLayerTripleBufferingDisabled = atoi(value);
     ALOGI_IF(mLayerTripleBufferingDisabled, "Disabling Triple Buffering");
 
+    property_get("ro.sf.enable_fb_scaling", value, "0");
+    mUseFbScaling = atoi(value);
+    ALOGI_IF(mUseFbScaling, "Enable FrameBuffer Scaling");
+
     const size_t defaultListSize = MAX_LAYERS;
     auto listSize = property_get_int32("debug.sf.max_igbp_list_size", int32_t(defaultListSize));
     mMaxGraphicBufferProducerListSize = (listSize > 0) ? size_t(listSize) : defaultListSize;
@@ -640,6 +644,16 @@ void SurfaceFlinger::bootFinished()
     postMessageAsync(new LambdaMessage([this]() NO_THREAD_SAFETY_ANALYSIS {
         readPersistentProperties();
         mBootStage = BootStage::FINISHED;
+
+        if (mUseFbScaling) {
+            ssize_t index = mCurrentState.displays.indexOfKey(getInternalDisplayTokenLocked());
+            if (index < 0) {
+                ALOGE("Invalid token %p", getInternalDisplayTokenLocked().get());
+            } else {
+                const DisplayDeviceState& state = mCurrentState.displays.valueAt(index);
+                setFrameBufferSizeForScaling(getDefaultDisplayDeviceLocked(), state);
+            }
+        }
 
         // set the refresh rate according to the policy
         int maxSupportedType = (int)RefreshRateType::PERF2;
@@ -3008,6 +3022,29 @@ sp<DisplayDevice> SurfaceFlinger::setupNewDisplayDeviceInternal(
     return display;
 }
 
+void SurfaceFlinger::setFrameBufferSizeForScaling(sp<DisplayDevice> displayDevice,
+                                                  const DisplayDeviceState& state) {
+    base::unique_fd fd;
+    auto display = displayDevice->getCompositionDisplay();
+
+    if (displayDevice->getWidth() == state.viewport.width() &&
+        displayDevice->getHeight() == state.viewport.height()) {
+        return;
+    }
+
+    if (mBootStage == BootStage::FINISHED) {
+        displayDevice->setProjection(state.orientation, state.viewport, state.viewport);
+        displayDevice->setDisplaySize(state.viewport.width(), state.viewport.height());
+        display->getRenderSurface()->setViewportAndProjection();
+        display->getRenderSurface()->flipClientTarget(true);
+        // queue a scratch buffer to flip Client Target with updated size
+        display->getRenderSurface()->queueBuffer(std::move(fd));
+        display->getRenderSurface()->flipClientTarget(false);
+        // releases the FrameBuffer that was acquired as part of queueBuffer()
+        display->getRenderSurface()->onPresentDisplayCompleted();
+    }
+}
+
 void SurfaceFlinger::processDisplayChangesLocked() {
     // here we take advantage of Vector's copy-on-write semantics to
     // improve performance by skipping the transaction entirely when
@@ -3061,15 +3098,27 @@ void SurfaceFlinger::processDisplayChangesLocked() {
                 }
 
                 if (const auto display = getDisplayDeviceLocked(displayToken)) {
+                    bool displaySizeChanged = false;
                     if (state.layerStack != draw[i].layerStack) {
                         display->setLayerStack(state.layerStack);
                     }
                     if ((state.orientation != draw[i].orientation) ||
                         (state.viewport != draw[i].viewport) || (state.frame != draw[i].frame)) {
-                        display->setProjection(state.orientation, state.viewport, state.frame);
+                        if (mUseFbScaling && display->isPrimary()) {
+                            mCurrentState.displays.editValueAt(j).width = state.viewport.width();
+                            mCurrentState.displays.editValueAt(j).height = state.viewport.height();
+                            mCurrentState.displays.editValueAt(j).frame =
+                                mCurrentState.displays[j].viewport;
+                            setFrameBufferSizeForScaling(display, state);
+                            displaySizeChanged = true;
+                        } else {
+                            display->setProjection(state.orientation, state.viewport, state.frame);
+                        }
                     }
                     if (state.width != draw[i].width || state.height != draw[i].height) {
-                        display->setDisplaySize(state.width, state.height);
+                        if (!displaySizeChanged) {
+                            display->setDisplaySize(state.width, state.height);
+                        }
                     }
                 }
             }
