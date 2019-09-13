@@ -39,6 +39,7 @@ public:
     MOCK_METHOD1(beginFrame, status_t(bool mustRecompose));
     MOCK_METHOD0(prepareFrame, status_t());
     MOCK_METHOD1(dequeueBuffer, sp<GraphicBuffer>(base::unique_fd*));
+    MOCK_METHOD1(flipClientTarget, void(bool flip));
     MOCK_METHOD1(queueBuffer, void(base::unique_fd&&));
     MOCK_METHOD0(onPresentDisplayCompleted, void());
     MOCK_METHOD0(setViewportAndProjection, void());
