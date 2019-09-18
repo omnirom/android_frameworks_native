@@ -16,13 +16,12 @@
 
 #pragma once
 
-#include <cinttypes>
+#include <unordered_map>
 
 #include "RefreshRateConfigs.h"
 #include "VSyncModulator.h"
 
-namespace android {
-namespace scheduler {
+namespace android::scheduler {
 
 /*
  * This class encapsulates offsets for different refresh rates. Depending
@@ -32,35 +31,33 @@ namespace scheduler {
  */
 class PhaseOffsets {
 public:
-    struct Offsets {
-        VSyncModulator::Offsets early;
-        VSyncModulator::Offsets earlyGl;
-        VSyncModulator::Offsets late;
-    };
+    using Offsets = VSyncModulator::OffsetsConfig;
+    using RefreshRateType = RefreshRateConfigs::RefreshRateType;
 
     virtual ~PhaseOffsets();
 
-    virtual nsecs_t getCurrentAppOffset() = 0;
-    virtual nsecs_t getCurrentSfOffset() = 0;
-    virtual Offsets getOffsetsForRefreshRate(
-            RefreshRateConfigs::RefreshRateType refreshRateType) const = 0;
+    nsecs_t getCurrentAppOffset() const { return getCurrentOffsets().late.app; }
+    nsecs_t getCurrentSfOffset() const { return getCurrentOffsets().late.sf; }
+    nsecs_t getOffsetThresholdForNextVsync() const {
+        return getCurrentOffsets().thresholdForNextVsync;
+    }
+
     virtual Offsets getCurrentOffsets() const = 0;
-    virtual void setRefreshRateType(RefreshRateConfigs::RefreshRateType refreshRateType) = 0;
-    virtual nsecs_t getOffsetThresholdForNextVsync() const = 0;
+    virtual Offsets getOffsetsForRefreshRate(RefreshRateType) const = 0;
+
+    virtual void setRefreshRateType(RefreshRateType) = 0;
+
     virtual void dump(std::string& result) const = 0;
 };
 
 namespace impl {
+
 class PhaseOffsets : public scheduler::PhaseOffsets {
 public:
     PhaseOffsets();
 
-    nsecs_t getCurrentAppOffset() override;
-    nsecs_t getCurrentSfOffset() override;
-
     // Returns early, early GL, and late offsets for Apps and SF for a given refresh rate.
-    Offsets getOffsetsForRefreshRate(
-            RefreshRateConfigs::RefreshRateType refreshRateType) const override;
+    Offsets getOffsetsForRefreshRate(RefreshRateType) const override;
 
     // Returns early, early GL, and late offsets for Apps and SF.
     Offsets getCurrentOffsets() const override {
@@ -69,27 +66,21 @@ public:
 
     // This function should be called when the device is switching between different
     // refresh rates, to properly update the offsets.
-    void setRefreshRateType(RefreshRateConfigs::RefreshRateType refreshRateType) override {
+    void setRefreshRateType(RefreshRateType refreshRateType) override {
         mRefreshRateType = refreshRateType;
     }
-
-    nsecs_t getOffsetThresholdForNextVsync() const override { return mOffsetThresholdForNextVsync; }
 
     // Returns current offsets in human friendly format.
     void dump(std::string& result) const override;
 
 private:
-    Offsets getDefaultRefreshRateOffsets() { return mDefaultRefreshRateOffsets; }
-    Offsets getHighRefreshRateOffsets() { return mHighRefreshRateOffsets; }
+    static Offsets getDefaultOffsets(nsecs_t thresholdForNextVsync);
+    static Offsets getHighFpsOffsets(nsecs_t thresholdForNextVsync);
 
-    std::atomic<RefreshRateConfigs::RefreshRateType> mRefreshRateType =
-            RefreshRateConfigs::RefreshRateType::DEFAULT;
+    std::atomic<RefreshRateType> mRefreshRateType = RefreshRateType::DEFAULT;
 
-    Offsets mDefaultRefreshRateOffsets;
-    Offsets mHighRefreshRateOffsets;
-    nsecs_t mOffsetThresholdForNextVsync;
+    std::unordered_map<RefreshRateType, Offsets> mOffsets;
 };
-} // namespace impl
 
-} // namespace scheduler
-} // namespace android
+} // namespace impl
+} // namespace android::scheduler

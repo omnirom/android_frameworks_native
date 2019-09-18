@@ -26,7 +26,11 @@
 
 #include "DisplayHardware/DisplayIdentification.h"
 
-namespace android::compositionengine::impl {
+namespace android::compositionengine {
+
+struct LayerFECompositionState;
+
+namespace impl {
 
 class OutputLayer : public compositionengine::OutputLayer {
 public:
@@ -44,7 +48,14 @@ public:
     OutputLayerCompositionState& editState() override;
 
     void updateCompositionState(bool) override;
-    void writeStateToHWC(bool) const override;
+    void writeStateToHWC(bool) override;
+
+    HWC2::Layer* getHwcLayer() const override;
+    bool requiresClientComposition() const override;
+    void applyDeviceCompositionTypeChange(Hwc2::IComposerClient::Composition) override;
+    void prepareForDeviceLayerRequests() override;
+    void applyDeviceLayerRequest(Hwc2::IComposerClient::LayerRequest request) override;
+    bool needsFiltering() const override;
 
     void dump(std::string& result) const override;
 
@@ -54,6 +65,16 @@ public:
 
 private:
     Rect calculateInitialCrop() const;
+    void writeOutputDependentGeometryStateToHWC(HWC2::Layer*, Hwc2::IComposerClient::Composition);
+    void writeOutputIndependentGeometryStateToHWC(HWC2::Layer*, const LayerFECompositionState&);
+    void writeOutputDependentPerFrameStateToHWC(HWC2::Layer*);
+    void writeOutputIndependentPerFrameStateToHWC(HWC2::Layer*, const LayerFECompositionState&);
+    void writeSolidColorStateToHWC(HWC2::Layer*, const LayerFECompositionState&);
+    void writeSidebandStateToHWC(HWC2::Layer*, const LayerFECompositionState&);
+    void writeBufferStateToHWC(HWC2::Layer*, const LayerFECompositionState&);
+    void writeCompositionTypeToHWC(HWC2::Layer*, Hwc2::IComposerClient::Composition);
+    void detectDisallowedCompositionTypeChange(Hwc2::IComposerClient::Composition from,
+                                               Hwc2::IComposerClient::Composition to) const;
 
     const compositionengine::Output& mOutput;
     std::shared_ptr<compositionengine::Layer> mLayer;
@@ -66,4 +87,5 @@ std::unique_ptr<compositionengine::OutputLayer> createOutputLayer(
         const CompositionEngine&, std::optional<DisplayId>, const compositionengine::Output&,
         std::shared_ptr<compositionengine::Layer>, sp<compositionengine::LayerFE>);
 
-} // namespace android::compositionengine::impl
+} // namespace impl
+} // namespace android::compositionengine

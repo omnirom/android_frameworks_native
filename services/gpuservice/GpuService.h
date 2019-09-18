@@ -25,10 +25,21 @@
 
 #include <mutex>
 #include <vector>
+#include <unordered_map>
 
 namespace android {
 
 class GpuStats;
+
+struct MemoryStruct {
+  int64_t gpuMemory;
+  int64_t mappedMemory;
+  int64_t ionMemory;
+};
+
+// A map that keeps track of how much memory of each type is allocated by every process.
+// Format: map[pid][memoryType] = MemoryStruct()'
+using GpuMemoryMap = std::unordered_map<int32_t, std::unordered_map<std::string, MemoryStruct>>;
 
 class GpuService : public BnGpuService, public PriorityDumper {
 public:
@@ -46,12 +57,12 @@ private:
     void setGpuStats(const std::string& driverPackageName, const std::string& driverVersionName,
                      uint64_t driverVersionCode, int64_t driverBuildTime,
                      const std::string& appPackageName, const int32_t vulkanVersion,
-                     GraphicsEnv::Driver driver, bool isDriverLoaded,
+                     GpuStatsInfo::Driver driver, bool isDriverLoaded,
                      int64_t driverLoadingTime) override;
     status_t getGpuStatsGlobalInfo(std::vector<GpuStatsGlobalInfo>* outStats) const override;
     status_t getGpuStatsAppInfo(std::vector<GpuStatsAppInfo>* outStats) const override;
-    void setCpuVulkanInUse(const std::string& appPackageName,
-                           const uint64_t driverVersionCode) override;
+    void setTargetStats(const std::string& appPackageName, const uint64_t driverVersionCode,
+                        const GpuStatsInfo::Stats stats, const uint64_t value) override;
 
     /*
      * IBinder interface
@@ -70,6 +81,8 @@ private:
     }
 
     status_t doDump(int fd, const Vector<String16>& args, bool asProto);
+
+    status_t getQCommGpuMemoryInfo(GpuMemoryMap* memories, std::string* result, int32_t dumpPid) const;
 
     /*
      * Attributes

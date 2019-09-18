@@ -34,7 +34,7 @@ class BpBinder : public IBinder
 public:
     static BpBinder*    create(int32_t handle);
 
-    inline  int32_t     handle() const { return mHandle; }
+    int32_t             handle() const;
 
     virtual const String16&    getInterfaceDescriptor() const;
     virtual bool        isBinderAlive() const;
@@ -45,7 +45,7 @@ public:
     virtual status_t    transact(   uint32_t code,
                                     const Parcel& data,
                                     Parcel* reply,
-                                    uint32_t flags = 0);
+                                    uint32_t flags = 0) final;
 
     // NOLINTNEXTLINE(google-default-arguments)
     virtual status_t    linkToDeath(const sp<DeathRecipient>& recipient,
@@ -61,9 +61,9 @@ public:
     virtual void        attachObject(   const void* objectID,
                                         void* object,
                                         void* cleanupCookie,
-                                        object_cleanup_func func);
-    virtual void*       findObject(const void* objectID) const;
-    virtual void        detachObject(const void* objectID);
+                                        object_cleanup_func func) final;
+    virtual void*       findObject(const void* objectID) const final;
+    virtual void        detachObject(const void* objectID) final;
 
     virtual BpBinder*   remoteBinder();
 

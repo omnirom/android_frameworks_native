@@ -16,39 +16,34 @@
 
 #define ATRACE_TAG ATRACE_TAG_GRAPHICS
 
+#include "driver.h"
+
+#include <dlfcn.h>
 #include <malloc.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/prctl.h>
-
-#include <dlfcn.h>
-#include <algorithm>
-#include <array>
-#include <new>
-
-#include <log/log.h>
 
 #include <android/dlext.h>
 #include <android/hardware/configstore/1.0/ISurfaceFlingerConfigs.h>
+#include <android-base/properties.h>
 #include <configstore/Utils.h>
 #include <cutils/properties.h>
 #include <graphicsenv/GraphicsEnv.h>
+#include <log/log.h>
+#include <nativeloader/dlext_namespaces.h>
+#include <sys/prctl.h>
 #include <utils/Timers.h>
 #include <utils/Trace.h>
-#include <utils/Vector.h>
 
-#include "android-base/properties.h"
+#include <algorithm>
+#include <array>
+#include <new>
+#include <vector>
 
-#include "driver.h"
 #include "stubhal.h"
 
 using namespace android::hardware::configstore;
 using namespace android::hardware::configstore::V1_0;
-
-// TODO(b/37049319) Get this from a header once one exists
-extern "C" {
-android_namespace_t* android_get_exported_namespace(const char*);
-}
 
 // #define ENABLE_ALLOC_CALLSTACKS 1
 #if ENABLE_ALLOC_CALLSTACKS
@@ -212,7 +207,7 @@ int LoadBuiltinDriver(const hwvulkan_module_t** module) {
     if (!ns)
         return -ENOENT;
     android::GraphicsEnv::getInstance().setDriverToLoad(
-        android::GraphicsEnv::Driver::VULKAN);
+        android::GpuStatsInfo::Driver::VULKAN);
     return LoadDriver(ns, module);
 }
 
@@ -223,7 +218,7 @@ int LoadUpdatedDriver(const hwvulkan_module_t** module) {
     if (!ns)
         return -ENOENT;
     android::GraphicsEnv::getInstance().setDriverToLoad(
-        android::GraphicsEnv::Driver::VULKAN_UPDATED);
+        android::GpuStatsInfo::Driver::VULKAN_UPDATED);
     return LoadDriver(ns, module);
 }
 
@@ -258,7 +253,7 @@ bool Hal::Open() {
     }
     if (result != 0) {
         android::GraphicsEnv::getInstance().setDriverLoaded(
-            android::GraphicsEnv::Api::API_VK, false, systemTime() - openTime);
+            android::GpuStatsInfo::Api::API_VK, false, systemTime() - openTime);
         ALOGV("unable to load Vulkan HAL, using stub HAL (result=%d)", result);
         return true;
     }
@@ -272,7 +267,7 @@ bool Hal::Open() {
     ATRACE_END();
     if (result != 0) {
         android::GraphicsEnv::getInstance().setDriverLoaded(
-            android::GraphicsEnv::Api::API_VK, false, systemTime() - openTime);
+            android::GpuStatsInfo::Api::API_VK, false, systemTime() - openTime);
         // Any device with a Vulkan HAL should be able to open the device.
         ALOGE("failed to open Vulkan HAL device: %s (%d)", strerror(-result),
               result);
@@ -284,7 +279,7 @@ bool Hal::Open() {
     hal_.InitDebugReportIndex();
 
     android::GraphicsEnv::getInstance().setDriverLoaded(
-        android::GraphicsEnv::Api::API_VK, true, systemTime() - openTime);
+        android::GpuStatsInfo::Api::API_VK, true, systemTime() - openTime);
 
     return true;
 }
@@ -809,8 +804,7 @@ VkResult EnumerateInstanceExtensionProperties(
     const char* pLayerName,
     uint32_t* pPropertyCount,
     VkExtensionProperties* pProperties) {
-
-    android::Vector<VkExtensionProperties> loader_extensions;
+    std::vector<VkExtensionProperties> loader_extensions;
     loader_extensions.push_back({
         VK_KHR_SURFACE_EXTENSION_NAME,
         VK_KHR_SURFACE_SPEC_VERSION});
@@ -833,7 +827,7 @@ VkResult EnumerateInstanceExtensionProperties(
         uint32_t count = std::min(
             *pPropertyCount, static_cast<uint32_t>(loader_extensions.size()));
 
-        std::copy_n(loader_extensions.begin(), count, pProperties);
+        std::copy_n(loader_extensions.data(), count, pProperties);
 
         if (count < loader_extensions.size()) {
             *pPropertyCount = count;
@@ -879,8 +873,7 @@ VkResult EnumerateInstanceExtensionProperties(
 
 bool QueryPresentationProperties(
     VkPhysicalDevice physicalDevice,
-    VkPhysicalDevicePresentationPropertiesANDROID *presentation_properties)
-{
+    VkPhysicalDevicePresentationPropertiesANDROID *presentation_properties) {
     const InstanceData& data = GetData(physicalDevice);
 
     // GPDP2 must be present and enabled on the instance.
@@ -920,7 +913,7 @@ VkResult EnumerateDeviceExtensionProperties(
     VkExtensionProperties* pProperties) {
     const InstanceData& data = GetData(physicalDevice);
     // extensions that are unconditionally exposed by the loader
-    android::Vector<VkExtensionProperties> loader_extensions;
+    std::vector<VkExtensionProperties> loader_extensions;
     loader_extensions.push_back({
         VK_KHR_INCREMENTAL_PRESENT_EXTENSION_NAME,
         VK_KHR_INCREMENTAL_PRESENT_SPEC_VERSION});
@@ -956,7 +949,7 @@ VkResult EnumerateDeviceExtensionProperties(
         uint32_t count = std::min(
             *pPropertyCount, static_cast<uint32_t>(loader_extensions.size()));
 
-        std::copy_n(loader_extensions.begin(), count, pProperties);
+        std::copy_n(loader_extensions.data(), count, pProperties);
 
         if (count < loader_extensions.size()) {
             *pPropertyCount = count;
@@ -1176,7 +1169,8 @@ VkResult CreateDevice(VkPhysicalDevice physicalDevice,
 
     if (properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_CPU) {
         // Log that the app is hitting software Vulkan implementation
-        android::GraphicsEnv::getInstance().setCpuVulkanInUse();
+        android::GraphicsEnv::getInstance().setTargetStats(
+            android::GpuStatsInfo::Stats::CPU_VULKAN_IN_USE);
     }
 
     data->driver_device = dev;
@@ -1245,11 +1239,10 @@ VkResult EnumeratePhysicalDeviceGroups(
         if (!device_count)
             return VK_INCOMPLETE;
 
-        android::Vector<VkPhysicalDevice> devices;
-        devices.resize(device_count);
+        std::vector<VkPhysicalDevice> devices(device_count);
         *pPhysicalDeviceGroupCount = device_count;
-        result = EnumeratePhysicalDevices(instance, &device_count,
-                                          devices.editArray());
+        result =
+            EnumeratePhysicalDevices(instance, &device_count, devices.data());
         if (result < 0)
             return result;
 

@@ -24,12 +24,15 @@
  */
 
 #include <android/input.h>
+#include <math.h>
+#include <stdint.h>
 #include <utils/BitSet.h>
 #include <utils/KeyedVector.h>
 #include <utils/RefBase.h>
 #include <utils/Timers.h>
 #include <utils/Vector.h>
-#include <stdint.h>
+
+#include <limits>
 
 /*
  * Additional private constants not defined in ndk/ui/input.h.
@@ -246,6 +249,13 @@ enum class MotionClassification : uint8_t {
  */
 const char* motionClassificationToString(MotionClassification classification);
 
+/**
+ * Invalid value for cursor position. Used for non-mouse events, tests and injected events. Don't
+ * use it for direct comparison with any other value, because NaN isn't equal to itself according to
+ * IEEE 754. Use isnan() instead to check if a cursor position is valid.
+ */
+constexpr float AMOTION_EVENT_INVALID_CURSOR_POSITION = std::numeric_limits<float>::quiet_NaN();
+
 /*
  * Pointer coordinate data.
  */
@@ -459,6 +469,18 @@ public:
 
     inline float getYPrecision() const { return mYPrecision; }
 
+    inline float getRawXCursorPosition() const { return mRawXCursorPosition; }
+
+    float getXCursorPosition() const;
+
+    inline float getRawYCursorPosition() const { return mRawYCursorPosition; }
+
+    float getYCursorPosition() const;
+
+    void setCursorPosition(float x, float y);
+
+    static inline bool isValidCursorPosition(float x, float y) { return !isnan(x) && !isnan(y); }
+
     inline nsecs_t getDownTime() const { return mDownTime; }
 
     inline void setDownTime(nsecs_t downTime) { mDownTime = downTime; }
@@ -600,26 +622,13 @@ public:
 
     ssize_t findPointerIndex(int32_t pointerId) const;
 
-    void initialize(
-            int32_t deviceId,
-            int32_t source,
-            int32_t displayId,
-            int32_t action,
-            int32_t actionButton,
-            int32_t flags,
-            int32_t edgeFlags,
-            int32_t metaState,
-            int32_t buttonState,
-            MotionClassification classification,
-            float xOffset,
-            float yOffset,
-            float xPrecision,
-            float yPrecision,
-            nsecs_t downTime,
-            nsecs_t eventTime,
-            size_t pointerCount,
-            const PointerProperties* pointerProperties,
-            const PointerCoords* pointerCoords);
+    void initialize(int32_t deviceId, int32_t source, int32_t displayId, int32_t action,
+                    int32_t actionButton, int32_t flags, int32_t edgeFlags, int32_t metaState,
+                    int32_t buttonState, MotionClassification classification, float xOffset,
+                    float yOffset, float xPrecision, float yPrecision, float rawXCursorPosition,
+                    float rawYCursorPosition, nsecs_t downTime, nsecs_t eventTime,
+                    size_t pointerCount, const PointerProperties* pointerProperties,
+                    const PointerCoords* pointerCoords);
 
     void copyFrom(const MotionEvent* other, bool keepHistory);
 
@@ -669,6 +678,8 @@ protected:
     float mYOffset;
     float mXPrecision;
     float mYPrecision;
+    float mRawXCursorPosition;
+    float mRawYCursorPosition;
     nsecs_t mDownTime;
     Vector<PointerProperties> mPointerProperties;
     Vector<nsecs_t> mSampleEventTimes;

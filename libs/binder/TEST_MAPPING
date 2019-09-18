@@ -1,0 +1,19 @@
+{
+  "presubmit": [
+    {
+      "name": "binderSafeInterfaceTest"
+    },
+    {
+      "name": "binderDriverInterfaceTest"
+    },
+    {
+      "name": "binderTextOutputTest"
+    },
+    {
+      "name": "binderLibTest"
+    },
+    {
+      "name": "binderStabilityTest"
+    }
+  ]
+}

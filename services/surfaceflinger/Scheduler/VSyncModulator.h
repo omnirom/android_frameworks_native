@@ -16,14 +16,11 @@
 
 #pragma once
 
-#include <utils/Errors.h>
-
-#include <cinttypes>
 #include <mutex>
 
 #include "Scheduler.h"
 
-namespace android {
+namespace android::scheduler {
 
 /*
  * Modulates the vsync-offsets depending on current SurfaceFlinger state.
@@ -33,180 +30,83 @@ private:
     // Number of frames we'll keep the early phase offsets once they are activated for a
     // transaction. This acts as a low-pass filter in case the client isn't quick enough in
     // sending new transactions.
-    const int MIN_EARLY_FRAME_COUNT_TRANSACTION = 2;
+    static constexpr int MIN_EARLY_FRAME_COUNT_TRANSACTION = 2;
 
     // Number of frames we'll keep the early gl phase offsets once they are activated.
     // This acts as a low-pass filter to avoid scenarios where we rapidly
     // switch in and out of gl composition.
-    const int MIN_EARLY_GL_FRAME_COUNT_TRANSACTION = 2;
+    static constexpr int MIN_EARLY_GL_FRAME_COUNT_TRANSACTION = 2;
+
+    using RefreshRateType = RefreshRateConfigs::RefreshRateType;
 
 public:
+    // Wrapper for a collection of surfaceflinger/app offsets for a particular
+    // configuration.
     struct Offsets {
+        RefreshRateType fpsMode;
         nsecs_t sf;
         nsecs_t app;
     };
 
-    // Sets the phase offsets
-    //
-    // sfEarly: The phase offset when waking up SF early, which happens when marking a transaction
-    //          as early. May be the same as late, in which case we don't shift offsets.
-    // sfEarlyGl: Like sfEarly, but only if we used GL composition. If we use both GL composition
-    //            and the transaction was marked as early, we'll use sfEarly.
-    // sfLate: The regular SF vsync phase offset.
-    // appEarly: Like sfEarly, but for the app-vsync
-    // appEarlyGl: Like sfEarlyGl, but for the app-vsync.
-    // appLate: The regular app vsync phase offset.
-    void setPhaseOffsets(Offsets early, Offsets earlyGl, Offsets late) {
-        mEarlyOffsets = early;
-        mEarlyGlOffsets = earlyGl;
-        mLateOffsets = late;
+    struct OffsetsConfig {
+        Offsets early;   // For transactions with the eEarlyWakeup flag.
+        Offsets earlyGl; // As above but while compositing with GL.
+        Offsets late;    // Default.
 
-        if (mSfConnectionHandle && late.sf != mOffsets.load().sf) {
-            mScheduler->setPhaseOffset(mSfConnectionHandle, late.sf);
-        }
+        nsecs_t thresholdForNextVsync;
+    };
 
-        if (mAppConnectionHandle && late.app != mOffsets.load().app) {
-            mScheduler->setPhaseOffset(mAppConnectionHandle, late.app);
-        }
+    VSyncModulator(Scheduler&, const sp<Scheduler::ConnectionHandle>& appConnectionHandle,
+                   const sp<Scheduler::ConnectionHandle>& sfConnectionHandle, const OffsetsConfig&);
 
-        mOffsets = late;
-    }
+    void setPhaseOffsets(const OffsetsConfig&) EXCLUDES(mMutex);
 
-    Offsets getEarlyOffsets() const { return mEarlyOffsets; }
+    // Signals that a transaction has started, and changes offsets accordingly.
+    void setTransactionStart(Scheduler::TransactionStart transactionStart);
 
-    Offsets getEarlyGlOffsets() const { return mEarlyGlOffsets; }
-
-    void setEventThreads(EventThread* sfEventThread, EventThread* appEventThread) {
-        mSfEventThread = sfEventThread;
-        mAppEventThread = appEventThread;
-    }
-
-    void setSchedulerAndHandles(Scheduler* scheduler,
-                                Scheduler::ConnectionHandle* appConnectionHandle,
-                                Scheduler::ConnectionHandle* sfConnectionHandle) {
-        mScheduler = scheduler;
-        mAppConnectionHandle = appConnectionHandle;
-        mSfConnectionHandle = sfConnectionHandle;
-    }
-
-    void setTransactionStart(Scheduler::TransactionStart transactionStart) {
-        if (transactionStart == Scheduler::TransactionStart::EARLY) {
-            mRemainingEarlyFrameCount = MIN_EARLY_FRAME_COUNT_TRANSACTION;
-        }
-
-        // An early transaction stays an early transaction.
-        if (transactionStart == mTransactionStart ||
-            mTransactionStart == Scheduler::TransactionStart::EARLY) {
-            return;
-        }
-        mTransactionStart = transactionStart;
-        updateOffsets();
-    }
-
-    void onTransactionHandled() {
-        if (mTransactionStart == Scheduler::TransactionStart::NORMAL) return;
-        mTransactionStart = Scheduler::TransactionStart::NORMAL;
-        updateOffsets();
-    }
+    // Signals that a transaction has been completed, so that we can finish
+    // special handling for a transaction.
+    void onTransactionHandled();
 
     // Called when we send a refresh rate change to hardware composer, so that
     // we can move into early offsets.
-    void onRefreshRateChangeInitiated() {
-        if (mRefreshRateChangePending) {
-            return;
-        }
-        mRefreshRateChangePending = true;
-        updateOffsets();
-    }
+    void onRefreshRateChangeInitiated();
 
     // Called when we detect from vsync signals that the refresh rate changed.
     // This way we can move out of early offsets if no longer necessary.
-    void onRefreshRateChangeCompleted() {
-        if (!mRefreshRateChangePending) {
-            return;
-        }
-        mRefreshRateChangePending = false;
-        updateOffsets();
-    }
+    void onRefreshRateChangeCompleted();
 
-    void onRefreshed(bool usedRenderEngine) {
-        bool updateOffsetsNeeded = false;
-        if (mRemainingEarlyFrameCount > 0) {
-            mRemainingEarlyFrameCount--;
-            updateOffsetsNeeded = true;
-        }
-        if (usedRenderEngine) {
-            mRemainingRenderEngineUsageCount = MIN_EARLY_GL_FRAME_COUNT_TRANSACTION;
-            updateOffsetsNeeded = true;
-        } else if (mRemainingRenderEngineUsageCount > 0) {
-            mRemainingRenderEngineUsageCount--;
-            updateOffsetsNeeded = true;
-        }
+    // Called when the display is presenting a new frame. usedRenderEngine
+    // should be set to true if RenderEngine was involved with composing the new
+    // frame.
+    void onRefreshed(bool usedRenderEngine);
 
-        if (updateOffsetsNeeded) {
-            updateOffsets();
-        }
-    }
-
-    Offsets getOffsets() {
-        // Early offsets are used if we're in the middle of a refresh rate
-        // change, or if we recently begin a transaction.
-        if (mTransactionStart == Scheduler::TransactionStart::EARLY ||
-            mRemainingEarlyFrameCount > 0 || mRefreshRateChangePending) {
-            return mEarlyOffsets;
-        } else if (mRemainingRenderEngineUsageCount > 0) {
-            return mEarlyGlOffsets;
-        } else {
-            return mLateOffsets;
-        }
-    }
+    // Returns the offsets that we are currently using
+    Offsets getOffsets() const EXCLUDES(mMutex);
 
 private:
-    void updateOffsets() {
-        const Offsets desired = getOffsets();
-        const Offsets current = mOffsets;
+    // Returns the next offsets that we should be using
+    const Offsets& getNextOffsets() const REQUIRES(mMutex);
+    // Updates offsets and persists them into the scheduler framework.
+    void updateOffsets() EXCLUDES(mMutex);
+    void updateOffsetsLocked() REQUIRES(mMutex);
 
-        bool changed = false;
-        if (desired.sf != current.sf) {
-            if (mSfConnectionHandle != nullptr) {
-                mScheduler->setPhaseOffset(mSfConnectionHandle, desired.sf);
-            } else {
-                mSfEventThread->setPhaseOffset(desired.sf);
-            }
-            changed = true;
-        }
-        if (desired.app != current.app) {
-            if (mAppConnectionHandle != nullptr) {
-                mScheduler->setPhaseOffset(mAppConnectionHandle, desired.app);
-            } else {
-                mAppEventThread->setPhaseOffset(desired.app);
-            }
-            changed = true;
-        }
+    Scheduler& mScheduler;
+    const sp<Scheduler::ConnectionHandle> mAppConnectionHandle;
+    const sp<Scheduler::ConnectionHandle> mSfConnectionHandle;
 
-        if (changed) {
-            mOffsets = desired;
-        }
-    }
+    mutable std::mutex mMutex;
+    OffsetsConfig mOffsetsConfig GUARDED_BY(mMutex);
 
-    Offsets mLateOffsets;
-    Offsets mEarlyOffsets;
-    Offsets mEarlyGlOffsets;
-
-    EventThread* mSfEventThread = nullptr;
-    EventThread* mAppEventThread = nullptr;
-
-    Scheduler* mScheduler = nullptr;
-    Scheduler::ConnectionHandle* mAppConnectionHandle = nullptr;
-    Scheduler::ConnectionHandle* mSfConnectionHandle = nullptr;
-
-    std::atomic<Offsets> mOffsets;
+    Offsets mOffsets GUARDED_BY(mMutex){mOffsetsConfig.late};
 
     std::atomic<Scheduler::TransactionStart> mTransactionStart =
             Scheduler::TransactionStart::NORMAL;
     std::atomic<bool> mRefreshRateChangePending = false;
     std::atomic<int> mRemainingEarlyFrameCount = 0;
     std::atomic<int> mRemainingRenderEngineUsageCount = 0;
+
+    bool mTraceDetailedInfo = false;
 };
 
-} // namespace android
+} // namespace android::scheduler

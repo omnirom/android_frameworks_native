@@ -202,21 +202,9 @@ public:
         mConfig.portAssociations.insert({inputPort, displayPort});
     }
 
-    void addDisabledDevice(int32_t deviceId) {
-        ssize_t index = mConfig.disabledDevices.indexOf(deviceId);
-        bool currentlyEnabled = index < 0;
-        if (currentlyEnabled) {
-            mConfig.disabledDevices.add(deviceId);
-        }
-    }
+    void addDisabledDevice(int32_t deviceId) { mConfig.disabledDevices.insert(deviceId); }
 
-    void removeDisabledDevice(int32_t deviceId) {
-        ssize_t index = mConfig.disabledDevices.indexOf(deviceId);
-        bool currentlyEnabled = index < 0;
-        if (!currentlyEnabled) {
-            mConfig.disabledDevices.remove(deviceId);
-        }
-    }
+    void removeDisabledDevice(int32_t deviceId) { mConfig.disabledDevices.erase(deviceId); }
 
     void setPointerController(int32_t deviceId, const sp<FakePointerController>& controller) {
         mPointerControllers.add(deviceId, controller);
@@ -337,14 +325,13 @@ class FakeEventHub : public EventHubInterface {
     List<RawEvent> mEvents;
     std::unordered_map<int32_t /*deviceId*/, std::vector<TouchVideoFrame>> mVideoFrames;
 
-protected:
+public:
     virtual ~FakeEventHub() {
         for (size_t i = 0; i < mDevices.size(); i++) {
             delete mDevices.valueAt(i);
         }
     }
 
-public:
     FakeEventHub() { }
 
     void addDevice(int32_t deviceId, const std::string& name, uint32_t classes) {
@@ -772,7 +759,7 @@ private:
 // --- FakeInputReaderContext ---
 
 class FakeInputReaderContext : public InputReaderContext {
-    sp<EventHubInterface> mEventHub;
+    std::shared_ptr<EventHubInterface> mEventHub;
     sp<InputReaderPolicyInterface> mPolicy;
     sp<InputListenerInterface> mListener;
     int32_t mGlobalMetaState;
@@ -781,12 +768,14 @@ class FakeInputReaderContext : public InputReaderContext {
     uint32_t mNextSequenceNum;
 
 public:
-    FakeInputReaderContext(const sp<EventHubInterface>& eventHub,
-            const sp<InputReaderPolicyInterface>& policy,
-            const sp<InputListenerInterface>& listener) :
-            mEventHub(eventHub), mPolicy(policy), mListener(listener),
-            mGlobalMetaState(0), mNextSequenceNum(1) {
-    }
+    FakeInputReaderContext(std::shared_ptr<EventHubInterface> eventHub,
+                           const sp<InputReaderPolicyInterface>& policy,
+                           const sp<InputListenerInterface>& listener)
+          : mEventHub(eventHub),
+            mPolicy(policy),
+            mListener(listener),
+            mGlobalMetaState(0),
+            mNextSequenceNum(1) {}
 
     virtual ~FakeInputReaderContext() { }
 
@@ -1011,12 +1000,10 @@ class InstrumentedInputReader : public InputReader {
     InputDevice* mNextDevice;
 
 public:
-    InstrumentedInputReader(const sp<EventHubInterface>& eventHub,
-            const sp<InputReaderPolicyInterface>& policy,
-            const sp<InputListenerInterface>& listener) :
-            InputReader(eventHub, policy, listener),
-            mNextDevice(nullptr) {
-    }
+    InstrumentedInputReader(std::shared_ptr<EventHubInterface> eventHub,
+                            const sp<InputReaderPolicyInterface>& policy,
+                            const sp<InputListenerInterface>& listener)
+          : InputReader(eventHub, policy, listener), mNextDevice(nullptr) {}
 
     virtual ~InstrumentedInputReader() {
         if (mNextDevice) {
@@ -1244,11 +1231,11 @@ class InputReaderTest : public testing::Test {
 protected:
     sp<TestInputListener> mFakeListener;
     sp<FakeInputReaderPolicy> mFakePolicy;
-    sp<FakeEventHub> mFakeEventHub;
+    std::shared_ptr<FakeEventHub> mFakeEventHub;
     sp<InstrumentedInputReader> mReader;
 
     virtual void SetUp() {
-        mFakeEventHub = new FakeEventHub();
+        mFakeEventHub = std::make_unique<FakeEventHub>();
         mFakePolicy = new FakeInputReaderPolicy();
         mFakeListener = new TestInputListener();
 
@@ -1260,7 +1247,6 @@ protected:
 
         mFakeListener.clear();
         mFakePolicy.clear();
-        mFakeEventHub.clear();
     }
 
     void addDevice(int32_t deviceId, const std::string& name, uint32_t classes,
@@ -1587,7 +1573,7 @@ protected:
     static const int32_t DEVICE_CONTROLLER_NUMBER;
     static const uint32_t DEVICE_CLASSES;
 
-    sp<FakeEventHub> mFakeEventHub;
+    std::shared_ptr<FakeEventHub> mFakeEventHub;
     sp<FakeInputReaderPolicy> mFakePolicy;
     sp<TestInputListener> mFakeListener;
     FakeInputReaderContext* mFakeContext;
@@ -1595,7 +1581,7 @@ protected:
     InputDevice* mDevice;
 
     virtual void SetUp() {
-        mFakeEventHub = new FakeEventHub();
+        mFakeEventHub = std::make_unique<FakeEventHub>();
         mFakePolicy = new FakeInputReaderPolicy();
         mFakeListener = new TestInputListener();
         mFakeContext = new FakeInputReaderContext(mFakeEventHub, mFakePolicy, mFakeListener);
@@ -1613,7 +1599,6 @@ protected:
         delete mFakeContext;
         mFakeListener.clear();
         mFakePolicy.clear();
-        mFakeEventHub.clear();
     }
 };
 
@@ -1782,14 +1767,14 @@ protected:
     static const int32_t DEVICE_CONTROLLER_NUMBER;
     static const uint32_t DEVICE_CLASSES;
 
-    sp<FakeEventHub> mFakeEventHub;
+    std::shared_ptr<FakeEventHub> mFakeEventHub;
     sp<FakeInputReaderPolicy> mFakePolicy;
     sp<TestInputListener> mFakeListener;
     FakeInputReaderContext* mFakeContext;
     InputDevice* mDevice;
 
     virtual void SetUp() {
-        mFakeEventHub = new FakeEventHub();
+        mFakeEventHub = std::make_unique<FakeEventHub>();
         mFakePolicy = new FakeInputReaderPolicy();
         mFakeListener = new TestInputListener();
         mFakeContext = new FakeInputReaderContext(mFakeEventHub, mFakePolicy, mFakeListener);
@@ -1807,7 +1792,6 @@ protected:
         delete mFakeContext;
         mFakeListener.clear();
         mFakePolicy.clear();
-        mFakeEventHub.clear();
     }
 
     void addConfigurationProperty(const char* key, const char* value) {
@@ -4688,7 +4672,6 @@ protected:
     void processSlot(MultiTouchInputMapper* mapper, int32_t slot);
     void processToolType(MultiTouchInputMapper* mapper, int32_t toolType);
     void processKey(MultiTouchInputMapper* mapper, int32_t code, int32_t value);
-    void processTimestamp(MultiTouchInputMapper* mapper, uint32_t value);
     void processMTSync(MultiTouchInputMapper* mapper);
     void processSync(MultiTouchInputMapper* mapper);
 };
@@ -4802,10 +4785,6 @@ void MultiTouchInputMapperTest::processToolType(
 void MultiTouchInputMapperTest::processKey(
         MultiTouchInputMapper* mapper, int32_t code, int32_t value) {
     process(mapper, ARBITRARY_TIME, EV_KEY, code, value);
-}
-
-void MultiTouchInputMapperTest::processTimestamp(MultiTouchInputMapper* mapper, uint32_t value) {
-    process(mapper, ARBITRARY_TIME, EV_MSC, MSC_TIMESTAMP, value);
 }
 
 void MultiTouchInputMapperTest::processMTSync(MultiTouchInputMapper* mapper) {
@@ -6188,64 +6167,6 @@ TEST_F(MultiTouchInputMapperTest, Process_WhenAbsMTPressureIsPresent_HoversIfIts
     ASSERT_EQ(AMOTION_EVENT_ACTION_HOVER_EXIT, motionArgs.action);
     ASSERT_NO_FATAL_FAILURE(assertPointerCoords(motionArgs.pointerCoords[0],
             toDisplayX(150), toDisplayY(250), 0, 0, 0, 0, 0, 0, 0, 0));
-}
-
-TEST_F(MultiTouchInputMapperTest, Process_HandlesTimestamp) {
-    MultiTouchInputMapper* mapper = new MultiTouchInputMapper(mDevice);
-
-    addConfigurationProperty("touch.deviceType", "touchScreen");
-    prepareDisplay(DISPLAY_ORIENTATION_0);
-    prepareAxes(POSITION);
-    addMapperAndConfigure(mapper);
-    NotifyMotionArgs args;
-
-    // By default, deviceTimestamp should be zero
-    processPosition(mapper, 100, 100);
-    processMTSync(mapper);
-    processSync(mapper);
-    ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyMotionWasCalled(&args));
-    ASSERT_EQ(0U, args.deviceTimestamp);
-
-    // Now the timestamp of 1000 is reported by evdev and should appear in MotionArgs
-    processPosition(mapper, 0, 0);
-    processTimestamp(mapper, 1000);
-    processMTSync(mapper);
-    processSync(mapper);
-    ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyMotionWasCalled(&args));
-    ASSERT_EQ(1000U, args.deviceTimestamp);
-}
-
-TEST_F(MultiTouchInputMapperTest, WhenMapperIsReset_TimestampIsCleared) {
-    MultiTouchInputMapper* mapper = new MultiTouchInputMapper(mDevice);
-
-    addConfigurationProperty("touch.deviceType", "touchScreen");
-    prepareDisplay(DISPLAY_ORIENTATION_0);
-    prepareAxes(POSITION);
-    addMapperAndConfigure(mapper);
-    NotifyMotionArgs args;
-
-    // Send a touch event with a timestamp
-    processPosition(mapper, 100, 100);
-    processTimestamp(mapper, 1);
-    processMTSync(mapper);
-    processSync(mapper);
-    ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyMotionWasCalled(&args));
-    ASSERT_EQ(1U, args.deviceTimestamp);
-
-    // Since the data accumulates, and new timestamp has not arrived, deviceTimestamp won't change
-    processPosition(mapper, 100, 200);
-    processMTSync(mapper);
-    processSync(mapper);
-    ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyMotionWasCalled(&args));
-    ASSERT_EQ(1U, args.deviceTimestamp);
-
-    mapper->reset(/* when */ 0);
-    // After the mapper is reset, deviceTimestamp should become zero again
-    processPosition(mapper, 100, 300);
-    processMTSync(mapper);
-    processSync(mapper);
-    ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyMotionWasCalled(&args));
-    ASSERT_EQ(0U, args.deviceTimestamp);
 }
 
 /**

@@ -34,6 +34,7 @@
 #include <utils/Trace.h>
 
 #include <input/InputTransport.h>
+#include <statslog.h>
 
 using android::base::StringPrintf;
 
@@ -191,6 +192,10 @@ void InputMessage::getSanitizedCopy(InputMessage* msg) const {
             msg->body.motion.xPrecision = body.motion.xPrecision;
             // float yPrecision
             msg->body.motion.yPrecision = body.motion.yPrecision;
+            // float xCursorPosition
+            msg->body.motion.xCursorPosition = body.motion.xCursorPosition;
+            // float yCursorPosition
+            msg->body.motion.yCursorPosition = body.motion.yCursorPosition;
             // uint32_t pointerCount
             msg->body.motion.pointerCount = body.motion.pointerCount;
             //struct Pointer pointers[MAX_POINTERS]
@@ -222,35 +227,28 @@ void InputMessage::getSanitizedCopy(InputMessage* msg) const {
 
 // --- InputChannel ---
 
-InputChannel::InputChannel(const std::string& name, int fd) :
-        mName(name) {
+sp<InputChannel> InputChannel::create(const std::string& name, android::base::unique_fd fd) {
+    const int result = fcntl(fd, F_SETFL, O_NONBLOCK);
+    if (result != 0) {
+        LOG_ALWAYS_FATAL("channel '%s' ~ Could not make socket non-blocking: %s", name.c_str(),
+                         strerror(errno));
+        return nullptr;
+    }
+    return new InputChannel(name, std::move(fd));
+}
+
+InputChannel::InputChannel(const std::string& name, android::base::unique_fd fd)
+      : mName(name), mFd(std::move(fd)) {
 #if DEBUG_CHANNEL_LIFECYCLE
     ALOGD("Input channel constructed: name='%s', fd=%d",
             mName.c_str(), fd);
 #endif
-
-    setFd(fd);
 }
 
 InputChannel::~InputChannel() {
 #if DEBUG_CHANNEL_LIFECYCLE
-    ALOGD("Input channel destroyed: name='%s', fd=%d",
-            mName.c_str(), mFd);
+    ALOGD("Input channel destroyed: name='%s', fd=%d", mName.c_str(), mFd.get());
 #endif
-
-    ::close(mFd);
-}
-
-void InputChannel::setFd(int fd) {
-    if (mFd > 0) {
-        ::close(mFd);
-    }
-    mFd = fd;
-    if (mFd > 0) {
-        int result = fcntl(mFd, F_SETFL, O_NONBLOCK);
-        LOG_ALWAYS_FATAL_IF(result != 0, "channel '%s' ~ Could not make socket "
-            "non-blocking.  errno=%d", mName.c_str(), errno);
-    }
 }
 
 status_t InputChannel::openInputChannelPair(const std::string& name,
@@ -271,13 +269,13 @@ status_t InputChannel::openInputChannelPair(const std::string& name,
     setsockopt(sockets[1], SOL_SOCKET, SO_SNDBUF, &bufferSize, sizeof(bufferSize));
     setsockopt(sockets[1], SOL_SOCKET, SO_RCVBUF, &bufferSize, sizeof(bufferSize));
 
-    std::string serverChannelName = name;
-    serverChannelName += " (server)";
-    outServerChannel = new InputChannel(serverChannelName, sockets[0]);
+    std::string serverChannelName = name + " (server)";
+    android::base::unique_fd serverFd(sockets[0]);
+    outServerChannel = InputChannel::create(serverChannelName, std::move(serverFd));
 
-    std::string clientChannelName = name;
-    clientChannelName += " (client)";
-    outClientChannel = new InputChannel(clientChannelName, sockets[1]);
+    std::string clientChannelName = name + " (client)";
+    android::base::unique_fd clientFd(sockets[1]);
+    outClientChannel = InputChannel::create(clientChannelName, std::move(clientFd));
     return OK;
 }
 
@@ -287,7 +285,7 @@ status_t InputChannel::sendMessage(const InputMessage* msg) {
     msg->getSanitizedCopy(&cleanMsg);
     ssize_t nWrite;
     do {
-        nWrite = ::send(mFd, &cleanMsg, msgLength, MSG_DONTWAIT | MSG_NOSIGNAL);
+        nWrite = ::send(mFd.get(), &cleanMsg, msgLength, MSG_DONTWAIT | MSG_NOSIGNAL);
     } while (nWrite == -1 && errno == EINTR);
 
     if (nWrite < 0) {
@@ -322,7 +320,7 @@ status_t InputChannel::sendMessage(const InputMessage* msg) {
 status_t InputChannel::receiveMessage(InputMessage* msg) {
     ssize_t nRead;
     do {
-        nRead = ::recv(mFd, msg, sizeof(InputMessage), MSG_DONTWAIT);
+        nRead = ::recv(mFd.get(), msg, sizeof(InputMessage), MSG_DONTWAIT);
     } while (nRead == -1 && errno == EINTR);
 
     if (nRead < 0) {
@@ -360,39 +358,44 @@ status_t InputChannel::receiveMessage(InputMessage* msg) {
 }
 
 sp<InputChannel> InputChannel::dup() const {
-    int fd = ::dup(getFd());
-    return fd >= 0 ? new InputChannel(getName(), fd) : nullptr;
+    android::base::unique_fd newFd(::dup(getFd()));
+    if (!newFd.ok()) {
+        ALOGE("Could not duplicate fd %i for channel %s: %s", getFd(), mName.c_str(),
+              strerror(errno));
+        return nullptr;
+    }
+    return InputChannel::create(mName, std::move(newFd));
 }
 
-
 status_t InputChannel::write(Parcel& out) const {
-    status_t s = out.writeString8(String8(getName().c_str()));
-
+    status_t s = out.writeCString(getName().c_str());
     if (s != OK) {
         return s;
     }
+
     s = out.writeStrongBinder(mToken);
     if (s != OK) {
         return s;
     }
 
-    s = out.writeDupFileDescriptor(getFd());
-
+    s = out.writeUniqueFileDescriptor(mFd);
     return s;
 }
 
-status_t InputChannel::read(const Parcel& from) {
-    mName = from.readString8();
-    mToken = from.readStrongBinder();
-
-    int rawFd = from.readFileDescriptor();
-    setFd(::dup(rawFd));
-
-    if (mFd < 0) {
-        return BAD_VALUE;
+sp<InputChannel> InputChannel::read(const Parcel& from) {
+    std::string name = from.readCString();
+    sp<IBinder> token = from.readStrongBinder();
+    android::base::unique_fd rawFd;
+    status_t fdResult = from.readUniqueFileDescriptor(&rawFd);
+    if (fdResult != OK) {
+        return nullptr;
     }
 
-    return OK;
+    sp<InputChannel> channel = InputChannel::create(name, std::move(rawFd));
+    if (channel != nullptr) {
+        channel->setToken(token);
+    }
+    return channel;
 }
 
 sp<IBinder> InputChannel::getToken() const {
@@ -465,26 +468,12 @@ status_t InputPublisher::publishKeyEvent(
 }
 
 status_t InputPublisher::publishMotionEvent(
-        uint32_t seq,
-        int32_t deviceId,
-        int32_t source,
-        int32_t displayId,
-        int32_t action,
-        int32_t actionButton,
-        int32_t flags,
-        int32_t edgeFlags,
-        int32_t metaState,
-        int32_t buttonState,
-        MotionClassification classification,
-        float xOffset,
-        float yOffset,
-        float xPrecision,
-        float yPrecision,
-        nsecs_t downTime,
-        nsecs_t eventTime,
-        uint32_t pointerCount,
-        const PointerProperties* pointerProperties,
-        const PointerCoords* pointerCoords) {
+        uint32_t seq, int32_t deviceId, int32_t source, int32_t displayId, int32_t action,
+        int32_t actionButton, int32_t flags, int32_t edgeFlags, int32_t metaState,
+        int32_t buttonState, MotionClassification classification, float xOffset, float yOffset,
+        float xPrecision, float yPrecision, float xCursorPosition, float yCursorPosition,
+        nsecs_t downTime, nsecs_t eventTime, uint32_t pointerCount,
+        const PointerProperties* pointerProperties, const PointerCoords* pointerCoords) {
     if (ATRACE_ENABLED()) {
         std::string message = StringPrintf(
                 "publishMotionEvent(inputChannel=%s, action=%" PRId32 ")",
@@ -532,12 +521,18 @@ status_t InputPublisher::publishMotionEvent(
     msg.body.motion.yOffset = yOffset;
     msg.body.motion.xPrecision = xPrecision;
     msg.body.motion.yPrecision = yPrecision;
+    msg.body.motion.xCursorPosition = xCursorPosition;
+    msg.body.motion.yCursorPosition = yCursorPosition;
     msg.body.motion.downTime = downTime;
     msg.body.motion.eventTime = eventTime;
     msg.body.motion.pointerCount = pointerCount;
     for (uint32_t i = 0; i < pointerCount; i++) {
         msg.body.motion.pointers[i].properties.copyFrom(pointerProperties[i]);
         msg.body.motion.pointers[i].coords.copyFrom(pointerCoords[i]);
+    }
+
+    if (source == AINPUT_SOURCE_TOUCHSCREEN) {
+        reportTouchEventForStatistics(eventTime);
     }
     return mChannel->sendMessage(&msg);
 }
@@ -563,6 +558,17 @@ status_t InputPublisher::receiveFinishedSignal(uint32_t* outSeq, bool* outHandle
     *outSeq = msg.body.finished.seq;
     *outHandled = msg.body.finished.handled;
     return OK;
+}
+
+void InputPublisher::reportTouchEventForStatistics(nsecs_t evdevTime) {
+    if (mTouchStatistics.shouldReport()) {
+        android::util::stats_write(android::util::TOUCH_EVENT_REPORTED, mTouchStatistics.getMin(),
+                                   mTouchStatistics.getMax(), mTouchStatistics.getMean(),
+                                   mTouchStatistics.getStDev(), mTouchStatistics.getCount());
+        mTouchStatistics.reset();
+    }
+    nsecs_t latency = nanoseconds_to_microseconds(systemTime(CLOCK_MONOTONIC) - evdevTime);
+    mTouchStatistics.addValue(latency);
 }
 
 // --- InputConsumer ---
@@ -1146,26 +1152,16 @@ void InputConsumer::initializeMotionEvent(MotionEvent* event, const InputMessage
         pointerCoords[i].copyFrom(msg->body.motion.pointers[i].coords);
     }
 
-    event->initialize(
-            msg->body.motion.deviceId,
-            msg->body.motion.source,
-            msg->body.motion.displayId,
-            msg->body.motion.action,
-            msg->body.motion.actionButton,
-            msg->body.motion.flags,
-            msg->body.motion.edgeFlags,
-            msg->body.motion.metaState,
-            msg->body.motion.buttonState,
-            msg->body.motion.classification,
-            msg->body.motion.xOffset,
-            msg->body.motion.yOffset,
-            msg->body.motion.xPrecision,
-            msg->body.motion.yPrecision,
-            msg->body.motion.downTime,
-            msg->body.motion.eventTime,
-            pointerCount,
-            pointerProperties,
-            pointerCoords);
+    event->initialize(msg->body.motion.deviceId, msg->body.motion.source,
+                      msg->body.motion.displayId, msg->body.motion.action,
+                      msg->body.motion.actionButton, msg->body.motion.flags,
+                      msg->body.motion.edgeFlags, msg->body.motion.metaState,
+                      msg->body.motion.buttonState, msg->body.motion.classification,
+                      msg->body.motion.xOffset, msg->body.motion.yOffset,
+                      msg->body.motion.xPrecision, msg->body.motion.yPrecision,
+                      msg->body.motion.xCursorPosition, msg->body.motion.yCursorPosition,
+                      msg->body.motion.downTime, msg->body.motion.eventTime, pointerCount,
+                      pointerProperties, pointerCoords);
 }
 
 void InputConsumer::addSample(MotionEvent* event, const InputMessage* msg) {

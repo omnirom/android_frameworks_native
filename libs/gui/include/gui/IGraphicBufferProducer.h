@@ -412,6 +412,7 @@ public:
         uint64_t nextFrameNumber{0};
         FrameEventHistoryDelta frameTimestamps;
         bool bufferReplaced{false};
+        int maxBufferCount{0};
     };
 
     virtual status_t queueBuffer(int slot, const QueueBufferInput& input,
@@ -628,6 +629,14 @@ public:
     // returned by querying the now deprecated
     // NATIVE_WINDOW_CONSUMER_USAGE_BITS attribute.
     virtual status_t getConsumerUsage(uint64_t* outUsage) const = 0;
+
+    // Enable/disable the auto prerotation at buffer allocation when the buffer
+    // size is driven by the consumer.
+    //
+    // When buffer size is driven by the consumer and the transform hint
+    // specifies a 90 or 270 degree rotation, if auto prerotation is enabled,
+    // the width and height used for dequeueBuffer will be additionally swapped.
+    virtual status_t setAutoPrerotation(bool autoPrerotation);
 
     // Static method exports any IGraphicBufferProducer object to a parcel. It
     // handles null producer as well.

@@ -21,7 +21,12 @@
 
 #include <utils/StrongPointer.h>
 
+#include "DisplayHardware/ComposerHal.h"
 #include "DisplayHardware/DisplayIdentification.h"
+
+namespace HWC2 {
+class Layer;
+} // namespace HWC2
 
 namespace android {
 
@@ -71,7 +76,25 @@ public:
     // Writes the geometry state to the HWC, or does nothing if this layer does
     // not use the HWC. If includeGeometry is false, the geometry state can be
     // skipped.
-    virtual void writeStateToHWC(bool includeGeometry) const = 0;
+    virtual void writeStateToHWC(bool includeGeometry) = 0;
+
+    // Returns the HWC2::Layer associated with this layer, if it exists
+    virtual HWC2::Layer* getHwcLayer() const = 0;
+
+    // Returns true if the current layer state requires client composition
+    virtual bool requiresClientComposition() const = 0;
+
+    // Applies a HWC device requested composition type change
+    virtual void applyDeviceCompositionTypeChange(Hwc2::IComposerClient::Composition) = 0;
+
+    // Prepares to apply any HWC device layer requests
+    virtual void prepareForDeviceLayerRequests() = 0;
+
+    // Applies a HWC device layer request
+    virtual void applyDeviceLayerRequest(Hwc2::IComposerClient::LayerRequest request) = 0;
+
+    // Returns true if the composition settings scale pixels
+    virtual bool needsFiltering() const = 0;
 
     // Debugging
     virtual void dump(std::string& result) const = 0;

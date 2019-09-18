@@ -17,6 +17,7 @@
 #include <cmath>
 
 #include <compositionengine/impl/Output.h>
+#include <compositionengine/impl/OutputCompositionState.h>
 #include <compositionengine/mock/CompositionEngine.h>
 #include <compositionengine/mock/DisplayColorProfile.h>
 #include <compositionengine/mock/Layer.h>
@@ -37,8 +38,7 @@ using testing::Return;
 using testing::ReturnRef;
 using testing::StrictMock;
 
-class OutputTest : public testing::Test {
-public:
+struct OutputTest : public testing::Test {
     OutputTest() {
         mOutput.setDisplayColorProfileForTest(
                 std::unique_ptr<DisplayColorProfile>(mDisplayColorProfile));
@@ -46,7 +46,6 @@ public:
 
         mOutput.editState().bounds = kDefaultDisplaySize;
     }
-    ~OutputTest() override = default;
 
     static const Rect kDefaultDisplaySize;
 
@@ -58,7 +57,7 @@ public:
 
 const Rect OutputTest::kDefaultDisplaySize{100, 200};
 
-/* ------------------------------------------------------------------------
+/*
  * Basic construction
  */
 
@@ -77,7 +76,7 @@ TEST_F(OutputTest, canInstantiateOutput) {
     EXPECT_FALSE(mOutput.isValid());
 }
 
-/* ------------------------------------------------------------------------
+/*
  * Output::setCompositionEnabled()
  */
 
@@ -108,7 +107,7 @@ TEST_F(OutputTest, setCompositionEnabledSetsDisabledAndDirtiesEntireOutput) {
     EXPECT_THAT(mOutput.getState().dirtyRegion, RegionEq(Region(kDefaultDisplaySize)));
 }
 
-/* ------------------------------------------------------------------------
+/*
  * Output::setProjection()
  */
 
@@ -130,7 +129,7 @@ TEST_F(OutputTest, setProjectionTriviallyWorks) {
     EXPECT_EQ(needsFiltering, mOutput.getState().needsFiltering);
 }
 
-/* ------------------------------------------------------------------------
+/*
  * Output::setBounds()
  */
 
@@ -147,7 +146,7 @@ TEST_F(OutputTest, setBoundsSetsSizeAndDirtiesEntireOutput) {
     EXPECT_THAT(mOutput.getState().dirtyRegion, RegionEq(Region(Rect(displaySize))));
 }
 
-/* ------------------------------------------------------------------------
+/*
  * Output::setLayerStackFilter()
  */
 
@@ -161,7 +160,7 @@ TEST_F(OutputTest, setLayerStackFilterSetsFilterAndDirtiesEntireOutput) {
     EXPECT_THAT(mOutput.getState().dirtyRegion, RegionEq(Region(kDefaultDisplaySize)));
 }
 
-/* ------------------------------------------------------------------------
+/*
  * Output::setColorTransform
  */
 
@@ -200,34 +199,46 @@ TEST_F(OutputTest, setColorTransformSetsTransform) {
     EXPECT_THAT(mOutput.getState().dirtyRegion, RegionEq(Region(kDefaultDisplaySize)));
 }
 
-/* ------------------------------------------------------------------------
+/*
  * Output::setColorMode
  */
 
 TEST_F(OutputTest, setColorModeSetsStateAndDirtiesOutputIfChanged) {
+    EXPECT_CALL(*mDisplayColorProfile,
+                getTargetDataspace(ui::ColorMode::DISPLAY_P3, ui::Dataspace::DISPLAY_P3,
+                                   ui::Dataspace::UNKNOWN))
+            .WillOnce(Return(ui::Dataspace::UNKNOWN));
     EXPECT_CALL(*mRenderSurface, setBufferDataspace(ui::Dataspace::DISPLAY_P3)).Times(1);
 
     mOutput.setColorMode(ui::ColorMode::DISPLAY_P3, ui::Dataspace::DISPLAY_P3,
-                         ui::RenderIntent::TONE_MAP_COLORIMETRIC);
+                         ui::RenderIntent::TONE_MAP_COLORIMETRIC, ui::Dataspace::UNKNOWN);
 
     EXPECT_EQ(ui::ColorMode::DISPLAY_P3, mOutput.getState().colorMode);
     EXPECT_EQ(ui::Dataspace::DISPLAY_P3, mOutput.getState().dataspace);
     EXPECT_EQ(ui::RenderIntent::TONE_MAP_COLORIMETRIC, mOutput.getState().renderIntent);
+    EXPECT_EQ(ui::Dataspace::UNKNOWN, mOutput.getState().targetDataspace);
+
     EXPECT_THAT(mOutput.getState().dirtyRegion, RegionEq(Region(kDefaultDisplaySize)));
 }
 
 TEST_F(OutputTest, setColorModeDoesNothingIfNoChange) {
+    EXPECT_CALL(*mDisplayColorProfile,
+                getTargetDataspace(ui::ColorMode::DISPLAY_P3, ui::Dataspace::DISPLAY_P3,
+                                   ui::Dataspace::UNKNOWN))
+            .WillOnce(Return(ui::Dataspace::UNKNOWN));
+
     mOutput.editState().colorMode = ui::ColorMode::DISPLAY_P3;
     mOutput.editState().dataspace = ui::Dataspace::DISPLAY_P3;
     mOutput.editState().renderIntent = ui::RenderIntent::TONE_MAP_COLORIMETRIC;
+    mOutput.editState().targetDataspace = ui::Dataspace::UNKNOWN;
 
     mOutput.setColorMode(ui::ColorMode::DISPLAY_P3, ui::Dataspace::DISPLAY_P3,
-                         ui::RenderIntent::TONE_MAP_COLORIMETRIC);
+                         ui::RenderIntent::TONE_MAP_COLORIMETRIC, ui::Dataspace::UNKNOWN);
 
     EXPECT_THAT(mOutput.getState().dirtyRegion, RegionEq(Region()));
 }
 
-/* ------------------------------------------------------------------------
+/*
  * Output::setRenderSurface()
  */
 
@@ -242,7 +253,7 @@ TEST_F(OutputTest, setRenderSurfaceResetsBounds) {
     EXPECT_EQ(Rect(newDisplaySize), mOutput.getState().bounds);
 }
 
-/* ------------------------------------------------------------------------
+/*
  * Output::getDirtyRegion()
  */
 
@@ -271,7 +282,7 @@ TEST_F(OutputTest, getDirtyRegionWithRepaintEverythingFalse) {
     }
 }
 
-/* ------------------------------------------------------------------------
+/*
  * Output::belongsInOutput()
  */
 
@@ -298,7 +309,7 @@ TEST_F(OutputTest, belongsInOutputFiltersAsExpected) {
     EXPECT_FALSE(mOutput.belongsInOutput(layerStack2, false));
 }
 
-/* ------------------------------------------------------------------------
+/*
  * Output::getOutputLayerForLayer()
  */
 
@@ -330,7 +341,7 @@ TEST_F(OutputTest, getOutputLayerForLayerWorks) {
     EXPECT_EQ(nullptr, mOutput.getOutputLayerForLayer(&layer));
 }
 
-/* ------------------------------------------------------------------------
+/*
  * Output::getOrCreateOutputLayer()
  */
 
@@ -375,6 +386,64 @@ TEST_F(OutputTest, getOrCreateOutputLayerWorks) {
         EXPECT_EQ(nullptr, outputLayers[0].get());
         EXPECT_EQ(nullptr, outputLayers[1].get());
     }
+}
+
+/*
+ * Output::prepareFrame()
+ */
+
+struct OutputPrepareFrameTest : public testing::Test {
+    struct OutputPartialMock : public impl::Output {
+        OutputPartialMock(const compositionengine::CompositionEngine& compositionEngine)
+              : impl::Output(compositionEngine) {}
+
+        // Sets up the helper functions called by prepareFrame to use a mock
+        // implementations.
+        MOCK_METHOD0(chooseCompositionStrategy, void());
+    };
+
+    OutputPrepareFrameTest() {
+        mOutput.setDisplayColorProfileForTest(
+                std::unique_ptr<DisplayColorProfile>(mDisplayColorProfile));
+        mOutput.setRenderSurfaceForTest(std::unique_ptr<RenderSurface>(mRenderSurface));
+    }
+
+    StrictMock<mock::CompositionEngine> mCompositionEngine;
+    mock::DisplayColorProfile* mDisplayColorProfile = new StrictMock<mock::DisplayColorProfile>();
+    mock::RenderSurface* mRenderSurface = new StrictMock<mock::RenderSurface>();
+    StrictMock<OutputPartialMock> mOutput{mCompositionEngine};
+};
+
+TEST_F(OutputPrepareFrameTest, takesEarlyOutIfNotEnabled) {
+    mOutput.editState().isEnabled = false;
+
+    mOutput.prepareFrame();
+}
+
+TEST_F(OutputPrepareFrameTest, delegatesToChooseCompositionStrategyAndRenderSurface) {
+    mOutput.editState().isEnabled = true;
+    mOutput.editState().usesClientComposition = false;
+    mOutput.editState().usesDeviceComposition = true;
+
+    EXPECT_CALL(mOutput, chooseCompositionStrategy()).Times(1);
+    EXPECT_CALL(*mRenderSurface, prepareFrame(false, true));
+
+    mOutput.prepareFrame();
+}
+
+// Note: Use OutputTest and not OutputPrepareFrameTest, so the real
+// base chooseCompositionStrategy() is invoked.
+TEST_F(OutputTest, prepareFrameSetsClientCompositionOnlyByDefault) {
+    mOutput.editState().isEnabled = true;
+    mOutput.editState().usesClientComposition = false;
+    mOutput.editState().usesDeviceComposition = true;
+
+    EXPECT_CALL(*mRenderSurface, prepareFrame(true, false));
+
+    mOutput.prepareFrame();
+
+    EXPECT_TRUE(mOutput.getState().usesClientComposition);
+    EXPECT_FALSE(mOutput.getState().usesDeviceComposition);
 }
 
 } // namespace

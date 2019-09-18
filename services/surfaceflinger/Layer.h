@@ -17,8 +17,6 @@
 #ifndef ANDROID_LAYER_H
 #define ANDROID_LAYER_H
 
-#include <sys/types.h>
-
 #include <compositionengine/LayerFE.h>
 #include <gui/BufferQueue.h>
 #include <gui/ISurfaceComposerClient.h>
@@ -28,6 +26,7 @@
 #include <math/vec4.h>
 #include <renderengine/Mesh.h>
 #include <renderengine/Texture.h>
+#include <sys/types.h>
 #include <ui/FloatRect.h>
 #include <ui/FrameStats.h>
 #include <ui/GraphicBuffer.h>
@@ -44,15 +43,15 @@
 #include <vector>
 
 #include "Client.h"
+#include "ClientCache.h"
+#include "DisplayHardware/ComposerHal.h"
+#include "DisplayHardware/HWComposer.h"
 #include "FrameTracker.h"
 #include "LayerVector.h"
 #include "MonitoredProducer.h"
+#include "RenderArea.h"
 #include "SurfaceFlinger.h"
 #include "TransactionCompletedThread.h"
-
-#include "DisplayHardware/ComposerHal.h"
-#include "DisplayHardware/HWComposer.h"
-#include "RenderArea.h"
 
 using namespace android::surfaceflinger;
 
@@ -218,6 +217,7 @@ public:
         // recent callback handle.
         std::deque<sp<CallbackHandle>> callbackHandles;
         bool colorSpaceAgnostic;
+        nsecs_t desiredPresentTime = -1;
     };
 
     explicit Layer(const LayerCreationArgs& args);
@@ -358,8 +358,6 @@ public:
         return getLayerStack() == layerStack && (!mPrimaryDisplayOnly || isPrimaryDisplay);
     }
 
-    void computeGeometry(const RenderArea& renderArea, renderengine::Mesh& mesh,
-                         bool useIdentityTransform) const;
     FloatRect getBounds(const Region& activeTransparentRegion) const;
     FloatRect getBounds() const;
 
@@ -380,7 +378,9 @@ public:
 
     // -----------------------------------------------------------------------
     // Virtuals
-    virtual const char* getTypeId() const = 0;
+
+    // Provide unique string for each class type in the Layer hierarchy
+    virtual const char* getType() const = 0;
 
     /*
      * isOpaque - true if this surface is opaque
@@ -443,11 +443,16 @@ public:
 
     bool isRemovedFromCurrentState() const;
 
-    void writeToProto(LayerProto* layerInfo, LayerVector::StateSet stateSet,
-                      uint32_t traceFlags = SurfaceTracing::TRACE_ALL);
-
-    void writeToProto(LayerProto* layerInfo, const sp<DisplayDevice>& displayDevice,
-                      uint32_t traceFlags = SurfaceTracing::TRACE_ALL);
+    // Write states that are modified by the main thread. This includes drawing
+    // state as well as buffer data. This should be called in the main or tracing
+    // thread.
+    void writeToProtoDrawingState(LayerProto* layerInfo,
+                                  uint32_t traceFlags = SurfaceTracing::TRACE_ALL) const;
+    // Write drawing or current state. If writing current state, the caller should hold the
+    // external mStateLock. If writing drawing state, this function should be called on the
+    // main or tracing thread.
+    void writeToProtoCommonState(LayerProto* layerInfo, LayerVector::StateSet stateSet,
+                                 uint32_t traceFlags = SurfaceTracing::TRACE_ALL) const;
 
     virtual Geometry getActiveGeometry(const Layer::State& s) const { return s.active_legacy; }
     virtual uint32_t getActiveWidth(const Layer::State& s) const { return s.active_legacy.w; }
@@ -459,41 +464,29 @@ public:
         return s.activeTransparentRegion_legacy;
     }
     virtual Rect getCrop(const Layer::State& s) const { return s.crop_legacy; }
-
-protected:
-    virtual bool prepareClientLayer(const RenderArea& renderArea, const Region& clip,
-                                    bool useIdentityTransform, Region& clearRegion,
-                                    const bool supportProtectedContent,
-                                    renderengine::LayerSettings& layer);
+    virtual bool needsFiltering(const sp<const DisplayDevice>&) const { return false; }
 
 public:
     /*
      * compositionengine::LayerFE overrides
      */
+    bool onPreComposition(nsecs_t) override;
     void latchCompositionState(compositionengine::LayerFECompositionState&,
                                bool includeGeometry) const override;
+    std::optional<renderengine::LayerSettings> prepareClientComposition(
+            compositionengine::LayerFE::ClientCompositionTargetSettings&) override;
     void onLayerDisplayed(const sp<Fence>& releaseFence) override;
     const char* getDebugName() const override;
 
 protected:
     void latchGeometry(compositionengine::LayerFECompositionState& outState) const;
+    virtual void latchPerFrameState(compositionengine::LayerFECompositionState& outState) const;
 
 public:
     virtual void setDefaultBufferSize(uint32_t /*w*/, uint32_t /*h*/) {}
 
     virtual bool isHdrY410() const { return false; }
 
-    void forceClientComposition(const sp<DisplayDevice>& display);
-    bool getForceClientComposition(const sp<DisplayDevice>& display);
-    virtual void setPerFrameData(const sp<const DisplayDevice>& display,
-                                 const ui::Transform& transform, const Rect& viewport,
-                                 int32_t supportedPerFrameMetadata,
-                                 const ui::Dataspace targetDataspace) = 0;
-
-    // callIntoHwc exists so we can update our local state and call
-    // acceptDisplayChanges without unnecessarily updating the device's state
-    void setCompositionType(const sp<const DisplayDevice>& display,
-                            Hwc2::IComposerClient::Composition type);
     Hwc2::IComposerClient::Composition getCompositionType(
             const sp<const DisplayDevice>& display) const;
     bool getClearClientTarget(const sp<const DisplayDevice>& display) const;
@@ -501,12 +494,6 @@ public:
 
     virtual bool shouldPresentNow(nsecs_t /*expectedPresentTime*/) const { return false; }
     virtual void setTransformHint(uint32_t /*orientation*/) const { }
-
-    /*
-     * called before composition.
-     * returns true if the layer has pending updates.
-     */
-    virtual bool onPreComposition(nsecs_t refreshStartTime) = 0;
 
     /*
      * called after composition.
@@ -524,17 +511,6 @@ public:
 
     // For Animation Hint
     virtual bool isScreenshot() const { return false; }
-
-    /*
-     * prepareClientLayer - populates a renderengine::LayerSettings to passed to
-     * RenderEngine::drawLayers. Returns true if the layer can be used, and
-     * false otherwise.
-     */
-    bool prepareClientLayer(const RenderArea& renderArea, const Region& clip, Region& clearRegion,
-                            const bool supportProtectedContent, renderengine::LayerSettings& layer);
-    bool prepareClientLayer(const RenderArea& renderArea, bool useIdentityTransform,
-                            Region& clearRegion, const bool supportProtectedContent,
-                            renderengine::LayerSettings& layer);
 
     /*
      * doTransaction - process the transaction. This is a good place to figure
@@ -572,11 +548,14 @@ public:
      * operation, so this should be set only if needed). Typically this is used
      * to figure out if the content or size of a surface has changed.
      */
-    virtual bool latchBuffer(bool& /*recomputeVisibleRegions*/, nsecs_t /*latchTime*/) {
-        return {};
+    virtual bool latchBuffer(bool& /*recomputeVisibleRegions*/, nsecs_t /*latchTime*/,
+                             nsecs_t /*expectedPresentTime*/) {
+        return false;
     }
 
     virtual bool isBufferLatched() const { return false; }
+
+    virtual void latchAndReleaseBuffer() {}
 
     /*
      * Remove relative z for the layer if its relative parent is not part of the
@@ -618,10 +597,6 @@ public:
     virtual int32_t getQueuedFrameCount() const { return 0; }
 
     // -----------------------------------------------------------------------
-
-    bool hasHwcLayer(const sp<const DisplayDevice>& displayDevice);
-    HWC2::Layer* getHwcLayer(const sp<const DisplayDevice>& displayDevice);
-
     inline const State& getDrawingState() const { return mDrawingState; }
     inline const State& getCurrentState() const { return mCurrentState; }
     inline State& getCurrentState() { return mCurrentState; }
@@ -820,7 +795,7 @@ public:
     // this to be called once.
     sp<IBinder> getHandle();
     const String8& getName() const;
-    virtual void notifyAvailableFrames() {}
+    virtual void notifyAvailableFrames(nsecs_t /*expectedPresentTime*/) {}
     virtual PixelFormat getPixelFormat() const { return PIXEL_FORMAT_NONE; }
     bool getPremultipledAlpha() const;
 
@@ -840,13 +815,15 @@ protected:
 
     bool mPrimaryDisplayOnly = false;
 
-    // these are protected by an external lock
-    State mCurrentState;
+    // These are only accessed by the main thread or the tracing thread.
     State mDrawingState;
-    std::atomic<uint32_t> mTransactionFlags{0};
+    // Store a copy of the pending state so that the drawing thread can access the
+    // states without a lock.
+    Vector<State> mPendingStatesSnapshot;
 
-    // Accessed from main thread and binder threads
-    Mutex mPendingStateMutex;
+    // these are protected by an external lock (mStateLock)
+    State mCurrentState;
+    std::atomic<uint32_t> mTransactionFlags{0};
     Vector<State> mPendingStates;
 
     // Timestamp history for UIAutomation. Thread safe.

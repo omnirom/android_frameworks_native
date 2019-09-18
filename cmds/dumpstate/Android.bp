@@ -86,15 +86,14 @@ cc_defaults {
         "libdumpstateaidl",
         "libdumpstateutil",
         "libdumputils",
+        "libhardware_legacy",
         "libhidlbase",
         "libhidltransport",
         "liblog",
         "libutils",
     ],
     srcs: [
-        "DumpstateSectionReporter.cpp",
         "DumpstateService.cpp",
-        "utils.cpp",
     ],
     static_libs: [
         "libincidentcompanion",
@@ -123,7 +122,6 @@ cc_binary {
         "lsmod",
         "lsof",
         "netstat",
-        "parse_radio_log",
         "printenv",
         "procrank",
         "screencap",
@@ -146,6 +144,12 @@ cc_test {
         "tests/dumpstate_test.cpp",
     ],
     static_libs: ["libgmock"],
+    test_config: "dumpstate_test.xml",
+    data: [
+        ":dumpstate_test_fixture",
+        "tests/testdata/**/*",
+    ],
+    test_suites: ["device-tests"],
 }
 
 cc_test {

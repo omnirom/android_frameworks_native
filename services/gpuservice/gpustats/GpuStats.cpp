@@ -27,20 +27,20 @@
 
 namespace android {
 
-static void addLoadingCount(GraphicsEnv::Driver driver, bool isDriverLoaded,
+static void addLoadingCount(GpuStatsInfo::Driver driver, bool isDriverLoaded,
                             GpuStatsGlobalInfo* const outGlobalInfo) {
     switch (driver) {
-        case GraphicsEnv::Driver::GL:
-        case GraphicsEnv::Driver::GL_UPDATED:
+        case GpuStatsInfo::Driver::GL:
+        case GpuStatsInfo::Driver::GL_UPDATED:
             outGlobalInfo->glLoadingCount++;
             if (!isDriverLoaded) outGlobalInfo->glLoadingFailureCount++;
             break;
-        case GraphicsEnv::Driver::VULKAN:
-        case GraphicsEnv::Driver::VULKAN_UPDATED:
+        case GpuStatsInfo::Driver::VULKAN:
+        case GpuStatsInfo::Driver::VULKAN_UPDATED:
             outGlobalInfo->vkLoadingCount++;
             if (!isDriverLoaded) outGlobalInfo->vkLoadingFailureCount++;
             break;
-        case GraphicsEnv::Driver::ANGLE:
+        case GpuStatsInfo::Driver::ANGLE:
             outGlobalInfo->angleLoadingCount++;
             if (!isDriverLoaded) outGlobalInfo->angleLoadingFailureCount++;
             break;
@@ -49,22 +49,22 @@ static void addLoadingCount(GraphicsEnv::Driver driver, bool isDriverLoaded,
     }
 }
 
-static void addLoadingTime(GraphicsEnv::Driver driver, int64_t driverLoadingTime,
+static void addLoadingTime(GpuStatsInfo::Driver driver, int64_t driverLoadingTime,
                            GpuStatsAppInfo* const outAppInfo) {
     switch (driver) {
-        case GraphicsEnv::Driver::GL:
-        case GraphicsEnv::Driver::GL_UPDATED:
+        case GpuStatsInfo::Driver::GL:
+        case GpuStatsInfo::Driver::GL_UPDATED:
             if (outAppInfo->glDriverLoadingTime.size() < GpuStats::MAX_NUM_LOADING_TIMES) {
                 outAppInfo->glDriverLoadingTime.emplace_back(driverLoadingTime);
             }
             break;
-        case GraphicsEnv::Driver::VULKAN:
-        case GraphicsEnv::Driver::VULKAN_UPDATED:
+        case GpuStatsInfo::Driver::VULKAN:
+        case GpuStatsInfo::Driver::VULKAN_UPDATED:
             if (outAppInfo->vkDriverLoadingTime.size() < GpuStats::MAX_NUM_LOADING_TIMES) {
                 outAppInfo->vkDriverLoadingTime.emplace_back(driverLoadingTime);
             }
             break;
-        case GraphicsEnv::Driver::ANGLE:
+        case GpuStatsInfo::Driver::ANGLE:
             if (outAppInfo->angleDriverLoadingTime.size() < GpuStats::MAX_NUM_LOADING_TIMES) {
                 outAppInfo->angleDriverLoadingTime.emplace_back(driverLoadingTime);
             }
@@ -77,7 +77,7 @@ static void addLoadingTime(GraphicsEnv::Driver driver, int64_t driverLoadingTime
 void GpuStats::insert(const std::string& driverPackageName, const std::string& driverVersionName,
                       uint64_t driverVersionCode, int64_t driverBuildTime,
                       const std::string& appPackageName, const int32_t vulkanVersion,
-                      GraphicsEnv::Driver driver, bool isDriverLoaded, int64_t driverLoadingTime) {
+                      GpuStatsInfo::Driver driver, bool isDriverLoaded, int64_t driverLoadingTime) {
     ATRACE_CALL();
 
     std::lock_guard<std::mutex> lock(mLock);
@@ -126,14 +126,28 @@ void GpuStats::insert(const std::string& driverPackageName, const std::string& d
     addLoadingTime(driver, driverLoadingTime, &mAppStats[appStatsKey]);
 }
 
-void GpuStats::setCpuVulkanInUse(const std::string& appPackageName,
-                                 const uint64_t driverVersionCode) {
+void GpuStats::insertTargetStats(const std::string& appPackageName,
+                                 const uint64_t driverVersionCode, const GpuStatsInfo::Stats stats,
+                                 const uint64_t /*value*/) {
+    ATRACE_CALL();
+
     const std::string appStatsKey = appPackageName + std::to_string(driverVersionCode);
+
+    std::lock_guard<std::mutex> lock(mLock);
     if (!mAppStats.count(appStatsKey)) {
         return;
     }
 
-    mAppStats[appStatsKey].cpuVulkanInUse = true;
+    switch (stats) {
+        case GpuStatsInfo::Stats::CPU_VULKAN_IN_USE:
+            mAppStats[appStatsKey].cpuVulkanInUse = true;
+            break;
+        case GpuStatsInfo::Stats::FALSE_PREROTATION:
+            mAppStats[appStatsKey].falsePrerotation = true;
+            break;
+        default:
+            break;
+    }
 }
 
 void GpuStats::interceptSystemDriverStatsLocked() {
