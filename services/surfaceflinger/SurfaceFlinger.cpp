@@ -2894,7 +2894,7 @@ void SurfaceFlinger::setFrameBufferSizeForScaling(sp<DisplayDevice> displayDevic
     if (mBootStage == BootStage::FINISHED) {
         displayDevice->setProjection(state.orientation, state.viewport, state.viewport);
         displayDevice->setDisplaySize(state.viewport.width(), state.viewport.height());
-        display->getRenderSurface()->setViewportAndProjection();
+        //display->getRenderSurface()->setViewportAndProjection();
         display->getRenderSurface()->flipClientTarget(true);
         // queue a scratch buffer to flip Client Target with updated size
         display->getRenderSurface()->queueBuffer(std::move(fd));
