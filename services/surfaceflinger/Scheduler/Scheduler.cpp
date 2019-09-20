@@ -274,7 +274,7 @@ ResyncCallback Scheduler::makeResyncCallback(GetVsyncPeriod&& getVsyncPeriod) {
 }
 
 void Scheduler::VsyncState::resync(const GetVsyncPeriod& getVsyncPeriod) {
-    static constexpr nsecs_t kIgnoreDelay = ms2ns(500);
+    static constexpr nsecs_t kIgnoreDelay = ms2ns(750);
 
     const nsecs_t now = systemTime();
     const nsecs_t last = lastResyncTime.exchange(now);
@@ -567,6 +567,7 @@ Scheduler::RefreshRateType Scheduler::calculateRefreshRateType() {
     }
 
     // Content detection is on, find the appropriate refresh rate with minimal error
+    // TODO(b/139751853): Scan allowed refresh rates only (SurfaceFlinger::mAllowedDisplayConfigs)
     auto iter = min_element(mRefreshRateConfigs.getRefreshRates().cbegin(),
                             mRefreshRateConfigs.getRefreshRates().cend(),
                             [rate = mContentRefreshRate](const auto& l, const auto& r) -> bool {
@@ -594,6 +595,11 @@ Scheduler::RefreshRateType Scheduler::calculateRefreshRateType() {
     }
 
     return currRefreshRateType;
+}
+
+Scheduler::RefreshRateType Scheduler::getPreferredRefreshRateType() {
+    std::lock_guard<std::mutex> lock(mFeatureStateLock);
+    return mRefreshRateType;
 }
 
 void Scheduler::changeRefreshRate(RefreshRateType refreshRateType, ConfigEvent configEvent) {
