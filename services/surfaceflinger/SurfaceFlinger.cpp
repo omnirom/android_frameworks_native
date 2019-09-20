@@ -2677,20 +2677,10 @@ void SurfaceFlinger::pickColorMode(const sp<DisplayDevice>& display, ColorMode* 
     }
 
     // respect hdrDataSpace only when there is no legacy HDR support
-    bool isHdr = hdrDataSpace != Dataspace::UNKNOWN &&
+    const bool isHdr = hdrDataSpace != Dataspace::UNKNOWN &&
             !profile->hasLegacyHdrSupport(hdrDataSpace) && !isHdrClientComposition;
     if (isHdr) {
         bestDataSpace = hdrDataSpace;
-    }
-
-    for (const auto& layer : display->getVisibleLayersSortedByZ()) {
-        // Secure display layers are always rendered in sRGB and needs sRGB
-        // Color Mode.
-        if (layer->isSecureDisplay()) {
-            bestDataSpace = Dataspace::V0_SRGB;
-            isHdr = false;
-            break;
-        }
     }
 
     RenderIntent intent;
