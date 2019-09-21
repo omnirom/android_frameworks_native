@@ -114,12 +114,11 @@ bool BufferQueueLayer::shouldPresentNow(nsecs_t expectedPresentTime) const {
     bool isDue = addedTime < expectedPresentTime;
 
     if (isDue && mFlinger->mUseSmoMo) {
-        smomo::SmomoBufferStats bufferStats = {
-            getSequence(),
-            getQueuedFrameCount(),
-            mQueueItems[0].mIsAutoTimestamp,
-            mQueueItems[0].mTimestamp,
-        };
+        smomo::SmomoBufferStats bufferStats;
+        bufferStats.id = getSequence();
+        bufferStats.queued_frames = getQueuedFrameCount();
+        bufferStats.auto_timestamp = mQueueItems[0].mIsAutoTimestamp;
+        bufferStats.timestamp = mQueueItems[0].mTimestamp;
         isDue = mFlinger->mSmoMo->ShouldPresentNow(bufferStats, expectedPresentTime);
     }
 
@@ -487,12 +486,11 @@ void BufferQueueLayer::onFrameAvailable(const BufferItem& item) {
                                              item.mGraphicBuffer->getHeight(), item.mFrameNumber);
 
     if (mFlinger->mUseSmoMo) {
-        smomo::SmomoBufferStats bufferStats = {
-            getSequence(),
-            getQueuedFrameCount(),
-            item.mIsAutoTimestamp,
-            item.mTimestamp,
-        };
+        smomo::SmomoBufferStats bufferStats;
+        bufferStats.id = getSequence();
+        bufferStats.queued_frames = getQueuedFrameCount();
+        bufferStats.auto_timestamp = item.mIsAutoTimestamp;
+        bufferStats.timestamp = item.mTimestamp;
         mFlinger->mSmoMo->CollectLayerStats(bufferStats);
     }
 
