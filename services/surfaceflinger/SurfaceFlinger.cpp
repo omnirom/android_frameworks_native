@@ -738,20 +738,9 @@ void SurfaceFlinger::init() {
                             renderengine::RenderEngine::USE_COLOR_MANAGEMENT : 0);
     renderEngineFeature |= (useContextPriority ?
                             renderengine::RenderEngine::USE_HIGH_PRIORITY_CONTEXT : 0);
-
-    {
-        using vendor::display::config::V1_7::IDisplayConfig;
-            android::sp<IDisplayConfig> disp_config_v1_7 = IDisplayConfig::getService();
-        if (disp_config_v1_7 != NULL) {
-            disp_config_v1_7->getDebugProperty("protected_client_composition",
-                [&] (const ::android::hardware::hidl_string& value, int32_t error) {
-                    if (error == 0) {
-                        renderEngineFeature |= atoi(value.c_str()) ?
-                            renderengine::RenderEngine::ENABLE_PROTECTED_CONTEXT : 0;
-                    }
-            });
-        }
-    }
+    renderEngineFeature |=
+            (enable_protected_contents(false) ? renderengine::RenderEngine::ENABLE_PROTECTED_CONTEXT
+                                              : 0);
 
     // TODO(b/77156734): We need to stop casting and use HAL types when possible.
     // Sending maxFrameBufferAcquiredBuffers as the cache size is tightly tuned to single-display.
