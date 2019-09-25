@@ -166,7 +166,7 @@ void RenderSurface::queueBuffer(base::unique_fd&& readyFence) {
     auto& hwc = mCompositionEngine.getHwComposer();
     const auto id = mDisplay.getId();
 
-    if (hwc.hasClientComposition(id) || hwc.hasFlipClientTargetRequest(id)) {
+    if (mFlipClientTarget || hwc.hasClientComposition(id) || hwc.hasFlipClientTargetRequest(id)) {
         // hasFlipClientTargetRequest could return true even if we haven't
         // dequeued a buffer before. Try dequeueing one if we don't have a
         // buffer ready.
@@ -187,7 +187,8 @@ void RenderSurface::queueBuffer(base::unique_fd&& readyFence) {
         } else {
             status_t result =
                     mNativeWindow->queueBuffer(mNativeWindow.get(),
-                                               mGraphicBuffer->getNativeBuffer(), dup(readyFence));
+                                               mGraphicBuffer->getNativeBuffer(),
+                                               mFlipClientTarget ? -1 : dup(readyFence));
             if (result != NO_ERROR) {
                 ALOGE("Error when queueing buffer for display [%s]: %d", mDisplay.getName().c_str(),
                       result);
@@ -197,7 +198,8 @@ void RenderSurface::queueBuffer(base::unique_fd&& readyFence) {
                     LOG_ALWAYS_FATAL("ANativeWindow::queueBuffer failed with error: %d", result);
                 } else {
                     mNativeWindow->cancelBuffer(mNativeWindow.get(),
-                                                mGraphicBuffer->getNativeBuffer(), dup(readyFence));
+                                                mGraphicBuffer->getNativeBuffer(),
+                                                mFlipClientTarget ? -1 : dup(readyFence));
                 }
             }
 
@@ -258,6 +260,10 @@ void RenderSurface::setSizeForTest(const ui::Size& size) {
 
 sp<GraphicBuffer>& RenderSurface::mutableGraphicBufferForTest() {
     return mGraphicBuffer;
+}
+
+void RenderSurface::flipClientTarget(bool flip) {
+    mFlipClientTarget = flip;
 }
 
 } // namespace impl
