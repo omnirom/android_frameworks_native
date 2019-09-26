@@ -2042,6 +2042,16 @@ void SurfaceFlinger::setDisplayAnimating(const sp<DisplayDevice>& hw) {
     hw->setAnimating(hasScreenshot);
 }
 
+void SurfaceFlinger::setLayerAsMask(const sp<const DisplayDevice>& hw, const uint64_t& layerId) {
+    static android::sp<vendor::display::config::V1_7::IDisplayConfig> disp_config_v1_7 =
+                                        vendor::display::config::V1_7::IDisplayConfig::getService();
+    const std::optional<DisplayId>& displayId = hw->getId();
+    const auto dpy = getHwComposer().fromPhysicalDisplayId(*displayId);
+    if (!disp_config_v1_7) {
+      return;
+    }
+    disp_config_v1_7->setLayerAsMask(*dpy, layerId);
+}
 
 void SurfaceFlinger::calculateWorkingSet() {
     ATRACE_CALL();
