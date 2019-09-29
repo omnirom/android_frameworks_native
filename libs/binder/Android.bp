@@ -70,10 +70,10 @@ cc_library_shared {
         "ProcessInfoService.cpp",
         "ProcessState.cpp",
         "Static.cpp",
+        "Stability.cpp",
         "Status.cpp",
         "TextOutput.cpp",
         "IpPrefix.cpp",
-        "Value.cpp",
         ":libbinder_aidl",
     ],
 
@@ -94,7 +94,6 @@ cc_library_shared {
                 "PermissionController.cpp",
                 "ProcessInfoService.cpp",
                 "IpPrefix.cpp",
-                ":libbinder_aidl",
             ],
         },
     },
@@ -116,7 +115,6 @@ cc_library_shared {
     },
 
     shared_libs: [
-        "libbase",
         "liblog",
         "libcutils",
         "libutils",
@@ -142,7 +140,7 @@ filegroup {
     name: "libbinder_aidl",
     srcs: [
         "aidl/android/content/pm/IPackageManagerNative.aidl",
+        "aidl/android/os/IServiceManager.aidl",
     ],
+    path: "aidl",
 }
-
-subdirs = ["tests"]

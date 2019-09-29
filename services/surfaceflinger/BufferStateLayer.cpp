@@ -50,8 +50,12 @@ BufferStateLayer::BufferStateLayer(const LayerCreationArgs& args)
     mOverrideScalingMode = NATIVE_WINDOW_SCALING_MODE_SCALE_TO_WINDOW;
     mCurrentState.dataspace = ui::Dataspace::V0_SRGB;
 }
+
 BufferStateLayer::~BufferStateLayer() {
     if (mActiveBuffer != nullptr) {
+        // Ensure that mActiveBuffer is uncached from RenderEngine here, as
+        // RenderEngine may have been using the buffer as an external texture
+        // after the client uncached the buffer.
         auto& engine(mFlinger->getRenderEngine());
         engine.unbindExternalTextureBuffer(mActiveBuffer->getId());
     }
@@ -91,7 +95,7 @@ void BufferStateLayer::setTransformHint(uint32_t /*orientation*/) const {
 }
 
 void BufferStateLayer::releasePendingBuffer(nsecs_t /*dequeueReadyTime*/) {
-    mFlinger->getTransactionCompletedThread().addPresentedCallbackHandles(
+    mFlinger->getTransactionCompletedThread().finalizePendingCallbackHandles(
             mDrawingState.callbackHandles);
 
     mDrawingState.callbackHandles = {};
@@ -222,11 +226,11 @@ bool BufferStateLayer::setBuffer(const sp<GraphicBuffer>& buffer, nsecs_t postTi
     mCurrentState.modified = true;
     setTransactionFlags(eTransactionNeeded);
 
-    mFlinger->mTimeStats->setPostTime(getSequence(), getFrameNumber(), getName().c_str(), postTime);
-    mDesiredPresentTime = desiredPresentTime;
+    mFlinger->mTimeStats->setPostTime(getSequence(), mFrameNumber, getName().c_str(), postTime);
+    mCurrentState.desiredPresentTime = desiredPresentTime;
 
     if (mFlinger->mUseSmart90ForVideo) {
-        const nsecs_t presentTime = (mDesiredPresentTime == -1) ? 0 : mDesiredPresentTime;
+        const nsecs_t presentTime = (desiredPresentTime == -1) ? 0 : desiredPresentTime;
         mFlinger->mScheduler->addLayerPresentTimeAndHDR(mSchedulerLayerHandle, presentTime,
                                                         mCurrentState.hdrMetadata.validTypes != 0);
     }
@@ -316,7 +320,7 @@ bool BufferStateLayer::setTransactionCompletedListeners(
 
         } else { // If this layer will NOT need to be relatched and presented this frame
             // Notify the transaction completed thread this handle is done
-            mFlinger->getTransactionCompletedThread().addUnpresentedCallbackHandle(handle);
+            mFlinger->getTransactionCompletedThread().registerUnpresentedCallbackHandle(handle);
         }
     }
 
@@ -375,16 +379,16 @@ bool BufferStateLayer::fenceHasSignaled() const {
     return getDrawingState().acquireFence->getStatus() == Fence::Status::Signaled;
 }
 
-bool BufferStateLayer::framePresentTimeIsCurrent() const {
+bool BufferStateLayer::framePresentTimeIsCurrent(nsecs_t expectedPresentTime) const {
     if (!hasFrameUpdate() || isRemovedFromCurrentState()) {
         return true;
     }
 
-    return mDesiredPresentTime <= mFlinger->mScheduler->expectedPresentTime();
+    return mCurrentState.desiredPresentTime <= expectedPresentTime;
 }
 
 nsecs_t BufferStateLayer::getDesiredPresentTime() {
-    return mDesiredPresentTime;
+    return getDrawingState().desiredPresentTime;
 }
 
 std::shared_ptr<FenceTime> BufferStateLayer::getCurrentFenceTime() const {
@@ -452,7 +456,7 @@ PixelFormat BufferStateLayer::getPixelFormat() const {
     return mActiveBuffer->format;
 }
 
-uint64_t BufferStateLayer::getFrameNumber() const {
+uint64_t BufferStateLayer::getFrameNumber(nsecs_t /*expectedPresentTime*/) const {
     return mFrameNumber;
 }
 
@@ -500,7 +504,8 @@ status_t BufferStateLayer::bindTextureImage() {
     return engine.bindExternalTextureBuffer(mTextureName, s.buffer, s.acquireFence);
 }
 
-status_t BufferStateLayer::updateTexImage(bool& /*recomputeVisibleRegions*/, nsecs_t latchTime) {
+status_t BufferStateLayer::updateTexImage(bool& /*recomputeVisibleRegions*/, nsecs_t latchTime,
+                                          nsecs_t /*expectedPresentTime*/) {
     const State& s(getDrawingState());
 
     if (!s.buffer) {
@@ -534,7 +539,7 @@ status_t BufferStateLayer::updateTexImage(bool& /*recomputeVisibleRegions*/, nse
         ALOGE("[%s] rejecting buffer: "
               "bufferWidth=%d, bufferHeight=%d, front.active.{w=%d, h=%d}",
               mName.string(), bufferWidth, bufferHeight, s.active.w, s.active.h);
-        mFlinger->mTimeStats->removeTimeRecord(layerID, getFrameNumber());
+        mFlinger->mTimeStats->removeTimeRecord(layerID, mFrameNumber);
         return BAD_VALUE;
     }
 
@@ -556,8 +561,8 @@ status_t BufferStateLayer::updateTexImage(bool& /*recomputeVisibleRegions*/, nse
         }
     }
 
-    mFlinger->mTimeStats->setAcquireFence(layerID, getFrameNumber(), getCurrentFenceTime());
-    mFlinger->mTimeStats->setLatchTime(layerID, getFrameNumber(), latchTime);
+    mFlinger->mTimeStats->setAcquireFence(layerID, mFrameNumber, getCurrentFenceTime());
+    mFlinger->mTimeStats->setLatchTime(layerID, mFrameNumber, latchTime);
 
     mCurrentStateModified = false;
 
@@ -571,16 +576,10 @@ status_t BufferStateLayer::updateActiveBuffer() {
         return BAD_VALUE;
     }
 
-    if (mActiveBuffer != nullptr) {
-        // todo: get this to work with BufferStateLayerCache
-        auto& engine(mFlinger->getRenderEngine());
-        engine.unbindExternalTextureBuffer(mActiveBuffer->getId());
-    }
     mActiveBuffer = s.buffer;
     mActiveBufferFence = s.acquireFence;
     auto& layerCompositionState = getCompositionLayer()->editState().frontEnd;
     layerCompositionState.buffer = mActiveBuffer;
-    layerCompositionState.bufferSlot = 0;
 
     return NO_ERROR;
 }
@@ -591,24 +590,18 @@ status_t BufferStateLayer::updateFrameNumber(nsecs_t /*latchTime*/) {
     return NO_ERROR;
 }
 
-void BufferStateLayer::setHwcLayerBuffer(const sp<const DisplayDevice>& display) {
-    const auto outputLayer = findOutputLayerForDisplay(display);
-    LOG_FATAL_IF(!outputLayer || !outputLayer->getState().hwc);
-    auto& hwcInfo = *outputLayer->editState().hwc;
-    auto& hwcLayer = hwcInfo.hwcLayer;
+void BufferStateLayer::latchPerFrameState(
+        compositionengine::LayerFECompositionState& compositionState) const {
+    BufferLayer::latchPerFrameState(compositionState);
+    if (compositionState.compositionType == Hwc2::IComposerClient::Composition::SIDEBAND) {
+        return;
+    }
 
     const State& s(getDrawingState());
 
-    uint32_t hwcSlot;
-    sp<GraphicBuffer> buffer;
-    hwcInfo.hwcBufferCache.getHwcBuffer(mHwcSlotGenerator->getHwcCacheSlot(s.clientCacheId),
-                                        s.buffer, &hwcSlot, &buffer);
-
-    auto error = hwcLayer->setBuffer(hwcSlot, buffer, s.acquireFence);
-    if (error != HWC2::Error::None) {
-        ALOGE("[%s] Failed to set buffer %p: %s (%d)", mName.string(),
-              s.buffer->handle, to_string(error).c_str(), static_cast<int32_t>(error));
-    }
+    compositionState.buffer = s.buffer;
+    compositionState.bufferSlot = mHwcSlotGenerator->getHwcCacheSlot(s.clientCacheId);
+    compositionState.acquireFence = s.acquireFence;
 
     mFrameNumber++;
 }

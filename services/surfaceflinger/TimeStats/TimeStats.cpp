@@ -72,8 +72,10 @@ std::string TimeStats::miniDump() {
 
     std::string result = "TimeStats miniDump:\n";
     std::lock_guard<std::mutex> lock(mMutex);
-    android::base::StringAppendF(&result, "Number of tracked layers is %zu\n",
+    android::base::StringAppendF(&result, "Number of layers currently being tracked is %zu\n",
                                  mTimeStatsTracker.size());
+    android::base::StringAppendF(&result, "Number of layers in the stats pool is %zu\n",
+                                 mTimeStats.stats.size());
     return result;
 }
 
@@ -173,8 +175,8 @@ void TimeStats::flushAvailableRecordsToStatsLocked(int32_t layerID) {
         ALOGV("[%d]-[%" PRIu64 "]-presentFenceTime[%" PRId64 "]", layerID,
               timeRecords[0].frameTime.frameNumber, timeRecords[0].frameTime.presentTime);
 
-        const std::string& layerName = layerRecord.layerName;
         if (prevTimeRecord.ready) {
+            const std::string& layerName = layerRecord.layerName;
             if (!mTimeStats.stats.count(layerName)) {
                 mTimeStats.stats[layerName].layerName = layerName;
                 mTimeStats.stats[layerName].packageName = getPackageName(layerName);
@@ -220,18 +222,6 @@ void TimeStats::flushAvailableRecordsToStatsLocked(int32_t layerID) {
                   timeRecords[0].frameTime.frameNumber, presentToPresentMs);
             timeStatsLayer.deltas["present2present"].insert(presentToPresentMs);
         }
-
-        // Output additional trace points to track frame time.
-        ATRACE_INT64(("TimeStats-Post - " + layerName).c_str(), timeRecords[0].frameTime.postTime);
-        ATRACE_INT64(("TimeStats-Acquire - " + layerName).c_str(),
-                     timeRecords[0].frameTime.acquireTime);
-        ATRACE_INT64(("TimeStats-Latch - " + layerName).c_str(),
-                     timeRecords[0].frameTime.latchTime);
-        ATRACE_INT64(("TimeStats-Desired - " + layerName).c_str(),
-                     timeRecords[0].frameTime.desiredTime);
-        ATRACE_INT64(("TimeStats-Present - " + layerName).c_str(),
-                     timeRecords[0].frameTime.presentTime);
-
         prevTimeRecord = timeRecords[0];
         timeRecords.pop_front();
         layerRecord.waitData--;
@@ -262,6 +252,9 @@ void TimeStats::setPostTime(int32_t layerID, uint64_t frameNumber, const std::st
           postTime);
 
     std::lock_guard<std::mutex> lock(mMutex);
+    if (!mTimeStats.stats.count(layerName) && mTimeStats.stats.size() >= MAX_NUM_LAYER_STATS) {
+        return;
+    }
     if (!mTimeStatsTracker.count(layerID) && mTimeStatsTracker.size() < MAX_NUM_LAYER_RECORDS &&
         layerNameIsValid(layerName)) {
         mTimeStatsTracker[layerID].layerName = layerName;
@@ -613,7 +606,7 @@ void TimeStats::dump(bool asProto, std::optional<uint32_t> maxLayers, std::strin
     if (asProto) {
         ALOGD("Dumping TimeStats as proto");
         SFTimeStatsGlobalProto timeStatsProto = mTimeStats.toProto(maxLayers);
-        result.append(timeStatsProto.SerializeAsString().c_str(), timeStatsProto.ByteSize());
+        result.append(timeStatsProto.SerializeAsString());
     } else {
         ALOGD("Dumping TimeStats as text");
         result.append(mTimeStats.toString(maxLayers));

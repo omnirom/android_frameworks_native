@@ -98,6 +98,26 @@ void FrameTracker::advanceFrame() {
     }
 }
 
+nsecs_t FrameTracker::getPreviousGfxInfo() {
+    size_t previous = -1;
+    if (mOffset > 0) {
+        previous = (mOffset-1) % NUM_FRAME_RECORDS;
+    } else if (mOffset == 0) {
+        previous = NUM_FRAME_RECORDS - 1;
+    }
+    if (previous >= 0) {
+        nsecs_t desiredPresentTime = mFrameRecords[previous].desiredPresentTime;
+        const std::shared_ptr<FenceTime>& rfence = mFrameRecords[previous].frameReadyFence;
+        if (rfence != nullptr) {
+            nsecs_t frameReadyTime = rfence->getSignalTime();
+            if (desiredPresentTime != INT64_MAX && frameReadyTime != INT64_MAX) {
+                return (frameReadyTime - desiredPresentTime);
+            }
+        }
+    }
+    return INT64_MAX;
+}
+
 void FrameTracker::clearStats() {
     Mutex::Autolock lock(mMutex);
     for (size_t i = 0; i < NUM_FRAME_RECORDS; i++) {

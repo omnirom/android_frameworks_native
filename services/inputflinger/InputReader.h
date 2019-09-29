@@ -27,11 +27,11 @@
 #include <input/VelocityControl.h>
 #include <input/VelocityTracker.h>
 #include <ui/DisplayInfo.h>
-#include <utils/KeyedVector.h>
+#include <utils/BitSet.h>
 #include <utils/Condition.h>
+#include <utils/KeyedVector.h>
 #include <utils/Mutex.h>
 #include <utils/Timers.h>
-#include <utils/BitSet.h>
 
 #include <optional>
 #include <stddef.h>
@@ -114,9 +114,9 @@ public:
  */
 class InputReader : public InputReaderInterface {
 public:
-    InputReader(const sp<EventHubInterface>& eventHub,
-            const sp<InputReaderPolicyInterface>& policy,
-            const sp<InputListenerInterface>& listener);
+    InputReader(std::shared_ptr<EventHubInterface> eventHub,
+                const sp<InputReaderPolicyInterface>& policy,
+                const sp<InputListenerInterface>& listener);
     virtual ~InputReader();
 
     virtual void dump(std::string& dump);
@@ -181,7 +181,10 @@ private:
 
     Condition mReaderIsAliveCondition;
 
-    sp<EventHubInterface> mEventHub;
+    // This could be unique_ptr, but due to the way InputReader tests are written,
+    // it is made shared_ptr here. In the tests, an EventHub reference is retained by the test
+    // in parallel to passing it to the InputReader.
+    std::shared_ptr<EventHubInterface> mEventHub;
     sp<InputReaderPolicyInterface> mPolicy;
     sp<QueuedInputListener> mQueuedListener;
 
@@ -569,69 +572,6 @@ struct CookedPointerData {
     }
 };
 
-/**
- * Basic statistics information.
- * Keep track of min, max, average, and standard deviation of the received samples.
- * Used to report latency information about input events.
- */
-struct LatencyStatistics {
-    float min;
-    float max;
-    // Sum of all samples
-    float sum;
-    // Sum of squares of all samples
-    float sum2;
-    // The number of samples
-    size_t count;
-    // The last time statistics were reported.
-    nsecs_t lastReportTime;
-
-    LatencyStatistics() {
-        reset(systemTime(SYSTEM_TIME_MONOTONIC));
-    }
-
-    inline void addValue(float x) {
-        if (x < min) {
-            min = x;
-        }
-        if (x > max) {
-            max = x;
-        }
-        sum += x;
-        sum2 += x * x;
-        count++;
-    }
-
-    // Get the average value. Should not be called if no samples have been added.
-    inline float mean() {
-        if (count == 0) {
-            return 0;
-        }
-        return sum / count;
-    }
-
-    // Get the standard deviation. Should not be called if no samples have been added.
-    inline float stdev() {
-        if (count == 0) {
-            return 0;
-        }
-        float average = mean();
-        return sqrt(sum2 / count - average * average);
-    }
-
-    /**
-     * Reset internal state. The variable 'when' is the time when the data collection started.
-     * Call this to start a new data collection window.
-     */
-    inline void reset(nsecs_t when) {
-        max = 0;
-        min = std::numeric_limits<float>::max();
-        sum = 0;
-        sum2 = 0;
-        count = 0;
-        lastReportTime = when;
-    }
-};
 
 /* Keeps track of the state of single-touch protocol. */
 class SingleTouchMotionAccumulator {
@@ -717,7 +657,6 @@ public:
 
     inline size_t getSlotCount() const { return mSlotCount; }
     inline const Slot* getSlot(size_t index) const { return &mSlots[index]; }
-    inline uint32_t getDeviceTimestamp() const { return mDeviceTimestamp; }
 
 private:
     int32_t mCurrentSlot;
@@ -725,7 +664,6 @@ private:
     size_t mSlotCount;
     bool mUsingSlotsProtocol;
     bool mHaveStylus;
-    uint32_t mDeviceTimestamp;
 
     void clearSlots(int32_t initialSlot);
 };
@@ -1174,7 +1112,6 @@ protected:
 
     struct RawState {
         nsecs_t when;
-        uint32_t deviceTimestamp;
 
         // Raw pointer sample data.
         RawPointerData rawPointerData;
@@ -1187,7 +1124,6 @@ protected:
 
         void copyFrom(const RawState& other) {
             when = other.when;
-            deviceTimestamp = other.deviceTimestamp;
             rawPointerData.copyFrom(other.rawPointerData);
             buttonState = other.buttonState;
             rawVScroll = other.rawVScroll;
@@ -1196,7 +1132,6 @@ protected:
 
         void clear() {
             when = 0;
-            deviceTimestamp = 0;
             rawPointerData.clear();
             buttonState = 0;
             rawVScroll = 0;
@@ -1205,7 +1140,6 @@ protected:
     };
 
     struct CookedState {
-        uint32_t deviceTimestamp;
         // Cooked pointer sample data.
         CookedPointerData cookedPointerData;
 
@@ -1217,7 +1151,6 @@ protected:
         int32_t buttonState;
 
         void copyFrom(const CookedState& other) {
-            deviceTimestamp = other.deviceTimestamp;
             cookedPointerData.copyFrom(other.cookedPointerData);
             fingerIdBits = other.fingerIdBits;
             stylusIdBits = other.stylusIdBits;
@@ -1226,7 +1159,6 @@ protected:
         }
 
         void clear() {
-            deviceTimestamp = 0;
             cookedPointerData.clear();
             fingerIdBits.clear();
             stylusIdBits.clear();
@@ -1579,9 +1511,6 @@ private:
     VelocityControl mWheelXVelocityControl;
     VelocityControl mWheelYVelocityControl;
 
-    // Latency statistics for touch events
-    struct LatencyStatistics mStatistics;
-
     std::optional<DisplayViewport> findViewport();
 
     void resetExternalStylus();
@@ -1634,7 +1563,6 @@ private:
     void dispatchMotion(nsecs_t when, uint32_t policyFlags, uint32_t source,
             int32_t action, int32_t actionButton,
             int32_t flags, int32_t metaState, int32_t buttonState, int32_t edgeFlags,
-            uint32_t deviceTimestamp,
             const PointerProperties* properties, const PointerCoords* coords,
             const uint32_t* idToIndex, BitSet32 idBits,
             int32_t changedId, float xPrecision, float yPrecision, nsecs_t downTime);
@@ -1650,8 +1578,6 @@ private:
     const VirtualKey* findVirtualKeyHit(int32_t x, int32_t y);
 
     static void assignPointerIds(const RawState* last, RawState* current);
-
-    void reportEventForStatistics(nsecs_t evdevTime);
 
     const char* modeToString(DeviceMode deviceMode);
 };

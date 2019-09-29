@@ -73,13 +73,15 @@ extern "C" {
  */
 class DurationReporter {
   public:
-    explicit DurationReporter(const std::string& title, bool logcat_only = false);
+    explicit DurationReporter(const std::string& title, bool logcat_only = false,
+                              bool verbose = false);
 
     ~DurationReporter();
 
   private:
     std::string title_;
     bool logcat_only_;
+    bool verbose_;
     uint64_t started_;
 
     DISALLOW_COPY_AND_ASSIGN(DurationReporter);
@@ -224,7 +226,8 @@ class Dumpstate {
      */
     int RunCommand(const std::string& title, const std::vector<std::string>& fullCommand,
                    const android::os::dumpstate::CommandOptions& options =
-                       android::os::dumpstate::CommandOptions::DEFAULT);
+                       android::os::dumpstate::CommandOptions::DEFAULT,
+                   bool verbose_duration = false);
 
     /*
      * Runs `dumpsys` with the given arguments, automatically setting its timeout
@@ -341,6 +344,11 @@ class Dumpstate {
     bool IsUserConsentDenied() const;
 
     /*
+     * Returns true if dumpstate is called by bugreporting API
+     */
+    bool CalledByApi() const;
+
+    /*
      * Structure to hold options that determine the behavior of dumpstate.
      */
     struct DumpOptions {
@@ -400,12 +408,8 @@ class Dumpstate {
     // Runtime options.
     std::unique_ptr<DumpOptions> options_;
 
-    // How frequently the progess should be updated;the listener will only be notificated when the
-    // delta from the previous update is more than the threshold.
-    int32_t update_progress_threshold_ = 100;
-
-    // Last progress that triggered a listener updated
-    int32_t last_updated_progress_;
+    // Last progress that was sent to the listener [0-100].
+    int last_reported_percent_progress_ = 0;
 
     // Whether it should take an screenshot earlier in the process.
     bool do_early_screenshot_ = false;
@@ -441,8 +445,7 @@ class Dumpstate {
     // Full path of the bugreport file, be it zip or text, inside bugreport_internal_dir_.
     std::string path_;
 
-    // TODO: If temporary this should be removed at the end.
-    // Full path of the temporary file containing the screenshot (when requested).
+    // Full path of the file containing the screenshot (when requested).
     std::string screenshot_path_;
 
     // Pointer to the zipped file.
@@ -585,9 +588,6 @@ bool is_dir(const char* pathname);
 
 /** Gets the last modification time of a file, or default time if file is not found. */
 time_t get_mtime(int fd, time_t default_mtime);
-
-/* Dumps eMMC Extended CSD data. */
-void dump_emmc_ecsd(const char *ext_csd_path);
 
 /** Gets command-line arguments. */
 void format_args(int argc, const char *argv[], std::string *args);

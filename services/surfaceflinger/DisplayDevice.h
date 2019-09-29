@@ -40,6 +40,7 @@
 #include <utils/Timers.h>
 
 #include "DisplayHardware/DisplayIdentification.h"
+#include "DisplayHardware/PowerAdvisor.h"
 #include "RenderArea.h"
 
 namespace android {
@@ -94,8 +95,6 @@ public:
 
     void                    setVisibleLayersSortedByZ(const Vector< sp<Layer> >& layers);
     const Vector< sp<Layer> >& getVisibleLayersSortedByZ() const;
-    void                    setLayersNeedingFences(const Vector< sp<Layer> >& layers);
-    const Vector< sp<Layer> >& getLayersNeedingFences() const;
 
     void                    setLayerStack(uint32_t stack);
     void                    setDisplaySize(const int newWidth, const int newHeight);
@@ -197,8 +196,6 @@ private:
 
     // list of visible layers on that display
     Vector< sp<Layer> > mVisibleLayersSortedByZ;
-    // list of layers needing fences
-    Vector< sp<Layer> > mLayersNeedingFences;
 
     /*
      * Transaction state
@@ -266,6 +263,7 @@ struct DisplayDeviceCreationArgs {
     std::unordered_map<ui::ColorMode, std::vector<ui::RenderIntent>> hwcColorModes;
     int initialPowerMode{HWC_POWER_MODE_NORMAL};
     bool isPrimary{false};
+    Hwc2::PowerAdvisor* powerAdvisor{nullptr};
 };
 
 class DisplayRenderArea : public RenderArea {

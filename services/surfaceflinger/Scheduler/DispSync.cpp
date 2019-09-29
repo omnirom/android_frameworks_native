@@ -64,7 +64,7 @@ public:
     DispSyncThread(const char* name, bool showTraceDetailedInfo)
           : mName(name),
             mStop(false),
-            mModelLocked(false),
+            mModelLocked("DispSync:ModelLocked", false),
             mPeriod(0),
             mPhase(0),
             mReferenceTime(0),
@@ -79,11 +79,7 @@ public:
         Mutex::Autolock lock(mMutex);
 
         mPhase = phase;
-        if (mReferenceTime != referenceTime) {
-            for (auto& eventListener : mEventListeners) {
-                eventListener.mHasFired = false;
-            }
-        }
+        const bool referenceTimeChanged = mReferenceTime != referenceTime;
         mReferenceTime = referenceTime;
         if (mPeriod != 0 && mPeriod != period && mReferenceTime != 0) {
             // Inflate the reference time to be the most recent predicted
@@ -94,6 +90,16 @@ public:
             mReferenceTime = mReferenceTime + (numOldPeriods)*mPeriod;
         }
         mPeriod = period;
+        if (!mModelLocked && referenceTimeChanged) {
+            for (auto& eventListener : mEventListeners) {
+                eventListener.mLastEventTime = mReferenceTime + mPhase + eventListener.mPhase;
+                // If mLastEventTime is after mReferenceTime (can happen when positive phase offsets
+                // are used) we treat it as like it happened in previous period.
+                if (eventListener.mLastEventTime > mReferenceTime) {
+                    eventListener.mLastEventTime -= mPeriod;
+                }
+            }
+        }
         if (mTraceDetailedInfo) {
             ATRACE_INT64("DispSync:Period", mPeriod);
             ATRACE_INT64("DispSync:Phase", mPhase + mPeriod / 2);
@@ -115,13 +121,11 @@ public:
     void lockModel() {
         Mutex::Autolock lock(mMutex);
         mModelLocked = true;
-        ATRACE_INT("DispSync:ModelLocked", mModelLocked);
     }
 
     void unlockModel() {
         Mutex::Autolock lock(mMutex);
         mModelLocked = false;
-        ATRACE_INT("DispSync:ModelLocked", mModelLocked);
     }
 
     virtual bool threadLoop() {
@@ -286,12 +290,8 @@ public:
                 // new offset to allow for a seamless offset change without double-firing or
                 // skipping.
                 nsecs_t diff = oldPhase - phase;
-                if (diff > mPeriod / 2) {
-                    diff -= mPeriod;
-                } else if (diff < -mPeriod / 2) {
-                    diff += mPeriod;
-                }
                 eventListener.mLastEventTime -= diff;
+                eventListener.mLastCallbackTime -= diff;
                 mCond.signal();
                 return NO_ERROR;
             }
@@ -306,7 +306,6 @@ private:
         nsecs_t mLastEventTime;
         nsecs_t mLastCallbackTime;
         DispSync::Callback* mCallback;
-        bool mHasFired = false;
     };
 
     struct CallbackInvocation {
@@ -354,12 +353,7 @@ private:
                           eventListener.mName);
                     continue;
                 }
-                if (eventListener.mHasFired && !mModelLocked) {
-                    eventListener.mLastEventTime = t;
-                    ALOGV("[%s] [%s] Skipping event due to already firing", mName,
-                          eventListener.mName);
-                    continue;
-                }
+
                 CallbackInvocation ci;
                 ci.mCallback = eventListener.mCallback;
                 ci.mEventTime = t;
@@ -368,7 +362,6 @@ private:
                 callbackInvocations.push_back(ci);
                 eventListener.mLastEventTime = t;
                 eventListener.mLastCallbackTime = now;
-                eventListener.mHasFired = true;
             }
         }
 
@@ -436,7 +429,7 @@ private:
     const char* const mName;
 
     bool mStop;
-    bool mModelLocked;
+    TracedOrdinal<bool> mModelLocked;
 
     nsecs_t mPeriod;
     nsecs_t mPhase;
@@ -459,15 +452,14 @@ private:
 
 class ZeroPhaseTracer : public DispSync::Callback {
 public:
-    ZeroPhaseTracer() : mParity(false) {}
+    ZeroPhaseTracer() : mParity("ZERO_PHASE_VSYNC", false) {}
 
     virtual void onDispSyncEvent(nsecs_t /*when*/) {
         mParity = !mParity;
-        ATRACE_INT("ZERO_PHASE_VSYNC", mParity ? 1 : 0);
     }
 
 private:
-    bool mParity;
+    TracedOrdinal<bool> mParity;
 };
 
 DispSync::DispSync(const char* name) : mName(name), mRefreshSkipCount(0) {
@@ -673,7 +665,13 @@ void DispSync::updateModelLocked() {
         nsecs_t durationSum = 0;
         nsecs_t minDuration = INT64_MAX;
         nsecs_t maxDuration = 0;
-        for (size_t i = 1; i < mNumResyncSamples; i++) {
+        // We skip the first 2 samples because the first vsync duration on some
+        // devices may be much more inaccurate than on other devices, e.g. due
+        // to delays in ramping up from a power collapse. By doing so this
+        // actually increases the accuracy of the DispSync model even though
+        // we're effectively relying on fewer sample points.
+        static constexpr size_t numSamplesSkipped = 2;
+        for (size_t i = numSamplesSkipped; i < mNumResyncSamples; i++) {
             size_t idx = (mFirstResyncSample + i) % MAX_RESYNC_SAMPLES;
             size_t prev = (idx + MAX_RESYNC_SAMPLES - 1) % MAX_RESYNC_SAMPLES;
             nsecs_t duration = mResyncSamples[idx] - mResyncSamples[prev];
@@ -684,15 +682,14 @@ void DispSync::updateModelLocked() {
 
         // Exclude the min and max from the average
         durationSum -= minDuration + maxDuration;
-        mPeriod = durationSum / (mNumResyncSamples - 3);
+        mPeriod = durationSum / (mNumResyncSamples - numSamplesSkipped - 2);
 
         ALOGV("[%s] mPeriod = %" PRId64, mName, ns2us(mPeriod));
 
         double sampleAvgX = 0;
         double sampleAvgY = 0;
         double scale = 2.0 * M_PI / double(mPeriod);
-        // Intentionally skip the first sample
-        for (size_t i = 1; i < mNumResyncSamples; i++) {
+        for (size_t i = numSamplesSkipped; i < mNumResyncSamples; i++) {
             size_t idx = (mFirstResyncSample + i) % MAX_RESYNC_SAMPLES;
             nsecs_t sample = mResyncSamples[idx] - mReferenceTime;
             double samplePhase = double(sample % mPeriod) * scale;
@@ -700,8 +697,8 @@ void DispSync::updateModelLocked() {
             sampleAvgY += sin(samplePhase);
         }
 
-        sampleAvgX /= double(mNumResyncSamples - 1);
-        sampleAvgY /= double(mNumResyncSamples - 1);
+        sampleAvgX /= double(mNumResyncSamples - numSamplesSkipped);
+        sampleAvgY /= double(mNumResyncSamples - numSamplesSkipped);
 
         mPhase = nsecs_t(atan2(sampleAvgY, sampleAvgX) / scale);
 

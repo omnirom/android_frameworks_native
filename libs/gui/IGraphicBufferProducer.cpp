@@ -73,6 +73,7 @@ enum {
     GET_UNIQUE_ID,
     GET_CONSUMER_USAGE,
     SET_LEGACY_BUFFER_DROP,
+    SET_AUTO_PREROTATION,
 };
 
 class BpGraphicBufferProducer : public BpInterface<IGraphicBufferProducer>
@@ -547,6 +548,17 @@ public:
         }
         return actualResult;
     }
+
+    virtual status_t setAutoPrerotation(bool autoPrerotation) {
+        Parcel data, reply;
+        data.writeInterfaceToken(IGraphicBufferProducer::getInterfaceDescriptor());
+        data.writeBool(autoPrerotation);
+        status_t result = remote()->transact(SET_AUTO_PREROTATION, data, &reply);
+        if (result == NO_ERROR) {
+            result = reply.readInt32();
+        }
+        return result;
+    }
 };
 
 // Out-of-line virtual method definition to trigger vtable emission in this
@@ -675,6 +687,10 @@ public:
     status_t getConsumerUsage(uint64_t* outUsage) const override {
         return mBase->getConsumerUsage(outUsage);
     }
+
+    status_t setAutoPrerotation(bool autoPrerotation) override {
+        return mBase->setAutoPrerotation(autoPrerotation);
+    }
 };
 
 IMPLEMENT_HYBRID_META_INTERFACE(GraphicBufferProducer,
@@ -685,6 +701,12 @@ IMPLEMENT_HYBRID_META_INTERFACE(GraphicBufferProducer,
 status_t IGraphicBufferProducer::setLegacyBufferDrop(bool drop) {
     // No-op for IGBP other than BufferQueue.
     (void) drop;
+    return INVALID_OPERATION;
+}
+
+status_t IGraphicBufferProducer::setAutoPrerotation(bool autoPrerotation) {
+    // No-op for IGBP other than BufferQueue.
+    (void)autoPrerotation;
     return INVALID_OPERATION;
 }
 
@@ -1050,6 +1072,13 @@ status_t BnGraphicBufferProducer::onTransact(
             reply->writeInt32(result);
             return NO_ERROR;
         }
+        case SET_AUTO_PREROTATION: {
+            CHECK_INTERFACE(IGraphicBuffer, data, reply);
+            bool autoPrerotation = data.readBool();
+            status_t result = setAutoPrerotation(autoPrerotation);
+            reply->writeInt32(result);
+            return NO_ERROR;
+        }
     }
     return BBinder::onTransact(code, data, reply, flags);
 }
@@ -1141,12 +1170,8 @@ status_t IGraphicBufferProducer::QueueBufferInput::unflatten(
 
 // ----------------------------------------------------------------------------
 constexpr size_t IGraphicBufferProducer::QueueBufferOutput::minFlattenedSize() {
-    return sizeof(width) +
-            sizeof(height) +
-            sizeof(transformHint) +
-            sizeof(numPendingBuffers) +
-            sizeof(nextFrameNumber) +
-            sizeof(bufferReplaced);
+    return sizeof(width) + sizeof(height) + sizeof(transformHint) + sizeof(numPendingBuffers) +
+            sizeof(nextFrameNumber) + sizeof(bufferReplaced) + sizeof(maxBufferCount);
 }
 
 size_t IGraphicBufferProducer::QueueBufferOutput::getFlattenedSize() const {
@@ -1170,6 +1195,7 @@ status_t IGraphicBufferProducer::QueueBufferOutput::flatten(
     FlattenableUtils::write(buffer, size, numPendingBuffers);
     FlattenableUtils::write(buffer, size, nextFrameNumber);
     FlattenableUtils::write(buffer, size, bufferReplaced);
+    FlattenableUtils::write(buffer, size, maxBufferCount);
 
     return frameTimestamps.flatten(buffer, size, fds, count);
 }
@@ -1187,6 +1213,7 @@ status_t IGraphicBufferProducer::QueueBufferOutput::unflatten(
     FlattenableUtils::read(buffer, size, numPendingBuffers);
     FlattenableUtils::read(buffer, size, nextFrameNumber);
     FlattenableUtils::read(buffer, size, bufferReplaced);
+    FlattenableUtils::read(buffer, size, maxBufferCount);
 
     return frameTimestamps.unflatten(buffer, size, fds, count);
 }

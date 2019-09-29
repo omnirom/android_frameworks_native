@@ -96,7 +96,8 @@ void MessageQueue::setEventThread(android::EventThread* eventThread,
     }
 
     mEventThread = eventThread;
-    mEvents = eventThread->createEventConnection(std::move(resyncCallback));
+    mEvents = eventThread->createEventConnection(std::move(resyncCallback),
+                                                 ISurfaceComposer::eConfigChangedSuppress);
     mEvents->stealReceiveChannel(&mEventTube);
     mLooper->addFd(mEventTube.getFd(), 0, Looper::EVENT_INPUT, MessageQueue::cb_eventReceiver,
                    this);
@@ -164,6 +165,7 @@ int MessageQueue::eventReceiver(int /*fd*/, int /*events*/) {
     while ((n = DisplayEventReceiver::getEvents(&mEventTube, buffer, 8)) > 0) {
         for (int i = 0; i < n; i++) {
             if (buffer[i].header.type == DisplayEventReceiver::DISPLAY_EVENT_VSYNC) {
+                mFlinger->mVsyncTimeStamp = systemTime(SYSTEM_TIME_MONOTONIC);
                 mHandler->dispatchInvalidate();
                 break;
             }

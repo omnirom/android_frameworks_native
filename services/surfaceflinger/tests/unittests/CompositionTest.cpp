@@ -34,7 +34,6 @@
 #include "ColorLayer.h"
 #include "Layer.h"
 
-#include "TestableScheduler.h"
 #include "TestableSurfaceFlinger.h"
 #include "mock/DisplayHardware/MockComposer.h"
 #include "mock/MockDispSync.h"
@@ -95,10 +94,6 @@ public:
         mFlinger.mutableEventQueue().reset(mMessageQueue);
         setupScheduler();
 
-        EXPECT_CALL(*mPrimaryDispSync, computeNextRefresh(0)).WillRepeatedly(Return(0));
-        EXPECT_CALL(*mPrimaryDispSync, getPeriod())
-                .WillRepeatedly(Return(FakeHwcDisplayInjector::DEFAULT_REFRESH_RATE));
-        EXPECT_CALL(*mPrimaryDispSync, expectedPresentTime()).WillRepeatedly(Return(0));
         EXPECT_CALL(*mNativeWindow, query(NATIVE_WINDOW_WIDTH, _))
                 .WillRepeatedly(DoAll(SetArgPointee<1>(DEFAULT_DISPLAY_WIDTH), Return(0)));
         EXPECT_CALL(*mNativeWindow, query(NATIVE_WINDOW_HEIGHT, _))
@@ -125,15 +120,22 @@ public:
     }
 
     void setupScheduler() {
-        mScheduler = new TestableScheduler(mFlinger.mutableRefreshRateConfigs());
-        mScheduler->mutableEventControlThread().reset(mEventControlThread);
-        mScheduler->mutablePrimaryDispSync().reset(mPrimaryDispSync);
-        EXPECT_CALL(*mEventThread.get(), registerDisplayEventConnection(_));
-        sp<Scheduler::ConnectionHandle> connectionHandle =
-                mScheduler->addConnection(std::move(mEventThread));
-        mFlinger.mutableSfConnectionHandle() = std::move(connectionHandle);
+        auto eventThread = std::make_unique<mock::EventThread>();
+        auto sfEventThread = std::make_unique<mock::EventThread>();
 
-        mFlinger.mutableScheduler().reset(mScheduler);
+        EXPECT_CALL(*eventThread, registerDisplayEventConnection(_));
+        EXPECT_CALL(*sfEventThread, registerDisplayEventConnection(_));
+
+        auto primaryDispSync = std::make_unique<mock::DispSync>();
+
+        EXPECT_CALL(*primaryDispSync, computeNextRefresh(0)).WillRepeatedly(Return(0));
+        EXPECT_CALL(*primaryDispSync, getPeriod())
+                .WillRepeatedly(Return(FakeHwcDisplayInjector::DEFAULT_REFRESH_RATE));
+        EXPECT_CALL(*primaryDispSync, expectedPresentTime()).WillRepeatedly(Return(0));
+
+        mFlinger.setupScheduler(std::move(primaryDispSync),
+                                std::make_unique<mock::EventControlThread>(),
+                                std::move(eventThread), std::move(sfEventThread));
     }
 
     void setupForceGeometryDirty() {
@@ -157,7 +159,6 @@ public:
 
     std::unordered_set<HWC2::Capability> mDefaultCapabilities = {HWC2::Capability::SidebandStream};
 
-    TestableScheduler* mScheduler;
     TestableSurfaceFlinger mFlinger;
     sp<DisplayDevice> mDisplay;
     sp<DisplayDevice> mExternalDisplay;
@@ -168,13 +169,9 @@ public:
     sp<GraphicBuffer> mBuffer = new GraphicBuffer();
     ANativeWindowBuffer* mNativeWindowBuffer = mBuffer->getNativeBuffer();
 
-    std::unique_ptr<mock::EventThread> mEventThread = std::make_unique<mock::EventThread>();
-    mock::EventControlThread* mEventControlThread = new mock::EventControlThread();
-
     Hwc2::mock::Composer* mComposer = nullptr;
     renderengine::mock::RenderEngine* mRenderEngine = new renderengine::mock::RenderEngine();
     mock::MessageQueue* mMessageQueue = new mock::MessageQueue();
-    mock::DispSync* mPrimaryDispSync = new mock::DispSync();
 
     sp<Fence> mClientTargetAcquireFence = Fence::NO_FENCE;
 
@@ -296,18 +293,12 @@ struct BaseDisplayVariant {
         EXPECT_CALL(*test->mComposer,
                     setColorTransform(HWC_DISPLAY, _, Hwc2::ColorTransform::IDENTITY))
                 .Times(1);
-        EXPECT_CALL(*test->mComposer, presentOrValidateDisplay(HWC_DISPLAY, _, _, _, _)).Times(1);
         EXPECT_CALL(*test->mComposer, getDisplayRequests(HWC_DISPLAY, _, _, _)).Times(1);
         EXPECT_CALL(*test->mComposer, acceptDisplayChanges(HWC_DISPLAY)).Times(1);
         EXPECT_CALL(*test->mComposer, presentDisplay(HWC_DISPLAY, _)).Times(1);
         EXPECT_CALL(*test->mComposer, getReleaseFences(HWC_DISPLAY, _, _)).Times(1);
 
         EXPECT_CALL(*test->mRenderEngine, useNativeFenceSync()).WillRepeatedly(Return(true));
-        // TODO: remove once we verify that we can just grab the fence from the
-        // FramebufferSurface.
-        EXPECT_CALL(*test->mRenderEngine, flush()).WillRepeatedly(Invoke([]() {
-            return base::unique_fd();
-        }));
 
         EXPECT_CALL(*test->mDisplaySurface, onFrameCommitted()).Times(1);
         EXPECT_CALL(*test->mDisplaySurface, advanceFrame()).Times(1);
@@ -341,9 +332,19 @@ struct BaseDisplayVariant {
     }
 
     static void setupHwcCompositionCallExpectations(CompositionTest* test) {
+        EXPECT_CALL(*test->mComposer, presentOrValidateDisplay(HWC_DISPLAY, _, _, _, _)).Times(1);
+
         EXPECT_CALL(*test->mDisplaySurface,
                     prepareFrame(compositionengine::DisplaySurface::COMPOSITION_HWC))
                 .Times(1);
+    }
+
+    static void setupHwcClientCompositionCallExpectations(CompositionTest* test) {
+        EXPECT_CALL(*test->mComposer, presentOrValidateDisplay(HWC_DISPLAY, _, _, _, _)).Times(1);
+    }
+
+    static void setupHwcForcedClientCompositionCallExpectations(CompositionTest* test) {
+        EXPECT_CALL(*test->mComposer, validateDisplay(HWC_DISPLAY, _, _)).Times(1);
     }
 
     static void setupRECompositionCallExpectations(CompositionTest* test) {
@@ -419,6 +420,8 @@ struct PoweredOffDisplaySetupVariant : public BaseDisplayVariant<PoweredOffDispl
     }
 
     static void setupHwcCompositionCallExpectations(CompositionTest*) {}
+    static void setupHwcClientCompositionCallExpectations(CompositionTest*) {}
+    static void setupHwcForcedClientCompositionCallExpectations(CompositionTest*) {}
 
     static void setupRECompositionCallExpectations(CompositionTest* test) {
         EXPECT_CALL(*test->mRenderEngine, useNativeFenceSync()).WillRepeatedly(Return(true));
@@ -507,7 +510,7 @@ struct BaseLayerProperties {
 
         EXPECT_CALL(*test->mRenderEngine, useNativeFenceSync()).WillRepeatedly(Return(true));
         bool ignoredRecomputeVisibleRegions;
-        layer->latchBuffer(ignoredRecomputeVisibleRegions, 0);
+        layer->latchBuffer(ignoredRecomputeVisibleRegions, 0, 0);
         Mock::VerifyAndClear(test->mRenderEngine);
     }
 
@@ -986,14 +989,25 @@ struct RECompositionResultVariant : public CompositionResultBaseVariant {
     template <typename Case>
     static void setupCallExpectations(CompositionTest* test) {
         Case::Display::setupNonEmptyFrameCompositionCallExpectations(test);
+        Case::Display::setupHwcClientCompositionCallExpectations(test);
         Case::Display::setupRECompositionCallExpectations(test);
         Case::Display::template setupRELayerCompositionCallExpectations<Case>(test);
     }
 };
 
-struct ForcedClientCompositionResultVariant : public RECompositionResultVariant {
+struct ForcedClientCompositionResultVariant : public CompositionResultBaseVariant {
     static void setupLayerState(CompositionTest* test, sp<Layer> layer) {
-        layer->forceClientComposition(test->mDisplay);
+        const auto outputLayer = layer->findOutputLayerForDisplay(test->mDisplay);
+        LOG_FATAL_IF(!outputLayer);
+        outputLayer->editState().forceClientComposition = true;
+    }
+
+    template <typename Case>
+    static void setupCallExpectations(CompositionTest* test) {
+        Case::Display::setupNonEmptyFrameCompositionCallExpectations(test);
+        Case::Display::setupHwcForcedClientCompositionCallExpectations(test);
+        Case::Display::setupRECompositionCallExpectations(test);
+        Case::Display::template setupRELayerCompositionCallExpectations<Case>(test);
     }
 
     template <typename Case>

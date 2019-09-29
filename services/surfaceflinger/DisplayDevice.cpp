@@ -60,7 +60,7 @@ DisplayDevice::DisplayDevice(DisplayDeviceCreationArgs&& args)
         mDisplayInstallOrientation(args.displayInstallOrientation),
         mCompositionDisplay{mFlinger->getCompositionEngine().createDisplay(
                 compositionengine::DisplayCreationArgs{args.isSecure, args.isVirtual,
-                                                       args.displayId})},
+                                                       args.displayId, args.powerAdvisor})},
         mIsVirtual(args.isVirtual),
         mOrientation(),
         mActiveConfig(0),
@@ -127,14 +127,6 @@ void DisplayDevice::setVisibleLayersSortedByZ(const Vector< sp<Layer> >& layers)
 
 const Vector< sp<Layer> >& DisplayDevice::getVisibleLayersSortedByZ() const {
     return mVisibleLayersSortedByZ;
-}
-
-void DisplayDevice::setLayersNeedingFences(const Vector< sp<Layer> >& layers) {
-    mLayersNeedingFences = layers;
-}
-
-const Vector< sp<Layer> >& DisplayDevice::getLayersNeedingFences() const {
-    return mLayersNeedingFences;
 }
 
 // ----------------------------------------------------------------------------

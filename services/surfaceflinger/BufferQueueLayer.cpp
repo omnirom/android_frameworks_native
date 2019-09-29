@@ -30,6 +30,7 @@
 #include "SurfaceInterceptor.h"
 
 #include "TimeStats/TimeStats.h"
+#include "frame_extn_intf.h"
 #include "smomo_interface.h"
 
 namespace android {
@@ -148,13 +149,13 @@ bool BufferQueueLayer::fenceHasSignaled() const {
     return mQueueItems[0].mFenceTime->getSignalTime() != Fence::SIGNAL_TIME_PENDING;
 }
 
-bool BufferQueueLayer::framePresentTimeIsCurrent() const {
+bool BufferQueueLayer::framePresentTimeIsCurrent(nsecs_t expectedPresentTime) const {
     if (!hasFrameUpdate() || isRemovedFromCurrentState()) {
         return true;
     }
 
     Mutex::Autolock lock(mQueueItemLock);
-    return mQueueItems[0].mTimestamp <= mFlinger->mScheduler->expectedPresentTime();
+    return mQueueItems[0].mTimestamp <= expectedPresentTime;
 }
 
 nsecs_t BufferQueueLayer::getDesiredPresentTime() {
@@ -207,13 +208,11 @@ PixelFormat BufferQueueLayer::getPixelFormat() const {
     return mFormat;
 }
 
-uint64_t BufferQueueLayer::getFrameNumber() const {
+uint64_t BufferQueueLayer::getFrameNumber(nsecs_t expectedPresentTime) const {
     Mutex::Autolock lock(mQueueItemLock);
     uint64_t frameNumber = mQueueItems[0].mFrameNumber;
 
     // The head of the queue will be dropped if there are signaled and timely frames behind it
-    nsecs_t expectedPresentTime = mFlinger->mScheduler->expectedPresentTime();
-
     if (isRemovedFromCurrentState()) {
         expectedPresentTime = 0;
     }
@@ -279,7 +278,8 @@ status_t BufferQueueLayer::bindTextureImage() {
     return mConsumer->bindTextureImage();
 }
 
-status_t BufferQueueLayer::updateTexImage(bool& recomputeVisibleRegions, nsecs_t latchTime) {
+status_t BufferQueueLayer::updateTexImage(bool& recomputeVisibleRegions, nsecs_t latchTime,
+                                          nsecs_t expectedPresentTime) {
     // This boolean is used to make sure that SurfaceFlinger's shadow copy
     // of the buffer queue isn't modified when the buffer queue is returning
     // BufferItem's that weren't actually queued. This can happen in shared
@@ -289,8 +289,6 @@ status_t BufferQueueLayer::updateTexImage(bool& recomputeVisibleRegions, nsecs_t
     LayerRejecter r(mDrawingState, getCurrentState(), recomputeVisibleRegions,
                     getProducerStickyTransform() != 0, mName.string(), mOverrideScalingMode,
                     getTransformToDisplayInverse(), mFreezeGeometryUpdates);
-
-    nsecs_t expectedPresentTime = mFlinger->mScheduler->expectedPresentTime();
 
     if (isRemovedFromCurrentState()) {
         expectedPresentTime = 0;
@@ -327,6 +325,7 @@ status_t BufferQueueLayer::updateTexImage(bool& recomputeVisibleRegions, nsecs_t
         // and return early
         if (queuedBuffer) {
             Mutex::Autolock lock(mQueueItemLock);
+            mConsumer->mergeSurfaceDamage(mQueueItems[0].mSurfaceDamage);
             mFlinger->mTimeStats->removeTimeRecord(layerID, mQueueItems[0].mFrameNumber);
             mQueueItems.removeAt(0);
             mQueuedFrames--;
@@ -362,6 +361,7 @@ status_t BufferQueueLayer::updateTexImage(bool& recomputeVisibleRegions, nsecs_t
         // Remove any stale buffers that have been dropped during
         // updateTexImage
         while (mQueueItems[0].mFrameNumber != currentFrameNumber) {
+            mConsumer->mergeSurfaceDamage(mQueueItems[0].mSurfaceDamage);
             mFlinger->mTimeStats->removeTimeRecord(layerID, mQueueItems[0].mFrameNumber);
             mQueueItems.removeAt(0);
             mQueuedFrames--;
@@ -388,7 +388,6 @@ status_t BufferQueueLayer::updateActiveBuffer() {
     mActiveBuffer = mConsumer->getCurrentBuffer(&mActiveBufferSlot, &mActiveBufferFence);
     auto& layerCompositionState = getCompositionLayer()->editState().frontEnd;
     layerCompositionState.buffer = mActiveBuffer;
-    layerCompositionState.bufferSlot = mActiveBufferSlot;
 
     if (mActiveBuffer == nullptr) {
         // this can only happen if the very first buffer was rejected.
@@ -408,45 +407,22 @@ status_t BufferQueueLayer::updateFrameNumber(nsecs_t latchTime) {
     return NO_ERROR;
 }
 
-void BufferQueueLayer::setHwcLayerBuffer(const sp<const DisplayDevice>& display) {
-    const auto outputLayer = findOutputLayerForDisplay(display);
-    LOG_FATAL_IF(!outputLayer);
-    LOG_FATAL_IF(!outputLayer->getState.hwc);
-    auto& hwcLayer = (*outputLayer->getState().hwc).hwcLayer;
-
-    uint32_t hwcSlot = 0;
-    sp<GraphicBuffer> hwcBuffer;
-
-    // INVALID_BUFFER_SLOT is used to identify BufferStateLayers.  Default to 0
-    // for BufferQueueLayers
-    int slot = (mActiveBufferSlot == BufferQueue::INVALID_BUFFER_SLOT) ? 0 : mActiveBufferSlot;
-    (*outputLayer->editState().hwc)
-            .hwcBufferCache.getHwcBuffer(slot, mActiveBuffer, &hwcSlot, &hwcBuffer);
-
-    auto acquireFence = mConsumer->getCurrentFence();
-    auto error = hwcLayer->setBuffer(hwcSlot, hwcBuffer, acquireFence);
-    if (error != HWC2::Error::None) {
-        ALOGE("[%s] Failed to set buffer %p: %s (%d)", mName.string(), mActiveBuffer->handle,
-              to_string(error).c_str(), static_cast<int32_t>(error));
+void BufferQueueLayer::latchPerFrameState(
+        compositionengine::LayerFECompositionState& compositionState) const {
+    BufferLayer::latchPerFrameState(compositionState);
+    if (compositionState.compositionType == Hwc2::IComposerClient::Composition::SIDEBAND) {
+        return;
     }
 
-    auto& layerCompositionState = getCompositionLayer()->editState().frontEnd;
-    layerCompositionState.bufferSlot = mActiveBufferSlot;
-    layerCompositionState.buffer = mActiveBuffer;
-    layerCompositionState.acquireFence = acquireFence;
+    compositionState.buffer = mActiveBuffer;
+    compositionState.bufferSlot =
+            (mActiveBufferSlot == BufferQueue::INVALID_BUFFER_SLOT) ? 0 : mActiveBufferSlot;
+    compositionState.acquireFence = mConsumer->getCurrentFence();
 }
 
 // -----------------------------------------------------------------------
 // Interface implementation for BufferLayerConsumer::ContentsChangedListener
 // -----------------------------------------------------------------------
-
-void BufferQueueLayer::fakeVsync() {
-    mRefreshPending = false;
-    bool ignored = false;
-    latchBuffer(ignored, systemTime());
-    usleep(16000);
-    releasePendingBuffer(systemTime());
-}
 
 void BufferQueueLayer::onFrameAvailable(const BufferItem& item) {
     ATRACE_CALL();
@@ -484,21 +460,6 @@ void BufferQueueLayer::onFrameAvailable(const BufferItem& item) {
     mFlinger->mInterceptor->saveBufferUpdate(this, item.mGraphicBuffer->getWidth(),
                                              item.mGraphicBuffer->getHeight(), item.mFrameNumber);
 
-    if (mFlinger->mDolphinFuncsEnabled) {
-        Mutex::Autolock lock(mFlinger->mDolphinStateLock);
-        const auto displayId = mFlinger->getInternalDisplayIdLocked();
-        const Vector< sp<Layer> >& visibleLayersSortedByZ =
-            mFlinger->getLayerSortedByZForHwcDisplay(*displayId);
-        bool isTransparentRegion = this->visibleNonTransparentRegion.isEmpty();
-        int visibleLayerNum = visibleLayersSortedByZ.size();
-        Rect crop = this->getContentCrop();
-        int32_t width = crop.getWidth();
-        int32_t height = crop.getHeight();
-        String8 name = this->getName();
-        mFlinger->mDolphinOnFrameAvailable(isTransparentRegion, visibleLayerNum,
-                                           width, height, name);
-    }
-
     if (mFlinger->mUseSmoMo) {
         smomo::SmomoBufferStats bufferStats;
         bufferStats.id = getSequence();
@@ -508,13 +469,36 @@ void BufferQueueLayer::onFrameAvailable(const BufferItem& item) {
         mFlinger->mSmoMo->CollectLayerStats(bufferStats);
     }
 
-    // If this layer is orphaned, then we run a fake vsync pulse so that
-    // dequeueBuffer doesn't block indefinitely.
-    if (isRemovedFromCurrentState()) {
-        fakeVsync();
-    } else {
-        mFlinger->signalLayerUpdate();
+    if (!isRemovedFromCurrentState()) {
+        if (mFlinger->mFrameExtn && mFlinger->mDolphinFuncsEnabled) {
+            composer::FrameInfo frameInfo;
+            Rect crop;
+            frameInfo.version.major = (uint8_t)(1);
+            frameInfo.version.minor = (uint8_t)(0);
+            frameInfo.max_queued_frames = mFlinger->mMaxQueuedFrames;
+            frameInfo.num_idle = mFlinger->mNumIdle;
+            frameInfo.max_queued_layer_name = mFlinger->mNameLayerMax.c_str();
+            frameInfo.current_timestamp = systemTime(SYSTEM_TIME_MONOTONIC);
+            frameInfo.previous_timestamp = mLastTimeStamp;
+            frameInfo.vsync_timestamp = mFlinger->mVsyncTimeStamp;
+            frameInfo.refresh_timestamp = mFlinger->mRefreshTimeStamp;
+            frameInfo.ref_latency = mFrameTracker.getPreviousGfxInfo();
+            DisplayStatInfo stats;
+            mFlinger->mScheduler->getDisplayStatInfo(&stats);
+            frameInfo.vsync_period = stats.vsyncPeriod;
+            mLastTimeStamp = frameInfo.current_timestamp;
+            {
+                Mutex::Autolock lock(mFlinger->mStateLock);
+                frameInfo.transparent_region = this->visibleNonTransparentRegion.isEmpty();
+                crop = this->getContentCrop();
+                frameInfo.width = crop.getWidth();
+                frameInfo.height = crop.getHeight();
+                frameInfo.layer_name = this->getName().c_str();
+            }
+            mFlinger->mFrameExtn->SetFrameInfo(frameInfo);
+        }
     }
+    mFlinger->signalLayerUpdate();
     mConsumer->onBufferAvailable(item);
 }
 

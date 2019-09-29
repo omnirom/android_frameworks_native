@@ -369,6 +369,15 @@ const Region& BufferLayerConsumer::getSurfaceDamage() const {
     return mCurrentSurfaceDamage;
 }
 
+void BufferLayerConsumer::mergeSurfaceDamage(const Region& damage) {
+    if (damage.bounds() == Rect::INVALID_RECT ||
+        mCurrentSurfaceDamage.bounds() == Rect::INVALID_RECT) {
+        mCurrentSurfaceDamage = Region::INVALID_REGION;
+    } else {
+        mCurrentSurfaceDamage |= damage;
+    }
+}
+
 int BufferLayerConsumer::getCurrentApi() const {
     Mutex::Autolock lock(mMutex);
     return mCurrentApi;
@@ -419,30 +428,6 @@ std::shared_ptr<FenceTime> BufferLayerConsumer::getCurrentFenceTime() const {
     return mCurrentFenceTime;
 }
 
-status_t BufferLayerConsumer::doFenceWaitLocked() const {
-    if (mCurrentFence->isValid()) {
-        if (mRE.useWaitSync()) {
-            base::unique_fd fenceFd(mCurrentFence->dup());
-            if (fenceFd == -1) {
-                BLC_LOGE("doFenceWait: error dup'ing fence fd: %d", errno);
-                return -errno;
-            }
-            if (!mRE.waitFence(std::move(fenceFd))) {
-                BLC_LOGE("doFenceWait: failed to wait on fence fd");
-                return UNKNOWN_ERROR;
-            }
-        } else {
-            status_t err = mCurrentFence->waitForever("BufferLayerConsumer::doFenceWaitLocked");
-            if (err != NO_ERROR) {
-                BLC_LOGE("doFenceWait: error waiting for fence: %d", err);
-                return err;
-            }
-        }
-    }
-
-    return NO_ERROR;
-}
-
 void BufferLayerConsumer::freeBufferLocked(int slotIndex) {
     BLC_LOGV("freeBufferLocked: slotIndex=%d", slotIndex);
     std::lock_guard<std::mutex> lock(mImagesMutex);
@@ -485,7 +470,6 @@ void BufferLayerConsumer::onBufferAvailable(const BufferItem& item) {
         if (oldImage == nullptr || oldImage->graphicBuffer() == nullptr ||
             oldImage->graphicBuffer()->getId() != item.mGraphicBuffer->getId()) {
             mImages[item.mSlot] = std::make_shared<Image>(item.mGraphicBuffer, mRE);
-            mRE.cacheExternalTextureBuffer(item.mGraphicBuffer);
         }
     }
 }
@@ -520,6 +504,12 @@ void BufferLayerConsumer::dumpLocked(String8& result, const char* prefix) const 
                         mCurrentTransform);
 
     ConsumerBase::dumpLocked(result, prefix);
+}
+
+BufferLayerConsumer::Image::Image(const sp<GraphicBuffer>& graphicBuffer,
+                                  renderengine::RenderEngine& engine)
+      : mGraphicBuffer(graphicBuffer), mRE(engine) {
+    mRE.cacheExternalTextureBuffer(mGraphicBuffer);
 }
 
 BufferLayerConsumer::Image::~Image() {

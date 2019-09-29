@@ -107,6 +107,10 @@ cc_defaults {
     lto: {
         thin: true,
     },
+    // TODO(b/131771163): Fix broken fuzzer support with LTO.
+    sanitize: {
+        fuzzer: false,
+    },
 }
 
 cc_library_headers {
@@ -141,7 +145,6 @@ filegroup {
         "Layer.cpp",
         "LayerProtoHelper.cpp",
         "LayerRejecter.cpp",
-        "LayerStats.cpp",
         "LayerVector.cpp",
         "MonitoredProducer.cpp",
         "NativeWindowSurface.cpp",
@@ -152,13 +155,14 @@ filegroup {
         "Scheduler/DispSyncSource.cpp",
         "Scheduler/EventControlThread.cpp",
         "Scheduler/EventThread.cpp",
-        "Scheduler/IdleTimer.cpp",
+        "Scheduler/OneShotTimer.cpp",
         "Scheduler/LayerHistory.cpp",
         "Scheduler/LayerInfo.cpp",
         "Scheduler/MessageQueue.cpp",
+        "Scheduler/PhaseOffsets.cpp",
         "Scheduler/Scheduler.cpp",
         "Scheduler/SchedulerUtils.cpp",
-        "Scheduler/PhaseOffsets.cpp",
+        "Scheduler/VSyncModulator.cpp",
         "StartPropertySetThread.cpp",
         "SurfaceFlinger.cpp",
         "SurfaceInterceptor.cpp",
@@ -188,9 +192,6 @@ cc_defaults {
     defaults: ["surfaceflinger_defaults"],
     cflags: [
         "-DLOG_TAG=\"SurfaceFlinger\"",
-    ],
-    whole_static_libs: [
-        "libsigchain",
     ],
     shared_libs: [
         "android.frameworks.displayservice@1.0",

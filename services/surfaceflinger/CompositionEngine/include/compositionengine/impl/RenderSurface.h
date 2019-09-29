@@ -52,11 +52,10 @@ public:
     void setDisplaySize(const ui::Size&) override;
     void setProtected(bool useProtected) override;
     status_t beginFrame(bool mustRecompose) override;
-    status_t prepareFrame() override;
+    void prepareFrame(bool usesClientComposition, bool usesDeviceComposition) override;
     sp<GraphicBuffer> dequeueBuffer(base::unique_fd* bufferFence) override;
     void queueBuffer(base::unique_fd&& readyFence) override;
     void onPresentDisplayCompleted() override;
-    void setViewportAndProjection() override;
     void flip() override;
 
     // Debugging
@@ -68,6 +67,7 @@ public:
     void setSizeForTest(const ui::Size&);
     sp<GraphicBuffer>& mutableGraphicBufferForTest();
     base::unique_fd& mutableBufferReadyForTest();
+    void flipClientTarget(bool flip) override;
 
 private:
     const compositionengine::CompositionEngine& mCompositionEngine;
@@ -80,6 +80,7 @@ private:
     const sp<DisplaySurface> mDisplaySurface;
     ui::Size mSize;
     bool mProtected{false};
+    bool mFlipClientTarget{false};
     std::uint32_t mPageFlipCount{0};
 };
 

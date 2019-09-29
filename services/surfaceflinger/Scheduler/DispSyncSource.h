@@ -20,14 +20,16 @@
 
 #include "DispSync.h"
 #include "EventThread.h"
+#include "TracedOrdinal.h"
 
 namespace android {
 
 class DispSyncSource final : public VSyncSource, private DispSync::Callback {
 public:
-    DispSyncSource(DispSync* dispSync, nsecs_t phaseOffset, bool traceVsync, const char* name);
+    DispSyncSource(DispSync* dispSync, nsecs_t phaseOffset, nsecs_t offsetThresholdForNextVsync,
+                   bool traceVsync, const char* name);
 
-    ~DispSyncSource() override = default;
+    ~DispSyncSource();
 
     // The following methods are implementation of VSyncSource.
     void setVSyncEnabled(bool enable) override;
@@ -39,11 +41,10 @@ private:
     virtual void onDispSyncEvent(nsecs_t when);
 
     const char* const mName;
-    int mValue = 0;
+    TracedOrdinal<int> mValue;
 
     const bool mTraceVsync;
     const std::string mVsyncOnLabel;
-    const std::string mVsyncEventLabel;
     nsecs_t mLastCallbackTime GUARDED_BY(mVsyncMutex) = 0;
 
     DispSync* mDispSync;
@@ -52,8 +53,11 @@ private:
     VSyncSource::Callback* mCallback GUARDED_BY(mCallbackMutex) = nullptr;
 
     std::mutex mVsyncMutex;
-    nsecs_t mPhaseOffset GUARDED_BY(mVsyncMutex);
+    TracedOrdinal<nsecs_t> mPhaseOffset GUARDED_BY(mVsyncMutex);
+    const nsecs_t mOffsetThresholdForNextVsync;
     bool mEnabled GUARDED_BY(mVsyncMutex) = false;
+    void *mDolphinHandle = nullptr;
+    bool (*mDolphinCheck)(const char* name) = nullptr;
 };
 
 } // namespace android
