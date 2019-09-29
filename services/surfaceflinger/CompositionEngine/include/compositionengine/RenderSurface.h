@@ -71,7 +71,7 @@ public:
     virtual status_t beginFrame(bool mustRecompose) = 0;
 
     // Prepares the frame for rendering
-    virtual status_t prepareFrame() = 0;
+    virtual void prepareFrame(bool usesClientComposition, bool usesDeviceComposition) = 0;
 
     // Allocates a buffer as scratch space for GPU composition
     virtual sp<GraphicBuffer> dequeueBuffer(base::unique_fd* bufferFence) = 0;
@@ -82,10 +82,6 @@ public:
 
     // Called after the HWC calls are made to present the display
     virtual void onPresentDisplayCompleted() = 0;
-
-    // Called to set the viewport and projection state for rendering into this
-    // surface
-    virtual void setViewportAndProjection() = 0;
 
     // Called after the surface has been rendering to signal the surface should
     // be made ready for displaying

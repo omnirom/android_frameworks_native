@@ -202,7 +202,8 @@ void TransactionCompletedListener::onTransactionCompleted(ListenerStats listener
      * callbackIds to generate one super map that contains all the sp<IBinder> to sp<SurfaceControl>
      * that could possibly exist for the callbacks.
      */
-    std::unordered_map<sp<IBinder>, sp<SurfaceControl>, IBinderHash> surfaceControls;
+    std::unordered_map<sp<IBinder>, sp<SurfaceControl>, SurfaceComposerClient::IBinderHash>
+            surfaceControls;
     for (const auto& transactionStats : listenerStats.transactionStats) {
         for (auto callbackId : transactionStats.callbackIds) {
             auto& [callbackFunction, callbackSurfaceControls] = mCallbacks[callbackId];
@@ -322,21 +323,109 @@ SurfaceComposerClient::Transaction::Transaction(const Transaction& other)
         mTransactionNestCount(other.mTransactionNestCount),
         mAnimation(other.mAnimation),
         mEarlyWakeup(other.mEarlyWakeup),
+        mContainsBuffer(other.mContainsBuffer),
         mDesiredPresentTime(other.mDesiredPresentTime) {
     mDisplayStates = other.mDisplayStates;
     mComposerStates = other.mComposerStates;
     mInputWindowCommands = other.mInputWindowCommands;
+    mListenerCallbacks = other.mListenerCallbacks;
+}
+
+std::unique_ptr<SurfaceComposerClient::Transaction>
+SurfaceComposerClient::Transaction::createFromParcel(const Parcel* parcel) {
+    auto transaction = std::make_unique<Transaction>();
+    if (transaction->readFromParcel(parcel) == NO_ERROR) {
+        return transaction;
+    }
+    return nullptr;
+}
+
+status_t SurfaceComposerClient::Transaction::readFromParcel(const Parcel* parcel) {
+    const uint32_t forceSynchronous = parcel->readUint32();
+    const uint32_t transactionNestCount = parcel->readUint32();
+    const bool animation = parcel->readBool();
+    const bool earlyWakeup = parcel->readBool();
+    const bool containsBuffer = parcel->readBool();
+    const int64_t desiredPresentTime = parcel->readInt64();
+
+    size_t count = static_cast<size_t>(parcel->readUint32());
+    if (count > parcel->dataSize()) {
+        return BAD_VALUE;
+    }
+    SortedVector<DisplayState> displayStates;
+    displayStates.setCapacity(count);
+    for (size_t i = 0; i < count; i++) {
+        DisplayState displayState;
+        if (displayState.read(*parcel) == BAD_VALUE) {
+            return BAD_VALUE;
+        }
+        displayStates.add(displayState);
+    }
+
+    count = static_cast<size_t>(parcel->readUint32());
+    if (count > parcel->dataSize()) {
+        return BAD_VALUE;
+    }
+    std::unordered_map<sp<IBinder>, ComposerState, IBinderHash> composerStates;
+    composerStates.reserve(count);
+    for (size_t i = 0; i < count; i++) {
+        sp<IBinder> surfaceControlHandle = parcel->readStrongBinder();
+
+        ComposerState composerState;
+        if (composerState.read(*parcel) == BAD_VALUE) {
+            return BAD_VALUE;
+        }
+        composerStates[surfaceControlHandle] = composerState;
+    }
+
+    InputWindowCommands inputWindowCommands;
+    inputWindowCommands.read(*parcel);
+
+    // Parsing was successful. Update the object.
+    mForceSynchronous = forceSynchronous;
+    mTransactionNestCount = transactionNestCount;
+    mAnimation = animation;
+    mEarlyWakeup = earlyWakeup;
+    mContainsBuffer = containsBuffer;
+    mDesiredPresentTime = desiredPresentTime;
+    mDisplayStates = displayStates;
+    mComposerStates = composerStates;
+    mInputWindowCommands = inputWindowCommands;
+    // listener callbacks contain function pointer addresses and may not be safe to parcel.
+    mListenerCallbacks.clear();
+    return NO_ERROR;
+}
+
+status_t SurfaceComposerClient::Transaction::writeToParcel(Parcel* parcel) const {
+    parcel->writeUint32(mForceSynchronous);
+    parcel->writeUint32(mTransactionNestCount);
+    parcel->writeBool(mAnimation);
+    parcel->writeBool(mEarlyWakeup);
+    parcel->writeBool(mContainsBuffer);
+    parcel->writeInt64(mDesiredPresentTime);
+    parcel->writeUint32(static_cast<uint32_t>(mDisplayStates.size()));
+    for (auto const& displayState : mDisplayStates) {
+        displayState.write(*parcel);
+    }
+
+    parcel->writeUint32(static_cast<uint32_t>(mComposerStates.size()));
+    for (auto const& [surfaceHandle, composerState] : mComposerStates) {
+        parcel->writeStrongBinder(surfaceHandle);
+        composerState.write(*parcel);
+    }
+
+    mInputWindowCommands.write(*parcel);
+    return NO_ERROR;
 }
 
 SurfaceComposerClient::Transaction& SurfaceComposerClient::Transaction::merge(Transaction&& other) {
-    for (auto const& kv : other.mComposerStates) {
-        if (mComposerStates.count(kv.first) == 0) {
-            mComposerStates[kv.first] = kv.second;
+    for (auto const& [surfaceHandle, composerState] : other.mComposerStates) {
+        if (mComposerStates.count(surfaceHandle) == 0) {
+            mComposerStates[surfaceHandle] = composerState;
         } else {
-            mComposerStates[kv.first].state.merge(kv.second.state);
+            mComposerStates[surfaceHandle].state.merge(composerState.state);
         }
     }
-    other.mComposerStates.clear();
 
     for (auto const& state : other.mDisplayStates) {
         ssize_t index = mDisplayStates.indexOf(state);
@@ -346,7 +435,6 @@ SurfaceComposerClient::Transaction& SurfaceComposerClient::Transaction::merge(Tr
             mDisplayStates.editItemAt(static_cast<size_t>(index)).merge(state);
         }
     }
-    other.mDisplayStates.clear();
 
     for (const auto& [listener, callbackInfo] : other.mListenerCallbacks) {
         auto& [callbackIds, surfaceControls] = callbackInfo;
@@ -357,28 +445,34 @@ SurfaceComposerClient::Transaction& SurfaceComposerClient::Transaction::merge(Tr
                 .surfaceControls.insert(std::make_move_iterator(surfaceControls.begin()),
                                         std::make_move_iterator(surfaceControls.end()));
     }
-    other.mListenerCallbacks.clear();
 
     mInputWindowCommands.merge(other.mInputWindowCommands);
-    other.mInputWindowCommands.clear();
 
     mContainsBuffer = other.mContainsBuffer;
-    other.mContainsBuffer = false;
-
     mEarlyWakeup = mEarlyWakeup || other.mEarlyWakeup;
-    other.mEarlyWakeup = false;
-
+    other.clear();
     return *this;
 }
 
-void SurfaceComposerClient::doDropReferenceTransaction(const sp<IBinder>& handle,
-        const sp<ISurfaceComposerClient>& client) {
+void SurfaceComposerClient::Transaction::clear() {
+    mComposerStates.clear();
+    mDisplayStates.clear();
+    mListenerCallbacks.clear();
+    mInputWindowCommands.clear();
+    mContainsBuffer = false;
+    mForceSynchronous = 0;
+    mTransactionNestCount = 0;
+    mAnimation = false;
+    mEarlyWakeup = false;
+    mDesiredPresentTime = -1;
+}
+
+void SurfaceComposerClient::doDropReferenceTransaction(const sp<IBinder>& handle) {
     sp<ISurfaceComposer> sf(ComposerService::getComposerService());
     Vector<ComposerState> composerStates;
     Vector<DisplayState> displayStates;
 
     ComposerState s;
-    s.client = client;
     s.state.surface = handle;
     s.state.what |= layer_state_t::eReparent;
     s.state.parentHandleForChild = nullptr;
@@ -405,8 +499,8 @@ void SurfaceComposerClient::Transaction::cacheBuffers() {
     }
 
     size_t count = 0;
-    for (auto& [sc, cs] : mComposerStates) {
-        layer_state_t* s = getLayerState(sc);
+    for (auto& [handle, cs] : mComposerStates) {
+        layer_state_t* s = getLayerState(handle);
         if (!(s->what & layer_state_t::eBufferChanged)) {
             continue;
         }
@@ -454,7 +548,7 @@ status_t SurfaceComposerClient::Transaction::apply(bool synchronous) {
             continue;
         }
 
-        listenerCallbacks.emplace_back(listener, std::move(callbackIds));
+        listenerCallbacks.emplace_back(IInterface::asBinder(listener), std::move(callbackIds));
 
         // If the listener has any SurfaceControls set on this Transaction update the surface state
         for (const auto& surfaceControl : surfaceControls) {
@@ -545,16 +639,15 @@ void SurfaceComposerClient::Transaction::setEarlyWakeup() {
     mEarlyWakeup = true;
 }
 
-layer_state_t* SurfaceComposerClient::Transaction::getLayerState(const sp<SurfaceControl>& sc) {
-    if (mComposerStates.count(sc) == 0) {
+layer_state_t* SurfaceComposerClient::Transaction::getLayerState(const sp<IBinder>& handle) {
+    if (mComposerStates.count(handle) == 0) {
         // we don't have it, add an initialized layer_state to our list
         ComposerState s;
-        s.client = sc->getClient()->mClient;
-        s.state.surface = sc->getHandle();
-        mComposerStates[sc] = s;
+        s.state.surface = handle;
+        mComposerStates[handle] = s;
     }
 
-    return &(mComposerStates[sc].state);
+    return &(mComposerStates[handle].state);
 }
 
 void SurfaceComposerClient::Transaction::registerSurfaceControlForCallback(
@@ -702,14 +795,15 @@ SurfaceComposerClient::Transaction& SurfaceComposerClient::Transaction::setLayer
 }
 
 SurfaceComposerClient::Transaction& SurfaceComposerClient::Transaction::setMetadata(
-        const sp<SurfaceControl>& sc, uint32_t key, std::vector<uint8_t> data) {
+        const sp<SurfaceControl>& sc, uint32_t key, const Parcel& p) {
     layer_state_t* s = getLayerState(sc);
     if (!s) {
         mStatus = BAD_INDEX;
         return *this;
     }
     s->what |= layer_state_t::eMetadataChanged;
-    s->metadata.mMap[key] = std::move(data);
+
+    s->metadata.mMap[key] = {p.data(), p.data() + p.dataSize()};
 
     registerSurfaceControlForCallback(sc);
     return *this;

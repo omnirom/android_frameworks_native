@@ -19,14 +19,21 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <unordered_map>
 
 #include <math/mat4.h>
+#include <renderengine/LayerSettings.h>
+#include <ui/Fence.h>
 #include <ui/GraphicTypes.h>
 #include <ui/Region.h>
 #include <ui/Transform.h>
 #include <utils/StrongPointer.h>
 
 #include "DisplayHardware/DisplayIdentification.h"
+
+namespace HWC2 {
+class Layer;
+} // namespace HWC2
 
 namespace android::compositionengine {
 
@@ -46,6 +53,13 @@ struct OutputCompositionState;
 class Output {
 public:
     using OutputLayers = std::vector<std::unique_ptr<compositionengine::OutputLayer>>;
+    using ReleasedLayers = std::vector<wp<LayerFE>>;
+
+    struct FrameFences {
+        sp<Fence> presentFence{Fence::NO_FENCE};
+        sp<Fence> clientTargetAcquireFence{Fence::NO_FENCE};
+        std::unordered_map<HWC2::Layer*, sp<Fence>> layerFences;
+    };
 
     virtual ~Output();
 
@@ -71,7 +85,8 @@ public:
     virtual void setColorTransform(const mat4&) = 0;
 
     // Sets the output color mode
-    virtual void setColorMode(ui::ColorMode, ui::Dataspace, ui::RenderIntent) = 0;
+    virtual void setColorMode(ui::ColorMode, ui::Dataspace, ui::RenderIntent,
+                              ui::Dataspace colorSpaceAgnosticDataspace) = 0;
 
     // Outputs a string with a state dump
     virtual void dump(std::string&) const = 0;
@@ -130,9 +145,39 @@ public:
     // Gets the ordered set of output layers for this output
     virtual const OutputLayers& getOutputLayersOrderedByZ() const = 0;
 
+    // Sets the new set of layers being released this frame
+    virtual void setReleasedLayers(ReleasedLayers&&) = 0;
+
+    // Takes (moves) the set of layers being released this frame.
+    virtual ReleasedLayers takeReleasedLayers() = 0;
+
+    // Signals that a frame is beginning on the output
+    virtual void beginFrame() = 0;
+
+    // Prepares a frame for display
+    virtual void prepareFrame() = 0;
+
+    // Performs client composition as needed for layers on the output. The
+    // output fence is set to a fence to signal when client composition is
+    // finished.
+    // Returns false if client composition cannot be performed.
+    virtual bool composeSurfaces(const Region& debugFence, base::unique_fd* outReadyFence) = 0;
+
+    // Posts the new frame, and sets release fences.
+    virtual void postFramebuffer() = 0;
+
 protected:
     virtual void setDisplayColorProfile(std::unique_ptr<DisplayColorProfile>) = 0;
     virtual void setRenderSurface(std::unique_ptr<RenderSurface>) = 0;
+    virtual void chooseCompositionStrategy() = 0;
+    virtual bool getSkipColorTransform() const = 0;
+    virtual FrameFences presentAndGetFrameFences() = 0;
+    virtual std::vector<renderengine::LayerSettings> generateClientCompositionRequests(
+            bool supportsProtectedContent, Region& clearRegion) = 0;
+    virtual void appendRegionFlashRequests(
+            const Region& flashRegion,
+            std::vector<renderengine::LayerSettings>& clientCompositionLayers) = 0;
+    virtual void setExpensiveRenderingExpected(bool enabled) = 0;
 };
 
 } // namespace android::compositionengine

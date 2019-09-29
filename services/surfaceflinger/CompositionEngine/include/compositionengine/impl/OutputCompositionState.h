@@ -35,6 +35,16 @@ struct OutputCompositionState {
     // If false, this output is not considered secure
     bool isSecure{false};
 
+    // If true, the current frame on this output uses client composition
+    bool usesClientComposition{false};
+
+    // If true, the current frame on this output uses device composition
+    bool usesDeviceComposition{false};
+
+    // If true, the client target should be flipped when performing client
+    // composition
+    bool flipClientTarget{false};
+
     // If true, this output displays layers that are internal-only
     bool layerStackInternal{false};
 
@@ -88,8 +98,11 @@ struct OutputCompositionState {
     // Current active render intent
     ui::RenderIntent renderIntent{ui::RenderIntent::COLORIMETRIC};
 
-    // Current active dstaspace
+    // Current active dataspace
     ui::Dataspace dataspace{ui::Dataspace::UNKNOWN};
+
+    // Current target dataspace
+    ui::Dataspace targetDataspace{ui::Dataspace::UNKNOWN};
 
     // Debugging
     void dump(std::string& result) const;

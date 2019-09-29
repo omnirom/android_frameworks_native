@@ -30,28 +30,25 @@ public:
 
     std::shared_ptr<compositionengine::Layer> getCompositionLayer() const override;
 
-    virtual const char* getTypeId() const { return "ColorLayer"; }
+    const char* getType() const override { return "ColorLayer"; }
     bool isVisible() const override;
 
     bool setColor(const half3& color) override;
 
     bool setDataspace(ui::Dataspace dataspace) override;
 
-    void setPerFrameData(const sp<const DisplayDevice>& display, const ui::Transform& transform,
-                         const Rect& viewport, int32_t supportedPerFrameMetadata,
-                         const ui::Dataspace targetDataspace) override;
-
     void commitTransaction(const State& stateToCommit) override;
 
-    bool onPreComposition(nsecs_t /*refreshStartTime*/) override { return false; }
+    bool isOpaque(const Layer::State& s) const override;
 
 protected:
-    virtual bool prepareClientLayer(const RenderArea& renderArea, const Region& clip,
-                                    bool useIdentityTransform, Region& clearRegion,
-                                    const bool supportProtectedContent,
-                                    renderengine::LayerSettings& layer);
+    /*
+     * compositionengine::LayerFE overrides
+     */
+    void latchPerFrameState(compositionengine::LayerFECompositionState&) const override;
+    std::optional<renderengine::LayerSettings> prepareClientComposition(
+            compositionengine::LayerFE::ClientCompositionTargetSettings&) override;
 
-private:
     std::shared_ptr<compositionengine::Layer> mCompositionLayer;
 };
 

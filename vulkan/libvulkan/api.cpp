@@ -664,6 +664,12 @@ VkResult LayerChain::LoadLayer(ActiveLayer& layer, const char* name) {
         return VK_ERROR_LAYER_NOT_PRESENT;
     }
 
+    if (!layer.ref.GetGetInstanceProcAddr()) {
+        ALOGW("Failed to locate vkGetInstanceProcAddr in layer %s", name);
+        layer.ref.~LayerRef();
+        return VK_ERROR_LAYER_NOT_PRESENT;
+    }
+
     ALOGI("Loaded layer %s", name);
 
     return VK_SUCCESS;
@@ -1166,10 +1172,19 @@ bool EnsureInitialized() {
 
     std::call_once(once_flag, []() {
         if (driver::OpenHAL()) {
-            DiscoverLayers();
             initialized = true;
         }
     });
+
+    {
+        static pid_t pid = getpid() + 1;
+        static std::mutex layer_lock;
+        std::lock_guard<std::mutex> lock(layer_lock);
+        if (pid != getpid()) {
+            pid = getpid();
+            DiscoverLayers();
+        }
+    }
 
     return initialized;
 }

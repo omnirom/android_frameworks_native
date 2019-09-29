@@ -45,7 +45,7 @@ public:
     void setLayerStackFilter(uint32_t layerStackId, bool isInternal) override;
 
     void setColorTransform(const mat4&) override;
-    void setColorMode(ui::ColorMode, ui::Dataspace, ui::RenderIntent) override;
+    void setColorMode(ui::ColorMode, ui::Dataspace, ui::RenderIntent, ui::Dataspace) override;
 
     void dump(std::string&) const override;
 
@@ -72,12 +72,28 @@ public:
     void setOutputLayersOrderedByZ(OutputLayers&&) override;
     const OutputLayers& getOutputLayersOrderedByZ() const override;
 
+    void setReleasedLayers(ReleasedLayers&&) override;
+    ReleasedLayers takeReleasedLayers() override;
+
+    void beginFrame() override;
+    void prepareFrame() override;
+    bool composeSurfaces(const Region&, base::unique_fd*) override;
+    void postFramebuffer() override;
+
     // Testing
     void setDisplayColorProfileForTest(std::unique_ptr<compositionengine::DisplayColorProfile>);
     void setRenderSurfaceForTest(std::unique_ptr<compositionengine::RenderSurface>);
 
 protected:
     const CompositionEngine& getCompositionEngine() const;
+    void chooseCompositionStrategy() override;
+    bool getSkipColorTransform() const override;
+    compositionengine::Output::FrameFences presentAndGetFrameFences() override;
+    std::vector<renderengine::LayerSettings> generateClientCompositionRequests(
+            bool supportsProtectedContent, Region& clearRegion) override;
+    void appendRegionFlashRequests(const Region&,
+                                   std::vector<renderengine::LayerSettings>&) override;
+    void setExpensiveRenderingExpected(bool enabled) override;
     void dumpBase(std::string&) const;
 
 private:
@@ -93,6 +109,7 @@ private:
     std::unique_ptr<compositionengine::RenderSurface> mRenderSurface;
 
     OutputLayers mOutputLayersOrderedByZ;
+    ReleasedLayers mReleasedLayers;
 };
 
 } // namespace impl

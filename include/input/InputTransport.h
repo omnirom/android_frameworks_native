@@ -31,13 +31,18 @@
 
 #include <string>
 
+#include <android-base/chrono_utils.h>
+
 #include <binder/IBinder.h>
 #include <input/Input.h>
-#include <utils/Errors.h>
-#include <utils/Timers.h>
-#include <utils/RefBase.h>
-#include <utils/Vector.h>
+#include <input/LatencyStatistics.h>
 #include <utils/BitSet.h>
+#include <utils/Errors.h>
+#include <utils/RefBase.h>
+#include <utils/Timers.h>
+#include <utils/Vector.h>
+
+#include <android-base/unique_fd.h>
 
 namespace android {
 class Parcel;
@@ -113,6 +118,8 @@ struct InputMessage {
             float yOffset;
             float xPrecision;
             float yPrecision;
+            float xCursorPosition;
+            float yCursorPosition;
             uint32_t pointerCount;
             uint32_t empty3;
             // Note that PointerCoords requires 8 byte alignment.
@@ -161,8 +168,7 @@ protected:
     virtual ~InputChannel();
 
 public:
-    InputChannel() = default;
-    InputChannel(const std::string& name, int fd);
+    static sp<InputChannel> create(const std::string& name, android::base::unique_fd fd);
 
     /* Creates a pair of input channels.
      *
@@ -172,7 +178,7 @@ public:
             sp<InputChannel>& outServerChannel, sp<InputChannel>& outClientChannel);
 
     inline std::string getName() const { return mName; }
-    inline int getFd() const { return mFd; }
+    inline int getFd() const { return mFd.get(); }
 
     /* Sends a message to the other endpoint.
      *
@@ -203,16 +209,15 @@ public:
     sp<InputChannel> dup() const;
 
     status_t write(Parcel& out) const;
-    status_t read(const Parcel& from);
+    static sp<InputChannel> read(const Parcel& from);
 
     sp<IBinder> getToken() const;
     void setToken(const sp<IBinder>& token);
 
 private:
-    void setFd(int fd);
-
+    InputChannel(const std::string& name, android::base::unique_fd fd);
     std::string mName;
-    int mFd = -1;
+    android::base::unique_fd mFd;
 
     sp<IBinder> mToken = nullptr;
 };
@@ -261,27 +266,14 @@ public:
      * Returns BAD_VALUE if seq is 0 or if pointerCount is less than 1 or greater than MAX_POINTERS.
      * Other errors probably indicate that the channel is broken.
      */
-    status_t publishMotionEvent(
-            uint32_t seq,
-            int32_t deviceId,
-            int32_t source,
-            int32_t displayId,
-            int32_t action,
-            int32_t actionButton,
-            int32_t flags,
-            int32_t edgeFlags,
-            int32_t metaState,
-            int32_t buttonState,
-            MotionClassification classification,
-            float xOffset,
-            float yOffset,
-            float xPrecision,
-            float yPrecision,
-            nsecs_t downTime,
-            nsecs_t eventTime,
-            uint32_t pointerCount,
-            const PointerProperties* pointerProperties,
-            const PointerCoords* pointerCoords);
+    status_t publishMotionEvent(uint32_t seq, int32_t deviceId, int32_t source, int32_t displayId,
+                                int32_t action, int32_t actionButton, int32_t flags,
+                                int32_t edgeFlags, int32_t metaState, int32_t buttonState,
+                                MotionClassification classification, float xOffset, float yOffset,
+                                float xPrecision, float yPrecision, float xCursorPosition,
+                                float yCursorPosition, nsecs_t downTime, nsecs_t eventTime,
+                                uint32_t pointerCount, const PointerProperties* pointerProperties,
+                                const PointerCoords* pointerCoords);
 
     /* Receives the finished signal from the consumer in reply to the original dispatch signal.
      * If a signal was received, returns the message sequence number,
@@ -297,7 +289,12 @@ public:
     status_t receiveFinishedSignal(uint32_t* outSeq, bool* outHandled);
 
 private:
+    static constexpr std::chrono::duration TOUCH_STATS_REPORT_PERIOD = 5min;
+
     sp<InputChannel> mChannel;
+    LatencyStatistics mTouchStatistics{TOUCH_STATS_REPORT_PERIOD};
+
+    void reportTouchEventForStatistics(nsecs_t evdevTime);
 };
 
 /*

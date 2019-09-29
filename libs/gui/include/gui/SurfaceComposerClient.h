@@ -163,8 +163,7 @@ public:
      * Called from SurfaceControl d'tor to 'destroy' the surface (or rather, reparent it
      * to null), but without needing an sp<SurfaceControl> to avoid infinite ressurection.
      */
-    static void doDropReferenceTransaction(const sp<IBinder>& handle,
-            const sp<ISurfaceComposerClient>& client);
+    static void doDropReferenceTransaction(const sp<IBinder>& handle);
 
     /**
      * Uncaches a buffer in ISurfaceComposer. It must be uncached via a transaction so that it is
@@ -270,6 +269,12 @@ public:
         }
     };
 
+    struct IBinderHash {
+        std::size_t operator()(const sp<IBinder>& iBinder) const {
+            return std::hash<IBinder*>{}(iBinder.get());
+        }
+    };
+
     struct TCLHash {
         std::size_t operator()(const sp<ITransactionCompletedListener>& tcl) const {
             return std::hash<IBinder*>{}((tcl) ? IInterface::asBinder(tcl).get() : nullptr);
@@ -285,8 +290,8 @@ public:
         std::unordered_set<sp<SurfaceControl>, SCHash> surfaceControls;
     };
 
-    class Transaction {
-        std::unordered_map<sp<SurfaceControl>, ComposerState, SCHash> mComposerStates;
+    class Transaction : Parcelable {
+        std::unordered_map<sp<IBinder>, ComposerState, IBinderHash> mComposerStates;
         SortedVector<DisplayState > mDisplayStates;
         std::unordered_map<sp<ITransactionCompletedListener>, CallbackInfo, TCLHash>
                 mListenerCallbacks;
@@ -314,7 +319,10 @@ public:
         InputWindowCommands mInputWindowCommands;
         int mStatus = NO_ERROR;
 
-        layer_state_t* getLayerState(const sp<SurfaceControl>& sc);
+        layer_state_t* getLayerState(const sp<IBinder>& surfaceHandle);
+        layer_state_t* getLayerState(const sp<SurfaceControl>& sc) {
+            return getLayerState(sc->getHandle());
+        }
         DisplayState& getDisplayState(const sp<IBinder>& token);
 
         void cacheBuffers();
@@ -324,6 +332,15 @@ public:
         Transaction() = default;
         virtual ~Transaction() = default;
         Transaction(Transaction const& other);
+
+        // Factory method that creates a new Transaction instance from the parcel.
+        static std::unique_ptr<Transaction> createFromParcel(const Parcel* parcel);
+
+        status_t writeToParcel(Parcel* parcel) const override;
+        status_t readFromParcel(const Parcel* parcel) override;
+
+        // Clears the contents of the transaction without applying it.
+        void clear();
 
         status_t apply(bool synchronous = false);
         // Merge another transaction in to this one, clearing other
@@ -362,8 +379,7 @@ public:
         Transaction& setCrop_legacy(const sp<SurfaceControl>& sc, const Rect& crop);
         Transaction& setCornerRadius(const sp<SurfaceControl>& sc, float cornerRadius);
         Transaction& setLayerStack(const sp<SurfaceControl>& sc, uint32_t layerStack);
-        Transaction& setMetadata(const sp<SurfaceControl>& sc, uint32_t key,
-                                 std::vector<uint8_t> data);
+        Transaction& setMetadata(const sp<SurfaceControl>& sc, uint32_t key, const Parcel& p);
         // Defers applying any changes made in this transaction until the Layer
         // identified by handle reaches the given frameNumber. If the Layer identified
         // by handle is removed, then we will apply this transaction regardless of
@@ -551,15 +567,10 @@ class TransactionCompletedListener : public BnTransactionCompletedListener {
 
     CallbackId mCallbackIdCounter GUARDED_BY(mMutex) = 1;
 
-    struct IBinderHash {
-        std::size_t operator()(const sp<IBinder>& iBinder) const {
-            return std::hash<IBinder*>{}(iBinder.get());
-        }
-    };
-
     struct CallbackTranslation {
         TransactionCompletedCallback callbackFunction;
-        std::unordered_map<sp<IBinder>, sp<SurfaceControl>, IBinderHash> surfaceControls;
+        std::unordered_map<sp<IBinder>, sp<SurfaceControl>, SurfaceComposerClient::IBinderHash>
+                surfaceControls;
     };
 
     std::unordered_map<CallbackId, CallbackTranslation> mCallbacks GUARDED_BY(mMutex);

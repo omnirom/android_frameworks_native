@@ -29,6 +29,7 @@
 #include <gui/FrameTimestamps.h>
 #include <gui/ISurfaceComposer.h>
 #include <gui/ISurfaceComposerClient.h>
+#include <gui/ITransactionCompletedListener.h>
 #include <gui/LayerState.h>
 #include <gui/OccupancyTracker.h>
 #include <hardware/hwcomposer_defs.h>
@@ -52,7 +53,6 @@
 #include "DisplayHardware/PowerAdvisor.h"
 #include "Effects/Daltonizer.h"
 #include "FrameTracker.h"
-#include "LayerStats.h"
 #include "LayerVector.h"
 #include "Scheduler/RefreshRateConfigs.h"
 #include "Scheduler/RefreshRateStats.h"
@@ -60,6 +60,7 @@
 #include "Scheduler/VSyncModulator.h"
 #include "SurfaceFlingerFactory.h"
 #include "SurfaceTracing.h"
+#include "TracedOrdinal.h"
 #include "TransactionCompletedThread.h"
 
 #include <atomic>
@@ -68,6 +69,7 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <queue>
 #include <set>
 #include <string>
@@ -182,9 +184,9 @@ public:
 
 class SurfaceFlinger : public BnSurfaceComposer,
                        public PriorityDumper,
+                       public ClientCache::ErasedRecipient,
                        private IBinder::DeathRecipient,
-                       private HWC2::ComposerCallback
-{
+                       private HWC2::ComposerCallback {
 public:
     SurfaceFlingerBE& getBE() { return mBE; }
     const SurfaceFlingerBE& getBE() const { return mBE; }
@@ -277,7 +279,8 @@ public:
     status_t postMessageAsync(const sp<MessageBase>& msg, nsecs_t reltime = 0, uint32_t flags = 0);
 
     // post a synchronous message to the main thread
-    status_t postMessageSync(const sp<MessageBase>& msg, nsecs_t reltime = 0, uint32_t flags = 0);
+    status_t postMessageSync(const sp<MessageBase>& msg, nsecs_t reltime = 0, uint32_t flags = 0)
+            EXCLUDES(mStateLock);
 
     // force full composition on all displays
     void repaintEverything();
@@ -307,14 +310,14 @@ public:
     // TODO: this should be made accessible only to EventThread
     void setVsyncEnabled(bool enabled);
 
+    // main thread function to enable/disable h/w composer event
+    void setPrimaryVsyncEnabledInternal(bool enabled);
+    void setVsyncEnabledInHWC(DisplayId displayId, HWC2::Vsync enabled);
+
     // called on the main thread by MessageQueue when an internal message
     // is received
     // TODO: this should be made accessible only to MessageQueue
     void onMessageReceived(int32_t what);
-
-    // for debugging only
-    // TODO: this should be made accessible only to HWComposer
-    const Vector<sp<Layer>>& getLayerSortedByZForHwcDisplay(DisplayId displayId);
 
     renderengine::RenderEngine& getRenderEngine() const;
 
@@ -340,6 +343,9 @@ public:
     }
 
     sp<Layer> fromHandle(const sp<IBinder>& handle) REQUIRES(mStateLock);
+
+    // Inherit from ClientCache::ErasedRecipient
+    void bufferErased(const client_cache_t& clientCacheId) override;
 
 private:
     friend class BufferLayer;
@@ -421,7 +427,9 @@ private:
             const sp<IGraphicBufferProducer>& bufferProducer) const override;
     status_t getSupportedFrameTimestamps(std::vector<FrameEvent>* outSupported) const override;
     sp<IDisplayEventConnection> createDisplayEventConnection(
-            ISurfaceComposer::VsyncSource vsyncSource = eVsyncSourceApp) override;
+            ISurfaceComposer::VsyncSource vsyncSource = eVsyncSourceApp,
+            ISurfaceComposer::ConfigChanged configChanged =
+                    ISurfaceComposer::eConfigChangedSuppress) override;
     status_t captureScreen(const sp<IBinder>& displayToken, sp<GraphicBuffer>* outBuffer,
             bool& outCapturedSecureLayers, const ui::Dataspace reqDataspace,
             const ui::PixelFormat reqPixelFormat, Rect sourceCrop,
@@ -534,13 +542,15 @@ private:
     // Sets the desired active config bit. It obtains the lock, and sets mDesiredActiveConfig.
     void setDesiredActiveConfig(const ActiveConfigInfo& info) REQUIRES(mStateLock);
     // Once HWC has returned the present fence, this sets the active config and a new refresh
-    // rate in SF. It also triggers HWC vsync.
+    // rate in SF.
     void setActiveConfigInternal() REQUIRES(mStateLock);
     // Active config is updated on INVALIDATE call in a state machine-like manner. When the
     // desired config was set, HWC needs to update the panel on the next refresh, and when
     // we receive the fence back, we know that the process was complete. It returns whether
     // we need to wait for the next invalidate
     bool performSetActiveConfig() REQUIRES(mStateLock);
+    // Called when active config is no longer is progress
+    void desiredActiveConfigChangeDone() REQUIRES(mStateLock);
     // called on the main thread in response to setPowerMode()
     void setPowerModeInternal(const sp<DisplayDevice>& display, int mode) REQUIRES(mStateLock);
 
@@ -593,11 +603,10 @@ private:
     // Can only be called from the main thread or with mStateLock held
     uint32_t setTransactionFlags(uint32_t flags);
     uint32_t setTransactionFlags(uint32_t flags, Scheduler::TransactionStart transactionStart);
-    void latchAndReleaseBuffer(const sp<Layer>& layer);
     void commitTransaction() REQUIRES(mStateLock);
     void commitOffscreenLayers();
-    bool containsAnyInvalidClientState(const Vector<ComposerState>& states);
     bool transactionIsReadyToBeApplied(int64_t desiredPresentTime,
+                                       bool useCachedExpectedPresentTime,
                                        const Vector<ComposerState>& states);
     uint32_t setClientStateLocked(const ComposerState& composerState, int64_t desiredPresentTime,
                                   const std::vector<ListenerCallbacks>& listenerCallbacks,
@@ -672,7 +681,6 @@ private:
                                      bool forSystem, int* outSyncFd, bool& outCapturedSecureLayers);
     void traverseLayersInDisplay(const sp<const DisplayDevice>& display,
                                  const LayerVector::Visitor& visitor);
-
     bool canAllocateHwcDisplayIdForVDS(uint64_t usage);
     bool skipColorLayer(const char* layerType);
 
@@ -766,7 +774,6 @@ private:
 
     sp<DisplayDevice> getVsyncSource();
     void updateVsyncSource();
-    void preComposition();
     void postComposition();
     void getCompositorTiming(CompositorTiming* compositorTiming);
     void updateCompositorTiming(const DisplayStatInfo& stats, nsecs_t compositeTime,
@@ -785,31 +792,11 @@ private:
                        ui::Dataspace* outDataSpace, ui::RenderIntent* outRenderIntent) const;
 
     void calculateWorkingSet();
-    /*
-     * beginFrame - This function handles any pre-frame processing that needs to be
-     * prior to any CompositionInfo handling and is not dependent on data in
-     * CompositionInfo
-     */
-    void beginFrame(const sp<DisplayDevice>& display);
-    /* prepareFrame - This function will call into the DisplayDevice to prepare a
-     * frame after CompositionInfo has been programmed.   This provides a mechanism
-     * to prepare the hardware composer
-     */
-    void prepareFrame(const sp<DisplayDevice>& display);
     void doComposition(const sp<DisplayDevice>& display, bool repainEverything);
     void doDebugFlashRegions(const sp<DisplayDevice>& display, bool repaintEverything);
-    void logLayerStats();
     void doDisplayComposition(const sp<DisplayDevice>& display, const Region& dirtyRegion);
 
-    // This fails if using GL and the surface has been destroyed. readyFence
-    // will be populated if using GL and native fence sync is supported, to
-    // signal when drawing has completed.
-    bool doComposeSurfaces(const sp<DisplayDevice>& display, const Region& debugRegionm,
-                           base::unique_fd* readyFence);
-
-    void postFramebuffer(const sp<DisplayDevice>& display);
     void postFrame();
-    void drawWormhole(const Region& region) const;
 
     /* ------------------------------------------------------------------------
      * Display management
@@ -836,7 +823,13 @@ private:
     void setRefreshRateTo(RefreshRateType, Scheduler::ConfigEvent event) REQUIRES(mStateLock);
     void setRefreshRateTo(int32_t refreshRate) REQUIRES(mStateLock);
 
-    bool isDisplayConfigAllowed(int32_t configId) REQUIRES(mStateLock);
+    bool isDisplayConfigAllowed(int32_t configId) const REQUIRES(mStateLock);
+
+    bool previousFrameMissed();
+
+    // Populates the expected present time for this frame. For negative offsets, performs a
+    // correction using the predicted vsync for the next frame instead.
+    void populateExpectedPresentTime();
 
     /*
      * Display identification
@@ -865,8 +858,6 @@ private:
         const auto hwcDisplayId = getHwComposer().getInternalHwcDisplayId();
         return hwcDisplayId ? getHwComposer().toPhysicalDisplayId(*hwcDisplayId) : std::nullopt;
     }
-
-    bool previousFrameMissed();
 
     /*
      * Debugging & dumpsys
@@ -917,10 +908,10 @@ private:
     void dumpBufferingStats(std::string& result) const;
     void dumpDisplayIdentificationData(std::string& result) const;
     void dumpWideColorInfo(std::string& result) const;
-    LayersProto dumpProtoInfo(LayerVector::StateSet stateSet,
-                              uint32_t traceFlags = SurfaceTracing::TRACE_ALL) const;
+    LayersProto dumpDrawingStateProto(uint32_t traceFlags = SurfaceTracing::TRACE_ALL) const;
+    LayersProto dumpProtoFromMainThread(uint32_t traceFlags = SurfaceTracing::TRACE_ALL)
+            EXCLUDES(mStateLock);
     void withTracingLock(std::function<void()> operation) REQUIRES(mStateLock);
-    LayersProto dumpVisibleLayersProtoInfo(const sp<DisplayDevice>& display) const;
 
     bool isLayerTripleBufferingDisabled() const {
         return this->mLayerTripleBufferingDisabled;
@@ -1013,11 +1004,6 @@ private:
     std::unique_ptr<EventThread> mInjectorEventThread;
     std::unique_ptr<InjectVSyncSource> mVSyncInjector;
 
-    // Calculates correct offsets.
-    VSyncModulator mVsyncModulator;
-    // Keeps track of all available phase offsets for different refresh types.
-    const std::unique_ptr<scheduler::PhaseOffsets> mPhaseOffsets;
-
     // Can only accessed from the main thread, these members
     // don't need synchronization
     State mDrawingState{LayerVector::StateSet::Drawing};
@@ -1072,7 +1058,6 @@ private:
     SurfaceTracing mTracing{*this};
     bool mTracingEnabled = false;
     bool mTracingEnabledChanged GUARDED_BY(mStateLock) = false;
-    LayerStats mLayerStats;
     const std::shared_ptr<TimeStats> mTimeStats;
     bool mUseHwcVirtualDisplays = false;
     bool mUseFbScaling = false;
@@ -1104,11 +1089,6 @@ private:
     uint32_t mTexturePoolSize = 0;
     std::vector<uint32_t> mTexturePool;
 
-    struct IBinderHash {
-        std::size_t operator()(const sp<IBinder>& strongPointer) const {
-            return std::hash<IBinder*>{}(strongPointer.get());
-        }
-    };
     struct TransactionState {
         TransactionState(const Vector<ComposerState>& composerStates,
                          const Vector<DisplayState>& displayStates, uint32_t transactionFlags,
@@ -1133,7 +1113,7 @@ private:
         const int64_t postTime;
         bool privileged;
     };
-    std::unordered_map<sp<IBinder>, std::queue<TransactionState>, IBinderHash> mTransactionQueues;
+    std::unordered_map<sp<IBinder>, std::queue<TransactionState>, IListenerHash> mTransactionQueues;
 
     /* ------------------------------------------------------------------------
      * Feature prototyping
@@ -1144,7 +1124,7 @@ private:
     // Static screen stats
     bool mHasPoweredOff = false;
 
-    size_t mNumLayers = 0;
+    std::atomic<size_t> mNumLayers = 0;
     // Vsync Source
     sp<DisplayDevice> mActiveVsyncSource = NULL;
     sp<DisplayDevice> mNextVsyncSource = NULL;
@@ -1153,6 +1133,9 @@ private:
     // Verify that transaction is being called by an approved process:
     // either AID_GRAPHICS or AID_SYSTEM.
     status_t CheckTransactCodeCredentials(uint32_t code);
+
+    // to linkToDeath
+    sp<IBinder> mWindowManager;
 
     std::unique_ptr<dvr::VrFlinger> mVrFlinger;
     std::atomic<bool> mVrFlingerRequestsDisplay = false;
@@ -1172,6 +1155,7 @@ private:
 
     ui::Dataspace mDefaultCompositionDataspace;
     ui::Dataspace mWideColorGamutCompositionDataspace;
+    ui::Dataspace mColorSpaceAgnosticDataspace;
 
     SurfaceFlingerBE mBE;
     std::unique_ptr<compositionengine::CompositionEngine> mCompositionEngine;
@@ -1184,8 +1168,16 @@ private:
     sp<Scheduler::ConnectionHandle> mAppConnectionHandle;
     sp<Scheduler::ConnectionHandle> mSfConnectionHandle;
 
+    // Stores phase offsets configured per refresh rate.
+    const std::unique_ptr<scheduler::PhaseOffsets> mPhaseOffsets;
+
+    // Optional to defer construction until scheduler connections are created.
+    std::optional<scheduler::VSyncModulator> mVSyncModulator;
+
     scheduler::RefreshRateConfigs mRefreshRateConfigs;
     scheduler::RefreshRateStats mRefreshRateStats{mRefreshRateConfigs, *mTimeStats};
+
+    std::atomic<nsecs_t> mExpectedPresentTime = 0;
 
     // All configs are allowed if the set is empty.
     using DisplayConfigs = std::set<int32_t>;
@@ -1200,7 +1192,8 @@ private:
     ActiveConfigInfo mDesiredActiveConfig GUARDED_BY(mActiveConfigLock);
 
     // below flags are set by main thread only
-    bool mDesiredActiveConfigChanged GUARDED_BY(mActiveConfigLock) = false;
+    TracedOrdinal<bool> mDesiredActiveConfigChanged
+            GUARDED_BY(mActiveConfigLock) = {"DesiredActiveConfigChanged", false};
     bool mCheckPendingFence = false;
 
     bool mLumaSampling = true;
@@ -1245,6 +1238,10 @@ public:
     int mNumIdle = -1;
 
 private:
+    // Flags to capture the state of Vsync in HWC
+    HWC2::Vsync mHWCVsyncState = HWC2::Vsync::Disable;
+    HWC2::Vsync mHWCVsyncPendingState = HWC2::Vsync::Disable;
+
     bool mDolphinFuncsEnabled = false;
     void *mDolphinHandle = nullptr;
     bool (*mDolphinInit)() = nullptr;

@@ -33,9 +33,10 @@
 #include <cutils/atomic.h>
 #include <unordered_map>
 
+#include <limits.h>
 #include <stddef.h>
 #include <unistd.h>
-#include <limits.h>
+#include <deque>
 #include <unordered_map>
 
 #include "InputListener.h"
@@ -450,14 +451,6 @@ public:
     virtual status_t pilferPointers(const sp<IBinder>& token) override;
 
 private:
-    template <typename T>
-    struct Link {
-        T* next;
-        T* prev;
-
-    protected:
-        inline Link() : next(nullptr), prev(nullptr) { }
-    };
 
     struct InjectionState {
         mutable int32_t refCount;
@@ -475,7 +468,7 @@ private:
         ~InjectionState();
     };
 
-    struct EventEntry : Link<EventEntry> {
+    struct EventEntry {
         enum {
             TYPE_CONFIGURATION_CHANGED,
             TYPE_DEVICE_RESET,
@@ -570,19 +563,21 @@ private:
         int32_t edgeFlags;
         float xPrecision;
         float yPrecision;
+        float xCursorPosition;
+        float yCursorPosition;
         nsecs_t downTime;
         uint32_t pointerCount;
         PointerProperties pointerProperties[MAX_POINTERS];
         PointerCoords pointerCoords[MAX_POINTERS];
 
-        MotionEntry(uint32_t sequenceNum, nsecs_t eventTime,
-                int32_t deviceId, uint32_t source, int32_t displayId, uint32_t policyFlags,
-                int32_t action, int32_t actionButton, int32_t flags,
-                int32_t metaState, int32_t buttonState, MotionClassification classification,
-                int32_t edgeFlags, float xPrecision, float yPrecision,
-                nsecs_t downTime, uint32_t pointerCount,
-                const PointerProperties* pointerProperties, const PointerCoords* pointerCoords,
-                float xOffset, float yOffset);
+        MotionEntry(uint32_t sequenceNum, nsecs_t eventTime, int32_t deviceId, uint32_t source,
+                    int32_t displayId, uint32_t policyFlags, int32_t action, int32_t actionButton,
+                    int32_t flags, int32_t metaState, int32_t buttonState,
+                    MotionClassification classification, int32_t edgeFlags, float xPrecision,
+                    float yPrecision, float xCursorPosition, float yCursorPosition,
+                    nsecs_t downTime, uint32_t pointerCount,
+                    const PointerProperties* pointerProperties, const PointerCoords* pointerCoords,
+                    float xOffset, float yOffset);
         virtual void appendDescription(std::string& msg) const;
 
     protected:
@@ -590,7 +585,7 @@ private:
     };
 
     // Tracks the progress of dispatching a particular event to a particular connection.
-    struct DispatchEntry : Link<DispatchEntry> {
+    struct DispatchEntry {
         const uint32_t seq; // unique sequence number, never 0
 
         EventEntry* eventEntry; // the event to dispatch
@@ -642,10 +637,10 @@ private:
     //
     // Commands are implicitly 'LockedInterruptible'.
     struct CommandEntry;
-    typedef void (InputDispatcher::*Command)(CommandEntry* commandEntry);
+    typedef std::function<void(InputDispatcher&, CommandEntry*)> Command;
 
     class Connection;
-    struct CommandEntry : Link<CommandEntry> {
+    struct CommandEntry {
         explicit CommandEntry(Command command);
         ~CommandEntry();
 
@@ -663,75 +658,6 @@ private:
         sp<InputChannel> inputChannel;
         sp<IBinder> oldToken;
         sp<IBinder> newToken;
-    };
-
-    // Generic queue implementation.
-    template <typename T>
-    struct Queue {
-        T* head;
-        T* tail;
-        uint32_t entryCount;
-
-        inline Queue() : head(nullptr), tail(nullptr), entryCount(0) {
-        }
-
-        inline bool isEmpty() const {
-            return !head;
-        }
-
-        inline void enqueueAtTail(T* entry) {
-            entryCount++;
-            entry->prev = tail;
-            if (tail) {
-                tail->next = entry;
-            } else {
-                head = entry;
-            }
-            entry->next = nullptr;
-            tail = entry;
-        }
-
-        inline void enqueueAtHead(T* entry) {
-            entryCount++;
-            entry->next = head;
-            if (head) {
-                head->prev = entry;
-            } else {
-                tail = entry;
-            }
-            entry->prev = nullptr;
-            head = entry;
-        }
-
-        inline void dequeue(T* entry) {
-            entryCount--;
-            if (entry->prev) {
-                entry->prev->next = entry->next;
-            } else {
-                head = entry->next;
-            }
-            if (entry->next) {
-                entry->next->prev = entry->prev;
-            } else {
-                tail = entry->prev;
-            }
-        }
-
-        inline T* dequeueAtHead() {
-            entryCount--;
-            T* entry = head;
-            head = entry->next;
-            if (head) {
-                head->prev = nullptr;
-            } else {
-                tail = nullptr;
-            }
-            return entry;
-        }
-
-        uint32_t count() const {
-            return entryCount;
-        }
     };
 
     /* Specifies which events are to be canceled and why. */
@@ -830,6 +756,8 @@ private:
             int32_t flags;
             float xPrecision;
             float yPrecision;
+            float xCursorPosition;
+            float yCursorPosition;
             nsecs_t downTime;
             uint32_t pointerCount;
             PointerProperties pointerProperties[MAX_POINTERS];
@@ -882,11 +810,11 @@ private:
         bool inputPublisherBlocked;
 
         // Queue of events that need to be published to the connection.
-        Queue<DispatchEntry> outboundQueue;
+        std::deque<DispatchEntry*> outboundQueue;
 
         // Queue of events that have been published to the connection but that have not
         // yet received a "finished" response from the application.
-        Queue<DispatchEntry> waitQueue;
+        std::deque<DispatchEntry*> waitQueue;
 
         explicit Connection(const sp<InputChannel>& inputChannel, bool monitor);
 
@@ -895,7 +823,7 @@ private:
         const std::string getWindowName() const;
         const char* getStatusLabel() const;
 
-        DispatchEntry* findWaitQueueEntry(uint32_t seq);
+        std::deque<DispatchEntry*>::iterator findWaitQueueEntry(uint32_t seq);
     };
 
     struct Monitor {
@@ -923,9 +851,9 @@ private:
     sp<Looper> mLooper;
 
     EventEntry* mPendingEvent GUARDED_BY(mLock);
-    Queue<EventEntry> mInboundQueue GUARDED_BY(mLock);
-    Queue<EventEntry> mRecentQueue GUARDED_BY(mLock);
-    Queue<CommandEntry> mCommandQueue GUARDED_BY(mLock);
+    std::deque<EventEntry*> mInboundQueue GUARDED_BY(mLock);
+    std::deque<EventEntry*> mRecentQueue GUARDED_BY(mLock);
+    std::deque<std::unique_ptr<CommandEntry>> mCommandQueue GUARDED_BY(mLock);
 
     DropReason mLastDropReason GUARDED_BY(mLock);
 
@@ -1025,7 +953,7 @@ private:
     // Deferred command processing.
     bool haveCommandsLocked() const REQUIRES(mLock);
     bool runCommandsLockedInterruptible() REQUIRES(mLock);
-    CommandEntry* postCommandLocked(Command command) REQUIRES(mLock);
+    void postCommandLocked(std::unique_ptr<CommandEntry> commandEntry) REQUIRES(mLock);
 
     // Input filter processing.
     bool shouldSendKeyToInputFilterLocked(const NotifyKeyArgs* args) REQUIRES(mLock);
@@ -1050,6 +978,13 @@ private:
             REQUIRES(mLock);
     sp<InputChannel> getInputChannelLocked(const sp<IBinder>& windowToken) const REQUIRES(mLock);
     bool hasWindowHandleLocked(const sp<InputWindowHandle>& windowHandle) const REQUIRES(mLock);
+
+    /*
+     * Validate and update InputWindowHandles for a given display.
+     */
+    void updateWindowHandlesForDisplayLocked(
+            const std::vector<sp<InputWindowHandle>>& inputWindowHandles, int32_t displayId)
+            REQUIRES(mLock);
 
     // Focus tracking for keys, trackball, etc.
     std::unordered_map<int32_t, sp<InputWindowHandle>> mFocusedWindowHandlesByDisplay
@@ -1210,7 +1145,7 @@ private:
             uint32_t seq, bool handled) REQUIRES(mLock);
     void abortBrokenDispatchCycleLocked(nsecs_t currentTime, const sp<Connection>& connection,
             bool notify) REQUIRES(mLock);
-    void drainDispatchQueue(Queue<DispatchEntry>* queue);
+    void drainDispatchQueue(std::deque<DispatchEntry*>& queue);
     void releaseDispatchEntry(DispatchEntry* dispatchEntry);
     static int handleReceiveCallback(int fd, int events, void* data);
     // The action sent should only be of type AMOTION_EVENT_*

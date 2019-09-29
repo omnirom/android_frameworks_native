@@ -21,14 +21,14 @@
 #include <binder/BpBinder.h>
 #include <binder/IPCThreadState.h>
 #include <binder/IServiceManager.h>
+#include <binder/Stability.h>
 #include <cutils/atomic.h>
 #include <utils/Log.h>
-#include <utils/String8.h>
 #include <utils/String8.h>
 #include <utils/threads.h>
 
 #include <private/binder/binder_module.h>
-#include <private/binder/Static.h>
+#include "Static.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -40,7 +40,7 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 
-#define DEFAULT_BINDER_VM_SIZE ((1 * 1024 * 1024) - sysconf(_SC_PAGE_SIZE) * 2)
+#define BINDER_VM_SIZE ((1 * 1024 * 1024) - sysconf(_SC_PAGE_SIZE) * 2)
 #define DEFAULT_MAX_BINDER_THREADS 15
 
 #ifdef __ANDROID_VNDK__
@@ -77,13 +77,7 @@ sp<ProcessState> ProcessState::self()
     if (gProcess != nullptr) {
         return gProcess;
     }
-    gProcess = new ProcessState(kDefaultDriver, DEFAULT_BINDER_VM_SIZE);
-    return gProcess;
-}
-
-sp<ProcessState> ProcessState::selfOrNull()
-{
-    Mutex::Autolock _l(gProcessMutex);
+    gProcess = new ProcessState(kDefaultDriver);
     return gProcess;
 }
 
@@ -104,72 +98,25 @@ sp<ProcessState> ProcessState::initWithDriver(const char* driver)
         driver = "/dev/binder";
     }
 
-    gProcess = new ProcessState(driver, DEFAULT_BINDER_VM_SIZE);
+    gProcess = new ProcessState(driver);
     return gProcess;
 }
 
-sp<ProcessState> ProcessState::initWithMmapSize(size_t mmap_size) {
-    Mutex::Autolock _l(gProcessMutex);
-    if (gProcess != nullptr) {
-        LOG_ALWAYS_FATAL_IF(mmap_size != gProcess->getMmapSize(),
-                "ProcessState already initialized with a different mmap size.");
-        return gProcess;
-    }
-
-    gProcess = new ProcessState(kDefaultDriver, mmap_size);
-    return gProcess;
-}
-
-void ProcessState::setContextObject(const sp<IBinder>& object)
+sp<ProcessState> ProcessState::selfOrNull()
 {
-    setContextObject(object, String16("default"));
+    Mutex::Autolock _l(gProcessMutex);
+    return gProcess;
 }
 
 sp<IBinder> ProcessState::getContextObject(const sp<IBinder>& /*caller*/)
 {
-    return getStrongProxyForHandle(0);
-}
+    sp<IBinder> context = getStrongProxyForHandle(0);
 
-void ProcessState::setContextObject(const sp<IBinder>& object, const String16& name)
-{
-    AutoMutex _l(mLock);
-    mContexts.add(name, object);
-}
+    // The root object is special since we get it directly from the driver, it is never
+    // written by Parcell::writeStrongBinder.
+    internal::Stability::tryMarkCompilationUnit(context.get());
 
-sp<IBinder> ProcessState::getContextObject(const String16& name, const sp<IBinder>& caller)
-{
-    mLock.lock();
-    sp<IBinder> object(
-        mContexts.indexOfKey(name) >= 0 ? mContexts.valueFor(name) : nullptr);
-    mLock.unlock();
-    
-    //printf("Getting context object %s for %p\n", String8(name).string(), caller.get());
-    
-    if (object != nullptr) return object;
-
-    // Don't attempt to retrieve contexts if we manage them
-    if (mManagesContexts) {
-        ALOGE("getContextObject(%s) failed, but we manage the contexts!\n",
-            String8(name).string());
-        return nullptr;
-    }
-    
-    IPCThreadState* ipc = IPCThreadState::self();
-    {
-        Parcel data, reply;
-        // no interface token on this magic transaction
-        data.writeString16(name);
-        data.writeStrongBinder(caller);
-        status_t result = ipc->transact(0 /*magic*/, 0, data, &reply, 0);
-        if (result == NO_ERROR) {
-            object = reply.readStrongBinder();
-        }
-    }
-    
-    ipc->flushCommands();
-    
-    if (object != nullptr) setContextObject(object, name);
-    return object;
+    return context;
 }
 
 void ProcessState::startThreadPool()
@@ -181,41 +128,33 @@ void ProcessState::startThreadPool()
     }
 }
 
-bool ProcessState::isContextManager(void) const
-{
-    return mManagesContexts;
-}
-
 bool ProcessState::becomeContextManager(context_check_func checkFunc, void* userData)
 {
-    if (!mManagesContexts) {
-        AutoMutex _l(mLock);
-        mBinderContextCheckFunc = checkFunc;
-        mBinderContextUserData = userData;
+    AutoMutex _l(mLock);
+    mBinderContextCheckFunc = checkFunc;
+    mBinderContextUserData = userData;
 
-        flat_binder_object obj {
-            .flags = FLAT_BINDER_FLAG_TXN_SECURITY_CTX,
-        };
+    flat_binder_object obj {
+        .flags = FLAT_BINDER_FLAG_TXN_SECURITY_CTX,
+    };
 
-        status_t result = ioctl(mDriverFD, BINDER_SET_CONTEXT_MGR_EXT, &obj);
+    int result = ioctl(mDriverFD, BINDER_SET_CONTEXT_MGR_EXT, &obj);
 
-        // fallback to original method
-        if (result != 0) {
-            android_errorWriteLog(0x534e4554, "121035042");
+    // fallback to original method
+    if (result != 0) {
+        android_errorWriteLog(0x534e4554, "121035042");
 
-            int dummy = 0;
-            result = ioctl(mDriverFD, BINDER_SET_CONTEXT_MGR, &dummy);
-        }
-
-        if (result == 0) {
-            mManagesContexts = true;
-        } else if (result == -1) {
-            mBinderContextCheckFunc = nullptr;
-            mBinderContextUserData = nullptr;
-            ALOGE("Binder ioctl to become context manager failed: %s\n", strerror(errno));
-        }
+        int dummy = 0;
+        result = ioctl(mDriverFD, BINDER_SET_CONTEXT_MGR, &dummy);
     }
-    return mManagesContexts;
+
+    if (result == -1) {
+        mBinderContextCheckFunc = nullptr;
+        mBinderContextUserData = nullptr;
+        ALOGE("Binder ioctl to become context manager failed: %s\n", strerror(errno));
+    }
+
+    return result == 0;
 }
 
 // Get references to userspace objects held by the kernel binder driver
@@ -249,10 +188,6 @@ ssize_t ProcessState::getKernelReferences(size_t buf_count, uintptr_t* buf)
     return count;
 }
 
-size_t ProcessState::getMmapSize() {
-    return mMmapSize;
-}
-
 void ProcessState::setCallRestriction(CallRestriction restriction) {
     LOG_ALWAYS_FATAL_IF(IPCThreadState::selfOrNull(), "Call restrictions must be set before the threadpool is started.");
 
@@ -282,8 +217,12 @@ sp<IBinder> ProcessState::getStrongProxyForHandle(int32_t handle)
 
     if (e != nullptr) {
         // We need to create a new BpBinder if there isn't currently one, OR we
-        // are unable to acquire a weak reference on this current one.  See comment
-        // in getWeakProxyForHandle() for more info about this.
+        // are unable to acquire a weak reference on this current one.  The
+        // attemptIncWeak() is safe because we know the BpBinder destructor will always
+        // call expungeHandle(), which acquires the same lock we are holding now.
+        // We need to do this because there is a race condition between someone
+        // releasing a reference on this BpBinder, and a new reference on its handle
+        // arriving from the driver.
         IBinder* b = e->binder;
         if (b == nullptr || !e->refs->attemptIncWeak(this)) {
             if (handle == 0) {
@@ -322,37 +261,6 @@ sp<IBinder> ProcessState::getStrongProxyForHandle(int32_t handle)
             // reference to the remote proxy when this team doesn't have one
             // but another team is sending the handle to us.
             result.force_set(b);
-            e->refs->decWeak(this);
-        }
-    }
-
-    return result;
-}
-
-wp<IBinder> ProcessState::getWeakProxyForHandle(int32_t handle)
-{
-    wp<IBinder> result;
-
-    AutoMutex _l(mLock);
-
-    handle_entry* e = lookupHandleLocked(handle);
-
-    if (e != nullptr) {        
-        // We need to create a new BpBinder if there isn't currently one, OR we
-        // are unable to acquire a weak reference on this current one.  The
-        // attemptIncWeak() is safe because we know the BpBinder destructor will always
-        // call expungeHandle(), which acquires the same lock we are holding now.
-        // We need to do this because there is a race condition between someone
-        // releasing a reference on this BpBinder, and a new reference on its handle
-        // arriving from the driver.
-        IBinder* b = e->binder;
-        if (b == nullptr || !e->refs->attemptIncWeak(this)) {
-            b = BpBinder::create(handle);
-            result = b;
-            e->binder = b;
-            if (b) e->refs = b->getWeakRefs();
-        } else {
-            result = b;
             e->refs->decWeak(this);
         }
     }
@@ -437,7 +345,7 @@ static int open_driver(const char *driver)
     return fd;
 }
 
-ProcessState::ProcessState(const char *driver, size_t mmap_size)
+ProcessState::ProcessState(const char *driver)
     : mDriverName(String8(driver))
     , mDriverFD(open_driver(driver))
     , mVMStart(MAP_FAILED)
@@ -446,17 +354,15 @@ ProcessState::ProcessState(const char *driver, size_t mmap_size)
     , mExecutingThreadsCount(0)
     , mMaxThreads(DEFAULT_MAX_BINDER_THREADS)
     , mStarvationStartTimeMs(0)
-    , mManagesContexts(false)
     , mBinderContextCheckFunc(nullptr)
     , mBinderContextUserData(nullptr)
     , mThreadPoolStarted(false)
     , mThreadPoolSeq(1)
-    , mMmapSize(mmap_size)
     , mCallRestriction(CallRestriction::NONE)
 {
     if (mDriverFD >= 0) {
         // mmap the binder, providing a chunk of virtual address space to receive transactions.
-        mVMStart = mmap(nullptr, mMmapSize, PROT_READ, MAP_PRIVATE | MAP_NORESERVE, mDriverFD, 0);
+        mVMStart = mmap(nullptr, BINDER_VM_SIZE, PROT_READ, MAP_PRIVATE | MAP_NORESERVE, mDriverFD, 0);
         if (mVMStart == MAP_FAILED) {
             // *sigh*
             ALOGE("Using %s failed: unable to mmap transaction memory.\n", mDriverName.c_str());
@@ -466,14 +372,14 @@ ProcessState::ProcessState(const char *driver, size_t mmap_size)
         }
     }
 
-    LOG_ALWAYS_FATAL_IF(mDriverFD < 0, "Binder driver could not be opened.  Terminating.");
+    LOG_ALWAYS_FATAL_IF(mDriverFD < 0, "Binder driver '%s' could not be opened.  Terminating.", driver);
 }
 
 ProcessState::~ProcessState()
 {
     if (mDriverFD >= 0) {
         if (mVMStart != MAP_FAILED) {
-            munmap(mVMStart, mMmapSize);
+            munmap(mVMStart, BINDER_VM_SIZE);
         }
         close(mDriverFD);
     }

@@ -68,16 +68,8 @@ SurfaceControl::~SurfaceControl()
 {
     // Avoid reparenting the server-side surface to null if we are not the owner of it,
     // meaning that we retrieved it from another process.
-    if (mClient != nullptr && mHandle != nullptr && mOwned) {
-        SurfaceComposerClient::doDropReferenceTransaction(mHandle, mClient->getClient());
-    }
-    release();
-}
-
-void SurfaceControl::destroy()
-{
-    if (isValid()) {
-        SurfaceComposerClient::Transaction().reparent(this, nullptr).apply();
+    if (mHandle != nullptr && mOwned) {
+        SurfaceComposerClient::doDropReferenceTransaction(mHandle);
     }
     release();
 }
@@ -190,8 +182,7 @@ void SurfaceControl::writeToParcel(Parcel* parcel)
     parcel->writeStrongBinder(IGraphicBufferProducer::asBinder(mGraphicBufferProducer));
 }
 
-sp<SurfaceControl> SurfaceControl::readFromParcel(Parcel* parcel)
-{
+sp<SurfaceControl> SurfaceControl::readFromParcel(const Parcel* parcel) {
     sp<IBinder> client = parcel->readStrongBinder();
     sp<IBinder> handle = parcel->readStrongBinder();
     if (client == nullptr || handle == nullptr)

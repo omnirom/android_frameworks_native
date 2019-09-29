@@ -52,11 +52,10 @@ public:
     void setDisplaySize(const ui::Size&) override;
     void setProtected(bool useProtected) override;
     status_t beginFrame(bool mustRecompose) override;
-    status_t prepareFrame() override;
+    void prepareFrame(bool usesClientComposition, bool usesDeviceComposition) override;
     sp<GraphicBuffer> dequeueBuffer(base::unique_fd* bufferFence) override;
     void queueBuffer(base::unique_fd&& readyFence) override;
     void onPresentDisplayCompleted() override;
-    void setViewportAndProjection() override;
     void flip() override;
 
     // Debugging

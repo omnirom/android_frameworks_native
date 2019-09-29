@@ -24,6 +24,10 @@ void OutputCompositionState::dump(std::string& out) const {
     dumpVal(out, "isEnabled", isEnabled);
     dumpVal(out, "isSecure", isSecure);
 
+    dumpVal(out, "usesClientComposition", usesClientComposition);
+    dumpVal(out, "usesDeviceComposition", usesDeviceComposition);
+    dumpVal(out, "flipClientTarget", flipClientTarget);
+
     dumpVal(out, "layerStack", layerStackId);
     dumpVal(out, "layerStackInternal", layerStackInternal);
 
@@ -44,6 +48,7 @@ void OutputCompositionState::dump(std::string& out) const {
     dumpVal(out, "renderIntent", toString(renderIntent), renderIntent);
     dumpVal(out, "dataspace", toString(dataspace), dataspace);
     dumpVal(out, "colorTransform", colorTransform);
+    dumpVal(out, "target dataspace", toString(targetDataspace), targetDataspace);
 
     out.append("\n");
 }
