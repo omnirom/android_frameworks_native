@@ -6943,13 +6943,24 @@ void SurfaceFlinger::setAllowedDisplayConfigsInternal(const sp<DisplayDevice>& d
     }
 
     ALOGV("Updating allowed configs");
-    mAllowedDisplayConfigs = DisplayConfigs(allowedConfigs.begin(), allowedConfigs.end());
+
+    std::vector<int32_t> displayConfigs;
+    for (int i = 0; i < allowedConfigs.size(); i++) {
+        displayConfigs.push_back(allowedConfigs.at(i));
+    }
+
+    // Update the allowed Display Configs.
+    mRefreshRateConfigs.getAllowedConfigs(getHwComposer().getConfigs(*display->getId()),
+                                          &displayConfigs);
+
+    mAllowedDisplayConfigs = DisplayConfigs(displayConfigs.begin(), displayConfigs.end());
 
     // Set the highest allowed config by iterating backwards on available refresh rates
     const auto& refreshRates = mRefreshRateConfigs.getRefreshRates();
     for (auto iter = refreshRates.crbegin(); iter != refreshRates.crend(); ++iter) {
         if (iter->second && isDisplayConfigAllowed(iter->second->configId)) {
             ALOGV("switching to config %d", iter->second->configId);
+            mRefreshRateConfigs.setActiveConfig(iter->second->configId);
             setDesiredActiveConfig(
                     {iter->first, iter->second->configId, Scheduler::ConfigEvent::Changed});
             break;

@@ -28,6 +28,7 @@
 #include <ui/GraphicBuffer.h>
 
 #include <android/configuration.h>
+#include <vendor/display/config/1.12/IDisplayConfig.h>
 
 #include <inttypes.h>
 #include <algorithm>
@@ -752,6 +753,15 @@ int32_t Display::getAttribute(hwc2_config_t configId, Attribute attribute)
 void Display::loadConfig(hwc2_config_t configId)
 {
     ALOGV("[%" PRIu64 "] loadConfig(%u)", mId, configId);
+    bool smart_panel = false;
+
+    if (mId == HWC_DISPLAY_PRIMARY) {
+        using vendor::display::config::V1_12::IDisplayConfig;
+        android::sp<IDisplayConfig> disp_config_v1_12 = IDisplayConfig::tryGetService();
+        if (disp_config_v1_12 != NULL) {
+            smart_panel = disp_config_v1_12->isSmartPanelConfig(mId, configId);
+        }
+    }
 
     auto config = Config::Builder(*this, configId)
             .setWidth(getAttribute(configId, Attribute::Width))
@@ -759,6 +769,7 @@ void Display::loadConfig(hwc2_config_t configId)
             .setVsyncPeriod(getAttribute(configId, Attribute::VsyncPeriod))
             .setDpiX(getAttribute(configId, Attribute::DpiX))
             .setDpiY(getAttribute(configId, Attribute::DpiY))
+            .setSmartPanel(smart_panel)
             .build();
     mConfigs.emplace(configId, std::move(config));
 }
