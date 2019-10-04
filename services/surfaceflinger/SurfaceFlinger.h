@@ -1256,7 +1256,7 @@ private:
     SmomoIntf* mSmoMo = nullptr;
     void *mSmoMoLibHandle = nullptr;
 
-    using CreateSmoMoFuncPtr = std::add_pointer<bool(uint16_t, SmomoIntf**)>::type;
+    using CreateSmoMoFuncPtr = std::add_pointer<SmomoIntf*()>::type;
     using DestroySmoMoFuncPtr = std::add_pointer<void(SmomoIntf*)>::type;
     CreateSmoMoFuncPtr mSmoMoCreateFunc;
     DestroySmoMoFuncPtr mSmoMoDestroyFunc;
