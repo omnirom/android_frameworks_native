@@ -1822,7 +1822,13 @@ void SurfaceFlinger::signalRefresh() {
 }
 
 nsecs_t SurfaceFlinger::getVsyncPeriod() const {
-    const auto displayId = getInternalDisplayIdLocked();
+    auto displayId = getInternalDisplayIdLocked();
+    if (mNextVsyncSource) {
+        displayId = mNextVsyncSource->getId();
+    } else if (mActiveVsyncSource) {
+        displayId = mActiveVsyncSource->getId();
+    }
+
     if (!displayId || !getHwComposer().isConnected(*displayId)) {
         return 0;
     }
@@ -1917,6 +1923,15 @@ void SurfaceFlinger::onHotplugReceived(int32_t sequenceId, hal::HWDisplayId hwcD
     ConditionalLock lock(mStateLock, std::this_thread::get_id() != mMainThreadId);
 
     mPendingHotplugEvents.emplace_back(HotplugEvent{hwcDisplayId, connection});
+
+    if (connection != hal::Connection::CONNECTED) {
+        const std::optional<DisplayIdentificationInfo> info =
+           getHwComposer().onHotplug(hwcDisplayId, connection);
+        if (info) {
+            mDisplaysList.remove(getDisplayDeviceLocked(mPhysicalDisplayTokens[info->id]));
+        }
+        mNextVsyncSource = getVsyncSource();
+    }
 
     if (std::this_thread::get_id() == mMainThreadId) {
         // Process all pending hot plug events immediately if we are on the main thread.
@@ -2600,9 +2615,13 @@ void SurfaceFlinger::postComposition()
 
     getBE().mDisplayTimeline.updateSignalTimes();
     mPreviousPresentFences[1] = mPreviousPresentFences[0];
-    mPreviousPresentFences[0] = mActiveVsyncSource
-            ? getHwComposer().getPresentFence(*mActiveVsyncSource->getId())
-            : Fence::NO_FENCE;
+
+    sp<DisplayDevice> vSyncSource = mNextVsyncSource;
+    if (mNextVsyncSource == NULL) {
+        vSyncSource = mActiveVsyncSource;
+    }
+    mPreviousPresentFences[0] = vSyncSource ?
+        getHwComposer().getPresentFence(*vSyncSource->getId()) : Fence::NO_FENCE;
     auto presentFenceTime = std::make_shared<FenceTime>(mPreviousPresentFences[0]);
     getBE().mDisplayTimeline.push(presentFenceTime);
 
@@ -2851,6 +2870,7 @@ void SurfaceFlinger::updateVsyncSource()
     } else if ((mNextVsyncSource != NULL) &&
         (mActiveVsyncSource != NULL)) {
         // Switch vsync to the new source
+        mScheduler->disableHardwareVsync(true);
         mScheduler->resyncToHardwareVsync(true, getVsyncPeriod());
     }
 }
@@ -2942,9 +2962,8 @@ void SurfaceFlinger::processDisplayHotplugEventsLocked() {
                 mInterceptor->saveDisplayDeletion(state.sequenceId);
                 mCurrentState.displays.removeItemsAt(index);
             }
-            mDisplaysList.remove(getDisplayDeviceLocked(it->second));
-            updateVsyncSource();
             mPhysicalDisplayTokens.erase(it);
+            updateVsyncSource();
             if (mInternalPresentationDisplays && isInternalDisplay) {
                 // Update mInternalPresentationDisplays flag
                 updateInternalDisplaysPresentationMode();
@@ -4827,7 +4846,8 @@ void SurfaceFlinger::setPowerModeInternal(const sp<DisplayDevice>& display, hal:
                 mScheduler->onScreenAcquired(mAppConnectionHandle);
                 mScheduler->resyncToHardwareVsync(true, getVsyncPeriod());
             }
-        } else {
+        } else if ((mPluggableVsyncPrioritized && (displayId != getInternalDisplayIdLocked())) ||
+                    displayId == getInternalDisplayIdLocked()) {
             updateVsyncSource();
         }
 
