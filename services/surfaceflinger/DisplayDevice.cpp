@@ -64,10 +64,7 @@ DisplayDevice::DisplayDevice(DisplayDeviceCreationArgs&& args)
         mIsVirtual(args.isVirtual),
         mOrientation(),
         mActiveConfig(0),
-        mIsPrimary(args.isPrimary),
-        mIsPowerModeOverride(false),
-        mIsAnimating(false),
-        mIsDisplayBuiltInType(false) {
+        mIsPrimary(args.isPrimary) {
     mCompositionDisplay->createRenderSurface(
             compositionengine::RenderSurfaceCreationArgs{ANativeWindow_getWidth(
                                                                  args.nativeWindow.get()),
@@ -120,16 +117,6 @@ uint32_t DisplayDevice::getPageFlipCount() const {
 }
 
 // ----------------------------------------------------------------------------
-
-void DisplayDevice::setVisibleLayersSortedByZ(const Vector< sp<Layer> >& layers) {
-    mVisibleLayersSortedByZ = layers;
-}
-
-const Vector< sp<Layer> >& DisplayDevice::getVisibleLayersSortedByZ() const {
-    return mVisibleLayersSortedByZ;
-}
-
-// ----------------------------------------------------------------------------
 void DisplayDevice::setPowerMode(int mode) {
     mPowerMode = mode;
     getCompositionDisplay()->setCompositionEnabled(mPowerMode != HWC_POWER_MODE_OFF);
@@ -150,30 +137,6 @@ void DisplayDevice::setActiveConfig(int mode) {
 
 int DisplayDevice::getActiveConfig()  const {
     return mActiveConfig;
-}
-
-void DisplayDevice::setPowerModeOverrideConfig(bool supported) {
-    mIsPowerModeOverride = supported;
-}
-
-bool DisplayDevice::getPowerModeOverrideConfig() const {
-    return mIsPowerModeOverride;
-}
-
-void DisplayDevice::setAnimating(bool isAnimating) {
-    mIsAnimating = isAnimating;
-}
-
-bool DisplayDevice::getAnimating() const {
-    return mIsAnimating;
-}
-
-void DisplayDevice::setIsDisplayBuiltInType(bool isBuiltInType) {
-    mIsDisplayBuiltInType = isBuiltInType;
-}
-
-bool DisplayDevice::getIsDisplayBuiltInType() const {
-    return mIsDisplayBuiltInType;
 }
 
 // ----------------------------------------------------------------------------
@@ -318,7 +281,6 @@ void DisplayDevice::dump(std::string& result) const {
     result.append("   ");
     StringAppendF(&result, "powerMode=%d, ", mPowerMode);
     StringAppendF(&result, "activeConfig=%d, ", mActiveConfig);
-    StringAppendF(&result, "numLayers=%zu\n", mVisibleLayersSortedByZ.size());
     getCompositionDisplay()->dump(result);
 }
 

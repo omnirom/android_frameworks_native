@@ -23,6 +23,7 @@
 #include <utils/Errors.h>
 
 #include <gui/IGraphicBufferProducer.h>
+#include <gui/ITransactionCompletedListener.h>
 #include <math/mat4.h>
 
 #ifndef NO_INPUT
@@ -71,7 +72,7 @@ struct layer_state_t {
         eCropChanged_legacy = 0x00000100,
         eDeferTransaction_legacy = 0x00000200,
         eOverrideScalingModeChanged = 0x00000400,
-        eGeometryAppliesWithResize = 0x00000800,
+        // AVAILABLE 0x00000800,
         eReparentChildren = 0x00001000,
         eDetachChildren = 0x00002000,
         eRelativeLayerChanged = 0x00004000,
@@ -123,7 +124,6 @@ struct layer_state_t {
             surfaceDamageRegion(),
             api(-1),
             colorTransform(mat4()),
-            hasListenerCallbacks(false),
             bgColorAlpha(0),
             bgColorDataspace(ui::Dataspace::UNKNOWN),
             colorSpaceAgnostic(false) {
@@ -186,7 +186,6 @@ struct layer_state_t {
     sp<NativeHandle> sidebandStream;
     mat4 colorTransform;
 
-    bool hasListenerCallbacks;
 #ifndef NO_INPUT
     InputWindowInfo inputInfo;
 #endif
@@ -203,6 +202,8 @@ struct layer_state_t {
     // A color space agnostic layer means the color of this layer can be
     // interpreted in any color space.
     bool colorSpaceAgnostic;
+
+    std::vector<ListenerCallbacks> listeners;
 };
 
 struct ComposerState {

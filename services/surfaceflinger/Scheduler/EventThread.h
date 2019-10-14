@@ -216,8 +216,6 @@ private:
     State mState GUARDED_BY(mMutex) = State::Idle;
 
     static const char* toCString(State);
-    void *mDolphinHandle = nullptr;
-    bool (*mDolphinCheck)(const char* name) = nullptr;
 };
 
 // ---------------------------------------------------------------------------

@@ -16,8 +16,10 @@
 
 #include <android-base/stringprintf.h>
 #include <compositionengine/CompositionEngine.h>
+#include <compositionengine/CompositionRefreshArgs.h>
 #include <compositionengine/DisplayCreationArgs.h>
 #include <compositionengine/DisplaySurface.h>
+#include <compositionengine/LayerFE.h>
 #include <compositionengine/impl/Display.h>
 #include <compositionengine/impl/DisplayColorProfile.h>
 #include <compositionengine/impl/DumpHelpers.h>
@@ -68,24 +70,28 @@ void Display::disconnect() {
     mId.reset();
 }
 
-void Display::setColorTransform(const mat4& transform) {
-    Output::setColorTransform(transform);
+void Display::setColorTransform(const compositionengine::CompositionRefreshArgs& args) {
+    Output::setColorTransform(args);
+
+    if (!mId || CC_LIKELY(!args.colorTransformMatrix)) {
+        return;
+    }
 
     auto& hwc = getCompositionEngine().getHwComposer();
-    status_t result = hwc.setColorTransform(*mId, transform);
+    status_t result = hwc.setColorTransform(*mId, *args.colorTransformMatrix);
     ALOGE_IF(result != NO_ERROR, "Failed to set color transform on display \"%s\": %d",
              mId ? to_string(*mId).c_str() : "", result);
 }
 
-void Display::setColorMode(ui::ColorMode mode, ui::Dataspace dataspace,
-                           ui::RenderIntent renderIntent,
-                           ui::Dataspace colorSpaceAgnosticDataspace) {
-    ui::Dataspace targetDataspace =
-            getDisplayColorProfile()->getTargetDataspace(mode, dataspace,
-                                                         colorSpaceAgnosticDataspace);
+void Display::setColorProfile(const ColorProfile& colorProfile) {
+    const ui::Dataspace targetDataspace =
+            getDisplayColorProfile()->getTargetDataspace(colorProfile.mode, colorProfile.dataspace,
+                                                         colorProfile.colorSpaceAgnosticDataspace);
 
-    if (mode == getState().colorMode && dataspace == getState().dataspace &&
-        renderIntent == getState().renderIntent && targetDataspace == getState().targetDataspace) {
+    if (colorProfile.mode == getState().colorMode &&
+        colorProfile.dataspace == getState().dataspace &&
+        colorProfile.renderIntent == getState().renderIntent &&
+        targetDataspace == getState().targetDataspace) {
         return;
     }
 
@@ -94,10 +100,10 @@ void Display::setColorMode(ui::ColorMode mode, ui::Dataspace dataspace,
         return;
     }
 
-    Output::setColorMode(mode, dataspace, renderIntent, colorSpaceAgnosticDataspace);
+    Output::setColorProfile(colorProfile);
 
     auto& hwc = getCompositionEngine().getHwComposer();
-    hwc.setActiveColorMode(*mId, mode, renderIntent);
+    hwc.setActiveColorMode(*mId, colorProfile.mode, colorProfile.renderIntent);
 }
 
 void Display::dump(std::string& out) const {
@@ -126,6 +132,63 @@ void Display::createDisplayColorProfile(DisplayColorProfileCreationArgs&& args) 
 void Display::createRenderSurface(RenderSurfaceCreationArgs&& args) {
     setRenderSurface(compositionengine::impl::createRenderSurface(getCompositionEngine(), *this,
                                                                   std::move(args)));
+}
+
+std::unique_ptr<compositionengine::OutputLayer> Display::createOutputLayer(
+        const std::shared_ptr<compositionengine::Layer>& layer,
+        const sp<compositionengine::LayerFE>& layerFE) const {
+    auto result = Output::createOutputLayer(layer, layerFE);
+
+    if (result && mId) {
+        auto& hwc = getCompositionEngine().getHwComposer();
+        auto displayId = *mId;
+        // Note: For the moment we ensure it is safe to take a reference to the
+        // HWComposer implementation by destroying all the OutputLayers (and
+        // hence the HWC2::Layers they own) before setting a new HWComposer. See
+        // for example SurfaceFlinger::updateVrFlinger().
+        // TODO(b/121291683): Make this safer.
+        auto hwcLayer = std::shared_ptr<HWC2::Layer>(hwc.createLayer(displayId),
+                                                     [&hwc, displayId](HWC2::Layer* layer) {
+                                                         hwc.destroyLayer(displayId, layer);
+                                                     });
+        ALOGE_IF(!hwcLayer, "Failed to create a HWC layer for a HWC supported display %s",
+                 getName().c_str());
+        result->setHwcLayer(std::move(hwcLayer));
+    }
+    return result;
+}
+
+void Display::setReleasedLayers(const compositionengine::CompositionRefreshArgs& refreshArgs) {
+    Output::setReleasedLayers(refreshArgs);
+
+    if (!mId || refreshArgs.layersWithQueuedFrames.empty()) {
+        return;
+    }
+
+    // For layers that are being removed from a HWC display, and that have
+    // queued frames, add them to a a list of released layers so we can properly
+    // set a fence.
+    compositionengine::Output::ReleasedLayers releasedLayers;
+
+    // Any non-null entries in the current list of layers are layers that are no
+    // longer going to be visible
+    for (auto& layer : getOutputLayersOrderedByZ()) {
+        if (!layer) {
+            continue;
+        }
+
+        sp<compositionengine::LayerFE> layerFE(&layer->getLayerFE());
+        const bool hasQueuedFrames =
+                std::find(refreshArgs.layersWithQueuedFrames.cbegin(),
+                          refreshArgs.layersWithQueuedFrames.cend(),
+                          &layer->getLayer()) != refreshArgs.layersWithQueuedFrames.cend();
+
+        if (hasQueuedFrames) {
+            releasedLayers.emplace_back(layerFE);
+        }
+    }
+
+    setReleasedLayers(std::move(releasedLayers));
 }
 
 void Display::chooseCompositionStrategy() {
@@ -257,6 +320,21 @@ void Display::setExpensiveRenderingExpected(bool enabled) {
     if (mPowerAdvisor && mId) {
         mPowerAdvisor->setExpensiveRenderingExpected(*mId, enabled);
     }
+}
+
+void Display::finishFrame(const compositionengine::CompositionRefreshArgs& refreshArgs) {
+    // We only need to actually compose the display if:
+    // 1) It is being handled by hardware composer, which may need this to
+    //    keep its virtual display state machine in sync, or
+    // 2) There is work to be done (the dirty region isn't empty)
+    if (!mId) {
+        if (getDirtyRegion(refreshArgs.repaintEverything).isEmpty()) {
+            ALOGV("Skipping display composition");
+            return;
+        }
+    }
+
+    impl::Output::finishFrame(refreshArgs);
 }
 
 } // namespace android::compositionengine::impl

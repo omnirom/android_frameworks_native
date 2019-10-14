@@ -18,9 +18,9 @@
 
 #include <compositionengine/Display.h>
 #include <compositionengine/Layer.h>
+#include <compositionengine/LayerFECompositionState.h>
 #include <compositionengine/OutputLayer.h>
 #include <compositionengine/impl/CompositionEngine.h>
-#include <compositionengine/impl/LayerCompositionState.h>
 #include <compositionengine/impl/OutputLayerCompositionState.h>
 
 #include "BufferQueueLayer.h"
@@ -32,12 +32,12 @@
 #include "Layer.h"
 #include "NativeWindowSurface.h"
 #include "Scheduler/MessageQueue.h"
+#include "Scheduler/RefreshRateConfigs.h"
 #include "StartPropertySetThread.h"
 #include "SurfaceFlinger.h"
 #include "SurfaceFlingerFactory.h"
 #include "SurfaceInterceptor.h"
 #include "TestableScheduler.h"
-#include "TimeStats/TimeStats.h"
 
 namespace android {
 
@@ -61,7 +61,7 @@ class Factory final : public surfaceflinger::Factory {
 public:
     ~Factory() = default;
 
-    std::unique_ptr<DispSync> createDispSync(const char*, bool, int64_t) override {
+    std::unique_ptr<DispSync> createDispSync(const char*, bool) override {
         // TODO: Use test-fixture controlled factory
         return nullptr;
     }
@@ -151,11 +151,6 @@ public:
         return nullptr;
     }
 
-    std::shared_ptr<TimeStats> createTimeStats() override {
-        // TODO: Use test-fixture controlled factory
-        return std::make_shared<android::impl::TimeStats>();
-    }
-
     using CreateBufferQueueFunction =
             std::function<void(sp<IGraphicBufferProducer>* /* outProducer */,
                                sp<IGraphicBufferConsumer>* /* outConsumer */,
@@ -194,12 +189,22 @@ public:
                         std::unique_ptr<EventControlThread> eventControlThread,
                         std::unique_ptr<EventThread> appEventThread,
                         std::unique_ptr<EventThread> sfEventThread) {
+        std::vector<scheduler::RefreshRateConfigs::InputConfig> configs{{/*hwcId=*/0, 16666667}};
+        mFlinger->mRefreshRateConfigs =
+                std::make_unique<scheduler::RefreshRateConfigs>(/*refreshRateSwitching=*/false,
+                                                                configs, /*currentConfig=*/0);
+        mFlinger->mRefreshRateStats =
+                std::make_unique<scheduler::RefreshRateStats>(*mFlinger->mRefreshRateConfigs,
+                                                              *mFlinger->mTimeStats,
+                                                              /*currentConfig=*/0,
+                                                              /*powerMode=*/HWC_POWER_MODE_OFF);
+
         mScheduler =
                 new TestableScheduler(std::move(primaryDispSync), std::move(eventControlThread),
-                                      mFlinger->mRefreshRateConfigs);
+                                      *mFlinger->mRefreshRateConfigs);
 
-        mFlinger->mAppConnectionHandle = mScheduler->addConnection(std::move(appEventThread));
-        mFlinger->mSfConnectionHandle = mScheduler->addConnection(std::move(sfEventThread));
+        mFlinger->mAppConnectionHandle = mScheduler->createConnection(std::move(appEventThread));
+        mFlinger->mSfConnectionHandle = mScheduler->createConnection(std::move(sfEventThread));
 
         mFlinger->mScheduler.reset(mScheduler);
         mFlinger->mVSyncModulator.emplace(*mScheduler, mFlinger->mAppConnectionHandle,
@@ -230,7 +235,7 @@ public:
     void setLayerSidebandStream(sp<Layer> layer, sp<NativeHandle> sidebandStream) {
         layer->mDrawingState.sidebandStream = sidebandStream;
         layer->mSidebandStream = sidebandStream;
-        layer->getCompositionLayer()->editState().frontEnd.sidebandStream = sidebandStream;
+        layer->getCompositionLayer()->editFEState().sidebandStream = sidebandStream;
     }
 
     void setLayerCompositionType(sp<Layer> layer, HWC2::Composition type) {

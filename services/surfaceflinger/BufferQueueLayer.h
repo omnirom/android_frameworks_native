@@ -46,8 +46,6 @@ public:
 
     std::vector<OccupancyTracker::Segment> getOccupancyHistory(bool forceFlush) override;
 
-    bool getTransformToDisplayInverse() const override;
-
     // If a buffer was replaced this frame, release the former buffer
     void releasePendingBuffer(nsecs_t dequeueReadyTime) override;
 
@@ -66,19 +64,6 @@ public:
     bool framePresentTimeIsCurrent(nsecs_t expectedPresentTime) const override;
 
 private:
-    nsecs_t getDesiredPresentTime() override;
-    std::shared_ptr<FenceTime> getCurrentFenceTime() const override;
-
-    void getDrawingTransformMatrix(float *matrix) override;
-    uint32_t getDrawingTransform() const override;
-    ui::Dataspace getDrawingDataSpace() const override;
-    Rect getDrawingCrop() const override;
-    uint32_t getDrawingScalingMode() const override;
-    Region getDrawingSurfaceDamage() const override;
-    const HdrMetadata& getDrawingHdrMetadata() const override;
-    int getDrawingApi() const override;
-    PixelFormat getPixelFormat() const override;
-
     uint64_t getFrameNumber(nsecs_t expectedPresentTime) const override;
 
     bool getAutoRefresh() const override;
@@ -87,8 +72,6 @@ private:
     bool latchSidebandStream(bool& recomputeVisibleRegions) override;
 
     bool hasFrameUpdate() const override;
-
-    void setFilteringEnabled(bool enabled) override;
 
     status_t bindTextureImage() override;
     status_t updateTexImage(bool& recomputeVisibleRegions, nsecs_t latchTime,
@@ -103,6 +86,8 @@ private:
     // Interface implementation for BufferLayerConsumer::ContentsChangedListener
     // -----------------------------------------------------------------------
 protected:
+    void gatherBufferInfo() override;
+
     void onFrameAvailable(const BufferItem& item) override;
     void onFrameReplaced(const BufferItem& item) override;
     void onSidebandStreamChanged() override;
@@ -128,6 +113,9 @@ private:
     uint64_t mPreviousFrameNumber{0};
     bool mUpdateTexImageFailed{false};
 
+    uint64_t mPreviousBufferId = 0;
+    uint64_t mPreviousReleasedFrameNumber = 0;
+
     // Local copy of the queued contents of the incoming BufferQueue
     mutable Mutex mQueueItemLock;
     Condition mQueueItemCondition;
@@ -135,13 +123,10 @@ private:
     std::atomic<uint64_t> mLastFrameNumberReceived{0};
 
     bool mAutoRefresh{false};
-    int mActiveBufferSlot{BufferQueue::INVALID_BUFFER_SLOT};
 
     // thread-safe
     std::atomic<int32_t> mQueuedFrames{0};
     std::atomic<bool> mSidebandStreamChanged{false};
-
-    nsecs_t mLastTimeStamp = -1;
 };
 
 } // namespace android

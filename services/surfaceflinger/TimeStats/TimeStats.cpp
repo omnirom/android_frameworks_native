@@ -34,6 +34,14 @@ namespace android {
 
 namespace impl {
 
+TimeStats::TimeStats() {
+    // Temporarily enable TimeStats by default. Telemetry is disabled while
+    // we move onto statsd, so TimeStats is currently not exercised at all
+    // during testing.
+    // TODO: remove this.
+    enable();
+}
+
 void TimeStats::parseArgs(bool asProto, const Vector<String16>& args, std::string& result) {
     ATRACE_CALL();
 
@@ -407,13 +415,9 @@ void TimeStats::setPresentFence(int32_t layerID, uint64_t frameNumber,
 }
 
 void TimeStats::onDestroy(int32_t layerID) {
-    if (!mEnabled.load()) return;
-
     ATRACE_CALL();
     ALOGV("[%d]-onDestroy", layerID);
-
     std::lock_guard<std::mutex> lock(mMutex);
-    if (!mTimeStatsTracker.count(layerID)) return;
     mTimeStatsTracker.erase(layerID);
 }
 

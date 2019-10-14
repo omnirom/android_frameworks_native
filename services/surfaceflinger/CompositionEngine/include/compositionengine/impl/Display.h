@@ -40,12 +40,17 @@ public:
 
     // compositionengine::Output overrides
     void dump(std::string&) const override;
-    void setColorTransform(const mat4&) override;
-    void setColorMode(ui::ColorMode, ui::Dataspace, ui::RenderIntent, ui::Dataspace) override;
+    std::unique_ptr<compositionengine::OutputLayer> createOutputLayer(
+            const std::shared_ptr<Layer>&, const sp<LayerFE>&) const override;
+    using compositionengine::impl::Output::setReleasedLayers;
+    void setReleasedLayers(const compositionengine::CompositionRefreshArgs&) override;
+    void setColorTransform(const compositionengine::CompositionRefreshArgs&) override;
+    void setColorProfile(const ColorProfile&) override;
     void chooseCompositionStrategy() override;
     bool getSkipColorTransform() const override;
     compositionengine::Output::FrameFences presentAndGetFrameFences() override;
     void setExpensiveRenderingExpected(bool) override;
+    void finishFrame(const compositionengine::CompositionRefreshArgs&) override;
 
     // compositionengine::Display overrides
     const std::optional<DisplayId>& getId() const override;

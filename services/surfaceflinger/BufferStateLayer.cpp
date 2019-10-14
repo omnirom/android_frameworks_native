@@ -19,19 +19,18 @@
 #define LOG_TAG "BufferStateLayer"
 #define ATRACE_TAG ATRACE_TAG_GRAPHICS
 
+#include "BufferStateLayer.h"
+
 #include <limits>
 
-#include <compositionengine/Display.h>
 #include <compositionengine/Layer.h>
-#include <compositionengine/OutputLayer.h>
-#include <compositionengine/impl/LayerCompositionState.h>
-#include <compositionengine/impl/OutputLayerCompositionState.h>
+#include <compositionengine/LayerFECompositionState.h>
 #include <gui/BufferQueue.h>
 #include <private/gui/SyncFeatures.h>
 #include <renderengine/Image.h>
 
-#include "BufferStateLayer.h"
 #include "ColorLayer.h"
+#include "FrameTracer/FrameTracer.h"
 #include "TimeStats/TimeStats.h"
 
 namespace android {
@@ -52,12 +51,12 @@ BufferStateLayer::BufferStateLayer(const LayerCreationArgs& args)
 }
 
 BufferStateLayer::~BufferStateLayer() {
-    if (mActiveBuffer != nullptr) {
-        // Ensure that mActiveBuffer is uncached from RenderEngine here, as
+    if (mBufferInfo.mBuffer != nullptr) {
+        // Ensure that mBuffer is uncached from RenderEngine here, as
         // RenderEngine may have been using the buffer as an external texture
         // after the client uncached the buffer.
         auto& engine(mFlinger->getRenderEngine());
-        engine.unbindExternalTextureBuffer(mActiveBuffer->getId());
+        engine.unbindExternalTextureBuffer(mBufferInfo.mBuffer->getId());
     }
 }
 
@@ -87,6 +86,14 @@ void BufferStateLayer::onLayerDisplayed(const sp<Fence>& releaseFence) {
             break;
         }
     }
+
+    // Prevent tracing the same release multiple times.
+    if (mPreviousFrameNumber != mPreviousReleasedFrameNumber) {
+        mFlinger->mFrameTracer->traceFence(getSequence(), mPreviousBufferId, mPreviousFrameNumber,
+                                           std::make_shared<FenceTime>(releaseFence),
+                                           FrameTracer::FrameEvent::RELEASE_FENCE);
+        mPreviousReleasedFrameNumber = mPreviousFrameNumber;
+    }
 }
 
 void BufferStateLayer::setTransformHint(uint32_t /*orientation*/) const {
@@ -114,10 +121,6 @@ bool BufferStateLayer::willPresentCurrentTransaction() const {
     return getSidebandStreamChanged() || getAutoRefresh() ||
             (mCurrentState.modified &&
              (mCurrentState.buffer != nullptr || mCurrentState.bgColorLayer != nullptr));
-}
-
-bool BufferStateLayer::getTransformToDisplayInverse() const {
-    return mCurrentState.transformToDisplayInverse;
 }
 
 void BufferStateLayer::pushPendingState() {
@@ -226,7 +229,11 @@ bool BufferStateLayer::setBuffer(const sp<GraphicBuffer>& buffer, nsecs_t postTi
     mCurrentState.modified = true;
     setTransactionFlags(eTransactionNeeded);
 
-    mFlinger->mTimeStats->setPostTime(getSequence(), mFrameNumber, getName().c_str(), postTime);
+    const int32_t layerID = getSequence();
+    mFlinger->mTimeStats->setPostTime(layerID, mFrameNumber, getName().c_str(), postTime);
+    mFlinger->mFrameTracer->traceNewLayer(layerID, getName().c_str());
+    mFlinger->mFrameTracer->traceTimestamp(layerID, buffer->getId(), mFrameNumber, postTime,
+                                           FrameTracer::FrameEvent::POST);
     mCurrentState.desiredPresentTime = desiredPresentTime;
 
     if (mFlinger->mUseSmart90ForVideo) {
@@ -387,75 +394,6 @@ bool BufferStateLayer::framePresentTimeIsCurrent(nsecs_t expectedPresentTime) co
     return mCurrentState.desiredPresentTime <= expectedPresentTime;
 }
 
-nsecs_t BufferStateLayer::getDesiredPresentTime() {
-    return getDrawingState().desiredPresentTime;
-}
-
-std::shared_ptr<FenceTime> BufferStateLayer::getCurrentFenceTime() const {
-    return std::make_shared<FenceTime>(getDrawingState().acquireFence);
-}
-
-void BufferStateLayer::getDrawingTransformMatrix(float *matrix) {
-    std::copy(std::begin(mTransformMatrix), std::end(mTransformMatrix), matrix);
-}
-
-uint32_t BufferStateLayer::getDrawingTransform() const {
-    return getDrawingState().transform;
-}
-
-ui::Dataspace BufferStateLayer::getDrawingDataSpace() const {
-    return getDrawingState().dataspace;
-}
-
-// Crop that applies to the buffer
-Rect BufferStateLayer::getDrawingCrop() const {
-    const State& s(getDrawingState());
-
-    if (s.crop.isEmpty() && s.buffer) {
-        return s.buffer->getBounds();
-    } else if (s.buffer) {
-        Rect crop = s.crop;
-        crop.left = std::max(crop.left, 0);
-        crop.top = std::max(crop.top, 0);
-        uint32_t bufferWidth = s.buffer->getWidth();
-        uint32_t bufferHeight = s.buffer->getHeight();
-        if (bufferHeight <= std::numeric_limits<int32_t>::max() &&
-            bufferWidth <= std::numeric_limits<int32_t>::max()) {
-            crop.right = std::min(crop.right, static_cast<int32_t>(bufferWidth));
-            crop.bottom = std::min(crop.bottom, static_cast<int32_t>(bufferHeight));
-        }
-        if (!crop.isValid()) {
-            // Crop rect is out of bounds, return whole buffer
-            return s.buffer->getBounds();
-        }
-        return crop;
-    }
-    return s.crop;
-}
-
-uint32_t BufferStateLayer::getDrawingScalingMode() const {
-    return NATIVE_WINDOW_SCALING_MODE_SCALE_TO_WINDOW;
-}
-
-Region BufferStateLayer::getDrawingSurfaceDamage() const {
-    return getDrawingState().surfaceDamageRegion;
-}
-
-const HdrMetadata& BufferStateLayer::getDrawingHdrMetadata() const {
-    return getDrawingState().hdrMetadata;
-}
-
-int BufferStateLayer::getDrawingApi() const {
-    return getDrawingState().api;
-}
-
-PixelFormat BufferStateLayer::getPixelFormat() const {
-    if (!mActiveBuffer) {
-        return PIXEL_FORMAT_NONE;
-    }
-    return mActiveBuffer->format;
-}
-
 uint64_t BufferStateLayer::getFrameNumber(nsecs_t /*expectedPresentTime*/) const {
     return mFrameNumber;
 }
@@ -475,7 +413,7 @@ bool BufferStateLayer::latchSidebandStream(bool& recomputeVisibleRegions) {
         // mSidebandStreamChanged was true
         LOG_ALWAYS_FATAL_IF(!getCompositionLayer());
         mSidebandStream = s.sidebandStream;
-        getCompositionLayer()->editState().frontEnd.sidebandStream = mSidebandStream;
+        getCompositionLayer()->editFEState().sidebandStream = mSidebandStream;
         if (mSidebandStream != nullptr) {
             setTransactionFlags(eTransactionNeeded);
             mFlinger->setTransactionFlags(eTraversalNeeded);
@@ -490,11 +428,6 @@ bool BufferStateLayer::latchSidebandStream(bool& recomputeVisibleRegions) {
 bool BufferStateLayer::hasFrameUpdate() const {
     const State& c(getCurrentState());
     return mCurrentStateModified && (c.buffer != nullptr || c.bgColorLayer != nullptr);
-}
-
-void BufferStateLayer::setFilteringEnabled(bool enabled) {
-    GLConsumer::computeTransformMatrix(mTransformMatrix.data(), mActiveBuffer, mCurrentCrop,
-                                       mCurrentTransform, enabled);
 }
 
 status_t BufferStateLayer::bindTextureImage() {
@@ -557,12 +490,18 @@ status_t BufferStateLayer::updateTexImage(bool& /*recomputeVisibleRegions*/, nse
         status_t err = bindTextureImage();
         if (err != NO_ERROR) {
             mFlinger->mTimeStats->onDestroy(layerID);
+            mFlinger->mFrameTracer->onDestroy(layerID);
             return BAD_VALUE;
         }
     }
 
-    mFlinger->mTimeStats->setAcquireFence(layerID, mFrameNumber, getCurrentFenceTime());
+    const uint64_t bufferID = getCurrentBufferId();
+    mFlinger->mTimeStats->setAcquireFence(layerID, mFrameNumber, mBufferInfo.mFenceTime);
+    mFlinger->mFrameTracer->traceFence(layerID, bufferID, mFrameNumber, mBufferInfo.mFenceTime,
+                                       FrameTracer::FrameEvent::ACQUIRE_FENCE);
     mFlinger->mTimeStats->setLatchTime(layerID, mFrameNumber, latchTime);
+    mFlinger->mFrameTracer->traceTimestamp(layerID, bufferID, mFrameNumber, latchTime,
+                                           FrameTracer::FrameEvent::LATCH);
 
     mCurrentStateModified = false;
 
@@ -576,16 +515,18 @@ status_t BufferStateLayer::updateActiveBuffer() {
         return BAD_VALUE;
     }
 
-    mActiveBuffer = s.buffer;
-    mActiveBufferFence = s.acquireFence;
-    auto& layerCompositionState = getCompositionLayer()->editState().frontEnd;
-    layerCompositionState.buffer = mActiveBuffer;
+    mPreviousBufferId = getCurrentBufferId();
+    mBufferInfo.mBuffer = s.buffer;
+    mBufferInfo.mFence = s.acquireFence;
+    auto& layerCompositionState = getCompositionLayer()->editFEState();
+    layerCompositionState.buffer = mBufferInfo.mBuffer;
 
     return NO_ERROR;
 }
 
 status_t BufferStateLayer::updateFrameNumber(nsecs_t /*latchTime*/) {
     // TODO(marissaw): support frame history events
+    mPreviousFrameNumber = mCurrentFrameNumber;
     mCurrentFrameNumber = mFrameNumber;
     return NO_ERROR;
 }
@@ -597,11 +538,9 @@ void BufferStateLayer::latchPerFrameState(
         return;
     }
 
-    const State& s(getDrawingState());
-
-    compositionState.buffer = s.buffer;
-    compositionState.bufferSlot = mHwcSlotGenerator->getHwcCacheSlot(s.clientCacheId);
-    compositionState.acquireFence = s.acquireFence;
+    compositionState.buffer = mBufferInfo.mBuffer;
+    compositionState.bufferSlot = mBufferInfo.mBufferSlot;
+    compositionState.acquireFence = mBufferInfo.mFence;
 
     mFrameNumber++;
 }
@@ -686,4 +625,47 @@ void BufferStateLayer::HwcSlotGenerator::eraseBufferLocked(const client_cache_t&
     mFreeHwcCacheSlots.push(hwcCacheSlot);
     mCachedBuffers.erase(clientCacheId);
 }
+
+void BufferStateLayer::gatherBufferInfo() {
+    const State& s(getDrawingState());
+
+    mBufferInfo.mDesiredPresentTime = s.desiredPresentTime;
+    mBufferInfo.mFenceTime = std::make_shared<FenceTime>(s.acquireFence);
+    mBufferInfo.mFence = s.acquireFence;
+    mBufferInfo.mTransform = s.transform;
+    mBufferInfo.mDataspace = translateDataspace(s.dataspace);
+    mBufferInfo.mCrop = computeCrop(s);
+    mBufferInfo.mScaleMode = NATIVE_WINDOW_SCALING_MODE_SCALE_TO_WINDOW;
+    mBufferInfo.mSurfaceDamage = s.surfaceDamageRegion;
+    mBufferInfo.mHdrMetadata = s.hdrMetadata;
+    mBufferInfo.mApi = s.api;
+    mBufferInfo.mPixelFormat =
+            !mBufferInfo.mBuffer ? PIXEL_FORMAT_NONE : mBufferInfo.mBuffer->format;
+    mBufferInfo.mTransformToDisplayInverse = s.transformToDisplayInverse;
+    mBufferInfo.mBufferSlot = mHwcSlotGenerator->getHwcCacheSlot(s.clientCacheId);
+}
+
+Rect BufferStateLayer::computeCrop(const State& s) {
+    if (s.crop.isEmpty() && s.buffer) {
+        return s.buffer->getBounds();
+    } else if (s.buffer) {
+        Rect crop = s.crop;
+        crop.left = std::max(crop.left, 0);
+        crop.top = std::max(crop.top, 0);
+        uint32_t bufferWidth = s.buffer->getWidth();
+        uint32_t bufferHeight = s.buffer->getHeight();
+        if (bufferHeight <= std::numeric_limits<int32_t>::max() &&
+            bufferWidth <= std::numeric_limits<int32_t>::max()) {
+            crop.right = std::min(crop.right, static_cast<int32_t>(bufferWidth));
+            crop.bottom = std::min(crop.bottom, static_cast<int32_t>(bufferHeight));
+        }
+        if (!crop.isValid()) {
+            // Crop rect is out of bounds, return whole buffer
+            return s.buffer->getBounds();
+        }
+        return crop;
+    }
+    return s.crop;
+}
+
 } // namespace android

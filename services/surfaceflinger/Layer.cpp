@@ -22,11 +22,11 @@
 #include "Layer.h"
 
 #include <android-base/stringprintf.h>
+#include <binder/IPCThreadState.h>
 #include <compositionengine/Display.h>
 #include <compositionengine/Layer.h>
 #include <compositionengine/LayerFECompositionState.h>
 #include <compositionengine/OutputLayer.h>
-#include <compositionengine/impl/LayerCompositionState.h>
 #include <compositionengine/impl/OutputLayerCompositionState.h>
 #include <cutils/compiler.h>
 #include <cutils/native_handle.h>
@@ -57,12 +57,11 @@
 #include "Colorizer.h"
 #include "DisplayDevice.h"
 #include "DisplayHardware/HWComposer.h"
+#include "FrameTracer/FrameTracer.h"
 #include "LayerProtoHelper.h"
 #include "LayerRejecter.h"
 #include "MonitoredProducer.h"
 #include "SurfaceFlinger.h"
-#include "gralloc_priv.h"
-
 #include "TimeStats/TimeStats.h"
 
 #define DEBUG_RESIZE 0
@@ -78,7 +77,6 @@ Layer::Layer(const LayerCreationArgs& args)
         mName(args.name),
         mClientRef(args.client),
         mWindowType(args.metadata.getInt32(METADATA_WINDOW_TYPE, 0)) {
-    mCurrentCrop.makeInvalid();
 
     uint32_t layerFlags = 0;
     if (args.flags & ISurfaceComposerClient::eHidden) layerFlags |= layer_state_t::eLayerHidden;
@@ -123,7 +121,8 @@ Layer::Layer(const LayerCreationArgs& args)
     mFrameTracker.setDisplayRefreshPeriod(compositorTiming.interval);
 
     mSchedulerLayerHandle = mFlinger->mScheduler->registerLayer(mName.c_str(), mWindowType);
-
+    mCallingPid = args.callingPid;
+    mCallingUid = args.callingUid;
     mFlinger->onLayerCreated();
 }
 
@@ -135,6 +134,21 @@ Layer::~Layer() {
 
     mFrameTracker.logAndResetStats(mName);
     mFlinger->onLayerDestroyed(this);
+}
+
+LayerCreationArgs::LayerCreationArgs(SurfaceFlinger* flinger, const sp<Client>& client,
+                                     const String8& name, uint32_t w, uint32_t h, uint32_t flags,
+                                     LayerMetadata metadata)
+      : flinger(flinger),
+        client(client),
+        name(name),
+        w(w),
+        h(h),
+        flags(flags),
+        metadata(std::move(metadata)) {
+    IPCThreadState* ipc = IPCThreadState::self();
+    callingPid = ipc->getCallingPid();
+    callingUid = ipc->getCallingUid();
 }
 
 // ---------------------------------------------------------------------------
@@ -243,23 +257,6 @@ sp<IBinder> Layer::getHandle() {
 // h/w composer set-up
 // ---------------------------------------------------------------------------
 
-Rect Layer::getContentCrop() const {
-    // this is the crop rectangle that applies to the buffer
-    // itself (as opposed to the window)
-    Rect crop;
-    if (!mCurrentCrop.isEmpty()) {
-        // if the buffer crop is defined, we use that
-        crop = mCurrentCrop;
-    } else if (mActiveBuffer != nullptr) {
-        // otherwise we use the whole buffer
-        crop = mActiveBuffer->getBounds();
-    } else {
-        // if we don't have a buffer yet, we use an empty/invalid crop
-        crop.makeInvalid();
-    }
-    return crop;
-}
-
 static Rect reduce(const Rect& win, const Region& exclude) {
     if (CC_LIKELY(exclude.isEmpty())) {
         return win;
@@ -304,7 +301,7 @@ ui::Transform Layer::getBufferScaleTransform() const {
     // If the layer is not using NATIVE_WINDOW_SCALING_MODE_FREEZE (e.g.
     // it isFixedSize) then there may be additional scaling not accounted
     // for in the layer transform.
-    if (!isFixedSize() || !mActiveBuffer) {
+    if (!isFixedSize() || getBuffer() == nullptr) {
         return {};
     }
 
@@ -316,10 +313,10 @@ ui::Transform Layer::getBufferScaleTransform() const {
         return {};
     }
 
-    int bufferWidth = mActiveBuffer->getWidth();
-    int bufferHeight = mActiveBuffer->getHeight();
+    int bufferWidth = getBuffer()->getWidth();
+    int bufferHeight = getBuffer()->getHeight();
 
-    if (mCurrentTransform & NATIVE_WINDOW_TRANSFORM_ROT_90) {
+    if (getBufferTransform() & NATIVE_WINDOW_TRANSFORM_ROT_90) {
         std::swap(bufferWidth, bufferHeight);
     }
 
@@ -334,7 +331,7 @@ ui::Transform Layer::getBufferScaleTransform() const {
 ui::Transform Layer::getTransformWithScale(const ui::Transform& bufferScaleTransform) const {
     // We need to mirror this scaling to child surfaces or we will break the contract where WM can
     // treat child surfaces as pixels in the parent surface.
-    if (!isFixedSize() || !mActiveBuffer) {
+    if (!isFixedSize() || getBuffer() == nullptr) {
         return mEffectiveTransform;
     }
     return mEffectiveTransform * bufferScaleTransform;
@@ -343,7 +340,7 @@ ui::Transform Layer::getTransformWithScale(const ui::Transform& bufferScaleTrans
 FloatRect Layer::getBoundsPreScaling(const ui::Transform& bufferScaleTransform) const {
     // We need the pre scaled layer bounds when computing child bounds to make sure the child is
     // cropped to its parent layer after any buffer transform scaling is applied.
-    if (!isFixedSize() || !mActiveBuffer) {
+    if (!isFixedSize() || getBuffer() == nullptr) {
         return mBounds;
     }
     return bufferScaleTransform.inverse().transform(mBounds);
@@ -401,14 +398,43 @@ void Layer::setupRoundedCornersCropCoordinates(Rect win,
     win.bottom -= roundedCornersCrop.top;
 }
 
+void Layer::latchBasicGeometry(compositionengine::LayerFECompositionState& compositionState) const {
+    const auto& drawingState{getDrawingState()};
+    const uint32_t layerStack = getLayerStack();
+    const auto alpha = static_cast<float>(getAlpha());
+    const bool opaque = isOpaque(drawingState);
+    const bool usesRoundedCorners = getRoundedCornerState().radius != 0.f;
+
+    auto blendMode = Hwc2::IComposerClient::BlendMode::NONE;
+    if (!opaque || alpha != 1.0f) {
+        blendMode = mPremultipliedAlpha ? Hwc2::IComposerClient::BlendMode::PREMULTIPLIED
+                                        : Hwc2::IComposerClient::BlendMode::COVERAGE;
+    }
+
+    // TODO(b/121291683): Instead of filling in a passed-in compositionState
+    // structure, switch to Layer owning the structure and have
+    // CompositionEngine be able to get a reference to it.
+
+    compositionState.layerStackId =
+            (layerStack != ~0u) ? std::make_optional(layerStack) : std::nullopt;
+    compositionState.internalOnly = getPrimaryDisplayOnly();
+    compositionState.isVisible = isVisible();
+    compositionState.isOpaque = opaque && !usesRoundedCorners && alpha == 1.f;
+
+    compositionState.contentDirty = contentDirty;
+    contentDirty = false;
+
+    compositionState.geomLayerBounds = mBounds;
+    compositionState.geomLayerTransform = getTransform();
+    compositionState.geomInverseLayerTransform = compositionState.geomLayerTransform.inverse();
+    compositionState.transparentRegionHint = getActiveTransparentRegion(drawingState);
+
+    compositionState.blendMode = static_cast<Hwc2::IComposerClient::BlendMode>(blendMode);
+    compositionState.alpha = alpha;
+}
+
 void Layer::latchGeometry(compositionengine::LayerFECompositionState& compositionState) const {
     const auto& drawingState{getDrawingState()};
-    auto alpha = static_cast<float>(getAlpha());
-    auto blendMode = HWC2::BlendMode::None;
-    if (!isOpaque(drawingState) || alpha != 1.0f) {
-        blendMode =
-                mPremultipliedAlpha ? HWC2::BlendMode::Premultiplied : HWC2::BlendMode::Coverage;
-    }
 
     int type = drawingState.metadata.getInt32(METADATA_WINDOW_TYPE, 0);
     int appId = drawingState.metadata.getInt32(METADATA_OWNER_UID, 0);
@@ -423,20 +449,14 @@ void Layer::latchGeometry(compositionengine::LayerFECompositionState& compositio
         }
     }
 
-    compositionState.geomLayerTransform = getTransform();
-    compositionState.geomInverseLayerTransform = compositionState.geomLayerTransform.inverse();
     compositionState.geomBufferSize = getBufferSize(drawingState);
-    compositionState.geomContentCrop = getContentCrop();
+    compositionState.geomContentCrop = getBufferCrop();
     compositionState.geomCrop = getCrop(drawingState);
-    compositionState.geomBufferTransform = mCurrentTransform;
+    compositionState.geomBufferTransform = getBufferTransform();
     compositionState.geomBufferUsesDisplayInverseTransform = getTransformToDisplayInverse();
-    compositionState.geomActiveTransparentRegion = getActiveTransparentRegion(drawingState);
-    compositionState.geomLayerBounds = mBounds;
     compositionState.geomUsesSourceCrop = usesSourceCrop();
     compositionState.isSecure = isSecure();
 
-    compositionState.blendMode = static_cast<Hwc2::IComposerClient::BlendMode>(blendMode);
-    compositionState.alpha = alpha;
     compositionState.type = type;
     compositionState.appId = appId;
 }
@@ -445,12 +465,8 @@ void Layer::latchPerFrameState(compositionengine::LayerFECompositionState& compo
     const auto& drawingState{getDrawingState()};
     compositionState.forceClientComposition = false;
 
-    // TODO(lpique): b/121291683 Remove this one we are sure we don't need the
-    // value recomputed / set every frame.
-    compositionState.geomVisibleRegion = visibleRegion;
-
     compositionState.isColorspaceAgnostic = isColorSpaceAgnostic();
-    compositionState.dataspace = mCurrentDataSpace;
+    compositionState.dataspace = getDataSpace();
     compositionState.colorTransform = getColorTransform();
     compositionState.colorTransformIsIdentity = !hasColorTransform();
     compositionState.surfaceDamage = surfaceDamageRegion;
@@ -466,53 +482,48 @@ void Layer::latchPerFrameState(compositionengine::LayerFECompositionState& compo
     }
 }
 
+void Layer::latchCursorCompositionState(
+        compositionengine::LayerFECompositionState& compositionState) const {
+    // This gives us only the "orientation" component of the transform
+    const State& drawingState{getDrawingState()};
+
+    // Apply the layer's transform, followed by the display's global transform
+    // Here we're guaranteed that the layer's transform preserves rects
+    Rect win = getCroppedBufferSize(drawingState);
+    // Subtract the transparent region and snap to the bounds
+    Rect bounds = reduce(win, getActiveTransparentRegion(drawingState));
+    Rect frame(getTransform().transform(bounds));
+
+    compositionState.cursorFrame = frame;
+}
+
 bool Layer::onPreComposition(nsecs_t) {
     return false;
 }
 
 void Layer::latchCompositionState(compositionengine::LayerFECompositionState& compositionState,
-                                  bool includeGeometry) const {
-    if (includeGeometry) {
-        latchGeometry(compositionState);
-    }
+                                  compositionengine::LayerFE::StateSubset subset) const {
+    using StateSubset = compositionengine::LayerFE::StateSubset;
 
-    latchPerFrameState(compositionState);
+    switch (subset) {
+        case StateSubset::BasicGeometry:
+            latchBasicGeometry(compositionState);
+            break;
+
+        case StateSubset::GeometryAndContent:
+            latchBasicGeometry(compositionState);
+            latchGeometry(compositionState);
+            latchPerFrameState(compositionState);
+            break;
+
+        case StateSubset::Content:
+            latchPerFrameState(compositionState);
+            break;
+    }
 }
 
 const char* Layer::getDebugName() const {
     return mName.string();
-}
-
-void Layer::updateCursorPosition(const sp<const DisplayDevice>& display) {
-    const auto outputLayer = findOutputLayerForDisplay(display);
-    LOG_FATAL_IF(!outputLayer);
-
-    if (!outputLayer->getState().hwc ||
-        (*outputLayer->getState().hwc).hwcCompositionType !=
-                Hwc2::IComposerClient::Composition::CURSOR) {
-        return;
-    }
-
-    // This gives us only the "orientation" component of the transform
-    const State& s(getDrawingState());
-
-    // Apply the layer's transform, followed by the display's global transform
-    // Here we're guaranteed that the layer's transform preserves rects
-    Rect win = getCroppedBufferSize(s);
-    // Subtract the transparent region and snap to the bounds
-    Rect bounds = reduce(win, getActiveTransparentRegion(s));
-    Rect frame(getTransform().transform(bounds));
-    frame.intersect(display->getViewport(), &frame);
-    auto& displayTransform = display->getTransform();
-    auto position = displayTransform.transform(frame);
-
-    auto error =
-            (*outputLayer->getState().hwc).hwcLayer->setCursorPosition(position.left, position.top);
-    ALOGE_IF(error != HWC2::Error::None,
-             "[%s] Failed to set cursor position "
-             "to (%d, %d): %s (%d)",
-             mName.string(), position.left, position.top, to_string(error).c_str(),
-             static_cast<int32_t>(error));
 }
 
 // ---------------------------------------------------------------------------
@@ -544,7 +555,7 @@ std::optional<renderengine::LayerSettings> Layer::prepareClientComposition(
     layerSettings.geometry.roundedCornersCrop = roundedCornerState.cropRect;
 
     layerSettings.alpha = alpha;
-    layerSettings.sourceDataspace = mCurrentDataSpace;
+    layerSettings.sourceDataspace = getDataSpace();
     return layerSettings;
 }
 
@@ -584,32 +595,6 @@ bool Layer::addSyncPoint(const std::shared_ptr<SyncPoint>& point) {
 bool Layer::isSecure() const {
     const State& s(mDrawingState);
     return (s.flags & layer_state_t::eLayerSecure);
-}
-
-bool Layer::isSecureDisplay() const {
-    const sp<GraphicBuffer>& activeBuffer(mActiveBuffer);
-    return activeBuffer && (activeBuffer->getUsage() & GRALLOC_USAGE_PRIVATE_SECURE_DISPLAY);
-}
-
-void Layer::setVisibleRegion(const Region& visibleRegion) {
-    // always called from main thread
-    this->visibleRegion = visibleRegion;
-}
-
-void Layer::setCoveredRegion(const Region& coveredRegion) {
-    // always called from main thread
-    this->coveredRegion = coveredRegion;
-}
-
-void Layer::setVisibleNonTransparentRegion(const Region& setVisibleNonTransparentRegion) {
-    // always called from main thread
-    this->visibleNonTransparentRegion = setVisibleNonTransparentRegion;
-}
-
-void Layer::clearVisibilityRegions() {
-    visibleRegion.clear();
-    visibleNonTransparentRegion.clear();
-    coveredRegion.clear();
 }
 
 // ----------------------------------------------------------------------------
@@ -732,7 +717,7 @@ uint32_t Layer::doTransactionResize(uint32_t flags, State* stateToCommit) {
                  "            requested={ wh={%4u,%4u} }}\n"
                  "  drawing={ active   ={ wh={%4u,%4u} crop={%4d,%4d,%4d,%4d} (%4d,%4d) }\n"
                  "            requested={ wh={%4u,%4u} }}\n",
-                 this, getName().string(), mCurrentTransform, getEffectiveScalingMode(),
+                 this, getName().string(), getBufferTransform(), getEffectiveScalingMode(),
                  stateToCommit->active_legacy.w, stateToCommit->active_legacy.h,
                  stateToCommit->crop_legacy.left, stateToCommit->crop_legacy.top,
                  stateToCommit->crop_legacy.right, stateToCommit->crop_legacy.bottom,
@@ -764,7 +749,7 @@ uint32_t Layer::doTransactionResize(uint32_t flags, State* stateToCommit) {
     const bool resizePending =
             ((stateToCommit->requested_legacy.w != stateToCommit->active_legacy.w) ||
              (stateToCommit->requested_legacy.h != stateToCommit->active_legacy.h)) &&
-            (mActiveBuffer != nullptr);
+            (getBuffer() != nullptr);
     if (!isFixedSize()) {
         if (resizePending && mSidebandStream == nullptr) {
             flags |= eDontUpdateGeometryState;
@@ -777,11 +762,6 @@ uint32_t Layer::doTransactionResize(uint32_t flags, State* stateToCommit) {
     if (!(flags & eDontUpdateGeometryState)) {
         State& editCurrentState(getCurrentState());
 
-        // If mFreezeGeometryUpdates is true we are in the setGeometryAppliesWithResize
-        // mode, which causes attributes which normally latch regardless of scaling mode,
-        // to be delayed. We copy the requested state to the active state making sure
-        // to respect these rules (again see Layer.h for a detailed discussion).
-        //
         // There is an awkward asymmetry in the handling of the crop states in the position
         // states, as can be seen below. Largely this arises from position and transform
         // being stored in the same data structure while having different latching rules.
@@ -789,16 +769,8 @@ uint32_t Layer::doTransactionResize(uint32_t flags, State* stateToCommit) {
         //
         // Careful that "stateToCommit" and editCurrentState may not begin as equivalent due to
         // applyPendingStates in the presence of deferred transactions.
-        if (mFreezeGeometryUpdates) {
-            float tx = stateToCommit->active_legacy.transform.tx();
-            float ty = stateToCommit->active_legacy.transform.ty();
-            stateToCommit->active_legacy = stateToCommit->requested_legacy;
-            stateToCommit->active_legacy.transform.set(tx, ty);
-            editCurrentState.active_legacy = stateToCommit->active_legacy;
-        } else {
-            editCurrentState.active_legacy = editCurrentState.requested_legacy;
-            stateToCommit->active_legacy = stateToCommit->requested_legacy;
-        }
+        editCurrentState.active_legacy = editCurrentState.requested_legacy;
+        stateToCommit->active_legacy = stateToCommit->requested_legacy;
     }
 
     return flags;
@@ -865,7 +837,7 @@ uint32_t Layer::setTransactionFlags(uint32_t flags) {
     return mTransactionFlags.fetch_or(flags);
 }
 
-bool Layer::setPosition(float x, float y, bool immediate) {
+bool Layer::setPosition(float x, float y) {
     if (mCurrentState.requested_legacy.transform.tx() == x &&
         mCurrentState.requested_legacy.transform.ty() == y)
         return false;
@@ -875,14 +847,11 @@ bool Layer::setPosition(float x, float y, bool immediate) {
     // we want to apply the position portion of the transform matrix immediately,
     // but still delay scaling when resizing a SCALING_MODE_FREEZE layer.
     mCurrentState.requested_legacy.transform.set(x, y);
-    if (immediate && !mFreezeGeometryUpdates) {
-        // Here we directly update the active state
-        // unlike other setters, because we store it within
-        // the transform, but use different latching rules.
-        // b/38182305
-        mCurrentState.active_legacy.transform.set(x, y);
-    }
-    mFreezeGeometryUpdates = mFreezeGeometryUpdates || !immediate;
+    // Here we directly update the active state
+    // unlike other setters, because we store it within
+    // the transform, but use different latching rules.
+    // b/38182305
+    mCurrentState.active_legacy.transform.set(x, y);
 
     mCurrentState.modified = true;
     setTransactionFlags(eTransactionNeeded);
@@ -1020,7 +989,7 @@ bool Layer::setBackgroundColor(const half3& color, float alpha, ui::Dataspace da
         // create background color layer if one does not yet exist
         uint32_t flags = ISurfaceComposerClient::eFXSurfaceColor;
         const String8& name = mName + "BackgroundColorLayer";
-        mCurrentState.bgColorLayer = new ColorLayer(
+        mCurrentState.bgColorLayer = mFlinger->getFactory().createColorLayer(
                 LayerCreationArgs(mFlinger.get(), nullptr, name, 0, 0, flags, LayerMetadata()));
 
         // add to child list
@@ -1088,14 +1057,11 @@ bool Layer::setFlags(uint8_t flags, uint8_t mask) {
     return true;
 }
 
-bool Layer::setCrop_legacy(const Rect& crop, bool immediate) {
+bool Layer::setCrop_legacy(const Rect& crop) {
     if (mCurrentState.requestedCrop_legacy == crop) return false;
     mCurrentState.sequence++;
     mCurrentState.requestedCrop_legacy = crop;
-    if (immediate && !mFreezeGeometryUpdates) {
-        mCurrentState.crop_legacy = crop;
-    }
-    mFreezeGeometryUpdates = mFreezeGeometryUpdates || !immediate;
+    mCurrentState.crop_legacy = crop;
 
     mCurrentState.modified = true;
     setTransactionFlags(eTransactionNeeded);
@@ -1226,7 +1192,8 @@ LayerDebugInfo Layer::getLayerDebugInfo() const {
     info.mParentName = (parent == nullptr ? std::string("none") : parent->getName().string());
     info.mType = getType();
     info.mTransparentRegion = ds.activeTransparentRegion_legacy;
-    info.mVisibleRegion = visibleRegion;
+
+    info.mVisibleRegion = debugGetVisibleRegionOnDefaultDisplay();
     info.mSurfaceDamageRegion = surfaceDamageRegion;
     info.mLayerStack = getLayerStack();
     info.mX = ds.active_legacy.transform.tx();
@@ -1238,13 +1205,13 @@ LayerDebugInfo Layer::getLayerDebugInfo() const {
     info.mColor = ds.color;
     info.mFlags = ds.flags;
     info.mPixelFormat = getPixelFormat();
-    info.mDataSpace = static_cast<android_dataspace>(mCurrentDataSpace);
+    info.mDataSpace = static_cast<android_dataspace>(getDataSpace());
     info.mMatrix[0][0] = ds.active_legacy.transform[0][0];
     info.mMatrix[0][1] = ds.active_legacy.transform[0][1];
     info.mMatrix[1][0] = ds.active_legacy.transform[1][0];
     info.mMatrix[1][1] = ds.active_legacy.transform[1][1];
     {
-        sp<const GraphicBuffer> buffer = mActiveBuffer;
+        sp<const GraphicBuffer> buffer = getBuffer();
         if (buffer != 0) {
             info.mActiveBufferWidth = buffer->getWidth();
             info.mActiveBufferHeight = buffer->getHeight();
@@ -1347,10 +1314,17 @@ void Layer::dumpFrameEvents(std::string& result) {
     mFrameEventHistory.dump(result);
 }
 
+void Layer::dumpCallingUidPid(std::string& result) const {
+    StringAppendF(&result, "Layer %s (%s) pid:%d uid:%d\n", getName().string(), getType(),
+                  mCallingPid, mCallingUid);
+}
+
 void Layer::onDisconnect() {
     Mutex::Autolock lock(mFrameEventHistoryMutex);
     mFrameEventHistory.onDisconnect();
-    mFlinger->mTimeStats->onDestroy(getSequence());
+    const int32_t layerID = getSequence();
+    mFlinger->mTimeStats->onDestroy(layerID);
+    mFlinger->mFrameTracer->onDestroy(layerID);
 }
 
 void Layer::addAndGetFrameTimestamps(const NewFrameEventsEntry* newTimestamps,
@@ -1550,8 +1524,9 @@ bool Layer::hasColorTransform() const {
 
 bool Layer::isLegacyDataSpace() const {
     // return true when no higher bits are set
-    return !(mCurrentDataSpace & (ui::Dataspace::STANDARD_MASK |
-                ui::Dataspace::TRANSFER_MASK | ui::Dataspace::RANGE_MASK));
+    return !(getDataSpace() &
+             (ui::Dataspace::STANDARD_MASK | ui::Dataspace::TRANSFER_MASK |
+              ui::Dataspace::RANGE_MASK));
 }
 
 void Layer::setParent(const sp<Layer>& layer) {
@@ -1829,17 +1804,16 @@ void Layer::writeToProtoDrawingState(LayerProto* layerInfo, uint32_t traceFlags)
             }
         }
 
-        auto buffer = mActiveBuffer;
+        auto buffer = getBuffer();
         if (buffer != nullptr) {
             LayerProtoHelper::writeToProto(buffer,
                                            [&]() { return layerInfo->mutable_active_buffer(); });
-            LayerProtoHelper::writeToProto(ui::Transform(mCurrentTransform),
+            LayerProtoHelper::writeToProto(ui::Transform(getBufferTransform()),
                                            layerInfo->mutable_buffer_transform());
         }
         layerInfo->set_invalidate(contentDirty);
         layerInfo->set_is_protected(isProtected());
-        layerInfo->set_dataspace(
-                dataspaceDetails(static_cast<android_dataspace>(mCurrentDataSpace)));
+        layerInfo->set_dataspace(dataspaceDetails(static_cast<android_dataspace>(getDataSpace())));
         layerInfo->set_queued_frames(getQueuedFrameCount());
         layerInfo->set_refresh_pending(isBufferLatched());
         layerInfo->set_curr_frame(mCurrentFrameNumber);
@@ -1850,7 +1824,7 @@ void Layer::writeToProtoDrawingState(LayerProto* layerInfo, uint32_t traceFlags)
         LayerProtoHelper::writePositionToProto(transform.tx(), transform.ty(),
                                                [&]() { return layerInfo->mutable_position(); });
         LayerProtoHelper::writeToProto(mBounds, [&]() { return layerInfo->mutable_bounds(); });
-        LayerProtoHelper::writeToProto(visibleRegion,
+        LayerProtoHelper::writeToProto(debugGetVisibleRegionOnDefaultDisplay(),
                                        [&]() { return layerInfo->mutable_visible_region(); });
         LayerProtoHelper::writeToProto(surfaceDamageRegion,
                                        [&]() { return layerInfo->mutable_damage_region(); });
@@ -1953,7 +1927,7 @@ InputWindowInfo Layer::fillInputInfo() {
     InputWindowInfo info = mDrawingState.inputInfo;
 
     if (info.displayId == ADISPLAY_ID_NONE) {
-        info.displayId = mDrawingState.layerStack;
+        info.displayId = getLayerStack();
     }
 
     ui::Transform t = getTransform();
@@ -2019,12 +1993,26 @@ std::shared_ptr<compositionengine::Layer> Layer::getCompositionLayer() const {
 }
 
 bool Layer::canReceiveInput() const {
-    return isVisible();
+    return !isHiddenByPolicy();
 }
 
 compositionengine::OutputLayer* Layer::findOutputLayerForDisplay(
         const sp<const DisplayDevice>& display) const {
     return display->getCompositionDisplay()->getOutputLayerForLayer(getCompositionLayer().get());
+}
+
+Region Layer::debugGetVisibleRegionOnDefaultDisplay() const {
+    sp<DisplayDevice> displayDevice = mFlinger->getDefaultDisplayDeviceLocked();
+    if (displayDevice == nullptr) {
+        return {};
+    }
+
+    auto outputLayer = findOutputLayerForDisplay(displayDevice);
+    if (outputLayer == nullptr) {
+        return {};
+    }
+
+    return outputLayer->getState().visibleRegion;
 }
 
 // ---------------------------------------------------------------------------

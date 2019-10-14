@@ -47,6 +47,7 @@ cc_library_shared {
         "-Wno-padded",
 
         "-Wno-switch-enum",
+        "-Wno-format-pedantic",
     ],
 
     sanitize: {
@@ -99,8 +100,6 @@ cc_library_shared {
         "libbase",
         "libcutils",
         "libhidlbase",
-        "libhidltransport",
-        "libhwbinder",
         "libsync",
         "libutils",
         "liblog",

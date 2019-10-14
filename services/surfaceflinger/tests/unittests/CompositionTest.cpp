@@ -124,7 +124,16 @@ public:
         auto sfEventThread = std::make_unique<mock::EventThread>();
 
         EXPECT_CALL(*eventThread, registerDisplayEventConnection(_));
+        EXPECT_CALL(*eventThread, createEventConnection(_, _))
+                .WillOnce(Return(
+                        new EventThreadConnection(eventThread.get(), ResyncCallback(),
+                                                  ISurfaceComposer::eConfigChangedSuppress)));
+
         EXPECT_CALL(*sfEventThread, registerDisplayEventConnection(_));
+        EXPECT_CALL(*sfEventThread, createEventConnection(_, _))
+                .WillOnce(Return(
+                        new EventThreadConnection(sfEventThread.get(), ResyncCallback(),
+                                                  ISurfaceComposer::eConfigChangedSuppress)));
 
         auto primaryDispSync = std::make_unique<mock::DispSync>();
 
@@ -605,6 +614,12 @@ struct BaseLayerProperties {
                               displaySettings.clip);
                     // screen capture adds an additional color layer as an alpha
                     // prefill, so gtet the back layer.
+                    if (layerSettings.empty()) {
+                        ADD_FAILURE() << "layerSettings was not expected to be empty in "
+                                         "setupREBufferCompositionCommonCallExpectations "
+                                         "verification lambda";
+                        return NO_ERROR;
+                    }
                     renderengine::LayerSettings layer = layerSettings.back();
                     EXPECT_THAT(layer.source.buffer.buffer, Not(IsNull()));
                     EXPECT_THAT(layer.source.buffer.fence, Not(IsNull()));
@@ -648,6 +663,12 @@ struct BaseLayerProperties {
                               displaySettings.clip);
                     // screen capture adds an additional color layer as an alpha
                     // prefill, so get the back layer.
+                    if (layerSettings.empty()) {
+                        ADD_FAILURE()
+                                << "layerSettings was not expected to be empty in "
+                                   "setupREColorCompositionCallExpectations verification lambda";
+                        return NO_ERROR;
+                    }
                     renderengine::LayerSettings layer = layerSettings.back();
                     EXPECT_THAT(layer.source.buffer.buffer, IsNull());
                     EXPECT_EQ(half3(LayerProperties::COLOR[0], LayerProperties::COLOR[1],
@@ -718,6 +739,12 @@ struct SecureLayerProperties : public BaseLayerProperties<SecureLayerProperties>
                               displaySettings.clip);
                     // screen capture adds an additional color layer as an alpha
                     // prefill, so get the back layer.
+                    if (layerSettings.empty()) {
+                        ADD_FAILURE() << "layerSettings was not expected to be empty in "
+                                         "setupInsecureREBufferCompositionCommonCallExpectations "
+                                         "verification lambda";
+                        return NO_ERROR;
+                    }
                     renderengine::LayerSettings layer = layerSettings.back();
                     EXPECT_THAT(layer.source.buffer.buffer, IsNull());
                     EXPECT_EQ(half3(0.0f, 0.0f, 0.0f), layer.source.solidColor);
@@ -777,7 +804,6 @@ struct BaseLayerVariant {
         layerDrawingState.color = half4(LayerProperties::COLOR[0], LayerProperties::COLOR[1],
                                         LayerProperties::COLOR[2], LayerProperties::COLOR[3]);
         layer->computeBounds(FloatRect(0, 0, 100, 100), ui::Transform());
-        layer->setVisibleRegion(Region(Rect(0, 0, 100, 100)));
 
         return layer;
     }
@@ -788,17 +814,15 @@ struct BaseLayerVariant {
 
         std::vector<std::unique_ptr<compositionengine::OutputLayer>> outputLayers;
         outputLayers.emplace_back(test->mDisplay->getCompositionDisplay()
-                                          ->getOrCreateOutputLayer(DEFAULT_DISPLAY_ID,
-                                                                   layer->getCompositionLayer(),
-                                                                   layer));
+                                          ->createOutputLayer(layer->getCompositionLayer(), layer));
+
+        outputLayers.back()->editState().visibleRegion = Region(Rect(0, 0, 100, 100));
+        outputLayers.back()->editState().outputSpaceVisibleRegion = Region(Rect(0, 0, 100, 100));
 
         test->mDisplay->getCompositionDisplay()->setOutputLayersOrderedByZ(std::move(outputLayers));
 
         Mock::VerifyAndClear(test->mComposer);
 
-        Vector<sp<Layer>> layers;
-        layers.add(layer);
-        test->mDisplay->setVisibleLayersSortedByZ(layers);
         test->mFlinger.mutableDrawingState().layersSortedByZ.add(layer);
     }
 
@@ -1087,8 +1111,6 @@ struct CompositionCase {
         for (auto& hwcDisplay : test->mFlinger.mFakeHwcDisplays) {
             hwcDisplay->mutableLayers().clear();
         }
-
-        test->mDisplay->setVisibleLayersSortedByZ(Vector<sp<android::Layer>>());
     }
 };
 

@@ -67,7 +67,6 @@ public:
     void setSizeForTest(const ui::Size&);
     sp<GraphicBuffer>& mutableGraphicBufferForTest();
     base::unique_fd& mutableBufferReadyForTest();
-    void flipClientTarget(bool flip) override;
 
 private:
     const compositionengine::CompositionEngine& mCompositionEngine;
@@ -80,7 +79,6 @@ private:
     const sp<DisplaySurface> mDisplaySurface;
     ui::Size mSize;
     bool mProtected{false};
-    bool mFlipClientTarget{false};
     std::uint32_t mPageFlipCount{0};
 };
 

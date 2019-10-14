@@ -57,7 +57,7 @@ VirtualDisplaySurface::VirtualDisplaySurface(HWComposer& hwc,
                                              const sp<IGraphicBufferProducer>& sink,
                                              const sp<IGraphicBufferProducer>& bqProducer,
                                              const sp<IGraphicBufferConsumer>& bqConsumer,
-                                             const std::string& name, bool secure)
+                                             const std::string& name)
       : ConsumerBase(bqConsumer),
         mHwc(hwc),
         mDisplayId(displayId),
@@ -79,9 +79,7 @@ VirtualDisplaySurface::VirtualDisplaySurface(HWComposer& hwc,
         mDbgState(DBG_STATE_IDLE),
         mDbgLastCompositionType(COMPOSITION_UNKNOWN),
         mMustRecompose(false),
-        mForceHwcCopy(SurfaceFlinger::useHwcForRgbToYuv),
-        mSecure(secure),
-        mSinkUsage(0) {
+        mForceHwcCopy(SurfaceFlinger::useHwcForRgbToYuv) {
     mSource[SOURCE_SINK] = sink;
     mSource[SOURCE_SCRATCH] = bqProducer;
 
@@ -99,8 +97,6 @@ VirtualDisplaySurface::VirtualDisplaySurface(HWComposer& hwc,
     // on usage bits.
     int sinkUsage;
     sink->query(NATIVE_WINDOW_CONSUMER_USAGE_BITS, &sinkUsage);
-    mSinkUsage |= (GRALLOC_USAGE_HW_COMPOSER | sinkUsage);
-    setOutputUsage(mSinkUsage);
     if (sinkUsage & (GRALLOC_USAGE_SW_READ_MASK | GRALLOC_USAGE_SW_WRITE_MASK)) {
         int sinkFormat;
         sink->query(NATIVE_WINDOW_FORMAT, &sinkFormat);
@@ -129,11 +125,6 @@ status_t VirtualDisplaySurface::beginFrame(bool mustRecompose) {
     }
 
     mMustRecompose = mustRecompose;
-    //For WFD use cases we must always set the recompose flag in order
-    // to support pause/resume functionality
-    if (mOutputUsage & GRALLOC_USAGE_HW_VIDEO_ENCODER) {
-        mMustRecompose = true;
-    }
 
     VDS_LOGW_IF(mDbgState != DBG_STATE_IDLE,
             "Unexpected beginFrame() in %s state", dbgStateStr());
@@ -172,7 +163,7 @@ status_t VirtualDisplaySurface::prepareFrame(CompositionType compositionType) {
 
     if (mCompositionType != COMPOSITION_GLES &&
             (mOutputFormat != mDefaultOutputFormat ||
-             !(mOutputUsage & GRALLOC_USAGE_HW_COMPOSER))) {
+             mOutputUsage != GRALLOC_USAGE_HW_COMPOSER)) {
         // We must have just switched from GLES-only to MIXED or HWC
         // composition. Stop using the format and usage requested by the GLES
         // driver; they may be suboptimal when HWC is writing to the output
@@ -184,7 +175,7 @@ status_t VirtualDisplaySurface::prepareFrame(CompositionType compositionType) {
         // format/usage and get a new buffer when the GLES driver calls
         // dequeueBuffer().
         mOutputFormat = mDefaultOutputFormat;
-        setOutputUsage(GRALLOC_USAGE_HW_COMPOSER);
+        mOutputUsage = GRALLOC_USAGE_HW_COMPOSER;
         refreshOutputBuffer();
     }
 
@@ -267,7 +258,7 @@ void VirtualDisplaySurface::onFrameCommitted() {
         int sslot = mapProducer2SourceSlot(SOURCE_SINK, mOutputProducerSlot);
         QueueBufferOutput qbo;
         VDS_LOGV("onFrameCommitted: queue sink sslot=%d", sslot);
-        if (retireFence->isValid() && mMustRecompose) {
+        if (mMustRecompose) {
             status_t result = mSource[SOURCE_SINK]->queueBuffer(sslot,
                     QueueBufferInput(
                         systemTime(), false /* isAutoTimestamp */,
@@ -330,14 +321,7 @@ status_t VirtualDisplaySurface::setAsyncMode(bool async) {
 
 status_t VirtualDisplaySurface::dequeueBuffer(Source source,
         PixelFormat format, uint64_t usage, int* sslot, sp<Fence>* fence) {
-    LOG_FATAL_IF(mDisplayId < 0, "mDisplayId=%d but should not be < 0.", mDisplayId);
-
-    // Exclude video encoder usage flag from scratch buffer usage flags.
-    if (source == SOURCE_SCRATCH) {
-        usage &= ~(GRALLOC_USAGE_HW_VIDEO_ENCODER);
-        VDS_LOGV("dequeueBuffer(%s): updated scratch buffer usage flags=%#" PRIx64,
-                dbgSourceStr(source), usage);
-    }
+    LOG_FATAL_IF(!mDisplayId);
 
     status_t result =
             mSource[source]->dequeueBuffer(sslot, fence, mSinkBufferWidth, mSinkBufferHeight,
@@ -428,7 +412,7 @@ status_t VirtualDisplaySurface::dequeueBuffer(int* pslot, sp<Fence>* fence, uint
                     mSinkBufferWidth, mSinkBufferHeight,
                     buf->getPixelFormat(), buf->getUsage());
             mOutputFormat = format;
-            setOutputUsage(usage);
+            mOutputUsage = usage;
             result = refreshOutputBuffer();
             if (result < 0)
                 return result;
@@ -704,20 +688,6 @@ const char* VirtualDisplaySurface::dbgSourceStr(Source s) {
         default:             return "INVALID";
     }
 }
-
-/* Helper to update the output usage when the display is secure */
-void VirtualDisplaySurface::setOutputUsage(uint64_t /*flag*/) {
-    mOutputUsage = mSinkUsage;
-    if (mSecure && (mOutputUsage & GRALLOC_USAGE_HW_VIDEO_ENCODER)) {
-        /* TODO: Currently, the framework can only say whether the display
-         * and its subsequent session are secure or not. However, there is
-         * no mechanism to distinguish the different levels of security.
-         * The current solution assumes WV L3 protection.
-         */
-        mOutputUsage |= GRALLOC_USAGE_PROTECTED;
-    }
-}
-
 
 // ---------------------------------------------------------------------------
 } // namespace android

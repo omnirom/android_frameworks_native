@@ -18,8 +18,6 @@
 #include "epoll_event_dispatcher.h"
 #include "hardware_composer.h"
 
-#include "DisplayHardware/DisplayIdentification.h"
-
 namespace android {
 namespace dvr {
 
@@ -82,6 +80,7 @@ class DisplayService : public pdx::ServiceBase<DisplayService> {
   pdx::Status<display::Metrics> OnGetMetrics(pdx::Message& message);
   pdx::Status<std::string> OnGetConfigurationData(
       pdx::Message& message, display::ConfigFileType config_type);
+  pdx::Status<uint8_t> OnGetDisplayIdentificationPort(pdx::Message& message);
   pdx::Status<display::SurfaceInfo> OnCreateSurface(
       pdx::Message& message, const display::SurfaceAttributes& attributes);
   pdx::Status<BorrowedNativeBufferHandle> OnSetupGlobalBuffer(
@@ -119,8 +118,6 @@ class DisplayService : public pdx::ServiceBase<DisplayService> {
 
   DisplayService(const DisplayService&) = delete;
   void operator=(const DisplayService&) = delete;
-
-  DisplayIdentificationData display_identification_data_;
 };
 
 }  // namespace dvr

@@ -22,19 +22,23 @@
 #include <unordered_map>
 #include <vector>
 
-namespace android {
-namespace scheduler {
+namespace android::scheduler {
+
+// Opaque handle to scheduler connection.
+struct ConnectionHandle {
+    using Id = std::uintptr_t;
+    static constexpr Id INVALID_ID = static_cast<Id>(-1);
+
+    Id id = INVALID_ID;
+
+    explicit operator bool() const { return id != INVALID_ID; }
+};
+
+inline bool operator==(ConnectionHandle lhs, ConnectionHandle rhs) {
+    return lhs.id == rhs.id;
+}
+
 using namespace std::chrono_literals;
-
-// This number is used to set the size of the arrays in scheduler that hold information
-// about layers.
-static constexpr size_t ARRAY_SIZE = 30;
-
-// This number is used to have a place holder for when the screen is not NORMAL/ON. Currently
-// the config is not visible to SF, and is completely maintained by HWC. However, we would
-// still like to keep track of time when the device is in this config.
-static constexpr int SCREEN_OFF_CONFIG_ID = -1;
-static constexpr uint32_t HWC2_SCREEN_OFF_CONFIG_ID = 0xffffffff;
 
 // This number is used when we try to determine how long do we keep layer information around
 // before we remove it. It is also used to determine how long the layer stays relevant.
@@ -42,9 +46,11 @@ static constexpr uint32_t HWC2_SCREEN_OFF_CONFIG_ID = 0xffffffff;
 // or waiting idle in messaging app, when cursor is blinking.
 static constexpr std::chrono::nanoseconds OBSOLETE_TIME_EPSILON_NS = 1200ms;
 
-// Layer is considered low activity if the buffers come more than LOW_ACTIVITY_EPSILON_NS
-// apart. This is helping SF to vote for lower refresh rates when there is not activity
+// Layer is considered low activity if the LOW_ACTIVITY_BUFFERS buffers come more than
+// LOW_ACTIVITY_EPSILON_NS  apart.
+// This is helping SF to vote for lower refresh rates when there is not activity
 // in screen.
+static constexpr int LOW_ACTIVITY_BUFFERS = 2;
 static constexpr std::chrono::nanoseconds LOW_ACTIVITY_EPSILON_NS = 250ms;
 
 // Calculates the statistical mean (average) in the data structure (array, vector). The
@@ -80,5 +86,15 @@ auto calculate_mode(const T& v) {
     return static_cast<int>(std::max_element(counts.begin(), counts.end(), compareCounts)->first);
 }
 
-} // namespace scheduler
-} // namespace android
+} // namespace android::scheduler
+
+namespace std {
+
+template <>
+struct hash<android::scheduler::ConnectionHandle> {
+    size_t operator()(android::scheduler::ConnectionHandle handle) const {
+        return hash<android::scheduler::ConnectionHandle::Id>()(handle.id);
+    }
+};
+
+} // namespace std

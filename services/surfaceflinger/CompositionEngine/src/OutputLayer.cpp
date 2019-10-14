@@ -15,12 +15,11 @@
  */
 
 #include <android-base/stringprintf.h>
-#include <compositionengine/CompositionEngine.h>
 #include <compositionengine/DisplayColorProfile.h>
 #include <compositionengine/Layer.h>
 #include <compositionengine/LayerFE.h>
+#include <compositionengine/LayerFECompositionState.h>
 #include <compositionengine/Output.h>
-#include <compositionengine/impl/LayerCompositionState.h>
 #include <compositionengine/impl/OutputCompositionState.h>
 #include <compositionengine/impl/OutputLayer.h>
 #include <compositionengine/impl/OutputLayerCompositionState.h>
@@ -46,31 +45,24 @@ FloatRect reduce(const FloatRect& win, const Region& exclude) {
 } // namespace
 
 std::unique_ptr<compositionengine::OutputLayer> createOutputLayer(
-        const CompositionEngine& compositionEngine, std::optional<DisplayId> displayId,
-        const compositionengine::Output& output, std::shared_ptr<compositionengine::Layer> layer,
-        sp<compositionengine::LayerFE> layerFE) {
-    auto result = std::make_unique<OutputLayer>(output, layer, layerFE);
-    result->initialize(compositionEngine, displayId);
-    return result;
+        const compositionengine::Output& output,
+        const std::shared_ptr<compositionengine::Layer>& layer,
+        const sp<compositionengine::LayerFE>& layerFE) {
+    return std::make_unique<OutputLayer>(output, layer, layerFE);
 }
 
-OutputLayer::OutputLayer(const Output& output, std::shared_ptr<Layer> layer, sp<LayerFE> layerFE)
+OutputLayer::OutputLayer(const Output& output, const std::shared_ptr<Layer>& layer,
+                         const sp<LayerFE>& layerFE)
       : mOutput(output), mLayer(layer), mLayerFE(layerFE) {}
 
 OutputLayer::~OutputLayer() = default;
 
-void OutputLayer::initialize(const CompositionEngine& compositionEngine,
-                             std::optional<DisplayId> displayId) {
-    if (!displayId) {
-        return;
+void OutputLayer::setHwcLayer(std::shared_ptr<HWC2::Layer> hwcLayer) {
+    if (hwcLayer) {
+        mState.hwc.emplace(hwcLayer);
+    } else {
+        mState.hwc.reset();
     }
-
-    auto& hwc = compositionEngine.getHwComposer();
-
-    mState.hwc.emplace(std::shared_ptr<HWC2::Layer>(hwc.createLayer(*displayId),
-                                                    [&hwc, displayId](HWC2::Layer* layer) {
-                                                        hwc.destroyLayer(*displayId, layer);
-                                                    }));
 }
 
 const compositionengine::Output& OutputLayer::getOutput() const {
@@ -94,7 +86,7 @@ OutputLayerCompositionState& OutputLayer::editState() {
 }
 
 Rect OutputLayer::calculateInitialCrop() const {
-    const auto& layerState = mLayer->getState().frontEnd;
+    const auto& layerState = mLayer->getFEState();
 
     // apply the projection's clipping to the window crop in
     // layerstack space, and convert-back to layer space.
@@ -102,7 +94,7 @@ Rect OutputLayer::calculateInitialCrop() const {
     // pixels in the buffer.
 
     FloatRect activeCropFloat =
-            reduce(layerState.geomLayerBounds, layerState.geomActiveTransparentRegion);
+            reduce(layerState.geomLayerBounds, layerState.transparentRegionHint);
 
     const Rect& viewport = mOutput.getState().viewport;
     const ui::Transform& layerTransform = layerState.geomLayerTransform;
@@ -127,7 +119,7 @@ Rect OutputLayer::calculateInitialCrop() const {
 }
 
 FloatRect OutputLayer::calculateOutputSourceCrop() const {
-    const auto& layerState = mLayer->getState().frontEnd;
+    const auto& layerState = mLayer->getFEState();
     const auto& outputState = mOutput.getState();
 
     if (!layerState.geomUsesSourceCrop) {
@@ -204,12 +196,12 @@ FloatRect OutputLayer::calculateOutputSourceCrop() const {
 }
 
 Rect OutputLayer::calculateOutputDisplayFrame() const {
-    const auto& layerState = mLayer->getState().frontEnd;
+    const auto& layerState = mLayer->getFEState();
     const auto& outputState = mOutput.getState();
 
     // apply the layer's transform, followed by the display's global transform
     // here we're guaranteed that the layer's transform preserves rects
-    Region activeTransparentRegion = layerState.geomActiveTransparentRegion;
+    Region activeTransparentRegion = layerState.transparentRegionHint;
     const ui::Transform& layerTransform = layerState.geomLayerTransform;
     const ui::Transform& inverseLayerTransform = layerState.geomInverseLayerTransform;
     const Rect& bufferSize = layerState.geomBufferSize;
@@ -251,7 +243,7 @@ Rect OutputLayer::calculateOutputDisplayFrame() const {
 }
 
 uint32_t OutputLayer::calculateOutputRelativeBufferTransform() const {
-    const auto& layerState = mLayer->getState().frontEnd;
+    const auto& layerState = mLayer->getFEState();
     const auto& outputState = mOutput.getState();
 
     /*
@@ -291,7 +283,7 @@ uint32_t OutputLayer::calculateOutputRelativeBufferTransform() const {
 } // namespace impl
 
 void OutputLayer::updateCompositionState(bool includeGeometry) {
-    const auto& layerFEState = mLayer->getState().frontEnd;
+    const auto& layerFEState = mLayer->getFEState();
     const auto& outputState = mOutput.getState();
     const auto& profile = *mOutput.getDisplayColorProfile();
 
@@ -315,11 +307,6 @@ void OutputLayer::updateCompositionState(bool includeGeometry) {
             ? outputState.targetDataspace
             : layerFEState.dataspace;
 
-    // TODO(lpique): b/121291683 Remove this one we are sure we don't need the
-    // value recomputed / set every frame.
-    mState.visibleRegion = outputState.transform.transform(
-            layerFEState.geomVisibleRegion.intersect(outputState.viewport));
-
     // These are evaluated every frame as they can potentially change at any
     // time.
     if (layerFEState.forceClientComposition || !profile.isDataspaceSupported(mState.dataspace)) {
@@ -340,7 +327,7 @@ void OutputLayer::writeStateToHWC(bool includeGeometry) {
         return;
     }
 
-    const auto& outputIndependentState = mLayer->getState().frontEnd;
+    const auto& outputIndependentState = mLayer->getFEState();
     auto requestedCompositionType = outputIndependentState.compositionType;
 
     if (includeGeometry) {
@@ -421,13 +408,13 @@ void OutputLayer::writeOutputIndependentGeometryStateToHWC(
 void OutputLayer::writeOutputDependentPerFrameStateToHWC(HWC2::Layer* hwcLayer) {
     const auto& outputDependentState = getState();
 
-    // TODO(lpique): b/121291683 visibleRegion is output-dependent geometry
+    // TODO(lpique): b/121291683 outputSpaceVisibleRegion is output-dependent geometry
     // state and should not change every frame.
-    if (auto error = hwcLayer->setVisibleRegion(outputDependentState.visibleRegion);
+    if (auto error = hwcLayer->setVisibleRegion(outputDependentState.outputSpaceVisibleRegion);
         error != HWC2::Error::None) {
         ALOGE("[%s] Failed to set visible region: %s (%d)", mLayerFE->getDebugName(),
               to_string(error).c_str(), static_cast<int32_t>(error));
-        outputDependentState.visibleRegion.dump(LOG_TAG);
+        outputDependentState.outputSpaceVisibleRegion.dump(LOG_TAG);
     }
 
     if (auto error = hwcLayer->setDataspace(outputDependentState.dataspace);
@@ -550,6 +537,27 @@ void OutputLayer::writeCompositionTypeToHWC(
     }
 }
 
+void OutputLayer::writeCursorPositionToHWC() const {
+    // Skip doing this if there is no HWC interface
+    auto hwcLayer = getHwcLayer();
+    if (!hwcLayer) {
+        return;
+    }
+
+    const auto& layerFEState = mLayer->getFEState();
+    const auto& outputState = mOutput.getState();
+
+    Rect frame = layerFEState.cursorFrame;
+    frame.intersect(outputState.viewport, &frame);
+    Rect position = outputState.transform.transform(frame);
+
+    if (auto error = hwcLayer->setCursorPosition(position.left, position.top);
+        error != HWC2::Error::None) {
+        ALOGE("[%s] Failed to set cursor position to (%d, %d): %s (%d)", mLayerFE->getDebugName(),
+              position.left, position.top, to_string(error).c_str(), static_cast<int32_t>(error));
+    }
+}
+
 HWC2::Layer* OutputLayer::getHwcLayer() const {
     return mState.hwc ? mState.hwc->hwcLayer.get() : nullptr;
 }
@@ -557,6 +565,11 @@ HWC2::Layer* OutputLayer::getHwcLayer() const {
 bool OutputLayer::requiresClientComposition() const {
     return !mState.hwc ||
             mState.hwc->hwcCompositionType == Hwc2::IComposerClient::Composition::CLIENT;
+}
+
+bool OutputLayer::isHardwareCursor() const {
+    return mState.hwc &&
+            mState.hwc->hwcCompositionType == Hwc2::IComposerClient::Composition::CURSOR;
 }
 
 void OutputLayer::detectDisallowedCompositionTypeChange(

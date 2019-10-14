@@ -80,9 +80,7 @@ class SurfaceInterceptor;
 
 struct LayerCreationArgs {
     LayerCreationArgs(SurfaceFlinger* flinger, const sp<Client>& client, const String8& name,
-                      uint32_t w, uint32_t h, uint32_t flags, LayerMetadata metadata)
-          : flinger(flinger), client(client), name(name), w(w), h(h), flags(flags),
-            metadata(std::move(metadata)) {}
+                      uint32_t w, uint32_t h, uint32_t flags, LayerMetadata metadata);
 
     SurfaceFlinger* flinger;
     const sp<Client>& client;
@@ -91,17 +89,15 @@ struct LayerCreationArgs {
     uint32_t h;
     uint32_t flags;
     LayerMetadata metadata;
+    pid_t callingPid;
+    uid_t callingUid;
 };
 
-class Layer : public virtual compositionengine::LayerFE {
+class Layer : public compositionengine::LayerFE {
     static std::atomic<int32_t> sSequence;
 
 public:
     mutable bool contentDirty{false};
-    // regions below are in window-manager space
-    Region visibleRegion;
-    Region coveredRegion;
-    Region visibleNonTransparentRegion;
     Region surfaceDamageRegion;
 
     // Layer serial number.  This gives layers an explicit ordering, so we
@@ -268,9 +264,9 @@ public:
 
     // setPosition operates in parent buffer space (pre parent-transform) or display
     // space for top-level layers.
-    virtual bool setPosition(float x, float y, bool immediate);
+    virtual bool setPosition(float x, float y);
     // Buffer space
-    virtual bool setCrop_legacy(const Rect& crop, bool immediate);
+    virtual bool setCrop_legacy(const Rect& crop);
 
     // TODO(b/38182121): Could we eliminate the various latching modes by
     // using the layer hierarchy?
@@ -330,7 +326,7 @@ public:
     virtual bool setBackgroundColor(const half3& color, float alpha, ui::Dataspace dataspace);
     virtual bool setColorSpaceAgnostic(const bool agnostic);
 
-    ui::Dataspace getDataSpace() const { return mCurrentDataSpace; }
+    virtual ui::Dataspace getDataSpace() const { return ui::Dataspace::UNKNOWN; }
 
     // Before color management is introduced, contents on Android have to be
     // desaturated in order to match what they appears like visually.
@@ -376,6 +372,14 @@ public:
 
     int32_t getSequence() const { return sequence; }
 
+    // For tracing.
+    // TODO: Replace with raw buffer id from buffer metadata when that becomes available.
+    // GraphicBuffer::getId() does not provide a reliable global identifier. Since the traces
+    // creates its tracks by buffer id and has no way of associating a buffer back to the process
+    // that created it, the current implementation is only sufficient for cases where a buffer is
+    // only used within a single layer.
+    uint64_t getCurrentBufferId() const { return getBuffer() ? getBuffer()->getId() : 0; }
+
     // -----------------------------------------------------------------------
     // Virtuals
 
@@ -396,11 +400,6 @@ public:
      * screenshots or VNC servers.
      */
     bool isSecure() const;
-
-    /*
-     * isSecureDisplay - true if this display is secure, false otherwise
-     */
-    bool isSecureDisplay() const;
 
     /*
      * isVisible - true if this layer is visible, false otherwise
@@ -472,13 +471,15 @@ public:
      */
     bool onPreComposition(nsecs_t) override;
     void latchCompositionState(compositionengine::LayerFECompositionState&,
-                               bool includeGeometry) const override;
+                               compositionengine::LayerFE::StateSubset subset) const override;
+    void latchCursorCompositionState(compositionengine::LayerFECompositionState&) const override;
     std::optional<renderengine::LayerSettings> prepareClientComposition(
             compositionengine::LayerFE::ClientCompositionTargetSettings&) override;
     void onLayerDisplayed(const sp<Fence>& releaseFence) override;
     const char* getDebugName() const override;
 
 protected:
+    void latchBasicGeometry(compositionengine::LayerFECompositionState& outState) const;
     void latchGeometry(compositionengine::LayerFECompositionState& outState) const;
     virtual void latchPerFrameState(compositionengine::LayerFECompositionState& outState) const;
 
@@ -490,7 +491,6 @@ public:
     Hwc2::IComposerClient::Composition getCompositionType(
             const sp<const DisplayDevice>& display) const;
     bool getClearClientTarget(const sp<const DisplayDevice>& display) const;
-    void updateCursorPosition(const sp<const DisplayDevice>& display);
 
     virtual bool shouldPresentNow(nsecs_t /*expectedPresentTime*/) const { return false; }
     virtual void setTransformHint(uint32_t /*orientation*/) const { }
@@ -509,38 +509,11 @@ public:
     // If a buffer was replaced this frame, release the former buffer
     virtual void releasePendingBuffer(nsecs_t /*dequeueReadyTime*/) { }
 
-    // For Animation Hint
-    virtual bool isScreenshot() const { return false; }
-
     /*
      * doTransaction - process the transaction. This is a good place to figure
      * out which attributes of the surface have changed.
      */
     uint32_t doTransaction(uint32_t transactionFlags);
-
-    /*
-     * setVisibleRegion - called to set the new visible region. This gives
-     * a chance to update the new visible region or record the fact it changed.
-     */
-    void setVisibleRegion(const Region& visibleRegion);
-
-    /*
-     * setCoveredRegion - called when the covered region changes. The covered
-     * region corresponds to any area of the surface that is covered
-     * (transparently or not) by another surface.
-     */
-    void setCoveredRegion(const Region& coveredRegion);
-
-    /*
-     * setVisibleNonTransparentRegion - called when the visible and
-     * non-transparent region changes.
-     */
-    void setVisibleNonTransparentRegion(const Region& visibleNonTransparentRegion);
-
-    /*
-     * Clear the visible, covered, and non-transparent regions.
-     */
-    void clearVisibilityRegions();
 
     /*
      * latchBuffer - called each time the screen is redrawn and returns whether
@@ -587,7 +560,14 @@ public:
      * returns the rectangle that crops the content of the layer and scales it
      * to the layer's size.
      */
-    Rect getContentCrop() const;
+    virtual Rect getBufferCrop() const { return Rect(); }
+
+    /*
+     * Returns the transform applied to the buffer.
+     */
+    virtual uint32_t getBufferTransform() const { return 0; }
+
+    virtual sp<GraphicBuffer> getBuffer() const { return nullptr; }
 
     /*
      * Returns if a frame is ready
@@ -608,6 +588,7 @@ public:
     void miniDump(std::string& result, const sp<DisplayDevice>& display) const;
     void dumpFrameStats(std::string& result) const;
     void dumpFrameEvents(std::string& result);
+    void dumpCallingUidPid(std::string& result) const;
     void clearFrameStats();
     void logFrameStats();
     void getFrameStats(FrameStats* outStats) const;
@@ -683,6 +664,8 @@ public:
 
     compositionengine::OutputLayer* findOutputLayerForDisplay(
             const sp<const DisplayDevice>& display) const;
+
+    Region debugGetVisibleRegionOnDefaultDisplay() const;
 
 protected:
     // constant
@@ -838,16 +821,10 @@ protected:
 
     // main thread
     sp<NativeHandle> mSidebandStream;
-    // Active buffer fields
-    sp<GraphicBuffer> mActiveBuffer;
-    sp<Fence> mActiveBufferFence;
     // False if the buffer and its contents have been previously used for GPU
     // composition, true otherwise.
     bool mIsActiveBufferUpdatedForGpu = true;
 
-    ui::Dataspace mCurrentDataSpace = ui::Dataspace::UNKNOWN;
-    Rect mCurrentCrop;
-    uint32_t mCurrentTransform{0};
     // We encode unset as -1.
     int32_t mOverrideScalingMode{-1};
     std::atomic<uint64_t> mCurrentFrameNumber{0};
@@ -867,8 +844,6 @@ protected:
 
     // This layer can be a cursor on some displays.
     bool mPotentialCursor{false};
-
-    bool mFreezeGeometryUpdates{false};
 
     // Child list about to be committed/used for editing.
     LayerVector mCurrentChildren{LayerVector::StateSet::Current};
@@ -932,6 +907,11 @@ private:
     bool mGetHandleCalled = false;
 
     void removeRemoteSyncPoints();
+
+    // Tracks the process and user id of the caller when creating this layer
+    // to help debugging.
+    pid_t mCallingPid;
+    uid_t mCallingUid;
 };
 
 } // namespace android

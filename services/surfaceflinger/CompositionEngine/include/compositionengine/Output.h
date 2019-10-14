@@ -21,7 +21,7 @@
 #include <string>
 #include <unordered_map>
 
-#include <math/mat4.h>
+#include <compositionengine/LayerFE.h>
 #include <renderengine/LayerSettings.h>
 #include <ui/Fence.h>
 #include <ui/GraphicTypes.h>
@@ -43,6 +43,9 @@ class LayerFE;
 class RenderSurface;
 class OutputLayer;
 
+struct CompositionRefreshArgs;
+struct LayerFECompositionState;
+
 namespace impl {
 struct OutputCompositionState;
 } // namespace impl
@@ -54,11 +57,35 @@ class Output {
 public:
     using OutputLayers = std::vector<std::unique_ptr<compositionengine::OutputLayer>>;
     using ReleasedLayers = std::vector<wp<LayerFE>>;
+    using UniqueFELayerStateMap = std::unordered_map<LayerFE*, LayerFECompositionState*>;
 
     struct FrameFences {
         sp<Fence> presentFence{Fence::NO_FENCE};
         sp<Fence> clientTargetAcquireFence{Fence::NO_FENCE};
         std::unordered_map<HWC2::Layer*, sp<Fence>> layerFences;
+    };
+
+    struct ColorProfile {
+        ui::ColorMode mode{ui::ColorMode::NATIVE};
+        ui::Dataspace dataspace{ui::Dataspace::UNKNOWN};
+        ui::RenderIntent renderIntent{ui::RenderIntent::COLORIMETRIC};
+        ui::Dataspace colorSpaceAgnosticDataspace{ui::Dataspace::UNKNOWN};
+    };
+
+    // Use internally to incrementally compute visibility/coverage
+    struct CoverageState {
+        explicit CoverageState(LayerFESet& latchedLayers) : latchedLayers(latchedLayers) {}
+
+        // The set of layers that had been latched for the coverage calls, to
+        // avoid duplicate requests to obtain the same front-end layer state.
+        LayerFESet& latchedLayers;
+
+        // The region of the output which is covered by layers
+        Region aboveCoveredLayers;
+        // The region of the output which is opaquely covered by layers
+        Region aboveOpaqueLayers;
+        // The region of the output which should be considered dirty
+        Region dirtyRegion;
     };
 
     virtual ~Output();
@@ -81,12 +108,8 @@ public:
     // belongsInOutput for full details.
     virtual void setLayerStackFilter(uint32_t layerStackId, bool isInternal) = 0;
 
-    // Sets the color transform matrix to use
-    virtual void setColorTransform(const mat4&) = 0;
-
     // Sets the output color mode
-    virtual void setColorMode(ui::ColorMode, ui::Dataspace, ui::RenderIntent,
-                              ui::Dataspace colorSpaceAgnosticDataspace) = 0;
+    virtual void setColorProfile(const ColorProfile&) = 0;
 
     // Outputs a string with a state dump
     virtual void dump(std::string&) const = 0;
@@ -126,17 +149,23 @@ public:
     // A layer belongs to the output if its layerStackId matches. Additionally
     // if the layer should only show in the internal (primary) display only and
     // this output allows that.
-    virtual bool belongsInOutput(uint32_t layerStackId, bool internalOnly) const = 0;
+    virtual bool belongsInOutput(std::optional<uint32_t> layerStackId, bool internalOnly) const = 0;
+
+    // Determines if a layer belongs to the output.
+    virtual bool belongsInOutput(const compositionengine::Layer*) const = 0;
 
     // Returns a pointer to the output layer corresponding to the given layer on
     // this output, or nullptr if the layer does not have one
     virtual OutputLayer* getOutputLayerForLayer(Layer*) const = 0;
 
+    // Creates an OutputLayer instance for this output
+    virtual std::unique_ptr<OutputLayer> createOutputLayer(const std::shared_ptr<Layer>&,
+                                                           const sp<LayerFE>&) const = 0;
+
     // Gets the OutputLayer corresponding to the input Layer instance from the
     // current ordered set of output layers. If there is no such layer, a new
     // one is created and returned.
-    virtual std::unique_ptr<OutputLayer> getOrCreateOutputLayer(std::optional<DisplayId>,
-                                                                std::shared_ptr<Layer>,
+    virtual std::unique_ptr<OutputLayer> getOrCreateOutputLayer(std::shared_ptr<Layer>,
                                                                 sp<LayerFE>) = 0;
 
     // Sets the new ordered set of output layers for this output
@@ -151,24 +180,35 @@ public:
     // Takes (moves) the set of layers being released this frame.
     virtual ReleasedLayers takeReleasedLayers() = 0;
 
-    // Signals that a frame is beginning on the output
-    virtual void beginFrame() = 0;
+    // Prepare the output, updating the OutputLayers used in the output
+    virtual void prepare(const CompositionRefreshArgs&, LayerFESet&) = 0;
 
-    // Prepares a frame for display
-    virtual void prepareFrame() = 0;
+    // Presents the output, finalizing all composition details
+    virtual void present(const CompositionRefreshArgs&) = 0;
 
-    // Performs client composition as needed for layers on the output. The
-    // output fence is set to a fence to signal when client composition is
-    // finished.
-    // Returns false if client composition cannot be performed.
-    virtual bool composeSurfaces(const Region& debugFence, base::unique_fd* outReadyFence) = 0;
-
-    // Posts the new frame, and sets release fences.
-    virtual void postFramebuffer() = 0;
+    // Latches the front-end layer state for each output layer
+    virtual void updateLayerStateFromFE(const CompositionRefreshArgs&) const = 0;
 
 protected:
     virtual void setDisplayColorProfile(std::unique_ptr<DisplayColorProfile>) = 0;
     virtual void setRenderSurface(std::unique_ptr<RenderSurface>) = 0;
+
+    virtual void rebuildLayerStacks(const compositionengine::CompositionRefreshArgs&,
+                                    LayerFESet&) = 0;
+    virtual void collectVisibleLayers(const CompositionRefreshArgs&, CoverageState&) = 0;
+    virtual std::unique_ptr<OutputLayer> getOutputLayerIfVisible(
+            std::shared_ptr<compositionengine::Layer>, CoverageState&) = 0;
+    virtual void setReleasedLayers(const compositionengine::CompositionRefreshArgs&) = 0;
+
+    virtual void updateAndWriteCompositionState(const CompositionRefreshArgs&) = 0;
+    virtual void setColorTransform(const CompositionRefreshArgs&) = 0;
+    virtual void updateColorProfile(const CompositionRefreshArgs&) = 0;
+    virtual void beginFrame() = 0;
+    virtual void prepareFrame() = 0;
+    virtual void devOptRepaintFlash(const CompositionRefreshArgs&) = 0;
+    virtual void finishFrame(const CompositionRefreshArgs&) = 0;
+    virtual std::optional<base::unique_fd> composeSurfaces(const Region&) = 0;
+    virtual void postFramebuffer() = 0;
     virtual void chooseCompositionStrategy() = 0;
     virtual bool getSkipColorTransform() const = 0;
     virtual FrameFences presentAndGetFrameFences() = 0;

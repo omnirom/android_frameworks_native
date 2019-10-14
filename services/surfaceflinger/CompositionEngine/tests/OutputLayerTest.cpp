@@ -36,8 +36,6 @@ using testing::Return;
 using testing::ReturnRef;
 using testing::StrictMock;
 
-constexpr DisplayId DEFAULT_DISPLAY_ID = DisplayId{42};
-
 constexpr auto TR_IDENT = 0u;
 constexpr auto TR_FLP_H = HAL_TRANSFORM_FLIP_H;
 constexpr auto TR_FLP_V = HAL_TRANSFORM_FLIP_V;
@@ -61,7 +59,7 @@ struct OutputLayerTest : public testing::Test {
         EXPECT_CALL(*mLayerFE, getDebugName()).WillRepeatedly(Return("Test LayerFE"));
         EXPECT_CALL(mOutput, getName()).WillRepeatedly(ReturnRef(kOutputName));
 
-        EXPECT_CALL(*mLayer, getState()).WillRepeatedly(ReturnRef(mLayerState));
+        EXPECT_CALL(*mLayer, getFEState()).WillRepeatedly(ReturnRef(mLayerFEState));
         EXPECT_CALL(mOutput, getState()).WillRepeatedly(ReturnRef(mOutputState));
     }
 
@@ -72,7 +70,7 @@ struct OutputLayerTest : public testing::Test {
             new StrictMock<compositionengine::mock::LayerFE>()};
     impl::OutputLayer mOutputLayer{mOutput, mLayer, mLayerFE};
 
-    impl::LayerCompositionState mLayerState;
+    LayerFECompositionState mLayerFEState;
     impl::OutputCompositionState mOutputState;
 };
 
@@ -83,35 +81,27 @@ struct OutputLayerTest : public testing::Test {
 TEST_F(OutputLayerTest, canInstantiateOutputLayer) {}
 
 /*
- * OutputLayer::initialize()
+ * OutputLayer::setHwcLayer()
  */
 
-TEST_F(OutputLayerTest, initializingOutputLayerWithoutHwcDoesNothingInteresting) {
+TEST_F(OutputLayerTest, settingNullHwcLayerSetsEmptyHwcState) {
     StrictMock<compositionengine::mock::CompositionEngine> compositionEngine;
 
-    mOutputLayer.initialize(compositionEngine, std::nullopt);
+    mOutputLayer.setHwcLayer(nullptr);
 
     EXPECT_FALSE(mOutputLayer.getState().hwc);
 }
 
-TEST_F(OutputLayerTest, initializingOutputLayerWithHwcDisplayCreatesHwcLayer) {
-    StrictMock<compositionengine::mock::CompositionEngine> compositionEngine;
-    StrictMock<android::mock::HWComposer> hwc;
-    StrictMock<HWC2::mock::Layer> hwcLayer;
+TEST_F(OutputLayerTest, settingHwcLayerSetsHwcState) {
+    auto hwcLayer = std::make_shared<StrictMock<HWC2::mock::Layer>>();
 
-    EXPECT_CALL(compositionEngine, getHwComposer()).WillOnce(ReturnRef(hwc));
-    EXPECT_CALL(hwc, createLayer(DEFAULT_DISPLAY_ID)).WillOnce(Return(&hwcLayer));
-
-    mOutputLayer.initialize(compositionEngine, DEFAULT_DISPLAY_ID);
+    mOutputLayer.setHwcLayer(hwcLayer);
 
     const auto& outputLayerState = mOutputLayer.getState();
     ASSERT_TRUE(outputLayerState.hwc);
 
     const auto& hwcState = *outputLayerState.hwc;
-    EXPECT_EQ(&hwcLayer, hwcState.hwcLayer.get());
-
-    EXPECT_CALL(hwc, destroyLayer(DEFAULT_DISPLAY_ID, &hwcLayer));
-    mOutputLayer.editState().hwc.reset();
+    EXPECT_EQ(hwcLayer, hwcState.hwcLayer);
 }
 
 /*
@@ -122,27 +112,26 @@ struct OutputLayerSourceCropTest : public OutputLayerTest {
     OutputLayerSourceCropTest() {
         // Set reasonable default values for a simple case. Each test will
         // set one specific value to something different.
-        mLayerState.frontEnd.geomUsesSourceCrop = true;
-        mLayerState.frontEnd.geomContentCrop = Rect{0, 0, 1920, 1080};
-        mLayerState.frontEnd.geomActiveTransparentRegion = Region{};
-        mLayerState.frontEnd.geomLayerBounds = FloatRect{0.f, 0.f, 1920.f, 1080.f};
-        mLayerState.frontEnd.geomLayerTransform = ui::Transform{TR_IDENT};
-        mLayerState.frontEnd.geomBufferSize = Rect{0, 0, 1920, 1080};
-        mLayerState.frontEnd.geomBufferTransform = TR_IDENT;
+        mLayerFEState.geomUsesSourceCrop = true;
+        mLayerFEState.geomContentCrop = Rect{0, 0, 1920, 1080};
+        mLayerFEState.transparentRegionHint = Region{};
+        mLayerFEState.geomLayerBounds = FloatRect{0.f, 0.f, 1920.f, 1080.f};
+        mLayerFEState.geomLayerTransform = ui::Transform{TR_IDENT};
+        mLayerFEState.geomBufferSize = Rect{0, 0, 1920, 1080};
+        mLayerFEState.geomBufferTransform = TR_IDENT;
 
         mOutputState.viewport = Rect{0, 0, 1920, 1080};
     }
 
     FloatRect calculateOutputSourceCrop() {
-        mLayerState.frontEnd.geomInverseLayerTransform =
-                mLayerState.frontEnd.geomLayerTransform.inverse();
+        mLayerFEState.geomInverseLayerTransform = mLayerFEState.geomLayerTransform.inverse();
 
         return mOutputLayer.calculateOutputSourceCrop();
     }
 };
 
 TEST_F(OutputLayerSourceCropTest, computesEmptyIfSourceCropNotUsed) {
-    mLayerState.frontEnd.geomUsesSourceCrop = false;
+    mLayerFEState.geomUsesSourceCrop = false;
 
     const FloatRect expected{};
     EXPECT_THAT(calculateOutputSourceCrop(), FloatRectEq(expected));
@@ -154,15 +143,15 @@ TEST_F(OutputLayerSourceCropTest, correctForSimpleDefaultCase) {
 }
 
 TEST_F(OutputLayerSourceCropTest, handlesBoundsOutsideViewport) {
-    mLayerState.frontEnd.geomLayerBounds = FloatRect{-2000.f, -2000.f, 2000.f, 2000.f};
+    mLayerFEState.geomLayerBounds = FloatRect{-2000.f, -2000.f, 2000.f, 2000.f};
 
     const FloatRect expected{0.f, 0.f, 1920.f, 1080.f};
     EXPECT_THAT(calculateOutputSourceCrop(), FloatRectEq(expected));
 }
 
 TEST_F(OutputLayerSourceCropTest, handlesBoundsOutsideViewportRotated) {
-    mLayerState.frontEnd.geomLayerBounds = FloatRect{-2000.f, -2000.f, 2000.f, 2000.f};
-    mLayerState.frontEnd.geomLayerTransform.set(HAL_TRANSFORM_ROT_90, 1920, 1080);
+    mLayerFEState.geomLayerBounds = FloatRect{-2000.f, -2000.f, 2000.f, 2000.f};
+    mLayerFEState.geomLayerTransform.set(HAL_TRANSFORM_ROT_90, 1920, 1080);
 
     const FloatRect expected{0.f, 0.f, 1080.f, 1080.f};
     EXPECT_THAT(calculateOutputSourceCrop(), FloatRectEq(expected));
@@ -200,8 +189,8 @@ TEST_F(OutputLayerSourceCropTest, calculateOutputSourceCropWorksWithATransformed
     for (size_t i = 0; i < testData.size(); i++) {
         const auto& entry = testData[i];
 
-        mLayerState.frontEnd.geomBufferUsesDisplayInverseTransform = entry.bufferInvDisplay;
-        mLayerState.frontEnd.geomBufferTransform = entry.buffer;
+        mLayerFEState.geomBufferUsesDisplayInverseTransform = entry.bufferInvDisplay;
+        mLayerFEState.geomBufferTransform = entry.buffer;
         mOutputState.orientation = entry.display;
 
         EXPECT_THAT(calculateOutputSourceCrop(), FloatRectEq(entry.expected)) << "entry " << i;
@@ -209,7 +198,7 @@ TEST_F(OutputLayerSourceCropTest, calculateOutputSourceCropWorksWithATransformed
 }
 
 TEST_F(OutputLayerSourceCropTest, geomContentCropAffectsCrop) {
-    mLayerState.frontEnd.geomContentCrop = Rect{0, 0, 960, 540};
+    mLayerFEState.geomContentCrop = Rect{0, 0, 960, 540};
 
     const FloatRect expected{0.f, 0.f, 960.f, 540.f};
     EXPECT_THAT(calculateOutputSourceCrop(), FloatRectEq(expected));
@@ -231,20 +220,19 @@ struct OutputLayerDisplayFrameTest : public OutputLayerTest {
         // Set reasonable default values for a simple case. Each test will
         // set one specific value to something different.
 
-        mLayerState.frontEnd.geomActiveTransparentRegion = Region{};
-        mLayerState.frontEnd.geomLayerTransform = ui::Transform{TR_IDENT};
-        mLayerState.frontEnd.geomBufferSize = Rect{0, 0, 1920, 1080};
-        mLayerState.frontEnd.geomBufferUsesDisplayInverseTransform = false;
-        mLayerState.frontEnd.geomCrop = Rect{0, 0, 1920, 1080};
-        mLayerState.frontEnd.geomLayerBounds = FloatRect{0.f, 0.f, 1920.f, 1080.f};
+        mLayerFEState.transparentRegionHint = Region{};
+        mLayerFEState.geomLayerTransform = ui::Transform{TR_IDENT};
+        mLayerFEState.geomBufferSize = Rect{0, 0, 1920, 1080};
+        mLayerFEState.geomBufferUsesDisplayInverseTransform = false;
+        mLayerFEState.geomCrop = Rect{0, 0, 1920, 1080};
+        mLayerFEState.geomLayerBounds = FloatRect{0.f, 0.f, 1920.f, 1080.f};
 
         mOutputState.viewport = Rect{0, 0, 1920, 1080};
         mOutputState.transform = ui::Transform{TR_IDENT};
     }
 
     Rect calculateOutputDisplayFrame() {
-        mLayerState.frontEnd.geomInverseLayerTransform =
-                mLayerState.frontEnd.geomLayerTransform.inverse();
+        mLayerFEState.geomInverseLayerTransform = mLayerFEState.geomLayerTransform.inverse();
 
         return mOutputLayer.calculateOutputDisplayFrame();
     }
@@ -256,32 +244,32 @@ TEST_F(OutputLayerDisplayFrameTest, correctForSimpleDefaultCase) {
 }
 
 TEST_F(OutputLayerDisplayFrameTest, fullActiveTransparentRegionReturnsEmptyFrame) {
-    mLayerState.frontEnd.geomActiveTransparentRegion = Region{Rect{0, 0, 1920, 1080}};
+    mLayerFEState.transparentRegionHint = Region{Rect{0, 0, 1920, 1080}};
     const Rect expected{0, 0, 0, 0};
     EXPECT_THAT(calculateOutputDisplayFrame(), RectEq(expected));
 }
 
 TEST_F(OutputLayerDisplayFrameTest, cropAffectsDisplayFrame) {
-    mLayerState.frontEnd.geomCrop = Rect{100, 200, 300, 500};
+    mLayerFEState.geomCrop = Rect{100, 200, 300, 500};
     const Rect expected{100, 200, 300, 500};
     EXPECT_THAT(calculateOutputDisplayFrame(), RectEq(expected));
 }
 
 TEST_F(OutputLayerDisplayFrameTest, cropAffectsDisplayFrameRotated) {
-    mLayerState.frontEnd.geomCrop = Rect{100, 200, 300, 500};
-    mLayerState.frontEnd.geomLayerTransform.set(HAL_TRANSFORM_ROT_90, 1920, 1080);
+    mLayerFEState.geomCrop = Rect{100, 200, 300, 500};
+    mLayerFEState.geomLayerTransform.set(HAL_TRANSFORM_ROT_90, 1920, 1080);
     const Rect expected{1420, 100, 1720, 300};
     EXPECT_THAT(calculateOutputDisplayFrame(), RectEq(expected));
 }
 
 TEST_F(OutputLayerDisplayFrameTest, emptyGeomCropIsNotUsedToComputeFrame) {
-    mLayerState.frontEnd.geomCrop = Rect{};
+    mLayerFEState.geomCrop = Rect{};
     const Rect expected{0, 0, 1920, 1080};
     EXPECT_THAT(calculateOutputDisplayFrame(), RectEq(expected));
 }
 
 TEST_F(OutputLayerDisplayFrameTest, geomLayerBoundsAffectsFrame) {
-    mLayerState.frontEnd.geomLayerBounds = FloatRect{0.f, 0.f, 960.f, 540.f};
+    mLayerFEState.geomLayerBounds = FloatRect{0.f, 0.f, 960.f, 540.f};
     const Rect expected{0, 0, 960, 540};
     EXPECT_THAT(calculateOutputDisplayFrame(), RectEq(expected));
 }
@@ -303,7 +291,7 @@ TEST_F(OutputLayerDisplayFrameTest, outputTransformAffectsDisplayFrame) {
  */
 
 TEST_F(OutputLayerTest, calculateOutputRelativeBufferTransformTestsNeeded) {
-    mLayerState.frontEnd.geomBufferUsesDisplayInverseTransform = false;
+    mLayerFEState.geomBufferUsesDisplayInverseTransform = false;
 
     struct Entry {
         uint32_t layer;
@@ -350,8 +338,8 @@ TEST_F(OutputLayerTest, calculateOutputRelativeBufferTransformTestsNeeded) {
     for (size_t i = 0; i < testData.size(); i++) {
         const auto& entry = testData[i];
 
-        mLayerState.frontEnd.geomLayerTransform.set(entry.layer, 1920, 1080);
-        mLayerState.frontEnd.geomBufferTransform = entry.buffer;
+        mLayerFEState.geomLayerTransform.set(entry.layer, 1920, 1080);
+        mLayerFEState.geomBufferTransform = entry.buffer;
         mOutputState.orientation = entry.display;
 
         auto actual = mOutputLayer.calculateOutputRelativeBufferTransform();
@@ -361,7 +349,7 @@ TEST_F(OutputLayerTest, calculateOutputRelativeBufferTransformTestsNeeded) {
 
 TEST_F(OutputLayerTest,
        calculateOutputRelativeBufferTransformTestWithOfBufferUsesDisplayInverseTransform) {
-    mLayerState.frontEnd.geomBufferUsesDisplayInverseTransform = true;
+    mLayerFEState.geomBufferUsesDisplayInverseTransform = true;
 
     struct Entry {
         uint32_t layer;
@@ -408,8 +396,8 @@ TEST_F(OutputLayerTest,
     for (size_t i = 0; i < testData.size(); i++) {
         const auto& entry = testData[i];
 
-        mLayerState.frontEnd.geomLayerTransform = ui::Transform{entry.layer};
-        mLayerState.frontEnd.geomBufferTransform = entry.buffer;
+        mLayerFEState.geomLayerTransform = ui::Transform{entry.layer};
+        mLayerFEState.geomBufferTransform = entry.buffer;
         mOutputState.orientation = entry.display;
 
         auto actual = mOutputLayer.calculateOutputRelativeBufferTransform();
@@ -435,7 +423,7 @@ struct OutputLayerPartialMockForUpdateCompositionState : public impl::OutputLaye
 struct OutputLayerUpdateCompositionStateTest : public OutputLayerTest {
 public:
     OutputLayerUpdateCompositionStateTest() {
-        EXPECT_CALL(*mLayer, getState()).WillRepeatedly(ReturnRef(mLayerState));
+        EXPECT_CALL(*mLayer, getFEState()).WillRepeatedly(ReturnRef(mLayerFEState));
         EXPECT_CALL(mOutput, getState()).WillRepeatedly(ReturnRef(mOutputState));
         EXPECT_CALL(mOutput, getDisplayColorProfile())
                 .WillRepeatedly(Return(&mDisplayColorProfile));
@@ -468,7 +456,7 @@ public:
 };
 
 TEST_F(OutputLayerUpdateCompositionStateTest, setsStateNormally) {
-    mLayerState.frontEnd.isSecure = true;
+    mLayerFEState.isSecure = true;
     mOutputState.isSecure = true;
 
     setupGeometryChildCallValues();
@@ -482,7 +470,7 @@ TEST_F(OutputLayerUpdateCompositionStateTest, setsStateNormally) {
 
 TEST_F(OutputLayerUpdateCompositionStateTest,
        alsoSetsForceCompositionIfSecureLayerOnNonsecureOutput) {
-    mLayerState.frontEnd.isSecure = true;
+    mLayerFEState.isSecure = true;
     mOutputState.isSecure = false;
 
     setupGeometryChildCallValues();
@@ -496,7 +484,7 @@ TEST_F(OutputLayerUpdateCompositionStateTest,
 
 TEST_F(OutputLayerUpdateCompositionStateTest,
        alsoSetsForceCompositionIfUnsupportedBufferTransform) {
-    mLayerState.frontEnd.isSecure = true;
+    mLayerFEState.isSecure = true;
     mOutputState.isSecure = true;
 
     mBufferTransform = ui::Transform::ROT_INVALID;
@@ -511,12 +499,12 @@ TEST_F(OutputLayerUpdateCompositionStateTest,
 }
 
 TEST_F(OutputLayerUpdateCompositionStateTest, setsOutputLayerColorspaceCorrectly) {
-    mLayerState.frontEnd.dataspace = ui::Dataspace::DISPLAY_P3;
+    mLayerFEState.dataspace = ui::Dataspace::DISPLAY_P3;
     mOutputState.targetDataspace = ui::Dataspace::V0_SCRGB;
 
     // If the layer is not colorspace agnostic, the output layer dataspace
     // should use the layers requested colorspace.
-    mLayerState.frontEnd.isColorspaceAgnostic = false;
+    mLayerFEState.isColorspaceAgnostic = false;
 
     mOutputLayer.updateCompositionState(false);
 
@@ -524,7 +512,7 @@ TEST_F(OutputLayerUpdateCompositionStateTest, setsOutputLayerColorspaceCorrectly
 
     // If the layer is colorspace agnostic, the output layer dataspace
     // should use the colorspace chosen for the whole output.
-    mLayerState.frontEnd.isColorspaceAgnostic = true;
+    mLayerFEState.isColorspaceAgnostic = true;
 
     mOutputLayer.updateCompositionState(false);
 
@@ -538,7 +526,7 @@ TEST_F(OutputLayerUpdateCompositionStateTest, doesNotRecomputeGeometryIfNotReque
 }
 
 TEST_F(OutputLayerUpdateCompositionStateTest, clientCompositionForcedFromFrontEndFlagAtAnyTime) {
-    mLayerState.frontEnd.forceClientComposition = true;
+    mLayerFEState.forceClientComposition = true;
 
     mOutputLayer.updateCompositionState(false);
 
@@ -574,7 +562,7 @@ struct OutputLayerWriteStateToHWCTest : public OutputLayerTest {
 
     static const half4 kColor;
     static const Rect kDisplayFrame;
-    static const Region kVisibleRegion;
+    static const Region kOutputSpaceVisibleRegion;
     static const mat4 kColorTransform;
     static const Region kSurfaceDamage;
     static const HdrMetadata kHdrMetadata;
@@ -590,21 +578,21 @@ struct OutputLayerWriteStateToHWCTest : public OutputLayerTest {
         outputLayerState.sourceCrop = kSourceCrop;
         outputLayerState.z = kZOrder;
         outputLayerState.bufferTransform = static_cast<Hwc2::Transform>(kBufferTransform);
-        outputLayerState.visibleRegion = kVisibleRegion;
+        outputLayerState.outputSpaceVisibleRegion = kOutputSpaceVisibleRegion;
         outputLayerState.dataspace = kDataspace;
 
-        mLayerState.frontEnd.blendMode = kBlendMode;
-        mLayerState.frontEnd.alpha = kAlpha;
-        mLayerState.frontEnd.type = kType;
-        mLayerState.frontEnd.appId = kAppId;
-        mLayerState.frontEnd.colorTransform = kColorTransform;
-        mLayerState.frontEnd.color = kColor;
-        mLayerState.frontEnd.surfaceDamage = kSurfaceDamage;
-        mLayerState.frontEnd.hdrMetadata = kHdrMetadata;
-        mLayerState.frontEnd.sidebandStream = NativeHandle::create(kSidebandStreamHandle, false);
-        mLayerState.frontEnd.buffer = kBuffer;
-        mLayerState.frontEnd.bufferSlot = BufferQueue::INVALID_BUFFER_SLOT;
-        mLayerState.frontEnd.acquireFence = kFence;
+        mLayerFEState.blendMode = kBlendMode;
+        mLayerFEState.alpha = kAlpha;
+        mLayerFEState.type = kType;
+        mLayerFEState.appId = kAppId;
+        mLayerFEState.colorTransform = kColorTransform;
+        mLayerFEState.color = kColor;
+        mLayerFEState.surfaceDamage = kSurfaceDamage;
+        mLayerFEState.hdrMetadata = kHdrMetadata;
+        mLayerFEState.sidebandStream = NativeHandle::create(kSidebandStreamHandle, false);
+        mLayerFEState.buffer = kBuffer;
+        mLayerFEState.bufferSlot = BufferQueue::INVALID_BUFFER_SLOT;
+        mLayerFEState.acquireFence = kFence;
 
         EXPECT_CALL(mOutput, getDisplayColorProfile())
                 .WillRepeatedly(Return(&mDisplayColorProfile));
@@ -629,7 +617,7 @@ struct OutputLayerWriteStateToHWCTest : public OutputLayerTest {
     }
 
     void expectPerFrameCommonCalls(SimulateUnsupported unsupported = SimulateUnsupported::None) {
-        EXPECT_CALL(*mHwcLayer, setVisibleRegion(RegionEq(kVisibleRegion)))
+        EXPECT_CALL(*mHwcLayer, setVisibleRegion(RegionEq(kOutputSpaceVisibleRegion)))
                 .WillOnce(Return(kError));
         EXPECT_CALL(*mHwcLayer, setDataspace(kDataspace)).WillOnce(Return(kError));
         EXPECT_CALL(*mHwcLayer, setColorTransform(kColorTransform))
@@ -673,7 +661,8 @@ struct OutputLayerWriteStateToHWCTest : public OutputLayerTest {
 const half4 OutputLayerWriteStateToHWCTest::kColor{81.f / 255.f, 82.f / 255.f, 83.f / 255.f,
                                                    84.f / 255.f};
 const Rect OutputLayerWriteStateToHWCTest::kDisplayFrame{1001, 1002, 1003, 10044};
-const Region OutputLayerWriteStateToHWCTest::kVisibleRegion{Rect{1005, 1006, 1007, 1008}};
+const Region OutputLayerWriteStateToHWCTest::kOutputSpaceVisibleRegion{
+        Rect{1005, 1006, 1007, 1008}};
 const mat4 OutputLayerWriteStateToHWCTest::kColorTransform{
         1009, 1010, 1011, 1012, 1013, 1014, 1015, 1016,
         1017, 1018, 1019, 1020, 1021, 1022, 1023, 1024,
@@ -707,7 +696,7 @@ TEST_F(OutputLayerWriteStateToHWCTest, canSetAllState) {
 }
 
 TEST_F(OutputLayerWriteStateToHWCTest, canSetPerFrameStateForSolidColor) {
-    mLayerState.frontEnd.compositionType = Hwc2::IComposerClient::Composition::SOLID_COLOR;
+    mLayerFEState.compositionType = Hwc2::IComposerClient::Composition::SOLID_COLOR;
 
     expectPerFrameCommonCalls();
     expectSetColorCall();
@@ -717,7 +706,7 @@ TEST_F(OutputLayerWriteStateToHWCTest, canSetPerFrameStateForSolidColor) {
 }
 
 TEST_F(OutputLayerWriteStateToHWCTest, canSetPerFrameStateForSideband) {
-    mLayerState.frontEnd.compositionType = Hwc2::IComposerClient::Composition::SIDEBAND;
+    mLayerFEState.compositionType = Hwc2::IComposerClient::Composition::SIDEBAND;
 
     expectPerFrameCommonCalls();
     expectSetSidebandHandleCall();
@@ -727,7 +716,7 @@ TEST_F(OutputLayerWriteStateToHWCTest, canSetPerFrameStateForSideband) {
 }
 
 TEST_F(OutputLayerWriteStateToHWCTest, canSetPerFrameStateForCursor) {
-    mLayerState.frontEnd.compositionType = Hwc2::IComposerClient::Composition::CURSOR;
+    mLayerFEState.compositionType = Hwc2::IComposerClient::Composition::CURSOR;
 
     expectPerFrameCommonCalls();
     expectSetHdrMetadataAndBufferCalls();
@@ -737,7 +726,7 @@ TEST_F(OutputLayerWriteStateToHWCTest, canSetPerFrameStateForCursor) {
 }
 
 TEST_F(OutputLayerWriteStateToHWCTest, canSetPerFrameStateForDevice) {
-    mLayerState.frontEnd.compositionType = Hwc2::IComposerClient::Composition::DEVICE;
+    mLayerFEState.compositionType = Hwc2::IComposerClient::Composition::DEVICE;
 
     expectPerFrameCommonCalls();
     expectSetHdrMetadataAndBufferCalls();
@@ -750,7 +739,7 @@ TEST_F(OutputLayerWriteStateToHWCTest, compositionTypeIsNotSetIfUnchanged) {
     (*mOutputLayer.editState().hwc).hwcCompositionType =
             Hwc2::IComposerClient::Composition::SOLID_COLOR;
 
-    mLayerState.frontEnd.compositionType = Hwc2::IComposerClient::Composition::SOLID_COLOR;
+    mLayerFEState.compositionType = Hwc2::IComposerClient::Composition::SOLID_COLOR;
 
     expectPerFrameCommonCalls();
     expectSetColorCall();
@@ -760,7 +749,7 @@ TEST_F(OutputLayerWriteStateToHWCTest, compositionTypeIsNotSetIfUnchanged) {
 }
 
 TEST_F(OutputLayerWriteStateToHWCTest, compositionTypeIsSetToClientIfColorTransformNotSupported) {
-    mLayerState.frontEnd.compositionType = Hwc2::IComposerClient::Composition::SOLID_COLOR;
+    mLayerFEState.compositionType = Hwc2::IComposerClient::Composition::SOLID_COLOR;
 
     expectPerFrameCommonCalls(SimulateUnsupported::ColorTransform);
     expectSetColorCall();
@@ -772,13 +761,68 @@ TEST_F(OutputLayerWriteStateToHWCTest, compositionTypeIsSetToClientIfColorTransf
 TEST_F(OutputLayerWriteStateToHWCTest, compositionTypeIsSetToClientIfClientCompositionForced) {
     mOutputLayer.editState().forceClientComposition = true;
 
-    mLayerState.frontEnd.compositionType = Hwc2::IComposerClient::Composition::SOLID_COLOR;
+    mLayerFEState.compositionType = Hwc2::IComposerClient::Composition::SOLID_COLOR;
 
     expectPerFrameCommonCalls();
     expectSetColorCall();
     expectSetCompositionTypeCall(Hwc2::IComposerClient::Composition::CLIENT);
 
     mOutputLayer.writeStateToHWC(false);
+}
+
+/*
+ * OutputLayer::writeCursorPositionToHWC()
+ */
+
+struct OutputLayerWriteCursorPositionToHWCTest : public OutputLayerTest {
+    static constexpr int kDefaultTransform = TR_IDENT;
+    static constexpr HWC2::Error kDefaultError = HWC2::Error::Unsupported;
+
+    static const Rect kDefaultDisplayViewport;
+    static const Rect kDefaultCursorFrame;
+
+    OutputLayerWriteCursorPositionToHWCTest() {
+        auto& outputLayerState = mOutputLayer.editState();
+        outputLayerState.hwc = impl::OutputLayerCompositionState::Hwc(mHwcLayer);
+
+        mLayerFEState.cursorFrame = kDefaultCursorFrame;
+
+        mOutputState.viewport = kDefaultDisplayViewport;
+        mOutputState.transform = ui::Transform{kDefaultTransform};
+    }
+
+    std::shared_ptr<HWC2::mock::Layer> mHwcLayer{std::make_shared<StrictMock<HWC2::mock::Layer>>()};
+};
+
+const Rect OutputLayerWriteCursorPositionToHWCTest::kDefaultDisplayViewport{0, 0, 1920, 1080};
+const Rect OutputLayerWriteCursorPositionToHWCTest::kDefaultCursorFrame{1, 2, 3, 4};
+
+TEST_F(OutputLayerWriteCursorPositionToHWCTest, writeCursorPositionToHWCHandlesNoHwcState) {
+    mOutputLayer.editState().hwc.reset();
+
+    mOutputLayer.writeCursorPositionToHWC();
+}
+
+TEST_F(OutputLayerWriteCursorPositionToHWCTest, writeCursorPositionToHWCWritesStateToHWC) {
+    EXPECT_CALL(*mHwcLayer, setCursorPosition(1, 2)).WillOnce(Return(kDefaultError));
+
+    mOutputLayer.writeCursorPositionToHWC();
+}
+
+TEST_F(OutputLayerWriteCursorPositionToHWCTest, writeCursorPositionToHWCIntersectedWithViewport) {
+    mLayerFEState.cursorFrame = Rect{3000, 3000, 3016, 3016};
+
+    EXPECT_CALL(*mHwcLayer, setCursorPosition(1920, 1080)).WillOnce(Return(kDefaultError));
+
+    mOutputLayer.writeCursorPositionToHWC();
+}
+
+TEST_F(OutputLayerWriteCursorPositionToHWCTest, writeCursorPositionToHWCRotatedByTransform) {
+    mOutputState.transform = ui::Transform{TR_ROT_90};
+
+    EXPECT_CALL(*mHwcLayer, setCursorPosition(-4, 1)).WillOnce(Return(kDefaultError));
+
+    mOutputLayer.writeCursorPositionToHWC();
 }
 
 /*
@@ -826,6 +870,30 @@ TEST_F(OutputLayerTest, requiresClientCompositionReturnsFalseIfSetToDeviceCompos
     mOutputLayer.editState().hwc->hwcCompositionType = Hwc2::IComposerClient::Composition::DEVICE;
 
     EXPECT_FALSE(mOutputLayer.requiresClientComposition());
+}
+
+/*
+ * OutputLayer::isHardwareCursor()
+ */
+
+TEST_F(OutputLayerTest, isHardwareCursorReturnsFalseIfNoHWC2State) {
+    mOutputLayer.editState().hwc.reset();
+
+    EXPECT_FALSE(mOutputLayer.isHardwareCursor());
+}
+
+TEST_F(OutputLayerTest, isHardwareCursorReturnsTrueIfSetToCursorComposition) {
+    mOutputLayer.editState().hwc = impl::OutputLayerCompositionState::Hwc{nullptr};
+    mOutputLayer.editState().hwc->hwcCompositionType = Hwc2::IComposerClient::Composition::CURSOR;
+
+    EXPECT_TRUE(mOutputLayer.isHardwareCursor());
+}
+
+TEST_F(OutputLayerTest, isHardwareCursorReturnsFalseIfSetToDeviceComposition) {
+    mOutputLayer.editState().hwc = impl::OutputLayerCompositionState::Hwc{nullptr};
+    mOutputLayer.editState().hwc->hwcCompositionType = Hwc2::IComposerClient::Composition::DEVICE;
+
+    EXPECT_FALSE(mOutputLayer.isHardwareCursor());
 }
 
 /*
