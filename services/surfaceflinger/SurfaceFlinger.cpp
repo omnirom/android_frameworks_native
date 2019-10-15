@@ -5134,7 +5134,12 @@ status_t SurfaceFlinger::doDump(int fd, const DumpArgs& args,
                 LayersProto layersProto = dumpProtoInfo(LayerVector::StateSet::Current);
                 result.append(layersProto.SerializeAsString().c_str(), layersProto.ByteSize());
             } else {
-                dumpAllLocked(args, result);
+                // selection of mini dumpsys (Format: adb shell dumpsys SurfaceFlinger --mini)
+                if (numArgs && ((args[0] == String16("--mini")))) {
+                    dumpMini(result);
+                } else {
+                    dumpAllLocked(args, result);
+                }
             }
         }
 
@@ -5172,6 +5177,12 @@ status_t SurfaceFlinger::doDumpContinuous(int fd, const DumpArgs& args) {
 
     // Same command is used to start and end dump.
     mFileDump.running = !mFileDump.running;
+
+    // selection of full dumpsys or not (defualt, dumpsys will be minimum required)
+    // Format: adb shell dumpsys SurfaceFlinger --file --no-limit --full-dump
+    if (numArgs >= 3 && (args[2] == String16("--full-dump"))) {
+        mFileDump.fullDump = true;
+    }
 
     if (mFileDump.running) {
         std::ofstream ofs;
@@ -5342,7 +5353,11 @@ void SurfaceFlinger::dumpDrawCycle(bool prePrepare) {
 
     {
         Mutex::Autolock lock(mStateLock);
-        dumpAllLocked(args, dumpsys);
+        if (mFileDump.fullDump) {
+            dumpAllLocked(args, dumpsys);
+        } else {
+            dumpMini(dumpsys);
+        }
     }
 
     char timeStamp[32];
@@ -5648,6 +5663,42 @@ LayersProto SurfaceFlinger::dumpVisibleLayersProtoInfo(
     });
 
     return layersProto;
+}
+
+void SurfaceFlinger::dumpMini(std::string& result) const {
+    /*
+     * Dump Display state
+     */
+    StringAppendF(&result, "Displays (%zu entries)\n", mDisplays.size());
+    for (const auto& [token, display] : mDisplays) {
+        display->dump(result);
+    }
+    result.append("\n");
+
+    /*
+     * HWC layer minidump
+     */
+    for (const auto& [token, display] : mDisplays) {
+        const auto displayId = display->getId();
+        if (!displayId) {
+            continue;
+        }
+
+        StringAppendF(&result, "Display %s HWC layers:\n", to_string(*displayId).c_str());
+        Layer::miniDumpHeader(result);
+        const sp<DisplayDevice> displayDevice = display;
+        mCurrentState.traverseInZOrder(
+                [&](Layer* layer) { layer->miniDump(result, displayDevice); });
+        result.append("\n");
+    }
+
+    /*
+     * Dump HWComposer state
+     */
+    result.append("h/w composer state:\n");
+    bool hwcDisabled = mDebugDisableHWC || mDebugRegion;
+    StringAppendF(&result, "  h/w composer %s\n", hwcDisabled ? "disabled" : "enabled");
+    getHwComposer().dump(result);
 }
 
 void SurfaceFlinger::dumpAllLocked(const DumpArgs& args, std::string& result) const {
