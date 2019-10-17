@@ -44,7 +44,6 @@ class Scheduler;
 class StartPropertySetThread;
 class SurfaceFlinger;
 class SurfaceInterceptor;
-class TimeStats;
 
 struct DisplayDeviceCreationArgs;
 struct LayerCreationArgs;
@@ -64,16 +63,15 @@ class NativeWindowSurface;
 // of each interface.
 class Factory {
 public:
-    virtual std::unique_ptr<DispSync> createDispSync(const char* name, bool hasSyncFramework,
-                                                     int64_t dispSyncPresentTimeOffset) = 0;
-    virtual std::unique_ptr<EventControlThread> createEventControlThread(
-            std::function<void(bool)> setVSyncEnabled) = 0;
+    using SetVSyncEnabled = std::function<void(bool)>;
+
+    virtual std::unique_ptr<DispSync> createDispSync(const char* name, bool hasSyncFramework) = 0;
+    virtual std::unique_ptr<EventControlThread> createEventControlThread(SetVSyncEnabled) = 0;
     virtual std::unique_ptr<HWComposer> createHWComposer(const std::string& serviceName) = 0;
     virtual std::unique_ptr<MessageQueue> createMessageQueue() = 0;
     virtual std::unique_ptr<scheduler::PhaseOffsets> createPhaseOffsets() = 0;
-    virtual std::unique_ptr<Scheduler> createScheduler(
-            std::function<void(bool)> callback,
-            const scheduler::RefreshRateConfigs& refreshRateConfig) = 0;
+    virtual std::unique_ptr<Scheduler> createScheduler(SetVSyncEnabled,
+                                                       const scheduler::RefreshRateConfigs&) = 0;
     virtual std::unique_ptr<SurfaceInterceptor> createSurfaceInterceptor(SurfaceFlinger*) = 0;
 
     virtual sp<StartPropertySetThread> createStartPropertySetThread(
@@ -94,8 +92,6 @@ public:
     virtual sp<BufferStateLayer> createBufferStateLayer(const LayerCreationArgs& args) = 0;
     virtual sp<ColorLayer> createColorLayer(const LayerCreationArgs& args) = 0;
     virtual sp<ContainerLayer> createContainerLayer(const LayerCreationArgs& args) = 0;
-
-    virtual std::shared_ptr<TimeStats> createTimeStats() = 0;
 
 protected:
     ~Factory() = default;

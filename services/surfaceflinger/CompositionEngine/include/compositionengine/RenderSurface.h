@@ -92,9 +92,6 @@ public:
 
     // Debugging - gets the page flip count for the RenderSurface
     virtual std::uint32_t getPageFlipCount() const = 0;
-
-    // Called to flip the client target when needed
-    virtual void flipClientTarget(bool flip)  = 0;
 };
 
 } // namespace compositionengine

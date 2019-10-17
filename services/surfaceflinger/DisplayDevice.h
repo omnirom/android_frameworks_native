@@ -65,12 +65,6 @@ public:
     constexpr static float sDefaultMinLumiance = 0.0;
     constexpr static float sDefaultMaxLumiance = 500.0;
 
-    // region in layer-stack space
-    mutable Region dirtyRegion;
-    // region in screen space
-    Region undefinedRegion;
-    bool lastCompositionHadVisibleLayers;
-
     enum {
         NO_LAYER_STACK = 0xFFFFFFFF,
     };
@@ -92,9 +86,6 @@ public:
     int         getWidth() const;
     int         getHeight() const;
     int         getInstallOrientation() const { return mDisplayInstallOrientation; }
-
-    void                    setVisibleLayersSortedByZ(const Vector< sp<Layer> >& layers);
-    const Vector< sp<Layer> >& getVisibleLayersSortedByZ() const;
 
     void                    setLayerStack(uint32_t stack);
     void                    setDisplaySize(const int newWidth, const int newHeight);
@@ -156,15 +147,6 @@ public:
     int getActiveConfig() const;
     void setActiveConfig(int mode);
 
-    // PowerMode Override Config
-    void setPowerModeOverrideConfig(bool supported);
-    bool getPowerModeOverrideConfig() const;
-
-    // For animation hint
-    bool getAnimating() const;
-    void setAnimating(bool isAnimating);
-    bool getIsDisplayBuiltInType() const;
-    void setIsDisplayBuiltInType(bool isBuiltIn);
     // release HWC resources (if any) for removable displays
     void disconnect();
 
@@ -194,9 +176,6 @@ private:
      * don't need synchronization.
      */
 
-    // list of visible layers on that display
-    Vector< sp<Layer> > mVisibleLayersSortedByZ;
-
     /*
      * Transaction state
      */
@@ -214,12 +193,6 @@ private:
 
     // TODO(b/74619554): Remove special cases for primary display.
     const bool mIsPrimary;
-
-    // PowerMode Override
-    bool mIsPowerModeOverride;
-    // For animation hint
-    bool mIsAnimating;
-    bool mIsDisplayBuiltInType;
 };
 
 struct DisplayDeviceState {

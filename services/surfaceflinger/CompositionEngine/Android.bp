@@ -5,7 +5,7 @@ cc_defaults {
         "-DLOG_TAG=\"CompositionEngine\"",
     ],
     shared_libs: [
-        "android.frameworks.vr.composer@1.0",
+        "android.frameworks.vr.composer@2.0",
         "android.hardware.graphics.allocator@2.0",
         "android.hardware.graphics.composer@2.1",
         "android.hardware.graphics.composer@2.2",
@@ -47,7 +47,7 @@ cc_library {
         "src/DumpHelpers.cpp",
         "src/HwcBufferCache.cpp",
         "src/Layer.cpp",
-        "src/LayerCompositionState.cpp",
+        "src/LayerFECompositionState.cpp",
         "src/Output.cpp",
         "src/OutputCompositionState.cpp",
         "src/OutputLayer.cpp",

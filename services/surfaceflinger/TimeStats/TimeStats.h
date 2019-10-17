@@ -16,13 +16,10 @@
 
 #pragma once
 
+#include <hardware/hwcomposer_defs.h>
 #include <timestatsproto/TimeStatsHelper.h>
 #include <timestatsproto/TimeStatsProtoHeader.h>
-
-#include <hardware/hwcomposer_defs.h>
-
 #include <ui/FenceTime.h>
-
 #include <utils/String16.h>
 #include <utils/Vector.h>
 
@@ -109,7 +106,7 @@ class TimeStats : public android::TimeStats {
     };
 
 public:
-    TimeStats() = default;
+    TimeStats();
 
     void parseArgs(bool asProto, const Vector<String16>& args, std::string& result) override;
     bool isEnabled() override;

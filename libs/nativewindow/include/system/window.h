@@ -41,7 +41,8 @@
 #include <unistd.h>
 #include <stdbool.h>
 
-// system/window.h is a superset of the vndk
+// system/window.h is a superset of the vndk and apex apis
+#include <apex/window.h>
 #include <vndk/window.h>
 
 
@@ -91,7 +92,6 @@ enum {
      * likely be removed in the near future.
      */
     NATIVE_WINDOW_CONCRETE_TYPE = 5,
-
 
     /*
      * Default width and height of ANativeWindow buffers, these are the
@@ -239,6 +239,8 @@ enum {
     NATIVE_WINDOW_SET_BUFFERS_CTA861_3_METADATA   = 33,
     NATIVE_WINDOW_SET_BUFFERS_HDR10_PLUS_METADATA = 34,
     NATIVE_WINDOW_SET_AUTO_PREROTATION            = 35,
+    NATIVE_WINDOW_GET_LAST_DEQUEUE_START          = 36,    /* private */
+    NATIVE_WINDOW_SET_DEQUEUE_TIMEOUT             = 37,    /* private */
     // clang-format on
 };
 

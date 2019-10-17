@@ -35,6 +35,7 @@
 
 #include <ui/DisplayStatInfo.h>
 #include <ui/Fence.h>
+#include <ui/GraphicBuffer.h>
 #include <ui/HdrCapabilities.h>
 #include <ui/Region.h>
 
@@ -1080,6 +1081,12 @@ int Surface::perform(int operation, va_list args)
     case NATIVE_WINDOW_SET_AUTO_PREROTATION:
         res = dispatchSetAutoPrerotation(args);
         break;
+    case NATIVE_WINDOW_GET_LAST_DEQUEUE_START:
+        res = dispatchGetLastDequeueStartTime(args);
+        break;
+    case NATIVE_WINDOW_SET_DEQUEUE_TIMEOUT:
+        res = dispatchSetDequeueTimeout(args);
+        break;
     default:
         res = NAME_NOT_FOUND;
         break;
@@ -1285,6 +1292,17 @@ int Surface::dispatchSetAutoPrerotation(va_list args) {
     return setAutoPrerotation(autoPrerotation);
 }
 
+int Surface::dispatchGetLastDequeueStartTime(va_list args) {
+    int64_t* lastDequeueStartTime = va_arg(args, int64_t*);
+    *lastDequeueStartTime = mLastDequeueStartTime;
+    return NO_ERROR;
+}
+
+int Surface::dispatchSetDequeueTimeout(va_list args) {
+    nsecs_t timeout = va_arg(args, int64_t);
+    return setDequeueTimeout(timeout);
+}
+
 bool Surface::transformToDisplayInverse() {
     return (mTransform & NATIVE_WINDOW_TRANSFORM_INVERSE_DISPLAY) ==
             NATIVE_WINDOW_TRANSFORM_INVERSE_DISPLAY;
@@ -1297,6 +1315,14 @@ int Surface::connect(int api) {
 
 int Surface::connect(int api, const sp<IProducerListener>& listener) {
     return connect(api, listener, false);
+}
+
+int Surface::connect(
+        int api, bool reportBufferRemoval, const sp<SurfaceListener>& sListener) {
+    if (sListener != nullptr) {
+        mListenerProxy = new ProducerListenerProxy(this, sListener);
+    }
+    return connect(api, mListenerProxy, reportBufferRemoval);
 }
 
 int Surface::connect(
@@ -1700,6 +1726,28 @@ void Surface::freeAllBuffers() {
     }
 }
 
+status_t Surface::getAndFlushBuffersFromSlots(const std::vector<int32_t>& slots,
+        std::vector<sp<GraphicBuffer>>* outBuffers) {
+    ALOGV("Surface::getAndFlushBuffersFromSlots");
+    for (int32_t i : slots) {
+        if (i < 0 || i >= NUM_BUFFER_SLOTS) {
+            ALOGE("%s: Invalid slotIndex: %d", __FUNCTION__, i);
+            return BAD_VALUE;
+        }
+    }
+
+    Mutex::Autolock lock(mMutex);
+    for (int32_t i : slots) {
+        if (mSlots[i].buffer == nullptr) {
+            ALOGW("%s: Discarded slot %d doesn't contain buffer!", __FUNCTION__, i);
+            continue;
+        }
+        outBuffers->push_back(mSlots[i].buffer);
+        mSlots[i].buffer = nullptr;
+    }
+    return OK;
+}
+
 void Surface::setSurfaceDamage(android_native_rect_t* rects, size_t numRects) {
     ATRACE_CALL();
     ALOGV("Surface::setSurfaceDamage");
@@ -1919,11 +1967,6 @@ int Surface::getConsumerUsage(uint64_t* outUsage) const {
     return mGraphicBufferProducer->getConsumerUsage(outUsage);
 }
 
-nsecs_t Surface::getLastDequeueStartTime() const {
-    Mutex::Autolock lock(mMutex);
-    return mLastDequeueStartTime;
-}
-
 status_t Surface::getAndFlushRemovedBuffers(std::vector<sp<GraphicBuffer>>* out) {
     if (out == nullptr) {
         ALOGE("%s: out must not be null!", __FUNCTION__);
@@ -1983,6 +2026,24 @@ int Surface::setAutoPrerotation(bool autoPrerotation) {
     ALOGE_IF(err, "IGraphicBufferProducer::setAutoPrerotation(%d) returned %s", autoPrerotation,
              strerror(-err));
     return err;
+}
+
+void Surface::ProducerListenerProxy::onBuffersDiscarded(const std::vector<int32_t>& slots) {
+    ATRACE_CALL();
+    sp<Surface> parent = mParent.promote();
+    if (parent == nullptr) {
+        return;
+    }
+
+    std::vector<sp<GraphicBuffer>> discardedBufs;
+    status_t res = parent->getAndFlushBuffersFromSlots(slots, &discardedBufs);
+    if (res != OK) {
+        ALOGE("%s: Failed to get buffers from slots: %s(%d)", __FUNCTION__,
+                strerror(-res), res);
+        return;
+    }
+
+    mSurfaceListener->onBuffersDiscarded(discardedBufs);
 }
 
 }; // namespace android

@@ -34,11 +34,11 @@ namespace impl {
 
 class OutputLayer : public compositionengine::OutputLayer {
 public:
-    OutputLayer(const compositionengine::Output&, std::shared_ptr<compositionengine::Layer>,
-                sp<compositionengine::LayerFE>);
+    OutputLayer(const compositionengine::Output&, const std::shared_ptr<compositionengine::Layer>&,
+                const sp<compositionengine::LayerFE>&);
     ~OutputLayer() override;
 
-    void initialize(const CompositionEngine&, std::optional<DisplayId>);
+    void setHwcLayer(std::shared_ptr<HWC2::Layer>) override;
 
     const compositionengine::Output& getOutput() const override;
     compositionengine::Layer& getLayer() const override;
@@ -49,9 +49,11 @@ public:
 
     void updateCompositionState(bool) override;
     void writeStateToHWC(bool) override;
+    void writeCursorPositionToHWC() const override;
 
     HWC2::Layer* getHwcLayer() const override;
     bool requiresClientComposition() const override;
+    bool isHardwareCursor() const override;
     void applyDeviceCompositionTypeChange(Hwc2::IComposerClient::Composition) override;
     void prepareForDeviceLayerRequests() override;
     void applyDeviceLayerRequest(Hwc2::IComposerClient::LayerRequest request) override;
@@ -84,8 +86,8 @@ private:
 };
 
 std::unique_ptr<compositionengine::OutputLayer> createOutputLayer(
-        const CompositionEngine&, std::optional<DisplayId>, const compositionengine::Output&,
-        std::shared_ptr<compositionengine::Layer>, sp<compositionengine::LayerFE>);
+        const compositionengine::Output&, const std::shared_ptr<compositionengine::Layer>&,
+        const sp<compositionengine::LayerFE>&);
 
 } // namespace impl
 } // namespace android::compositionengine

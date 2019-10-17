@@ -929,6 +929,14 @@ static void DumpIpTablesAsRoot() {
     RunCommand("IP6TABLES RAW", {"ip6tables", "-t", "raw", "-L", "-nvx"});
 }
 
+static void DumpDynamicPartitionInfo() {
+    if (!::android::base::GetBoolProperty("ro.boot.dynamic_partitions", false)) {
+        return;
+    }
+
+    RunCommand("LPDUMP", {"lpdump", "--all"});
+}
+
 static void AddAnrTraceDir(const bool add_to_zip, const std::string& anr_traces_dir) {
     MYLOGD("AddAnrTraceDir(): dump_traces_file=%s, anr_traces_dir=%s\n", dump_traces_path,
            anr_traces_dir.c_str());
@@ -1515,6 +1523,7 @@ static Dumpstate::RunStatus DumpstateDefault() {
     }
     add_mountinfo();
     DumpIpTablesAsRoot();
+    DumpDynamicPartitionInfo();
 
     // Capture any IPSec policies in play. No keys are exposed here.
     RunCommand("IP XFRM POLICY", {"ip", "xfrm", "policy"}, CommandOptions::WithTimeout(10).Build());
@@ -1982,7 +1991,7 @@ static void SendBroadcast(const std::string& action, const std::vector<std::stri
 
 static void Vibrate(int duration_ms) {
     // clang-format off
-    RunCommand("", {"cmd", "vibrator", "vibrate", std::to_string(duration_ms), "dumpstate"},
+    RunCommand("", {"cmd", "vibrator", "vibrate", "-f", std::to_string(duration_ms), "dumpstate"},
                CommandOptions::WithTimeout(10)
                    .Log("Vibrate: '%s'\n")
                    .Always()
@@ -2328,9 +2337,6 @@ Dumpstate::RunStatus Dumpstate::DumpOptions::Initialize(int argc, char* argv[]) 
             // clang-format off
             case 'd': do_add_date = true;            break;
             case 'z': do_zip_file = true;            break;
-            // o=use_outfile not supported anymore.
-            // TODO(b/111441001): Remove when all callers have migrated.
-            case 'o': break;
             case 's': use_socket = true;             break;
             case 'S': use_control_socket = true;     break;
             case 'v': show_header_only = true;       break;
@@ -3499,7 +3505,7 @@ int open_socket(const char *service) {
 
     struct sockaddr addr;
     socklen_t alen = sizeof(addr);
-    int fd = accept(s, &addr, &alen);
+    int fd = accept4(s, &addr, &alen, SOCK_CLOEXEC);
 
     // Close socket just after accept(), to make sure that connect() by client will get error
     // when the socket is used by the other services.

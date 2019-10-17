@@ -16,6 +16,7 @@
 
 #include <compositionengine/CompositionRefreshArgs.h>
 #include <compositionengine/LayerFE.h>
+#include <compositionengine/OutputLayer.h>
 #include <compositionengine/impl/CompositionEngine.h>
 #include <compositionengine/impl/Display.h>
 #include <compositionengine/impl/Layer.h>
@@ -70,6 +71,46 @@ nsecs_t CompositionEngine::getLastFrameRefreshTimestamp() const {
     return mRefreshStartTime;
 }
 
+void CompositionEngine::present(CompositionRefreshArgs& args) {
+    ATRACE_CALL();
+    ALOGV(__FUNCTION__);
+
+    preComposition(args);
+
+    {
+        // latchedLayers is used to track the set of front-end layer state that
+        // has been latched across all outputs for the prepare step, and is not
+        // needed for anything else.
+        LayerFESet latchedLayers;
+
+        for (const auto& output : args.outputs) {
+            output->prepare(args, latchedLayers);
+        }
+    }
+
+    updateLayerStateFromFE(args);
+
+    for (const auto& output : args.outputs) {
+        output->present(args);
+    }
+}
+
+void CompositionEngine::updateCursorAsync(CompositionRefreshArgs& args) {
+    std::unordered_map<compositionengine::LayerFE*, compositionengine::LayerFECompositionState*>
+            uniqueVisibleLayers;
+
+    for (const auto& output : args.outputs) {
+        for (auto& layer : output->getOutputLayersOrderedByZ()) {
+            if (layer->isHardwareCursor()) {
+                // Latch the cursor composition state from each front-end layer.
+                layer->getLayerFE().latchCursorCompositionState(layer->getLayer().editFEState());
+
+                layer->writeCursorPositionToHWC();
+            }
+        }
+    }
+}
+
 void CompositionEngine::preComposition(CompositionRefreshArgs& args) {
     ATRACE_CALL();
     ALOGV(__FUNCTION__);
@@ -90,6 +131,13 @@ void CompositionEngine::preComposition(CompositionRefreshArgs& args) {
 
 void CompositionEngine::setNeedsAnotherUpdateForTest(bool value) {
     mNeedsAnotherUpdate = value;
+}
+
+void CompositionEngine::updateLayerStateFromFE(CompositionRefreshArgs& args) {
+    // Update the composition state from each front-end layer
+    for (const auto& output : args.outputs) {
+        output->updateLayerStateFromFE(args);
+    }
 }
 
 } // namespace impl

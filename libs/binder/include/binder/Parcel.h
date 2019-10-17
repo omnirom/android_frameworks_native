@@ -21,8 +21,6 @@
 #include <string>
 #include <vector>
 
-#include <linux/android/binder.h>
-
 #include <android-base/unique_fd.h>
 #include <cutils/native_handle.h>
 #include <utils/Errors.h>
@@ -34,20 +32,24 @@
 #include <binder/IInterface.h>
 #include <binder/Parcelable.h>
 
+#ifdef BINDER_IPC_32BIT
+typedef unsigned int binder_size_t;
+#else
+typedef unsigned long long binder_size_t;
+#endif
+
+
 // ---------------------------------------------------------------------------
 namespace android {
 
 template <typename T> class Flattenable;
 template <typename T> class LightFlattenable;
+struct flat_binder_object;
 class IBinder;
 class IPCThreadState;
 class ProcessState;
 class String8;
 class TextOutput;
-
-namespace binder {
-class Value;
-};
 
 class Parcel {
     friend class IPCThreadState;
@@ -382,7 +384,6 @@ public:
     // Returns the work source provided by the caller. This can only be trusted for trusted calling
     // uid.
     uid_t               readCallingWorkSourceUid() const;
-    void                readRequestHeaders() const;
 
 private:
     typedef void        (*release_func)(Parcel* parcel,

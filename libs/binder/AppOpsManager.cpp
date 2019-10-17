@@ -21,6 +21,13 @@
 
 #include <utils/SystemClock.h>
 
+#include <sys/types.h>
+
+#ifdef LOG_TAG
+#undef LOG_TAG
+#endif
+#define LOG_TAG "AppOpsManager"
+
 namespace android {
 
 namespace {
@@ -48,6 +55,12 @@ static const sp<IBinder>& getToken(const sp<IAppOpsService>& service) {
     pthread_mutex_unlock(&gTokenMutex);
     return gToken;
 }
+
+thread_local uint64_t notedAppOpsInThisBinderTransaction[2];
+thread_local int32_t uidOfThisBinderTransaction = -1;
+
+// Whether an appop should be collected: 0 == not initialized, 1 == don't note, 2 == note
+uint8_t appOpsToNote[AppOpsManager::_NUM_OP] = {0};
 
 AppOpsManager::AppOpsManager()
 {
@@ -102,18 +115,41 @@ int32_t AppOpsManager::checkAudioOpNoThrow(int32_t op, int32_t usage, int32_t ui
 }
 
 int32_t AppOpsManager::noteOp(int32_t op, int32_t uid, const String16& callingPackage) {
+    return noteOp(op, uid, callingPackage, String16("noteOp from native code"));
+}
+
+int32_t AppOpsManager::noteOp(int32_t op, int32_t uid, const String16& callingPackage,
+        const String16& message) {
     sp<IAppOpsService> service = getService();
-    return service != nullptr
+    int32_t mode = service != nullptr
             ? service->noteOperation(op, uid, callingPackage)
             : APP_OPS_MANAGER_UNAVAILABLE_MODE;
+
+    if (mode == AppOpsManager::MODE_ALLOWED) {
+        markAppOpNoted(uid, callingPackage, op, message);
+    }
+
+    return mode;
 }
 
 int32_t AppOpsManager::startOpNoThrow(int32_t op, int32_t uid, const String16& callingPackage,
         bool startIfModeDefault) {
+    return startOpNoThrow(op, uid, callingPackage, startIfModeDefault,
+            String16("startOpNoThrow from native code"));
+}
+
+int32_t AppOpsManager::startOpNoThrow(int32_t op, int32_t uid, const String16& callingPackage,
+        bool startIfModeDefault, const String16& message) {
     sp<IAppOpsService> service = getService();
-    return service != nullptr
+    int32_t mode = service != nullptr
             ? service->startOperation(getToken(service), op, uid, callingPackage,
                     startIfModeDefault) : APP_OPS_MANAGER_UNAVAILABLE_MODE;
+
+    if (mode == AppOpsManager::MODE_ALLOWED) {
+        markAppOpNoted(uid, callingPackage, op, message);
+    }
+
+    return mode;
 }
 
 void AppOpsManager::finishOp(int32_t op, int32_t uid, const String16& callingPackage) {
@@ -146,5 +182,45 @@ int32_t AppOpsManager::permissionToOpCode(const String16& permission) {
     return -1;
 }
 
+void AppOpsManager::setCameraAudioRestriction(int32_t mode) {
+    sp<IAppOpsService> service = getService();
+    if (service != nullptr) {
+        service->setCameraAudioRestriction(mode);
+    }
+}
+
+bool AppOpsManager::shouldCollectNotes(int32_t opcode) {
+    sp<IAppOpsService> service = getService();
+    if (service != nullptr) {
+        return service->shouldCollectNotes(opcode);
+    }
+    return false;
+}
+
+void AppOpsManager::markAppOpNoted(int32_t uid, const String16& packageName, int32_t opCode,
+         const String16& message) {
+    // check it the appops needs to be collected and cache result
+    if (appOpsToNote[opCode] == 0) {
+        if (shouldCollectNotes(opCode)) {
+            appOpsToNote[opCode] = 2;
+        } else {
+            appOpsToNote[opCode] = 1;
+        }
+    }
+
+    if (appOpsToNote[opCode] != 2) {
+        return;
+    }
+
+    noteAsyncOp(String16(), uid, packageName, opCode, message);
+}
+
+void AppOpsManager::noteAsyncOp(const String16& callingPackageName, int32_t uid,
+         const String16& packageName, int32_t opCode, const String16& message) {
+    sp<IAppOpsService> service = getService();
+    if (service != nullptr) {
+        return service->noteAsyncOp(callingPackageName, uid, packageName, opCode, message);
+    }
+}
 
 }; // namespace android

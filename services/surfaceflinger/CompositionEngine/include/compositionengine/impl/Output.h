@@ -44,8 +44,8 @@ public:
     void setBounds(const ui::Size&) override;
     void setLayerStackFilter(uint32_t layerStackId, bool isInternal) override;
 
-    void setColorTransform(const mat4&) override;
-    void setColorMode(ui::ColorMode, ui::Dataspace, ui::RenderIntent, ui::Dataspace) override;
+    void setColorTransform(const compositionengine::CompositionRefreshArgs&) override;
+    void setColorProfile(const ColorProfile&) override;
 
     void dump(std::string&) const override;
 
@@ -62,30 +62,51 @@ public:
     OutputCompositionState& editState() override;
 
     Region getDirtyRegion(bool repaintEverything) const override;
-    bool belongsInOutput(uint32_t, bool) const override;
+    bool belongsInOutput(std::optional<uint32_t>, bool) const override;
+    bool belongsInOutput(const compositionengine::Layer*) const override;
 
     compositionengine::OutputLayer* getOutputLayerForLayer(
             compositionengine::Layer*) const override;
+    std::unique_ptr<compositionengine::OutputLayer> createOutputLayer(
+            const std::shared_ptr<Layer>&, const sp<LayerFE>&) const override;
     std::unique_ptr<compositionengine::OutputLayer> getOrCreateOutputLayer(
-            std::optional<DisplayId>, std::shared_ptr<compositionengine::Layer>,
-            sp<LayerFE>) override;
+            std::shared_ptr<compositionengine::Layer>, sp<LayerFE>) override;
     void setOutputLayersOrderedByZ(OutputLayers&&) override;
     const OutputLayers& getOutputLayersOrderedByZ() const override;
 
     void setReleasedLayers(ReleasedLayers&&) override;
     ReleasedLayers takeReleasedLayers() override;
 
+    void prepare(const compositionengine::CompositionRefreshArgs&, LayerFESet&) override;
+    void present(const compositionengine::CompositionRefreshArgs&) override;
+
+    void rebuildLayerStacks(const compositionengine::CompositionRefreshArgs&, LayerFESet&) override;
+    void collectVisibleLayers(const compositionengine::CompositionRefreshArgs&,
+                              compositionengine::Output::CoverageState&) override;
+    std::unique_ptr<compositionengine::OutputLayer> getOutputLayerIfVisible(
+            std::shared_ptr<compositionengine::Layer>,
+            compositionengine::Output::CoverageState&) override;
+    void setReleasedLayers(const compositionengine::CompositionRefreshArgs&) override;
+
+    void updateLayerStateFromFE(const CompositionRefreshArgs&) const override;
+    void updateAndWriteCompositionState(const compositionengine::CompositionRefreshArgs&) override;
+    void updateColorProfile(const compositionengine::CompositionRefreshArgs&) override;
     void beginFrame() override;
     void prepareFrame() override;
-    bool composeSurfaces(const Region&, base::unique_fd*) override;
+    void devOptRepaintFlash(const compositionengine::CompositionRefreshArgs&) override;
+    void finishFrame(const compositionengine::CompositionRefreshArgs&) override;
+    std::optional<base::unique_fd> composeSurfaces(const Region&) override;
     void postFramebuffer() override;
 
     // Testing
+    const ReleasedLayers& getReleasedLayersForTest() const;
     void setDisplayColorProfileForTest(std::unique_ptr<compositionengine::DisplayColorProfile>);
     void setRenderSurfaceForTest(std::unique_ptr<compositionengine::RenderSurface>);
 
 protected:
     const CompositionEngine& getCompositionEngine() const;
+    std::unique_ptr<compositionengine::OutputLayer> takeOutputLayerForLayer(
+            compositionengine::Layer*);
     void chooseCompositionStrategy() override;
     bool getSkipColorTransform() const override;
     compositionengine::Output::FrameFences presentAndGetFrameFences() override;
@@ -98,6 +119,9 @@ protected:
 
 private:
     void dirtyEntireOutput();
+    ui::Dataspace getBestDataspace(ui::Dataspace*, bool*) const;
+    compositionengine::Output::ColorProfile pickColorProfile(
+            const compositionengine::CompositionRefreshArgs&) const;
 
     const CompositionEngine& mCompositionEngine;
 

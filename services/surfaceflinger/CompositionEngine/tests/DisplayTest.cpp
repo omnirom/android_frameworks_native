@@ -23,6 +23,8 @@
 #include <compositionengine/impl/Display.h>
 #include <compositionengine/mock/CompositionEngine.h>
 #include <compositionengine/mock/DisplayColorProfile.h>
+#include <compositionengine/mock/Layer.h>
+#include <compositionengine/mock/LayerFE.h>
 #include <compositionengine/mock/NativeWindow.h>
 #include <compositionengine/mock/OutputLayer.h>
 #include <compositionengine/mock/RenderSurface.h>
@@ -138,23 +140,26 @@ TEST_F(DisplayTest, disconnectDisconnectsDisplay) {
  */
 
 TEST_F(DisplayTest, setColorTransformSetsTransform) {
+    // No change does nothing
+    CompositionRefreshArgs refreshArgs;
+    refreshArgs.colorTransformMatrix = std::nullopt;
+    mDisplay.setColorTransform(refreshArgs);
+
     // Identity matrix sets an identity state value
-    const mat4 identity;
+    const mat4 kIdentity;
 
-    EXPECT_CALL(mHwComposer, setColorTransform(DEFAULT_DISPLAY_ID, identity)).Times(1);
+    EXPECT_CALL(mHwComposer, setColorTransform(DEFAULT_DISPLAY_ID, kIdentity)).Times(1);
 
-    mDisplay.setColorTransform(identity);
-
-    EXPECT_EQ(HAL_COLOR_TRANSFORM_IDENTITY, mDisplay.getState().colorTransform);
+    refreshArgs.colorTransformMatrix = kIdentity;
+    mDisplay.setColorTransform(refreshArgs);
 
     // Non-identity matrix sets a non-identity state value
-    const mat4 nonIdentity = mat4() * 2;
+    const mat4 kNonIdentity = mat4() * 2;
 
-    EXPECT_CALL(mHwComposer, setColorTransform(DEFAULT_DISPLAY_ID, nonIdentity)).Times(1);
+    EXPECT_CALL(mHwComposer, setColorTransform(DEFAULT_DISPLAY_ID, kNonIdentity)).Times(1);
 
-    mDisplay.setColorTransform(nonIdentity);
-
-    EXPECT_EQ(HAL_COLOR_TRANSFORM_ARBITRARY_MATRIX, mDisplay.getState().colorTransform);
+    refreshArgs.colorTransformMatrix = kNonIdentity;
+    mDisplay.setColorTransform(refreshArgs);
 }
 
 /*
@@ -162,6 +167,8 @@ TEST_F(DisplayTest, setColorTransformSetsTransform) {
  */
 
 TEST_F(DisplayTest, setColorModeSetsModeUnlessNoChange) {
+    using ColorProfile = Output::ColorProfile;
+
     mock::RenderSurface* renderSurface = new StrictMock<mock::RenderSurface>();
     mDisplay.setRenderSurfaceForTest(std::unique_ptr<RenderSurface>(renderSurface));
     mock::DisplayColorProfile* colorProfile = new StrictMock<mock::DisplayColorProfile>();
@@ -177,8 +184,8 @@ TEST_F(DisplayTest, setColorModeSetsModeUnlessNoChange) {
     ASSERT_EQ(ui::Dataspace::UNKNOWN, mDisplay.getState().targetDataspace);
 
     // If the set values are unchanged, nothing happens
-    mDisplay.setColorMode(ui::ColorMode::NATIVE, ui::Dataspace::UNKNOWN,
-                          ui::RenderIntent::COLORIMETRIC, ui::Dataspace::UNKNOWN);
+    mDisplay.setColorProfile(ColorProfile{ui::ColorMode::NATIVE, ui::Dataspace::UNKNOWN,
+                                          ui::RenderIntent::COLORIMETRIC, ui::Dataspace::UNKNOWN});
 
     EXPECT_EQ(ui::ColorMode::NATIVE, mDisplay.getState().colorMode);
     EXPECT_EQ(ui::Dataspace::UNKNOWN, mDisplay.getState().dataspace);
@@ -192,8 +199,9 @@ TEST_F(DisplayTest, setColorModeSetsModeUnlessNoChange) {
                                    ui::RenderIntent::TONE_MAP_COLORIMETRIC))
             .Times(1);
 
-    mDisplay.setColorMode(ui::ColorMode::DISPLAY_P3, ui::Dataspace::DISPLAY_P3,
-                          ui::RenderIntent::TONE_MAP_COLORIMETRIC, ui::Dataspace::UNKNOWN);
+    mDisplay.setColorProfile(ColorProfile{ui::ColorMode::DISPLAY_P3, ui::Dataspace::DISPLAY_P3,
+                                          ui::RenderIntent::TONE_MAP_COLORIMETRIC,
+                                          ui::Dataspace::UNKNOWN});
 
     EXPECT_EQ(ui::ColorMode::DISPLAY_P3, mDisplay.getState().colorMode);
     EXPECT_EQ(ui::Dataspace::DISPLAY_P3, mDisplay.getState().dataspace);
@@ -202,6 +210,8 @@ TEST_F(DisplayTest, setColorModeSetsModeUnlessNoChange) {
 }
 
 TEST_F(DisplayTest, setColorModeDoesNothingForVirtualDisplay) {
+    using ColorProfile = Output::ColorProfile;
+
     impl::Display virtualDisplay{mCompositionEngine,
                                  DisplayCreationArgs{false, true, DEFAULT_DISPLAY_ID}};
 
@@ -214,8 +224,9 @@ TEST_F(DisplayTest, setColorModeDoesNothingForVirtualDisplay) {
                                    ui::Dataspace::UNKNOWN))
             .WillOnce(Return(ui::Dataspace::UNKNOWN));
 
-    virtualDisplay.setColorMode(ui::ColorMode::DISPLAY_P3, ui::Dataspace::DISPLAY_P3,
-                                ui::RenderIntent::TONE_MAP_COLORIMETRIC, ui::Dataspace::UNKNOWN);
+    virtualDisplay.setColorProfile(
+            ColorProfile{ui::ColorMode::DISPLAY_P3, ui::Dataspace::DISPLAY_P3,
+                         ui::RenderIntent::TONE_MAP_COLORIMETRIC, ui::Dataspace::UNKNOWN});
 
     EXPECT_EQ(ui::ColorMode::NATIVE, virtualDisplay.getState().colorMode);
     EXPECT_EQ(ui::Dataspace::UNKNOWN, virtualDisplay.getState().dataspace);
@@ -244,6 +255,98 @@ TEST_F(DisplayTest, createRenderSurfaceSetsRenderSurface) {
     EXPECT_TRUE(mDisplay.getRenderSurface() == nullptr);
     mDisplay.createRenderSurface(RenderSurfaceCreationArgs{640, 480, mNativeWindow, nullptr});
     EXPECT_TRUE(mDisplay.getRenderSurface() != nullptr);
+}
+
+/*
+ * Display::createOutputLayer()
+ */
+
+TEST_F(DisplayTest, createOutputLayerSetsHwcLayer) {
+    sp<mock::LayerFE> layerFE = new StrictMock<mock::LayerFE>();
+    auto layer = std::make_shared<StrictMock<mock::Layer>>();
+    StrictMock<HWC2::mock::Layer> hwcLayer;
+
+    EXPECT_CALL(mHwComposer, createLayer(DEFAULT_DISPLAY_ID)).WillOnce(Return(&hwcLayer));
+
+    auto outputLayer = mDisplay.createOutputLayer(layer, layerFE);
+
+    EXPECT_EQ(&hwcLayer, outputLayer->getHwcLayer());
+
+    EXPECT_CALL(mHwComposer, destroyLayer(DEFAULT_DISPLAY_ID, &hwcLayer));
+    outputLayer.reset();
+}
+
+/*
+ * Display::setReleasedLayers()
+ */
+
+TEST_F(DisplayTest, setReleasedLayersDoesNothingIfNotHwcDisplay) {
+    std::shared_ptr<impl::Display> nonHwcDisplay{
+            impl::createDisplay(mCompositionEngine, DisplayCreationArgsBuilder().build())};
+
+    sp<mock::LayerFE> layerXLayerFE = new StrictMock<mock::LayerFE>();
+    mock::Layer layerXLayer;
+
+    {
+        Output::ReleasedLayers releasedLayers;
+        releasedLayers.emplace_back(layerXLayerFE);
+        nonHwcDisplay->setReleasedLayers(std::move(releasedLayers));
+    }
+
+    CompositionRefreshArgs refreshArgs;
+    refreshArgs.layersWithQueuedFrames.push_back(&layerXLayer);
+
+    nonHwcDisplay->setReleasedLayers(refreshArgs);
+
+    const auto& releasedLayers = nonHwcDisplay->getReleasedLayersForTest();
+    ASSERT_EQ(1, releasedLayers.size());
+}
+
+TEST_F(DisplayTest, setReleasedLayersDoesNothingIfNoLayersWithQueuedFrames) {
+    sp<mock::LayerFE> layerXLayerFE = new StrictMock<mock::LayerFE>();
+
+    {
+        Output::ReleasedLayers releasedLayers;
+        releasedLayers.emplace_back(layerXLayerFE);
+        mDisplay.setReleasedLayers(std::move(releasedLayers));
+    }
+
+    CompositionRefreshArgs refreshArgs;
+    mDisplay.setReleasedLayers(refreshArgs);
+
+    const auto& releasedLayers = mDisplay.getReleasedLayersForTest();
+    ASSERT_EQ(1, releasedLayers.size());
+}
+
+TEST_F(DisplayTest, setReleasedLayers) {
+    sp<mock::LayerFE> layer1LayerFE = new StrictMock<mock::LayerFE>();
+    sp<mock::LayerFE> layer2LayerFE = new StrictMock<mock::LayerFE>();
+    sp<mock::LayerFE> layer3LayerFE = new StrictMock<mock::LayerFE>();
+    sp<mock::LayerFE> layerXLayerFE = new StrictMock<mock::LayerFE>();
+    mock::Layer layer1Layer;
+    mock::Layer layer2Layer;
+    mock::Layer layer3Layer;
+    mock::Layer layerXLayer;
+
+    EXPECT_CALL(*mLayer1, getLayer()).WillRepeatedly(ReturnRef(layer1Layer));
+    EXPECT_CALL(*mLayer1, getLayerFE()).WillRepeatedly(ReturnRef(*layer1LayerFE.get()));
+    EXPECT_CALL(*mLayer2, getLayer()).WillRepeatedly(ReturnRef(layer2Layer));
+    EXPECT_CALL(*mLayer2, getLayerFE()).WillRepeatedly(ReturnRef(*layer2LayerFE.get()));
+    EXPECT_CALL(*mLayer3, getLayer()).WillRepeatedly(ReturnRef(layer3Layer));
+    EXPECT_CALL(*mLayer3, getLayerFE()).WillRepeatedly(ReturnRef(*layer3LayerFE.get()));
+
+    CompositionRefreshArgs refreshArgs;
+    refreshArgs.layersWithQueuedFrames.push_back(&layer1Layer);
+    refreshArgs.layersWithQueuedFrames.push_back(&layer2Layer);
+    refreshArgs.layersWithQueuedFrames.push_back(&layerXLayer);
+    refreshArgs.layersWithQueuedFrames.push_back(nullptr);
+
+    mDisplay.setReleasedLayers(refreshArgs);
+
+    const auto& releasedLayers = mDisplay.getReleasedLayersForTest();
+    ASSERT_EQ(2, releasedLayers.size());
+    ASSERT_EQ(layer1LayerFE.get(), releasedLayers[0].promote().get());
+    ASSERT_EQ(layer2LayerFE.get(), releasedLayers[1].promote().get());
 }
 
 /*
@@ -535,6 +638,91 @@ TEST_F(DisplayTest, setExpensiveRenderingExpectedForwardsToPowerAdvisor) {
 
     EXPECT_CALL(mPowerAdvisor, setExpensiveRenderingExpected(DEFAULT_DISPLAY_ID, false)).Times(1);
     mDisplay.setExpensiveRenderingExpected(false);
+}
+
+/*
+ * Display::finishFrame()
+ */
+
+TEST_F(DisplayTest, finishFrameDoesNotSkipCompositionIfNotDirtyOnHwcDisplay) {
+    mock::RenderSurface* renderSurface = new StrictMock<mock::RenderSurface>();
+    mDisplay.setRenderSurfaceForTest(std::unique_ptr<RenderSurface>(renderSurface));
+
+    // We expect no calls to queueBuffer if composition was skipped.
+    EXPECT_CALL(*renderSurface, queueBuffer(_)).Times(1);
+
+    mDisplay.editState().isEnabled = true;
+    mDisplay.editState().usesClientComposition = false;
+    mDisplay.editState().viewport = Rect(0, 0, 1, 1);
+    mDisplay.editState().dirtyRegion = Region::INVALID_REGION;
+
+    CompositionRefreshArgs refreshArgs;
+    refreshArgs.repaintEverything = false;
+
+    mDisplay.finishFrame(refreshArgs);
+}
+
+TEST_F(DisplayTest, finishFrameSkipsCompositionIfNotDirty) {
+    std::shared_ptr<impl::Display> nonHwcDisplay{
+            impl::createDisplay(mCompositionEngine, DisplayCreationArgsBuilder().build())};
+
+    mock::RenderSurface* renderSurface = new StrictMock<mock::RenderSurface>();
+    nonHwcDisplay->setRenderSurfaceForTest(std::unique_ptr<RenderSurface>(renderSurface));
+
+    // We expect no calls to queueBuffer if composition was skipped.
+    EXPECT_CALL(*renderSurface, queueBuffer(_)).Times(0);
+
+    nonHwcDisplay->editState().isEnabled = true;
+    nonHwcDisplay->editState().usesClientComposition = false;
+    nonHwcDisplay->editState().viewport = Rect(0, 0, 1, 1);
+    nonHwcDisplay->editState().dirtyRegion = Region::INVALID_REGION;
+
+    CompositionRefreshArgs refreshArgs;
+    refreshArgs.repaintEverything = false;
+
+    nonHwcDisplay->finishFrame(refreshArgs);
+}
+
+TEST_F(DisplayTest, finishFramePerformsCompositionIfDirty) {
+    std::shared_ptr<impl::Display> nonHwcDisplay{
+            impl::createDisplay(mCompositionEngine, DisplayCreationArgsBuilder().build())};
+
+    mock::RenderSurface* renderSurface = new StrictMock<mock::RenderSurface>();
+    nonHwcDisplay->setRenderSurfaceForTest(std::unique_ptr<RenderSurface>(renderSurface));
+
+    // We expect a single call to queueBuffer when composition is not skipped.
+    EXPECT_CALL(*renderSurface, queueBuffer(_)).Times(1);
+
+    nonHwcDisplay->editState().isEnabled = true;
+    nonHwcDisplay->editState().usesClientComposition = false;
+    nonHwcDisplay->editState().viewport = Rect(0, 0, 1, 1);
+    nonHwcDisplay->editState().dirtyRegion = Region(Rect(0, 0, 1, 1));
+
+    CompositionRefreshArgs refreshArgs;
+    refreshArgs.repaintEverything = false;
+
+    nonHwcDisplay->finishFrame(refreshArgs);
+}
+
+TEST_F(DisplayTest, finishFramePerformsCompositionIfRepaintEverything) {
+    std::shared_ptr<impl::Display> nonHwcDisplay{
+            impl::createDisplay(mCompositionEngine, DisplayCreationArgsBuilder().build())};
+
+    mock::RenderSurface* renderSurface = new StrictMock<mock::RenderSurface>();
+    nonHwcDisplay->setRenderSurfaceForTest(std::unique_ptr<RenderSurface>(renderSurface));
+
+    // We expect a single call to queueBuffer when composition is not skipped.
+    EXPECT_CALL(*renderSurface, queueBuffer(_)).Times(1);
+
+    nonHwcDisplay->editState().isEnabled = true;
+    nonHwcDisplay->editState().usesClientComposition = false;
+    nonHwcDisplay->editState().viewport = Rect(0, 0, 1, 1);
+    nonHwcDisplay->editState().dirtyRegion = Region::INVALID_REGION;
+
+    CompositionRefreshArgs refreshArgs;
+    refreshArgs.repaintEverything = true;
+
+    nonHwcDisplay->finishFrame(refreshArgs);
 }
 
 } // namespace

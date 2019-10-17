@@ -22,8 +22,6 @@ cc_test {
         "libgui",
         "libhardware",
         "libhidlbase",
-        "libhidltransport",
-        "libhwbinder",
         "liblayers_proto",
         "liblog",
         "libnativewindow",
@@ -33,8 +31,11 @@ cc_test {
         "libutils",
     ],
     static_libs: [
+        "libcompositionengine",
         "libgmock",
+        "libperfetto_client_experimental",
         "librenderengine",
+        "libtimestats",
         "libtrace_proto",
     ],
     header_libs: [

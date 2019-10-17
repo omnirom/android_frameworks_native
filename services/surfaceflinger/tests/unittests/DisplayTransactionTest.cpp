@@ -149,7 +149,7 @@ DisplayTransactionTest::DisplayTransactionTest() {
     // Default to no wide color display support configured
     mFlinger.mutableHasWideColorDisplay() = false;
     mFlinger.mutableUseColorManagement() = false;
-    mFlinger.mutableDisplayColorSetting() = DisplayColorSetting::UNMANAGED;
+    mFlinger.mutableDisplayColorSetting() = DisplayColorSetting::kUnmanaged;
 
     // Default to using HWC virtual displays
     mFlinger.mutableUseHwcVirtualDisplays() = true;
@@ -179,7 +179,14 @@ DisplayTransactionTest::~DisplayTransactionTest() {
 
 void DisplayTransactionTest::injectMockScheduler() {
     EXPECT_CALL(*mEventThread, registerDisplayEventConnection(_));
+    EXPECT_CALL(*mEventThread, createEventConnection(_, _))
+            .WillOnce(Return(new EventThreadConnection(mEventThread, ResyncCallback(),
+                                                       ISurfaceComposer::eConfigChangedSuppress)));
+
     EXPECT_CALL(*mSFEventThread, registerDisplayEventConnection(_));
+    EXPECT_CALL(*mSFEventThread, createEventConnection(_, _))
+            .WillOnce(Return(new EventThreadConnection(mSFEventThread, ResyncCallback(),
+                                                       ISurfaceComposer::eConfigChangedSuppress)));
 
     mFlinger.setupScheduler(std::unique_ptr<DispSync>(mPrimaryDispSync),
                             std::unique_ptr<EventControlThread>(mEventControlThread),
@@ -591,7 +598,7 @@ struct WideColorSupportNotConfiguredVariant {
     static void injectConfigChange(DisplayTransactionTest* test) {
         test->mFlinger.mutableHasWideColorDisplay() = false;
         test->mFlinger.mutableUseColorManagement() = false;
-        test->mFlinger.mutableDisplayColorSetting() = DisplayColorSetting::UNMANAGED;
+        test->mFlinger.mutableDisplayColorSetting() = DisplayColorSetting::kUnmanaged;
     }
 
     static void setupComposerCallExpectations(DisplayTransactionTest* test) {
@@ -611,7 +618,7 @@ struct WideColorP3ColorimetricSupportedVariant {
     static void injectConfigChange(DisplayTransactionTest* test) {
         test->mFlinger.mutableUseColorManagement() = true;
         test->mFlinger.mutableHasWideColorDisplay() = true;
-        test->mFlinger.mutableDisplayColorSetting() = DisplayColorSetting::UNMANAGED;
+        test->mFlinger.mutableDisplayColorSetting() = DisplayColorSetting::kUnmanaged;
     }
 
     static void setupComposerCallExpectations(DisplayTransactionTest* test) {

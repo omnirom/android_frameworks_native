@@ -17,6 +17,7 @@
 #undef LOG_TAG
 #define LOG_TAG "LibSurfaceFlingerUnittests"
 
+#include <TimeStats/TimeStats.h>
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
@@ -26,8 +27,6 @@
 
 #include <random>
 #include <unordered_set>
-
-#include "TimeStats/TimeStats.h"
 
 #include "libsurfaceflinger_unittest_main.h"
 
@@ -208,6 +207,10 @@ void TimeStatsTest::setTimeStamp(TimeStamp type, int32_t id, uint64_t frameNumbe
 int32_t TimeStatsTest::genRandomInt32(int32_t begin, int32_t end) {
     std::uniform_int_distribution<int32_t> distr(begin, end);
     return distr(mRandomEngine);
+}
+
+TEST_F(TimeStatsTest, enabledByDefault) {
+    ASSERT_TRUE(mTimeStats->isEnabled());
 }
 
 TEST_F(TimeStatsTest, canEnableAndDisableTimeStats) {

@@ -22,6 +22,9 @@ LIBNATIVEWINDOW {
     ANativeWindow_getBuffersDataSpace; # introduced=28
     ANativeWindow_getFormat;
     ANativeWindow_getHeight;
+    ANativeWindow_getLastDequeueDuration; # apex # introduced=30
+    ANativeWindow_getLastDequeueStartTime; # apex # introduced=30
+    ANativeWindow_getLastQueueDuration; # apex # introduced=30
     ANativeWindow_getWidth;
     ANativeWindow_lock;
     ANativeWindow_query; # vndk
@@ -37,6 +40,7 @@ LIBNATIVEWINDOW {
     ANativeWindow_setBuffersGeometry;
     ANativeWindow_setBuffersTimestamp; # vndk
     ANativeWindow_setBuffersTransform;
+    ANativeWindow_setDequeueTimeout; # apex # introduced=30
     ANativeWindow_setSharedBufferMode; # vndk
     ANativeWindow_setSwapInterval; # vndk
     ANativeWindow_setUsage; # vndk

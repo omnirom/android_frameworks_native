@@ -171,7 +171,7 @@ void DisplayTest::SetUp() {
     mMockComposer = new MockComposerClient;
     sp<ComposerClient> client = new ComposerClient(mMockComposer);
     mFakeService = new FakeComposerService(client);
-    (void)mFakeService->registerAsService("mock");
+    ASSERT_EQ(android::OK, mFakeService->registerAsService("mock"));
 
     android::hardware::ProcessState::self()->startThreadPool();
     android::ProcessState::self()->startThreadPool();
@@ -1331,16 +1331,6 @@ TEST_F(LatchingTest, SurfacePositionLatching) {
 
     restoreInitialState();
 
-    // Now we repeat with setGeometryAppliesWithResize
-    // and verify the position DOESN'T latch.
-    {
-        TransactionScope ts(*sFakeComposer);
-        ts.setGeometryAppliesWithResize(mFGSurfaceControl);
-        ts.setSize(mFGSurfaceControl, 32, 32);
-        ts.setPosition(mFGSurfaceControl, 100, 100);
-    }
-    EXPECT_TRUE(framesAreSame(mBaseFrame, sFakeComposer->getLatestFrame()));
-
     completeFGResize();
 
     auto referenceFrame2 = mBaseFrame;
@@ -1364,14 +1354,6 @@ TEST_F(LatchingTest, CropLatching) {
     EXPECT_TRUE(framesAreSame(referenceFrame1, sFakeComposer->getLatestFrame()));
 
     restoreInitialState();
-
-    {
-        TransactionScope ts(*sFakeComposer);
-        ts.setSize(mFGSurfaceControl, 128, 128);
-        ts.setGeometryAppliesWithResize(mFGSurfaceControl);
-        ts.setCrop_legacy(mFGSurfaceControl, Rect(0, 0, 63, 63));
-    }
-    EXPECT_TRUE(framesAreSame(mBaseFrame, sFakeComposer->getLatestFrame()));
 
     completeFGResize();
 

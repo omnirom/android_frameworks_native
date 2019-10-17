@@ -290,7 +290,8 @@ public:
         std::unordered_set<sp<SurfaceControl>, SCHash> surfaceControls;
     };
 
-    class Transaction : Parcelable {
+    class Transaction : public Parcelable {
+    protected:
         std::unordered_map<sp<IBinder>, ComposerState, IBinderHash> mComposerStates;
         SortedVector<DisplayState > mDisplayStates;
         std::unordered_map<sp<ITransactionCompletedListener>, CallbackInfo, TCLHash>
@@ -445,12 +446,6 @@ public:
         // specified scaling mode. -1 will clear the override scaling mode.
         Transaction& setOverrideScalingMode(const sp<SurfaceControl>& sc,
                 int32_t overrideScalingMode);
-
-        // If the size changes in this transaction, all geometry updates specified
-        // in this transaction will not complete until a buffer of the new size
-        // arrives. As some elements normally apply immediately, this enables
-        // freezing the total geometry of a surface until a resize is completed.
-        Transaction& setGeometryAppliesWithResize(const sp<SurfaceControl>& sc);
 
 #ifndef NO_INPUT
         Transaction& setInputWindowInfo(const sp<SurfaceControl>& sc, const InputWindowInfo& info);

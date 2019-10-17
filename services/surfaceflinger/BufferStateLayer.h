@@ -19,7 +19,6 @@
 #include "BufferLayer.h"
 #include "Layer.h"
 
-#include <gui/GLConsumer.h>
 #include <renderengine/Image.h>
 #include <renderengine/RenderEngine.h>
 #include <system/window.h>
@@ -47,8 +46,6 @@ public:
     void releasePendingBuffer(nsecs_t dequeueReadyTime) override;
 
     bool shouldPresentNow(nsecs_t expectedPresentTime) const override;
-
-    bool getTransformToDisplayInverse() const override;
 
     uint32_t doTransactionResize(uint32_t flags, Layer::State* /*stateToCommit*/) override {
         return flags;
@@ -82,13 +79,13 @@ public:
 
     // Override to ignore legacy layer state properties that are not used by BufferStateLayer
     bool setSize(uint32_t /*w*/, uint32_t /*h*/) override { return false; }
-    bool setPosition(float /*x*/, float /*y*/, bool /*immediate*/) override { return false; }
+    bool setPosition(float /*x*/, float /*y*/) override { return false; }
     bool setTransparentRegionHint(const Region& transparent) override;
     bool setMatrix(const layer_state_t::matrix22_t& /*matrix*/,
                    bool /*allowNonRectPreservingTransforms*/) override {
         return false;
     }
-    bool setCrop_legacy(const Rect& /*crop*/, bool /*immediate*/) override { return false; }
+    bool setCrop_legacy(const Rect& /*crop*/) override { return false; }
     bool setOverrideScalingMode(int32_t /*overrideScalingMode*/) override { return false; }
     void deferTransactionUntil_legacy(const sp<IBinder>& /*barrierHandle*/,
                                       uint64_t /*frameNumber*/) override {}
@@ -106,20 +103,10 @@ public:
     bool fenceHasSignaled() const override;
     bool framePresentTimeIsCurrent(nsecs_t expectedPresentTime) const override;
 
+protected:
+    void gatherBufferInfo() override;
+
 private:
-    nsecs_t getDesiredPresentTime() override;
-    std::shared_ptr<FenceTime> getCurrentFenceTime() const override;
-
-    void getDrawingTransformMatrix(float *matrix) override;
-    uint32_t getDrawingTransform() const override;
-    ui::Dataspace getDrawingDataSpace() const override;
-    Rect getDrawingCrop() const override;
-    uint32_t getDrawingScalingMode() const override;
-    Region getDrawingSurfaceDamage() const override;
-    const HdrMetadata& getDrawingHdrMetadata() const override;
-    int getDrawingApi() const override;
-    PixelFormat getPixelFormat() const override;
-
     uint64_t getFrameNumber(nsecs_t expectedPresentTime) const override;
 
     bool getAutoRefresh() const override;
@@ -128,8 +115,6 @@ private:
     bool latchSidebandStream(bool& recomputeVisibleRegions) override;
 
     bool hasFrameUpdate() const override;
-
-    void setFilteringEnabled(bool enabled) override;
 
     status_t bindTextureImage() override;
     status_t updateTexImage(bool& recomputeVisibleRegions, nsecs_t latchTime,
@@ -140,6 +125,9 @@ private:
 
     void latchPerFrameState(compositionengine::LayerFECompositionState&) const override;
 
+    // Crop that applies to the buffer
+    Rect computeCrop(const State& s);
+
 private:
     friend class SlotGenerationTest;
     void onFirstRef() override;
@@ -149,13 +137,14 @@ private:
 
     std::unique_ptr<renderengine::Image> mTextureImage;
 
-    std::array<float, 16> mTransformMatrix{IDENTITY_MATRIX};
-
     std::atomic<bool> mSidebandStreamChanged{false};
 
     mutable uint32_t mFrameNumber{0};
 
     sp<Fence> mPreviousReleaseFence;
+    uint64_t mPreviousBufferId = 0;
+    uint64_t mPreviousFrameNumber = 0;
+    uint64_t mPreviousReleasedFrameNumber = 0;
 
     mutable bool mCurrentStateModified = false;
     bool mReleasePreviousBuffer = false;
