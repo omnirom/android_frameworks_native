@@ -817,24 +817,19 @@ void SurfaceFlinger::init() {
     mRefreshRateStats.setConfigMode(active_config);
 
     if (mUseSmoMo) {
-        mSmoMoLibHandle = dlopen(SMOMO_LIBRARY_NAME, RTLD_NOW);
+        mSmoMoLibHandle = dlopen("libsmomo.qti.so", RTLD_NOW);
         if (!mSmoMoLibHandle) {
-            ALOGE("Unable to open SmoMo lib: %s", dlerror());
+            ALOGE("Unable to open libsmomo: %s", dlerror());
         } else {
-            mSmoMoCreateFunc =
-                reinterpret_cast<CreateSmoMoFuncPtr>(dlsym(mSmoMoLibHandle,
-                    CREATE_SMOMO_INTERFACE_NAME));
-            mSmoMoDestroyFunc =
-                reinterpret_cast<DestroySmoMoFuncPtr>(dlsym(mSmoMoLibHandle,
-                    DESTROY_SMOMO_INTERFACE_NAME));
-
-            if (mSmoMoCreateFunc && mSmoMoDestroyFunc) {
-                if (!mSmoMoCreateFunc(SMOMO_VERSION_TAG, &mSmoMo)) {
-                    ALOGE("Unable to create SmoMo interface");
-                }
-            } else {
-                ALOGE("Can't load SmoMo symbols: %s", dlerror());
-            }
+             mSmoMoCreateFunc =
+                    reinterpret_cast<CreateSmoMoFuncPtr>(dlsym(mSmoMoLibHandle, "CreateSmomo"));
+             mSmoMoDestroyFunc =
+                    reinterpret_cast<DestroySmoMoFuncPtr>(dlsym(mSmoMoLibHandle, "DestroySmomo"));
+             if (mSmoMoCreateFunc && mSmoMoDestroyFunc) {
+                mSmoMo = mSmoMoCreateFunc();
+             } else {
+                ALOGE("Can't load libsmomo symbols: %s", dlerror());
+             }
         }
 
         if (mSmoMo) {
@@ -857,9 +852,6 @@ void SurfaceFlinger::init() {
             ALOGI("SmoMo is enabled");
         } else {
             mUseSmoMo = false;
-            if (mSmoMoLibHandle) {
-                dlclose(mSmoMoLibHandle);
-            }
         }
     }
 
