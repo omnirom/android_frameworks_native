@@ -3805,16 +3805,7 @@ bool SurfaceFlinger::doComposeSurfaces(const sp<DisplayDevice>& displayDevice,
     const auto& displayState = display->getState();
     const auto displayId = display->getId();
     auto& renderEngine = getRenderEngine();
-    bool isSecureDisplay = false;
-    for (const auto& layer : displayDevice->getVisibleLayersSortedByZ()) {
-        if (layer->isSecureDisplay()) {
-            isSecureDisplay = true;
-            break;
-        }
-    }
-
-    const bool supportProtectedContent =
-            renderEngine.supportsProtectedContent() && !isSecureDisplay;
+    const bool supportProtectedContent = renderEngine.supportsProtectedContent();
 
     const Region bounds(displayState.bounds);
     const DisplayRenderArea renderArea(displayDevice);
