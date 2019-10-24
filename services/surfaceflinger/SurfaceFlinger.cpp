@@ -3797,7 +3797,16 @@ bool SurfaceFlinger::doComposeSurfaces(const sp<DisplayDevice>& displayDevice,
     const auto& displayState = display->getState();
     const auto displayId = display->getId();
     auto& renderEngine = getRenderEngine();
-    const bool supportProtectedContent = renderEngine.supportsProtectedContent();
+    bool isSecureDisplay = false;
+    for (const auto& layer : displayDevice->getVisibleLayersSortedByZ()) {
+        if (layer->isSecureDisplay()) {
+            isSecureDisplay = true;
+            break;
+        }
+    }
+
+    const bool supportProtectedContent =
+            renderEngine.supportsProtectedContent() && !isSecureDisplay;
 
     const Region bounds(displayState.bounds);
     const DisplayRenderArea renderArea(displayDevice);
@@ -4925,7 +4934,7 @@ void SurfaceFlinger::setPowerModeInternal(const sp<DisplayDevice>& display, int 
                 mScheduler->onScreenAcquired(mAppConnectionHandle);
                 mScheduler->resyncToHardwareVsync(true, getVsyncPeriod());
             }
-        } else {
+        } else if (displayId == getInternalDisplayIdLocked()) {
             updateVsyncSource();
         }
 
