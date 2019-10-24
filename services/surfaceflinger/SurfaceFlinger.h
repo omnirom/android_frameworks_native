@@ -89,7 +89,6 @@ class EventThread;
 class HWComposer;
 class IGraphicBufferProducer;
 class IInputFlinger;
-class InjectVSyncSource;
 class Layer;
 class MessageBase;
 class RefreshRateOverlay;
@@ -339,6 +338,7 @@ private:
 
     // For unit tests
     friend class TestableSurfaceFlinger;
+    friend class TransactionApplicationTest;
 
     // This value is specified in number of frames.  Log frame stats at most
     // every half hour.
@@ -347,9 +347,11 @@ private:
     static const size_t MAX_LAYERS = 4096;
     static const int MAX_TRACING_MEMORY = 100 * 1024 * 1024; // 100MB
 
+protected:
     // We're reference counted, never destroy SurfaceFlinger directly
     virtual ~SurfaceFlinger();
 
+private:
     /* ------------------------------------------------------------------------
      * Internal data structures
      */
@@ -549,7 +551,6 @@ private:
     void updateInputFlinger();
     void updateInputWindowInfo();
     void commitInputWindowCommands() REQUIRES(mStateLock);
-    void executeInputWindowCommands();
     void setInputWindowsFinished();
     void updateCursorAsync();
     void initScheduler(DisplayId primaryDisplayId);
@@ -585,15 +586,19 @@ private:
     bool transactionIsReadyToBeApplied(int64_t desiredPresentTime,
                                        bool useCachedExpectedPresentTime,
                                        const Vector<ComposerState>& states);
-    uint32_t setClientStateLocked(
-            const ComposerState& composerState, int64_t desiredPresentTime, int64_t postTime,
-            bool privileged,
-            std::unordered_set<ListenerCallbacks, ListenerCallbacksHash>& listenerCallbacks)
-            REQUIRES(mStateLock);
     uint32_t setDisplayStateLocked(const DisplayState& s) REQUIRES(mStateLock);
     uint32_t addInputWindowCommands(const InputWindowCommands& inputWindowCommands)
             REQUIRES(mStateLock);
 
+protected:
+    virtual uint32_t setClientStateLocked(
+            const ComposerState& composerState, int64_t desiredPresentTime, int64_t postTime,
+            bool privileged,
+            std::unordered_set<ListenerCallbacks, ListenerCallbacksHash>& listenerCallbacks)
+            REQUIRES(mStateLock);
+    virtual void commitTransactionLocked();
+
+private:
     /* ------------------------------------------------------------------------
      * Layer management
      */
@@ -602,24 +607,27 @@ private:
                          sp<IBinder>* handle, sp<IGraphicBufferProducer>* gbp,
                          const sp<IBinder>& parentHandle, const sp<Layer>& parentLayer = nullptr);
 
-    status_t createBufferQueueLayer(const sp<Client>& client, const String8& name, uint32_t w,
+    status_t createBufferQueueLayer(const sp<Client>& client, std::string name, uint32_t w,
                                     uint32_t h, uint32_t flags, LayerMetadata metadata,
                                     PixelFormat& format, sp<IBinder>* outHandle,
                                     sp<IGraphicBufferProducer>* outGbp, sp<Layer>* outLayer);
 
-    status_t createBufferStateLayer(const sp<Client>& client, const String8& name, uint32_t w,
+    status_t createBufferStateLayer(const sp<Client>& client, std::string name, uint32_t w,
                                     uint32_t h, uint32_t flags, LayerMetadata metadata,
                                     sp<IBinder>* outHandle, sp<Layer>* outLayer);
 
-    status_t createColorLayer(const sp<Client>& client, const String8& name, uint32_t w, uint32_t h,
+    status_t createColorLayer(const sp<Client>& client, std::string name, uint32_t w, uint32_t h,
                               uint32_t flags, LayerMetadata metadata, sp<IBinder>* outHandle,
                               sp<Layer>* outLayer);
 
-    status_t createContainerLayer(const sp<Client>& client, const String8& name, uint32_t w,
+    status_t createContainerLayer(const sp<Client>& client, std::string name, uint32_t w,
                                   uint32_t h, uint32_t flags, LayerMetadata metadata,
                                   sp<IBinder>* outHandle, sp<Layer>* outLayer);
 
-    String8 getUniqueLayerName(const String8& name);
+    status_t mirrorLayer(const sp<Client>& client, const sp<IBinder>& mirrorFromHandle,
+                         sp<IBinder>* outHandle);
+
+    std::string getUniqueLayerName(const char* name);
 
     // called when all clients have released all their references to
     // this layer meaning it is entirely safe to destroy all
@@ -858,8 +866,8 @@ private:
     // Not const because each Layer needs to query Fences and cache timestamps.
     void dumpFrameEventsLocked(std::string& result);
 
-    void recordBufferingStats(const char* layerName,
-            std::vector<OccupancyTracker::Segment>&& history);
+    void recordBufferingStats(const std::string& layerName,
+                              std::vector<OccupancyTracker::Segment>&& history);
     void dumpBufferingStats(std::string& result) const;
     void dumpDisplayIdentificationData(std::string& result) const;
     void dumpRawDisplayIdentificationData(const DumpArgs&, std::string& result) const;
@@ -931,8 +939,6 @@ private:
     // constant members (no synchronization needed for access)
     const nsecs_t mBootTime = systemTime();
     bool mGpuToCpuSupported = false;
-    std::unique_ptr<EventThread> mInjectorEventThread;
-    std::unique_ptr<InjectVSyncSource> mVSyncInjector;
 
     // Can only accessed from the main thread, these members
     // don't need synchronization
@@ -1049,8 +1055,6 @@ private:
     /* ------------------------------------------------------------------------
      * Feature prototyping
      */
-
-    bool mInjectVSyncs = false;
 
     // Static screen stats
     bool mHasPoweredOff = false;

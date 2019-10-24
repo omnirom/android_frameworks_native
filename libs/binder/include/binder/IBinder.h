@@ -59,9 +59,14 @@ public:
         INTERFACE_TRANSACTION   = B_PACK_CHARS('_', 'N', 'T', 'F'),
         SYSPROPS_TRANSACTION    = B_PACK_CHARS('_', 'S', 'P', 'R'),
         EXTENSION_TRANSACTION   = B_PACK_CHARS('_', 'E', 'X', 'T'),
+        DEBUG_PID_TRANSACTION   = B_PACK_CHARS('_', 'P', 'I', 'D'),
 
         // Corresponds to TF_ONE_WAY -- an asynchronous call.
-        FLAG_ONEWAY             = 0x00000001
+        FLAG_ONEWAY             = 0x00000001,
+
+        // Private userspace flag for transaction which is being requested from
+        // a vendor context.
+        FLAG_PRIVATE_VENDOR     = 0x10000000,
     };
 
                           IBinder();
@@ -128,6 +133,11 @@ public:
      *         // type of extension
      */
     status_t                getExtension(sp<IBinder>* out);
+
+    /**
+     * Dump PID for a binder, for debugging.
+     */
+    status_t                getDebugPid(pid_t* outPid);
 
     // NOLINTNEXTLINE(google-default-arguments)
     virtual status_t        transact(   uint32_t code,
@@ -236,7 +246,7 @@ protected:
 private:
 };
 
-}; // namespace android
+} // namespace android
 
 // ---------------------------------------------------------------------------
 

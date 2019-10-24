@@ -812,14 +812,10 @@ struct BaseLayerVariant {
         EXPECT_CALL(*test->mComposer, createLayer(HWC_DISPLAY, _))
                 .WillOnce(DoAll(SetArgPointee<1>(HWC_LAYER), Return(Error::NONE)));
 
-        std::vector<std::unique_ptr<compositionengine::OutputLayer>> outputLayers;
-        outputLayers.emplace_back(test->mDisplay->getCompositionDisplay()
-                                          ->createOutputLayer(layer->getCompositionLayer(), layer));
-
-        outputLayers.back()->editState().visibleRegion = Region(Rect(0, 0, 100, 100));
-        outputLayers.back()->editState().outputSpaceVisibleRegion = Region(Rect(0, 0, 100, 100));
-
-        test->mDisplay->getCompositionDisplay()->setOutputLayersOrderedByZ(std::move(outputLayers));
+        auto outputLayer = test->mDisplay->getCompositionDisplay()
+                                   ->injectOutputLayerForTest(layer->getCompositionLayer(), layer);
+        outputLayer->editState().visibleRegion = Region(Rect(0, 0, 100, 100));
+        outputLayer->editState().outputSpaceVisibleRegion = Region(Rect(0, 0, 100, 100));
 
         Mock::VerifyAndClear(test->mComposer);
 
@@ -830,8 +826,7 @@ struct BaseLayerVariant {
         EXPECT_CALL(*test->mComposer, destroyLayer(HWC_DISPLAY, HWC_LAYER))
                 .WillOnce(Return(Error::NONE));
 
-        test->mDisplay->getCompositionDisplay()->setOutputLayersOrderedByZ(
-                std::vector<std::unique_ptr<compositionengine::OutputLayer>>());
+        test->mDisplay->getCompositionDisplay()->clearOutputLayers();
         test->mFlinger.mutableDrawingState().layersSortedByZ.clear();
     }
 };
@@ -844,7 +839,7 @@ struct ColorLayerVariant : public BaseLayerVariant<LayerProperties> {
     static FlingerLayerType createLayer(CompositionTest* test) {
         FlingerLayerType layer = Base::template createLayerWithFactory<ColorLayer>(test, [test]() {
             return new ColorLayer(LayerCreationArgs(test->mFlinger.mFlinger.get(), sp<Client>(),
-                                                    String8("test-layer"), LayerProperties::WIDTH,
+                                                    "test-layer", LayerProperties::WIDTH,
                                                     LayerProperties::HEIGHT,
                                                     LayerProperties::LAYER_FLAGS, LayerMetadata()));
         });
@@ -883,11 +878,12 @@ struct BufferLayerVariant : public BaseLayerVariant<LayerProperties> {
 
         FlingerLayerType layer =
                 Base::template createLayerWithFactory<BufferQueueLayer>(test, [test]() {
-                    return new BufferQueueLayer(
-                            LayerCreationArgs(test->mFlinger.mFlinger.get(), sp<Client>(),
-                                              String8("test-layer"), LayerProperties::WIDTH,
-                                              LayerProperties::HEIGHT,
-                                              LayerProperties::LAYER_FLAGS, LayerMetadata()));
+                    sp<Client> client;
+                    LayerCreationArgs args(test->mFlinger.mFlinger.get(), client, "test-layer",
+                                           LayerProperties::WIDTH, LayerProperties::HEIGHT,
+                                           LayerProperties::LAYER_FLAGS, LayerMetadata());
+                    args.textureName = test->mFlinger.mutableTexturePool().back();
+                    return new BufferQueueLayer(args);
                 });
 
         LayerProperties::setupLayerState(test, layer);
@@ -1024,6 +1020,26 @@ struct ForcedClientCompositionResultVariant : public CompositionResultBaseVarian
         const auto outputLayer = layer->findOutputLayerForDisplay(test->mDisplay);
         LOG_FATAL_IF(!outputLayer);
         outputLayer->editState().forceClientComposition = true;
+    }
+
+    template <typename Case>
+    static void setupCallExpectations(CompositionTest* test) {
+        Case::Display::setupNonEmptyFrameCompositionCallExpectations(test);
+        Case::Display::setupHwcForcedClientCompositionCallExpectations(test);
+        Case::Display::setupRECompositionCallExpectations(test);
+        Case::Display::template setupRELayerCompositionCallExpectations<Case>(test);
+    }
+
+    template <typename Case>
+    static void setupCallExpectationsForDirtyGeometry(CompositionTest*) {}
+
+    template <typename Case>
+    static void setupCallExpectationsForDirtyFrame(CompositionTest*) {}
+};
+
+struct ForcedClientCompositionViaDebugOptionResultVariant : public CompositionResultBaseVariant {
+    static void setupLayerState(CompositionTest* test, sp<Layer>) {
+        test->mFlinger.mutableDebugDisableHWC() = true;
     }
 
     template <typename Case>
@@ -1350,6 +1366,24 @@ TEST_F(CompositionTest, captureScreenNormalBufferLayerOnPoweredOffDisplay) {
     captureScreenComposition<CompositionCase<
             PoweredOffDisplaySetupVariant, BufferLayerVariant<DefaultLayerProperties>,
             NoCompositionTypeVariant, REScreenshotResultVariant>>();
+}
+
+/* ------------------------------------------------------------------------
+ *  Client composition forced through debug/developer settings
+ */
+
+TEST_F(CompositionTest, DebugOptionForcingClientCompositionOfBufferLayerWithDirtyGeometry) {
+    displayRefreshCompositionDirtyGeometry<
+            CompositionCase<DefaultDisplaySetupVariant, BufferLayerVariant<DefaultLayerProperties>,
+                            KeepCompositionTypeVariant<IComposerClient::Composition::CLIENT>,
+                            ForcedClientCompositionViaDebugOptionResultVariant>>();
+}
+
+TEST_F(CompositionTest, DebugOptionForcingClientCompositionOfBufferLayerWithDirtyFrame) {
+    displayRefreshCompositionDirtyFrame<
+            CompositionCase<DefaultDisplaySetupVariant, BufferLayerVariant<DefaultLayerProperties>,
+                            KeepCompositionTypeVariant<IComposerClient::Composition::CLIENT>,
+                            ForcedClientCompositionViaDebugOptionResultVariant>>();
 }
 
 } // namespace

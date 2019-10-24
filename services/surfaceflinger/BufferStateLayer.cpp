@@ -48,10 +48,17 @@ BufferStateLayer::BufferStateLayer(const LayerCreationArgs& args)
       : BufferLayer(args), mHwcSlotGenerator(new HwcSlotGenerator()) {
     mOverrideScalingMode = NATIVE_WINDOW_SCALING_MODE_SCALE_TO_WINDOW;
     mCurrentState.dataspace = ui::Dataspace::V0_SRGB;
+    if (const auto display = args.displayDevice) {
+        updateTransformHint(display);
+    }
 }
 
 BufferStateLayer::~BufferStateLayer() {
-    if (mBufferInfo.mBuffer != nullptr) {
+    // The original layer and the clone layer share the same texture and buffer. Therefore, only
+    // one of the layers, in this case the original layer, needs to handle the deletion. The
+    // original layer and the clone should be removed at the same time so there shouldn't be any
+    // issue with the clone layer trying to use the texture.
+    if (mBufferInfo.mBuffer != nullptr && !isClone()) {
         // Ensure that mBuffer is uncached from RenderEngine here, as
         // RenderEngine may have been using the buffer as an external texture
         // after the client uncached the buffer.
@@ -96,12 +103,15 @@ void BufferStateLayer::onLayerDisplayed(const sp<Fence>& releaseFence) {
     }
 }
 
-void BufferStateLayer::setTransformHint(uint32_t /*orientation*/) const {
-    // TODO(marissaw): send the transform hint to buffer owner
-    return;
+void BufferStateLayer::setTransformHint(uint32_t orientation) const {
+    mTransformHint = orientation;
 }
 
 void BufferStateLayer::releasePendingBuffer(nsecs_t /*dequeueReadyTime*/) {
+    for (const auto& handle : mDrawingState.callbackHandles) {
+        handle->transformHint = mTransformHint;
+    }
+
     mFlinger->getTransactionCompletedThread().finalizePendingCallbackHandles(
             mDrawingState.callbackHandles);
 
@@ -118,9 +128,10 @@ bool BufferStateLayer::shouldPresentNow(nsecs_t /*expectedPresentTime*/) const {
 
 bool BufferStateLayer::willPresentCurrentTransaction() const {
     // Returns true if the most recent Transaction applied to CurrentState will be presented.
-    return getSidebandStreamChanged() || getAutoRefresh() ||
+    return (getSidebandStreamChanged() || getAutoRefresh() ||
             (mCurrentState.modified &&
-             (mCurrentState.buffer != nullptr || mCurrentState.bgColorLayer != nullptr));
+             (mCurrentState.buffer != nullptr || mCurrentState.bgColorLayer != nullptr))) &&
+        !mLayerDetached;
 }
 
 void BufferStateLayer::pushPendingState() {
@@ -128,7 +139,7 @@ void BufferStateLayer::pushPendingState() {
         return;
     }
     mPendingStates.push_back(mCurrentState);
-    ATRACE_INT(mTransactionName.string(), mPendingStates.size());
+    ATRACE_INT(mTransactionName.c_str(), mPendingStates.size());
 }
 
 bool BufferStateLayer::applyPendingStates(Layer::State* stateToCommit) {
@@ -471,7 +482,7 @@ status_t BufferStateLayer::updateTexImage(bool& /*recomputeVisibleRegions*/, nse
         (s.active.w != bufferWidth || s.active.h != bufferHeight)) {
         ALOGE("[%s] rejecting buffer: "
               "bufferWidth=%d, bufferHeight=%d, front.active.{w=%d, h=%d}",
-              mName.string(), bufferWidth, bufferHeight, s.active.w, s.active.h);
+              getDebugName(), bufferWidth, bufferHeight, s.active.w, s.active.h);
         mFlinger->mTimeStats->removeTimeRecord(layerID, mFrameNumber);
         return BAD_VALUE;
     }
@@ -543,14 +554,6 @@ void BufferStateLayer::latchPerFrameState(
     compositionState.acquireFence = mBufferInfo.mFence;
 
     mFrameNumber++;
-}
-
-void BufferStateLayer::onFirstRef() {
-    BufferLayer::onFirstRef();
-
-    if (const auto display = mFlinger->getDefaultDisplayDevice()) {
-        updateTransformHint(display);
-    }
 }
 
 void BufferStateLayer::HwcSlotGenerator::bufferErased(const client_cache_t& clientCacheId) {
@@ -668,4 +671,12 @@ Rect BufferStateLayer::computeCrop(const State& s) {
     return s.crop;
 }
 
+sp<Layer> BufferStateLayer::createClone() {
+    LayerCreationArgs args(mFlinger.get(), nullptr, mName + " (Mirror)", 0, 0, 0, LayerMetadata());
+    args.textureName = mTextureName;
+    sp<BufferStateLayer> layer = mFlinger->getFactory().createBufferStateLayer(args);
+    layer->mHwcSlotGenerator = mHwcSlotGenerator;
+    layer->setInitialValuesForClone(this);
+    return layer;
+}
 } // namespace android

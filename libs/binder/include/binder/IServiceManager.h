@@ -26,12 +26,22 @@ namespace android {
 
 // ----------------------------------------------------------------------
 
+/**
+ * Service manager for C++ services.
+ *
+ * IInterface is only for legacy ABI compatibility
+ */
 class IServiceManager : public IInterface
 {
 public:
-    DECLARE_META_INTERFACE(ServiceManager)
+    // for ABI compatibility
+    virtual const String16& getInterfaceDescriptor() const;
+
+    IServiceManager();
+    virtual ~IServiceManager();
+
     /**
-     * Must match values in IServiceManager.java
+     * Must match values in IServiceManager.aidl
      */
     /* Allows services to dump sections according to priorities. */
     static const int DUMP_FLAG_PRIORITY_CRITICAL = 1 << 0;
@@ -104,7 +114,7 @@ bool checkCallingPermission(const String16& permission,
                             int32_t* outPid, int32_t* outUid);
 bool checkPermission(const String16& permission, pid_t pid, uid_t uid);
 
-}; // namespace android
+} // namespace android
 
 #endif // ANDROID_ISERVICE_MANAGER_H
 

@@ -49,7 +49,8 @@ public:
             const String16& packageName) = 0;
     virtual void setCameraAudioRestriction(int32_t mode) = 0;
     virtual void noteAsyncOp(const String16& callingPackageName, int32_t uid,
-            const String16& packageName, int32_t opCode, const String16& message) = 0;
+            const String16& packageName, int32_t opCode, const String16& featureId,
+            const String16& message) = 0;
     virtual bool shouldCollectNotes(int32_t opCode) = 0;
 
     enum {
@@ -88,6 +89,6 @@ public:
 
 // ----------------------------------------------------------------------
 
-}; // namespace android
+} // namespace android
 
 #endif // ANDROID_IAPP_OPS_SERVICE_H

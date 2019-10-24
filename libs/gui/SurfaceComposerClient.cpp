@@ -222,7 +222,8 @@ void TransactionCompletedListener::onTransactionCompleted(ListenerStats listener
             for (const auto& surfaceStats : transactionStats.surfaceStats) {
                 surfaceControlStats.emplace_back(surfaceControls[surfaceStats.surfaceControl],
                                                  surfaceStats.acquireTime,
-                                                 surfaceStats.previousReleaseFence);
+                                                 surfaceStats.previousReleaseFence,
+                                                 surfaceStats.transformHint);
             }
 
             callbackFunction(transactionStats.latchTime, transactionStats.presentFence,
@@ -1327,7 +1328,9 @@ SurfaceComposerClient::Transaction& SurfaceComposerClient::Transaction::setGeome
             break;
     }
     setMatrix(sc, matrix[0], matrix[1], matrix[2], matrix[3]);
-    setPosition(sc, x, y);
+    float offsetX = xScale * source.left;
+    float offsetY = yScale * source.top;
+    setPosition(sc, x - offsetX, y - offsetY);
 
     return *this;
 }
@@ -1501,6 +1504,20 @@ status_t SurfaceComposerClient::createSurfaceChecked(const String8& name, uint32
         }
     }
     return err;
+}
+
+sp<SurfaceControl> SurfaceComposerClient::mirrorSurface(SurfaceControl* mirrorFromSurface) {
+    if (mirrorFromSurface == nullptr) {
+        return nullptr;
+    }
+
+    sp<IBinder> handle;
+    sp<IBinder> mirrorFromHandle = mirrorFromSurface->getHandle();
+    status_t err = mClient->mirrorSurface(mirrorFromHandle, &handle);
+    if (err == NO_ERROR) {
+        return new SurfaceControl(this, handle, nullptr, true /* owned */);
+    }
+    return nullptr;
 }
 
 status_t SurfaceComposerClient::clearLayerFrameStats(const sp<IBinder>& token) const {

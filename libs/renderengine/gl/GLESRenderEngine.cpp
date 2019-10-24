@@ -457,8 +457,10 @@ Framebuffer* GLESRenderEngine::getFramebufferForDrawing() {
 }
 
 void GLESRenderEngine::primeCache() const {
-    ProgramCache::getInstance().primeCache(mInProtectedContext ? mProtectedEGLContext : mEGLContext,
-                                           mFeatureFlags & USE_COLOR_MANAGEMENT);
+    ProgramCache::getInstance().primeCache(
+            mInProtectedContext ? mProtectedEGLContext : mEGLContext,
+                    mFeatureFlags & USE_COLOR_MANAGEMENT,
+                    mFeatureFlags & PRECACHE_TONE_MAPPER_SHADER_ONLY);
 }
 
 base::unique_fd GLESRenderEngine::flush() {
@@ -827,11 +829,14 @@ void GLESRenderEngine::handleRoundedCorners(const DisplaySettings& display,
     drawMesh(mesh);
 
     // The middle part of the layer can turn off blending.
-    const Rect middleRect(bounds.left, bounds.top + radius, bounds.right, bounds.bottom - radius);
-    setScissor(middleRect);
-    mState.cornerRadius = 0.0;
-    disableBlending();
-    drawMesh(mesh);
+    if (topRect.bottom < bottomRect.top) {
+        const Rect middleRect(bounds.left, bounds.top + radius, bounds.right,
+                              bounds.bottom - radius);
+        setScissor(middleRect);
+        mState.cornerRadius = 0.0;
+        disableBlending();
+        drawMesh(mesh);
+    }
     disableScissor();
 }
 
