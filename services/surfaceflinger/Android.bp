@@ -64,6 +64,7 @@ cc_defaults {
         "libutils",
         "libSurfaceFlingerProp",
         "libqdMetaData.system",
+        "vendor.qti.hardware.display.composer@2.0",
     ],
     static_libs: [
         "libcompositionengine",

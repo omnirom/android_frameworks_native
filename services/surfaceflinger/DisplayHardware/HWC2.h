@@ -394,6 +394,7 @@ public:
     [[clang::warn_unused_result]] virtual Error setVisibleRegion(const android::Region& region) = 0;
     [[clang::warn_unused_result]] virtual Error setZOrder(uint32_t z) = 0;
     [[clang::warn_unused_result]] virtual Error setInfo(uint32_t type, uint32_t appId) = 0;
+    [[clang::warn_unused_result]] virtual Error setType(uint32_t type) = 0;
 
     // Composer HAL 2.3
     [[clang::warn_unused_result]] virtual Error setColorTransform(const android::mat4& matrix) = 0;
@@ -431,6 +432,7 @@ public:
     Error setVisibleRegion(const android::Region& region) override;
     Error setZOrder(uint32_t z) override;
     Error setInfo(uint32_t type, uint32_t appId) override;
+    Error setType(uint32_t type) override;
 
     // Composer HAL 2.3
     Error setColorTransform(const android::mat4& matrix) override;

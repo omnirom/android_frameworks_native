@@ -55,6 +55,7 @@ public:
     MOCK_METHOD1(setVisibleRegion, Error(const android::Region&));
     MOCK_METHOD1(setZOrder, Error(uint32_t));
     MOCK_METHOD2(setInfo, Error(uint32_t, uint32_t));
+    MOCK_METHOD1(setType, Error(uint32_t));
 
     MOCK_METHOD1(setColorTransform, Error(const android::mat4&));
 };
