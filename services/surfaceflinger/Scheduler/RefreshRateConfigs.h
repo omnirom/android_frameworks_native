@@ -66,15 +66,6 @@ public:
         return nullptr;
     }
 
-    std::shared_ptr<RefreshRate> getRefreshRate(uint32_t fps) const {
-        for (const auto& [type, refreshRate] : mRefreshRates) {
-            if (refreshRate->fps == fps) {
-                return refreshRate;
-            }
-        }
-        return nullptr;
-    }
-
     RefreshRateType getRefreshRateType(hwc2_config_t id) const {
         for (const auto& [type, refreshRate] : mRefreshRates) {
             if (refreshRate->id == id) {
@@ -103,15 +94,13 @@ public:
         // Resolution change or SF::setActiveConfig will re-populate the mRefreshRates map.
         int32_t activeWidth = configs.at(mActiveConfig)->getWidth();
         int32_t activeHeight = configs.at(mActiveConfig)->getHeight();
-        bool hasSmartPanel = configs.at(mActiveConfig)->hasSmartPanel();
 
         // Create a map between config index and vsync period. This is all the info we need
         // from the configs.
         std::vector<std::pair<int, nsecs_t>> configIdToVsyncPeriod;
         for (int i = 0; i < configs.size(); ++i) {
             if ((configs.at(i)->getWidth() != activeWidth) ||
-                (configs.at(i)->getHeight() != activeHeight) ||
-                (configs.at(i)->hasSmartPanel() != hasSmartPanel)) {
+                (configs.at(i)->getHeight() != activeHeight)) {
                 continue;
             }
             configIdToVsyncPeriod.emplace_back(i, configs.at(i)->getVsyncPeriod());
@@ -163,32 +152,6 @@ public:
     }
 
     void setActiveConfig(int config) { mActiveConfig = config; }
-
-    // Update the allowed Display Config(s) based on Smart Panel attribute.
-    void getAllowedConfigs(const std::vector<std::shared_ptr<const HWC2::Display::Config>>& configs,
-                           std::vector<int32_t> *allowedConfigs) {
-        bool isSmart = configs.at(mActiveConfig)->hasSmartPanel();
-
-        for (int i = 0; i < allowedConfigs->size(); i++) {
-            int32_t configId = allowedConfigs->at(i);
-            if (configs.at(configId)->hasSmartPanel() == isSmart) {
-                continue;
-            }
-
-            // Get the corresponding Refresh Rate config.
-            nsecs_t vsyncPeriod = configs.at(configId)->getVsyncPeriod();
-            if (vsyncPeriod == 0) {
-                continue;
-            }
-
-            float fps = 1e9 / vsyncPeriod;
-            uint32_t refreshRate = static_cast<uint32_t>(fps);
-            auto refreshRateConfig = getRefreshRate(refreshRate);
-            if (refreshRateConfig != nullptr) {
-                allowedConfigs->at(i) = refreshRateConfig->configId;
-            }
-        }
-    }
 
 private:
     std::map<RefreshRateType, std::shared_ptr<RefreshRate>> mRefreshRates;

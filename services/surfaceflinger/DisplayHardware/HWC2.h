@@ -170,10 +170,6 @@ public:
                 }
                 return *this;
             }
-            Builder& setSmartPanel(bool smart_panel) {
-                mConfig->mSmartPanel = smart_panel;
-                return *this;
-            }
 
         private:
             float getDefaultDensity();
@@ -188,7 +184,6 @@ public:
         nsecs_t getVsyncPeriod() const { return mVsyncPeriod; }
         float getDpiX() const { return mDpiX; }
         float getDpiY() const { return mDpiY; }
-        bool hasSmartPanel() const { return mSmartPanel; }
 
     private:
         Config(Display& display, hwc2_config_t id);
@@ -201,7 +196,6 @@ public:
         nsecs_t mVsyncPeriod;
         float mDpiX;
         float mDpiY;
-        bool mSmartPanel;
     };
 
     virtual hwc2_display_t getId() const = 0;
@@ -361,7 +355,7 @@ private:
     bool mIsConnected;
     DisplayType mType;
     std::unordered_map<hwc2_layer_t, std::unique_ptr<Layer>> mLayers;
-    std::map<hwc2_config_t, std::shared_ptr<const Config>> mConfigs;
+    std::unordered_map<hwc2_config_t, std::shared_ptr<const Config>> mConfigs;
     std::once_flag mDisplayCapabilityQueryFlag;
     std::unordered_set<DisplayCapability> mDisplayCapabilities;
 };
