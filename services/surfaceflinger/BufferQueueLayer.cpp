@@ -119,7 +119,6 @@ bool BufferQueueLayer::shouldPresentNow(nsecs_t expectedPresentTime) const {
         bufferStats.queued_frames = getQueuedFrameCount();
         bufferStats.auto_timestamp = mQueueItems[0].mIsAutoTimestamp;
         bufferStats.timestamp = mQueueItems[0].mTimestamp;
-        bufferStats.dequeue_latency = getDequeueLatency();
         isDue = mFlinger->mSmoMo->ShouldPresentNow(bufferStats, expectedPresentTime);
     }
 
@@ -492,7 +491,6 @@ void BufferQueueLayer::onFrameAvailable(const BufferItem& item) {
         bufferStats.queued_frames = getQueuedFrameCount();
         bufferStats.auto_timestamp = item.mIsAutoTimestamp;
         bufferStats.timestamp = item.mTimestamp;
-        bufferStats.dequeue_latency = getDequeueLatency();
         mFlinger->mSmoMo->CollectLayerStats(bufferStats);
     }
 
