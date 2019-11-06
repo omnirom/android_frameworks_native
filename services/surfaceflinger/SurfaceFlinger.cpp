@@ -3878,7 +3878,7 @@ bool SurfaceFlinger::doComposeSurfaces(const sp<DisplayDevice>& displayDevice,
     if (hasClientComposition) {
         ALOGV("hasClientComposition");
 
-        if (displayDevice->isPrimary() && supportProtectedContent) {
+        if (displayDevice->getId() && supportProtectedContent) {
             bool needsProtected = false;
             for (auto& layer : displayDevice->getVisibleLayersSortedByZ()) {
                 // If the layer is a protected layer, mark protected context is needed.

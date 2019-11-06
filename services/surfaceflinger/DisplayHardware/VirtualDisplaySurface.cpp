@@ -364,11 +364,11 @@ status_t VirtualDisplaySurface::dequeueBuffer(Source source,
         }
     }
     if (result & BUFFER_NEEDS_REALLOCATION) {
-        result = mSource[source]->requestBuffer(*sslot, &mProducerBuffers[pslot]);
-        if (result < 0) {
+        auto status = mSource[source]->requestBuffer(*sslot, &mProducerBuffers[pslot]);
+        if (status < 0) {
             mProducerBuffers[pslot].clear();
             mSource[source]->cancelBuffer(*sslot, *fence);
-            return result;
+            return status;
         }
         VDS_LOGV("dequeueBuffer(%s): buffers[%d]=%p fmt=%d usage=%#" PRIx64,
                 dbgSourceStr(source), pslot, mProducerBuffers[pslot].get(),
