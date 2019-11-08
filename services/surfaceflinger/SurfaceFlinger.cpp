@@ -3063,15 +3063,23 @@ void SurfaceFlinger::setFrameBufferSizeForScaling(sp<DisplayDevice> displayDevic
                                                   const DisplayDeviceState& state) {
     base::unique_fd fd;
     auto display = displayDevice->getCompositionDisplay();
+    int newWidth = state.viewport.width();
+    int newHeight = state.viewport.height();
 
-    if (displayDevice->getWidth() == state.viewport.width() &&
-        displayDevice->getHeight() == state.viewport.height()) {
+    if (state.orientation == DISPLAY_ORIENTATION_90 || state.orientation ==
+        DISPLAY_ORIENTATION_270) {
+        std::swap(newWidth, newHeight);
+    }
+
+    if (displayDevice->getWidth() == newWidth &&
+        displayDevice->getHeight() == newHeight) {
+        displayDevice->setProjection(state.orientation, state.viewport, state.viewport);
         return;
     }
 
     if (mBootStage == BootStage::FINISHED) {
+        displayDevice->setDisplaySize(newWidth, newHeight);
         displayDevice->setProjection(state.orientation, state.viewport, state.viewport);
-        displayDevice->setDisplaySize(state.viewport.width(), state.viewport.height());
         display->getRenderSurface()->setViewportAndProjection();
         display->getRenderSurface()->flipClientTarget(true);
         // queue a scratch buffer to flip Client Target with updated size
