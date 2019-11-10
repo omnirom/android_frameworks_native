@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018 The Android Open Source Project
+ * Copyright (C) 2019 The Android Open Source Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,28 +14,5 @@
  * limitations under the License.
  */
 
-#include <inttypes.h>
-
-#define BPF_FS_PATH "/sys/fs/bpf/"
-
-#define FREQS_PER_ENTRY 32
-#define CPUS_PER_ENTRY 8
-
-struct time_key_t {
-    uint32_t uid;
-    uint32_t bucket;
-};
-
-struct tis_val_t {
-    uint64_t ar[FREQS_PER_ENTRY];
-};
-
-struct concurrent_val_t {
-    uint64_t active[CPUS_PER_ENTRY];
-    uint64_t policy[CPUS_PER_ENTRY];
-};
-
-struct freq_idx_key_t {
-    uint32_t policy;
-    uint32_t freq;
-};
+template <typename P>
+using ParcelRead = std::function<void(const P& p, uint8_t data)>;

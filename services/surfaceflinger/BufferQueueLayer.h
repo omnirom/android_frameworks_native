@@ -31,6 +31,7 @@ namespace android {
  */
 class BufferQueueLayer : public BufferLayer, public BufferLayerConsumer::ContentsChangedListener {
 public:
+    // Only call while mStateLock is held
     explicit BufferQueueLayer(const LayerCreationArgs&);
     ~BufferQueueLayer() override;
 
@@ -81,6 +82,7 @@ private:
     status_t updateFrameNumber(nsecs_t latchTime) override;
 
     void latchPerFrameState(compositionengine::LayerFECompositionState&) const override;
+    sp<Layer> createClone() override;
 
     // -----------------------------------------------------------------------
     // Interface implementation for BufferLayerConsumer::ContentsChangedListener
@@ -91,6 +93,7 @@ protected:
     void onFrameAvailable(const BufferItem& item) override;
     void onFrameReplaced(const BufferItem& item) override;
     void onSidebandStreamChanged() override;
+    void onFrameDequeued(const uint64_t bufferId) override;
     // -----------------------------------------------------------------------
 
 public:
@@ -109,8 +112,6 @@ private:
 
     PixelFormat mFormat{PIXEL_FORMAT_NONE};
 
-    // Only accessed on the main thread.
-    uint64_t mPreviousFrameNumber{0};
     bool mUpdateTexImageFailed{false};
 
     uint64_t mPreviousBufferId = 0;

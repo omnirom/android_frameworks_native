@@ -89,7 +89,7 @@ void GraphicBufferAllocator::dump(std::string& result) const {
         if (rec.size) {
             StringAppendF(&result,
                           "%10p: %7.2f KiB | %4u (%4u) x %4u | %4u | %8X | 0x%" PRIx64 " | %s\n",
-                          list.keyAt(i), rec.size / 1024.0, rec.width, rec.stride, rec.height,
+                          list.keyAt(i), static_cast<double>(rec.size) / 1024.0, rec.width, rec.stride, rec.height,
                           rec.layerCount, rec.format, rec.usage, rec.requestorName.c_str());
         } else {
             StringAppendF(&result,
@@ -99,7 +99,7 @@ void GraphicBufferAllocator::dump(std::string& result) const {
         }
         total += rec.size;
     }
-    StringAppendF(&result, "Total allocated (estimate): %.2f KB\n", total / 1024.0);
+    StringAppendF(&result, "Total allocated (estimate): %.2f KB\n", static_cast<double>(total) / 1024.0);
 
     result.append(mAllocator->dumpDebugInfo());
 }
@@ -137,6 +137,16 @@ status_t GraphicBufferAllocator::allocate(uint32_t width, uint32_t height,
 
     status_t error =
             mAllocator->allocate(width, height, format, layerCount, usage, 1, stride, handle);
+    size_t bufSize;
+
+    // if stride has no meaning or is too large,
+    // approximate size with the input width instead
+    if (std::numeric_limits<size_t>::max() / height / (*stride) < static_cast<size_t>(bpp)) {
+        bufSize = static_cast<size_t>(width) * height * bpp;
+    } else {
+        bufSize = static_cast<size_t>((*stride)) * height * bpp;
+    }
+
     if (error == NO_ERROR) {
         Mutex::Autolock _l(sLock);
         KeyedVector<buffer_handle_t, alloc_rec_t>& list(sAllocList);
@@ -147,7 +157,7 @@ status_t GraphicBufferAllocator::allocate(uint32_t width, uint32_t height,
         rec.format = format;
         rec.layerCount = layerCount;
         rec.usage = usage;
-        rec.size = static_cast<size_t>(height * (*stride) * bpp);
+        rec.size = bufSize;
         rec.requestorName = std::move(requestorName);
         list.add(*handle, rec);
 

@@ -35,7 +35,7 @@
 #define DEBUG_INJECTION 0
 
 // Log debug messages about input focus tracking.
-#define DEBUG_FOCUS 0
+static constexpr bool DEBUG_FOCUS = false;
 
 // Log debug messages about the app switch latency optimization.
 #define DEBUG_APP_SWITCH 0
@@ -50,6 +50,7 @@
 #include <errno.h>
 #include <inttypes.h>
 #include <limits.h>
+#include <statslog.h>
 #include <stddef.h>
 #include <time.h>
 #include <unistd.h>
@@ -313,9 +314,9 @@ void InputDispatcher::dispatchOnceInnerLocked(nsecs_t* nextWakeupTime) {
 
     // If dispatching is frozen, do not process timeouts or try to deliver any new events.
     if (mDispatchFrozen) {
-#if DEBUG_FOCUS
-        ALOGD("Dispatch frozen.  Waiting some more.");
-#endif
+        if (DEBUG_FOCUS) {
+            ALOGD("Dispatch frozen.  Waiting some more.");
+        }
         return;
     }
 
@@ -1041,11 +1042,11 @@ void InputDispatcher::dispatchEventLocked(nsecs_t currentTime, EventEntry* event
         if (connection != nullptr) {
             prepareDispatchCycleLocked(currentTime, connection, eventEntry, &inputTarget);
         } else {
-#if DEBUG_FOCUS
-            ALOGD("Dropping event delivery to target with channel '%s' because it "
-                  "is no longer registered with the input dispatcher.",
-                  inputTarget.inputChannel->getName().c_str());
-#endif
+            if (DEBUG_FOCUS) {
+                ALOGD("Dropping event delivery to target with channel '%s' because it "
+                      "is no longer registered with the input dispatcher.",
+                      inputTarget.inputChannel->getName().c_str());
+            }
         }
     }
 }
@@ -1056,9 +1057,9 @@ int32_t InputDispatcher::handleTargetsNotReadyLocked(
         const sp<InputWindowHandle>& windowHandle, nsecs_t* nextWakeupTime, const char* reason) {
     if (applicationHandle == nullptr && windowHandle == nullptr) {
         if (mInputTargetWaitCause != INPUT_TARGET_WAIT_CAUSE_SYSTEM_NOT_READY) {
-#if DEBUG_FOCUS
-            ALOGD("Waiting for system to become ready for input.  Reason: %s", reason);
-#endif
+            if (DEBUG_FOCUS) {
+                ALOGD("Waiting for system to become ready for input.  Reason: %s", reason);
+            }
             mInputTargetWaitCause = INPUT_TARGET_WAIT_CAUSE_SYSTEM_NOT_READY;
             mInputTargetWaitStartTime = currentTime;
             mInputTargetWaitTimeoutTime = LONG_LONG_MAX;
@@ -1067,10 +1068,10 @@ int32_t InputDispatcher::handleTargetsNotReadyLocked(
         }
     } else {
         if (mInputTargetWaitCause != INPUT_TARGET_WAIT_CAUSE_APPLICATION_NOT_READY) {
-#if DEBUG_FOCUS
-            ALOGD("Waiting for application to become ready for input: %s.  Reason: %s",
-                  getApplicationWindowLabel(applicationHandle, windowHandle).c_str(), reason);
-#endif
+            if (DEBUG_FOCUS) {
+                ALOGD("Waiting for application to become ready for input: %s.  Reason: %s",
+                      getApplicationWindowLabel(applicationHandle, windowHandle).c_str(), reason);
+            }
             nsecs_t timeout;
             if (windowHandle != nullptr) {
                 timeout = windowHandle->getDispatchingTimeout(DEFAULT_INPUT_DISPATCHING_TIMEOUT);
@@ -1159,9 +1160,9 @@ nsecs_t InputDispatcher::getTimeSpentWaitingForApplicationLocked(nsecs_t current
 }
 
 void InputDispatcher::resetANRTimeoutsLocked() {
-#if DEBUG_FOCUS
-    ALOGD("Resetting ANR timeouts.");
-#endif
+    if (DEBUG_FOCUS) {
+        ALOGD("Resetting ANR timeouts.");
+    }
 
     // Reset input target wait timeout.
     mInputTargetWaitCause = INPUT_TARGET_WAIT_CAUSE_NONE;
@@ -1253,11 +1254,11 @@ Failed:
 Unresponsive:
     nsecs_t timeSpentWaitingForApplication = getTimeSpentWaitingForApplicationLocked(currentTime);
     updateDispatchStatistics(currentTime, entry, injectionResult, timeSpentWaitingForApplication);
-#if DEBUG_FOCUS
-    ALOGD("findFocusedWindow finished: injectionResult=%d, "
-          "timeSpentWaitingForApplication=%0.1fms",
-          injectionResult, timeSpentWaitingForApplication / 1000000.0);
-#endif
+    if (DEBUG_FOCUS) {
+        ALOGD("findFocusedWindow finished: injectionResult=%d, "
+              "timeSpentWaitingForApplication=%0.1fms",
+              injectionResult, timeSpentWaitingForApplication / 1000000.0);
+    }
     return injectionResult;
 }
 
@@ -1308,11 +1309,11 @@ int32_t InputDispatcher::findTouchedWindowTargetsLocked(nsecs_t currentTime,
     if (newGesture) {
         bool down = maskedAction == AMOTION_EVENT_ACTION_DOWN;
         if (switchedDevice && mTempTouchState.down && !down && !isHoverAction) {
-#if DEBUG_FOCUS
-            ALOGD("Dropping event because a pointer for a different device is already down "
-                  "in display %" PRId32,
-                  displayId);
-#endif
+            if (DEBUG_FOCUS) {
+                ALOGD("Dropping event because a pointer for a different device is already down "
+                      "in display %" PRId32,
+                      displayId);
+            }
             // TODO: test multiple simultaneous input streams.
             injectionResult = INPUT_EVENT_INJECTION_FAILED;
             switchedDevice = false;
@@ -1326,11 +1327,11 @@ int32_t InputDispatcher::findTouchedWindowTargetsLocked(nsecs_t currentTime,
         mTempTouchState.displayId = displayId;
         isSplit = false;
     } else if (switchedDevice && maskedAction == AMOTION_EVENT_ACTION_MOVE) {
-#if DEBUG_FOCUS
-        ALOGI("Dropping move event because a pointer for a different device is already active "
-              "in display %" PRId32,
-              displayId);
-#endif
+        if (DEBUG_FOCUS) {
+            ALOGI("Dropping move event because a pointer for a different device is already active "
+                  "in display %" PRId32,
+                  displayId);
+        }
         // TODO: test multiple simultaneous input streams.
         injectionResult = INPUT_EVENT_INJECTION_PERMISSION_DENIED;
         switchedDevice = false;
@@ -1420,11 +1421,11 @@ int32_t InputDispatcher::findTouchedWindowTargetsLocked(nsecs_t currentTime,
 
         // If the pointer is not currently down, then ignore the event.
         if (!mTempTouchState.down) {
-#if DEBUG_FOCUS
-            ALOGD("Dropping event because the pointer is not down or we previously "
-                  "dropped the pointer down event in display %" PRId32,
-                  displayId);
-#endif
+            if (DEBUG_FOCUS) {
+                ALOGD("Dropping event because the pointer is not down or we previously "
+                      "dropped the pointer down event in display %" PRId32,
+                      displayId);
+            }
             injectionResult = INPUT_EVENT_INJECTION_FAILED;
             goto Failed;
         }
@@ -1441,11 +1442,11 @@ int32_t InputDispatcher::findTouchedWindowTargetsLocked(nsecs_t currentTime,
                     findTouchedWindowAtLocked(displayId, x, y);
             if (oldTouchedWindowHandle != newTouchedWindowHandle &&
                 oldTouchedWindowHandle != nullptr && newTouchedWindowHandle != nullptr) {
-#if DEBUG_FOCUS
-                ALOGD("Touch is slipping out of window %s into window %s in display %" PRId32,
-                      oldTouchedWindowHandle->getName().c_str(),
-                      newTouchedWindowHandle->getName().c_str(), displayId);
-#endif
+                if (DEBUG_FOCUS) {
+                    ALOGD("Touch is slipping out of window %s into window %s in display %" PRId32,
+                          oldTouchedWindowHandle->getName().c_str(),
+                          newTouchedWindowHandle->getName().c_str(), displayId);
+                }
                 // Make a slippery exit from the old window.
                 mTempTouchState.addOrUpdateWindow(oldTouchedWindowHandle,
                                                   InputTarget::FLAG_DISPATCH_AS_SLIPPERY_EXIT,
@@ -1514,11 +1515,11 @@ int32_t InputDispatcher::findTouchedWindowTargetsLocked(nsecs_t currentTime,
         }
         bool hasGestureMonitor = !mTempTouchState.gestureMonitors.empty();
         if (!haveForegroundWindow && !hasGestureMonitor) {
-#if DEBUG_FOCUS
-            ALOGD("Dropping event because there is no touched foreground window in display %" PRId32
-                  " or gesture monitor to receive it.",
-                  displayId);
-#endif
+            if (DEBUG_FOCUS) {
+                ALOGD("Dropping event because there is no touched foreground window in display "
+                      "%" PRId32 " or gesture monitor to receive it.",
+                      displayId);
+            }
             injectionResult = INPUT_EVENT_INJECTION_FAILED;
             goto Failed;
         }
@@ -1622,18 +1623,19 @@ Failed:
     if (injectionPermission == INJECTION_PERMISSION_GRANTED) {
         if (!wrongDevice) {
             if (switchedDevice) {
-#if DEBUG_FOCUS
-                ALOGD("Conflicting pointer actions: Switched to a different device.");
-#endif
+                if (DEBUG_FOCUS) {
+                    ALOGD("Conflicting pointer actions: Switched to a different device.");
+                }
                 *outConflictingPointerActions = true;
             }
 
             if (isHoverAction) {
                 // Started hovering, therefore no longer down.
                 if (oldState && oldState->down) {
-#if DEBUG_FOCUS
-                    ALOGD("Conflicting pointer actions: Hover received while pointer was down.");
-#endif
+                    if (DEBUG_FOCUS) {
+                        ALOGD("Conflicting pointer actions: Hover received while pointer was "
+                              "down.");
+                    }
                     *outConflictingPointerActions = true;
                 }
                 mTempTouchState.reset();
@@ -1650,9 +1652,9 @@ Failed:
             } else if (maskedAction == AMOTION_EVENT_ACTION_DOWN) {
                 // First pointer went down.
                 if (oldState && oldState->down) {
-#if DEBUG_FOCUS
-                    ALOGD("Conflicting pointer actions: Down received while already down.");
-#endif
+                    if (DEBUG_FOCUS) {
+                        ALOGD("Conflicting pointer actions: Down received while already down.");
+                    }
                     *outConflictingPointerActions = true;
                 }
             } else if (maskedAction == AMOTION_EVENT_ACTION_POINTER_UP) {
@@ -1693,9 +1695,9 @@ Failed:
             mLastHoverWindowHandle = newHoverWindowHandle;
         }
     } else {
-#if DEBUG_FOCUS
-        ALOGD("Not updating touch focus because injection was denied.");
-#endif
+        if (DEBUG_FOCUS) {
+            ALOGD("Not updating touch focus because injection was denied.");
+        }
     }
 
 Unresponsive:
@@ -1704,11 +1706,11 @@ Unresponsive:
 
     nsecs_t timeSpentWaitingForApplication = getTimeSpentWaitingForApplicationLocked(currentTime);
     updateDispatchStatistics(currentTime, entry, injectionResult, timeSpentWaitingForApplication);
-#if DEBUG_FOCUS
-    ALOGD("findTouchedWindow finished: injectionResult=%d, injectionPermission=%d, "
-          "timeSpentWaitingForApplication=%0.1fms",
-          injectionResult, injectionPermission, timeSpentWaitingForApplication / 1000000.0);
-#endif
+    if (DEBUG_FOCUS) {
+        ALOGD("findTouchedWindow finished: injectionResult=%d, injectionPermission=%d, "
+              "timeSpentWaitingForApplication=%0.1fms",
+              injectionResult, injectionPermission, timeSpentWaitingForApplication / 1000000.0);
+    }
     return injectionResult;
 }
 
@@ -2007,10 +2009,11 @@ void InputDispatcher::prepareDispatchCycleLocked(nsecs_t currentTime,
             if (!splitMotionEntry) {
                 return; // split event was dropped
             }
-#if DEBUG_FOCUS
-            ALOGD("channel '%s' ~ Split motion event.", connection->getInputChannelName().c_str());
-            logOutboundMotionDetails("  ", splitMotionEntry);
-#endif
+            if (DEBUG_FOCUS) {
+                ALOGD("channel '%s' ~ Split motion event.",
+                      connection->getInputChannelName().c_str());
+                logOutboundMotionDetails("  ", splitMotionEntry);
+            }
             enqueueDispatchEntriesLocked(currentTime, connection, splitMotionEntry, inputTarget);
             splitMotionEntry->release();
             return;
@@ -2274,6 +2277,7 @@ void InputDispatcher::startDispatchCycleLocked(nsecs_t currentTime,
                                                      motionEntry->downTime, motionEntry->eventTime,
                                                      motionEntry->pointerCount,
                                                      motionEntry->pointerProperties, usingCoords);
+                reportTouchEventForStatistics(*motionEntry);
                 break;
             }
 
@@ -2768,7 +2772,7 @@ void InputDispatcher::notifyMotion(const NotifyMotionArgs* args) {
           "yCursorPosition=%f, downTime=%" PRId64,
           args->eventTime, args->deviceId, args->source, args->displayId, args->policyFlags,
           args->action, args->actionButton, args->flags, args->metaState, args->buttonState,
-          args->edgeFlags, args->xPrecision, args->yPrecision, arg->xCursorPosition,
+          args->edgeFlags, args->xPrecision, args->yPrecision, args->xCursorPosition,
           args->yCursorPosition, args->downTime);
     for (uint32_t i = 0; i < args->pointerCount; i++) {
         ALOGD("  Pointer %d: id=%d, toolType=%d, "
@@ -3252,9 +3256,13 @@ void InputDispatcher::updateWindowHandlesForDisplayLocked(
 void InputDispatcher::setInputWindows(const std::vector<sp<InputWindowHandle>>& inputWindowHandles,
                                       int32_t displayId,
                                       const sp<ISetInputWindowsListener>& setInputWindowsListener) {
-#if DEBUG_FOCUS
-    ALOGD("setInputWindows displayId=%" PRId32, displayId);
-#endif
+    if (DEBUG_FOCUS) {
+        std::string windowList;
+        for (const sp<InputWindowHandle>& iwh : inputWindowHandles) {
+            windowList += iwh->getName() + " ";
+        }
+        ALOGD("setInputWindows displayId=%" PRId32 " %s", displayId, windowList.c_str());
+    }
     { // acquire lock
         std::scoped_lock _l(mLock);
 
@@ -3286,10 +3294,10 @@ void InputDispatcher::setInputWindows(const std::vector<sp<InputWindowHandle>>& 
 
         if (oldFocusedWindowHandle != newFocusedWindowHandle) {
             if (oldFocusedWindowHandle != nullptr) {
-#if DEBUG_FOCUS
-                ALOGD("Focus left window: %s in display %" PRId32,
-                      oldFocusedWindowHandle->getName().c_str(), displayId);
-#endif
+                if (DEBUG_FOCUS) {
+                    ALOGD("Focus left window: %s in display %" PRId32,
+                          oldFocusedWindowHandle->getName().c_str(), displayId);
+                }
                 sp<InputChannel> focusedInputChannel =
                         getInputChannelLocked(oldFocusedWindowHandle->getToken());
                 if (focusedInputChannel != nullptr) {
@@ -3300,10 +3308,10 @@ void InputDispatcher::setInputWindows(const std::vector<sp<InputWindowHandle>>& 
                 mFocusedWindowHandlesByDisplay.erase(displayId);
             }
             if (newFocusedWindowHandle != nullptr) {
-#if DEBUG_FOCUS
-                ALOGD("Focus entered window: %s in display %" PRId32,
-                      newFocusedWindowHandle->getName().c_str(), displayId);
-#endif
+                if (DEBUG_FOCUS) {
+                    ALOGD("Focus entered window: %s in display %" PRId32,
+                          newFocusedWindowHandle->getName().c_str(), displayId);
+                }
                 mFocusedWindowHandlesByDisplay[displayId] = newFocusedWindowHandle;
             }
 
@@ -3318,10 +3326,10 @@ void InputDispatcher::setInputWindows(const std::vector<sp<InputWindowHandle>>& 
             for (size_t i = 0; i < state.windows.size();) {
                 TouchedWindow& touchedWindow = state.windows[i];
                 if (!hasWindowHandleLocked(touchedWindow.windowHandle)) {
-#if DEBUG_FOCUS
-                    ALOGD("Touched window was removed: %s in display %" PRId32,
-                          touchedWindow.windowHandle->getName().c_str(), displayId);
-#endif
+                    if (DEBUG_FOCUS) {
+                        ALOGD("Touched window was removed: %s in display %" PRId32,
+                              touchedWindow.windowHandle->getName().c_str(), displayId);
+                    }
                     sp<InputChannel> touchedInputChannel =
                             getInputChannelLocked(touchedWindow.windowHandle->getToken());
                     if (touchedInputChannel != nullptr) {
@@ -3343,9 +3351,9 @@ void InputDispatcher::setInputWindows(const std::vector<sp<InputWindowHandle>>& 
         // which might not happen until the next GC.
         for (const sp<InputWindowHandle>& oldWindowHandle : oldWindowHandles) {
             if (!hasWindowHandleLocked(oldWindowHandle)) {
-#if DEBUG_FOCUS
-                ALOGD("Window went away: %s", oldWindowHandle->getName().c_str());
-#endif
+                if (DEBUG_FOCUS) {
+                    ALOGD("Window went away: %s", oldWindowHandle->getName().c_str());
+                }
                 oldWindowHandle->releaseChannel();
             }
         }
@@ -3361,9 +3369,10 @@ void InputDispatcher::setInputWindows(const std::vector<sp<InputWindowHandle>>& 
 
 void InputDispatcher::setFocusedApplication(
         int32_t displayId, const sp<InputApplicationHandle>& inputApplicationHandle) {
-#if DEBUG_FOCUS
-    ALOGD("setFocusedApplication displayId=%" PRId32, displayId);
-#endif
+    if (DEBUG_FOCUS) {
+        ALOGD("setFocusedApplication displayId=%" PRId32 " %s", displayId,
+              inputApplicationHandle ? inputApplicationHandle->getName().c_str() : "<nullptr>");
+    }
     { // acquire lock
         std::scoped_lock _l(mLock);
 
@@ -3381,10 +3390,6 @@ void InputDispatcher::setFocusedApplication(
             oldFocusedApplicationHandle.clear();
             mFocusedApplicationHandlesByDisplay.erase(displayId);
         }
-
-#if DEBUG_FOCUS
-        // logDispatchStateLocked();
-#endif
     } // release lock
 
     // Wake up poll loop since it may need to make new input dispatching choices.
@@ -3401,9 +3406,9 @@ void InputDispatcher::setFocusedApplication(
  * display. The display-specified events won't be affected.
  */
 void InputDispatcher::setFocusedDisplay(int32_t displayId) {
-#if DEBUG_FOCUS
-    ALOGD("setFocusedDisplay displayId=%" PRId32, displayId);
-#endif
+    if (DEBUG_FOCUS) {
+        ALOGD("setFocusedDisplay displayId=%" PRId32, displayId);
+    }
     { // acquire lock
         std::scoped_lock _l(mLock);
 
@@ -3442,9 +3447,9 @@ void InputDispatcher::setFocusedDisplay(int32_t displayId) {
             }
         }
 
-#if DEBUG_FOCUS
-        logDispatchStateLocked();
-#endif
+        if (DEBUG_FOCUS) {
+            logDispatchStateLocked();
+        }
     } // release lock
 
     // Wake up poll loop since it may need to make new input dispatching choices.
@@ -3452,9 +3457,9 @@ void InputDispatcher::setFocusedDisplay(int32_t displayId) {
 }
 
 void InputDispatcher::setInputDispatchMode(bool enabled, bool frozen) {
-#if DEBUG_FOCUS
-    ALOGD("setInputDispatchMode: enabled=%d, frozen=%d", enabled, frozen);
-#endif
+    if (DEBUG_FOCUS) {
+        ALOGD("setInputDispatchMode: enabled=%d, frozen=%d", enabled, frozen);
+    }
 
     bool changed;
     { // acquire lock
@@ -3476,9 +3481,9 @@ void InputDispatcher::setInputDispatchMode(bool enabled, bool frozen) {
             changed = false;
         }
 
-#if DEBUG_FOCUS
-        logDispatchStateLocked();
-#endif
+        if (DEBUG_FOCUS) {
+            logDispatchStateLocked();
+        }
     } // release lock
 
     if (changed) {
@@ -3488,9 +3493,9 @@ void InputDispatcher::setInputDispatchMode(bool enabled, bool frozen) {
 }
 
 void InputDispatcher::setInputFilterEnabled(bool enabled) {
-#if DEBUG_FOCUS
-    ALOGD("setInputFilterEnabled: enabled=%d", enabled);
-#endif
+    if (DEBUG_FOCUS) {
+        ALOGD("setInputFilterEnabled: enabled=%d", enabled);
+    }
 
     { // acquire lock
         std::scoped_lock _l(mLock);
@@ -3509,9 +3514,9 @@ void InputDispatcher::setInputFilterEnabled(bool enabled) {
 
 bool InputDispatcher::transferTouchFocus(const sp<IBinder>& fromToken, const sp<IBinder>& toToken) {
     if (fromToken == toToken) {
-#if DEBUG_FOCUS
-        ALOGD("Trivial transfer to same window.");
-#endif
+        if (DEBUG_FOCUS) {
+            ALOGD("Trivial transfer to same window.");
+        }
         return true;
     }
 
@@ -3524,14 +3529,14 @@ bool InputDispatcher::transferTouchFocus(const sp<IBinder>& fromToken, const sp<
             ALOGW("Cannot transfer focus because from or to window not found.");
             return false;
         }
-#if DEBUG_FOCUS
-        ALOGD("transferTouchFocus: fromWindowHandle=%s, toWindowHandle=%s",
-              fromWindowHandle->getName().c_str(), toWindowHandle->getName().c_str());
-#endif
+        if (DEBUG_FOCUS) {
+            ALOGD("transferTouchFocus: fromWindowHandle=%s, toWindowHandle=%s",
+                  fromWindowHandle->getName().c_str(), toWindowHandle->getName().c_str());
+        }
         if (fromWindowHandle->getInfo()->displayId != toWindowHandle->getInfo()->displayId) {
-#if DEBUG_FOCUS
-            ALOGD("Cannot transfer focus because windows are on different displays.");
-#endif
+            if (DEBUG_FOCUS) {
+                ALOGD("Cannot transfer focus because windows are on different displays.");
+            }
             return false;
         }
 
@@ -3559,9 +3564,9 @@ bool InputDispatcher::transferTouchFocus(const sp<IBinder>& fromToken, const sp<
     Found:
 
         if (!found) {
-#if DEBUG_FOCUS
-            ALOGD("Focus transfer failed because from window did not have focus.");
-#endif
+            if (DEBUG_FOCUS) {
+                ALOGD("Focus transfer failed because from window did not have focus.");
+            }
             return false;
         }
 
@@ -3577,9 +3582,9 @@ bool InputDispatcher::transferTouchFocus(const sp<IBinder>& fromToken, const sp<
             synthesizeCancelationEventsForConnectionLocked(fromConnection, options);
         }
 
-#if DEBUG_FOCUS
-        logDispatchStateLocked();
-#endif
+        if (DEBUG_FOCUS) {
+            logDispatchStateLocked();
+        }
     } // release lock
 
     // Wake up poll loop since it may need to make new input dispatching choices.
@@ -3588,9 +3593,9 @@ bool InputDispatcher::transferTouchFocus(const sp<IBinder>& fromToken, const sp<
 }
 
 void InputDispatcher::resetAndDropEverythingLocked(const char* reason) {
-#if DEBUG_FOCUS
-    ALOGD("Resetting and dropping all events (%s).", reason);
-#endif
+    if (DEBUG_FOCUS) {
+        ALOGD("Resetting and dropping all events (%s).", reason);
+    }
 
     CancelationOptions options(CancelationOptions::CANCEL_ALL_EVENTS, reason);
     synthesizeCancelationEventsForAllConnectionsLocked(options);
@@ -3860,11 +3865,9 @@ void InputDispatcher::dumpMonitors(std::string& dump, const std::vector<Monitor>
     }
 }
 
-status_t InputDispatcher::registerInputChannel(const sp<InputChannel>& inputChannel,
-                                               int32_t displayId) {
+status_t InputDispatcher::registerInputChannel(const sp<InputChannel>& inputChannel) {
 #if DEBUG_REGISTRATION
-    ALOGD("channel '%s' ~ registerInputChannel - displayId=%" PRId32,
-          inputChannel->getName().c_str(), displayId);
+    ALOGD("channel '%s' ~ registerInputChannel", inputChannel->getName().c_str());
 #endif
 
     { // acquire lock
@@ -4476,6 +4479,34 @@ void InputDispatcher::updateDispatchStatistics(nsecs_t currentTime, const EventE
                                                int32_t injectionResult,
                                                nsecs_t timeSpentWaitingForApplication) {
     // TODO Write some statistics about how long we spend waiting.
+}
+
+/**
+ * Report the touch event latency to the statsd server.
+ * Input events are reported for statistics if:
+ * - This is a touchscreen event
+ * - InputFilter is not enabled
+ * - Event is not injected or synthesized
+ *
+ * Statistics should be reported before calling addValue, to prevent a fresh new sample
+ * from getting aggregated with the "old" data.
+ */
+void InputDispatcher::reportTouchEventForStatistics(const MotionEntry& motionEntry)
+        REQUIRES(mLock) {
+    const bool reportForStatistics = (motionEntry.source == AINPUT_SOURCE_TOUCHSCREEN) &&
+            !(motionEntry.isSynthesized()) && !mInputFilterEnabled;
+    if (!reportForStatistics) {
+        return;
+    }
+
+    if (mTouchStatistics.shouldReport()) {
+        android::util::stats_write(android::util::TOUCH_EVENT_REPORTED, mTouchStatistics.getMin(),
+                                   mTouchStatistics.getMax(), mTouchStatistics.getMean(),
+                                   mTouchStatistics.getStDev(), mTouchStatistics.getCount());
+        mTouchStatistics.reset();
+    }
+    const float latencyMicros = nanoseconds_to_microseconds(now() - motionEntry.eventTime);
+    mTouchStatistics.addValue(latencyMicros);
 }
 
 void InputDispatcher::traceInboundQueueLengthLocked() {
