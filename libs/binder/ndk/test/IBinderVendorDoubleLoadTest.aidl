@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018 The Android Open Source Project
+ * Copyright (C) 2019 The Android Open Source Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,14 +14,6 @@
  * limitations under the License.
  */
 
-#include "mock/gui/MockGraphicBufferConsumer.h"
-
-namespace android {
-namespace mock {
-
-// Explicit default instantiation is recommended.
-GraphicBufferConsumer::GraphicBufferConsumer() = default;
-GraphicBufferConsumer::~GraphicBufferConsumer() = default;
-
-} // namespace mock
-} // namespace android
+interface IBinderVendorDoubleLoadTest {
+    @utf8InCpp String RepeatString(@utf8InCpp String toRepeat);
+}

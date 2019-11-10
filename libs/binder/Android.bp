@@ -51,7 +51,7 @@ libbinder_device_interface_sources = [
     "IpPrefix.cpp",
 ]
 
-cc_library_shared {
+cc_library {
     name: "libbinder",
 
     // for vndbinder
@@ -71,7 +71,12 @@ cc_library_shared {
     // libbinder does not offer a stable wire protocol.
     // if a second copy of it is installed, then it may break after security
     // or dessert updates. Instead, apex users should use libbinder_ndk.
-    no_apex: true,
+    apex_available: [
+        "//apex_available:platform",
+        // TODO(b/139016109) remove these three
+        "com.android.media.swcodec",
+        "test_com.android.media.swcodec",
+    ],
 
     srcs: [
         "Binder.cpp",
@@ -101,6 +106,11 @@ cc_library_shared {
     target: {
         android: {
             srcs: libbinder_device_interface_sources,
+
+            // NOT static to keep the wire protocol unfrozen
+            static: {
+                enabled: false,
+            },
         },
         vendor: {
             exclude_srcs: libbinder_device_interface_sources,
@@ -153,4 +163,17 @@ filegroup {
         "aidl/android/os/IServiceManager.aidl",
     ],
     path: "aidl",
+}
+
+aidl_interface {
+    name: "libbinder_aidl_test_stub",
+    local_include_dir: "aidl",
+    srcs: [":libbinder_aidl"],
+    visibility: [":__subpackages__"],
+    vendor_available: true,
+    backend: {
+        java: {
+            enabled: false,
+        },
+    },
 }

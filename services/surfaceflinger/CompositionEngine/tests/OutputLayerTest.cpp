@@ -15,6 +15,7 @@
  */
 
 #include <compositionengine/impl/OutputLayer.h>
+#include <compositionengine/impl/OutputLayerCompositionState.h>
 #include <compositionengine/mock/CompositionEngine.h>
 #include <compositionengine/mock/DisplayColorProfile.h>
 #include <compositionengine/mock/Layer.h>
@@ -55,6 +56,29 @@ MATCHER_P(ColorEq, expected, "") {
 }
 
 struct OutputLayerTest : public testing::Test {
+    struct OutputLayer final : public impl::OutputLayer {
+        OutputLayer(const compositionengine::Output& output,
+                    std::shared_ptr<compositionengine::Layer> layer,
+                    sp<compositionengine::LayerFE> layerFE)
+              : mOutput(output), mLayer(layer), mLayerFE(layerFE) {}
+        ~OutputLayer() override = default;
+
+        // compositionengine::OutputLayer overrides
+        const compositionengine::Output& getOutput() const override { return mOutput; }
+        compositionengine::Layer& getLayer() const override { return *mLayer; }
+        compositionengine::LayerFE& getLayerFE() const override { return *mLayerFE; }
+        const impl::OutputLayerCompositionState& getState() const override { return mState; }
+        impl::OutputLayerCompositionState& editState() override { return mState; }
+
+        // compositionengine::impl::OutputLayer overrides
+        void dumpState(std::string& out) const override { mState.dump(out); }
+
+        const compositionengine::Output& mOutput;
+        std::shared_ptr<compositionengine::Layer> mLayer;
+        sp<compositionengine::LayerFE> mLayerFE;
+        impl::OutputLayerCompositionState mState;
+    };
+
     OutputLayerTest() {
         EXPECT_CALL(*mLayerFE, getDebugName()).WillRepeatedly(Return("Test LayerFE"));
         EXPECT_CALL(mOutput, getName()).WillRepeatedly(ReturnRef(kOutputName));
@@ -68,7 +92,7 @@ struct OutputLayerTest : public testing::Test {
             new StrictMock<compositionengine::mock::Layer>()};
     sp<compositionengine::mock::LayerFE> mLayerFE{
             new StrictMock<compositionengine::mock::LayerFE>()};
-    impl::OutputLayer mOutputLayer{mOutput, mLayer, mLayerFE};
+    OutputLayer mOutputLayer{mOutput, mLayer, mLayerFE};
 
     LayerFECompositionState mLayerFEState;
     impl::OutputCompositionState mOutputState;
@@ -413,11 +437,26 @@ struct OutputLayerPartialMockForUpdateCompositionState : public impl::OutputLaye
     OutputLayerPartialMockForUpdateCompositionState(const compositionengine::Output& output,
                                                     std::shared_ptr<compositionengine::Layer> layer,
                                                     sp<compositionengine::LayerFE> layerFE)
-          : impl::OutputLayer(output, layer, layerFE) {}
+          : mOutput(output), mLayer(layer), mLayerFE(layerFE) {}
     // Mock everything called by updateCompositionState to simplify testing it.
     MOCK_CONST_METHOD0(calculateOutputSourceCrop, FloatRect());
     MOCK_CONST_METHOD0(calculateOutputDisplayFrame, Rect());
     MOCK_CONST_METHOD0(calculateOutputRelativeBufferTransform, uint32_t());
+
+    // compositionengine::OutputLayer overrides
+    const compositionengine::Output& getOutput() const override { return mOutput; }
+    compositionengine::Layer& getLayer() const override { return *mLayer; }
+    compositionengine::LayerFE& getLayerFE() const override { return *mLayerFE; }
+    const impl::OutputLayerCompositionState& getState() const override { return mState; }
+    impl::OutputLayerCompositionState& editState() override { return mState; }
+
+    // These need implementations though are not expected to be called.
+    MOCK_CONST_METHOD1(dumpState, void(std::string&));
+
+    const compositionengine::Output& mOutput;
+    std::shared_ptr<compositionengine::Layer> mLayer;
+    sp<compositionengine::LayerFE> mLayerFE;
+    impl::OutputLayerCompositionState mState;
 };
 
 struct OutputLayerUpdateCompositionStateTest : public OutputLayerTest {
@@ -458,10 +497,11 @@ public:
 TEST_F(OutputLayerUpdateCompositionStateTest, setsStateNormally) {
     mLayerFEState.isSecure = true;
     mOutputState.isSecure = true;
+    mOutputLayer.editState().forceClientComposition = true;
 
     setupGeometryChildCallValues();
 
-    mOutputLayer.updateCompositionState(true);
+    mOutputLayer.updateCompositionState(true, false);
 
     validateComputedGeometryState();
 
@@ -475,7 +515,7 @@ TEST_F(OutputLayerUpdateCompositionStateTest,
 
     setupGeometryChildCallValues();
 
-    mOutputLayer.updateCompositionState(true);
+    mOutputLayer.updateCompositionState(true, false);
 
     validateComputedGeometryState();
 
@@ -491,7 +531,7 @@ TEST_F(OutputLayerUpdateCompositionStateTest,
 
     setupGeometryChildCallValues();
 
-    mOutputLayer.updateCompositionState(true);
+    mOutputLayer.updateCompositionState(true, false);
 
     validateComputedGeometryState();
 
@@ -506,7 +546,7 @@ TEST_F(OutputLayerUpdateCompositionStateTest, setsOutputLayerColorspaceCorrectly
     // should use the layers requested colorspace.
     mLayerFEState.isColorspaceAgnostic = false;
 
-    mOutputLayer.updateCompositionState(false);
+    mOutputLayer.updateCompositionState(false, false);
 
     EXPECT_EQ(ui::Dataspace::DISPLAY_P3, mOutputLayer.getState().dataspace);
 
@@ -514,30 +554,60 @@ TEST_F(OutputLayerUpdateCompositionStateTest, setsOutputLayerColorspaceCorrectly
     // should use the colorspace chosen for the whole output.
     mLayerFEState.isColorspaceAgnostic = true;
 
-    mOutputLayer.updateCompositionState(false);
+    mOutputLayer.updateCompositionState(false, false);
 
     EXPECT_EQ(ui::Dataspace::V0_SCRGB, mOutputLayer.getState().dataspace);
 }
 
 TEST_F(OutputLayerUpdateCompositionStateTest, doesNotRecomputeGeometryIfNotRequested) {
-    mOutputLayer.updateCompositionState(false);
+    mOutputLayer.editState().forceClientComposition = false;
+
+    mOutputLayer.updateCompositionState(false, false);
 
     EXPECT_EQ(false, mOutputLayer.getState().forceClientComposition);
 }
 
+TEST_F(OutputLayerUpdateCompositionStateTest,
+       doesNotClearForceClientCompositionIfNotDoingGeometry) {
+    mOutputLayer.editState().forceClientComposition = true;
+
+    mOutputLayer.updateCompositionState(false, false);
+
+    EXPECT_EQ(true, mOutputLayer.getState().forceClientComposition);
+}
+
 TEST_F(OutputLayerUpdateCompositionStateTest, clientCompositionForcedFromFrontEndFlagAtAnyTime) {
     mLayerFEState.forceClientComposition = true;
+    mOutputLayer.editState().forceClientComposition = false;
 
-    mOutputLayer.updateCompositionState(false);
+    mOutputLayer.updateCompositionState(false, false);
 
     EXPECT_EQ(true, mOutputLayer.getState().forceClientComposition);
 }
 
 TEST_F(OutputLayerUpdateCompositionStateTest,
        clientCompositionForcedFromUnsupportedDataspaceAtAnyTime) {
+    mOutputLayer.editState().forceClientComposition = false;
     EXPECT_CALL(mDisplayColorProfile, isDataspaceSupported(_)).WillRepeatedly(Return(false));
 
-    mOutputLayer.updateCompositionState(false);
+    mOutputLayer.updateCompositionState(false, false);
+
+    EXPECT_EQ(true, mOutputLayer.getState().forceClientComposition);
+}
+
+TEST_F(OutputLayerUpdateCompositionStateTest, clientCompositionForcedFromArgumentFlag) {
+    mLayerFEState.forceClientComposition = false;
+    mOutputLayer.editState().forceClientComposition = false;
+
+    mOutputLayer.updateCompositionState(false, true);
+
+    EXPECT_EQ(true, mOutputLayer.getState().forceClientComposition);
+
+    mOutputLayer.editState().forceClientComposition = false;
+
+    setupGeometryChildCallValues();
+
+    mOutputLayer.updateCompositionState(true, true);
 
     EXPECT_EQ(true, mOutputLayer.getState().forceClientComposition);
 }

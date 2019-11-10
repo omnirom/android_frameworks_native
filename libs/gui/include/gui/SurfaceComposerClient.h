@@ -58,12 +58,16 @@ class Region;
 
 struct SurfaceControlStats {
     SurfaceControlStats(const sp<SurfaceControl>& sc, nsecs_t time,
-                        const sp<Fence>& prevReleaseFence)
-          : surfaceControl(sc), acquireTime(time), previousReleaseFence(prevReleaseFence) {}
+                        const sp<Fence>& prevReleaseFence, uint32_t hint)
+          : surfaceControl(sc),
+            acquireTime(time),
+            previousReleaseFence(prevReleaseFence),
+            transformHint(hint) {}
 
     sp<SurfaceControl> surfaceControl;
     nsecs_t acquireTime = -1;
     sp<Fence> previousReleaseFence;
+    uint32_t transformHint = 0;
 };
 
 using TransactionCompletedCallbackTakesContext =
@@ -244,6 +248,17 @@ public:
                                                Surface* parent = nullptr, // parent
                                                LayerMetadata metadata = LayerMetadata() // metadata
     );
+
+    // Creates a mirrored hierarchy for the mirrorFromSurface. This returns a SurfaceControl
+    // which is a parent of the root of the mirrored hierarchy.
+    //
+    //  Real Hierarchy    Mirror
+    //                      SC (value that's returned)
+    //                      |
+    //      A               A'
+    //      |               |
+    //      B               B'
+    sp<SurfaceControl> mirrorSurface(SurfaceControl* mirrorFromSurface);
 
     //! Create a virtual display
     static sp<IBinder> createDisplay(const String8& displayName, bool secure);

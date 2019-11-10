@@ -62,7 +62,7 @@ std::vector<OccupancyTracker::Segment> BufferQueueLayer::getOccupancyHistory(boo
     std::vector<OccupancyTracker::Segment> history;
     status_t result = mConsumer->getOccupancyHistory(forceFlush, &history);
     if (result != NO_ERROR) {
-        ALOGW("[%s] Failed to obtain occupancy history (%d)", mName.string(), result);
+        ALOGW("[%s] Failed to obtain occupancy history (%d)", getDebugName(), result);
         return {};
     }
     return history;
@@ -110,7 +110,7 @@ bool BufferQueueLayer::shouldPresentNow(nsecs_t expectedPresentTime) const {
     ALOGW_IF(!isPlausible,
              "[%s] Timestamp %" PRId64 " seems implausible "
              "relative to expectedPresent %" PRId64,
-             mName.string(), addedTime, expectedPresentTime);
+             getDebugName(), addedTime, expectedPresentTime);
 
     const bool isDue = addedTime < expectedPresentTime;
     return isDue || !isPlausible;
@@ -225,7 +225,7 @@ status_t BufferQueueLayer::updateTexImage(bool& recomputeVisibleRegions, nsecs_t
     bool queuedBuffer = false;
     const int32_t layerID = getSequence();
     LayerRejecter r(mDrawingState, getCurrentState(), recomputeVisibleRegions,
-                    getProducerStickyTransform() != 0, mName.string(), mOverrideScalingMode,
+                    getProducerStickyTransform() != 0, mName, mOverrideScalingMode,
                     getTransformToDisplayInverse());
 
     if (isRemovedFromCurrentState()) {
@@ -372,11 +372,17 @@ void BufferQueueLayer::latchPerFrameState(
 // Interface implementation for BufferLayerConsumer::ContentsChangedListener
 // -----------------------------------------------------------------------
 
+void BufferQueueLayer::onFrameDequeued(const uint64_t bufferId) {
+    const int32_t layerID = getSequence();
+    mFlinger->mFrameTracer->traceTimestamp(layerID, bufferId, FrameTracer::UNSPECIFIED_FRAME_NUMBER,
+                                           systemTime(), FrameTracer::FrameEvent::DEQUEUE, 3000);
+}
+
 void BufferQueueLayer::onFrameAvailable(const BufferItem& item) {
     const int32_t layerID = getSequence();
     mFlinger->mFrameTracer->traceNewLayer(layerID, getName().c_str());
     mFlinger->mFrameTracer->traceTimestamp(layerID, item.mGraphicBuffer->getId(), item.mFrameNumber,
-                                           systemTime(), FrameTracer::FrameEvent::POST);
+                                           systemTime(), FrameTracer::FrameEvent::QUEUE);
 
     ATRACE_CALL();
     // Add this buffer from our internal queue tracker
@@ -398,7 +404,7 @@ void BufferQueueLayer::onFrameAvailable(const BufferItem& item) {
         while (item.mFrameNumber != mLastFrameNumberReceived + 1) {
             status_t result = mQueueItemCondition.waitRelative(mQueueItemLock, ms2ns(500));
             if (result != NO_ERROR) {
-                ALOGE("[%s] Timed out waiting on callback", mName.string());
+                ALOGE("[%s] Timed out waiting on callback", getDebugName());
             }
         }
 
@@ -426,7 +432,7 @@ void BufferQueueLayer::onFrameReplaced(const BufferItem& item) {
         while (item.mFrameNumber != mLastFrameNumberReceived + 1) {
             status_t result = mQueueItemCondition.waitRelative(mQueueItemLock, ms2ns(500));
             if (result != NO_ERROR) {
-                ALOGE("[%s] Timed out waiting on callback", mName.string());
+                ALOGE("[%s] Timed out waiting on callback", getDebugName());
             }
         }
 
@@ -459,24 +465,21 @@ void BufferQueueLayer::onFirstRef() {
     // Creates a custom BufferQueue for SurfaceFlingerConsumer to use
     sp<IGraphicBufferProducer> producer;
     sp<IGraphicBufferConsumer> consumer;
-    BufferQueue::createBufferQueue(&producer, &consumer, true);
-    mProducer = new MonitoredProducer(producer, mFlinger, this);
-    {
-        // Grab the SF state lock during this since it's the only safe way to access RenderEngine
-        Mutex::Autolock lock(mFlinger->mStateLock);
-        mConsumer =
-                new BufferLayerConsumer(consumer, mFlinger->getRenderEngine(), mTextureName, this);
-    }
+    mFlinger->getFactory().createBufferQueue(&producer, &consumer, true);
+    mProducer = mFlinger->getFactory().createMonitoredProducer(producer, mFlinger, this);
+    mConsumer =
+            mFlinger->getFactory().createBufferLayerConsumer(consumer, mFlinger->getRenderEngine(),
+                                                             mTextureName, this);
     mConsumer->setConsumerUsageBits(getEffectiveUsage(0));
     mConsumer->setContentsChangedListener(this);
-    mConsumer->setName(mName);
+    mConsumer->setName(String8(mName.data(), mName.size()));
 
     // BufferQueueCore::mMaxDequeuedBufferCount is default to 1
     if (!mFlinger->isLayerTripleBufferingDisabled()) {
         mProducer->setMaxDequeuedBufferCount(2);
     }
 
-    if (const auto display = mFlinger->getDefaultDisplayDevice()) {
+    if (const auto display = mFlinger->getDefaultDisplayDeviceLocked()) {
         updateTransformHint(display);
     }
 }
@@ -529,6 +532,15 @@ void BufferQueueLayer::gatherBufferInfo() {
     mBufferInfo.mApi = mConsumer->getCurrentApi();
     mBufferInfo.mPixelFormat = mFormat;
     mBufferInfo.mTransformToDisplayInverse = mConsumer->getTransformToDisplayInverse();
+}
+
+sp<Layer> BufferQueueLayer::createClone() {
+    LayerCreationArgs args(mFlinger.get(), nullptr, mName + " (Mirror)", 0, 0, 0, LayerMetadata());
+    args.textureName = mTextureName;
+    sp<BufferQueueLayer> layer = mFlinger->getFactory().createBufferQueueLayer(args);
+    layer->setInitialValuesForClone(this);
+
+    return layer;
 }
 
 } // namespace android

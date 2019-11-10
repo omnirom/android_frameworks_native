@@ -373,7 +373,9 @@ ProcessState::ProcessState(const char *driver)
         }
     }
 
+#ifdef __ANDROID__
     LOG_ALWAYS_FATAL_IF(mDriverFD < 0, "Binder driver '%s' could not be opened.  Terminating.", driver);
+#endif
 }
 
 ProcessState::~ProcessState()
@@ -387,4 +389,4 @@ ProcessState::~ProcessState()
     mDriverFD = -1;
 }
         
-}; // namespace android
+} // namespace android

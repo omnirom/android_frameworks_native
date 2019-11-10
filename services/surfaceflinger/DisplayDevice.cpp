@@ -59,12 +59,13 @@ DisplayDevice::DisplayDevice(DisplayDeviceCreationArgs&& args)
         mSequenceId(args.sequenceId),
         mDisplayInstallOrientation(args.displayInstallOrientation),
         mCompositionDisplay{mFlinger->getCompositionEngine().createDisplay(
-                compositionengine::DisplayCreationArgs{args.isSecure, args.isVirtual,
-                                                       args.displayId, args.powerAdvisor})},
+                compositionengine::DisplayCreationArgs{args.isVirtual, args.displayId,
+                                                       args.powerAdvisor})},
         mIsVirtual(args.isVirtual),
         mOrientation(),
         mActiveConfig(0),
         mIsPrimary(args.isPrimary) {
+    mCompositionDisplay->editState().isSecure = args.isSecure;
     mCompositionDisplay->createRenderSurface(
             compositionengine::RenderSurfaceCreationArgs{ANativeWindow_getWidth(
                                                                  args.nativeWindow.get()),
@@ -254,13 +255,17 @@ void DisplayDevice::setProjection(int orientation,
         scissor = displayBounds;
     }
 
+    uint32_t transformOrientation;
+
     if (isPrimary()) {
         sPrimaryDisplayOrientation = displayStateOrientationToTransformOrientation(orientation);
+        transformOrientation = displayStateOrientationToTransformOrientation(
+                (orientation + mDisplayInstallOrientation) % (DisplayState::eOrientation270 + 1));
+    } else {
+        transformOrientation = displayStateOrientationToTransformOrientation(orientation);
     }
 
-    getCompositionDisplay()->setProjection(globalTransform,
-                                           displayStateOrientationToTransformOrientation(
-                                                   orientation),
+    getCompositionDisplay()->setProjection(globalTransform, transformOrientation,
                                            frame, viewport, scissor, needsFiltering);
 }
 

@@ -34,7 +34,6 @@
 #include <ui/Region.h>
 #include <ui/Transform.h>
 #include <utils/RefBase.h>
-#include <utils/String8.h>
 #include <utils/Timers.h>
 
 #include <cstdint>
@@ -79,18 +78,20 @@ class SurfaceInterceptor;
 // ---------------------------------------------------------------------------
 
 struct LayerCreationArgs {
-    LayerCreationArgs(SurfaceFlinger* flinger, const sp<Client>& client, const String8& name,
+    LayerCreationArgs(SurfaceFlinger* flinger, const sp<Client>& client, std::string name,
                       uint32_t w, uint32_t h, uint32_t flags, LayerMetadata metadata);
 
     SurfaceFlinger* flinger;
     const sp<Client>& client;
-    const String8& name;
+    std::string name;
     uint32_t w;
     uint32_t h;
     uint32_t flags;
     LayerMetadata metadata;
     pid_t callingPid;
     uid_t callingUid;
+    sp<const DisplayDevice> displayDevice;
+    uint32_t textureName;
 };
 
 class Layer : public compositionengine::LayerFE {
@@ -170,6 +171,7 @@ public:
 
         // If non-null, a Surface this Surface's Z-order is interpreted relative to.
         wp<Layer> zOrderRelativeOf;
+        bool isRelativeOf{false};
 
         // A list of surfaces whose Z-order is interpreted relative to ours.
         SortedVector<wp<Layer>> zOrderRelatives;
@@ -464,6 +466,30 @@ public:
     }
     virtual Rect getCrop(const Layer::State& s) const { return s.crop_legacy; }
     virtual bool needsFiltering(const sp<const DisplayDevice>&) const { return false; }
+
+    // This layer is not a clone, but it's the parent to the cloned hierarchy. The
+    // variable mClonedChild represents the top layer that will be cloned so this
+    // layer will be the parent of mClonedChild.
+    // The layers in the cloned hierarchy will match the lifetime of the real layers. That is
+    // if the real layer is destroyed, then the clone layer will also be destroyed.
+    sp<Layer> mClonedChild;
+
+    virtual sp<Layer> createClone() = 0;
+    void updateMirrorInfo();
+    virtual void updateCloneBufferInfo(){};
+
+protected:
+    sp<Layer> getClonedFrom() { return mClonedFrom != nullptr ? mClonedFrom.promote() : nullptr; }
+    bool isClone() { return mClonedFrom != nullptr; }
+    bool isClonedFromAlive() { return getClonedFrom() != nullptr; }
+
+    virtual void setInitialValuesForClone(const sp<Layer>& clonedFrom);
+
+    void updateClonedDrawingState(std::map<sp<Layer>, sp<Layer>>& clonedLayersMap);
+    void updateClonedChildren(const sp<Layer>& mirrorRoot,
+                              std::map<sp<Layer>, sp<Layer>>& clonedLayersMap);
+    void updateClonedRelatives(std::map<sp<Layer>, sp<Layer>> clonedLayersMap);
+    void addChildToDrawing(const sp<Layer>& layer);
 
 public:
     /*
@@ -777,7 +803,7 @@ public:
     // Creates a new handle each time, so we only expect
     // this to be called once.
     sp<IBinder> getHandle();
-    const String8& getName() const;
+    const std::string& getName() const { return mName; }
     virtual void notifyAvailableFrames(nsecs_t /*expectedPresentTime*/) {}
     virtual PixelFormat getPixelFormat() const { return PIXEL_FORMAT_NONE; }
     bool getPremultipledAlpha() const;
@@ -793,8 +819,8 @@ protected:
     bool usingRelativeZ(LayerVector::StateSet stateSet) const;
 
     bool mPremultipliedAlpha{true};
-    String8 mName;
-    String8 mTransactionName; // A cached version of "TX - " + mName for systraces
+    const std::string mName;
+    const std::string mTransactionName{"TX - " + mName};
 
     bool mPrimaryDisplayOnly = false;
 
@@ -828,7 +854,6 @@ protected:
     // We encode unset as -1.
     int32_t mOverrideScalingMode{-1};
     std::atomic<uint64_t> mCurrentFrameNumber{0};
-    bool mFrameLatencyNeeded{false};
     // Whether filtering is needed b/c of the drawingstate
     bool mNeedsFiltering{false};
 
@@ -912,6 +937,12 @@ private:
     // to help debugging.
     pid_t mCallingPid;
     uid_t mCallingUid;
+
+    // The current layer is a clone of mClonedFrom. This means that this layer will update it's
+    // properties based on mClonedFrom. When mClonedFrom latches a new buffer for BufferLayers,
+    // this layer will update it's buffer. When mClonedFrom updates it's drawing state, children,
+    // and relatives, this layer will update as well.
+    wp<Layer> mClonedFrom;
 };
 
 } // namespace android

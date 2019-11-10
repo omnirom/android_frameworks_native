@@ -119,10 +119,6 @@ void InputManager::setInputWindows(const std::vector<InputWindowInfo>& infos,
     }
 }
 
-void InputManager::transferTouchFocus(const sp<IBinder>& fromToken, const sp<IBinder>& toToken) {
-    mDispatcher->transferTouchFocus(fromToken, toToken);
-}
-
 // Used by tests only.
 void InputManager::registerInputChannel(const sp<InputChannel>& channel) {
     IPCThreadState* ipc = IPCThreadState::self();
@@ -132,7 +128,7 @@ void InputManager::registerInputChannel(const sp<InputChannel>& channel) {
                 "from non shell/root entity (PID: %d)", ipc->getCallingPid());
         return;
     }
-    mDispatcher->registerInputChannel(channel, false);
+    mDispatcher->registerInputChannel(channel);
 }
 
 void InputManager::unregisterInputChannel(const sp<InputChannel>& channel) {

@@ -165,6 +165,8 @@ protected:
 
         sp<GraphicBuffer> mBuffer;
         int mBufferSlot{BufferQueue::INVALID_BUFFER_SLOT};
+
+        bool mFrameLatencyNeeded{false};
     };
 
     BufferInfo mBufferInfo;
@@ -194,6 +196,9 @@ protected:
     bool mRefreshPending{false};
 
     ui::Dataspace translateDataspace(ui::Dataspace dataspace);
+    void setInitialValuesForClone(const sp<Layer>& clonedFrom);
+    void updateCloneBufferInfo() override;
+    uint64_t mPreviousFrameNumber = 0;
 
 private:
     // Returns true if this layer requires filtering
