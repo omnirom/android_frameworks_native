@@ -517,6 +517,7 @@ private:
                                          bool* outSupport) const override;
     status_t setDisplayBrightness(const sp<IBinder>& displayToken, float brightness) const override;
     status_t notifyPowerHint(int32_t hintId) override;
+    status_t setDisplayElapseTime(const sp<DisplayDevice>& display) const;
 
     /* ------------------------------------------------------------------------
      * DeathRecipient interface
@@ -1119,6 +1120,7 @@ private:
     const std::shared_ptr<TimeStats> mTimeStats;
     bool mUseHwcVirtualDisplays = false;
     bool mUseFbScaling = false;
+    bool mUseAdvanceSfOffset = false;
     std::atomic<uint32_t> mFrameMissedCount = 0;
     std::atomic<uint32_t> mHwcFrameMissedCount = 0;
     std::atomic<uint32_t> mGpuFrameMissedCount = 0;

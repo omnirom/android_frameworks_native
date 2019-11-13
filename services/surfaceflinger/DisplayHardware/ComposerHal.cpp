@@ -26,14 +26,14 @@
 #include <gui/BufferQueue.h>
 #include <hidl/HidlTransportSupport.h>
 #include <hidl/HidlTransportUtils.h>
-#include <vendor/qti/hardware/display/composer/2.0/IQtiComposerClient.h>
+#include <vendor/qti/hardware/display/composer/2.1/IQtiComposerClient.h>
 
 namespace android {
 
 using hardware::Return;
 using hardware::hidl_vec;
 using hardware::hidl_handle;
-using vendor::qti::hardware::display::composer::V2_0::IQtiComposerClient;
+using vendor::qti::hardware::display::composer::V2_1::IQtiComposerClient;
 
 namespace Hwc2 {
 
@@ -137,6 +137,16 @@ void Composer::CommandWriter::setLayerType(uint32_t type)
                          IQtiComposerClient::Command::SET_LAYER_TYPE),
                  kSetLayerTypeLength);
     write(type);
+    endCommand();
+}
+
+void Composer::CommandWriter::setDisplayElapseTime(uint64_t time)
+{
+    constexpr uint16_t kSetDisplayElapseTimeLength = 2;
+    beginCommand(static_cast<V2_1::IComposerClient::Command>(
+                         IQtiComposerClient::Command::SET_DISPLAY_ELAPSE_TIME),
+                 kSetDisplayElapseTimeLength);
+    write64(time);
     endCommand();
 }
 
@@ -627,6 +637,13 @@ Error Composer::setOutputBuffer(Display display, const native_handle_t* buffer,
 {
     mWriter.selectDisplay(display);
     mWriter.setOutputBuffer(0, buffer, dup(releaseFence));
+    return Error::NONE;
+}
+
+Error Composer::setDisplayElapseTime(Display display, uint64_t timeStamp)
+{
+    mWriter.selectDisplay(display);
+    mWriter.setDisplayElapseTime(timeStamp);
     return Error::NONE;
 }
 
