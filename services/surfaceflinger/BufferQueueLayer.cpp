@@ -424,6 +424,11 @@ void BufferQueueLayer::setHwcLayerBuffer(const sp<const DisplayDevice>& display)
     (*outputLayer->editState().hwc)
             .hwcBufferCache.getHwcBuffer(slot, mActiveBuffer, &hwcSlot, &hwcBuffer);
 
+    if (mPrimaryDisplayOnly && (!mSetLayerAsMask)) {
+        mSetLayerAsMask = true;
+        mFlinger->setLayerAsMask(display, (hwcLayer->getId()));
+    }
+
     auto acquireFence = mConsumer->getCurrentFence();
     auto error = hwcLayer->setBuffer(hwcSlot, hwcBuffer, acquireFence);
     if (error != HWC2::Error::None) {
