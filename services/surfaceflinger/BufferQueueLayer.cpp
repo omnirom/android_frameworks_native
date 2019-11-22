@@ -426,6 +426,11 @@ void BufferQueueLayer::setHwcLayerBuffer(const sp<const DisplayDevice>& display)
     (*outputLayer->editState().hwc)
             .hwcBufferCache.getHwcBuffer(slot, mActiveBuffer, &hwcSlot, &hwcBuffer);
 
+    if (mPrimaryDisplayOnly && (!mSetLayerAsMask)) {
+        mSetLayerAsMask = true;
+        mFlinger->setLayerAsMask(display, (hwcLayer->getId()));
+    }
+
     auto acquireFence = mConsumer->getCurrentFence();
     auto error = hwcLayer->setBuffer(hwcSlot, hwcBuffer, acquireFence);
     if (error != HWC2::Error::None) {
@@ -520,13 +525,14 @@ void BufferQueueLayer::onFrameAvailable(const BufferItem& item) {
             frameInfo.vsync_period = stats.vsyncPeriod;
             mLastTimeStamp = frameInfo.current_timestamp;
             {
-                Mutex::Autolock lock(mFlinger->mStateLock);
+                Mutex::Autolock lock(mFlinger->mDolphinStateLock);
                 frameInfo.transparent_region = this->visibleNonTransparentRegion.isEmpty();
-                crop = this->getContentCrop();
-                frameInfo.width = crop.getWidth();
-                frameInfo.height = crop.getHeight();
-                frameInfo.layer_name = this->getName().c_str();
             }
+            crop = this->getContentCrop();
+            frameInfo.width = crop.getWidth();
+            frameInfo.height = crop.getHeight();
+            frameInfo.layer_name = this->getName().c_str();
+
             mFlinger->mFrameExtn->SetFrameInfo(frameInfo);
         }
         mFlinger->signalLayerUpdate();
