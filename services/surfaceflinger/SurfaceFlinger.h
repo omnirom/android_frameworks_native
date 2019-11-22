@@ -322,16 +322,10 @@ public:
         const sp<IGraphicBufferProducer>& bufferProducer) const;
 
     inline void onLayerCreated() {
-         {
-           Mutex::Autolock lock(mLayerCountLock);
-           mNumLayers++;
-         }
+          mNumLayers++;
     }
     inline void onLayerDestroyed(Layer* layer) {
-          {
-            Mutex::Autolock lock(mLayerCountLock);
-            mNumLayers--;
-          }
+          mNumLayers--;
           mOffscreenLayers.erase(layer);
     }
 
@@ -949,6 +943,7 @@ private:
       const char *mMemoryAllocFileName = "/data/misc/wmtrace/sf_memory.txt";
       int mMaxAllocationLimit = 1024*1024;
       int mMemoryAllocFilePos = 0;
+      int mMemoryDumpCount = 300;
     } mMemoryDump;
 
     status_t dumpAll(int fd, const DumpArgs& args, bool asProto) override {
@@ -981,7 +976,6 @@ private:
     // access must be protected by mStateLock
     mutable Mutex mStateLock;
     mutable Mutex mDolphinStateLock;
-    mutable Mutex mLayerCountLock;
     mutable Mutex mVsyncLock;
     State mCurrentState{LayerVector::StateSet::Current};
     std::atomic<int32_t> mTransactionFlags = 0;
