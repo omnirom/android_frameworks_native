@@ -124,6 +124,7 @@
 #include <vendor/display/config/1.6/IDisplayConfig.h>
 #include <vendor/display/config/1.7/IDisplayConfig.h>
 #include <vendor/display/config/1.9/IDisplayConfig.h>
+#include <composer_extn_intf.h>
 
 #include <layerproto/LayerProtoParser.h>
 #include "SurfaceFlingerProperties.h"
@@ -131,6 +132,8 @@
 #include "frame_extn_intf.h"
 #include "smomo_interface.h"
 #include "layer_extn_intf.h"
+
+composer::ComposerExtnLib composer::ComposerExtnLib::g_composer_ext_lib_;
 
 namespace android {
 
@@ -919,6 +922,16 @@ void SurfaceFlinger::init() {
         mLayerExt = LayerExtWrapper::Create();
         if (!mLayerExt) {
             ALOGE("Failed to create layer extension");
+        }
+    }
+
+    mComposerExtnIntf = composer::ComposerExtnLib::GetInstance();
+    if (!mComposerExtnIntf) {
+        ALOGE("Failed to create composer extension");
+    } else {
+        int ret = mComposerExtnIntf->CreateFrameScheduler(&mFrameSchedulerExtnIntf);
+        if (ret == -1 || !mFrameSchedulerExtnIntf) {
+            ALOGI("Failed to create frame scheduler extension");
         }
     }
 
@@ -1845,6 +1858,39 @@ void SurfaceFlinger::onRefreshReceived(int sequenceId, hwc2_display_t /*hwcDispl
     }
 }
 
+void SurfaceFlinger::updateFrameScheduler() NO_THREAD_SAFETY_ANALYSIS {
+    if (!mFrameSchedulerExtnIntf) {
+        return;
+    }
+
+    const sp<Fence>& fence =
+            (mVsyncModulator.getOffsets().sf < mPhaseOffsets->getOffsetThresholdForNextVsync() &&
+             mVsyncModulator.getOffsets().sf >= 0)
+            ? mPreviousPresentFences[0]
+            : mPreviousPresentFences[1];
+
+    if (fence == Fence::NO_FENCE) {
+        return;
+    }
+
+    int fenceFd = fence->get();
+    nsecs_t timeStamp = 0;
+    int ret = mFrameSchedulerExtnIntf->UpdateFrameScheduling(fenceFd, &timeStamp);
+    if (ret <= 0) {
+        return;
+    }
+
+    const nsecs_t period = getVsyncPeriod();
+    mScheduler->resyncToHardwareVsync(true, period, true /* force resync */);
+    if (timeStamp > 0) {
+        bool periodFlushed = false;
+        mScheduler->addResyncSample(timeStamp, &periodFlushed);
+        if (periodFlushed) {
+            mVsyncModulator.onRefreshRateChangeCompleted();
+        }
+    }
+}
+
 void SurfaceFlinger::setVsyncEnabled(bool enabled) {
     ATRACE_CALL();
 
@@ -2013,6 +2059,7 @@ void SurfaceFlinger::onMessageReceived(int32_t what) NO_THREAD_SAFETY_ANALYSIS {
             // value throughout this frame to make sure all layers are
             // seeing this same value.
             populateExpectedPresentTime();
+            updateFrameScheduler();
 
             // When Backpressure propagation is enabled we want to give a small grace period
             // for the present fence to fire instead of just giving up on this frame to handle cases
