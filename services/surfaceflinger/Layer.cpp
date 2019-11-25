@@ -109,6 +109,7 @@ Layer::Layer(const LayerCreationArgs& args)
     mCurrentState.hasColorTransform = false;
     mCurrentState.colorSpaceAgnostic = false;
     mCurrentState.metadata = args.metadata;
+    mCurrentState.shadowRadius = 0.f;
 
     // drawing state & current state are identical
     mDrawingState = mCurrentState;
@@ -120,7 +121,10 @@ Layer::Layer(const LayerCreationArgs& args)
 
     mCallingPid = args.callingPid;
     mCallingUid = args.callingUid;
-    mFlinger->onLayerCreated(this);
+}
+
+void Layer::onFirstRef() {
+    mFlinger->onLayerFirstRef(this);
 }
 
 Layer::~Layer() {
@@ -1356,9 +1360,9 @@ void Layer::dumpCallingUidPid(std::string& result) const {
 void Layer::onDisconnect() {
     Mutex::Autolock lock(mFrameEventHistoryMutex);
     mFrameEventHistory.onDisconnect();
-    const int32_t layerID = getSequence();
-    mFlinger->mTimeStats->onDestroy(layerID);
-    mFlinger->mFrameTracer->onDestroy(layerID);
+    const int32_t layerId = getSequence();
+    mFlinger->mTimeStats->onDestroy(layerId);
+    mFlinger->mFrameTracer->onDestroy(layerId);
 }
 
 void Layer::addAndGetFrameTimestamps(const NewFrameEventsEntry* newTimestamps,
@@ -1366,6 +1370,8 @@ void Layer::addAndGetFrameTimestamps(const NewFrameEventsEntry* newTimestamps,
     if (newTimestamps) {
         mFlinger->mTimeStats->setPostTime(getSequence(), newTimestamps->frameNumber,
                                           getName().c_str(), newTimestamps->postedTime);
+        mFlinger->mTimeStats->setAcquireFence(getSequence(), newTimestamps->frameNumber,
+                                              newTimestamps->acquireFence);
     }
 
     Mutex::Autolock lock(mFrameEventHistoryMutex);
