@@ -124,7 +124,8 @@ class OverrideLayerNames {
     };
 
     void AddImplicitLayers() {
-        if (!is_instance_ || !driver::Debuggable())
+        if (!is_instance_ ||
+            !android::GraphicsEnv::getInstance().isDebuggable())
             return;
 
         GetLayersFromSettings();
@@ -144,7 +145,7 @@ class OverrideLayerNames {
     }
 
     void GetLayersFromSettings() {
-        // These will only be available if conditions are met in GraphicsEnvironemnt
+        // These will only be available if conditions are met in GraphicsEnvironment
         // gpu_debug_layers = layer1:layer2:layerN
         const std::string layers = android::GraphicsEnv::getInstance().getDebugLayers();
         if (!layers.empty()) {
@@ -370,7 +371,8 @@ class OverrideExtensionNames {
 
    private:
     bool EnableDebugCallback() const {
-        return (is_instance_ && driver::Debuggable() &&
+        return (is_instance_ &&
+                android::GraphicsEnv::getInstance().isDebuggable() &&
                 property_get_bool("debug.vulkan.enable_callback", false));
     }
 
