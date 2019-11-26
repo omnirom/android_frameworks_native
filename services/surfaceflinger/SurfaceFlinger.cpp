@@ -2000,7 +2000,8 @@ void SurfaceFlinger::populateExpectedPresentTime() NO_THREAD_SAFETY_ANALYSIS {
     const nsecs_t presentTime = mScheduler->getDispSyncExpectedPresentTime();
     // Inflate the expected present time if we're targetting the next vsync.
     mExpectedPresentTime =
-            mVsyncModulator.getOffsets().sf < mPhaseOffsets->getOffsetThresholdForNextVsync()
+            (mVsyncModulator.getOffsets().sf < mPhaseOffsets->getOffsetThresholdForNextVsync() &&
+             mVsyncModulator.getOffsets().sf >= 0)
             ? presentTime
             : presentTime + stats.vsyncPeriod;
 }
@@ -2687,10 +2688,18 @@ void SurfaceFlinger::forceResyncModel() NO_THREAD_SAFETY_ANALYSIS {
         ATRACE_CALL();
         mScheduler->resyncToHardwareVsync(true, period, true /* force resync */);
         mVsyncPeriod.push_back(period);
+        // update Vsync phase offsets when resync happens for negative phase offset cases
+        const auto [early, gl, late] = mPhaseOffsets->getCurrentOffsets();
+        mVsyncModulator.setPhaseOffsets(early, gl, late,
+                                        mPhaseOffsets->getOffsetThresholdForNextVsync());
     } else if (period < mVsyncPeriod.at(mVsyncPeriod.size() - 1)) {
         // Vsync period changed. Trigger resync.
         ATRACE_CALL();
         mScheduler->resyncToHardwareVsync(true, period, true /* force resync */);
+        // update Vsync phase offsets when resync happens for negative phase offset cases
+        const auto [early, gl, late] = mPhaseOffsets->getCurrentOffsets();
+        mVsyncModulator.setPhaseOffsets(early, gl, late,
+                                        mPhaseOffsets->getOffsetThresholdForNextVsync());
         mVsyncPeriod = {};
     }
 }
