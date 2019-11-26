@@ -21,7 +21,7 @@
 
 /**
  * @file binder_auto_utils.h
- * @brief These objects provide a more C++-like thin interface to the .
+ * @brief These objects provide a more C++-like thin interface to the binder.
  */
 
 #pragma once
@@ -159,13 +159,17 @@ class ScopedAResource {
      */
     T* getR() { return &mT; }
 
-    // copy-constructing, or move/copy assignment is disallowed
+    // copy-constructing/assignment is disallowed
     ScopedAResource(const ScopedAResource&) = delete;
     ScopedAResource& operator=(const ScopedAResource&) = delete;
-    ScopedAResource& operator=(ScopedAResource&&) = delete;
 
-    // move-constructing is okay
+    // move-constructing/assignment is okay
     ScopedAResource(ScopedAResource&& other) : mT(std::move(other.mT)) { other.mT = DEFAULT; }
+    ScopedAResource& operator=(ScopedAResource&& other) {
+        set(other.mT);
+        other.mT = DEFAULT;
+        return *this;
+    }
 
    private:
     T mT;
@@ -197,6 +201,7 @@ class ScopedAStatus : public impl::ScopedAResource<AStatus*, void, AStatus_delet
     explicit ScopedAStatus(AStatus* a = nullptr) : ScopedAResource(a) {}
     ~ScopedAStatus() {}
     ScopedAStatus(ScopedAStatus&&) = default;
+    ScopedAStatus& operator=(ScopedAStatus&&) = default;
 
     /**
      * See AStatus_isOk.
@@ -219,9 +224,31 @@ class ScopedAStatus : public impl::ScopedAResource<AStatus*, void, AStatus_delet
     binder_status_t getStatus() const { return AStatus_getStatus(get()); }
 
     /**
-     * Convenience method for okay status.
+     * See AStatus_getMessage
+     */
+    const char* getMessage() const { return AStatus_getMessage(get()); }
+
+    /**
+     * Convenience methods for creating scoped statuses.
      */
     static ScopedAStatus ok() { return ScopedAStatus(AStatus_newOk()); }
+    static ScopedAStatus fromExceptionCode(binder_exception_t exception) {
+        return ScopedAStatus(AStatus_fromExceptionCode(exception));
+    }
+    static ScopedAStatus fromExceptionCodeWithMessage(binder_exception_t exception,
+                                                      const char* message) {
+        return ScopedAStatus(AStatus_fromExceptionCodeWithMessage(exception, message));
+    }
+    static ScopedAStatus fromServiceSpecificError(int32_t serviceSpecific) {
+        return ScopedAStatus(AStatus_fromServiceSpecificError(serviceSpecific));
+    }
+    static ScopedAStatus fromServiceSpecificErrorWithMessage(int32_t serviceSpecific,
+                                                             const char* message) {
+        return ScopedAStatus(AStatus_fromServiceSpecificErrorWithMessage(serviceSpecific, message));
+    }
+    static ScopedAStatus fromStatus(binder_status_t status) {
+        return ScopedAStatus(AStatus_fromStatus(status));
+    }
 };
 
 /**

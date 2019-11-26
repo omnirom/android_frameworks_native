@@ -476,7 +476,6 @@ public:
         const sp<InputDispatcher>& dispatcher, const std::string name, int32_t displayId) :
             FakeInputReceiver(dispatcher, name, displayId),
             mFocused(false), mFrame(Rect(0, 0, WIDTH, HEIGHT)), mLayoutParamFlags(0) {
-            mServerChannel->setToken(new BBinder());
             mDispatcher->registerInputChannel(mServerChannel);
 
             inputApplicationHandle->updateInfo();
@@ -484,7 +483,7 @@ public:
     }
 
     virtual bool updateInfo() {
-        mInfo.token = mServerChannel ? mServerChannel->getToken() : nullptr;
+        mInfo.token = mServerChannel ? mServerChannel->getConnectionToken() : nullptr;
         mInfo.name = mName;
         mInfo.layoutParamsFlags = mLayoutParamFlags;
         mInfo.layoutParamsType = InputWindowInfo::TYPE_APPLICATION;
@@ -865,7 +864,6 @@ public:
     FakeMonitorReceiver(const sp<InputDispatcher>& dispatcher, const std::string name,
             int32_t displayId, bool isGestureMonitor = false)
             : FakeInputReceiver(dispatcher, name, displayId) {
-        mServerChannel->setToken(new BBinder());
         mDispatcher->registerInputMonitor(mServerChannel, displayId, isGestureMonitor);
     }
 };

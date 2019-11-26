@@ -224,6 +224,8 @@ void TransactionCompletedListener::onTransactionCompleted(ListenerStats listener
                                                  surfaceStats.acquireTime,
                                                  surfaceStats.previousReleaseFence,
                                                  surfaceStats.transformHint);
+                surfaceControls[surfaceStats.surfaceControl]->setTransformHint(
+                        surfaceStats.transformHint);
             }
 
             callbackFunction(transactionStats.latchTime, transactionStats.presentFence,
@@ -1335,6 +1337,18 @@ SurfaceComposerClient::Transaction& SurfaceComposerClient::Transaction::setGeome
     return *this;
 }
 
+SurfaceComposerClient::Transaction& SurfaceComposerClient::Transaction::setShadowRadius(
+        const sp<SurfaceControl>& sc, float shadowRadius) {
+    layer_state_t* s = getLayerState(sc);
+    if (!s) {
+        mStatus = BAD_INDEX;
+        return *this;
+    }
+    s->what |= layer_state_t::eShadowRadiusChanged;
+    s->shadowRadius = shadowRadius;
+    return *this;
+}
+
 // ---------------------------------------------------------------------------
 
 DisplayState& SurfaceComposerClient::Transaction::getDisplayState(const sp<IBinder>& token) {
@@ -1451,16 +1465,19 @@ void SurfaceComposerClient::dispose() {
 sp<SurfaceControl> SurfaceComposerClient::createSurface(const String8& name, uint32_t w, uint32_t h,
                                                         PixelFormat format, uint32_t flags,
                                                         SurfaceControl* parent,
-                                                        LayerMetadata metadata) {
+                                                        LayerMetadata metadata,
+                                                        uint32_t* outTransformHint) {
     sp<SurfaceControl> s;
-    createSurfaceChecked(name, w, h, format, &s, flags, parent, std::move(metadata));
+    createSurfaceChecked(name, w, h, format, &s, flags, parent, std::move(metadata),
+                         outTransformHint);
     return s;
 }
 
 sp<SurfaceControl> SurfaceComposerClient::createWithSurfaceParent(const String8& name, uint32_t w,
                                                                   uint32_t h, PixelFormat format,
                                                                   uint32_t flags, Surface* parent,
-                                                                  LayerMetadata metadata) {
+                                                                  LayerMetadata metadata,
+                                                                  uint32_t* outTransformHint) {
     sp<SurfaceControl> sur;
     status_t err = mStatus;
 
@@ -1469,11 +1486,15 @@ sp<SurfaceControl> SurfaceComposerClient::createWithSurfaceParent(const String8&
         sp<IGraphicBufferProducer> parentGbp = parent->getIGraphicBufferProducer();
         sp<IGraphicBufferProducer> gbp;
 
+        uint32_t transformHint = 0;
         err = mClient->createWithSurfaceParent(name, w, h, format, flags, parentGbp,
-                                               std::move(metadata), &handle, &gbp);
+                                               std::move(metadata), &handle, &gbp, &transformHint);
+        if (outTransformHint) {
+            *outTransformHint = transformHint;
+        }
         ALOGE_IF(err, "SurfaceComposerClient::createWithSurfaceParent error %s", strerror(-err));
         if (err == NO_ERROR) {
-            return new SurfaceControl(this, handle, gbp, true /* owned */);
+            return new SurfaceControl(this, handle, gbp, true /* owned */, transformHint);
         }
     }
     return nullptr;
@@ -1482,8 +1503,8 @@ sp<SurfaceControl> SurfaceComposerClient::createWithSurfaceParent(const String8&
 status_t SurfaceComposerClient::createSurfaceChecked(const String8& name, uint32_t w, uint32_t h,
                                                      PixelFormat format,
                                                      sp<SurfaceControl>* outSurface, uint32_t flags,
-                                                     SurfaceControl* parent,
-                                                     LayerMetadata metadata) {
+                                                     SurfaceControl* parent, LayerMetadata metadata,
+                                                     uint32_t* outTransformHint) {
     sp<SurfaceControl> sur;
     status_t err = mStatus;
 
@@ -1496,11 +1517,15 @@ status_t SurfaceComposerClient::createSurfaceChecked(const String8& name, uint32
             parentHandle = parent->getHandle();
         }
 
+        uint32_t transformHint = 0;
         err = mClient->createSurface(name, w, h, format, flags, parentHandle, std::move(metadata),
-                                     &handle, &gbp);
+                                     &handle, &gbp, &transformHint);
+        if (outTransformHint) {
+            *outTransformHint = transformHint;
+        }
         ALOGE_IF(err, "SurfaceComposerClient::createSurface error %s", strerror(-err));
         if (err == NO_ERROR) {
-            *outSurface = new SurfaceControl(this, handle, gbp, true /* owned */);
+            *outSurface = new SurfaceControl(this, handle, gbp, true /* owned */, transformHint);
         }
     }
     return err;

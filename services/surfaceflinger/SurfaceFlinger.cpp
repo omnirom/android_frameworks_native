@@ -2011,7 +2011,8 @@ void SurfaceFlinger::computeLayerBounds() {
                 continue;
             }
 
-            layer->computeBounds(displayDevice->getViewport().toFloatRect(), ui::Transform());
+            layer->computeBounds(displayDevice->getViewport().toFloatRect(), ui::Transform(),
+                                 0.f /* shadowRadius */);
         }
     }
 }
@@ -3335,6 +3336,9 @@ uint32_t SurfaceFlinger::setClientStateLocked(
             flags |= eTraversalNeeded;
         }
     }
+    if (what & layer_state_t::eShadowRadiusChanged) {
+        if (layer->setShadowRadius(s.shadowRadius)) flags |= eTraversalNeeded;
+    }
     // This has to happen after we reparent children because when we reparent to null we remove
     // child layers from current state and remove its relative z. If the children are reparented in
     // the same transaction, then we have to make sure we reparent the children first so we do not
@@ -3432,8 +3436,8 @@ status_t SurfaceFlinger::createLayer(const String8& name, const sp<Client>& clie
                                      uint32_t h, PixelFormat format, uint32_t flags,
                                      LayerMetadata metadata, sp<IBinder>* handle,
                                      sp<IGraphicBufferProducer>* gbp,
-                                     const sp<IBinder>& parentHandle,
-                                     const sp<Layer>& parentLayer) {
+                                     const sp<IBinder>& parentHandle, const sp<Layer>& parentLayer,
+                                     uint32_t* outTransformHint) {
     if (int32_t(w|h) < 0) {
         ALOGE("createLayer() failed, w or h is negative (w=%d, h=%d)",
                 int(w), int(h));
@@ -3470,7 +3474,7 @@ status_t SurfaceFlinger::createLayer(const String8& name, const sp<Client>& clie
             break;
         case ISurfaceComposerClient::eFXSurfaceBufferState:
             result = createBufferStateLayer(client, std::move(uniqueName), w, h, flags,
-                                            std::move(metadata), handle, &layer);
+                                            std::move(metadata), handle, outTransformHint, &layer);
             break;
         case ISurfaceComposerClient::eFXSurfaceColor:
             // check if buffer size is set for color layer.
@@ -3585,11 +3589,14 @@ status_t SurfaceFlinger::createBufferQueueLayer(const sp<Client>& client, std::s
 status_t SurfaceFlinger::createBufferStateLayer(const sp<Client>& client, std::string name,
                                                 uint32_t w, uint32_t h, uint32_t flags,
                                                 LayerMetadata metadata, sp<IBinder>* handle,
-                                                sp<Layer>* outLayer) {
+                                                uint32_t* outTransformHint, sp<Layer>* outLayer) {
     LayerCreationArgs args(this, client, std::move(name), w, h, flags, std::move(metadata));
     args.displayDevice = getDefaultDisplayDevice();
     args.textureName = getNewTexture();
     sp<BufferStateLayer> layer = getFactory().createBufferStateLayer(args);
+    if (outTransformHint) {
+        *outTransformHint = layer->getTransformHint();
+    }
     *handle = layer->getHandle();
     *outLayer = layer;
 
@@ -4438,18 +4445,7 @@ status_t SurfaceFlinger::CheckTransactCodeCredentials(uint32_t code) {
         case SET_DISPLAY_BRIGHTNESS: {
             return OK;
         }
-        case CAPTURE_LAYERS: {
-            IPCThreadState* ipc = IPCThreadState::self();
-            const int pid = ipc->getCallingPid();
-            const int uid = ipc->getCallingUid();
-            // allow media to capture layer for video thumbnails
-            if ((uid != AID_GRAPHICS && uid != AID_MEDIA) &&
-                !PermissionCache::checkPermission(sReadFramebuffer, pid, uid)) {
-                ALOGE("Permission Denial: can't capture layer pid=%d, uid=%d", pid, uid);
-                return PERMISSION_DENIED;
-            }
-            return OK;
-        }
+        case CAPTURE_LAYERS:
         case CAPTURE_SCREEN:
         case ADD_REGION_SAMPLING_LISTENER:
         case REMOVE_REGION_SAMPLING_LISTENER: {
@@ -5010,7 +5006,8 @@ status_t SurfaceFlinger::captureLayers(
                                const Rect& drawingBounds)
                   : oldParent(oldParent), newParent(newParent) {
                 // Compute and cache the bounds for the new parent layer.
-                newParent->computeBounds(drawingBounds.toFloatRect(), ui::Transform());
+                newParent->computeBounds(drawingBounds.toFloatRect(), ui::Transform(),
+                                         0.f /* shadowRadius */);
                 oldParent->setChildrenDrawingParent(newParent);
             }
             ~ReparentForDrawing() { oldParent->setChildrenDrawingParent(oldParent); }
