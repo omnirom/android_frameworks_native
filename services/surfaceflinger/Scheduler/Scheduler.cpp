@@ -226,7 +226,7 @@ void Scheduler::disableHardwareVsync(bool makeUnavailable) {
     }
 }
 
-void Scheduler::resyncToHardwareVsync(bool makeAvailable, nsecs_t period) {
+void Scheduler::resyncToHardwareVsync(bool makeAvailable, nsecs_t period, bool force_resync) {
     {
         std::lock_guard<std::mutex> lock(mHWVsyncLock);
         if (makeAvailable) {
@@ -242,7 +242,7 @@ void Scheduler::resyncToHardwareVsync(bool makeAvailable, nsecs_t period) {
         return;
     }
 
-    setVsyncPeriod(period);
+    setVsyncPeriod(period, force_resync);
 }
 
 ResyncCallback Scheduler::makeResyncCallback(GetVsyncPeriod&& getVsyncPeriod) {
@@ -269,11 +269,11 @@ void Scheduler::setRefreshSkipCount(int count) {
     mPrimaryDispSync->setRefreshSkipCount(count);
 }
 
-void Scheduler::setVsyncPeriod(const nsecs_t period) {
+void Scheduler::setVsyncPeriod(const nsecs_t period, bool force_resync) {
     std::lock_guard<std::mutex> lock(mHWVsyncLock);
     mPrimaryDispSync->setPeriod(period);
 
-    if (!mPrimaryHWVsyncEnabled) {
+    if (!mPrimaryHWVsyncEnabled || force_resync) {
         mPrimaryDispSync->beginResync();
         mEventControlThread->setVsyncEnabled(true);
         mPrimaryHWVsyncEnabled = true;

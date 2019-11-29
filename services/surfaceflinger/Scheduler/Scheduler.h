@@ -135,7 +135,7 @@ public:
 
     void enableHardwareVsync();
     void disableHardwareVsync(bool makeUnavailable);
-    void resyncToHardwareVsync(bool makeAvailable, nsecs_t period);
+    void resyncToHardwareVsync(bool makeAvailable, nsecs_t period, bool force_resync = false);
     // Creates a callback for resyncing.
     ResyncCallback makeResyncCallback(GetVsyncPeriod&& getVsyncPeriod);
     void setRefreshSkipCount(int count);
@@ -214,7 +214,7 @@ private:
     // Function that is called when the touch timer expires.
     void expiredTouchTimerCallback();
     // Sets vsync period.
-    void setVsyncPeriod(const nsecs_t period);
+    void setVsyncPeriod(const nsecs_t period, bool force_resync = false);
     // Idle timer feature's function to change the refresh rate.
     void timerChangeRefreshRate(IdleTimerState idleTimerState);
     // Touch timer feature's function to change the refresh rate.
