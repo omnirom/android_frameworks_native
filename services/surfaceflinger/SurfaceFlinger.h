@@ -520,6 +520,7 @@ private:
     void setPowerModeOnMainThread(const sp<IBinder>& displayToken, int mode);
     // For Animation Hint
     void setDisplayAnimating(const sp<DisplayDevice>& hw);
+    void setLayerAsMask(const sp<const DisplayDevice>& display, const uint64_t& layerId);
 
     /* ------------------------------------------------------------------------
      * Message handling
@@ -785,6 +786,7 @@ private:
 
     sp<DisplayDevice> getVsyncSource();
     void updateVsyncSource();
+    void forceResyncModel();
     void preComposition();
     void postComposition();
     void getCompositorTiming(CompositorTiming* compositorTiming);
@@ -919,7 +921,7 @@ private:
     }
 
     void dumpAllLocked(const DumpArgs& args, std::string& result) const REQUIRES(mStateLock);
-
+    void dumpMini(std::string& result) const REQUIRES(mStateLock);
     void appendSfConfigString(std::string& result) const;
     void listLayersLocked(std::string& result) const;
     void dumpStatsLocked(const DumpArgs& args, std::string& result) const REQUIRES(mStateLock);
@@ -957,6 +959,7 @@ private:
       const char *name = "/data/misc/wmtrace/dumpsys.txt";
       bool running = false;
       bool noLimit = false;
+      bool fullDump = false;
       bool replaceAfterCommit = false;
       long int position = 0;
     } mFileDump;
@@ -1099,6 +1102,9 @@ private:
     std::atomic<uint32_t> mFrameMissedCount = 0;
     std::atomic<uint32_t> mHwcFrameMissedCount = 0;
     std::atomic<uint32_t> mGpuFrameMissedCount = 0;
+
+    std::mutex mVsyncPeriodMutex;
+    std::vector<nsecs_t> mVsyncPeriod;
 
     TransactionCompletedThread mTransactionCompletedThread;
 
