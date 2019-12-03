@@ -356,14 +356,6 @@ SurfaceFlinger::SurfaceFlinger(Factory& factory) : SurfaceFlinger(factory, SkipI
     auto listSize = property_get_int32("debug.sf.max_igbp_list_size", int32_t(defaultListSize));
     mMaxGraphicBufferProducerListSize = (listSize > 0) ? size_t(listSize) : defaultListSize;
 
-    mUseSmart90ForVideo = use_smart_90_for_video(false);
-    property_get("debug.sf.use_smart_90_for_video", value, "0");
-
-    int int_value = atoi(value);
-    if (int_value) {
-        mUseSmart90ForVideo = true;
-    }
-
     property_get("debug.sf.luma_sampling", value, "1");
     mLumaSampling = atoi(value);
 
@@ -1643,11 +1635,7 @@ void SurfaceFlinger::onMessageReceived(int32_t what) NO_THREAD_SAFETY_ANALYSIS {
                 mGpuFrameMissedCount++;
             }
 
-            if (mUseSmart90ForVideo) {
-                // This call is made each time SF wakes up and creates a new frame. It is part
-                // of video detection feature.
-                mScheduler->updateFpsBasedOnContent();
-            }
+            mScheduler->chooseRefreshRateForContent();
 
             if (performSetActiveConfig()) {
                 break;
@@ -1727,7 +1715,12 @@ void SurfaceFlinger::handleMessageRefresh() {
     refreshArgs.layersWithQueuedFrames.reserve(mLayersWithQueuedFrames.size());
     for (sp<Layer> layer : mLayersWithQueuedFrames) {
         auto compositionLayer = layer->getCompositionLayer();
-        if (compositionLayer) refreshArgs.layersWithQueuedFrames.push_back(compositionLayer.get());
+        if (compositionLayer) {
+            refreshArgs.layersWithQueuedFrames.push_back(compositionLayer.get());
+            mFrameTracer->traceTimestamp(layer->getSequence(), layer->getCurrentBufferId(),
+                                         layer->getCurrentFrameNumber(), systemTime(),
+                                         FrameTracer::FrameEvent::HWC_COMPOSITION_QUEUED);
+        }
     }
 
     refreshArgs.repaintEverything = mRepaintEverything.exchange(false);
@@ -1908,9 +1901,8 @@ void SurfaceFlinger::postComposition()
     }
 
     mDrawingState.traverseInZOrder([&](Layer* layer) {
-        bool frameLatched =
-                layer->onPostComposition(displayDevice->getId(), glCompositionDoneFenceTime,
-                                         presentFenceTime, compositorTiming);
+        bool frameLatched = layer->onPostComposition(displayDevice, glCompositionDoneFenceTime,
+                                                     presentFenceTime, compositorTiming);
         if (frameLatched) {
             recordBufferingStats(layer->getName(), layer->getOccupancyHistory(false));
         }
@@ -3947,9 +3939,6 @@ void SurfaceFlinger::appendSfConfigString(std::string& result) const {
 
 void SurfaceFlinger::dumpVSync(std::string& result) const {
     mScheduler->dump(result);
-    StringAppendF(&result, "+  Refresh rate switching: %s\n",
-                  mRefreshRateConfigs->refreshRateSwitchingSupported() ? "on" : "off");
-    StringAppendF(&result, "+  Smart video mode: %s\n\n", mUseSmart90ForVideo ? "on" : "off");
 
     mRefreshRateStats->dump(result);
     result.append("\n");
@@ -5502,7 +5491,7 @@ sp<Layer> SurfaceFlinger::fromHandle(const sp<IBinder>& handle) {
     return nullptr;
 }
 
-void SurfaceFlinger::onLayerCreated(Layer* layer) {
+void SurfaceFlinger::onLayerFirstRef(Layer* layer) {
     mNumLayers++;
     mScheduler->registerLayer(layer);
 }

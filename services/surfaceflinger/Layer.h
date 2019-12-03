@@ -222,6 +222,8 @@ public:
     explicit Layer(const LayerCreationArgs& args);
     virtual ~Layer();
 
+    void onFirstRef() override;
+
     int getWindowType() const { return mWindowType; }
 
     void setPrimaryDisplayOnly() { mPrimaryDisplayOnly = true; }
@@ -529,7 +531,7 @@ public:
      * called after composition.
      * returns true if the layer latched a new buffer this frame.
      */
-    virtual bool onPostComposition(const std::optional<DisplayId>& /*displayId*/,
+    virtual bool onPostComposition(sp<const DisplayDevice> /*displayDevice*/,
                                    const std::shared_ptr<FenceTime>& /*glDoneFence*/,
                                    const std::shared_ptr<FenceTime>& /*presentFence*/,
                                    const CompositorTiming& /*compositorTiming*/) {
@@ -598,6 +600,8 @@ public:
     virtual uint32_t getBufferTransform() const { return 0; }
 
     virtual sp<GraphicBuffer> getBuffer() const { return nullptr; }
+
+    virtual uint64_t getCurrentFrameNumber() const { return mCurrentFrameNumber; }
 
     /*
      * Returns if a frame is ready
@@ -948,7 +952,7 @@ private:
     // The inherited shadow radius after taking into account the layer hierarchy. This is the
     // final shadow radius for this layer. If a shadow is specified for a layer, then effective
     // shadow radius is the set shadow radius, otherwise its the parent's shadow radius.
-    float mEffectiveShadowRadius;
+    float mEffectiveShadowRadius = 0.f;
 
     // Returns true if the layer can draw shadows on its border.
     virtual bool canDrawShadows() const { return true; }
