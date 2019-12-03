@@ -31,8 +31,8 @@
 #include <utils/RefBase.h>
 #include <utils/Timers.h>
 #include <utils/Vector.h>
-
 #include <limits>
+#include <queue>
 
 /*
  * Additional private constants not defined in ndk/ui/input.h.
@@ -166,6 +166,8 @@ namespace android {
 #ifdef __ANDROID__
 class Parcel;
 #endif
+
+const char* inputEventTypeToString(int32_t type);
 
 /*
  * Flags that flow alongside events in the input dispatch system to help with certain
@@ -687,6 +689,28 @@ protected:
 };
 
 /*
+ * Focus events.
+ */
+class FocusEvent : public InputEvent {
+public:
+    virtual ~FocusEvent() {}
+
+    virtual int32_t getType() const override { return AINPUT_EVENT_TYPE_FOCUS; }
+
+    inline bool getHasFocus() const { return mHasFocus; }
+
+    inline bool getInTouchMode() const { return mInTouchMode; }
+
+    void initialize(bool hasFocus, bool inTouchMode);
+
+    void initialize(const FocusEvent& from);
+
+protected:
+    bool mHasFocus;
+    bool mInTouchMode;
+};
+
+/*
  * Input event factory.
  */
 class InputEventFactoryInterface {
@@ -698,6 +722,7 @@ public:
 
     virtual KeyEvent* createKeyEvent() = 0;
     virtual MotionEvent* createMotionEvent() = 0;
+    virtual FocusEvent* createFocusEvent() = 0;
 };
 
 /*
@@ -709,12 +734,14 @@ public:
     PreallocatedInputEventFactory() { }
     virtual ~PreallocatedInputEventFactory() { }
 
-    virtual KeyEvent* createKeyEvent() { return & mKeyEvent; }
-    virtual MotionEvent* createMotionEvent() { return & mMotionEvent; }
+    virtual KeyEvent* createKeyEvent() override { return &mKeyEvent; }
+    virtual MotionEvent* createMotionEvent() override { return &mMotionEvent; }
+    virtual FocusEvent* createFocusEvent() override { return &mFocusEvent; }
 
 private:
     KeyEvent mKeyEvent;
     MotionEvent mMotionEvent;
+    FocusEvent mFocusEvent;
 };
 
 /*
@@ -725,16 +752,18 @@ public:
     explicit PooledInputEventFactory(size_t maxPoolSize = 20);
     virtual ~PooledInputEventFactory();
 
-    virtual KeyEvent* createKeyEvent();
-    virtual MotionEvent* createMotionEvent();
+    virtual KeyEvent* createKeyEvent() override;
+    virtual MotionEvent* createMotionEvent() override;
+    virtual FocusEvent* createFocusEvent() override;
 
     void recycle(InputEvent* event);
 
 private:
     const size_t mMaxPoolSize;
 
-    Vector<KeyEvent*> mKeyEventPool;
-    Vector<MotionEvent*> mMotionEventPool;
+    std::queue<std::unique_ptr<KeyEvent>> mKeyEventPool;
+    std::queue<std::unique_ptr<MotionEvent>> mMotionEventPool;
+    std::queue<std::unique_ptr<FocusEvent>> mFocusEventPool;
 };
 
 } // namespace android

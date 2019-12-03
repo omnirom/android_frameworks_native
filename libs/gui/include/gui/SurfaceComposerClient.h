@@ -129,6 +129,13 @@ public:
     static status_t getAllowedDisplayConfigs(const sp<IBinder>& displayToken,
                                              std::vector<int32_t>* outAllowedConfigs);
 
+    // Sets the refresh rate boundaries for display configuration.
+    // For all other parameters, default configuration is used. The index for the default is
+    // corresponting to the configs returned from getDisplayConfigs().
+    static status_t setDesiredDisplayConfigSpecs(const sp<IBinder>& displayToken,
+                                                 int32_t defaultModeId, float minRefreshRate,
+                                                 float maxRefreshRate);
+
     // Gets the list of supported color modes for the given display
     static status_t getDisplayColorModes(const sp<IBinder>& display,
             Vector<ui::ColorMode>* outColorModes);
@@ -213,6 +220,27 @@ public:
      * Returns NO_ERROR upon success.
      */
     static status_t notifyPowerHint(int32_t hintId);
+
+    /*
+     * Sets the global configuration for all the shadows drawn by SurfaceFlinger. Shadow follows
+     * material design guidelines.
+     *
+     * ambientColor
+     *      Color to the ambient shadow. The alpha is premultiplied.
+     *
+     * spotColor
+     *      Color to the spot shadow. The alpha is premultiplied. The position of the spot shadow
+     *      depends on the light position.
+     *
+     * lightPosY/lightPosZ
+     *      Position of the light used to cast the spot shadow. The X value is always the display
+     *      width / 2.
+     *
+     * lightRadius
+     *      Radius of the light casting the shadow.
+     */
+    static status_t setGlobalShadowSettings(const half4& ambientColor, const half4& spotColor,
+                                            float lightPosY, float lightPosZ, float lightRadius);
 
     // ------------------------------------------------------------------------
     // surface creation / destruction

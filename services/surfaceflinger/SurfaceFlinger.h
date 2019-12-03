@@ -37,6 +37,7 @@
 #include <input/ISetInputWindowsListener.h>
 #include <layerproto/LayerProtoHeader.h>
 #include <math/mat4.h>
+#include <renderengine/LayerSettings.h>
 #include <serviceutils/PriorityDumper.h>
 #include <system/graphics.h>
 #include <ui/FenceTime.h>
@@ -313,6 +314,8 @@ public:
     void onLayerFirstRef(Layer*);
     void onLayerDestroyed(Layer*);
 
+    void removeFromOffscreenLayers(Layer* layer);
+
     TransactionCompletedThread& getTransactionCompletedThread() {
         return mTransactionCompletedThread;
     }
@@ -365,6 +368,8 @@ private:
             if (colorMatrixChanged) {
                 colorMatrix = other.colorMatrix;
             }
+            globalShadowSettings = other.globalShadowSettings;
+
             return *this;
         }
 
@@ -374,6 +379,8 @@ private:
 
         bool colorMatrixChanged = true;
         mat4 colorMatrix;
+
+        renderengine::ShadowSettings globalShadowSettings;
 
         void traverseInZOrder(const LayerVector::Visitor& visitor) const;
         void traverseInReverseZOrder(const LayerVector::Visitor& visitor) const;
@@ -466,11 +473,14 @@ private:
                                       const std::vector<int32_t>& allowedConfigs) override;
     status_t getAllowedDisplayConfigs(const sp<IBinder>& displayToken,
                                       std::vector<int32_t>* outAllowedConfigs) override;
+    status_t setDesiredDisplayConfigSpecs(const sp<IBinder>& displayToken, int32_t displayModeId,
+                                          float minRefreshRate, float maxRefreshRate) override;
     status_t getDisplayBrightnessSupport(const sp<IBinder>& displayToken,
                                          bool* outSupport) const override;
     status_t setDisplayBrightness(const sp<IBinder>& displayToken, float brightness) const override;
     status_t notifyPowerHint(int32_t hintId) override;
-
+    status_t setGlobalShadowSettings(const half4& ambientColor, const half4& spotColor,
+                                     float lightPosY, float lightPosZ, float lightRadius) override;
     /* ------------------------------------------------------------------------
      * DeathRecipient interface
      */
@@ -484,11 +494,14 @@ private:
     /* ------------------------------------------------------------------------
      * HWC2::ComposerCallback / HWComposer::EventHandler interface
      */
-    void onVsyncReceived(int32_t sequenceId, hwc2_display_t hwcDisplayId,
-                         int64_t timestamp) override;
+    void onVsyncReceived(int32_t sequenceId, hwc2_display_t hwcDisplayId, int64_t timestamp,
+                         std::optional<hwc2_vsync_period_t> vsyncPeriod) override;
     void onHotplugReceived(int32_t sequenceId, hwc2_display_t hwcDisplayId,
                            HWC2::Connection connection) override;
     void onRefreshReceived(int32_t sequenceId, hwc2_display_t hwcDisplayId) override;
+    void onVsyncPeriodTimingChangedReceived(
+            int32_t sequenceId, hwc2_display_t display,
+            const hwc_vsync_period_change_timeline_t& updatedTimeline) override;
 
     /* ------------------------------------------------------------------------
      * Message handling
@@ -1147,6 +1160,9 @@ private:
 
     bool mPendingSyncInputWindows GUARDED_BY(mStateLock);
     Hwc2::impl::PowerAdvisor mPowerAdvisor;
+
+    // This should only be accessed on the main thread.
+    nsecs_t mFrameStartTime = 0;
 
     std::unique_ptr<RefreshRateOverlay> mRefreshRateOverlay;
 

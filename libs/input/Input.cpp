@@ -20,6 +20,7 @@
 #include <limits.h>
 
 #include <input/Input.h>
+#include <input/InputDevice.h>
 #include <input/InputEventLabels.h>
 
 #ifdef __ANDROID__
@@ -40,6 +41,21 @@ const char* motionClassificationToString(MotionClassification classification) {
 }
 
 // --- InputEvent ---
+
+const char* inputEventTypeToString(int32_t type) {
+    switch (type) {
+        case AINPUT_EVENT_TYPE_KEY: {
+            return "KEY";
+        }
+        case AINPUT_EVENT_TYPE_MOTION: {
+            return "MOTION";
+        }
+        case AINPUT_EVENT_TYPE_FOCUS: {
+            return "FOCUS";
+        }
+    }
+    return "UNKNOWN";
+}
 
 void InputEvent::initialize(int32_t deviceId, int32_t source, int32_t displayId) {
     mDeviceId = deviceId;
@@ -587,6 +603,20 @@ int32_t MotionEvent::getAxisFromLabel(const char* label) {
     return getAxisByLabel(label);
 }
 
+// --- FocusEvent ---
+
+void FocusEvent::initialize(bool hasFocus, bool inTouchMode) {
+    InputEvent::initialize(ReservedInputDeviceId::VIRTUAL_KEYBOARD_ID, AINPUT_SOURCE_UNKNOWN,
+                           ADISPLAY_ID_NONE);
+    mHasFocus = hasFocus;
+    mInTouchMode = inTouchMode;
+}
+
+void FocusEvent::initialize(const FocusEvent& from) {
+    InputEvent::initialize(from);
+    mHasFocus = from.mHasFocus;
+    mInTouchMode = from.mInTouchMode;
+}
 
 // --- PooledInputEventFactory ---
 
@@ -595,43 +625,52 @@ PooledInputEventFactory::PooledInputEventFactory(size_t maxPoolSize) :
 }
 
 PooledInputEventFactory::~PooledInputEventFactory() {
-    for (size_t i = 0; i < mKeyEventPool.size(); i++) {
-        delete mKeyEventPool.itemAt(i);
-    }
-    for (size_t i = 0; i < mMotionEventPool.size(); i++) {
-        delete mMotionEventPool.itemAt(i);
-    }
 }
 
 KeyEvent* PooledInputEventFactory::createKeyEvent() {
-    if (!mKeyEventPool.isEmpty()) {
-        KeyEvent* event = mKeyEventPool.top();
-        mKeyEventPool.pop();
-        return event;
+    if (mKeyEventPool.empty()) {
+        return new KeyEvent();
     }
-    return new KeyEvent();
+    KeyEvent* event = mKeyEventPool.front().release();
+    mKeyEventPool.pop();
+    return event;
 }
 
 MotionEvent* PooledInputEventFactory::createMotionEvent() {
-    if (!mMotionEventPool.isEmpty()) {
-        MotionEvent* event = mMotionEventPool.top();
-        mMotionEventPool.pop();
-        return event;
+    if (mMotionEventPool.empty()) {
+        return new MotionEvent();
     }
-    return new MotionEvent();
+    MotionEvent* event = mMotionEventPool.front().release();
+    mMotionEventPool.pop();
+    return event;
+}
+
+FocusEvent* PooledInputEventFactory::createFocusEvent() {
+    if (mFocusEventPool.empty()) {
+        return new FocusEvent();
+    }
+    FocusEvent* event = mFocusEventPool.front().release();
+    mFocusEventPool.pop();
+    return event;
 }
 
 void PooledInputEventFactory::recycle(InputEvent* event) {
     switch (event->getType()) {
     case AINPUT_EVENT_TYPE_KEY:
         if (mKeyEventPool.size() < mMaxPoolSize) {
-            mKeyEventPool.push(static_cast<KeyEvent*>(event));
+            mKeyEventPool.push(std::unique_ptr<KeyEvent>(static_cast<KeyEvent*>(event)));
             return;
         }
         break;
     case AINPUT_EVENT_TYPE_MOTION:
         if (mMotionEventPool.size() < mMaxPoolSize) {
-            mMotionEventPool.push(static_cast<MotionEvent*>(event));
+            mMotionEventPool.push(std::unique_ptr<MotionEvent>(static_cast<MotionEvent*>(event)));
+            return;
+        }
+        break;
+    case AINPUT_EVENT_TYPE_FOCUS:
+        if (mFocusEventPool.size() < mMaxPoolSize) {
+            mFocusEventPool.push(std::unique_ptr<FocusEvent>(static_cast<FocusEvent*>(event)));
             return;
         }
         break;
