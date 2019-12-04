@@ -77,9 +77,9 @@ BufferLayer::~BufferLayer() {
         // with the clone layer trying to use the deleted texture.
         mFlinger->deleteTextureAsync(mTextureName);
     }
-    const int32_t layerID = getSequence();
-    mFlinger->mTimeStats->onDestroy(layerID);
-    mFlinger->mFrameTracer->onDestroy(layerID);
+    const int32_t layerId = getSequence();
+    mFlinger->mTimeStats->onDestroy(layerId);
+    mFlinger->mFrameTracer->onDestroy(layerId);
 }
 
 void BufferLayer::useSurfaceDamage() {
@@ -286,7 +286,7 @@ bool BufferLayer::onPreComposition(nsecs_t refreshStartTime) {
     return hasReadyFrame();
 }
 
-bool BufferLayer::onPostComposition(const std::optional<DisplayId>& displayId,
+bool BufferLayer::onPostComposition(sp<const DisplayDevice> displayDevice,
                                     const std::shared_ptr<FenceTime>& glDoneFence,
                                     const std::shared_ptr<FenceTime>& presentFence,
                                     const CompositorTiming& compositorTiming) {
@@ -305,8 +305,16 @@ bool BufferLayer::onPostComposition(const std::optional<DisplayId>& displayId,
     nsecs_t desiredPresentTime = mBufferInfo.mDesiredPresentTime;
     mFrameTracker.setDesiredPresentTime(desiredPresentTime);
 
-    const int32_t layerID = getSequence();
-    mFlinger->mTimeStats->setDesiredTime(layerID, mCurrentFrameNumber, desiredPresentTime);
+    const int32_t layerId = getSequence();
+    mFlinger->mTimeStats->setDesiredTime(layerId, mCurrentFrameNumber, desiredPresentTime);
+
+    const auto outputLayer = findOutputLayerForDisplay(displayDevice);
+    if (outputLayer && outputLayer->requiresClientComposition()) {
+        nsecs_t clientCompositionTimestamp = outputLayer->getState().clientCompositionTimestamp;
+        mFlinger->mFrameTracer->traceTimestamp(layerId, getCurrentBufferId(), mCurrentFrameNumber,
+                                               clientCompositionTimestamp,
+                                               FrameTracer::FrameEvent::FALLBACK_COMPOSITION);
+    }
 
     std::shared_ptr<FenceTime> frameReadyFence = mBufferInfo.mFenceTime;
     if (frameReadyFence->isValid()) {
@@ -317,17 +325,18 @@ bool BufferLayer::onPostComposition(const std::optional<DisplayId>& displayId,
         mFrameTracker.setFrameReadyTime(desiredPresentTime);
     }
 
+    const auto displayId = displayDevice->getId();
     if (presentFence->isValid()) {
-        mFlinger->mTimeStats->setPresentFence(layerID, mCurrentFrameNumber, presentFence);
-        mFlinger->mFrameTracer->traceFence(layerID, getCurrentBufferId(), mCurrentFrameNumber,
+        mFlinger->mTimeStats->setPresentFence(layerId, mCurrentFrameNumber, presentFence);
+        mFlinger->mFrameTracer->traceFence(layerId, getCurrentBufferId(), mCurrentFrameNumber,
                                            presentFence, FrameTracer::FrameEvent::PRESENT_FENCE);
         mFrameTracker.setActualPresentFence(std::shared_ptr<FenceTime>(presentFence));
     } else if (displayId && mFlinger->getHwComposer().isConnected(*displayId)) {
         // The HWC doesn't support present fences, so use the refresh
         // timestamp instead.
         const nsecs_t actualPresentTime = mFlinger->getHwComposer().getRefreshTimestamp(*displayId);
-        mFlinger->mTimeStats->setPresentTime(layerID, mCurrentFrameNumber, actualPresentTime);
-        mFlinger->mFrameTracer->traceTimestamp(layerID, getCurrentBufferId(), mCurrentFrameNumber,
+        mFlinger->mTimeStats->setPresentTime(layerId, mCurrentFrameNumber, actualPresentTime);
+        mFlinger->mFrameTracer->traceTimestamp(layerId, getCurrentBufferId(), mCurrentFrameNumber,
                                                actualPresentTime,
                                                FrameTracer::FrameEvent::PRESENT_FENCE);
         mFrameTracker.setActualPresentTime(actualPresentTime);

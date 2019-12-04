@@ -551,6 +551,10 @@ void Output::updateAndWriteCompositionState(
     ATRACE_CALL();
     ALOGV(__FUNCTION__);
 
+    if (!getState().isEnabled) {
+        return;
+    }
+
     for (auto* layer : getOutputLayersOrderedByZ()) {
         layer->updateCompositionState(refreshArgs.updatingGeometryThisFrame,
                                       refreshArgs.devOptForceClientComposition);
@@ -900,6 +904,7 @@ std::vector<renderengine::LayerSettings> Output::generateClientCompositionReques
                     layerSettings.disableBlending = true;
                 }
 
+                layer->editState().clientCompositionTimestamp = systemTime();
                 clientCompositionLayers.push_back(*result);
             }
         }
