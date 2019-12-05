@@ -3927,7 +3927,8 @@ bool SurfaceFlinger::doComposeSurfaces(const sp<DisplayDevice>& displayDevice,
                                               HWC2::DisplayCapability::SkipClientColorTransform);
 
         // Compute the global color transform matrix.
-        applyColorMatrix = !hasDeviceComposition && !skipClientColorTransform;
+        applyColorMatrix = !hasDeviceComposition && !skipClientColorTransform &&
+                           (displayDevice->isPrimary() || displayDevice->getIsDisplayBuiltInType());
         if (applyColorMatrix) {
             clientCompositionDisplay.colorTransform = displayState.colorTransformMat;
         }
