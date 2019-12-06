@@ -2484,11 +2484,13 @@ void SurfaceFlinger::forceResyncModel() NO_THREAD_SAFETY_ANALYSIS {
     // as soon as change is fps(period) is observed.
 
     if (period > mVsyncPeriod.at(mVsyncPeriod.size() - 1)) {
-        mScheduler->resyncToHardwareVsync(true, period);
+        ATRACE_CALL();
+        mScheduler->resyncToHardwareVsync(true, period, true /* force resync */);
         mVsyncPeriod.push_back(period);
     } else if (period < mVsyncPeriod.at(mVsyncPeriod.size() - 1)) {
         // Vsync period changed. Trigger resync.
-        mScheduler->resyncToHardwareVsync(true, period);
+        ATRACE_CALL();
+        mScheduler->resyncToHardwareVsync(true, period, true /* force resync */);
         mVsyncPeriod = {};
     }
 }
@@ -3934,7 +3936,8 @@ bool SurfaceFlinger::doComposeSurfaces(const sp<DisplayDevice>& displayDevice,
                                               HWC2::DisplayCapability::SkipClientColorTransform);
 
         // Compute the global color transform matrix.
-        applyColorMatrix = !hasDeviceComposition && !skipClientColorTransform;
+        applyColorMatrix = !hasDeviceComposition && !skipClientColorTransform &&
+                           (displayDevice->isPrimary() || displayDevice->getIsDisplayBuiltInType());
         if (applyColorMatrix) {
             clientCompositionDisplay.colorTransform = displayState.colorTransformMat;
         }
