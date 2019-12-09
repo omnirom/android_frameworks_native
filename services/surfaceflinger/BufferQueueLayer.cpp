@@ -119,6 +119,7 @@ bool BufferQueueLayer::shouldPresentNow(nsecs_t expectedPresentTime) const {
         bufferStats.queued_frames = getQueuedFrameCount();
         bufferStats.auto_timestamp = mQueueItems[0].mIsAutoTimestamp;
         bufferStats.timestamp = mQueueItems[0].mTimestamp;
+        bufferStats.dequeue_latency = getDequeueLatency();
         isDue = mFlinger->mSmoMo->ShouldPresentNow(bufferStats, expectedPresentTime);
     }
 
@@ -424,8 +425,9 @@ void BufferQueueLayer::setHwcLayerBuffer(const sp<const DisplayDevice>& display)
     (*outputLayer->editState().hwc)
             .hwcBufferCache.getHwcBuffer(slot, mActiveBuffer, &hwcSlot, &hwcBuffer);
 
-    if (mPrimaryDisplayOnly && (!mSetLayerAsMask)) {
-        mSetLayerAsMask = true;
+    // send notch layer hint to HWC whenever there is a outlayer change.
+    if (mPrimaryDisplayOnly && (mPreviousLayerId != hwcLayer->getId())) {
+        mPreviousLayerId = hwcLayer->getId();
         mFlinger->setLayerAsMask(display, (hwcLayer->getId()));
     }
 
@@ -496,6 +498,7 @@ void BufferQueueLayer::onFrameAvailable(const BufferItem& item) {
         bufferStats.queued_frames = getQueuedFrameCount();
         bufferStats.auto_timestamp = item.mIsAutoTimestamp;
         bufferStats.timestamp = item.mTimestamp;
+        bufferStats.dequeue_latency = getDequeueLatency();
         mFlinger->mSmoMo->CollectLayerStats(bufferStats);
     }
 
@@ -522,13 +525,14 @@ void BufferQueueLayer::onFrameAvailable(const BufferItem& item) {
             frameInfo.vsync_period = stats.vsyncPeriod;
             mLastTimeStamp = frameInfo.current_timestamp;
             {
-                Mutex::Autolock lock(mFlinger->mStateLock);
+                Mutex::Autolock lock(mFlinger->mDolphinStateLock);
                 frameInfo.transparent_region = this->visibleNonTransparentRegion.isEmpty();
-                crop = this->getContentCrop();
-                frameInfo.width = crop.getWidth();
-                frameInfo.height = crop.getHeight();
-                frameInfo.layer_name = this->getName().c_str();
             }
+            crop = this->getContentCrop();
+            frameInfo.width = crop.getWidth();
+            frameInfo.height = crop.getHeight();
+            frameInfo.layer_name = this->getName().c_str();
+
             mFlinger->mFrameExtn->SetFrameInfo(frameInfo);
         }
         mFlinger->signalLayerUpdate();
