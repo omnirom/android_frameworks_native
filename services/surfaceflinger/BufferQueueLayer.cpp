@@ -426,8 +426,9 @@ void BufferQueueLayer::setHwcLayerBuffer(const sp<const DisplayDevice>& display)
     (*outputLayer->editState().hwc)
             .hwcBufferCache.getHwcBuffer(slot, mActiveBuffer, &hwcSlot, &hwcBuffer);
 
-    if (mPrimaryDisplayOnly && (!mSetLayerAsMask)) {
-        mSetLayerAsMask = true;
+    // send notch layer hint to HWC whenever there is a outlayer change.
+    if (mPrimaryDisplayOnly && (mPreviousLayerId != hwcLayer->getId())) {
+        mPreviousLayerId = hwcLayer->getId();
         mFlinger->setLayerAsMask(display, (hwcLayer->getId()));
     }
 
