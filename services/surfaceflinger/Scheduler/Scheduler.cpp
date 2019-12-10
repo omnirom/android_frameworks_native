@@ -258,10 +258,13 @@ void Scheduler::VsyncState::resync(const GetVsyncPeriod& getVsyncPeriod) {
     static constexpr nsecs_t kIgnoreDelay = ms2ns(500);
 
     const nsecs_t now = systemTime();
-    const nsecs_t last = lastResyncTime.exchange(now);
+    const nsecs_t last = lastResyncTime;
 
     if (now - last > kIgnoreDelay) {
+        ATRACE_BEGIN("scheduler.resyncToHardwareVsync");
         scheduler.resyncToHardwareVsync(false, getVsyncPeriod());
+        lastResyncTime.exchange(now);
+        ATRACE_END();
     }
 }
 
