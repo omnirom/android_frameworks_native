@@ -70,6 +70,7 @@
 namespace android {
 
 using base::StringAppendF;
+using android::hardware::graphics::common::V1_0::BufferUsage;
 
 std::atomic<int32_t> Layer::sSequence{1};
 
@@ -655,6 +656,13 @@ bool Layer::isSecure() const {
 bool Layer::isSecureDisplay() const {
     const sp<GraphicBuffer>& activeBuffer(mActiveBuffer);
     return activeBuffer && (activeBuffer->getUsage() & GRALLOC_USAGE_PRIVATE_SECURE_DISPLAY);
+}
+
+bool Layer::isSecureCamera() const {
+    const sp<GraphicBuffer>& activeBuffer(mActiveBuffer);
+    bool protected_buffer = activeBuffer && (activeBuffer->getUsage() & BufferUsage::PROTECTED);
+    bool camera_output = activeBuffer && (activeBuffer->getUsage() & BufferUsage::CAMERA_OUTPUT);
+    return protected_buffer && camera_output;
 }
 
 void Layer::setVisibleRegion(const Region& visibleRegion) {
