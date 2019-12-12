@@ -97,6 +97,10 @@ cc_defaults {
         "android.hardware.power@1.3",
         "libhidlbase",
     ],
+    // TODO (marissaw): this library is not used by surfaceflinger. This is here so
+    // the library compiled in a way that is accessible to system partition when running
+    // IMapper's VTS.
+    required: ["libgralloctypes"]
 }
 
 cc_defaults {
@@ -163,12 +167,14 @@ filegroup {
         "Scheduler/LayerInfo.cpp",
         "Scheduler/MessageQueue.cpp",
         "Scheduler/PhaseOffsets.cpp",
+        "Scheduler/RefreshRateConfigs.cpp",
         "Scheduler/Scheduler.cpp",
         "Scheduler/SchedulerUtils.cpp",
         "Scheduler/Timer.cpp",
         "Scheduler/VSyncDispatchTimerQueue.cpp",
         "Scheduler/VSyncPredictor.cpp",
         "Scheduler/VSyncModulator.cpp",
+        "Scheduler/VSyncReactor.cpp",
         "StartPropertySetThread.cpp",
         "SurfaceFlinger.cpp",
         "SurfaceFlingerDefaultFactory.cpp",

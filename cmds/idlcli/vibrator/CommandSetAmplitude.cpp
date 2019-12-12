@@ -54,7 +54,8 @@ class CommandSetAmplitude : public Command {
         Status ret;
 
         if (auto hal = getHal<aidl::IVibrator>()) {
-            auto status = hal->call(&aidl::IVibrator::setAmplitude, mAmplitude);
+            auto status = hal->call(&aidl::IVibrator::setAmplitude,
+                                    static_cast<float>(mAmplitude) / UINT8_MAX);
             statusStr = status.toString8();
             ret = status.isOk() ? OK : ERROR;
         } else if (auto hal = getHal<V1_0::IVibrator>()) {

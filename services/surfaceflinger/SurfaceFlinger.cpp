@@ -1363,8 +1363,11 @@ nsecs_t SurfaceFlinger::getVsyncPeriod() const {
 }
 
 void SurfaceFlinger::onVsyncReceived(int32_t sequenceId, hwc2_display_t hwcDisplayId,
-                                     int64_t timestamp) {
+                                     int64_t timestamp,
+                                     std::optional<hwc2_vsync_period_t> /*vsyncPeriod*/) {
     ATRACE_NAME("SF onVsync");
+
+    // TODO(b/140201379): use vsyncPeriod in the new DispSync
 
     Mutex::Autolock lock(mStateLock);
     // Ignore any vsyncs from a previous hardware composer.
@@ -1440,6 +1443,12 @@ void SurfaceFlinger::onHotplugReceived(int32_t sequenceId, hwc2_display_t hwcDis
     }
 
     setTransactionFlags(eDisplayTransactionNeeded);
+}
+
+void SurfaceFlinger::onVsyncPeriodTimingChangedReceived(
+        int32_t /*sequenceId*/, hwc2_display_t /*display*/,
+        const hwc_vsync_period_change_timeline_t& /*updatedTimeline*/) {
+    // TODO(b/142753004): use timeline when changing refresh rate
 }
 
 void SurfaceFlinger::onRefreshReceived(int sequenceId, hwc2_display_t /*hwcDisplayId*/) {
@@ -1601,6 +1610,7 @@ void SurfaceFlinger::onMessageReceived(int32_t what) NO_THREAD_SAFETY_ANALYSIS {
     ATRACE_CALL();
     switch (what) {
         case MessageQueue::INVALIDATE: {
+            const nsecs_t frameStart = systemTime();
             // calculate the expected present time once and use the cached
             // value throughout this frame to make sure all layers are
             // seeing this same value.
@@ -1665,6 +1675,13 @@ void SurfaceFlinger::onMessageReceived(int32_t what) NO_THREAD_SAFETY_ANALYSIS {
                 // Signal a refresh if a transaction modified the window state,
                 // a new buffer was latched, or if HWC has requested a full
                 // repaint
+                if (mFrameStartTime <= 0) {
+                    // We should only use the time of the first invalidate
+                    // message that signals a refresh as the beginning of the
+                    // frame. Otherwise the real frame time will be
+                    // underestimated.
+                    mFrameStartTime = frameStart;
+                }
                 signalRefresh();
             }
             break;
@@ -1715,12 +1732,7 @@ void SurfaceFlinger::handleMessageRefresh() {
     refreshArgs.layersWithQueuedFrames.reserve(mLayersWithQueuedFrames.size());
     for (sp<Layer> layer : mLayersWithQueuedFrames) {
         auto compositionLayer = layer->getCompositionLayer();
-        if (compositionLayer) {
-            refreshArgs.layersWithQueuedFrames.push_back(compositionLayer.get());
-            mFrameTracer->traceTimestamp(layer->getSequence(), layer->getCurrentBufferId(),
-                                         layer->getCurrentFrameNumber(), systemTime(),
-                                         FrameTracer::FrameEvent::HWC_COMPOSITION_QUEUED);
-        }
+        if (compositionLayer) refreshArgs.layersWithQueuedFrames.push_back(compositionLayer.get());
     }
 
     refreshArgs.repaintEverything = mRepaintEverything.exchange(false);
@@ -1748,6 +1760,9 @@ void SurfaceFlinger::handleMessageRefresh() {
     mGeometryInvalid = false;
 
     mCompositionEngine->present(refreshArgs);
+    mTimeStats->recordFrameDuration(mFrameStartTime, systemTime());
+    // Reset the frame start time now that we've recorded this frame.
+    mFrameStartTime = 0;
 
     postFrame();
     postComposition();
@@ -3717,7 +3732,6 @@ void SurfaceFlinger::setPowerModeInternal(const sp<DisplayDevice>& display, int 
     }
 
     if (currentMode == HWC_POWER_MODE_OFF) {
-        // Turn on the display
         getHwComposer().setPowerMode(*displayId, mode);
         if (display->isPrimary() && mode != HWC_POWER_MODE_DOZE_SUSPEND) {
             setVsyncEnabledInHWC(*displayId, mHWCVsyncPendingState);
@@ -4382,13 +4396,15 @@ status_t SurfaceFlinger::CheckTransactCodeCredentials(uint32_t code) {
         case SET_ACTIVE_CONFIG:
         case SET_ALLOWED_DISPLAY_CONFIGS:
         case GET_ALLOWED_DISPLAY_CONFIGS:
+        case SET_DESIRED_DISPLAY_CONFIG_SPECS:
         case SET_ACTIVE_COLOR_MODE:
         case INJECT_VSYNC:
         case SET_POWER_MODE:
         case GET_DISPLAYED_CONTENT_SAMPLING_ATTRIBUTES:
         case SET_DISPLAY_CONTENT_SAMPLING_ENABLED:
         case GET_DISPLAYED_CONTENT_SAMPLE:
-        case NOTIFY_POWER_HINT: {
+        case NOTIFY_POWER_HINT:
+        case SET_GLOBAL_SHADOW_SETTINGS: {
             if (!callingThreadHasUnscopedSurfaceFlingerAccess()) {
                 IPCThreadState* ipc = IPCThreadState::self();
                 ALOGE("Permission Denial: can't access SurfaceFlinger pid=%d, uid=%d",
@@ -5475,6 +5491,23 @@ status_t SurfaceFlinger::getAllowedDisplayConfigs(const sp<IBinder>& displayToke
     return NO_ERROR;
 }
 
+status_t SurfaceFlinger::setDesiredDisplayConfigSpecs(const sp<IBinder>& displayToken,
+                                                      int32_t defaultModeId, float minRefreshRate,
+                                                      float maxRefreshRate) {
+    ATRACE_CALL();
+
+    if (!displayToken) {
+        return BAD_VALUE;
+    }
+
+    ALOGD("setDesiredDisplayConfigSpecs: defaultId: %d min: %.f max: %.f", defaultModeId,
+          minRefreshRate, maxRefreshRate);
+    // TODO(b/142507213): In order to minimize the changelist size, this is going to be implemented
+    // in the follow up CL.
+
+    return NO_ERROR;
+}
+
 void SurfaceFlinger::SetInputWindowsListener::onSetInputWindowsFinished() {
     mFlinger->setInputWindowsFinished();
 }
@@ -5498,11 +5531,41 @@ void SurfaceFlinger::onLayerFirstRef(Layer* layer) {
 
 void SurfaceFlinger::onLayerDestroyed(Layer* layer) {
     mNumLayers--;
+    removeFromOffscreenLayers(layer);
+}
+
+// WARNING: ONLY CALL THIS FROM LAYER DTOR
+// Here we add children in the current state to offscreen layers and remove the
+// layer itself from the offscreen layer list.  Since
+// this is the dtor, it is safe to access the current state.  This keeps us
+// from dangling children layers such that they are not reachable from the
+// Drawing state nor the offscreen layer list
+// See b/141111965
+void SurfaceFlinger::removeFromOffscreenLayers(Layer* layer) {
+    for (auto& child : layer->getCurrentChildren()) {
+        mOffscreenLayers.emplace(child.get());
+    }
     mOffscreenLayers.erase(layer);
 }
 
 void SurfaceFlinger::bufferErased(const client_cache_t& clientCacheId) {
     getRenderEngine().unbindExternalTextureBuffer(clientCacheId.id);
+}
+
+status_t SurfaceFlinger::setGlobalShadowSettings(const half4& ambientColor, const half4& spotColor,
+                                                 float lightPosY, float lightPosZ,
+                                                 float lightRadius) {
+    Mutex::Autolock _l(mStateLock);
+    mCurrentState.globalShadowSettings.ambientColor = vec4(ambientColor);
+    mCurrentState.globalShadowSettings.spotColor = vec4(spotColor);
+    mCurrentState.globalShadowSettings.lightPos.y = lightPosY;
+    mCurrentState.globalShadowSettings.lightPos.z = lightPosZ;
+    mCurrentState.globalShadowSettings.lightRadius = lightRadius;
+
+    // these values are overridden when calculating the shadow settings for a layer.
+    mCurrentState.globalShadowSettings.lightPos.x = 0.f;
+    mCurrentState.globalShadowSettings.length = 0.f;
+    return NO_ERROR;
 }
 
 } // namespace android
