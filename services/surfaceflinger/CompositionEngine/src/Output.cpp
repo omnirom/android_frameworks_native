@@ -799,7 +799,8 @@ std::optional<base::unique_fd> Output::composeSurfaces(const Region& debugRegion
     // Generate the client composition requests for the layers on this output.
     std::vector<renderengine::LayerSettings> clientCompositionLayers =
             generateClientCompositionRequests(supportsProtectedContent,
-                                              clientCompositionDisplay.clearRegion);
+                                              clientCompositionDisplay.clearRegion,
+                                              clientCompositionDisplay.outputDataspace);
     appendRegionFlashRequests(debugRegion, clientCompositionLayers);
 
     // If we the display is secure, protected content support is enabled, and at
@@ -838,9 +839,18 @@ std::optional<base::unique_fd> Output::composeSurfaces(const Region& debugRegion
         setExpensiveRenderingExpected(true);
     }
 
+    const nsecs_t renderEngineStart = systemTime();
     renderEngine.drawLayers(clientCompositionDisplay, clientCompositionLayers,
                             buf->getNativeBuffer(), /*useFramebufferCache=*/true, std::move(fd),
                             &readyFence);
+    auto& timeStats = getCompositionEngine().getTimeStats();
+    if (readyFence.get() < 0) {
+        timeStats.recordRenderEngineDuration(renderEngineStart, systemTime());
+    } else {
+        timeStats.recordRenderEngineDuration(renderEngineStart,
+                                             std::make_shared<FenceTime>(
+                                                     new Fence(dup(readyFence.get()))));
+    }
 
     if (expensiveRenderingExpected) {
         setExpensiveRenderingExpected(false);
@@ -850,7 +860,7 @@ std::optional<base::unique_fd> Output::composeSurfaces(const Region& debugRegion
 }
 
 std::vector<renderengine::LayerSettings> Output::generateClientCompositionRequests(
-        bool supportsProtectedContent, Region& clearRegion) {
+        bool supportsProtectedContent, Region& clearRegion, ui::Dataspace outputDataspace) {
     std::vector<renderengine::LayerSettings> clientCompositionLayers;
     ALOGV("Rendering client layers");
 
@@ -902,6 +912,13 @@ std::vector<renderengine::LayerSettings> Output::generateClientCompositionReques
                     layerSettings.source.solidColor = half3(0.0, 0.0, 0.0);
                     layerSettings.alpha = half(0.0);
                     layerSettings.disableBlending = true;
+                } else {
+                    std::optional<renderengine::LayerSettings> shadowLayer =
+                            layerFE.prepareShadowClientComposition(*result, outputState.viewport,
+                                                                   outputDataspace);
+                    if (shadowLayer) {
+                        clientCompositionLayers.push_back(*shadowLayer);
+                    }
                 }
 
                 layer->editState().clientCompositionTimestamp = systemTime();

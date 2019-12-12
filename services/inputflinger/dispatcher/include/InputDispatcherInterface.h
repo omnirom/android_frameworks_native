@@ -63,12 +63,23 @@ public:
     /* Called by the heatbeat to ensures that the dispatcher has not deadlocked. */
     virtual void monitor() = 0;
 
-    /* Runs a single iteration of the dispatch loop.
-     * Nominally processes one queued event, a timeout, or a response from an input consumer.
-     *
-     * This method should only be called on the input dispatcher thread.
+    /**
+     * Wait until dispatcher is idle. That means, there are no further events to be processed,
+     * and all of the policy callbacks have been completed.
+     * Return true if the dispatcher is idle.
+     * Return false if the timeout waiting for the dispatcher to become idle has expired.
      */
-    virtual void dispatchOnce() = 0;
+    virtual bool waitForIdle() = 0;
+
+    /* Make the dispatcher start processing events.
+     *
+     * The dispatcher will start consuming events from the InputListenerInterface
+     * in the order that they were received.
+     */
+    virtual status_t start() = 0;
+
+    /* Makes the dispatcher stop processing events. */
+    virtual status_t stop() = 0;
 
     /* Injects an input event and optionally waits for sync.
      * The synchronization mode determines whether the method blocks while waiting for

@@ -46,6 +46,7 @@ cc_defaults {
         "ConsumerBase.cpp",
         "CpuConsumer.cpp",
         "DebugEGLImageTracker.cpp",
+        "DisplayEventDispatcher.cpp",
         "DisplayEventReceiver.cpp",
         "GLConsumer.cpp",
         "GuiConfig.cpp",
