@@ -88,8 +88,11 @@ using smomo::SmomoIntf;
 
 namespace composer {
 class FrameExtnIntf;
-}
+class LayerExtnIntf;
+} // namespace composer
+
 using composer::FrameExtnIntf;
+using composer::LayerExtnIntf;
 
 namespace android {
 
@@ -178,6 +181,29 @@ public:
     // use to differentiate callbacks from different hardware composer
     // instances. Each hardware composer instance gets a different sequence id.
     int32_t mComposerSequenceId = 0;
+};
+
+class LayerExtWrapper {
+public:
+    LayerExtWrapper() {}
+    ~LayerExtWrapper();
+
+    static std::unique_ptr<LayerExtWrapper> Create();
+    int getLayerClass(const std::string &name);
+
+    LayerExtWrapper(const LayerExtWrapper&) = delete;
+    LayerExtWrapper& operator=(const LayerExtWrapper&) = delete;
+
+private:
+    bool Init();
+
+    LayerExtnIntf *mInst = nullptr;
+    void *mLayerExtLibHandle = nullptr;
+
+    using CreateLayerExtnFuncPtr = std::add_pointer<bool(uint16_t, LayerExtnIntf**)>::type;
+    using DestroyLayerExtnFuncPtr = std::add_pointer<void(LayerExtnIntf*)>::type;
+    CreateLayerExtnFuncPtr mLayerExtCreateFunc;
+    DestroyLayerExtnFuncPtr mLayerExtDestroyFunc;
 };
 
 class SurfaceFlinger : public BnSurfaceComposer,
@@ -1292,6 +1318,9 @@ private:
     void *mFrameExtnLibHandle = nullptr;
     bool (*mCreateFrameExtnFunc)(FrameExtnIntf **interface) = nullptr;
     bool (*mDestroyFrameExtnFunc)(FrameExtnIntf *interface) = nullptr;
+
+    bool mUseLayerExt = false;
+    std::unique_ptr<LayerExtWrapper> mLayerExt;
 };
 
 } // namespace android
