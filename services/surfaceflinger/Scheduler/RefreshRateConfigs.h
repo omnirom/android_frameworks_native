@@ -39,7 +39,7 @@ public:
     // Enum to indicate which vsync rate to run at. Power saving is intended to be the lowest
     // (eg. when the screen is in AOD mode or off), default is the old 60Hz, and performance
     // is the new 90Hz. Eventually we want to have a way for vendors to map these in the configs.
-    enum class RefreshRateType {POWER_SAVING, LOW0, LOW1, LOW2, DEFAULT, PERFORMANCE, PERF1, PERF2};
+    enum class RefreshRateType {POWER_SAVING, LOW0, LOW1, LOW2, DEFAULT, PERFORMANCE, HIGH1, HIGH2};
 
     struct RefreshRate {
         // This config ID corresponds to the position of the config in the vector that is stored
@@ -123,7 +123,7 @@ public:
                       return a.second > b.second;
                   });
 
-        int maxRefreshType = (int)RefreshRateType::PERF2;
+        int maxRefreshType = (int)RefreshRateType::HIGH2;
         int lowRefreshType = (int)RefreshRateType::LOW0;
         int defaultType = (int)RefreshRateType::DEFAULT;
         int type = (int)RefreshRateType::DEFAULT;
@@ -131,7 +131,7 @@ public:
         // When the configs are sorted by refresh rate. For configs with refresh rate lower than
         // DEFAULT_FPS, they are supported with LOW0, LOW1 and LOW2 refresh rate types. For the
         // configs with refresh rate higher than DEFAULT_FPS, they are supported with PERFORMANCE,
-        // PERF1 and PERF2 refresh rate types.
+        // HIGH1 and HIGH2 refresh rate types.
 
         for (int j = 0; j < configIdToVsyncPeriod.size(); j++) {
             nsecs_t vsyncPeriod = configIdToVsyncPeriod[j].second;
