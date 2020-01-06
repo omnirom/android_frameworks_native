@@ -184,6 +184,10 @@ public:
             DisplayId displayId, size_t configId,
             const HWC2::VsyncPeriodChangeConstraints& constraints,
             HWC2::VsyncPeriodChangeTimeline* outTimeline) = 0;
+    virtual status_t setAutoLowLatencyMode(DisplayId displayId, bool on) = 0;
+    virtual status_t getSupportedContentTypes(
+            DisplayId displayId, std::vector<HWC2::ContentType>* outSupportedContentTypes) = 0;
+    virtual status_t setContentType(DisplayId displayId, HWC2::ContentType contentType) = 0;
 
     // for debugging ----------------------------------------------------------
     virtual void dump(std::string& out) const = 0;
@@ -203,6 +207,7 @@ namespace impl {
 class HWComposer final : public android::HWComposer {
 public:
     explicit HWComposer(std::unique_ptr<Hwc2::Composer> composer);
+    explicit HWComposer(const std::string& composerServiceName);
 
     ~HWComposer() override;
 
@@ -313,11 +318,15 @@ public:
     status_t setActiveConfigWithConstraints(DisplayId displayId, size_t configId,
                                             const HWC2::VsyncPeriodChangeConstraints& constraints,
                                             HWC2::VsyncPeriodChangeTimeline* outTimeline) override;
+    status_t setAutoLowLatencyMode(DisplayId displayId, bool) override;
+    status_t getSupportedContentTypes(DisplayId displayId,
+                                      std::vector<HWC2::ContentType>*) override;
+    status_t setContentType(DisplayId displayId, HWC2::ContentType) override;
 
     // for debugging ----------------------------------------------------------
     void dump(std::string& out) const override;
 
-    Hwc2::Composer* getComposer() const override { return mHwcDevice->getComposer(); }
+    Hwc2::Composer* getComposer() const override { return mComposer.get(); }
 
     // TODO(b/74619554): Remove special cases for internal/external display.
     std::optional<hwc2_display_t> getInternalHwcDisplayId() const override {
@@ -335,11 +344,12 @@ private:
     friend TestableSurfaceFlinger;
 
     std::optional<DisplayIdentificationInfo> onHotplugConnect(hwc2_display_t hwcDisplayId);
+    void loadCapabilities();
+    uint32_t getMaxVirtualDisplayCount() const;
 
     struct DisplayData {
         bool isVirtual = false;
-
-        HWC2::Display* hwcDisplay = nullptr;
+        std::unique_ptr<HWC2::Display> hwcDisplay;
         sp<Fence> lastPresentFence = Fence::NO_FENCE; // signals when the last set op retires
         std::unordered_map<HWC2::Layer*, sp<Fence>> releaseFences;
         buffer_handle_t outbufHandle = nullptr;
@@ -361,9 +371,9 @@ private:
 
     std::unordered_map<DisplayId, DisplayData> mDisplayData;
 
-    // This must be destroyed before mDisplayData, because destructor may call back into HWComposer
-    // and look up DisplayData.
-    std::unique_ptr<HWC2::Device> mHwcDevice;
+    std::unique_ptr<android::Hwc2::Composer> mComposer;
+    std::unordered_set<HWC2::Capability> mCapabilities;
+    bool mRegisteredCallback = false;
 
     std::unordered_map<hwc2_display_t, DisplayId> mPhysicalDisplayIdMap;
     std::optional<hwc2_display_t> mInternalHwcDisplayId;
@@ -372,7 +382,7 @@ private:
 
     std::unordered_set<DisplayId> mFreeVirtualDisplayIds;
     uint32_t mNextVirtualDisplayId = 0;
-    uint32_t mRemainingHwcVirtualDisplays{mHwcDevice->getMaxVirtualDisplayCount()};
+    uint32_t mRemainingHwcVirtualDisplays{getMaxVirtualDisplayCount()};
 };
 
 } // namespace impl

@@ -63,7 +63,6 @@ struct InputWindowInfo {
         FLAG_DISMISS_KEYGUARD = 0x00400000,
         FLAG_SPLIT_TOUCH = 0x00800000,
         FLAG_SLIPPERY = 0x20000000,
-        FLAG_NEEDS_MENU_KEY = 0x40000000,
     };
 
     // Window types from WindowManager.LayoutParams
@@ -120,7 +119,11 @@ struct InputWindowInfo {
     /* These values are filled in by the WM and passed through SurfaceFlinger
      * unless specified otherwise.
      */
+    // This value should NOT be used to uniquely identify the window. There may be different
+    // input windows that have the same token.
     sp<IBinder> token;
+    // This uniquely identifies the input window.
+    int32_t id = 0;
     std::string name;
     int32_t layoutParamsFlags;
     int32_t layoutParamsType;
@@ -158,7 +161,6 @@ struct InputWindowInfo {
     bool hasFocus;
     bool hasWallpaper;
     bool paused;
-    int32_t layer;
     int32_t ownerPid;
     int32_t ownerUid;
     int32_t inputFeatures;
@@ -203,6 +205,8 @@ public:
     }
 
     sp<IBinder> getToken() const;
+
+    int32_t getId() const { return mInfo.id; }
 
     sp<IBinder> getApplicationToken() {
         return mInfo.applicationInfo.token;

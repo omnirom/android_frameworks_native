@@ -240,6 +240,18 @@ static bool removeByValue(std::unordered_map<K, V>& map, const V& value) {
     return removed;
 }
 
+static bool haveSameToken(const sp<InputWindowHandle>& first, const sp<InputWindowHandle>& second) {
+    if (first == second) {
+        return true;
+    }
+
+    if (first == nullptr || second == nullptr) {
+        return false;
+    }
+
+    return first->getToken() == second->getToken();
+}
+
 // --- InputDispatcherThread ---
 
 class InputDispatcher::InputDispatcherThread : public Thread {
@@ -3278,9 +3290,9 @@ void InputDispatcher::updateWindowHandlesForDisplayLocked(
     // Since we compare the pointer of input window handles across window updates, we need
     // to make sure the handle object for the same window stays unchanged across updates.
     const std::vector<sp<InputWindowHandle>>& oldHandles = getWindowHandlesLocked(displayId);
-    std::unordered_map<sp<IBinder>, sp<InputWindowHandle>, IBinderHash> oldHandlesByTokens;
+    std::unordered_map<int32_t /*id*/, sp<InputWindowHandle>> oldHandlesById;
     for (const sp<InputWindowHandle>& handle : oldHandles) {
-        oldHandlesByTokens[handle->getToken()] = handle;
+        oldHandlesById[handle->getId()] = handle;
     }
 
     std::vector<sp<InputWindowHandle>> newHandles;
@@ -3311,8 +3323,8 @@ void InputDispatcher::updateWindowHandlesForDisplayLocked(
             continue;
         }
 
-        if (oldHandlesByTokens.find(handle->getToken()) != oldHandlesByTokens.end()) {
-            const sp<InputWindowHandle> oldHandle = oldHandlesByTokens.at(handle->getToken());
+        if (oldHandlesById.find(handle->getId()) != oldHandlesById.end()) {
+            const sp<InputWindowHandle>& oldHandle = oldHandlesById.at(handle->getId());
             oldHandle->updateFrom(handle);
             newHandles.push_back(oldHandle);
         } else {
@@ -3370,7 +3382,7 @@ void InputDispatcher::setInputWindows(const std::vector<sp<InputWindowHandle>>& 
         sp<InputWindowHandle> oldFocusedWindowHandle =
                 getValueByKey(mFocusedWindowHandlesByDisplay, displayId);
 
-        if (oldFocusedWindowHandle != newFocusedWindowHandle) {
+        if (!haveSameToken(oldFocusedWindowHandle, newFocusedWindowHandle)) {
             if (oldFocusedWindowHandle != nullptr) {
                 if (DEBUG_FOCUS) {
                     ALOGD("Focus left window: %s in display %" PRId32,
@@ -3781,12 +3793,10 @@ void InputDispatcher::dumpDispatchStateLocked(std::string& dump) {
 
                     dump += StringPrintf(INDENT3 "%zu: name='%s', displayId=%d, "
                                                  "portalToDisplayId=%d, paused=%s, hasFocus=%s, "
-                                                 "hasWallpaper=%s, "
-                                                 "visible=%s, canReceiveKeys=%s, flags=0x%08x, "
-                                                 "type=0x%08x, layer=%d, "
+                                                 "hasWallpaper=%s, visible=%s, canReceiveKeys=%s, "
+                                                 "flags=0x%08x, type=0x%08x, "
                                                  "frame=[%d,%d][%d,%d], globalScale=%f, "
-                                                 "windowScale=(%f,%f), "
-                                                 "touchableRegion=",
+                                                 "windowScale=(%f,%f), touchableRegion=",
                                          i, windowInfo->name.c_str(), windowInfo->displayId,
                                          windowInfo->portalToDisplayId,
                                          toString(windowInfo->paused),
@@ -3795,11 +3805,10 @@ void InputDispatcher::dumpDispatchStateLocked(std::string& dump) {
                                          toString(windowInfo->visible),
                                          toString(windowInfo->canReceiveKeys),
                                          windowInfo->layoutParamsFlags,
-                                         windowInfo->layoutParamsType, windowInfo->layer,
-                                         windowInfo->frameLeft, windowInfo->frameTop,
-                                         windowInfo->frameRight, windowInfo->frameBottom,
-                                         windowInfo->globalScaleFactor, windowInfo->windowXScale,
-                                         windowInfo->windowYScale);
+                                         windowInfo->layoutParamsType, windowInfo->frameLeft,
+                                         windowInfo->frameTop, windowInfo->frameRight,
+                                         windowInfo->frameBottom, windowInfo->globalScaleFactor,
+                                         windowInfo->windowXScale, windowInfo->windowYScale);
                     dumpRegion(dump, windowInfo->touchableRegion);
                     dump += StringPrintf(", inputFeatures=0x%08x", windowInfo->inputFeatures);
                     dump += StringPrintf(", ownerPid=%d, ownerUid=%d, dispatchingTimeout=%0.3fms\n",
@@ -4115,7 +4124,9 @@ status_t InputDispatcher::pilferPointers(const sp<IBinder>& token) {
         options.displayId = displayId;
         for (const TouchedWindow& window : state.windows) {
             sp<InputChannel> channel = getInputChannelLocked(window.windowHandle->getToken());
-            synthesizeCancelationEventsForInputChannelLocked(channel, options);
+            if (channel != nullptr) {
+                synthesizeCancelationEventsForInputChannelLocked(channel, options);
+            }
         }
         // Then clear the current touch state so we stop dispatching to them as well.
         state.filterNonMonitors();

@@ -195,6 +195,37 @@ public:
             ui::ColorMode colorMode) = 0;
 
     /**
+     * Returns true if the connected display reports support for HDMI 2.1 Auto
+     * Low Latency Mode.
+     * For more information, see the HDMI 2.1 specification.
+     */
+    virtual status_t getAutoLowLatencyModeSupport(const sp<IBinder>& display,
+                                                  bool* outSupport) const = 0;
+
+    /**
+     * Switches Auto Low Latency Mode on/off on the connected display, if it is
+     * available. This should only be called if #getAutoLowLatencyMode returns
+     * true.
+     * For more information, see the HDMI 2.1 specification.
+     */
+    virtual void setAutoLowLatencyMode(const sp<IBinder>& display, bool on) = 0;
+
+    /**
+     * Returns true if the connected display reports support for Game Content Type.
+     * For more information, see the HDMI 1.4 specification.
+     */
+    virtual status_t getGameContentTypeSupport(const sp<IBinder>& display,
+                                               bool* outSupport) const = 0;
+
+    /**
+     * This will start sending infoframes to the connected display with
+     * ContentType=Game (if on=true). This will switch the disply to Game mode.
+     * This should only be called if #getGameContentTypeSupport returns true.
+     * For more information, see the HDMI 1.4 specification.
+     */
+    virtual void setGameContentType(const sp<IBinder>& display, bool on) = 0;
+
+    /**
      * Capture the specified screen. This requires READ_FRAME_BUFFER
      * permission.  This function will fail if there is a secure window on
      * screen.
@@ -386,31 +417,16 @@ public:
     virtual status_t removeRegionSamplingListener(const sp<IRegionSamplingListener>& listener) = 0;
 
     /*
-     * Sets the allowed display configurations to be used.
-     * The allowedConfigs in a vector of indexes corresponding to the configurations
-     * returned from getDisplayConfigs().
-     */
-    virtual status_t setAllowedDisplayConfigs(const sp<IBinder>& displayToken,
-                                              const std::vector<int32_t>& allowedConfigs) = 0;
-
-    /*
-     * Returns the allowed display configurations currently set.
-     * The allowedConfigs in a vector of indexes corresponding to the configurations
-     * returned from getDisplayConfigs().
-     */
-    virtual status_t getAllowedDisplayConfigs(const sp<IBinder>& displayToken,
-                                              std::vector<int32_t>* outAllowedConfigs) = 0;
-    /*
      * Sets the refresh rate boundaries for display configuration.
      * For all other parameters, default configuration is used. The index for the default is
      * corresponding to the configs returned from getDisplayConfigs().
      */
     virtual status_t setDesiredDisplayConfigSpecs(const sp<IBinder>& displayToken,
-                                                  int32_t defaultModeId, float minRefreshRate,
+                                                  int32_t defaultConfig, float minRefreshRate,
                                                   float maxRefreshRate) = 0;
 
     virtual status_t getDesiredDisplayConfigSpecs(const sp<IBinder>& displayToken,
-                                                  int32_t* outDefaultModeId,
+                                                  int32_t* outDefaultConfig,
                                                   float* outMinRefreshRate,
                                                   float* outMaxRefreshRate) = 0;
     /*
@@ -523,8 +539,6 @@ public:
         GET_PHYSICAL_DISPLAY_IDS,
         ADD_REGION_SAMPLING_LISTENER,
         REMOVE_REGION_SAMPLING_LISTENER,
-        SET_ALLOWED_DISPLAY_CONFIGS,
-        GET_ALLOWED_DISPLAY_CONFIGS,
         SET_DESIRED_DISPLAY_CONFIG_SPECS,
         GET_DESIRED_DISPLAY_CONFIG_SPECS,
         GET_DISPLAY_BRIGHTNESS_SUPPORT,
@@ -532,6 +546,10 @@ public:
         CAPTURE_SCREEN_BY_ID,
         NOTIFY_POWER_HINT,
         SET_GLOBAL_SHADOW_SETTINGS,
+        GET_AUTO_LOW_LATENCY_MODE_SUPPORT,
+        SET_AUTO_LOW_LATENCY_MODE,
+        GET_GAME_CONTENT_TYPE_SUPPORT,
+        SET_GAME_CONTENT_TYPE,
         // Always append new enum to the end.
     };
 

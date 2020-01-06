@@ -73,6 +73,7 @@ status_t InputWindowInfo::write(Parcel& output) const {
     status_t s = output.writeStrongBinder(token);
     if (s != OK) return s;
 
+    output.writeInt32(id);
     output.writeString8(String8(name.c_str()));
     output.writeInt32(layoutParamsFlags);
     output.writeInt32(layoutParamsType);
@@ -90,7 +91,6 @@ status_t InputWindowInfo::write(Parcel& output) const {
     output.writeBool(hasFocus);
     output.writeBool(hasWallpaper);
     output.writeBool(paused);
-    output.writeInt32(layer);
     output.writeInt32(ownerPid);
     output.writeInt32(ownerUid);
     output.writeInt32(inputFeatures);
@@ -116,6 +116,7 @@ InputWindowInfo InputWindowInfo::read(const Parcel& from) {
     }
 
     ret.token = token;
+    ret.id = from.readInt32();
     ret.name = from.readString8().c_str();
     ret.layoutParamsFlags = from.readInt32();
     ret.layoutParamsType = from.readInt32();
@@ -133,7 +134,6 @@ InputWindowInfo InputWindowInfo::read(const Parcel& from) {
     ret.hasFocus = from.readBool();
     ret.hasWallpaper = from.readBool();
     ret.paused = from.readBool();
-    ret.layer = from.readInt32();
     ret.ownerPid = from.readInt32();
     ret.ownerUid = from.readInt32();
     ret.inputFeatures = from.readInt32();

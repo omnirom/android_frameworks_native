@@ -750,6 +750,16 @@ public:
                            bool /*captureSecureLayers*/) override {
         return NO_ERROR;
     }
+    status_t getAutoLowLatencyModeSupport(const sp<IBinder>& /*display*/,
+                                          bool* /*outSupport*/) const override {
+        return NO_ERROR;
+    }
+    void setAutoLowLatencyMode(const sp<IBinder>& /*display*/, bool /*on*/) override {}
+    status_t getGameContentTypeSupport(const sp<IBinder>& /*display*/,
+                                       bool* /*outSupport*/) const override {
+        return NO_ERROR;
+    }
+    void setGameContentType(const sp<IBinder>& /*display*/, bool /*on*/) override {}
     status_t captureScreen(uint64_t /*displayOrLayerStack*/, ui::Dataspace* /*outDataspace*/,
                            sp<GraphicBuffer>* /*outBuffer*/) override {
         return NO_ERROR;
@@ -823,21 +833,13 @@ public:
             const sp<IRegionSamplingListener>& /*listener*/) override {
         return NO_ERROR;
     }
-    status_t setAllowedDisplayConfigs(const sp<IBinder>& /*displayToken*/,
-                                      const std::vector<int32_t>& /*allowedConfigs*/) override {
-        return NO_ERROR;
-    }
-    status_t getAllowedDisplayConfigs(const sp<IBinder>& /*displayToken*/,
-                                      std::vector<int32_t>* /*outAllowedConfigs*/) override {
-        return NO_ERROR;
-    }
     status_t setDesiredDisplayConfigSpecs(const sp<IBinder>& /*displayToken*/,
-                                          int32_t /*defaultModeId*/, float /*minRefreshRate*/,
-                                          float /*maxRefreshRate*/) override {
+                                          int32_t /*defaultConfig*/, float /*minRefreshRate*/,
+                                          float /*maxRefreshRate*/) {
         return NO_ERROR;
     }
     status_t getDesiredDisplayConfigSpecs(const sp<IBinder>& /*displayToken*/,
-                                          int32_t* /*outDefaultModeId*/,
+                                          int32_t* /*outDefaultConfig*/,
                                           float* /*outMinRefreshRate*/,
                                           float* /*outMaxRefreshRate*/) override {
         return NO_ERROR;

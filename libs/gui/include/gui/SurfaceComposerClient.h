@@ -117,23 +117,11 @@ public:
     // returned by getDisplayInfo
     static status_t setActiveConfig(const sp<IBinder>& display, int id);
 
-    // Sets the allowed display configurations to be used.
-    // The allowedConfigs in a vector of indexes corresponding to the configurations
-    // returned from getDisplayConfigs().
-    static status_t setAllowedDisplayConfigs(const sp<IBinder>& displayToken,
-                                             const std::vector<int32_t>& allowedConfigs);
-
-    // Returns the allowed display configurations currently set.
-    // The allowedConfigs in a vector of indexes corresponding to the configurations
-    // returned from getDisplayConfigs().
-    static status_t getAllowedDisplayConfigs(const sp<IBinder>& displayToken,
-                                             std::vector<int32_t>* outAllowedConfigs);
-
     // Sets the refresh rate boundaries for display configuration.
     // For all other parameters, default configuration is used. The index for the default is
     // corresponting to the configs returned from getDisplayConfigs().
     static status_t setDesiredDisplayConfigSpecs(const sp<IBinder>& displayToken,
-                                                 int32_t defaultModeId, float minRefreshRate,
+                                                 int32_t defaultConfig, float minRefreshRate,
                                                  float maxRefreshRate);
     // Gets the refresh rate boundaries for display configuration.
     // For all other parameters, default configuration is used. The index for the default is
@@ -141,7 +129,7 @@ public:
     // The reason is passed in for telemetry tracking, and it corresponds to the list of all
     // the policy rules that were used.
     static status_t getDesiredDisplayConfigSpecs(const sp<IBinder>& displayToken,
-                                                 int32_t* outDefaultModeId,
+                                                 int32_t* outDefaultConfig,
                                                  float* outMinRefreshRate,
                                                  float* outMaxRefreshRate);
 
@@ -159,6 +147,21 @@ public:
     // Sets the active color mode for the given display
     static status_t setActiveColorMode(const sp<IBinder>& display,
             ui::ColorMode colorMode);
+
+    // Reports whether the connected display supports Auto Low Latency Mode
+    static bool getAutoLowLatencyModeSupport(const sp<IBinder>& display);
+
+    // Switches on/off Auto Low Latency Mode on the connected display. This should only be
+    // called if the connected display supports Auto Low Latency Mode as reported by
+    // #getAutoLowLatencyModeSupport
+    static void setAutoLowLatencyMode(const sp<IBinder>& display, bool on);
+
+    // Reports whether the connected display supports Game content type
+    static bool getGameContentTypeSupport(const sp<IBinder>& display);
+
+    // Turns Game mode on/off on the connected display. This should only be called
+    // if the display supports Game content type, as reported by #getGameContentTypeSupport
+    static void setGameContentType(const sp<IBinder>& display, bool on);
 
     /* Triggers screen on/off or low power mode and waits for it to complete */
     static void setDisplayPowerMode(const sp<IBinder>& display, int mode);
