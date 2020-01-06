@@ -38,6 +38,7 @@ public:
     MOCK_METHOD1(addVsyncTimestamp, void(nsecs_t));
     MOCK_CONST_METHOD1(nextAnticipatedVSyncTimeFrom, nsecs_t(nsecs_t));
     MOCK_CONST_METHOD0(currentPeriod, nsecs_t());
+    MOCK_METHOD1(setPeriod, void(nsecs_t));
 };
 
 class VSyncTrackerWrapper : public VSyncTracker {
@@ -49,6 +50,7 @@ public:
         return mTracker->nextAnticipatedVSyncTimeFrom(timePoint);
     }
     nsecs_t currentPeriod() const final { return mTracker->currentPeriod(); }
+    void setPeriod(nsecs_t period) { mTracker->setPeriod(period); }
 
 private:
     std::shared_ptr<VSyncTracker> const mTracker;
@@ -124,7 +126,7 @@ class VSyncReactorTest : public testing::Test {
 protected:
     VSyncReactorTest()
           : mMockDispatch(std::make_shared<MockVSyncDispatch>()),
-            mMockTracker(std::make_shared<MockVSyncTracker>()),
+            mMockTracker(std::make_shared<NiceMock<MockVSyncTracker>>()),
             mMockClock(std::make_shared<NiceMock<MockClock>>()),
             mReactor(std::make_unique<ClockWrapper>(mMockClock),
                      std::make_unique<VSyncDispatchWrapper>(mMockDispatch),
@@ -232,6 +234,37 @@ TEST_F(VSyncReactorTest, queriesTrackerForNextRefreshFuture) {
     EXPECT_CALL(*mMockTracker, nextAnticipatedVSyncTimeFrom(fakeNow + numPeriodsOut * fakePeriod))
             .WillOnce(Return(fakeTimestamp));
     EXPECT_THAT(mReactor.computeNextRefresh(numPeriodsOut), Eq(fakeTimestamp));
+}
+
+TEST_F(VSyncReactorTest, getPeriod) {
+    nsecs_t const fakePeriod = 1010;
+    EXPECT_CALL(*mMockTracker, currentPeriod()).WillOnce(Return(fakePeriod));
+    EXPECT_THAT(mReactor.getPeriod(), Eq(fakePeriod));
+}
+
+TEST_F(VSyncReactorTest, setPeriod) {
+    nsecs_t const fakePeriod = 4098;
+    EXPECT_CALL(*mMockTracker, setPeriod(fakePeriod));
+    mReactor.setPeriod(fakePeriod);
+}
+
+TEST_F(VSyncReactorTest, addResyncSampleTypical) {
+    nsecs_t const fakeTimestamp = 3032;
+    bool periodFlushed = false;
+
+    EXPECT_CALL(*mMockTracker, addVsyncTimestamp(fakeTimestamp));
+    EXPECT_FALSE(mReactor.addResyncSample(fakeTimestamp, &periodFlushed));
+    EXPECT_FALSE(periodFlushed);
+}
+
+TEST_F(VSyncReactorTest, addResyncSamplePeriodChanges) {
+    bool periodFlushed = false;
+    nsecs_t const fakeTimestamp = 4398;
+    nsecs_t const newPeriod = 3490;
+    EXPECT_CALL(*mMockTracker, addVsyncTimestamp(fakeTimestamp));
+    mReactor.setPeriod(newPeriod);
+    EXPECT_FALSE(mReactor.addResyncSample(fakeTimestamp, &periodFlushed));
+    EXPECT_TRUE(periodFlushed);
 }
 
 } // namespace android::scheduler

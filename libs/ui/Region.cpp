@@ -23,11 +23,10 @@
 
 #include <utils/Log.h>
 
+#include <ui/Point.h>
 #include <ui/Rect.h>
 #include <ui/Region.h>
-#include <ui/Point.h>
-
-#include <private/ui/RegionHelper.h>
+#include <ui/RegionHelper.h>
 
 // ----------------------------------------------------------------------------
 
@@ -279,6 +278,20 @@ void Region::set(uint32_t w, uint32_t h)
 
 bool Region::isTriviallyEqual(const Region& region) const {
     return begin() == region.begin();
+}
+
+bool Region::hasSameRects(const Region& other) const {
+    size_t thisRectCount = 0;
+    android::Rect const* thisRects = getArray(&thisRectCount);
+    size_t otherRectCount = 0;
+    android::Rect const* otherRects = other.getArray(&otherRectCount);
+
+    if (thisRectCount != otherRectCount) return false;
+
+    for (size_t i = 0; i < thisRectCount; i++) {
+        if (thisRects[i] != otherRects[i]) return false;
+    }
+    return true;
 }
 
 // ----------------------------------------------------------------------------

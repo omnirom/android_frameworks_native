@@ -175,7 +175,8 @@ class SurfaceFlinger : public BnSurfaceComposer,
                        public PriorityDumper,
                        public ClientCache::ErasedRecipient,
                        private IBinder::DeathRecipient,
-                       private HWC2::ComposerCallback {
+                       private HWC2::ComposerCallback,
+                       private ISchedulerCallback {
 public:
     SurfaceFlingerBE& getBE() { return mBE; }
     const SurfaceFlingerBE& getBE() const { return mBE; }
@@ -271,9 +272,6 @@ public:
 
     // force full composition on all displays
     void repaintEverything();
-
-    // force full composition on all displays without resetting the scheduler idle timer.
-    void repaintEverythingForHWC();
 
     surfaceflinger::Factory& getFactory() { return mFactory; }
 
@@ -386,6 +384,17 @@ private:
         void traverseInReverseZOrder(const LayerVector::Visitor& visitor) const;
     };
 
+    struct DesiredDisplayConfigSpecs {
+        int32_t defaultModeId;
+        float minRefreshRate;
+        float maxRefreshRate;
+
+        bool operator==(const DesiredDisplayConfigSpecs& other) const {
+            return defaultModeId == other.defaultModeId && minRefreshRate == other.minRefreshRate &&
+                    maxRefreshRate == other.maxRefreshRate;
+        }
+    };
+
     /* ------------------------------------------------------------------------
      * IBinder interface
      */
@@ -475,6 +484,9 @@ private:
                                       std::vector<int32_t>* outAllowedConfigs) override;
     status_t setDesiredDisplayConfigSpecs(const sp<IBinder>& displayToken, int32_t displayModeId,
                                           float minRefreshRate, float maxRefreshRate) override;
+    status_t getDesiredDisplayConfigSpecs(const sp<IBinder>& displayToken,
+                                          int32_t* outDefaultModeId, float* outMinRefreshRate,
+                                          float* outMaxRefreshRate) override;
     status_t getDisplayBrightnessSupport(const sp<IBinder>& displayToken,
                                          bool* outSupport) const override;
     status_t setDisplayBrightness(const sp<IBinder>& displayToken, float brightness) const override;
@@ -504,6 +516,12 @@ private:
             const hwc_vsync_period_change_timeline_t& updatedTimeline) override;
 
     /* ------------------------------------------------------------------------
+     * ISchedulerCallback
+     */
+    void changeRefreshRate(const Scheduler::RefreshRate&, Scheduler::ConfigEvent) override;
+    // force full composition on all displays without resetting the scheduler idle timer.
+    void repaintEverythingForHWC() override;
+    /* ------------------------------------------------------------------------
      * Message handling
      */
     void waitForEvent();
@@ -513,15 +531,14 @@ private:
     void signalLayerUpdate();
     void signalRefresh();
 
-    using RefreshRateType = scheduler::RefreshRateConfigs::RefreshRateType;
+    using RefreshRate = scheduler::RefreshRateConfigs::RefreshRate;
 
     struct ActiveConfigInfo {
-        RefreshRateType type = RefreshRateType::DEFAULT;
-        int configId = 0;
+        HwcConfigIndexType configId;
         Scheduler::ConfigEvent event = Scheduler::ConfigEvent::None;
 
         bool operator!=(const ActiveConfigInfo& other) const {
-            return type != other.type || configId != other.configId || event != other.event;
+            return configId != other.configId || event != other.event;
         }
     };
 
@@ -674,6 +691,7 @@ private:
                                  const sp<GraphicBuffer>& buffer, bool useIdentityTransform,
                                  bool& outCapturedSecureLayers);
     const sp<DisplayDevice> getDisplayByIdOrLayerStack(uint64_t displayOrLayerStack);
+    const sp<DisplayDevice> getDisplayByLayerStack(uint64_t layerStack);
     status_t captureScreenImplLocked(const RenderArea& renderArea,
                                      TraverseLayersFunction traverseLayers,
                                      ANativeWindowBuffer* buffer, bool useIdentityTransform,
@@ -796,9 +814,10 @@ private:
 
     // Sets the refresh rate by switching active configs, if they are available for
     // the desired refresh rate.
-    void setRefreshRateTo(RefreshRateType, Scheduler::ConfigEvent event) REQUIRES(mStateLock);
+    void changeRefreshRateLocked(const RefreshRate&, Scheduler::ConfigEvent event)
+            REQUIRES(mStateLock);
 
-    bool isDisplayConfigAllowed(int32_t configId) const REQUIRES(mStateLock);
+    bool isDisplayConfigAllowed(HwcConfigIndexType configId) const REQUIRES(mStateLock);
 
     bool previousFrameMissed(int graceTimeMs = 0);
 
@@ -1122,8 +1141,9 @@ private:
     std::atomic<nsecs_t> mExpectedPresentTime = 0;
 
     // All configs are allowed if the set is empty.
-    using DisplayConfigs = std::set<int32_t>;
+    using DisplayConfigs = std::set<HwcConfigIndexType>;
     DisplayConfigs mAllowedDisplayConfigs GUARDED_BY(mStateLock);
+    DesiredDisplayConfigSpecs mDesiredDisplayConfigSpecs GUARDED_BY(mStateLock);
 
     std::mutex mActiveConfigLock;
     // This bit is set once we start setting the config. We read from this bit during the

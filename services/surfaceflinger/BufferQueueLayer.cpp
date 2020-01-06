@@ -35,6 +35,7 @@ namespace android {
 BufferQueueLayer::BufferQueueLayer(const LayerCreationArgs& args) : BufferLayer(args) {}
 
 BufferQueueLayer::~BufferQueueLayer() {
+    mContentsChangedListener->abandon();
     mConsumer->abandon();
 }
 
@@ -399,8 +400,7 @@ void BufferQueueLayer::onFrameAvailable(const BufferItem& item) {
     // Add this buffer from our internal queue tracker
     { // Autolock scope
         const nsecs_t presentTime = item.mIsAutoTimestamp ? 0 : item.mTimestamp;
-        const bool isHDR = item.mHdrMetadata.validTypes != 0;
-        mFlinger->mScheduler->recordLayerHistory(this, presentTime, isHDR);
+        mFlinger->mScheduler->recordLayerHistory(this, presentTime);
 
         Mutex::Autolock lock(mQueueItemLock);
         // Reset the frame number tracker when we receive the first buffer after
@@ -480,7 +480,9 @@ void BufferQueueLayer::onFirstRef() {
             mFlinger->getFactory().createBufferLayerConsumer(consumer, mFlinger->getRenderEngine(),
                                                              mTextureName, this);
     mConsumer->setConsumerUsageBits(getEffectiveUsage(0));
-    mConsumer->setContentsChangedListener(this);
+
+    mContentsChangedListener = new ContentsChangedListener(this);
+    mConsumer->setContentsChangedListener(mContentsChangedListener);
     mConsumer->setName(String8(mName.data(), mName.size()));
 
     // BufferQueueCore::mMaxDequeuedBufferCount is default to 1
@@ -551,5 +553,58 @@ sp<Layer> BufferQueueLayer::createClone() {
 
     return layer;
 }
+
+// -----------------------------------------------------------------------
+// Interface implementation for BufferLayerConsumer::ContentsChangedListener
+// -----------------------------------------------------------------------
+
+void BufferQueueLayer::ContentsChangedListener::onFrameAvailable(const BufferItem& item) {
+    Mutex::Autolock lock(mMutex);
+    if (mBufferQueueLayer != nullptr) {
+        mBufferQueueLayer->onFrameAvailable(item);
+    }
+}
+
+void BufferQueueLayer::ContentsChangedListener::onFrameReplaced(const BufferItem& item) {
+    Mutex::Autolock lock(mMutex);
+    if (mBufferQueueLayer != nullptr) {
+        mBufferQueueLayer->onFrameReplaced(item);
+    }
+}
+
+void BufferQueueLayer::ContentsChangedListener::onSidebandStreamChanged() {
+    Mutex::Autolock lock(mMutex);
+    if (mBufferQueueLayer != nullptr) {
+        mBufferQueueLayer->onSidebandStreamChanged();
+    }
+}
+
+void BufferQueueLayer::ContentsChangedListener::onFrameDequeued(const uint64_t bufferId) {
+    Mutex::Autolock lock(mMutex);
+    if (mBufferQueueLayer != nullptr) {
+        mBufferQueueLayer->onFrameDequeued(bufferId);
+    }
+}
+
+void BufferQueueLayer::ContentsChangedListener::onFrameDetached(const uint64_t bufferId) {
+    Mutex::Autolock lock(mMutex);
+    if (mBufferQueueLayer != nullptr) {
+        mBufferQueueLayer->onFrameDetached(bufferId);
+    }
+}
+
+void BufferQueueLayer::ContentsChangedListener::onFrameCancelled(const uint64_t bufferId) {
+    Mutex::Autolock lock(mMutex);
+    if (mBufferQueueLayer != nullptr) {
+        mBufferQueueLayer->onFrameCancelled(bufferId);
+    }
+}
+
+void BufferQueueLayer::ContentsChangedListener::abandon() {
+    Mutex::Autolock lock(mMutex);
+    mBufferQueueLayer = nullptr;
+}
+
+// -----------------------------------------------------------------------
 
 } // namespace android

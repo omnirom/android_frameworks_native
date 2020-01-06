@@ -16,8 +16,6 @@
 
 #include "../dispatcher/InputDispatcher.h"
 
-#include <InputDispatcherThread.h>
-
 #include <binder/Binder.h>
 #include <input/Input.h>
 
@@ -51,7 +49,6 @@ protected:
 
 public:
     FakeInputDispatcherPolicy() {
-        mOnPointerDownToken.clear();
     }
 
     void assertFilterInputEventWasCalled(const NotifyKeyArgs& args) {
@@ -66,17 +63,41 @@ public:
 
     void assertFilterInputEventWasNotCalled() { ASSERT_EQ(nullptr, mFilteredEvent); }
 
+    void assertNotifyConfigurationChangedWasCalled(nsecs_t when) {
+        ASSERT_TRUE(mConfigurationChangedTime)
+                << "Timed out waiting for configuration changed call";
+        ASSERT_EQ(*mConfigurationChangedTime, when);
+        mConfigurationChangedTime = std::nullopt;
+    }
+
+    void assertNotifySwitchWasCalled(const NotifySwitchArgs& args) {
+        ASSERT_TRUE(mLastNotifySwitch);
+        // We do not check sequenceNum because it is not exposed to the policy
+        EXPECT_EQ(args.eventTime, mLastNotifySwitch->eventTime);
+        EXPECT_EQ(args.policyFlags, mLastNotifySwitch->policyFlags);
+        EXPECT_EQ(args.switchValues, mLastNotifySwitch->switchValues);
+        EXPECT_EQ(args.switchMask, mLastNotifySwitch->switchMask);
+        mLastNotifySwitch = std::nullopt;
+    }
+
     void assertOnPointerDownEquals(const sp<IBinder>& touchedToken) {
-        ASSERT_EQ(mOnPointerDownToken, touchedToken)
-                << "Expected token from onPointerDownOutsideFocus was not matched";
-        reset();
+        ASSERT_EQ(touchedToken, mOnPointerDownToken);
+        mOnPointerDownToken.clear();
+    }
+
+    void assertOnPointerDownWasNotCalled() {
+        ASSERT_TRUE(mOnPointerDownToken == nullptr)
+                << "Expected onPointerDownOutsideFocus to not have been called";
     }
 
 private:
     std::unique_ptr<InputEvent> mFilteredEvent;
+    std::optional<nsecs_t> mConfigurationChangedTime;
     sp<IBinder> mOnPointerDownToken;
+    std::optional<NotifySwitchArgs> mLastNotifySwitch;
 
-    virtual void notifyConfigurationChanged(nsecs_t) {
+    virtual void notifyConfigurationChanged(nsecs_t when) override {
+        mConfigurationChangedTime = when;
     }
 
     virtual nsecs_t notifyANR(const sp<InputApplicationHandle>&,
@@ -128,7 +149,13 @@ private:
         return false;
     }
 
-    virtual void notifySwitch(nsecs_t, uint32_t, uint32_t, uint32_t) {
+    virtual void notifySwitch(nsecs_t when, uint32_t switchValues, uint32_t switchMask,
+                              uint32_t policyFlags) override {
+        /** We simply reconstruct NotifySwitchArgs in policy because InputDispatcher is
+         * essentially a passthrough for notifySwitch.
+         */
+        mLastNotifySwitch =
+                NotifySwitchArgs(1 /*sequenceNum*/, when, policyFlags, switchValues, switchMask);
     }
 
     virtual void pokeUserActivity(nsecs_t, int32_t) {
@@ -163,8 +190,6 @@ private:
 
         mFilteredEvent = nullptr;
     }
-
-    void reset() { mOnPointerDownToken.clear(); }
 };
 
 
@@ -174,20 +199,17 @@ class InputDispatcherTest : public testing::Test {
 protected:
     sp<FakeInputDispatcherPolicy> mFakePolicy;
     sp<InputDispatcher> mDispatcher;
-    sp<InputDispatcherThread> mDispatcherThread;
 
-    virtual void SetUp() {
+    virtual void SetUp() override {
         mFakePolicy = new FakeInputDispatcherPolicy();
         mDispatcher = new InputDispatcher(mFakePolicy);
         mDispatcher->setInputDispatchMode(/*enabled*/ true, /*frozen*/ false);
         //Start InputDispatcher thread
-        mDispatcherThread = new InputDispatcherThread(mDispatcher);
-        mDispatcherThread->run("InputDispatcherTest", PRIORITY_URGENT_DISPLAY);
+        ASSERT_EQ(OK, mDispatcher->start());
     }
 
-    virtual void TearDown() {
-        mDispatcherThread->requestExit();
-        mDispatcherThread.clear();
+    virtual void TearDown() override {
+        ASSERT_EQ(OK, mDispatcher->stop());
         mFakePolicy.clear();
         mDispatcher.clear();
     }
@@ -351,9 +373,30 @@ TEST_F(InputDispatcherTest, InjectInputEvent_ValidatesMotionEvents) {
             << "Should reject motion events with duplicate pointer ids.";
 }
 
+/* Test InputDispatcher for notifyConfigurationChanged and notifySwitch events */
+
+TEST_F(InputDispatcherTest, NotifyConfigurationChanged_CallsPolicy) {
+    constexpr nsecs_t eventTime = 20;
+    NotifyConfigurationChangedArgs args(10 /*sequenceNum*/, eventTime);
+    mDispatcher->notifyConfigurationChanged(&args);
+    ASSERT_TRUE(mDispatcher->waitForIdle());
+
+    mFakePolicy->assertNotifyConfigurationChangedWasCalled(eventTime);
+}
+
+TEST_F(InputDispatcherTest, NotifySwitch_CallsPolicy) {
+    NotifySwitchArgs args(10 /*sequenceNum*/, 20 /*eventTime*/, 0 /*policyFlags*/,
+                          1 /*switchValues*/, 2 /*switchMask*/);
+    mDispatcher->notifySwitch(&args);
+
+    // InputDispatcher adds POLICY_FLAG_TRUSTED because the event went through InputListener
+    args.policyFlags |= POLICY_FLAG_TRUSTED;
+    mFakePolicy->assertNotifySwitchWasCalled(args);
+}
+
 // --- InputDispatcherTest SetInputWindowTest ---
-static const int32_t INJECT_EVENT_TIMEOUT = 500;
-static const int32_t DISPATCHING_TIMEOUT = 100;
+static constexpr int32_t INJECT_EVENT_TIMEOUT = 500;
+static constexpr int32_t DISPATCHING_TIMEOUT = 100;
 
 class FakeApplicationHandle : public InputApplicationHandle {
 public:
@@ -539,9 +582,7 @@ public:
         InputWindowHandle::releaseChannel();
     }
 protected:
-    virtual bool handled() {
-        return true;
-    }
+    virtual bool handled() override { return true; }
 
     bool mFocused;
     Rect mFrame;
@@ -764,11 +805,56 @@ TEST_F(InputDispatcherTest, DispatchMouseEventsUnderCursor) {
     windowRight->assertNoEvents();
 }
 
+TEST_F(InputDispatcherTest, NotifyDeviceReset_CancelsKeyStream) {
+    sp<FakeApplicationHandle> application = new FakeApplicationHandle();
+    sp<FakeWindowHandle> window =
+            new FakeWindowHandle(application, mDispatcher, "Fake Window", ADISPLAY_ID_DEFAULT);
+    window->setFocus();
+
+    mDispatcher->setInputWindows({window}, ADISPLAY_ID_DEFAULT);
+
+    NotifyKeyArgs keyArgs = generateKeyArgs(AKEY_EVENT_ACTION_DOWN, ADISPLAY_ID_DEFAULT);
+    mDispatcher->notifyKey(&keyArgs);
+
+    // Window should receive key down event.
+    window->consumeKeyDown(ADISPLAY_ID_DEFAULT);
+
+    // When device reset happens, that key stream should be terminated with FLAG_CANCELED
+    // on the app side.
+    NotifyDeviceResetArgs args(10 /*sequenceNum*/, 20 /*eventTime*/, DEVICE_ID);
+    mDispatcher->notifyDeviceReset(&args);
+    window->consumeEvent(AINPUT_EVENT_TYPE_KEY, AKEY_EVENT_ACTION_UP, ADISPLAY_ID_DEFAULT,
+                         AKEY_EVENT_FLAG_CANCELED);
+}
+
+TEST_F(InputDispatcherTest, NotifyDeviceReset_CancelsMotionStream) {
+    sp<FakeApplicationHandle> application = new FakeApplicationHandle();
+    sp<FakeWindowHandle> window =
+            new FakeWindowHandle(application, mDispatcher, "Fake Window", ADISPLAY_ID_DEFAULT);
+
+    mDispatcher->setInputWindows({window}, ADISPLAY_ID_DEFAULT);
+
+    NotifyMotionArgs motionArgs =
+            generateMotionArgs(AMOTION_EVENT_ACTION_DOWN, AINPUT_SOURCE_TOUCHSCREEN,
+                               ADISPLAY_ID_DEFAULT);
+    mDispatcher->notifyMotion(&motionArgs);
+
+    // Window should receive motion down event.
+    window->consumeMotionDown(ADISPLAY_ID_DEFAULT);
+
+    // When device reset happens, that motion stream should be terminated with ACTION_CANCEL
+    // on the app side.
+    NotifyDeviceResetArgs args(10 /*sequenceNum*/, 20 /*eventTime*/, DEVICE_ID);
+    mDispatcher->notifyDeviceReset(&args);
+    window->consumeEvent(AINPUT_EVENT_TYPE_MOTION, AMOTION_EVENT_ACTION_CANCEL, ADISPLAY_ID_DEFAULT,
+                         0 /*expectedFlags*/);
+}
+
 /* Test InputDispatcher for MultiDisplay */
 class InputDispatcherFocusOnTwoDisplaysTest : public InputDispatcherTest {
 public:
     static constexpr int32_t SECOND_DISPLAY_ID = 1;
-    virtual void SetUp() {
+    virtual void SetUp() override {
         InputDispatcherTest::SetUp();
 
         application1 = new FakeApplicationHandle();
@@ -792,7 +878,7 @@ public:
         mDispatcher->setInputWindows({windowInSecondary}, SECOND_DISPLAY_ID);
     }
 
-    virtual void TearDown() {
+    virtual void TearDown() override {
         InputDispatcherTest::TearDown();
 
         application1.clear();
@@ -927,7 +1013,7 @@ protected:
         motionArgs = generateMotionArgs(
                 AMOTION_EVENT_ACTION_UP, AINPUT_SOURCE_TOUCHSCREEN, displayId);
         mDispatcher->notifyMotion(&motionArgs);
-
+        ASSERT_TRUE(mDispatcher->waitForIdle());
         if (expectToBeFiltered) {
             mFakePolicy->assertFilterInputEventWasCalled(motionArgs);
         } else {
@@ -942,6 +1028,7 @@ protected:
         mDispatcher->notifyKey(&keyArgs);
         keyArgs = generateKeyArgs(AKEY_EVENT_ACTION_UP);
         mDispatcher->notifyKey(&keyArgs);
+        ASSERT_TRUE(mDispatcher->waitForIdle());
 
         if (expectToBeFiltered) {
             mFakePolicy->assertFilterInputEventWasCalled(keyArgs);
@@ -987,7 +1074,7 @@ TEST_F(InputFilterTest, KeyEvent_InputFilter) {
 }
 
 class InputDispatcherOnPointerDownOutsideFocus : public InputDispatcherTest {
-    virtual void SetUp() {
+    virtual void SetUp() override {
         InputDispatcherTest::SetUp();
 
         sp<FakeApplicationHandle> application = new FakeApplicationHandle();
@@ -1012,7 +1099,7 @@ class InputDispatcherOnPointerDownOutsideFocus : public InputDispatcherTest {
         mDispatcher->setInputWindows({mUnfocusedWindow, mFocusedWindow}, ADISPLAY_ID_DEFAULT);
     }
 
-    virtual void TearDown() {
+    virtual void TearDown() override {
         InputDispatcherTest::TearDown();
 
         mUnfocusedWindow.clear();
@@ -1032,9 +1119,8 @@ TEST_F(InputDispatcherOnPointerDownOutsideFocus, OnPointerDownOutsideFocus_Succe
     ASSERT_EQ(INPUT_EVENT_INJECTION_SUCCEEDED, injectMotionDown(mDispatcher,
             AINPUT_SOURCE_TOUCHSCREEN, ADISPLAY_ID_DEFAULT, 20, 20))
             << "Inject motion event should return INPUT_EVENT_INJECTION_SUCCEEDED";
-    // Call monitor to wait for the command queue to get flushed.
-    mDispatcher->monitor();
 
+    ASSERT_TRUE(mDispatcher->waitForIdle());
     mFakePolicy->assertOnPointerDownEquals(mUnfocusedWindow->getToken());
 }
 
@@ -1045,10 +1131,9 @@ TEST_F(InputDispatcherOnPointerDownOutsideFocus, OnPointerDownOutsideFocus_NonPo
     ASSERT_EQ(INPUT_EVENT_INJECTION_SUCCEEDED, injectMotionDown(mDispatcher,
             AINPUT_SOURCE_TRACKBALL, ADISPLAY_ID_DEFAULT, 20, 20))
             << "Inject motion event should return INPUT_EVENT_INJECTION_SUCCEEDED";
-    // Call monitor to wait for the command queue to get flushed.
-    mDispatcher->monitor();
 
-    mFakePolicy->assertOnPointerDownEquals(nullptr);
+    ASSERT_TRUE(mDispatcher->waitForIdle());
+    mFakePolicy->assertOnPointerDownWasNotCalled();
 }
 
 // Have two windows, one with focus. Inject KeyEvent with action DOWN on the window that doesn't
@@ -1056,10 +1141,9 @@ TEST_F(InputDispatcherOnPointerDownOutsideFocus, OnPointerDownOutsideFocus_NonPo
 TEST_F(InputDispatcherOnPointerDownOutsideFocus, OnPointerDownOutsideFocus_NonMotionFailure) {
     ASSERT_EQ(INPUT_EVENT_INJECTION_SUCCEEDED, injectKeyDown(mDispatcher, ADISPLAY_ID_DEFAULT))
             << "Inject key event should return INPUT_EVENT_INJECTION_SUCCEEDED";
-    // Call monitor to wait for the command queue to get flushed.
-    mDispatcher->monitor();
 
-    mFakePolicy->assertOnPointerDownEquals(nullptr);
+    ASSERT_TRUE(mDispatcher->waitForIdle());
+    mFakePolicy->assertOnPointerDownWasNotCalled();
 }
 
 // Have two windows, one with focus. Inject MotionEvent with source TOUCHSCREEN and action
@@ -1071,10 +1155,9 @@ TEST_F(InputDispatcherOnPointerDownOutsideFocus,
               injectMotionDown(mDispatcher, AINPUT_SOURCE_TOUCHSCREEN, ADISPLAY_ID_DEFAULT,
                                mFocusedWindowTouchPoint, mFocusedWindowTouchPoint))
             << "Inject motion event should return INPUT_EVENT_INJECTION_SUCCEEDED";
-    // Call monitor to wait for the command queue to get flushed.
-    mDispatcher->monitor();
 
-    mFakePolicy->assertOnPointerDownEquals(nullptr);
+    ASSERT_TRUE(mDispatcher->waitForIdle());
+    mFakePolicy->assertOnPointerDownWasNotCalled();
 }
 
 } // namespace android::inputdispatcher
