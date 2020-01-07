@@ -1972,6 +1972,7 @@ void SurfaceFlinger::onMessageReceived(int32_t what) NO_THREAD_SAFETY_ANALYSIS {
                         expectedPresentTime = mScheduler->getDispSyncExpectedPresentTime();
                         if (layer->shouldPresentNow(expectedPresentTime)) {
                             int layerQueuedFrames = layer->getQueuedFrameCount();
+                            Mutex::Autolock lock(mDolphinStateLock);
                             if (maxQueuedFrames < layerQueuedFrames &&
                                     !layer->visibleNonTransparentRegion.isEmpty()) {
                                 maxQueuedFrames = layerQueuedFrames;
