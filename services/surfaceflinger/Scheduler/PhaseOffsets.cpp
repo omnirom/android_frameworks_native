@@ -151,7 +151,8 @@ PhaseOffsets::PhaseOffsets() {
 
 PhaseOffsets::Offsets PhaseOffsets::getOffsetsForRefreshRate(
         android::scheduler::RefreshRateConfigs::RefreshRateType refreshRateType) const {
-    return mOffsets.at(refreshRateType);
+    bool isDefault = (refreshRateType == RefreshRateConfigs::RefreshRateType::DEFAULT);
+    return isDefault ? mOffsets.at(mDefaultPhaseOffsetType) : mOffsets.at(refreshRateType);
 }
 
 void PhaseOffsets::dump(std::string& result) const {
