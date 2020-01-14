@@ -34,6 +34,13 @@
 #include <hidl/HidlTransportUtils.h>
 #include <vendor/qti/hardware/display/composer/3.0/IQtiComposerClient.h>
 
+#ifdef QTI_DISPLAY_CONFIG_ENABLED
+#include <config/client_interface.h>
+namespace DisplayConfig {
+class ClientInterface;
+}
+#endif
+
 namespace android {
 
 using hardware::Return;
@@ -237,6 +244,29 @@ Composer::Composer(const std::string& serviceName)
     if (mClient == nullptr) {
         LOG_ALWAYS_FATAL("failed to create composer client");
     }
+
+     // On successful creation of composer client only AllowIdleFallback
+#ifdef QTI_DISPLAY_CONFIG_ENABLED
+    if (mClient) {
+        ::DisplayConfig::ClientInterface *mDisplayConfigIntf = nullptr;
+        ::DisplayConfig::ClientInterface::Create("SurfaceFlinger"+std::to_string(0),
+                                                        nullptr, &mDisplayConfigIntf);
+        if (mDisplayConfigIntf) {
+#ifdef DISPLAY_CONFIG_API_LEVEL_2
+            std::string value = "";
+            std::string idle_fallback_prop = "enable_allow_idle_fallback";
+            int ret = mDisplayConfigIntf->GetDebugProperty(idle_fallback_prop, &value);
+            ALOGI("enable_allow_idle_fallback, ret:%d value:%s", ret, value.c_str());
+            if (!ret && (value == "1")) {
+                if(mDisplayConfigIntf->AllowIdleFallback()) {
+                    ALOGW("failed to set Idle time");
+                }
+            }
+#endif
+            ::DisplayConfig::ClientInterface::Destroy(mDisplayConfigIntf);
+        }
+    }
+#endif
 
 #if defined(USE_VR_COMPOSER) && USE_VR_COMPOSER
     if (mIsUsingVrComposer) {
