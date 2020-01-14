@@ -27,6 +27,7 @@
 #include <hidl/HidlTransportSupport.h>
 #include <hidl/HidlTransportUtils.h>
 #include <vendor/qti/hardware/display/composer/2.1/IQtiComposerClient.h>
+#include <vendor/display/config/1.16/IDisplayConfig.h>
 
 namespace android {
 
@@ -218,6 +219,17 @@ Composer::Composer(const std::string& serviceName)
 
     if (mClient == nullptr) {
         LOG_ALWAYS_FATAL("failed to create composer client");
+    }
+
+    // On successful creation of composer client only allowIdleFallback
+    if (mClient) {
+        using vendor::display::config::V1_16::IDisplayConfig;
+        android::sp<IDisplayConfig> disp_config_v1_16 = IDisplayConfig::getService();
+        if (disp_config_v1_16 != NULL) {
+            if (disp_config_v1_16->allowIdleFallback()) {
+                ALOGW("failed to set Idle time");
+            }
+        }
     }
 
     if (mIsUsingVrComposer) {
