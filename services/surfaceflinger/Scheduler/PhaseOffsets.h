@@ -80,15 +80,13 @@ public:
 
 private:
     Offsets getDefaultRefreshRateOffsets() { return mDefaultRefreshRateOffsets; }
-    Offsets getPerfRefreshRateOffsets() { return mPerfRefreshRateOffsets; }
     Offsets getHighRefreshRateOffsets() { return mHighRefreshRateOffsets; }
 
     std::atomic<RefreshRateConfigs::RefreshRateType> mRefreshRateType =
             RefreshRateConfigs::RefreshRateType::DEFAULT;
 
     Offsets mDefaultRefreshRateOffsets;
-    Offsets mPerfRefreshRateOffsets; // PERFORMANCE
-    Offsets mHighRefreshRateOffsets; // HIGH1,HIGH2
+    Offsets mHighRefreshRateOffsets;
     nsecs_t mOffsetThresholdForNextVsync;
 };
 } // namespace impl

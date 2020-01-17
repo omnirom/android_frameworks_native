@@ -715,7 +715,7 @@ void SurfaceFlinger::bootFinished()
         }
 
         // set the refresh rate according to the policy
-        int maxSupportedType = (int)RefreshRateType::HIGH2;
+        int maxSupportedType = (int)RefreshRateType::PERF2;
         int minSupportedType = (int)RefreshRateType::LOW0;
 
         for (int type = maxSupportedType; type >= minSupportedType; type--) {

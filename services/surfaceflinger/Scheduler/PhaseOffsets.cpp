@@ -46,7 +46,6 @@ PhaseOffsets::PhaseOffsets() {
     property_get("debug.sf.early_gl_app_phase_offset_ns", value, "-1");
     const int earlyGlAppOffsetNs = atoi(value);
 
-    // Phase Offsets for HIGH1 or HIGH2 Refresh Rate type.
     property_get("debug.sf.high_fps_early_phase_offset_ns", value, "-1");
     const int highFpsEarlySfOffsetNs = atoi(value);
 
@@ -65,25 +64,6 @@ PhaseOffsets::PhaseOffsets() {
 
     property_get("debug.sf.high_fps_late_sf_phase_offset_ns", value, "1000000");
     const int highFpsLateSfOffsetNs = atoi(value);
-
-    // Phase Offsets for PERFORMANCE Refresh Rate type.
-    property_get("debug.sf.perf_fps_early_phase_offset_ns", value, "-1");
-    const int perfFpsEarlySfOffsetNs = atoi(value);
-
-    property_get("debug.sf.perf_fps_early_gl_phase_offset_ns", value, "-1");
-    const int perfFpsEarlyGlSfOffsetNs = atoi(value);
-
-    property_get("debug.sf.perf_fps_late_sf_phase_offset_ns", value, "-1");
-    const int perfFpsLateSfOffsetNs = atoi(value);
-
-    property_get("debug.sf.perf_fps_early_app_phase_offset_ns", value, "-1");
-    const int perfFpsEarlyAppOffsetNs = atoi(value);
-
-    property_get("debug.sf.perf_fps_early_gl_app_phase_offset_ns", value, "-1");
-    const int perfFpsEarlyGlAppOffsetNs = atoi(value);
-
-    property_get("debug.sf.perf_fps_late_app_phase_offset_ns", value, "-1");
-    const int perfFpsLateAppOffsetNs = atoi(value);
 
     // Below defines the threshold when an offset is considered to be negative, i.e. targeting
     // for the N+2 vsync instead of N+1. This means that:
@@ -112,22 +92,6 @@ PhaseOffsets::PhaseOffsets() {
                                                                        : highFpsLateAppOffsetNs};
     mHighRefreshRateOffsets.late = {highFpsLateSfOffsetNs, highFpsLateAppOffsetNs};
 
-    // If a perf_fps property is not configured, it defaults to corresponding high_fps prop value.
-    mPerfRefreshRateOffsets.early = {perfFpsEarlySfOffsetNs != -1 ? perfFpsEarlySfOffsetNs
-                                                            : mHighRefreshRateOffsets.early.sf,
-                                     perfFpsEarlyAppOffsetNs != -1 ? perfFpsEarlyAppOffsetNs
-                                                            : mHighRefreshRateOffsets.early.app};
-
-    mPerfRefreshRateOffsets.earlyGl = {perfFpsEarlyGlSfOffsetNs != -1 ? perfFpsEarlyGlSfOffsetNs
-                                                            : mHighRefreshRateOffsets.earlyGl.sf,
-                                       perfFpsEarlyGlAppOffsetNs != -1 ? perfFpsEarlyGlAppOffsetNs
-                                                            : mHighRefreshRateOffsets.earlyGl.app};
-
-    mPerfRefreshRateOffsets.late = {perfFpsLateSfOffsetNs != -1 ? perfFpsLateSfOffsetNs
-                                                            : mHighRefreshRateOffsets.late.sf,
-                                    perfFpsLateAppOffsetNs != -1 ? perfFpsLateAppOffsetNs
-                                                            : mHighRefreshRateOffsets.late.app};
-
     mOffsetThresholdForNextVsync = phaseOffsetThresholdForNextVsyncNs != -1
             ? phaseOffsetThresholdForNextVsyncNs
             : std::numeric_limits<nsecs_t>::max();
@@ -137,9 +101,8 @@ PhaseOffsets::Offsets PhaseOffsets::getOffsetsForRefreshRate(
         android::scheduler::RefreshRateConfigs::RefreshRateType refreshRateType) const {
     switch (refreshRateType) {
         case RefreshRateConfigs::RefreshRateType::PERFORMANCE:
-            return mPerfRefreshRateOffsets;
-        case RefreshRateConfigs::RefreshRateType::HIGH1:
-        case RefreshRateConfigs::RefreshRateType::HIGH2:
+        case RefreshRateConfigs::RefreshRateType::PERF1:
+        case RefreshRateConfigs::RefreshRateType::PERF2:
             return mHighRefreshRateOffsets;
         default:
             return mDefaultRefreshRateOffsets;
