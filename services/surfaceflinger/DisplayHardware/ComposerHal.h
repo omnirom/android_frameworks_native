@@ -176,6 +176,7 @@ public:
                                         const std::vector<IComposerClient::Rect>& visible) = 0;
     virtual Error setLayerZOrder(Display display, Layer layer, uint32_t z) = 0;
     virtual Error setLayerInfo(Display display, Layer layer, uint32_t type, uint32_t appId) = 0;
+    virtual Error setLayerType(Display display, Layer layer, uint32_t type) = 0;
 
     // Composer HAL 2.2
     virtual Error setLayerPerFrameMetadata(
@@ -388,6 +389,7 @@ public:
                                 const std::vector<IComposerClient::Rect>& visible) override;
     Error setLayerZOrder(Display display, Layer layer, uint32_t z) override;
     Error setLayerInfo(Display display, Layer layer, uint32_t type, uint32_t appId) override;
+    Error setLayerType(Display display, Layer layer, uint32_t type) override;
 
     // Composer HAL 2.2
     Error setLayerPerFrameMetadata(
@@ -424,6 +426,7 @@ private:
         ~CommandWriter() override;
 
         void setLayerInfo(uint32_t type, uint32_t appId);
+        void setLayerType(uint32_t type);
         void setClientTargetMetadata(
                 const IVrComposerClient::BufferMetadata& metadata);
         void setLayerBufferMetadata(

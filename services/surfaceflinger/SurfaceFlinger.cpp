@@ -130,6 +130,7 @@
 #include "gralloc_priv.h"
 #include "frame_extn_intf.h"
 #include "smomo_interface.h"
+#include "layer_extn_intf.h"
 
 namespace android {
 
@@ -285,6 +286,58 @@ std::string decodeDisplayColorSetting(DisplayColorSetting displayColorSetting) {
 
 SurfaceFlingerBE::SurfaceFlingerBE() : mHwcServiceName(getHwcServiceName()) {}
 
+bool LayerExtWrapper::Init() {
+    mLayerExtLibHandle = dlopen(LAYER_EXTN_LIBRARY_NAME, RTLD_NOW);
+    if (!mLayerExtLibHandle) {
+        ALOGE("Unable to open layer ext lib: %s", dlerror());
+        return false;
+    }
+
+    mLayerExtCreateFunc =
+        reinterpret_cast<CreateLayerExtnFuncPtr>(dlsym(mLayerExtLibHandle,
+            CREATE_LAYER_EXTN_INTERFACE));
+    mLayerExtDestroyFunc =
+        reinterpret_cast<DestroyLayerExtnFuncPtr>(dlsym(mLayerExtLibHandle,
+            DESTROY_LAYER_EXTN_INTERFACE));
+
+    if (!mLayerExtCreateFunc || !mLayerExtDestroyFunc) {
+        ALOGE("Can't load layer ext symbols: %s", dlerror());
+        dlclose(mLayerExtLibHandle);
+        return false;
+    }
+
+    if (!mLayerExtCreateFunc(LAYER_EXTN_VERSION_TAG, &mInst)) {
+        ALOGE("Unable to create layer ext interface");
+        dlclose(mLayerExtLibHandle);
+        return false;
+    }
+
+    return true;
+}
+
+std::unique_ptr<LayerExtWrapper> LayerExtWrapper::Create() {
+    std::unique_ptr<LayerExtWrapper> layerExt(new LayerExtWrapper);
+    if (layerExt->Init()) {
+        return layerExt;
+    } else {
+        return nullptr;
+    }
+}
+
+int LayerExtWrapper::getLayerClass(const std::string &name) {
+  return mInst->GetLayerClass(name);
+}
+
+LayerExtWrapper::~LayerExtWrapper() {
+    if (mInst) {
+        mLayerExtDestroyFunc(mInst);
+    }
+
+    if (mLayerExtLibHandle) {
+      dlclose(mLayerExtLibHandle);
+    }
+}
+
 SurfaceFlinger::SurfaceFlinger(Factory& factory, SkipInitializationTag)
       : mFactory(factory),
         mPhaseOffsets(mFactory.createPhaseOffsets()),
@@ -432,6 +485,12 @@ SurfaceFlinger::SurfaceFlinger(Factory& factory) : SurfaceFlinger(factory, SkipI
         // would be brittle if the name that's not 'default' is used
         // for production purposes later on.
         setenv("TREBLE_TESTING_OVERRIDE", "true", true);
+    }
+
+    property_get("vendor.display.use_layer_ext", value, "0");
+    int_value = atoi(value);
+    if (int_value) {
+        mUseLayerExt = true;
     }
 
     property_get("vendor.display.use_smooth_motion", value, "0");
@@ -842,6 +901,13 @@ void SurfaceFlinger::init() {
     mRefreshRateConfigs.setActiveConfig(active_config);
     mRefreshRateConfigs.populate(getHwComposer().getConfigs(*display->getId()));
     mRefreshRateStats.setConfigMode(active_config);
+
+    if (mUseLayerExt) {
+        mLayerExt = LayerExtWrapper::Create();
+        if (!mLayerExt) {
+            ALOGE("Failed to create layer extension");
+        }
+    }
 
     if (mUseSmoMo) {
         mSmoMoLibHandle = dlopen(SMOMO_LIBRARY_NAME, RTLD_NOW);

@@ -26,12 +26,14 @@
 #include <gui/BufferQueue.h>
 #include <hidl/HidlTransportSupport.h>
 #include <hidl/HidlTransportUtils.h>
+#include <vendor/qti/hardware/display/composer/2.0/IQtiComposerClient.h>
 
 namespace android {
 
 using hardware::Return;
 using hardware::hidl_vec;
 using hardware::hidl_handle;
+using vendor::qti::hardware::display::composer::V2_0::IQtiComposerClient;
 
 namespace Hwc2 {
 
@@ -125,6 +127,16 @@ void Composer::CommandWriter::setLayerInfo(uint32_t type, uint32_t appId)
                  kSetLayerInfoLength);
     write(type);
     write(appId);
+    endCommand();
+}
+
+void Composer::CommandWriter::setLayerType(uint32_t type)
+{
+    constexpr uint16_t kSetLayerTypeLength = 1;
+    beginCommand(static_cast<V2_1::IComposerClient::Command>(
+                         IQtiComposerClient::Command::SET_LAYER_TYPE),
+                 kSetLayerTypeLength);
+    write(type);
     endCommand();
 }
 
@@ -831,6 +843,19 @@ Error Composer::setLayerInfo(Display display, Layer layer, uint32_t type,
         mWriter.selectLayer(layer);
         mWriter.setLayerInfo(type, appId);
     }
+    return Error::NONE;
+}
+
+Error Composer::setLayerType(Display display, Layer layer, uint32_t type)
+{
+    if (mClient_2_3) {
+        if (sp<IQtiComposerClient> qClient = IQtiComposerClient::castFrom(mClient_2_3)) {
+            mWriter.selectDisplay(display);
+            mWriter.selectLayer(layer);
+            mWriter.setLayerType(type);
+        }
+    }
+
     return Error::NONE;
 }
 

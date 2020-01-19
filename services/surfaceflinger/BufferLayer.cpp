@@ -339,6 +339,12 @@ void BufferLayer::setPerFrameData(const sp<const DisplayDevice>& displayDevice,
     layerCompositionState.hdrMetadata = metadata;
 
     setHwcLayerBuffer(displayDevice);
+
+    error = hwcLayer->setType(getLayerType());
+    if (error != HWC2::Error::None) {
+        ALOGE("[%s] Failed to set layer type: %s (%d)", mName.string(),
+              to_string(error).c_str(), static_cast<int32_t>(error));
+    }
 }
 
 bool BufferLayer::onPreComposition(nsecs_t refreshStartTime) {
