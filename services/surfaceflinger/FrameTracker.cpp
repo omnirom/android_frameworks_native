@@ -99,6 +99,7 @@ void FrameTracker::advanceFrame() {
 }
 
 nsecs_t FrameTracker::getPreviousGfxInfo() {
+    Mutex::Autolock lock(mMutex);
     size_t previous = -1;
     if (mOffset > 0) {
         previous = (mOffset-1) % NUM_FRAME_RECORDS;
