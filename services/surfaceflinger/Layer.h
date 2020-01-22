@@ -902,6 +902,8 @@ protected:
     // protected by mLock
     mutable Mutex mLock;
 
+    mutable Mutex mActiveBufferLock;
+
     const wp<Client> mClientRef;
 
     // This layer can be a cursor on some displays.
