@@ -23,7 +23,6 @@ using ui::ColorMode;
 namespace {
 const String8 DISPLAY_NAME("Credentials Display Test");
 const String8 SURFACE_NAME("Test Surface Name");
-const uint32_t ROTATION = 0;
 const float FRAME_SCALE = 1.0f;
 } // namespace
 
@@ -32,6 +31,10 @@ const float FRAME_SCALE = 1.0f;
  * Methods like EnableVsyncInjections and InjectVsync are not tested since they do not
  * return anything meaningful.
  */
+
+// TODO(b/129481165): remove the #pragma below and fix conversion issues
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wconversion"
 class CredentialsTest : public ::testing::Test {
 protected:
     void SetUp() override {
@@ -215,10 +218,17 @@ TEST_F(CredentialsTest, GetDisplayNativePrimariesTest) {
     ASSERT_NO_FATAL_FAILURE(checkWithPrivileges<status_t>(condition, NO_ERROR, NO_ERROR));
 }
 
-TEST_F(CredentialsTest, SetActiveConfigTest) {
+TEST_F(CredentialsTest, SetDesiredDisplayConfigsTest) {
     const auto display = SurfaceComposerClient::getInternalDisplayToken();
+    int32_t defaultConfig;
+    float minFps;
+    float maxFps;
+    status_t res = SurfaceComposerClient::getDesiredDisplayConfigSpecs(display, &defaultConfig,
+                                                                       &minFps, &maxFps);
+    ASSERT_EQ(res, NO_ERROR);
     std::function<status_t()> condition = [=]() {
-        return SurfaceComposerClient::setActiveConfig(display, 0);
+        return SurfaceComposerClient::setDesiredDisplayConfigSpecs(display, defaultConfig, minFps,
+                                                                   maxFps);
     };
     ASSERT_NO_FATAL_FAILURE(checkWithPrivileges<status_t>(condition, NO_ERROR, PERMISSION_DENIED));
 }
@@ -262,7 +272,7 @@ TEST_F(CredentialsTest, CaptureTest) {
         sp<GraphicBuffer> outBuffer;
         return ScreenshotClient::capture(display, ui::Dataspace::V0_SRGB,
                                          ui::PixelFormat::RGBA_8888, Rect(), 0 /*reqWidth*/,
-                                         0 /*reqHeight*/, false, ROTATION, &outBuffer);
+                                         0 /*reqHeight*/, false, ui::ROTATION_0, &outBuffer);
     };
     ASSERT_NO_FATAL_FAILURE(checkWithPrivileges<status_t>(condition, NO_ERROR, PERMISSION_DENIED));
 }
@@ -363,3 +373,6 @@ TEST_F(CredentialsTest, GetActiveColorModeBasicCorrectness) {
 }
 
 } // namespace android
+
+// TODO(b/129481165): remove the #pragma below and fix conversion issues
+#pragma clang diagnostic pop // ignored "-Wconversion"

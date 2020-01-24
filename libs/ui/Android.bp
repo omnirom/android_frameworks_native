@@ -32,12 +32,6 @@ cc_library_shared {
     sanitize: {
         integer_overflow: true,
         misc_undefined: ["bounds"],
-        diag: {
-            misc_undefined: ["bounds"],
-            no_recover: [
-                "bounds",
-            ],
-        },
     },
 
     srcs: [
@@ -82,6 +76,7 @@ cc_library_shared {
         "android.hardware.graphics.allocator@2.0",
         "android.hardware.graphics.allocator@3.0",
         "android.hardware.graphics.allocator@4.0",
+        "android.hardware.graphics.common-ndk_platform",
         "android.hardware.graphics.common@1.2",
         "android.hardware.graphics.mapper@2.0",
         "android.hardware.graphics.mapper@2.1",
@@ -94,14 +89,13 @@ cc_library_shared {
         "libsync",
         "libutils",
         "liblog",
-        "vintf-graphics-common-ndk_platform",
     ],
 
     export_shared_lib_headers: [
         "android.hardware.graphics.common@1.2",
+        "android.hardware.graphics.common-ndk_platform",
         "android.hardware.graphics.mapper@4.0",
         "libgralloctypes",
-        "vintf-graphics-common-ndk_platform",
     ],
 
     static_libs: [

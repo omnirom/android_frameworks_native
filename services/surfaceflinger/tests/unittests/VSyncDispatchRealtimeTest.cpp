@@ -50,6 +50,7 @@ public:
     nsecs_t currentPeriod() const final { return mPeriod; }
 
     void setPeriod(nsecs_t) final {}
+    void resetModel() final {}
 
 private:
     nsecs_t const mPeriod;
@@ -83,6 +84,7 @@ public:
     }
 
     void setPeriod(nsecs_t) final {}
+    void resetModel() final {}
 
 private:
     std::mutex mutable mMutex;
@@ -101,7 +103,7 @@ public:
     RepeatingCallbackReceiver(VSyncDispatch& dispatch, nsecs_t wl)
           : mWorkload(wl),
             mCallback(
-                    dispatch, [&](auto time) { callback_called(time); }, "repeat0") {}
+                    dispatch, [&](auto time, auto) { callback_called(time); }, "repeat0") {}
 
     void repeatedly_schedule(size_t iterations, std::function<void(nsecs_t)> const& onEachFrame) {
         mCallbackTimes.reserve(iterations);

@@ -14,6 +14,10 @@
  * limitations under the License.
  */
 
+// TODO(b/129481165): remove the #pragma below and fix conversion issues
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wconversion"
+
 //#define LOG_NDEBUG 0
 #undef LOG_TAG
 #define LOG_TAG "TransactionCompletedThread"
@@ -310,8 +314,8 @@ void TransactionCompletedThread::threadMain() {
                     // we get pointers that compare unequal in the SF process.
                     interface_cast<ITransactionCompletedListener>(listenerStats.listener)
                             ->onTransactionCompleted(listenerStats);
-                    listener->unlinkToDeath(mDeathRecipient);
                     if (transactionStatsDeque.empty()) {
+                        listener->unlinkToDeath(mDeathRecipient);
                         completedTransactionsItr =
                                 mCompletedTransactions.erase(completedTransactionsItr);
                     } else {
@@ -355,3 +359,6 @@ CallbackHandle::CallbackHandle(const sp<IBinder>& transactionListener,
       : listener(transactionListener), callbackIds(ids), surfaceControl(sc) {}
 
 } // namespace android
+
+// TODO(b/129481165): remove the #pragma below and fix conversion issues
+#pragma clang diagnostic pop // ignored "-Wconversion"

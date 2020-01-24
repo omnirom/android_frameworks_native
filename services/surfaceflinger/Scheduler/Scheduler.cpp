@@ -14,6 +14,10 @@
  * limitations under the License.
  */
 
+// TODO(b/129481165): remove the #pragma below and fix conversion issues
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wconversion"
+
 #undef LOG_TAG
 #define LOG_TAG "Scheduler"
 #define ATRACE_TAG ATRACE_TAG_GRAPHICS
@@ -47,6 +51,10 @@
 #include "OneShotTimer.h"
 #include "SchedulerUtils.h"
 #include "SurfaceFlingerProperties.h"
+#include "Timer.h"
+#include "VSyncDispatchTimerQueue.h"
+#include "VSyncPredictor.h"
+#include "VSyncReactor.h"
 
 #define RETURN_IF_INVALID_HANDLE(handle, ...)                        \
     do {                                                             \
@@ -58,11 +66,45 @@
 
 namespace android {
 
+std::unique_ptr<DispSync> createDispSync() {
+    // TODO (140302863) remove this and use the vsync_reactor system.
+    if (property_get_bool("debug.sf.vsync_reactor", false)) {
+        // TODO (144707443) tune Predictor tunables.
+        static constexpr int default_rate = 60;
+        static constexpr auto initial_period =
+                std::chrono::duration<nsecs_t, std::ratio<1, default_rate>>(1);
+        static constexpr size_t vsyncTimestampHistorySize = 20;
+        static constexpr size_t minimumSamplesForPrediction = 6;
+        static constexpr uint32_t discardOutlierPercent = 20;
+        auto tracker = std::make_unique<
+                scheduler::VSyncPredictor>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                                   initial_period)
+                                                   .count(),
+                                           vsyncTimestampHistorySize, minimumSamplesForPrediction,
+                                           discardOutlierPercent);
+
+        static constexpr auto vsyncMoveThreshold =
+                std::chrono::duration_cast<std::chrono::nanoseconds>(3ms);
+        static constexpr auto timerSlack =
+                std::chrono::duration_cast<std::chrono::nanoseconds>(500us);
+        auto dispatch = std::make_unique<
+                scheduler::VSyncDispatchTimerQueue>(std::make_unique<scheduler::Timer>(), *tracker,
+                                                    timerSlack.count(), vsyncMoveThreshold.count());
+
+        static constexpr size_t pendingFenceLimit = 20;
+        return std::make_unique<scheduler::VSyncReactor>(std::make_unique<scheduler::SystemClock>(),
+                                                         std::move(dispatch), std::move(tracker),
+                                                         pendingFenceLimit);
+    } else {
+        return std::make_unique<impl::DispSync>("SchedulerDispSync",
+                                                sysprop::running_without_sync_framework(true));
+    }
+}
+
 Scheduler::Scheduler(impl::EventControlThread::SetVSyncEnabledFunction function,
                      const scheduler::RefreshRateConfigs& refreshRateConfig,
                      ISchedulerCallback& schedulerCallback)
-      : mPrimaryDispSync(new impl::DispSync("SchedulerDispSync",
-                                            sysprop::running_without_sync_framework(true))),
+      : mPrimaryDispSync(createDispSync()),
         mEventControlThread(new impl::EventControlThread(std::move(function))),
         mSupportKernelTimer(sysprop::support_kernel_idle_timer(false)),
         mSchedulerCallback(schedulerCallback),
@@ -70,7 +112,7 @@ Scheduler::Scheduler(impl::EventControlThread::SetVSyncEnabledFunction function,
     using namespace sysprop;
 
     if (property_get_bool("debug.sf.use_smart_90_for_video", 0) || use_smart_90_for_video(false)) {
-        mLayerHistory.emplace();
+        mLayerHistory = std::make_unique<scheduler::impl::LayerHistory>();
     }
 
     const int setIdleTimerMs = property_get_int32("debug.sf.set_idle_timer_ms", 0);
@@ -184,9 +226,9 @@ void Scheduler::onScreenReleased(ConnectionHandle handle) {
 }
 
 void Scheduler::onConfigChanged(ConnectionHandle handle, PhysicalDisplayId displayId,
-                                HwcConfigIndexType configId) {
+                                HwcConfigIndexType configId, nsecs_t vsyncPeriod) {
     RETURN_IF_INVALID_HANDLE(handle);
-    mConnections[handle].thread->onConfigChanged(displayId, configId);
+    mConnections[handle].thread->onConfigChanged(displayId, configId, vsyncPeriod);
 }
 
 void Scheduler::dump(ConnectionHandle handle, std::string& result) const {
@@ -380,18 +422,20 @@ void Scheduler::resetIdleTimer() {
 }
 
 void Scheduler::notifyTouchEvent() {
-    if (mTouchTimer) {
-        mTouchTimer->reset();
-    }
-
-    if (mSupportKernelTimer && mIdleTimer) {
-        mIdleTimer->reset();
-    }
-
     // Touch event will boost the refresh rate to performance.
-    // Clear Layer History to get fresh FPS detection
-    if (mLayerHistory) {
+    // Clear Layer History to get fresh FPS detection.
+    // NOTE: Instead of checking all the layers, we should be checking the layer
+    // that is currently on top. b/142507166 will give us this capability.
+    if (mLayerHistory && !mLayerHistory->hasClientSpecifiedFrameRate()) {
         mLayerHistory->clear();
+
+        if (mTouchTimer) {
+            mTouchTimer->reset();
+        }
+
+        if (mSupportKernelTimer && mIdleTimer) {
+            mIdleTimer->reset();
+        }
     }
 }
 
@@ -455,7 +499,7 @@ void Scheduler::dump(std::string& result) const {
 
     const bool supported = mRefreshRateConfigs.refreshRateSwitchingSupported();
     StringAppendF(&result, "+  Refresh rate switching: %s\n", states[supported]);
-    StringAppendF(&result, "+  Content detection: %s\n", states[mLayerHistory.has_value()]);
+    StringAppendF(&result, "+  Content detection: %s\n", states[mLayerHistory != nullptr]);
 
     StringAppendF(&result, "+  Idle timer: %s\n",
                   mIdleTimer ? mIdleTimer->dump().c_str() : states[0]);
@@ -491,25 +535,31 @@ HwcConfigIndexType Scheduler::calculateRefreshRateType() {
         return mRefreshRateConfigs.getCurrentRefreshRate().configId;
     }
 
-    // If Display Power is not in normal operation we want to be in performance mode.
-    // When coming back to normal mode, a grace period is given with DisplayPowerTimer
-    if (!mFeatures.isDisplayPowerStateNormal || mFeatures.displayPowerTimer == TimerState::Reset) {
-        return mRefreshRateConfigs.getMaxRefreshRateByPolicy().configId;
-    }
+    // If the layer history doesn't have the frame rate specified, use the old path. NOTE:
+    // if we remove the kernel idle timer, and use our internal idle timer, this code will have to
+    // be refactored.
+    if (!mLayerHistory->hasClientSpecifiedFrameRate()) {
+        // If Display Power is not in normal operation we want to be in performance mode.
+        // When coming back to normal mode, a grace period is given with DisplayPowerTimer
+        if (!mFeatures.isDisplayPowerStateNormal ||
+            mFeatures.displayPowerTimer == TimerState::Reset) {
+            return mRefreshRateConfigs.getMaxRefreshRateByPolicy().configId;
+        }
 
-    // As long as touch is active we want to be in performance mode
-    if (mFeatures.touch == TouchState::Active) {
-        return mRefreshRateConfigs.getMaxRefreshRateByPolicy().configId;
-    }
+        // As long as touch is active we want to be in performance mode
+        if (mFeatures.touch == TouchState::Active) {
+            return mRefreshRateConfigs.getMaxRefreshRateByPolicy().configId;
+        }
 
-    // If timer has expired as it means there is no new content on the screen
-    if (mFeatures.idleTimer == TimerState::Expired) {
-        return mRefreshRateConfigs.getMinRefreshRateByPolicy().configId;
-    }
+        // If timer has expired as it means there is no new content on the screen
+        if (mFeatures.idleTimer == TimerState::Expired) {
+            return mRefreshRateConfigs.getMinRefreshRateByPolicy().configId;
+        }
 
-    // If content detection is off we choose performance as we don't know the content fps
-    if (mFeatures.contentDetection == ContentDetectionState::Off) {
-        return mRefreshRateConfigs.getMaxRefreshRateByPolicy().configId;
+        // If content detection is off we choose performance as we don't know the content fps
+        if (mFeatures.contentDetection == ContentDetectionState::Off) {
+            return mRefreshRateConfigs.getMaxRefreshRateByPolicy().configId;
+        }
     }
 
     // Content detection is on, find the appropriate refresh rate with minimal error
@@ -557,3 +607,6 @@ void Scheduler::onDisplayRefreshed(nsecs_t timestamp) {
 }
 
 } // namespace android
+
+// TODO(b/129481165): remove the #pragma below and fix conversion issues
+#pragma clang diagnostic pop // ignored "-Wconversion"

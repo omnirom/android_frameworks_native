@@ -14,6 +14,10 @@
  * limitations under the License.
  */
 
+// TODO(b/129481165): remove the #pragma below and fix conversion issues
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wconversion"
+
 #include <cmath>
 
 #include <compositionengine/DisplayColorProfileCreationArgs.h>
@@ -700,6 +704,9 @@ TEST_F(DisplayTest, finishFrameDoesNotSkipCompositionIfNotDirtyOnHwcDisplay) {
     // We expect no calls to queueBuffer if composition was skipped.
     EXPECT_CALL(*renderSurface, queueBuffer(_)).Times(1);
 
+    // Expect a call to signal no expensive rendering since there is no client composition.
+    EXPECT_CALL(mPowerAdvisor, setExpensiveRenderingExpected(DEFAULT_DISPLAY_ID, false));
+
     mDisplay->editState().isEnabled = true;
     mDisplay->editState().usesClientComposition = false;
     mDisplay->editState().viewport = Rect(0, 0, 1, 1);
@@ -830,3 +837,6 @@ TEST_F(DisplayFunctionalTest, postFramebufferCriticalCallsAreOrdered) {
 
 } // namespace
 } // namespace android::compositionengine
+
+// TODO(b/129481165): remove the #pragma below and fix conversion issues
+#pragma clang diagnostic pop // ignored "-Wconversion"

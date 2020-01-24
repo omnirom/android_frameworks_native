@@ -108,6 +108,8 @@ static constexpr const char* kFuseProp = "persist.sys.fuse";
  * Property to control if app data isolation is enabled.
  */
 static constexpr const char* kAppDataIsolationEnabledProperty = "persist.zygote.app_data_isolation";
+static constexpr const char* kMntSdcardfs = "/mnt/runtime/default/";
+static constexpr const char* kMntFuse = "/mnt/pass_through/0/";
 
 static std::atomic<bool> sAppDataIsolationEnabled(false);
 
@@ -271,7 +273,7 @@ status_t InstalldNativeService::start() {
     ps->startThreadPool();
     ps->giveThreadPoolName();
     sAppDataIsolationEnabled = android::base::GetBoolProperty(
-            kAppDataIsolationEnabledProperty, false);
+            kAppDataIsolationEnabledProperty, true);
     return android::OK;
 }
 
@@ -639,10 +641,8 @@ binder::Status InstalldNativeService::clearAppData(const std::unique_ptr<std::st
                 if (delete_dir_contents(path, true) != 0) {
                     res = error("Failed to delete contents of " + path);
                 }
-                path = StringPrintf("%s/Android/obb/%s", extPath.c_str(), pkgname);
-                if (delete_dir_contents(path, true) != 0) {
-                    res = error("Failed to delete contents of " + path);
-                }
+                // Note that we explicitly don't delete OBBs - those are only removed on
+                // app uninstall.
             }
         }
     }
@@ -2688,15 +2688,13 @@ binder::Status InstalldNativeService::invalidateMounts() {
         std::getline(in, ignored);
 
         if (android::base::GetBoolProperty(kFuseProp, false)) {
-            // TODO(b/146139106): Use sdcardfs mounts on devices running sdcardfs so we don't bypass
-            // it's VFS cache
-            if (target.compare(0, 17, "/mnt/pass_through") == 0) {
+            if (target.find(kMntFuse) == 0) {
                 LOG(DEBUG) << "Found storage mount " << source << " at " << target;
                 mStorageMounts[source] = target;
             }
         } else {
 #if !BYPASS_SDCARDFS
-            if (target.compare(0, 21, "/mnt/runtime/default/") == 0) {
+            if (target.find(kMntSdcardfs) == 0) {
                 LOG(DEBUG) << "Found storage mount " << source << " at " << target;
                 mStorageMounts[source] = target;
             }
@@ -2794,17 +2792,6 @@ std::string InstalldNativeService::findDataMediaPath(
     std::lock_guard<std::recursive_mutex> lock(mMountsLock);
     const char* uuid_ = uuid ? uuid->c_str() : nullptr;
     auto path = StringPrintf("%s/media", create_data_path(uuid_).c_str());
-    if (android::base::GetBoolProperty(kFuseProp, false)) {
-        // TODO(b/146139106): This is only safe on devices not running sdcardfs where there is no
-        // risk of bypassing the sdcardfs VFS cache
-
-        // Always use the lower filesystem path on FUSE enabled devices not running sdcardfs
-        // The upper filesystem path, /mnt/pass_through/<userid>/<vol>/ which was a bind mount
-        // to the lower filesytem may have been unmounted already when a user is
-        // removed and the path will now be pointing to a tmpfs without content
-        return StringPrintf("%s/%u", path.c_str(), userid);
-    }
-
     auto resolved = mStorageMounts[path];
     if (resolved.empty()) {
         LOG(WARNING) << "Failed to find storage mount for " << path;

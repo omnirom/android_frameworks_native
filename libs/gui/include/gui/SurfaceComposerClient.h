@@ -35,6 +35,7 @@
 #include <ui/FrameStats.h>
 #include <ui/GraphicTypes.h>
 #include <ui/PixelFormat.h>
+#include <ui/Rotation.h>
 
 #include <gui/CpuConsumer.h>
 #include <gui/ISurfaceComposer.h>
@@ -112,10 +113,6 @@ public:
     // Get the index of the current active configuration (relative to the list
     // returned by getDisplayInfo)
     static int getActiveConfig(const sp<IBinder>& display);
-
-    // Set a new active configuration using an index relative to the list
-    // returned by getDisplayInfo
-    static status_t setActiveConfig(const sp<IBinder>& display, int id);
 
     // Sets the refresh rate boundaries for display configuration.
     // For all other parameters, default configuration is used. The index for the default is
@@ -434,6 +431,8 @@ public:
                 float dsdx, float dtdx, float dtdy, float dsdy);
         Transaction& setCrop_legacy(const sp<SurfaceControl>& sc, const Rect& crop);
         Transaction& setCornerRadius(const sp<SurfaceControl>& sc, float cornerRadius);
+        Transaction& setBackgroundBlurRadius(const sp<SurfaceControl>& sc,
+                                             int backgroundBlurRadius);
         Transaction& setLayerStack(const sp<SurfaceControl>& sc, uint32_t layerStack);
         Transaction& setMetadata(const sp<SurfaceControl>& sc, uint32_t key, const Parcel& p);
         // Defers applying any changes made in this transaction until the Layer
@@ -482,6 +481,9 @@ public:
         Transaction& setDesiredPresentTime(nsecs_t desiredPresentTime);
         Transaction& setColorSpaceAgnostic(const sp<SurfaceControl>& sc, const bool agnostic);
 
+        // Sets information about the priority of the frame.
+        Transaction& setFrameRateSelectionPriority(const sp<SurfaceControl>& sc, int32_t priority);
+
         Transaction& addTransactionCompletedCallback(
                 TransactionCompletedCallbackTakesContext callback, void* callbackContext);
 
@@ -516,6 +518,8 @@ public:
                 const Rect& source, const Rect& dst, int transform);
         Transaction& setShadowRadius(const sp<SurfaceControl>& sc, float cornerRadius);
 
+        Transaction& setFrameRate(const sp<SurfaceControl>& sc, float frameRate);
+
         status_t setDisplaySurface(const sp<IBinder>& token,
                 const sp<IGraphicBufferProducer>& bufferProducer);
 
@@ -531,10 +535,8 @@ public:
          * mapped to. displayRect is specified post-orientation, that is
          * it uses the orientation seen by the end-user.
          */
-        void setDisplayProjection(const sp<IBinder>& token,
-                uint32_t orientation,
-                const Rect& layerStackRect,
-                const Rect& displayRect);
+        void setDisplayProjection(const sp<IBinder>& token, ui::Rotation orientation,
+                                  const Rect& layerStackRect, const Rect& displayRect);
         void setDisplaySize(const sp<IBinder>& token, uint32_t width, uint32_t height);
         void setAnimationTransaction();
         void setEarlyWakeup();
@@ -548,10 +550,8 @@ public:
     static status_t getHdrCapabilities(const sp<IBinder>& display,
             HdrCapabilities* outCapabilities);
 
-    static void setDisplayProjection(const sp<IBinder>& token,
-            uint32_t orientation,
-            const Rect& layerStackRect,
-            const Rect& displayRect);
+    static void setDisplayProjection(const sp<IBinder>& token, ui::Rotation orientation,
+                                     const Rect& layerStackRect, const Rect& displayRect);
 
     inline sp<ISurfaceComposerClient> getClient() { return mClient; }
 
@@ -583,23 +583,23 @@ class ScreenshotClient {
 public:
     // if cropping isn't required, callers may pass in a default Rect, e.g.:
     //   capture(display, producer, Rect(), reqWidth, ...);
-    static status_t capture(const sp<IBinder>& display, const ui::Dataspace reqDataSpace,
-                            const ui::PixelFormat reqPixelFormat, Rect sourceCrop,
+    static status_t capture(const sp<IBinder>& display, ui::Dataspace reqDataSpace,
+                            ui::PixelFormat reqPixelFormat, const Rect& sourceCrop,
                             uint32_t reqWidth, uint32_t reqHeight, bool useIdentityTransform,
-                            uint32_t rotation, bool captureSecureLayers,
+                            ui::Rotation rotation, bool captureSecureLayers,
                             sp<GraphicBuffer>* outBuffer, bool& outCapturedSecureLayers);
-    static status_t capture(const sp<IBinder>& display, const ui::Dataspace reqDataSpace,
-                            const ui::PixelFormat reqPixelFormat, Rect sourceCrop,
+    static status_t capture(const sp<IBinder>& display, ui::Dataspace reqDataSpace,
+                            ui::PixelFormat reqPixelFormat, const Rect& sourceCrop,
                             uint32_t reqWidth, uint32_t reqHeight, bool useIdentityTransform,
-                            uint32_t rotation, sp<GraphicBuffer>* outBuffer);
+                            ui::Rotation rotation, sp<GraphicBuffer>* outBuffer);
     static status_t capture(uint64_t displayOrLayerStack, ui::Dataspace* outDataspace,
                             sp<GraphicBuffer>* outBuffer);
-    static status_t captureLayers(const sp<IBinder>& layerHandle, const ui::Dataspace reqDataSpace,
-                                  const ui::PixelFormat reqPixelFormat, Rect sourceCrop,
+    static status_t captureLayers(const sp<IBinder>& layerHandle, ui::Dataspace reqDataSpace,
+                                  ui::PixelFormat reqPixelFormat, const Rect& sourceCrop,
                                   float frameScale, sp<GraphicBuffer>* outBuffer);
     static status_t captureChildLayers(
-            const sp<IBinder>& layerHandle, const ui::Dataspace reqDataSpace,
-            const ui::PixelFormat reqPixelFormat, Rect sourceCrop,
+            const sp<IBinder>& layerHandle, ui::Dataspace reqDataSpace,
+            ui::PixelFormat reqPixelFormat, const Rect& sourceCrop,
             const std::unordered_set<sp<IBinder>, ISurfaceComposer::SpHash<IBinder>>&
                     excludeHandles,
             float frameScale, sp<GraphicBuffer>* outBuffer);

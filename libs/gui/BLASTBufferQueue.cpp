@@ -37,8 +37,6 @@ BLASTBufferQueue::BLASTBufferQueue(const sp<SurfaceControl>& surface, int width,
         mHeight(height),
         mNextTransaction(nullptr) {
     BufferQueue::createBufferQueue(&mProducer, &mConsumer);
-    mConsumer->setMaxBufferCount(MAX_BUFFERS);
-    mProducer->setMaxDequeuedBufferCount(MAX_BUFFERS - 1);
     mConsumer->setMaxAcquiredBufferCount(MAX_ACQUIRED_BUFFERS);
     mBufferItemConsumer =
             new BufferItemConsumer(mConsumer, AHARDWAREBUFFER_USAGE_GPU_FRAMEBUFFER, 1, true);
@@ -111,7 +109,7 @@ void BLASTBufferQueue::transactionCallback(nsecs_t /*latchTime*/, const sp<Fence
 
 void BLASTBufferQueue::processNextBufferLocked() {
     ATRACE_CALL();
-    if (mNumFrameAvailable == 0) {
+    if (mNumFrameAvailable == 0 || mNumAcquired == MAX_ACQUIRED_BUFFERS) {
         return;
     }
 

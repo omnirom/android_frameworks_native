@@ -371,7 +371,6 @@ public:
      */
 
     auto& mutableHasWideColorDisplay() { return SurfaceFlinger::hasWideColorDisplay; }
-    auto& mutablePrimaryDisplayOrientation() { return SurfaceFlinger::primaryDisplayOrientation; }
     auto& mutableUseColorManagement() { return SurfaceFlinger::useColorManagement; }
 
     auto& mutableCurrentState() { return mFlinger->mCurrentState; }
@@ -603,6 +602,11 @@ public:
 
         auto& setHasWideColorGamut(bool hasWideColorGamut) {
             mCreationArgs.hasWideColorGamut = hasWideColorGamut;
+            return *this;
+        }
+
+        auto& setPhysicalOrientation(ui::Rotation orientation) {
+            mCreationArgs.physicalOrientation = orientation;
             return *this;
         }
 

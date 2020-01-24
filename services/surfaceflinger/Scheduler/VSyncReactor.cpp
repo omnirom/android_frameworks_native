@@ -14,11 +14,13 @@
  * limitations under the License.
  */
 
+#define ATRACE_TAG ATRACE_TAG_GRAPHICS
 #undef LOG_TAG
 #define LOG_TAG "VSyncReactor"
 //#define LOG_NDEBUG 0
 #include "VSyncReactor.h"
 #include <log/log.h>
+#include <utils/Trace.h>
 #include "TimeKeeper.h"
 #include "VSyncDispatch.h"
 #include "VSyncTracker.h"
@@ -26,12 +28,15 @@
 namespace android::scheduler {
 
 Clock::~Clock() = default;
+nsecs_t SystemClock::now() const {
+    return systemTime(SYSTEM_TIME_MONOTONIC);
+}
 
 VSyncReactor::VSyncReactor(std::unique_ptr<Clock> clock, std::unique_ptr<VSyncDispatch> dispatch,
                            std::unique_ptr<VSyncTracker> tracker, size_t pendingFenceLimit)
       : mClock(std::move(clock)),
-        mDispatch(std::move(dispatch)),
         mTracker(std::move(tracker)),
+        mDispatch(std::move(dispatch)),
         mPendingLimit(pendingFenceLimit) {}
 
 VSyncReactor::~VSyncReactor() = default;
@@ -45,7 +50,8 @@ public:
                      nsecs_t period, nsecs_t offset, nsecs_t notBefore)
           : mCallback(cb),
             mRegistration(dispatch,
-                          std::bind(&CallbackRepeater::callback, this, std::placeholders::_1),
+                          std::bind(&CallbackRepeater::callback, this, std::placeholders::_1,
+                                    std::placeholders::_2),
                           std::string(name)),
             mPeriod(period),
             mOffset(offset),
@@ -82,15 +88,13 @@ public:
     }
 
 private:
-    void callback(nsecs_t vsynctime) {
-        nsecs_t period = 0;
+    void callback(nsecs_t vsynctime, nsecs_t wakeupTime) {
         {
             std::lock_guard<std::mutex> lk(mMutex);
-            period = mPeriod;
             mLastCallTime = vsynctime;
         }
 
-        mCallback->onDispSyncEvent(vsynctime - period);
+        mCallback->onDispSyncEvent(wakeupTime);
 
         {
             std::lock_guard<std::mutex> lk(mMutex);
@@ -151,7 +155,7 @@ bool VSyncReactor::addPresentFence(const std::shared_ptr<FenceTime>& fence) {
         mTracker->addVsyncTimestamp(signalTime);
     }
 
-    return false; // TODO(b/144707443): add policy for turning on HWVsync.
+    return mMoreSamplesNeeded;
 }
 
 void VSyncReactor::setIgnorePresentFences(bool ignoration) {
@@ -172,14 +176,25 @@ nsecs_t VSyncReactor::expectedPresentTime() {
     return mTracker->nextAnticipatedVSyncTimeFrom(mClock->now());
 }
 
+void VSyncReactor::startPeriodTransition(nsecs_t newPeriod) {
+    mPeriodTransitioningTo = newPeriod;
+    mMoreSamplesNeeded = true;
+}
+
+void VSyncReactor::endPeriodTransition() {
+    mPeriodTransitioningTo.reset();
+    mLastHwVsync.reset();
+    mMoreSamplesNeeded = false;
+}
+
 void VSyncReactor::setPeriod(nsecs_t period) {
-    mTracker->setPeriod(period);
-    {
-        std::lock_guard<std::mutex> lk(mMutex);
-        mPeriodChangeInProgress = true;
-        for (auto& entry : mCallbacks) {
-            entry.second->setPeriod(period);
-        }
+    ATRACE_INT64("VSR-setPeriod", period);
+    std::lock_guard lk(mMutex);
+    mLastHwVsync.reset();
+    if (period == getPeriod()) {
+        endPeriodTransition();
+    } else {
+        startPeriodTransition(period);
     }
 }
 
@@ -187,19 +202,43 @@ nsecs_t VSyncReactor::getPeriod() {
     return mTracker->currentPeriod();
 }
 
-void VSyncReactor::beginResync() {}
+void VSyncReactor::beginResync() {
+    mTracker->resetModel();
+}
 
 void VSyncReactor::endResync() {}
 
+bool VSyncReactor::periodChangeDetected(nsecs_t vsync_timestamp) {
+    if (!mLastHwVsync || !mPeriodTransitioningTo) {
+        return false;
+    }
+    auto const distance = vsync_timestamp - *mLastHwVsync;
+    return std::abs(distance - *mPeriodTransitioningTo) < std::abs(distance - getPeriod());
+}
+
 bool VSyncReactor::addResyncSample(nsecs_t timestamp, bool* periodFlushed) {
     assert(periodFlushed);
-    mTracker->addVsyncTimestamp(timestamp);
-    {
-        std::lock_guard<std::mutex> lk(mMutex);
-        *periodFlushed = mPeriodChangeInProgress;
-        mPeriodChangeInProgress = false;
+
+    std::lock_guard<std::mutex> lk(mMutex);
+    if (periodChangeDetected(timestamp)) {
+        mTracker->setPeriod(*mPeriodTransitioningTo);
+        for (auto& entry : mCallbacks) {
+            entry.second->setPeriod(*mPeriodTransitioningTo);
+        }
+
+        endPeriodTransition();
+        *periodFlushed = true;
+    } else if (mPeriodTransitioningTo) {
+        mLastHwVsync = timestamp;
+        mMoreSamplesNeeded = true;
+        *periodFlushed = false;
+    } else {
+        mMoreSamplesNeeded = false;
+        *periodFlushed = false;
     }
-    return false;
+
+    mTracker->addVsyncTimestamp(timestamp);
+    return mMoreSamplesNeeded;
 }
 
 status_t VSyncReactor::addEventListener(const char* name, nsecs_t phase,
@@ -244,5 +283,11 @@ status_t VSyncReactor::changePhaseOffset(DispSync::Callback* callback, nsecs_t p
     it->second->start(phase);
     return NO_ERROR;
 }
+
+void VSyncReactor::dump(std::string& result) const {
+    result += "VsyncReactor in use\n"; // TODO (b/144927823): add more information!
+}
+
+void VSyncReactor::reset() {}
 
 } // namespace android::scheduler

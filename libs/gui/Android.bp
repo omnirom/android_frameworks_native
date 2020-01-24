@@ -65,9 +65,6 @@ cc_defaults {
         "SurfaceComposerClient.cpp",
         "SyncFeatures.cpp",
         "view/Surface.cpp",
-        "surfacetexture/SurfaceTexture.cpp",
-        "surfacetexture/ImageConsumer.cpp",
-        "surfacetexture/EGLConsumer.cpp",
     ],
 
     shared_libs: [

@@ -14,11 +14,16 @@
  * limitations under the License.
  */
 
+// TODO(b/129481165): remove the #pragma below and fix conversion issues
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wconversion"
+
 #include <chrono>
 #include <condition_variable>
 #include <fstream>
 
 #include <gtest/gtest.h>
+#include <cutils/properties.h>
 #include <renderengine/RenderEngine.h>
 #include <sync/sync.h>
 #include <ui/PixelFormat.h>
@@ -40,6 +45,7 @@ struct RenderEngineTest : public ::testing::Test {
                     .setUseColorManagerment(false)
                     .setEnableProtectedContext(false)
                     .setPrecacheToneMapperShaderOnly(false)
+                    .setSupportsBackgroundBlur(true)
                     .setContextPriority(renderengine::RenderEngine::ContextPriority::MEDIUM)
         .build());
     }
@@ -322,6 +328,9 @@ struct RenderEngineTest : public ::testing::Test {
 
     template <typename SourceVariant>
     void fillBufferWithRoundedCorners();
+
+    template <typename SourceVariant>
+    void fillBufferAndBlurBackground();
 
     template <typename SourceVariant>
     void overlayCorners();
@@ -702,6 +711,51 @@ void RenderEngineTest::fillBufferWithRoundedCorners() {
 }
 
 template <typename SourceVariant>
+void RenderEngineTest::fillBufferAndBlurBackground() {
+        char value[PROPERTY_VALUE_MAX];
+    property_get("ro.surface_flinger.supports_background_blur", value, "0");
+    if (!atoi(value)) {
+        // This device doesn't support blurs, no-op.
+        return;
+    }
+
+    auto blurRadius = 50;
+    auto center = DEFAULT_DISPLAY_WIDTH / 2;
+
+    renderengine::DisplaySettings settings;
+    settings.physicalDisplay = fullscreenRect();
+    settings.clip = fullscreenRect();
+
+    std::vector<renderengine::LayerSettings> layers;
+
+    renderengine::LayerSettings backgroundLayer;
+    backgroundLayer.geometry.boundaries = fullscreenRect().toFloatRect();
+    SourceVariant::fillColor(backgroundLayer, 0.0f, 1.0f, 0.0f, this);
+    backgroundLayer.alpha = 1.0f;
+    layers.push_back(backgroundLayer);
+
+    renderengine::LayerSettings leftLayer;
+    leftLayer.geometry.boundaries =
+            Rect(DEFAULT_DISPLAY_WIDTH / 2, DEFAULT_DISPLAY_HEIGHT).toFloatRect();
+    SourceVariant::fillColor(leftLayer, 1.0f, 0.0f, 0.0f, this);
+    leftLayer.alpha = 1.0f;
+    layers.push_back(leftLayer);
+
+    renderengine::LayerSettings blurLayer;
+    blurLayer.geometry.boundaries = fullscreenRect().toFloatRect();
+    blurLayer.backgroundBlurRadius = blurRadius;
+    blurLayer.alpha = 0;
+    layers.push_back(blurLayer);
+
+    invokeDraw(settings, layers, mBuffer);
+
+    expectBufferColor(Rect(center - 1, center - 5, center, center + 5), 150, 150, 0, 255,
+                      50 /* tolerance */);
+    expectBufferColor(Rect(center, center - 5, center + 1, center + 5), 150, 150, 0, 255,
+                      50 /* tolerance */);
+}
+
+template <typename SourceVariant>
 void RenderEngineTest::overlayCorners() {
     renderengine::DisplaySettings settings;
     settings.physicalDisplay = fullscreenRect();
@@ -1028,6 +1082,10 @@ TEST_F(RenderEngineTest, drawLayers_fillBufferRoundedCorners_colorSource) {
     fillBufferWithRoundedCorners<ColorSourceVariant>();
 }
 
+TEST_F(RenderEngineTest, drawLayers_fillBufferAndBlurBackground_colorSource) {
+    fillBufferAndBlurBackground<ColorSourceVariant>();
+}
+
 TEST_F(RenderEngineTest, drawLayers_overlayCorners_colorSource) {
     overlayCorners<ColorSourceVariant>();
 }
@@ -1080,6 +1138,10 @@ TEST_F(RenderEngineTest, drawLayers_fillBufferRoundedCorners_opaqueBufferSource)
     fillBufferWithRoundedCorners<BufferSourceVariant<ForceOpaqueBufferVariant>>();
 }
 
+TEST_F(RenderEngineTest, drawLayers_fillBufferAndBlurBackground_opaqueBufferSource) {
+    fillBufferAndBlurBackground<BufferSourceVariant<ForceOpaqueBufferVariant>>();
+}
+
 TEST_F(RenderEngineTest, drawLayers_overlayCorners_opaqueBufferSource) {
     overlayCorners<BufferSourceVariant<ForceOpaqueBufferVariant>>();
 }
@@ -1130,6 +1192,10 @@ TEST_F(RenderEngineTest, drawLayers_fillBufferColorTransform_bufferSource) {
 
 TEST_F(RenderEngineTest, drawLayers_fillBufferRoundedCorners_bufferSource) {
     fillBufferWithRoundedCorners<BufferSourceVariant<RelaxOpaqueBufferVariant>>();
+}
+
+TEST_F(RenderEngineTest, drawLayers_fillBufferAndBlurBackground_bufferSource) {
+    fillBufferAndBlurBackground<BufferSourceVariant<RelaxOpaqueBufferVariant>>();
 }
 
 TEST_F(RenderEngineTest, drawLayers_overlayCorners_bufferSource) {
@@ -1339,3 +1405,6 @@ TEST_F(RenderEngineTest, drawLayers_fillShadow_translucentCasterWithAlpha) {
 }
 
 } // namespace android
+
+// TODO(b/129481165): remove the #pragma below and fix conversion issues
+#pragma clang diagnostic pop // ignored "-Wconversion"

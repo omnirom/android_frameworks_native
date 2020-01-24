@@ -14,6 +14,10 @@
  * limitations under the License.
  */
 
+// TODO(b/129481165): remove the #pragma below and fix conversion issues
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wconversion"
+
 //#define LOG_NDEBUG 0
 #undef LOG_TAG
 #define LOG_TAG "BufferStateLayer"
@@ -235,6 +239,8 @@ bool BufferStateLayer::setBuffer(const sp<GraphicBuffer>& buffer, nsecs_t postTi
         mReleasePreviousBuffer = true;
     }
 
+    mFrameCounter++;
+
     mCurrentState.buffer = buffer;
     mCurrentState.clientCacheId = clientCacheId;
     mCurrentState.modified = true;
@@ -342,6 +348,11 @@ bool BufferStateLayer::setTransactionCompletedListeners(
     mCallbackHandleAcquireTime = -1;
 
     return willPresent;
+}
+
+void BufferStateLayer::forceSendCallbacks() {
+    mFlinger->getTransactionCompletedThread().finalizePendingCallbackHandles(
+            mCurrentState.callbackHandles);
 }
 
 bool BufferStateLayer::setTransparentRegionHint(const Region& transparent) {
@@ -468,7 +479,7 @@ status_t BufferStateLayer::updateTexImage(bool& /*recomputeVisibleRegions*/, nse
     }
 
     if (s.transformToDisplayInverse) {
-        uint32_t invTransform = DisplayDevice::getPrimaryDisplayOrientationTransform();
+        uint32_t invTransform = DisplayDevice::getPrimaryDisplayRotationFlags();
         if (invTransform & ui::Transform::ROT_90) {
             std::swap(bufferWidth, bufferHeight);
         }
@@ -486,6 +497,8 @@ status_t BufferStateLayer::updateTexImage(bool& /*recomputeVisibleRegions*/, nse
     for (auto& handle : mDrawingState.callbackHandles) {
         handle->latchTime = latchTime;
     }
+
+    mFrameNumber = mFrameCounter;
 
     if (!SyncFeatures::getInstance().useNativeFenceSync()) {
         // Bind the new buffer to the GL texture.
@@ -548,8 +561,6 @@ void BufferStateLayer::latchPerFrameState(
     compositionState.buffer = mBufferInfo.mBuffer;
     compositionState.bufferSlot = mBufferInfo.mBufferSlot;
     compositionState.acquireFence = mBufferInfo.mFence;
-
-    mFrameNumber++;
 }
 
 void BufferStateLayer::HwcSlotGenerator::bufferErased(const client_cache_t& clientCacheId) {
@@ -676,3 +687,6 @@ sp<Layer> BufferStateLayer::createClone() {
     return layer;
 }
 } // namespace android
+
+// TODO(b/129481165): remove the #pragma below and fix conversion issues
+#pragma clang diagnostic pop // ignored "-Wconversion"

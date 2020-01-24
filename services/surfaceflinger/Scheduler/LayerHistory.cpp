@@ -14,6 +14,10 @@
  * limitations under the License.
  */
 
+// TODO(b/129481165): remove the #pragma below and fix conversion issues
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wconversion"
+
 #undef LOG_TAG
 #define LOG_TAG "LayerHistory"
 #define ATRACE_TAG ATRACE_TAG_GRAPHICS
@@ -34,17 +38,26 @@
 #include "LayerInfo.h"
 #include "SchedulerUtils.h"
 
-namespace android::scheduler {
+namespace android::scheduler::impl {
 
 namespace {
 
 bool isLayerActive(const Layer& layer, const LayerInfo& info, nsecs_t threshold) {
+    if (layer.getFrameRate() > .0f) {
+        return layer.isVisible();
+    }
     return layer.isVisible() && info.getLastUpdatedTime() >= threshold;
 }
 
 bool traceEnabled() {
     char value[PROPERTY_VALUE_MAX];
     property_get("debug.sf.layer_history_trace", value, "0");
+    return atoi(value);
+}
+
+bool useFrameRatePriority() {
+    char value[PROPERTY_VALUE_MAX];
+    property_get("debug.sf.use_frame_rate_priority", value, "1");
     return atoi(value);
 }
 
@@ -60,7 +73,8 @@ void trace(const wp<Layer>& weak, int fps) {
 
 } // namespace
 
-LayerHistory::LayerHistory() : mTraceEnabled(traceEnabled()) {}
+LayerHistory::LayerHistory()
+      : mTraceEnabled(traceEnabled()), mUseFrameRatePriority(useFrameRatePriority()) {}
 LayerHistory::~LayerHistory() = default;
 
 void LayerHistory::registerLayer(Layer* layer, float lowRefreshRate, float highRefreshRate) {
@@ -94,16 +108,44 @@ LayerHistory::Summary LayerHistory::summarize(nsecs_t now) {
     partitionLayers(now);
 
     // Find the maximum refresh rate among recently active layers.
-    for (const auto& [layer, info] : activeLayers()) {
+    for (const auto& [activeLayer, info] : activeLayers()) {
         const bool recent = info->isRecentlyActive(now);
+
         if (recent || CC_UNLIKELY(mTraceEnabled)) {
             const float refreshRate = info->getRefreshRate(now);
             if (recent && refreshRate > maxRefreshRate) {
+                if (const auto layer = activeLayer.promote(); layer) {
+                    const int32_t priority = layer->getFrameRateSelectionPriority();
+                    // TODO(b/142507166): This is where the scoring algorithm should live.
+                    // Layers should be organized by priority
+                    ALOGD("Layer has priority: %d", priority);
+                }
+            }
+        }
+    }
+
+    for (const auto& [weakLayer, info] : activeLayers()) {
+        const bool recent = info->isRecentlyActive(now);
+        auto layer = weakLayer.promote();
+        // Only use the layer if the reference still exists.
+        if (layer || CC_UNLIKELY(mTraceEnabled)) {
+            float refreshRate = 0.f;
+            // Default content refresh rate is only used when dealing with recent layers.
+            if (recent) {
+                refreshRate = info->getRefreshRate(now);
+            }
+            // Check if frame rate was set on layer.
+            float frameRate = layer->getFrameRate();
+            if (frameRate > 0.f) {
+                // Override content detection refresh rate, if it was set.
+                refreshRate = frameRate;
+            }
+            if (refreshRate > maxRefreshRate) {
                 maxRefreshRate = refreshRate;
             }
 
             if (CC_UNLIKELY(mTraceEnabled)) {
-                trace(layer, std::round(refreshRate));
+                trace(weakLayer, std::round(refreshRate));
             }
         }
     }
@@ -157,4 +199,23 @@ void LayerHistory::clear() {
     mActiveLayersEnd = 0;
 }
 
-} // namespace android::scheduler
+bool LayerHistory::hasClientSpecifiedFrameRate() {
+    std::lock_guard lock(mLock);
+    for (const auto& [weakLayer, info] : activeLayers()) {
+        auto layer = weakLayer.promote();
+        if (layer) {
+            float frameRate = layer->getFrameRate();
+            // Found a layer that has a frame rate set on it.
+            if (fabs(frameRate) > 0.f) {
+                return true;
+            }
+        }
+    }
+    // Did not find any layers that have frame rate.
+    return false;
+}
+
+} // namespace android::scheduler::impl
+
+// TODO(b/129481165): remove the #pragma below and fix conversion issues
+#pragma clang diagnostic pop // ignored "-Wconversion"

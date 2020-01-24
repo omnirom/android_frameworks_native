@@ -1,12 +1,35 @@
-cc_library_static {
+cc_library_shared {
     name: "libtimestats",
-    defaults: ["surfaceflinger_defaults"],
     srcs: [
-      "TimeStats.cpp",
+        "TimeStats.cpp",
+    ],
+    shared_libs: [
+        "libbase",
+        "libcutils",
+        "liblog",
+        "libprotobuf-cpp-lite",
+        "libprotoutil",
+        "libstatslog",
+        "libstatspull",
+        "libstatssocket",
+        "libtimestats_proto",
+        "libui",
+        "libutils",
     ],
     export_include_dirs: ["."],
-    shared_libs: [
-      "libtimestats_proto",
-      "libui",
+    export_shared_lib_headers: [
+        "libprotoutil",
+        "libstatslog",
+        "libstatspull",
+        "libstatssocket",
+        "libtimestats_proto",
+    ],
+    cppflags: [
+        "-Wall",
+        "-Werror",
+        "-Wformat",
+        "-Wthread-safety",
+        "-Wunused",
+        "-Wunreachable-code",
     ],
 }

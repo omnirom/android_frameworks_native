@@ -13,6 +13,10 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
+// TODO(b/129481165): remove the #pragma below and fix conversion issues
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wconversion"
 #undef LOG_TAG
 #define LOG_TAG "SurfaceInterceptor"
 #define ATRACE_TAG ATRACE_TAG_GRAPHICS
@@ -110,6 +114,7 @@ void SurfaceInterceptor::addInitialSurfaceStateLocked(Increment* increment,
     addLayerStackLocked(transaction, layerId, layer->mCurrentState.layerStack);
     addCropLocked(transaction, layerId, layer->mCurrentState.crop_legacy);
     addCornerRadiusLocked(transaction, layerId, layer->mCurrentState.cornerRadius);
+    addBackgroundBlurRadiusLocked(transaction, layerId, layer->mCurrentState.backgroundBlurRadius);
     if (layer->mCurrentState.barrierLayer_legacy != nullptr) {
         addDeferTransactionLocked(transaction, layerId,
                                   layer->mCurrentState.barrierLayer_legacy.promote(),
@@ -137,8 +142,8 @@ void SurfaceInterceptor::addInitialDisplayStateLocked(Increment* increment,
     addDisplaySurfaceLocked(transaction, display.sequenceId, display.surface);
     addDisplayLayerStackLocked(transaction, display.sequenceId, display.layerStack);
     addDisplaySizeLocked(transaction, display.sequenceId, display.width, display.height);
-    addDisplayProjectionLocked(transaction, display.sequenceId, display.orientation,
-            display.viewport, display.frame);
+    addDisplayProjectionLocked(transaction, display.sequenceId, toRotationInt(display.orientation),
+                               display.viewport, display.frame);
 }
 
 status_t SurfaceInterceptor::writeProtoFileLocked() {
@@ -318,6 +323,13 @@ void SurfaceInterceptor::addCornerRadiusLocked(Transaction* transaction, int32_t
     cornerRadiusChange->set_corner_radius(cornerRadius);
 }
 
+void SurfaceInterceptor::addBackgroundBlurRadiusLocked(Transaction* transaction, int32_t layerId,
+                                                       int32_t backgroundBlurRadius) {
+    SurfaceChange* change(createSurfaceChangeLocked(transaction, layerId));
+    BackgroundBlurRadiusChange* blurRadiusChange(change->mutable_background_blur_radius());
+    blurRadiusChange->set_background_blur_radius(backgroundBlurRadius);
+}
+
 void SurfaceInterceptor::addDeferTransactionLocked(Transaction* transaction, int32_t layerId,
         const sp<const Layer>& layer, uint64_t frameNumber)
 {
@@ -418,6 +430,9 @@ void SurfaceInterceptor::addSurfaceChangesLocked(Transaction* transaction,
     if (state.what & layer_state_t::eCornerRadiusChanged) {
         addCornerRadiusLocked(transaction, layerId, state.cornerRadius);
     }
+    if (state.what & layer_state_t::eBackgroundBlurRadiusChanged) {
+        addBackgroundBlurRadiusLocked(transaction, layerId, state.backgroundBlurRadius);
+    }
     if (state.what & layer_state_t::eDeferTransaction_legacy) {
         sp<Layer> otherLayer = nullptr;
         if (state.barrierHandle_legacy != nullptr) {
@@ -467,8 +482,8 @@ void SurfaceInterceptor::addDisplayChangesLocked(Transaction* transaction,
         addDisplaySizeLocked(transaction, sequenceId, state.width, state.height);
     }
     if (state.what & DisplayState::eDisplayProjectionChanged) {
-        addDisplayProjectionLocked(transaction, sequenceId, state.orientation, state.viewport,
-                state.frame);
+        addDisplayProjectionLocked(transaction, sequenceId, toRotationInt(state.orientation),
+                                   state.viewport, state.frame);
     }
 }
 
@@ -677,3 +692,6 @@ void SurfaceInterceptor::savePowerModeUpdate(int32_t sequenceId, int32_t mode) {
 
 } // namespace impl
 } // namespace android
+
+// TODO(b/129481165): remove the #pragma below and fix conversion issues
+#pragma clang diagnostic pop // ignored "-Wconversion"
