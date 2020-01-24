@@ -81,6 +81,16 @@ public:
             int32_t userId, int32_t flags, const std::vector<int32_t>& appIds,
             std::vector<int64_t>* _aidl_return);
 
+    binder::Status getAppCrates(const std::unique_ptr<std::string>& uuid,
+            const std::vector<std::string>& packageNames,
+            int32_t userId,
+            std::unique_ptr<std::vector<std::unique_ptr<android::os::storage::CrateMetadata>>>*
+                    _aidl_return);
+    binder::Status getUserCrates(
+            const std::unique_ptr<std::string>& uuid, int32_t userId,
+            std::unique_ptr<std::vector<std::unique_ptr<android::os::storage::CrateMetadata>>>*
+                    _aidl_return);
+
     binder::Status setAppQuota(const std::unique_ptr<std::string>& uuid,
             int32_t userId, int32_t appId, int64_t cacheQuota);
 
@@ -133,7 +143,7 @@ public:
     binder::Status deleteOdex(const std::string& apkPath, const std::string& instructionSet,
             const std::unique_ptr<std::string>& outputPath);
     binder::Status installApkVerity(const std::string& filePath,
-            const ::android::base::unique_fd& verityInput, int32_t contentSize);
+            android::base::unique_fd verityInput, int32_t contentSize);
     binder::Status assertFsverityRootHashMatches(const std::string& filePath,
             const std::vector<uint8_t>& expectedHash);
     binder::Status reconcileSecondaryDexFile(const std::string& dexPath,
@@ -146,6 +156,8 @@ public:
     binder::Status invalidateMounts();
     binder::Status isQuotaSupported(const std::unique_ptr<std::string>& volumeUuid,
             bool* _aidl_return);
+    binder::Status onPrivateVolumeMounted(const std::unique_ptr<std::string>& volumeUuid);
+    binder::Status onPrivateVolumeRemoved(const std::unique_ptr<std::string>& volumeUuid);
 
     binder::Status prepareAppProfile(const std::string& packageName,
             int32_t userId, int32_t appId, const std::string& profileName,

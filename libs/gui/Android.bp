@@ -36,6 +36,7 @@ cc_defaults {
     defaults: ["libgui_bufferqueue-defaults"],
 
     srcs: [
+        ":framework_native_aidl",
         ":libgui_bufferqueue_sources",
 
         "BitTube.cpp",
@@ -102,6 +103,10 @@ cc_defaults {
         "libdvr_headers",
         "libpdx_headers",
     ],
+
+    aidl: {
+        export_aidl_headers: true,
+    }
 }
 
 // Used by media codec services exclusively as a static lib for

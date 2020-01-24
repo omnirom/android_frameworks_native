@@ -384,17 +384,6 @@ private:
         void traverseInReverseZOrder(const LayerVector::Visitor& visitor) const;
     };
 
-    struct DesiredDisplayConfigSpecs {
-        int32_t defaultModeId;
-        float minRefreshRate;
-        float maxRefreshRate;
-
-        bool operator==(const DesiredDisplayConfigSpecs& other) const {
-            return defaultModeId == other.defaultModeId && minRefreshRate == other.minRefreshRate &&
-                    maxRefreshRate == other.maxRefreshRate;
-        }
-    };
-
     /* ------------------------------------------------------------------------
      * IBinder interface
      */
@@ -449,6 +438,12 @@ private:
                                        ui::DisplayPrimaries &primaries);
     ui::ColorMode getActiveColorMode(const sp<IBinder>& displayToken) override;
     status_t setActiveColorMode(const sp<IBinder>& displayToken, ui::ColorMode colorMode) override;
+    status_t getAutoLowLatencyModeSupport(const sp<IBinder>& displayToken,
+                                          bool* outSupported) const override;
+    void setAutoLowLatencyMode(const sp<IBinder>& displayToken, bool on) override;
+    status_t getGameContentTypeSupport(const sp<IBinder>& displayToken,
+                                       bool* outSupported) const override;
+    void setGameContentType(const sp<IBinder>& displayToken, bool on) override;
     void setPowerMode(const sp<IBinder>& displayToken, int mode) override;
     status_t setActiveConfig(const sp<IBinder>& displayToken, int id) override;
     status_t clearAnimationFrameStats() override;
@@ -478,14 +473,10 @@ private:
     status_t addRegionSamplingListener(const Rect& samplingArea, const sp<IBinder>& stopLayerHandle,
                                        const sp<IRegionSamplingListener>& listener) override;
     status_t removeRegionSamplingListener(const sp<IRegionSamplingListener>& listener) override;
-    status_t setAllowedDisplayConfigs(const sp<IBinder>& displayToken,
-                                      const std::vector<int32_t>& allowedConfigs) override;
-    status_t getAllowedDisplayConfigs(const sp<IBinder>& displayToken,
-                                      std::vector<int32_t>* outAllowedConfigs) override;
     status_t setDesiredDisplayConfigSpecs(const sp<IBinder>& displayToken, int32_t displayModeId,
                                           float minRefreshRate, float maxRefreshRate) override;
     status_t getDesiredDisplayConfigSpecs(const sp<IBinder>& displayToken,
-                                          int32_t* outDefaultModeId, float* outMinRefreshRate,
+                                          int32_t* outDefaultConfig, float* outMinRefreshRate,
                                           float* outMaxRefreshRate) override;
     status_t getDisplayBrightnessSupport(const sp<IBinder>& displayToken,
                                          bool* outSupport) const override;
@@ -559,10 +550,16 @@ private:
     // called on the main thread in response to setPowerMode()
     void setPowerModeInternal(const sp<DisplayDevice>& display, int mode) REQUIRES(mStateLock);
 
-    // called on the main thread in response to setAllowedDisplayConfigs()
-    void setAllowedDisplayConfigsInternal(const sp<DisplayDevice>& display,
-                                          const std::vector<int32_t>& allowedConfigs)
-            REQUIRES(mStateLock);
+    // Sets the desired display configs.
+    status_t setDesiredDisplayConfigSpecsInternal(const sp<DisplayDevice>& display,
+                                                  HwcConfigIndexType defaultConfig,
+                                                  float minRefreshRate, float maxRefreshRate)
+            EXCLUDES(mStateLock);
+
+    // called on the main thread in response to setAutoLowLatencyMode()
+    void setAutoLowLatencyModeInternal(const sp<IBinder>& displayToken, bool on);
+    // called on the main thread in response to setGameContentType()
+    void setGameContentTypeInternal(const sp<IBinder>& displayToken, bool on);
 
     // Returns whether the transaction actually modified any state
     bool handleMessageTransaction();
@@ -1130,7 +1127,7 @@ private:
     scheduler::ConnectionHandle mSfConnectionHandle;
 
     // Stores phase offsets configured per refresh rate.
-    const std::unique_ptr<scheduler::PhaseOffsets> mPhaseOffsets;
+    std::unique_ptr<scheduler::PhaseConfiguration> mPhaseConfiguration;
 
     // Optional to defer construction until scheduler connections are created.
     std::optional<scheduler::VSyncModulator> mVSyncModulator;
@@ -1139,11 +1136,6 @@ private:
     std::unique_ptr<scheduler::RefreshRateStats> mRefreshRateStats;
 
     std::atomic<nsecs_t> mExpectedPresentTime = 0;
-
-    // All configs are allowed if the set is empty.
-    using DisplayConfigs = std::set<HwcConfigIndexType>;
-    DisplayConfigs mAllowedDisplayConfigs GUARDED_BY(mStateLock);
-    DesiredDisplayConfigSpecs mDesiredDisplayConfigSpecs GUARDED_BY(mStateLock);
 
     std::mutex mActiveConfigLock;
     // This bit is set once we start setting the config. We read from this bit during the

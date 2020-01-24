@@ -361,7 +361,7 @@ struct BaseDisplayVariant {
 
     static void setupRECompositionCallExpectations(CompositionTest* test) {
         EXPECT_CALL(*test->mDisplaySurface,
-                    prepareFrame(compositionengine::DisplaySurface::COMPOSITION_GLES))
+                    prepareFrame(compositionengine::DisplaySurface::COMPOSITION_GPU))
                 .Times(1);
         EXPECT_CALL(*test->mDisplaySurface, getClientTargetAcquireFence())
                 .WillRepeatedly(ReturnRef(test->mClientTargetAcquireFence));
@@ -1154,8 +1154,10 @@ struct CompositionCase {
     static void cleanup(CompositionTest* test) {
         Layer::cleanupInjectedLayers(test);
 
-        for (auto& hwcDisplay : test->mFlinger.mFakeHwcDisplays) {
-            hwcDisplay->mutableLayers().clear();
+        for (auto& displayData : test->mFlinger.mutableHwcDisplayData()) {
+            static_cast<TestableSurfaceFlinger::HWC2Display*>(displayData.second.hwcDisplay.get())
+                    ->mutableLayers()
+                    .clear();
         }
     }
 };

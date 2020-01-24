@@ -79,7 +79,8 @@ public:
         return std::make_unique<android::impl::MessageQueue>();
     }
 
-    std::unique_ptr<scheduler::PhaseOffsets> createPhaseOffsets() override {
+    std::unique_ptr<scheduler::PhaseConfiguration> createPhaseConfiguration(
+            const scheduler::RefreshRateConfigs& /*refreshRateConfigs*/) override {
         return std::make_unique<scheduler::FakePhaseOffsets>();
     }
 
@@ -207,6 +208,8 @@ public:
                 scheduler::RefreshRateStats>(*mFlinger->mRefreshRateConfigs, *mFlinger->mTimeStats,
                                              /*currentConfig=*/HwcConfigIndexType(0),
                                              /*powerMode=*/HWC_POWER_MODE_OFF);
+        mFlinger->mPhaseConfiguration =
+                mFactory.createPhaseConfiguration(*mFlinger->mRefreshRateConfigs);
 
         mScheduler =
                 new TestableScheduler(std::move(primaryDispSync), std::move(eventControlThread),
@@ -218,7 +221,7 @@ public:
 
         mFlinger->mVSyncModulator.emplace(*mScheduler, mFlinger->mAppConnectionHandle,
                                           mFlinger->mSfConnectionHandle,
-                                          mFlinger->mPhaseOffsets->getCurrentOffsets());
+                                          mFlinger->mPhaseConfiguration->getCurrentOffsets());
     }
 
     void resetScheduler(Scheduler* scheduler) { mFlinger->mScheduler.reset(scheduler); }
@@ -393,6 +396,11 @@ public:
     auto& mutableInternalHwcDisplayId() { return getHwComposer().mInternalHwcDisplayId; }
     auto& mutableExternalHwcDisplayId() { return getHwComposer().mExternalHwcDisplayId; }
 
+    auto fromHandle(const sp<IBinder>& handle) {
+        Mutex::Autolock _l(mFlinger->mStateLock);
+        return mFlinger->fromHandle(handle);
+    }
+
     ~TestableSurfaceFlinger() {
         // All these pointer and container clears help ensure that GMock does
         // not report a leaked object, since the SurfaceFlinger instance may
@@ -510,15 +518,13 @@ public:
             display->mutableIsConnected() = true;
             display->setPowerMode(static_cast<HWC2::PowerMode>(mPowerMode));
 
-            flinger->mutableHwcDisplayData()[mDisplayId].hwcDisplay = display.get();
+            flinger->mutableHwcDisplayData()[mDisplayId].hwcDisplay = std::move(display);
 
             if (mHwcDisplayType == HWC2::DisplayType::Physical) {
                 flinger->mutableHwcPhysicalDisplayIdMap().emplace(mHwcDisplayId, mDisplayId);
                 (mIsPrimary ? flinger->mutableInternalHwcDisplayId()
                             : flinger->mutableExternalHwcDisplayId()) = mHwcDisplayId;
             }
-
-            flinger->mFakeHwcDisplays.push_back(std::move(display));
         }
 
     private:
@@ -627,9 +633,6 @@ public:
     surfaceflinger::test::Factory mFactory;
     sp<SurfaceFlinger> mFlinger = new SurfaceFlinger(mFactory, SurfaceFlinger::SkipInitialization);
     TestableScheduler* mScheduler = nullptr;
-
-    // We need to keep a reference to these so they are properly destroyed.
-    std::vector<std::unique_ptr<HWC2Display>> mFakeHwcDisplays;
 };
 
 } // namespace android

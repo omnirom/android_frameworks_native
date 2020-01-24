@@ -44,6 +44,28 @@
 
 namespace android {
 
+// Macros for include BufferQueueCore information in log messages
+#define BQ_LOGV(x, ...)                                                                           \
+    ALOGV("[%s](id:%" PRIx64 ",api:%d,p:%d,c:%" PRIu64 ") " x, mConsumerName.string(),            \
+          mCore->mUniqueId, mCore->mConnectedApi, mCore->mConnectedPid, (mCore->mUniqueId) >> 32, \
+          ##__VA_ARGS__)
+#define BQ_LOGD(x, ...)                                                                           \
+    ALOGD("[%s](id:%" PRIx64 ",api:%d,p:%d,c:%" PRIu64 ") " x, mConsumerName.string(),            \
+          mCore->mUniqueId, mCore->mConnectedApi, mCore->mConnectedPid, (mCore->mUniqueId) >> 32, \
+          ##__VA_ARGS__)
+#define BQ_LOGI(x, ...)                                                                           \
+    ALOGI("[%s](id:%" PRIx64 ",api:%d,p:%d,c:%" PRIu64 ") " x, mConsumerName.string(),            \
+          mCore->mUniqueId, mCore->mConnectedApi, mCore->mConnectedPid, (mCore->mUniqueId) >> 32, \
+          ##__VA_ARGS__)
+#define BQ_LOGW(x, ...)                                                                           \
+    ALOGW("[%s](id:%" PRIx64 ",api:%d,p:%d,c:%" PRIu64 ") " x, mConsumerName.string(),            \
+          mCore->mUniqueId, mCore->mConnectedApi, mCore->mConnectedPid, (mCore->mUniqueId) >> 32, \
+          ##__VA_ARGS__)
+#define BQ_LOGE(x, ...)                                                                           \
+    ALOGE("[%s](id:%" PRIx64 ",api:%d,p:%d,c:%" PRIu64 ") " x, mConsumerName.string(),            \
+          mCore->mUniqueId, mCore->mConnectedApi, mCore->mConnectedPid, (mCore->mUniqueId) >> 32, \
+          ##__VA_ARGS__)
+
 static constexpr uint32_t BQ_LAYER_COUNT = 1;
 
 BufferQueueProducer::BufferQueueProducer(const sp<BufferQueueCore>& core,
@@ -998,6 +1020,17 @@ status_t BufferQueueProducer::queueBuffer(int slot,
         item.mGraphicBuffer.clear();
     }
 
+    // Update and get FrameEventHistory.
+    nsecs_t postedTime = systemTime(SYSTEM_TIME_MONOTONIC);
+    NewFrameEventsEntry newFrameEventsEntry = {
+        currentFrameNumber,
+        postedTime,
+        requestedPresentTimestamp,
+        std::move(acquireFenceTime)
+    };
+    addAndGetFrameTimestamps(&newFrameEventsEntry,
+            getFrameTimestamps ? &output->frameTimestamps : nullptr);
+
     // Call back without the main BufferQueue lock held, but with the callback
     // lock held so we can ensure that callbacks occur in order
 
@@ -1026,17 +1059,6 @@ status_t BufferQueueProducer::queueBuffer(int slot,
         ++mCurrentCallbackTicket;
         mCallbackCondition.notify_all();
     }
-
-    // Update and get FrameEventHistory.
-    nsecs_t postedTime = systemTime(SYSTEM_TIME_MONOTONIC);
-    NewFrameEventsEntry newFrameEventsEntry = {
-        currentFrameNumber,
-        postedTime,
-        requestedPresentTimestamp,
-        std::move(acquireFenceTime)
-    };
-    addAndGetFrameTimestamps(&newFrameEventsEntry,
-            getFrameTimestamps ? &output->frameTimestamps : nullptr);
 
     // Wait without lock held
     if (connectedApi == NATIVE_WINDOW_API_EGL) {
