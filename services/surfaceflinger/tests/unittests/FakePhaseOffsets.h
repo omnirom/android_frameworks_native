@@ -55,6 +55,9 @@ public:
 
     // Returns current offsets in human friendly format.
     void dump(std::string& /*result*/) const override {}
+
+    // Set Phase Offsets type for the Default Refresh Rate config.
+    void setDefaultRefreshRateType(RefreshRateConfigs::RefreshRateType /* type */) override {}
 };
 
 } // namespace scheduler
