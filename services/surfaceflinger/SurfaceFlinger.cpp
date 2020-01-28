@@ -439,6 +439,10 @@ SurfaceFlinger::SurfaceFlinger(Factory& factory) : SurfaceFlinger(factory, SkipI
     mUseFbScaling = atoi(value);
     ALOGI_IF(mUseFbScaling, "Enable FrameBuffer Scaling");
 
+    property_get("debug.sf.enable_advanced_sf_phase_offset", value, "0");
+    mUseAdvanceSfOffset = atoi(value);
+    ALOGI_IF(mUseAdvanceSfOffset, "Enable Advance SF Phase Offset");
+
     const size_t defaultListSize = MAX_LAYERS;
     auto listSize = property_get_int32("debug.sf.max_igbp_list_size", int32_t(defaultListSize));
     mMaxGraphicBufferProducerListSize = (listSize > 0) ? size_t(listSize) : defaultListSize;
@@ -1456,6 +1460,21 @@ status_t SurfaceFlinger::setDisplayContentSamplingEnabled(const sp<IBinder>& dis
                                                             componentMask, maxFrames);
 }
 
+status_t SurfaceFlinger::setDisplayElapseTime(const sp<DisplayDevice>& display) const {
+    if (!mUseAdvanceSfOffset && mPhaseOffsets->getCurrentSfOffset() >= 0) {
+        return OK;
+    }
+
+    if (mDisplaysList.size() != 1) {
+        // Revisit this for multi displays.
+        return OK;
+    }
+
+    uint64_t timeStamp = static_cast<uint64_t>(mVsyncTimeStamp +
+                         (mPhaseOffsets->getCurrentSfOffset() * -1));
+    return getHwComposer().setDisplayElapseTime(*display->getId(), timeStamp);
+}
+
 status_t SurfaceFlinger::getDisplayedContentSample(const sp<IBinder>& displayToken,
                                                    uint64_t maxFrames, uint64_t timestamp,
                                                    DisplayedFrameStats* outStats) const {
@@ -1959,7 +1978,8 @@ bool SurfaceFlinger::previousFrameMissed(int graceTimeMs) NO_THREAD_SAFETY_ANALY
     // woken up before the actual vsync but targeting the next vsync, we need to check
     // fence N-2
     const sp<Fence>& fence =
-            mVsyncModulator.getOffsets().sf < mPhaseOffsets->getOffsetThresholdForNextVsync()
+            (mVsyncModulator.getOffsets().sf < mPhaseOffsets->getOffsetThresholdForNextVsync() &&
+             mVsyncModulator.getOffsets().sf >= 0)
             ? mPreviousPresentFences[0]
             : mPreviousPresentFences[1];
 
@@ -2144,6 +2164,7 @@ void SurfaceFlinger::handleMessageRefresh() {
     rebuildLayerStacks();
     calculateWorkingSet();
     for (const auto& [token, display] : mDisplays) {
+        setDisplayElapseTime(display);
         beginFrame(display);
         prepareFrame(display);
         doDebugFlashRegions(display, repaintEverything);

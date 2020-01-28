@@ -205,6 +205,7 @@ public:
     virtual Error setLayerPerFrameMetadataBlobs(
             Display display, Layer layer, const std::vector<PerFrameMetadataBlob>& metadata) = 0;
     virtual Error setDisplayBrightness(Display display, float brightness) = 0;
+    virtual Error setDisplayElapseTime(Display display, uint64_t timeStamp) = 0;
 };
 
 namespace impl {
@@ -418,6 +419,7 @@ public:
             Display display, Layer layer,
             const std::vector<IComposerClient::PerFrameMetadataBlob>& metadata) override;
     Error setDisplayBrightness(Display display, float brightness) override;
+    Error setDisplayElapseTime(Display display, uint64_t timeStamp) override;
 
 private:
     class CommandWriter : public CommandWriterBase {
@@ -431,6 +433,7 @@ private:
                 const IVrComposerClient::BufferMetadata& metadata);
         void setLayerBufferMetadata(
                 const IVrComposerClient::BufferMetadata& metadata);
+        void setDisplayElapseTime(uint64_t time);
 
     private:
         void writeBufferMetadata(
