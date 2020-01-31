@@ -343,7 +343,7 @@ std::unique_ptr<scheduler::LayerHistory::LayerHandle> Scheduler::registerLayer(
         std::string const& name, int windowType) {
     RefreshRateType refreshRateType = (windowType == InputWindowInfo::TYPE_WALLPAPER)
             ? RefreshRateType::DEFAULT
-            : RefreshRateType::PERFORMANCE;
+            : mRefreshRateConfigs.getMaxPerfRefreshRateType();
 
     const auto refreshRate = mRefreshRateConfigs.getRefreshRate(refreshRateType);
     const uint32_t performanceFps = (refreshRate) ? refreshRate->fps : 0;
@@ -564,9 +564,9 @@ Scheduler::RefreshRateType Scheduler::calculateRefreshRateType() {
         return RefreshRateType::DEFAULT;
     }
 
-    // If content detection is off we choose performance as we don't know the content fps
+    // If content detection is off we choose the Max Allowed Perf Refresh Rate type.
     if (mCurrentContentFeatureState == ContentFeatureState::CONTENT_DETECTION_OFF) {
-        return RefreshRateType::PERFORMANCE;
+        return mRefreshRateConfigs.getMaxPerfRefreshRateType();
     }
 
     // Content detection is on, find the appropriate refresh rate with minimal error
