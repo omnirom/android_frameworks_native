@@ -7253,6 +7253,7 @@ void SurfaceFlinger::setPreferredDisplayConfig() {
     const auto& config = mRefreshRateConfigs.getRefreshRate(type);
     if (config && isDisplayConfigAllowed(config->configId)) {
         ALOGV("switching to Scheduler preferred config %d", config->configId);
+        mRefreshRateConfigs.setActiveConfig(config->configId);
         setDesiredActiveConfig({type, config->configId, Scheduler::ConfigEvent::Changed});
     } else {
         // Set the highest allowed config by iterating backwards on available refresh rates
