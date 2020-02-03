@@ -53,6 +53,7 @@
 #include "DisplayHardware/ComposerHal.h"
 #include "DisplayHardware/HWComposer.h"
 #include "RenderArea.h"
+#include <android/hardware/graphics/common/1.0/types.h>
 
 using namespace android::surfaceflinger;
 
@@ -404,6 +405,11 @@ public:
      * isSecureDisplay - true if this display is secure, false otherwise
      */
     bool isSecureDisplay() const;
+
+    /*
+     * isSecureCamera - true if this camera layer is secure, false otherwise
+     */
+    bool isSecureCamera() const;
 
     /*
      * isVisible - true if this layer is visible, false otherwise

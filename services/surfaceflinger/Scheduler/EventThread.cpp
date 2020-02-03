@@ -374,6 +374,7 @@ void EventThread::threadMain(std::unique_lock<std::mutex>& lock) {
                     if (const auto connection = it->promote()) {
                         consumers.push_back(connection);
                         aliveCount++;
+                        mVSyncSource->setVSyncEnabled(false);
                     }
                 }
             }
