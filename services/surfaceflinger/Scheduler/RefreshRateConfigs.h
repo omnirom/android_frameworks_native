@@ -85,6 +85,22 @@ public:
         return RefreshRateType::DEFAULT;
     }
 
+    RefreshRateType getDefaultRefreshRateType() const {
+        const auto& refreshRate = mRefreshRates.find(RefreshRateType::DEFAULT);
+        if (refreshRate != mRefreshRates.end()) {
+            uint32_t fps = refreshRate->second->fps;
+            if (fps <= DEFAULT_FPS) {
+                return RefreshRateType::DEFAULT;
+            } else if (fps < (2 * DEFAULT_FPS)) {
+                return RefreshRateType::PERFORMANCE;
+            } else if (fps >= (2 * DEFAULT_FPS)) {
+                return RefreshRateType::HIGH1;
+            }
+        }
+
+        return RefreshRateType::DEFAULT;
+    }
+
     void populate(const std::vector<std::shared_ptr<const HWC2::Display::Config>>& configs) {
         mRefreshRates.clear();
 

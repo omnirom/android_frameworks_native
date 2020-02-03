@@ -848,9 +848,14 @@ Error Composer::setLayerInfo(Display display, Layer layer, uint32_t type,
 
 Error Composer::setLayerType(Display display, Layer layer, uint32_t type)
 {
-    mWriter.selectDisplay(display);
-    mWriter.selectLayer(layer);
-    mWriter.setLayerType(type);
+    if (mClient_2_3) {
+        if (sp<IQtiComposerClient> qClient = IQtiComposerClient::castFrom(mClient_2_3)) {
+            mWriter.selectDisplay(display);
+            mWriter.selectLayer(layer);
+            mWriter.setLayerType(type);
+        }
+    }
+
     return Error::NONE;
 }
 

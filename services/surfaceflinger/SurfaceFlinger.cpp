@@ -902,6 +902,15 @@ void SurfaceFlinger::init() {
     mRefreshRateConfigs.populate(getHwComposer().getConfigs(*display->getId()));
     mRefreshRateStats.setConfigMode(active_config);
 
+    // Set Phase Offsets type for the Default Refresh Rate config.
+    RefreshRateType type = mRefreshRateConfigs.getDefaultRefreshRateType();
+    if (type != RefreshRateType::DEFAULT) {
+        mPhaseOffsets->setDefaultRefreshRateType(type);
+        const auto [early, gl, late] = mPhaseOffsets->getCurrentOffsets();
+        mVsyncModulator.setPhaseOffsets(early, gl, late,
+                                        mPhaseOffsets->getOffsetThresholdForNextVsync());
+    }
+
     if (mUseLayerExt) {
         mLayerExt = LayerExtWrapper::Create();
         if (!mLayerExt) {
@@ -2038,6 +2047,7 @@ void SurfaceFlinger::onMessageReceived(int32_t what) NO_THREAD_SAFETY_ANALYSIS {
                         expectedPresentTime = mScheduler->getDispSyncExpectedPresentTime();
                         if (layer->shouldPresentNow(expectedPresentTime)) {
                             int layerQueuedFrames = layer->getQueuedFrameCount();
+                            Mutex::Autolock lock(mDolphinStateLock);
                             if (maxQueuedFrames < layerQueuedFrames &&
                                     !layer->visibleNonTransparentRegion.isEmpty()) {
                                 maxQueuedFrames = layerQueuedFrames;
@@ -7232,6 +7242,7 @@ void SurfaceFlinger::setPreferredDisplayConfig() {
                 mRefreshRateConfigs.setActiveConfig(iter->second->configId);
                 setDesiredActiveConfig({iter->first, iter->second->configId,
                         Scheduler::ConfigEvent::Changed});
+                break;
             }
         }
     }
@@ -7242,6 +7253,10 @@ void SurfaceFlinger::setAllowedDisplayConfigsInternal(const sp<DisplayDevice>& d
     if (!display->isPrimary()) {
         return;
     }
+
+    // Set Phase Offsets type for the Default Refresh Rate config.
+    RefreshRateType type = mRefreshRateConfigs.getDefaultRefreshRateType();
+    mPhaseOffsets->setDefaultRefreshRateType(type);
 
     std::vector<int32_t> displayConfigs;
     for (int i = 0; i < allowedConfigs.size(); i++) {
