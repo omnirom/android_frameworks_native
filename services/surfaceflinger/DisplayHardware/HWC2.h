@@ -270,6 +270,7 @@ public:
             uint32_t* outNumTypes, uint32_t* outNumRequests,
             android::sp<android::Fence>* outPresentFence, uint32_t* state) = 0;
     [[clang::warn_unused_result]] virtual Error setDisplayBrightness(float brightness) const = 0;
+    [[clang::warn_unused_result]] virtual Error setDisplayElapseTime(uint64_t timeStamp) = 0;
 };
 
 namespace impl {
@@ -329,6 +330,7 @@ public:
     Error presentOrValidate(uint32_t* outNumTypes, uint32_t* outNumRequests,
                             android::sp<android::Fence>* outPresentFence, uint32_t* state) override;
     Error setDisplayBrightness(float brightness) const override;
+    Error setDisplayElapseTime(uint64_t timeStamp) override;
 
     // Other Display methods
     hwc2_display_t getId() const override { return mId; }
@@ -394,6 +396,7 @@ public:
     [[clang::warn_unused_result]] virtual Error setVisibleRegion(const android::Region& region) = 0;
     [[clang::warn_unused_result]] virtual Error setZOrder(uint32_t z) = 0;
     [[clang::warn_unused_result]] virtual Error setInfo(uint32_t type, uint32_t appId) = 0;
+    [[clang::warn_unused_result]] virtual Error setType(uint32_t type) = 0;
 
     // Composer HAL 2.3
     [[clang::warn_unused_result]] virtual Error setColorTransform(const android::mat4& matrix) = 0;
@@ -431,6 +434,7 @@ public:
     Error setVisibleRegion(const android::Region& region) override;
     Error setZOrder(uint32_t z) override;
     Error setInfo(uint32_t type, uint32_t appId) override;
+    Error setType(uint32_t type) override;
 
     // Composer HAL 2.3
     Error setColorTransform(const android::mat4& matrix) override;

@@ -32,6 +32,7 @@
 #include "TimeStats/TimeStats.h"
 #include "frame_extn_intf.h"
 #include "smomo_interface.h"
+#include "layer_extn_intf.h"
 
 namespace android {
 
@@ -156,7 +157,7 @@ bool BufferQueueLayer::framePresentTimeIsCurrent() const {
     }
 
     Mutex::Autolock lock(mQueueItemLock);
-    return mQueueItems[0].mTimestamp <= mFlinger->mScheduler->expectedPresentTime();
+    return mQueueItems[0].mTimestamp <= mFlinger->getExpectedPresentTime();
 }
 
 nsecs_t BufferQueueLayer::getDesiredPresentTime() {
@@ -214,7 +215,7 @@ uint64_t BufferQueueLayer::getFrameNumber() const {
     uint64_t frameNumber = mQueueItems[0].mFrameNumber;
 
     // The head of the queue will be dropped if there are signaled and timely frames behind it
-    nsecs_t expectedPresentTime = mFlinger->mScheduler->expectedPresentTime();
+    nsecs_t expectedPresentTime = mFlinger->getExpectedPresentTime();
 
     if (isRemovedFromCurrentState()) {
         expectedPresentTime = 0;
@@ -292,7 +293,7 @@ status_t BufferQueueLayer::updateTexImage(bool& recomputeVisibleRegions, nsecs_t
                     getProducerStickyTransform() != 0, mName.string(), mOverrideScalingMode,
                     getTransformToDisplayInverse(), mFreezeGeometryUpdates);
 
-    nsecs_t expectedPresentTime = mFlinger->mScheduler->expectedPresentTime();
+    nsecs_t expectedPresentTime = mFlinger->getExpectedPresentTime();
 
     if (isRemovedFromCurrentState()) {
         expectedPresentTime = 0;
@@ -329,6 +330,7 @@ status_t BufferQueueLayer::updateTexImage(bool& recomputeVisibleRegions, nsecs_t
         // and return early
         if (queuedBuffer) {
             Mutex::Autolock lock(mQueueItemLock);
+            mConsumer->mergeSurfaceDamage(mQueueItems[0].mSurfaceDamage);
             mFlinger->mTimeStats->removeTimeRecord(layerID, mQueueItems[0].mFrameNumber);
             mQueueItems.removeAt(0);
             mQueuedFrames--;
@@ -364,6 +366,7 @@ status_t BufferQueueLayer::updateTexImage(bool& recomputeVisibleRegions, nsecs_t
         // Remove any stale buffers that have been dropped during
         // updateTexImage
         while (mQueueItems[0].mFrameNumber != currentFrameNumber) {
+            mConsumer->mergeSurfaceDamage(mQueueItems[0].mSurfaceDamage);
             mFlinger->mTimeStats->removeTimeRecord(layerID, mQueueItems[0].mFrameNumber);
             mQueueItems.removeAt(0);
             mQueuedFrames--;
@@ -514,7 +517,6 @@ void BufferQueueLayer::onFrameAvailable(const BufferItem& item) {
             frameInfo.version.minor = (uint8_t)(0);
             frameInfo.max_queued_frames = mFlinger->mMaxQueuedFrames;
             frameInfo.num_idle = mFlinger->mNumIdle;
-            frameInfo.max_queued_layer_name = mFlinger->mNameLayerMax.c_str();
             frameInfo.current_timestamp = systemTime(SYSTEM_TIME_MONOTONIC);
             frameInfo.previous_timestamp = mLastTimeStamp;
             frameInfo.vsync_timestamp = mFlinger->mVsyncTimeStamp;
@@ -527,6 +529,7 @@ void BufferQueueLayer::onFrameAvailable(const BufferItem& item) {
             {
                 Mutex::Autolock lock(mFlinger->mDolphinStateLock);
                 frameInfo.transparent_region = this->visibleNonTransparentRegion.isEmpty();
+                frameInfo.max_queued_layer_name = mFlinger->mNameLayerMax.c_str();
             }
             crop = this->getContentCrop();
             frameInfo.width = crop.getWidth();
@@ -601,6 +604,10 @@ void BufferQueueLayer::onFirstRef() {
 
     if (const auto display = mFlinger->getDefaultDisplayDevice()) {
         updateTransformHint(display);
+    }
+
+    if (mFlinger->mLayerExt) {
+        mLayerType = mFlinger->mLayerExt->getLayerClass(mName.string());
     }
 }
 
