@@ -56,16 +56,17 @@ cc_defaults {
 // specifically the parts which are outside of the NDK. Actual users should
 // also instead use AIDL to generate these stubs. See android.binder.cts.
 cc_test {
-    name: "libbinder_ndk_test_client",
+    name: "libbinder_ndk_unit_test",
     defaults: ["test_libbinder_ndk_test_defaults"],
-    srcs: ["main_client.cpp"],
-}
+    srcs: ["libbinder_ndk_unit_test.cpp"],
+    static_libs: [
+        "IBinderNdkUnitTest-ndk_platform",
+    ],
+    test_suites: ["general-tests"],
+    require_root: true,
 
-cc_test {
-    name: "libbinder_ndk_test_server",
-    defaults: ["test_libbinder_ndk_test_defaults"],
-    srcs: ["main_server.cpp"],
-    gtest: false,
+    // force since binderVendorDoubleLoadTest has its own
+    auto_gen_config: true,
 }
 
 cc_test {
@@ -85,7 +86,7 @@ cc_test {
         "libbinder_ndk",
         "libutils",
     ],
-    test_suites: ["device-tests"],
+    test_suites: ["general-tests"],
 }
 
 aidl_interface {
@@ -93,5 +94,13 @@ aidl_interface {
     vendor: true,
     srcs: [
         "IBinderVendorDoubleLoadTest.aidl",
+    ],
+}
+
+aidl_interface {
+    name: "IBinderNdkUnitTest",
+    srcs: [
+        "IBinderNdkUnitTest.aidl",
+        "IEmpty.aidl",
     ],
 }

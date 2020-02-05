@@ -323,6 +323,10 @@ public:
     // Inherit from ClientCache::ErasedRecipient
     void bufferErased(const client_cache_t& clientCacheId) override;
 
+    // If set, disables reusing client composition buffers. This can be set by
+    // debug.sf.disable_client_composition_cache
+    bool mDisableClientCompositionCache = false;
+
 private:
     friend class BufferLayer;
     friend class BufferQueueLayer;
@@ -380,6 +384,7 @@ private:
 
         renderengine::ShadowSettings globalShadowSettings;
 
+        void traverse(const LayerVector::Visitor& visitor) const;
         void traverseInZOrder(const LayerVector::Visitor& visitor) const;
         void traverseInReverseZOrder(const LayerVector::Visitor& visitor) const;
     };
@@ -429,13 +434,13 @@ private:
             float frameScale, bool childrenOnly) override;
 
     status_t getDisplayStats(const sp<IBinder>& displayToken, DisplayStatInfo* stats) override;
-    status_t getDisplayConfigs(const sp<IBinder>& displayToken,
-                               Vector<DisplayInfo>* configs) override;
+    status_t getDisplayState(const sp<IBinder>& displayToken, ui::DisplayState*) override;
+    status_t getDisplayInfo(const sp<IBinder>& displayToken, DisplayInfo*) override;
+    status_t getDisplayConfigs(const sp<IBinder>& displayToken, Vector<DisplayConfig>*) override;
     int getActiveConfig(const sp<IBinder>& displayToken) override;
-    status_t getDisplayColorModes(const sp<IBinder>& displayToken,
-                                  Vector<ui::ColorMode>* configs) override;
+    status_t getDisplayColorModes(const sp<IBinder>& displayToken, Vector<ui::ColorMode>*) override;
     status_t getDisplayNativePrimaries(const sp<IBinder>& displayToken,
-                                       ui::DisplayPrimaries &primaries);
+                                       ui::DisplayPrimaries&) override;
     ui::ColorMode getActiveColorMode(const sp<IBinder>& displayToken) override;
     status_t setActiveColorMode(const sp<IBinder>& displayToken, ui::ColorMode colorMode) override;
     status_t getAutoLowLatencyModeSupport(const sp<IBinder>& displayToken,
@@ -987,6 +992,10 @@ private:
     // Note that it is possible for a frame to be composed via both client and device
     // composition, for example in the case of overlays.
     bool mHadDeviceComposition = false;
+    // True if in the previous frame, the client composition was skipped by reusing the buffer
+    // used in a previous composition. This can happed if the client composition requests
+    // did not change.
+    bool mReusedClientComposition = false;
 
     enum class BootStage {
         BOOTLOADER,
@@ -1156,6 +1165,9 @@ private:
     sp<RegionSamplingThread> mRegionSamplingThread;
     ui::DisplayPrimaries mInternalDisplayPrimaries;
 
+    const float mInternalDisplayDensity;
+    const float mEmulatedDisplayDensity;
+
     sp<IInputFlinger> mInputFlinger;
     InputWindowCommands mPendingInputWindowCommands GUARDED_BY(mStateLock);
     // Should only be accessed by the main thread.
@@ -1172,7 +1184,7 @@ private:
 
     const sp<SetInputWindowsListener> mSetInputWindowsListener = new SetInputWindowsListener(this);
 
-    bool mPendingSyncInputWindows GUARDED_BY(mStateLock);
+    bool mPendingSyncInputWindows GUARDED_BY(mStateLock) = false;
     Hwc2::impl::PowerAdvisor mPowerAdvisor;
 
     // This should only be accessed on the main thread.

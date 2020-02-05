@@ -117,6 +117,10 @@ bool BufferQueueLayer::shouldPresentNow(nsecs_t expectedPresentTime) const {
              "relative to expectedPresent %" PRId64,
              getDebugName(), addedTime, expectedPresentTime);
 
+    if (!isPlausible) {
+        mFlinger->mTimeStats->incrementBadDesiredPresent(getSequence());
+    }
+
     const bool isDue = addedTime < expectedPresentTime;
     return isDue || !isPlausible;
 }
@@ -129,8 +133,13 @@ bool BufferQueueLayer::setFrameRate(float frameRate) {
     return frameRateChanged;
 }
 
-float BufferQueueLayer::getFrameRate() const {
-    return mLatchedFrameRate;
+std::optional<float> BufferQueueLayer::getFrameRate() const {
+    const auto frameRate = mLatchedFrameRate.load();
+    if (frameRate > 0.f || frameRate == FRAME_RATE_NO_VOTE) {
+        return frameRate;
+    }
+
+    return {};
 }
 
 // -----------------------------------------------------------------------
@@ -154,7 +163,14 @@ bool BufferQueueLayer::fenceHasSignaled() const {
         // able to be latched. To avoid this, grab this buffer anyway.
         return true;
     }
-    return mQueueItems[0].mFenceTime->getSignalTime() != Fence::SIGNAL_TIME_PENDING;
+    const bool fenceSignaled =
+            mQueueItems[0].mFenceTime->getSignalTime() != Fence::SIGNAL_TIME_PENDING;
+    if (!fenceSignaled) {
+        mFlinger->mTimeStats->incrementLatchSkipped(getSequence(),
+                                                    TimeStats::LatchSkipReason::LateAcquire);
+    }
+
+    return fenceSignaled;
 }
 
 bool BufferQueueLayer::framePresentTimeIsCurrent(nsecs_t expectedPresentTime) const {

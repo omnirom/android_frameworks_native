@@ -239,7 +239,7 @@ bool BufferStateLayer::setBuffer(const sp<GraphicBuffer>& buffer, nsecs_t postTi
         mReleasePreviousBuffer = true;
     }
 
-    mFrameCounter++;
+    mCurrentState.frameNumber++;
 
     mCurrentState.buffer = buffer;
     mCurrentState.clientCacheId = clientCacheId;
@@ -247,13 +247,15 @@ bool BufferStateLayer::setBuffer(const sp<GraphicBuffer>& buffer, nsecs_t postTi
     setTransactionFlags(eTransactionNeeded);
 
     const int32_t layerId = getSequence();
-    mFlinger->mTimeStats->setPostTime(layerId, mFrameNumber, getName().c_str(), postTime);
+    mFlinger->mTimeStats->setPostTime(layerId, mCurrentState.frameNumber, getName().c_str(),
+                                      postTime);
     mFlinger->mFrameTracer->traceNewLayer(layerId, getName().c_str());
-    mFlinger->mFrameTracer->traceTimestamp(layerId, buffer->getId(), mFrameNumber, postTime,
-                                           FrameTracer::FrameEvent::POST);
+    mFlinger->mFrameTracer->traceTimestamp(layerId, buffer->getId(), mCurrentState.frameNumber,
+                                           postTime, FrameTracer::FrameEvent::POST);
     mCurrentState.desiredPresentTime = desiredPresentTime;
 
-    mFlinger->mScheduler->recordLayerHistory(this, desiredPresentTime);
+    mFlinger->mScheduler->recordLayerHistory(this,
+                                             desiredPresentTime <= 0 ? 0 : desiredPresentTime);
 
     return true;
 }
@@ -401,7 +403,14 @@ bool BufferStateLayer::fenceHasSignaled() const {
         return true;
     }
 
-    return getDrawingState().acquireFence->getStatus() == Fence::Status::Signaled;
+    const bool fenceSignaled =
+            getDrawingState().acquireFence->getStatus() == Fence::Status::Signaled;
+    if (!fenceSignaled) {
+        mFlinger->mTimeStats->incrementLatchSkipped(getSequence(),
+                                                    TimeStats::LatchSkipReason::LateAcquire);
+    }
+
+    return fenceSignaled;
 }
 
 bool BufferStateLayer::framePresentTimeIsCurrent(nsecs_t expectedPresentTime) const {
@@ -413,7 +422,7 @@ bool BufferStateLayer::framePresentTimeIsCurrent(nsecs_t expectedPresentTime) co
 }
 
 uint64_t BufferStateLayer::getFrameNumber(nsecs_t /*expectedPresentTime*/) const {
-    return mFrameNumber;
+    return mDrawingState.frameNumber;
 }
 
 bool BufferStateLayer::getAutoRefresh() const {
@@ -490,15 +499,13 @@ status_t BufferStateLayer::updateTexImage(bool& /*recomputeVisibleRegions*/, nse
         ALOGE("[%s] rejecting buffer: "
               "bufferWidth=%d, bufferHeight=%d, front.active.{w=%d, h=%d}",
               getDebugName(), bufferWidth, bufferHeight, s.active.w, s.active.h);
-        mFlinger->mTimeStats->removeTimeRecord(layerId, mFrameNumber);
+        mFlinger->mTimeStats->removeTimeRecord(layerId, mDrawingState.frameNumber);
         return BAD_VALUE;
     }
 
     for (auto& handle : mDrawingState.callbackHandles) {
         handle->latchTime = latchTime;
     }
-
-    mFrameNumber = mFrameCounter;
 
     if (!SyncFeatures::getInstance().useNativeFenceSync()) {
         // Bind the new buffer to the GL texture.
@@ -516,11 +523,13 @@ status_t BufferStateLayer::updateTexImage(bool& /*recomputeVisibleRegions*/, nse
     }
 
     const uint64_t bufferID = getCurrentBufferId();
-    mFlinger->mTimeStats->setAcquireFence(layerId, mFrameNumber, mBufferInfo.mFenceTime);
-    mFlinger->mFrameTracer->traceFence(layerId, bufferID, mFrameNumber, mBufferInfo.mFenceTime,
+    mFlinger->mTimeStats->setAcquireFence(layerId, mDrawingState.frameNumber,
+                                          mBufferInfo.mFenceTime);
+    mFlinger->mFrameTracer->traceFence(layerId, bufferID, mDrawingState.frameNumber,
+                                       mBufferInfo.mFenceTime,
                                        FrameTracer::FrameEvent::ACQUIRE_FENCE);
-    mFlinger->mTimeStats->setLatchTime(layerId, mFrameNumber, latchTime);
-    mFlinger->mFrameTracer->traceTimestamp(layerId, bufferID, mFrameNumber, latchTime,
+    mFlinger->mTimeStats->setLatchTime(layerId, mDrawingState.frameNumber, latchTime);
+    mFlinger->mFrameTracer->traceTimestamp(layerId, bufferID, mDrawingState.frameNumber, latchTime,
                                            FrameTracer::FrameEvent::LATCH);
 
     mCurrentStateModified = false;
@@ -547,7 +556,7 @@ status_t BufferStateLayer::updateActiveBuffer() {
 status_t BufferStateLayer::updateFrameNumber(nsecs_t /*latchTime*/) {
     // TODO(marissaw): support frame history events
     mPreviousFrameNumber = mCurrentFrameNumber;
-    mCurrentFrameNumber = mFrameNumber;
+    mCurrentFrameNumber = mDrawingState.frameNumber;
     return NO_ERROR;
 }
 

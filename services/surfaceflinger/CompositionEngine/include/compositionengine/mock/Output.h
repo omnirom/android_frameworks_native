@@ -37,8 +37,9 @@ public:
     MOCK_CONST_METHOD0(getDisplayId, std::optional<DisplayId>());
 
     MOCK_METHOD1(setCompositionEnabled, void(bool));
-    MOCK_METHOD6(setProjection,
-                 void(const ui::Transform&, uint32_t, const Rect&, const Rect&, const Rect&, bool));
+    MOCK_METHOD7(setProjection,
+                 void(const ui::Transform&, uint32_t, const Rect&, const Rect&, const Rect&,
+                      const Rect&, bool));
     MOCK_METHOD1(setBounds, void(const ui::Size&));
     MOCK_METHOD2(setLayerStackFilter, void(uint32_t, bool));
 
@@ -107,10 +108,11 @@ public:
     MOCK_METHOD0(presentAndGetFrameFences, compositionengine::Output::FrameFences());
 
     MOCK_METHOD3(generateClientCompositionRequests,
-                 std::vector<renderengine::LayerSettings>(bool, Region&, ui::Dataspace));
+                 std::vector<LayerFE::LayerSettings>(bool, Region&, ui::Dataspace));
     MOCK_METHOD2(appendRegionFlashRequests,
-                 void(const Region&, std::vector<renderengine::LayerSettings>&));
+                 void(const Region&, std::vector<LayerFE::LayerSettings>&));
     MOCK_METHOD1(setExpensiveRenderingExpected, void(bool));
+    MOCK_METHOD1(cacheClientCompositionRequests, void(uint32_t));
 };
 
 } // namespace android::compositionengine::mock

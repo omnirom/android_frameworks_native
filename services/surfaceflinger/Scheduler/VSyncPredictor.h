@@ -20,6 +20,7 @@
 #include <mutex>
 #include <unordered_map>
 #include <vector>
+#include "SchedulerUtils.h"
 #include "VSyncTracker.h"
 
 namespace android::scheduler {
@@ -37,7 +38,7 @@ public:
                    uint32_t outlierTolerancePercent);
     ~VSyncPredictor();
 
-    void addVsyncTimestamp(nsecs_t timestamp) final;
+    bool addVsyncTimestamp(nsecs_t timestamp) final;
     nsecs_t nextAnticipatedVSyncTimeFrom(nsecs_t timePoint) const final;
     nsecs_t currentPeriod() const final;
     void resetModel() final;
@@ -63,6 +64,9 @@ private:
     VSyncPredictor(VSyncPredictor const&) = delete;
     VSyncPredictor& operator=(VSyncPredictor const&) = delete;
     void clearTimestamps() REQUIRES(mMutex);
+
+    inline void traceInt64If(const char* name, int64_t value) const;
+    bool const mTraceOn;
 
     size_t const kHistorySize;
     size_t const kMinimumSamplesForPrediction;

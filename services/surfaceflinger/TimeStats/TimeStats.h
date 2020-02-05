@@ -51,6 +51,7 @@ public:
     virtual void incrementTotalFrames() = 0;
     virtual void incrementMissedFrames() = 0;
     virtual void incrementClientCompositionFrames() = 0;
+    virtual void incrementClientCompositionReusedFrames() = 0;
 
     // Records the start and end times for a frame.
     // The start time is the same as the beginning of a SurfaceFlinger
@@ -69,6 +70,18 @@ public:
     virtual void setPostTime(int32_t layerId, uint64_t frameNumber, const std::string& layerName,
                              nsecs_t postTime) = 0;
     virtual void setLatchTime(int32_t layerId, uint64_t frameNumber, nsecs_t latchTime) = 0;
+    // Reasons why latching a particular buffer may be skipped
+    enum class LatchSkipReason {
+        // If the acquire fence did not fire on some devices we skip latching
+        // the buffer until the fence fires.
+        LateAcquire,
+    };
+    // Increments the counter of skipped latch buffers.
+    virtual void incrementLatchSkipped(int32_t layerId, LatchSkipReason reason) = 0;
+    // Increments the counter of bad desired present times for this layer.
+    // Bad desired present times are "implausible" and cause SurfaceFlinger to
+    // latch a buffer immediately to avoid stalling.
+    virtual void incrementBadDesiredPresent(int32_t layerId) = 0;
     virtual void setDesiredTime(int32_t layerId, uint64_t frameNumber, nsecs_t desiredTime) = 0;
     virtual void setAcquireTime(int32_t layerId, uint64_t frameNumber, nsecs_t acquireTime) = 0;
     virtual void setAcquireFence(int32_t layerId, uint64_t frameNumber,
@@ -115,6 +128,8 @@ class TimeStats : public android::TimeStats {
         // fences to signal, but rather waiting to receive those fences/timestamps.
         int32_t waitData = -1;
         uint32_t droppedFrames = 0;
+        uint32_t lateAcquireFrames = 0;
+        uint32_t badDesiredPresentFrames = 0;
         TimeRecord prevTimeRecord;
         std::deque<TimeRecord> timeRecords;
     };
@@ -181,6 +196,8 @@ public:
               std::optional<size_t> maxPulledLayers,
               std::optional<size_t> maxPulledHistogramBuckets);
 
+    ~TimeStats() override;
+
     void onBootFinished() override;
     void parseArgs(bool asProto, const Vector<String16>& args, std::string& result) override;
     bool isEnabled() override;
@@ -189,6 +206,7 @@ public:
     void incrementTotalFrames() override;
     void incrementMissedFrames() override;
     void incrementClientCompositionFrames() override;
+    void incrementClientCompositionReusedFrames() override;
 
     void recordFrameDuration(nsecs_t startTime, nsecs_t endTime) override;
     void recordRenderEngineDuration(nsecs_t startTime, nsecs_t endTime) override;
@@ -198,6 +216,8 @@ public:
     void setPostTime(int32_t layerId, uint64_t frameNumber, const std::string& layerName,
                      nsecs_t postTime) override;
     void setLatchTime(int32_t layerId, uint64_t frameNumber, nsecs_t latchTime) override;
+    void incrementLatchSkipped(int32_t layerId, LatchSkipReason reason) override;
+    void incrementBadDesiredPresent(int32_t layerId) override;
     void setDesiredTime(int32_t layerId, uint64_t frameNumber, nsecs_t desiredTime) override;
     void setAcquireTime(int32_t layerId, uint64_t frameNumber, nsecs_t acquireTime) override;
     void setAcquireFence(int32_t layerId, uint64_t frameNumber,

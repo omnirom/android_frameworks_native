@@ -163,7 +163,8 @@ public:
 
     // Sets the projection state to use
     virtual void setProjection(const ui::Transform&, uint32_t orientation, const Rect& frame,
-                               const Rect& viewport, const Rect& scissor, bool needsFiltering) = 0;
+                               const Rect& viewport, const Rect& sourceClip,
+                               const Rect& destinationClip, bool needsFiltering) = 0;
     // Sets the bounds to use
     virtual void setBounds(const ui::Size&) = 0;
 
@@ -271,12 +272,13 @@ protected:
     virtual void chooseCompositionStrategy() = 0;
     virtual bool getSkipColorTransform() const = 0;
     virtual FrameFences presentAndGetFrameFences() = 0;
-    virtual std::vector<renderengine::LayerSettings> generateClientCompositionRequests(
+    virtual std::vector<LayerFE::LayerSettings> generateClientCompositionRequests(
             bool supportsProtectedContent, Region& clearRegion, ui::Dataspace outputDataspace) = 0;
     virtual void appendRegionFlashRequests(
             const Region& flashRegion,
-            std::vector<renderengine::LayerSettings>& clientCompositionLayers) = 0;
+            std::vector<LayerFE::LayerSettings>& clientCompositionLayers) = 0;
     virtual void setExpensiveRenderingExpected(bool enabled) = 0;
+    virtual void cacheClientCompositionRequests(uint32_t cacheSize) = 0;
 };
 
 } // namespace android::compositionengine

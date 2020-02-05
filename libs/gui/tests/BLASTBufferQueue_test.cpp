@@ -25,7 +25,7 @@
 #include <gui/IProducerListener.h>
 #include <gui/SurfaceComposerClient.h>
 #include <private/gui/ComposerService.h>
-#include <ui/DisplayInfo.h>
+#include <ui/DisplayConfig.h>
 #include <ui/GraphicBuffer.h>
 #include <ui/GraphicTypes.h>
 #include <ui/Transform.h>
@@ -103,10 +103,11 @@ protected:
         t.apply();
         t.clear();
 
-        DisplayInfo info;
-        ASSERT_EQ(NO_ERROR, SurfaceComposerClient::getDisplayInfo(mDisplayToken, &info));
-        mDisplayWidth = info.w;
-        mDisplayHeight = info.h;
+        DisplayConfig config;
+        ASSERT_EQ(NO_ERROR, SurfaceComposerClient::getActiveDisplayConfig(mDisplayToken, &config));
+        const ui::Size& resolution = config.resolution;
+        mDisplayWidth = resolution.getWidth();
+        mDisplayHeight = resolution.getHeight();
 
         mSurfaceControl = mClient->createSurface(String8("TestSurface"), mDisplayWidth,
                                                  mDisplayHeight, PIXEL_FORMAT_RGBA_8888,
@@ -114,7 +115,7 @@ protected:
                                                  /*parent*/ nullptr);
         t.setLayerStack(mSurfaceControl, 0)
                 .setLayer(mSurfaceControl, std::numeric_limits<int32_t>::max())
-                .setFrame(mSurfaceControl, Rect(0, 0, mDisplayWidth, mDisplayHeight))
+                .setFrame(mSurfaceControl, Rect(resolution))
                 .show(mSurfaceControl)
                 .setDataspace(mSurfaceControl, ui::Dataspace::V0_SRGB)
                 .apply();
@@ -235,6 +236,33 @@ TEST_F(BLASTBufferQueueTest, SetNextTransaction) {
     Transaction next;
     adapter.setNextTransaction(&next);
     ASSERT_EQ(&next, adapter.getNextTransaction());
+}
+
+TEST_F(BLASTBufferQueueTest, onFrameAvailable_ApplyDesiredPresentTime) {
+    BLASTBufferQueueHelper adapter(mSurfaceControl, mDisplayWidth, mDisplayHeight);
+    sp<IGraphicBufferProducer> igbProducer;
+    setUpProducer(adapter, igbProducer);
+
+    int slot;
+    sp<Fence> fence;
+    sp<GraphicBuffer> buf;
+    auto ret = igbProducer->dequeueBuffer(&slot, &fence, mDisplayWidth, mDisplayHeight,
+                                          PIXEL_FORMAT_RGBA_8888, GRALLOC_USAGE_SW_WRITE_OFTEN,
+                                          nullptr, nullptr);
+    ASSERT_EQ(IGraphicBufferProducer::BUFFER_NEEDS_REALLOCATION, ret);
+    ASSERT_EQ(OK, igbProducer->requestBuffer(slot, &buf));
+
+    nsecs_t desiredPresentTime = systemTime() + nsecs_t(5 * 1e8);
+    IGraphicBufferProducer::QueueBufferOutput qbOutput;
+    IGraphicBufferProducer::QueueBufferInput input(desiredPresentTime, false, HAL_DATASPACE_UNKNOWN,
+                                                   Rect(mDisplayWidth, mDisplayHeight),
+                                                   NATIVE_WINDOW_SCALING_MODE_FREEZE, 0,
+                                                   Fence::NO_FENCE);
+    igbProducer->queueBuffer(slot, input, &qbOutput);
+    ASSERT_NE(ui::Transform::ROT_INVALID, qbOutput.transformHint);
+
+    adapter.waitForCallbacks();
+    ASSERT_GE(systemTime(), desiredPresentTime);
 }
 
 TEST_F(BLASTBufferQueueTest, onFrameAvailable_Apply) {

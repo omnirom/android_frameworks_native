@@ -27,6 +27,7 @@ void OutputCompositionState::dump(std::string& out) const {
     dumpVal(out, "usesClientComposition", usesClientComposition);
     dumpVal(out, "usesDeviceComposition", usesDeviceComposition);
     dumpVal(out, "flipClientTarget", flipClientTarget);
+    dumpVal(out, "reusedClientComposition", reusedClientComposition);
 
     dumpVal(out, "layerStack", layerStackId);
     dumpVal(out, "layerStackInternal", layerStackInternal);
@@ -39,7 +40,8 @@ void OutputCompositionState::dump(std::string& out) const {
 
     dumpVal(out, "frame", frame);
     dumpVal(out, "viewport", viewport);
-    dumpVal(out, "scissor", scissor);
+    dumpVal(out, "sourceClip", sourceClip);
+    dumpVal(out, "destinationClip", destinationClip);
     dumpVal(out, "needsFiltering", needsFiltering);
 
     out.append("\n   ");

@@ -44,6 +44,7 @@ namespace {
 using testing::_;
 using testing::AnyNumber;
 using testing::Contains;
+using testing::HasSubstr;
 using testing::InSequence;
 using testing::SizeIs;
 using testing::StrEq;
@@ -257,22 +258,25 @@ TEST_F(TimeStatsTest, disabledByDefault) {
     ASSERT_FALSE(mTimeStats->isEnabled());
 }
 
-TEST_F(TimeStatsTest, enabledAfterBoot) {
+TEST_F(TimeStatsTest, registersCallbacksAfterBoot) {
     mTimeStats->onBootFinished();
-    ASSERT_TRUE(mTimeStats->isEnabled());
+    EXPECT_THAT(mDelegate->mAtomTags,
+                UnorderedElementsAre(android::util::SURFACEFLINGER_STATS_GLOBAL_INFO,
+                                     android::util::SURFACEFLINGER_STATS_LAYER_INFO));
+}
+
+TEST_F(TimeStatsTest, unregistersCallbacksOnDestruction) {
+    EXPECT_CALL(*mDelegate,
+                unregisterStatsPullAtomCallback(android::util::SURFACEFLINGER_STATS_GLOBAL_INFO));
+    EXPECT_CALL(*mDelegate,
+                unregisterStatsPullAtomCallback(android::util::SURFACEFLINGER_STATS_LAYER_INFO));
+    mTimeStats.reset();
 }
 
 TEST_F(TimeStatsTest, canEnableAndDisableTimeStats) {
     EXPECT_TRUE(inputCommand(InputCommand::ENABLE, FMT_STRING).empty());
     ASSERT_TRUE(mTimeStats->isEnabled());
-    EXPECT_THAT(mDelegate->mAtomTags,
-                UnorderedElementsAre(android::util::SURFACEFLINGER_STATS_GLOBAL_INFO,
-                                     android::util::SURFACEFLINGER_STATS_LAYER_INFO));
 
-    EXPECT_CALL(*mDelegate,
-                unregisterStatsPullAtomCallback(android::util::SURFACEFLINGER_STATS_GLOBAL_INFO));
-    EXPECT_CALL(*mDelegate,
-                unregisterStatsPullAtomCallback(android::util::SURFACEFLINGER_STATS_LAYER_INFO));
     EXPECT_TRUE(inputCommand(InputCommand::DISABLE, FMT_STRING).empty());
     ASSERT_FALSE(mTimeStats->isEnabled());
 }
@@ -303,6 +307,56 @@ TEST_F(TimeStatsTest, canIncreaseGlobalStats) {
     EXPECT_EQ(MISSED_FRAMES, globalProto.missed_frames());
     ASSERT_TRUE(globalProto.has_client_composition_frames());
     EXPECT_EQ(CLIENT_COMPOSITION_FRAMES, globalProto.client_composition_frames());
+}
+
+TEST_F(TimeStatsTest, canIncreaseLateAcquireFrames) {
+    // this stat is not in the proto so verify by checking the string dump
+    constexpr size_t LATE_ACQUIRE_FRAMES = 2;
+
+    EXPECT_TRUE(inputCommand(InputCommand::ENABLE, FMT_STRING).empty());
+
+    insertTimeRecord(NORMAL_SEQUENCE, LAYER_ID_0, 1, 1000000);
+    for (size_t i = 0; i < LATE_ACQUIRE_FRAMES; i++) {
+        mTimeStats->incrementLatchSkipped(LAYER_ID_0, TimeStats::LatchSkipReason::LateAcquire);
+    }
+    insertTimeRecord(NORMAL_SEQUENCE_2, LAYER_ID_0, 2, 2000000);
+
+    const std::string result(inputCommand(InputCommand::DUMP_ALL, FMT_STRING));
+    const std::string expectedResult = "lateAcquireFrames = " + std::to_string(LATE_ACQUIRE_FRAMES);
+    EXPECT_THAT(result, HasSubstr(expectedResult));
+}
+
+TEST_F(TimeStatsTest, canIncreaseBadDesiredPresent) {
+    // this stat is not in the proto so verify by checking the string dump
+    constexpr size_t BAD_DESIRED_PRESENT_FRAMES = 2;
+
+    EXPECT_TRUE(inputCommand(InputCommand::ENABLE, FMT_STRING).empty());
+
+    insertTimeRecord(NORMAL_SEQUENCE, LAYER_ID_0, 1, 1000000);
+    for (size_t i = 0; i < BAD_DESIRED_PRESENT_FRAMES; i++) {
+        mTimeStats->incrementBadDesiredPresent(LAYER_ID_0);
+    }
+    insertTimeRecord(NORMAL_SEQUENCE_2, LAYER_ID_0, 2, 2000000);
+
+    const std::string result(inputCommand(InputCommand::DUMP_ALL, FMT_STRING));
+    const std::string expectedResult =
+            "badDesiredPresentFrames = " + std::to_string(BAD_DESIRED_PRESENT_FRAMES);
+    EXPECT_THAT(result, HasSubstr(expectedResult));
+}
+
+TEST_F(TimeStatsTest, canIncreaseClientCompositionReusedFrames) {
+    // this stat is not in the proto so verify by checking the string dump
+    constexpr size_t CLIENT_COMPOSITION_REUSED_FRAMES = 2;
+
+    EXPECT_TRUE(inputCommand(InputCommand::ENABLE, FMT_STRING).empty());
+    for (size_t i = 0; i < CLIENT_COMPOSITION_REUSED_FRAMES; i++) {
+        ASSERT_NO_FATAL_FAILURE(mTimeStats->incrementClientCompositionReusedFrames());
+    }
+
+    const std::string result(inputCommand(InputCommand::DUMP_ALL, FMT_STRING));
+    const std::string expectedResult =
+            "clientCompositionReusedFrames = " + std::to_string(CLIENT_COMPOSITION_REUSED_FRAMES);
+    EXPECT_THAT(result, HasSubstr(expectedResult));
 }
 
 TEST_F(TimeStatsTest, canInsertGlobalPresentToPresent) {
@@ -647,6 +701,16 @@ TEST_F(TimeStatsTest, canClearTimeStats) {
     EXPECT_EQ(0, globalProto.frame_duration_size());
     EXPECT_EQ(0, globalProto.render_engine_timing_size());
     EXPECT_EQ(0, globalProto.stats_size());
+}
+
+TEST_F(TimeStatsTest, canClearClientCompositionReusedFrames) {
+    // this stat is not in the proto so verify by checking the string dump
+    EXPECT_TRUE(inputCommand(InputCommand::ENABLE, FMT_STRING).empty());
+    ASSERT_NO_FATAL_FAILURE(mTimeStats->incrementClientCompositionReusedFrames());
+    EXPECT_TRUE(inputCommand(InputCommand::CLEAR, FMT_STRING).empty());
+
+    const std::string result(inputCommand(InputCommand::DUMP_ALL, FMT_STRING));
+    EXPECT_THAT(result, HasSubstr("clientCompositionReusedFrames = 0"));
 }
 
 TEST_F(TimeStatsTest, canDumpWithMaxLayers) {

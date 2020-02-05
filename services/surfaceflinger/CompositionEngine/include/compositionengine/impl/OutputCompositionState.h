@@ -19,7 +19,16 @@
 #include <cstdint>
 
 #include <math/mat4.h>
+
+// TODO(b/129481165): remove the #pragma below and fix conversion issues
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wconversion"
+
 #include <ui/GraphicTypes.h>
+
+// TODO(b/129481165): remove the #pragma below and fix conversion issues
+#pragma clang diagnostic pop // ignored "-Wconversion"
+
 #include <ui/Rect.h>
 #include <ui/Region.h>
 #include <ui/Transform.h>
@@ -45,6 +54,9 @@ struct OutputCompositionState {
     // composition
     bool flipClientTarget{false};
 
+    // If true, the current frame reused the buffer from a previous client composition
+    bool reusedClientComposition{false};
+
     // If true, this output displays layers that are internal-only
     bool layerStackInternal{false};
 
@@ -67,8 +79,11 @@ struct OutputCompositionState {
     // The logical space user viewport rectangle
     Rect viewport;
 
-    // The physical space scissor rectangle
-    Rect scissor;
+    // The physical space source clip rectangle
+    Rect sourceClip;
+
+    // The physical space destination clip rectangle
+    Rect destinationClip;
 
     // If true, RenderEngine filtering should be enabled
     bool needsFiltering{false};
