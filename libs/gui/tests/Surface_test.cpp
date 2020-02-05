@@ -723,10 +723,6 @@ public:
     status_t getDisplayStats(const sp<IBinder>& /*display*/,
             DisplayStatInfo* /*stats*/) override { return NO_ERROR; }
     int getActiveConfig(const sp<IBinder>& /*display*/) override { return 0; }
-    status_t setActiveConfig(const sp<IBinder>& /*display*/, int /*id*/)
-            override {
-        return NO_ERROR;
-    }
     status_t getDisplayColorModes(const sp<IBinder>& /*display*/,
             Vector<ColorMode>* /*outColorModes*/) override {
         return NO_ERROR;
@@ -742,11 +738,10 @@ public:
     status_t setActiveColorMode(const sp<IBinder>& /*display*/,
         ColorMode /*colorMode*/) override { return NO_ERROR; }
     status_t captureScreen(const sp<IBinder>& /*display*/, sp<GraphicBuffer>* /*outBuffer*/,
-                           bool& /* outCapturedSecureLayers */,
-                           const ui::Dataspace /*reqDataspace*/,
-                           const ui::PixelFormat /*reqPixelFormat*/, Rect /*sourceCrop*/,
+                           bool& /*outCapturedSecureLayers*/, ui::Dataspace /*reqDataspace*/,
+                           ui::PixelFormat /*reqPixelFormat*/, const Rect& /*sourceCrop*/,
                            uint32_t /*reqWidth*/, uint32_t /*reqHeight*/,
-                           bool /*useIdentityTransform*/, Rotation /*rotation*/,
+                           bool /*useIdentityTransform*/, ui::Rotation,
                            bool /*captureSecureLayers*/) override {
         return NO_ERROR;
     }
@@ -766,7 +761,7 @@ public:
     }
     virtual status_t captureLayers(
             const sp<IBinder>& /*parentHandle*/, sp<GraphicBuffer>* /*outBuffer*/,
-            const ui::Dataspace /*reqDataspace*/, const ui::PixelFormat /*reqPixelFormat*/,
+            ui::Dataspace /*reqDataspace*/, ui::PixelFormat /*reqPixelFormat*/,
             const Rect& /*sourceCrop*/,
             const std::unordered_set<sp<IBinder>,
                                      ISurfaceComposer::SpHash<IBinder>>& /*excludeHandles*/,

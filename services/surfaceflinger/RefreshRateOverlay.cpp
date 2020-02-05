@@ -14,6 +14,10 @@
  * limitations under the License.
  */
 
+// TODO(b/129481165): remove the #pragma below and fix conversion issues
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wconversion"
+
 #include "RefreshRateOverlay.h"
 #include "Client.h"
 #include "Layer.h"
@@ -192,12 +196,25 @@ void RefreshRateOverlay::primeCache() {
 }
 
 void RefreshRateOverlay::changeRefreshRate(const RefreshRate& refreshRate) {
+    const auto display = mFlinger.getDefaultDisplayDeviceLocked();
+    if (!display) {
+        return;
+    }
+
+    const int32_t left = display->getWidth() / 32;
+    const int32_t top = display->getHeight() / 32;
+    const int32_t right = left + display->getWidth() / 8;
+    const int32_t buttom = top + display->getHeight() / 32;
+
     auto buffer = mBufferCache[refreshRate.fps];
     mLayer->setBuffer(buffer, 0, 0, {});
-    mLayer->setFrame(Rect(20, 120, 20 + SevenSegmentDrawer::getWidth(),
-                          120 + SevenSegmentDrawer::getHeight()));
+
+    mLayer->setFrame(Rect(left, top, right, buttom));
 
     mFlinger.mTransactionFlags.fetch_or(eTransactionMask);
 }
 
 }; // namespace android
+
+// TODO(b/129481165): remove the #pragma below and fix conversion issues
+#pragma clang diagnostic pop // ignored "-Wconversion"

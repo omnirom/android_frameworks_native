@@ -510,6 +510,14 @@ void Replayer::setCornerRadius(SurfaceComposerClient::Transaction& t,
     t.setCornerRadius(mLayers[id], cc.corner_radius());
 }
 
+void Replayer::setBackgroundBlurRadius(SurfaceComposerClient::Transaction& t,
+        layer_id id, const BackgroundBlurRadiusChange& cc) {
+    ALOGV("Layer %d: Setting Background Blur Radius -- backgroundBlurRadius=%d", id,
+        cc.background_blur_radius());
+
+    t.setBackgroundBlurRadius(mLayers[id], cc.background_blur_radius());
+}
+
 void Replayer::setMatrix(SurfaceComposerClient::Transaction& t,
         layer_id id, const MatrixChange& mc) {
     ALOGV("Layer %d: Setting Matrix -- dsdx=%f, dtdx=%f, dsdy=%f, dtdy=%f", id, mc.dsdx(),
@@ -606,7 +614,7 @@ void Replayer::setDisplayProjection(SurfaceComposerClient::Transaction& t,
             pc.viewport().bottom());
     Rect frame = Rect(pc.frame().left(), pc.frame().top(), pc.frame().right(), pc.frame().bottom());
 
-    t.setDisplayProjection(mDisplays[id], pc.orientation(), viewport, frame);
+    t.setDisplayProjection(mDisplays[id], ui::toRotation(pc.orientation()), viewport, frame);
 }
 
 status_t Replayer::createSurfaceControl(

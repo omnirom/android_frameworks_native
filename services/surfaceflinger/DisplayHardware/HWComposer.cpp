@@ -14,6 +14,10 @@
  * limitations under the License.
  */
 
+// TODO(b/129481165): remove the #pragma below and fix conversion issues
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wconversion"
+
 // #define LOG_NDEBUG 0
 
 #undef LOG_TAG
@@ -122,6 +126,11 @@ public:
         timeline.refreshRequired = updatedTimeline.refreshRequired;
         timeline.refreshTimeNanos = updatedTimeline.refreshTimeNanos;
         mCallback->onVsyncPeriodTimingChangedReceived(mSequenceId, display, timeline);
+        return android::hardware::Void();
+    }
+
+    android::hardware::Return<void> onSeamlessPossible(android::Hwc2::Display display) override {
+        mCallback->onSeamlessPossible(mSequenceId, display);
         return android::hardware::Void();
     }
 
@@ -943,3 +952,6 @@ uint32_t HWComposer::getMaxVirtualDisplayCount() const {
 
 } // namespace impl
 } // namespace android
+
+// TODO(b/129481165): remove the #pragma below and fix conversion issues
+#pragma clang diagnostic pop // ignored "-Wconversion"

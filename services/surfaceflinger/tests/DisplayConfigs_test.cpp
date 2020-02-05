@@ -14,6 +14,10 @@
  * limitations under the License.
  */
 
+// TODO(b/129481165): remove the #pragma below and fix conversion issues
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wconversion"
+
 #include <thread>
 #include "LayerTransactionTest.h"
 namespace android {
@@ -31,42 +35,43 @@ protected:
     void SetUp() override { mDisplayToken = SurfaceComposerClient::getInternalDisplayToken(); }
 
     sp<IBinder> mDisplayToken;
-    int32_t defaultConfigId;
-    float minRefreshRate;
-    float maxRefreshRate;
 };
 
-TEST_F(RefreshRateRangeTest, simpleSetAndGet) {
-    status_t res = SurfaceComposerClient::setDesiredDisplayConfigSpecs(mDisplayToken, 1, 45, 75);
-    EXPECT_EQ(res, NO_ERROR);
+TEST_F(RefreshRateRangeTest, setAllConfigs) {
+    int32_t initialDefaultConfig;
+    float initialMin;
+    float initialMax;
+    status_t res = SurfaceComposerClient::getDesiredDisplayConfigSpecs(mDisplayToken,
+                                                                       &initialDefaultConfig,
+                                                                       &initialMin, &initialMax);
+    ASSERT_EQ(res, NO_ERROR);
 
-    res = SurfaceComposerClient::getDesiredDisplayConfigSpecs(mDisplayToken, &defaultConfigId,
-                                                              &minRefreshRate, &maxRefreshRate);
-    EXPECT_EQ(res, NO_ERROR);
-    EXPECT_EQ(defaultConfigId, 1);
-    EXPECT_EQ(minRefreshRate, 45);
-    EXPECT_EQ(maxRefreshRate, 75);
+    Vector<DisplayInfo> configs;
+    res = SurfaceComposerClient::getDisplayConfigs(mDisplayToken, &configs);
+    ASSERT_EQ(res, NO_ERROR);
+
+    for (size_t i = 0; i < configs.size(); i++) {
+        res = SurfaceComposerClient::setDesiredDisplayConfigSpecs(mDisplayToken, i, configs[i].fps,
+                                                                  configs[i].fps);
+        ASSERT_EQ(res, NO_ERROR);
+
+        int defaultConfig;
+        float minFps;
+        float maxFps;
+        res = SurfaceComposerClient::getDesiredDisplayConfigSpecs(mDisplayToken, &defaultConfig,
+                                                                  &minFps, &maxFps);
+        ASSERT_EQ(res, NO_ERROR);
+        ASSERT_EQ(defaultConfig, i);
+        ASSERT_EQ(minFps, configs[i].fps);
+        ASSERT_EQ(maxFps, configs[i].fps);
+    }
+
+    res = SurfaceComposerClient::setDesiredDisplayConfigSpecs(mDisplayToken, initialDefaultConfig,
+                                                              initialMin, initialMax);
+    ASSERT_EQ(res, NO_ERROR);
 }
 
-TEST_F(RefreshRateRangeTest, complexSetAndGet) {
-    status_t res = SurfaceComposerClient::setDesiredDisplayConfigSpecs(mDisplayToken, 1, 45, 75);
-    EXPECT_EQ(res, NO_ERROR);
-
-    res = SurfaceComposerClient::getDesiredDisplayConfigSpecs(mDisplayToken, &defaultConfigId,
-                                                              &minRefreshRate, &maxRefreshRate);
-    EXPECT_EQ(res, NO_ERROR);
-    EXPECT_EQ(defaultConfigId, 1);
-    EXPECT_EQ(minRefreshRate, 45);
-    EXPECT_EQ(maxRefreshRate, 75);
-
-    // Second call overrides the first one.
-    res = SurfaceComposerClient::setDesiredDisplayConfigSpecs(mDisplayToken, 10, 145, 875);
-    EXPECT_EQ(res, NO_ERROR);
-    res = SurfaceComposerClient::getDesiredDisplayConfigSpecs(mDisplayToken, &defaultConfigId,
-                                                              &minRefreshRate, &maxRefreshRate);
-    EXPECT_EQ(res, NO_ERROR);
-    EXPECT_EQ(defaultConfigId, 10);
-    EXPECT_EQ(minRefreshRate, 145);
-    EXPECT_EQ(maxRefreshRate, 875);
-}
 } // namespace android
+
+// TODO(b/129481165): remove the #pragma below and fix conversion issues
+#pragma clang diagnostic pop // ignored "-Wconversion"

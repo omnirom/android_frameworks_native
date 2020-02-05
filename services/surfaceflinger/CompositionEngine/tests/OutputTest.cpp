@@ -14,6 +14,10 @@
  * limitations under the License.
  */
 
+// TODO(b/129481165): remove the #pragma below and fix conversion issues
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wconversion"
+
 #include <cmath>
 
 #include <android-base/stringprintf.h>
@@ -60,8 +64,8 @@ constexpr auto TR_IDENT = 0u;
 constexpr auto TR_ROT_90 = HAL_TRANSFORM_ROT_90;
 
 const mat4 kIdentity;
-const mat4 kNonIdentityHalf = mat4() * 0.5;
-const mat4 kNonIdentityQuarter = mat4() * 0.25;
+const mat4 kNonIdentityHalf = mat4() * 0.5f;
+const mat4 kNonIdentityQuarter = mat4() * 0.25f;
 
 constexpr OutputColorSetting kVendorSpecifiedOutputColorSetting =
         static_cast<OutputColorSetting>(0x100);
@@ -134,6 +138,10 @@ struct OutputLatchFEStateTest : public OutputTest {
         EXPECT_CALL(mLayer1, editFEState()).WillRepeatedly(ReturnRef(mLayer1FEState));
         EXPECT_CALL(mLayer2, editFEState()).WillRepeatedly(ReturnRef(mLayer2FEState));
         EXPECT_CALL(mLayer3, editFEState()).WillRepeatedly(ReturnRef(mLayer3FEState));
+
+        EXPECT_CALL(mLayer1, getFEState()).WillRepeatedly(ReturnRef(mLayer1FEState));
+        EXPECT_CALL(mLayer2, getFEState()).WillRepeatedly(ReturnRef(mLayer2FEState));
+        EXPECT_CALL(mLayer3, getFEState()).WillRepeatedly(ReturnRef(mLayer3FEState));
     }
 
     void injectLayer(std::unique_ptr<mock::OutputLayer> layer) {
@@ -980,7 +988,7 @@ struct OutputCollectVisibleLayersTest : public testing::Test {
     };
 
     OutputCollectVisibleLayersTest() {
-        EXPECT_CALL(mOutput, getOutputLayerCount()).WillRepeatedly(Return(3));
+        EXPECT_CALL(mOutput, getOutputLayerCount()).WillRepeatedly(Return(3u));
         EXPECT_CALL(mOutput, getOutputLayerOrderedByZByIndex(0))
                 .WillRepeatedly(Return(&mLayer1.outputLayer));
         EXPECT_CALL(mOutput, getOutputLayerOrderedByZByIndex(1))
@@ -1004,7 +1012,7 @@ struct OutputCollectVisibleLayersTest : public testing::Test {
 
 TEST_F(OutputCollectVisibleLayersTest, doesMinimalWorkIfNoLayers) {
     mRefreshArgs.layers.clear();
-    EXPECT_CALL(mOutput, getOutputLayerCount()).WillRepeatedly(Return(0));
+    EXPECT_CALL(mOutput, getOutputLayerCount()).WillRepeatedly(Return(0u));
 
     EXPECT_CALL(mOutput, setReleasedLayers(Ref(mRefreshArgs)));
     EXPECT_CALL(mOutput, finalizePendingOutputLayers());
@@ -1054,7 +1062,7 @@ struct OutputEnsureOutputLayerIfVisibleTest : public testing::Test {
         EXPECT_CALL(*mLayer, editFEState()).WillRepeatedly(ReturnRef(mLayerFEState));
 
         EXPECT_CALL(mOutput, belongsInOutput(mLayer.get())).WillRepeatedly(Return(true));
-        EXPECT_CALL(mOutput, getOutputLayerCount()).WillRepeatedly(Return(1));
+        EXPECT_CALL(mOutput, getOutputLayerCount()).WillRepeatedly(Return(1u));
         EXPECT_CALL(mOutput, getOutputLayerOrderedByZByIndex(0u))
                 .WillRepeatedly(Return(&mOutputLayer));
 
@@ -1619,7 +1627,7 @@ TEST_F(OutputUpdateColorProfileTest, setsAColorProfileWhenUnmanaged) {
     // When the outputColorSetting is set to kUnmanaged, the implementation sets
     // a simple default color profile without looking at anything else.
 
-    EXPECT_CALL(mOutput, getOutputLayerCount()).WillRepeatedly(Return(3));
+    EXPECT_CALL(mOutput, getOutputLayerCount()).WillRepeatedly(Return(3u));
     EXPECT_CALL(mOutput,
                 setColorProfile(ColorProfileEq(
                         ColorProfile{ui::ColorMode::NATIVE, ui::Dataspace::UNKNOWN,
@@ -1634,7 +1642,7 @@ TEST_F(OutputUpdateColorProfileTest, setsAColorProfileWhenUnmanaged) {
 struct OutputUpdateColorProfileTest_GetBestColorModeResultBecomesSetProfile
       : public OutputUpdateColorProfileTest {
     OutputUpdateColorProfileTest_GetBestColorModeResultBecomesSetProfile() {
-        EXPECT_CALL(mOutput, getOutputLayerCount()).WillRepeatedly(Return(0));
+        EXPECT_CALL(mOutput, getOutputLayerCount()).WillRepeatedly(Return(0u));
         mRefreshArgs.outputColorSetting = OutputColorSetting::kEnhanced;
         mRefreshArgs.colorSpaceAgnosticDataspace = ui::Dataspace::UNKNOWN;
     }
@@ -1682,7 +1690,7 @@ TEST_F(OutputUpdateColorProfileTest_GetBestColorModeResultBecomesSetProfile,
 struct OutputUpdateColorProfileTest_ColorSpaceAgnosticeDataspaceAffectsSetColorProfile
       : public OutputUpdateColorProfileTest {
     OutputUpdateColorProfileTest_ColorSpaceAgnosticeDataspaceAffectsSetColorProfile() {
-        EXPECT_CALL(mOutput, getOutputLayerCount()).WillRepeatedly(Return(0));
+        EXPECT_CALL(mOutput, getOutputLayerCount()).WillRepeatedly(Return(0u));
         EXPECT_CALL(*mDisplayColorProfile,
                     getBestColorMode(ui::Dataspace::V0_SRGB, ui::RenderIntent::ENHANCE, _, _, _))
                 .WillRepeatedly(DoAll(SetArgPointee<2>(ui::Dataspace::UNKNOWN),
@@ -1738,7 +1746,7 @@ struct OutputUpdateColorProfileTest_TopmostLayerPreferenceSetsOutputPreference
         mRefreshArgs.outputColorSetting = OutputColorSetting::kEnhanced;
         mRefreshArgs.colorSpaceAgnosticDataspace = ui::Dataspace::UNKNOWN;
 
-        EXPECT_CALL(mOutput, getOutputLayerCount()).WillRepeatedly(Return(3));
+        EXPECT_CALL(mOutput, getOutputLayerCount()).WillRepeatedly(Return(3u));
         EXPECT_CALL(mOutput, setColorProfile(_)).WillRepeatedly(Return());
     }
 
@@ -1860,7 +1868,7 @@ struct OutputUpdateColorProfileTest_ForceOutputColorOverrides
 
         mLayer1.mLayerFEState.dataspace = ui::Dataspace::DISPLAY_BT2020;
 
-        EXPECT_CALL(mOutput, getOutputLayerCount()).WillRepeatedly(Return(1));
+        EXPECT_CALL(mOutput, getOutputLayerCount()).WillRepeatedly(Return(1u));
         EXPECT_CALL(mOutput, setColorProfile(_)).WillRepeatedly(Return());
     }
 
@@ -1913,7 +1921,7 @@ struct OutputUpdateColorProfileTest_Hdr : public OutputUpdateColorProfileTest {
     OutputUpdateColorProfileTest_Hdr() {
         mRefreshArgs.outputColorSetting = OutputColorSetting::kEnhanced;
         mRefreshArgs.colorSpaceAgnosticDataspace = ui::Dataspace::UNKNOWN;
-        EXPECT_CALL(mOutput, getOutputLayerCount()).WillRepeatedly(Return(2));
+        EXPECT_CALL(mOutput, getOutputLayerCount()).WillRepeatedly(Return(2u));
         EXPECT_CALL(mOutput, setColorProfile(_)).WillRepeatedly(Return());
     }
 
@@ -2193,7 +2201,7 @@ struct OutputUpdateColorProfile_AffectsChosenRenderIntentTest
         mRefreshArgs.outputColorSetting = OutputColorSetting::kEnhanced;
         mRefreshArgs.colorSpaceAgnosticDataspace = ui::Dataspace::UNKNOWN;
         mLayer1.mLayerFEState.dataspace = ui::Dataspace::BT2020_PQ;
-        EXPECT_CALL(mOutput, getOutputLayerCount()).WillRepeatedly(Return(1));
+        EXPECT_CALL(mOutput, getOutputLayerCount()).WillRepeatedly(Return(1u));
         EXPECT_CALL(mOutput, setColorProfile(_)).WillRepeatedly(Return());
         EXPECT_CALL(*mDisplayColorProfile, hasLegacyHdrSupport(ui::Dataspace::BT2020_PQ))
                 .WillRepeatedly(Return(false));
@@ -2834,7 +2842,7 @@ struct OutputComposeSurfacesTest : public testing::Test {
 const Rect OutputComposeSurfacesTest::kDefaultOutputFrame{1001, 1002, 1003, 1004};
 const Rect OutputComposeSurfacesTest::kDefaultOutputViewport{1005, 1006, 1007, 1008};
 const Rect OutputComposeSurfacesTest::kDefaultOutputScissor{1009, 1010, 1011, 1012};
-const mat4 OutputComposeSurfacesTest::kDefaultColorTransformMat{mat4() * 0.5};
+const mat4 OutputComposeSurfacesTest::kDefaultColorTransformMat{mat4() * 0.5f};
 const Region OutputComposeSurfacesTest::kDebugRegion{Rect{100, 101, 102, 103}};
 const HdrCapabilities OutputComposeSurfacesTest::
         kHdrCapabilities{{},
@@ -2842,8 +2850,10 @@ const HdrCapabilities OutputComposeSurfacesTest::
                          OutputComposeSurfacesTest::kDefaultAvgLuminance,
                          OutputComposeSurfacesTest::kDefaultMinLuminance};
 
-TEST_F(OutputComposeSurfacesTest, doesNothingIfNoClientComposition) {
+TEST_F(OutputComposeSurfacesTest, doesNothingButSignalNoExpensiveRenderingIfNoClientComposition) {
     mOutput.mState.usesClientComposition = false;
+
+    EXPECT_CALL(mOutput, setExpensiveRenderingExpected(false));
 
     verify().execute().expectAFenceWasReturned();
 }
@@ -3163,7 +3173,6 @@ TEST_F(OutputComposeSurfacesTest_SetsExpensiveRendering, IfExepensiveOutputDatas
 
     EXPECT_CALL(mOutput, setExpensiveRenderingExpected(true));
     EXPECT_CALL(mRenderEngine, drawLayers(_, _, _, true, _, _)).WillOnce(Return(NO_ERROR));
-    EXPECT_CALL(mOutput, setExpensiveRenderingExpected(false));
 
     mOutput.composeSurfaces(kDebugRegion);
 }
@@ -3407,7 +3416,7 @@ TEST_F(GenerateClientCompositionRequestsTest_ThreeLayers, clearsHWCLayersIfOpaqu
     EXPECT_EQ(mLayers[1].mRELayerSettings.geometry.boundaries, requests[0].geometry.boundaries);
     EXPECT_FALSE(requests[0].source.buffer.buffer);
     EXPECT_EQ((half3{0.f, 0.f, 0.f}), requests[0].source.solidColor);
-    EXPECT_EQ(half{0.f}, requests[0].alpha);
+    EXPECT_EQ(0.f, static_cast<float>(requests[0].alpha));
     EXPECT_EQ(true, requests[0].disableBlending);
 
     EXPECT_EQ(mLayers[2].mRELayerSettings, requests[1]);
@@ -3632,6 +3641,29 @@ TEST_F(GenerateClientCompositionRequestsTest_ThreeLayers,
                                                                 kDisplayDataspace));
 }
 
+TEST_F(OutputUpdateAndWriteCompositionStateTest, handlesBackgroundBlurRequests) {
+    // Layer requesting blur, or below, should request client composition.
+    EXPECT_CALL(*mOutputLayer1, updateCompositionState(false, true));
+    EXPECT_CALL(*mOutputLayer1, writeStateToHWC(false));
+    EXPECT_CALL(*mOutputLayer2, updateCompositionState(false, true));
+    EXPECT_CALL(*mOutputLayer2, writeStateToHWC(false));
+    EXPECT_CALL(*mOutputLayer3, updateCompositionState(false, false));
+    EXPECT_CALL(*mOutputLayer3, writeStateToHWC(false));
+
+    mLayer2FEState.backgroundBlurRadius = 10;
+
+    injectLayer(std::move(mOutputLayer1));
+    injectLayer(std::move(mOutputLayer2));
+    injectLayer(std::move(mOutputLayer3));
+
+    mOutput->editState().isEnabled = true;
+
+    CompositionRefreshArgs args;
+    args.updatingGeometryThisFrame = false;
+    args.devOptForceClientComposition = false;
+    mOutput->updateAndWriteCompositionState(args);
+}
+
 TEST_F(GenerateClientCompositionRequestsTest, handlesLandscapeModeSplitScreenRequests) {
     // In split-screen landscape mode, the screen is rotated 90 degrees, with
     // one layer on the left covering the left side of the output, and one layer
@@ -3780,3 +3812,6 @@ TEST_F(GenerateClientCompositionRequestsTest_ThreeLayers,
 
 } // namespace
 } // namespace android::compositionengine
+
+// TODO(b/129481165): remove the #pragma below and fix conversion issues
+#pragma clang diagnostic pop // ignored "-Wconversion"

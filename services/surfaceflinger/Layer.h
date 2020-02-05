@@ -96,6 +96,7 @@ struct LayerCreationArgs {
 
 class Layer : public compositionengine::LayerFE {
     static std::atomic<int32_t> sSequence;
+    static constexpr int32_t PRIORITY_UNSET = -1;
 
 public:
     mutable bool contentDirty{false};
@@ -178,6 +179,7 @@ public:
 
         half4 color;
         float cornerRadius;
+        int backgroundBlurRadius;
 
         bool inputInfoChanged;
         InputWindowInfo inputInfo;
@@ -220,6 +222,11 @@ public:
         // Length of the cast shadow. If the radius is > 0, a shadow of length shadowRadius will
         // be rendered around the layer.
         float shadowRadius;
+
+        // Priority of the layer assigned by Window Manager.
+        int32_t frameRateSelectionPriority;
+
+        float frameRate;
     };
 
     explicit Layer(const LayerCreationArgs& args);
@@ -293,6 +300,9 @@ public:
     // The shape of the rounded corner rectangle is specified by the crop rectangle of the layer
     // from which we inferred the rounded corner radius.
     virtual bool setCornerRadius(float cornerRadius);
+    // When non-zero, everything below this layer will be blurred by backgroundBlurRadius, which
+    // is specified in pixels.
+    virtual bool setBackgroundBlurRadius(int backgroundBlurRadius);
     virtual bool setTransparentRegionHint(const Region& transparent);
     virtual bool setFlags(uint8_t flags, uint8_t mask);
     virtual bool setLayerStack(uint32_t layerStack);
@@ -333,9 +343,14 @@ public:
             const std::vector<sp<CallbackHandle>>& /*handles*/) {
         return false;
     };
+    virtual void forceSendCallbacks() {}
     virtual bool setBackgroundColor(const half3& color, float alpha, ui::Dataspace dataspace);
     virtual bool setColorSpaceAgnostic(const bool agnostic);
     bool setShadowRadius(float shadowRadius);
+    virtual bool setFrameRateSelectionPriority(int32_t priority);
+    //  If the variable is not set on the layer, it traverses up the tree to inherit the frame
+    //  rate priority from its parent.
+    virtual int32_t getFrameRateSelectionPriority() const;
 
     virtual ui::Dataspace getDataSpace() const { return ui::Dataspace::UNKNOWN; }
 
@@ -452,6 +467,9 @@ public:
     virtual bool isCreatedFromMainThread() const { return false; }
 
     bool isRemovedFromCurrentState() const;
+
+    LayerProto* writeToProto(LayersProto& layersProto,
+                             uint32_t traceFlags = SurfaceTracing::TRACE_ALL) const;
 
     // Write states that are modified by the main thread. This includes drawing
     // state as well as buffer data. This should be called in the main or tracing
@@ -649,6 +667,7 @@ public:
     // down the hierarchy).
     half getAlpha() const;
     half4 getColor() const;
+    int32_t getBackgroundBlurRadius() const;
 
     // Returns how rounded corners should be drawn for this layer.
     // This will traverse the hierarchy until it reaches its root, finding topmost rounded
@@ -725,6 +744,9 @@ public:
      */
     Rect getCroppedBufferSize(const Layer::State& s) const;
 
+    virtual bool setFrameRate(float frameRate);
+    virtual float getFrameRate() const;
+
 protected:
     // constant
     sp<SurfaceFlinger> mFlinger;
@@ -751,6 +773,7 @@ protected:
 
     // For unit tests
     friend class TestableSurfaceFlinger;
+    friend class RefreshRateSelectionTest;
 
     virtual void commitTransaction(const State& stateToCommit);
 

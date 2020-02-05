@@ -49,6 +49,7 @@ cc_test {
         "SchedulerTest.cpp",
         "SchedulerUtilsTest.cpp",
         "RefreshRateConfigsTest.cpp",
+        "RefreshRateSelectionTest.cpp",
         "RefreshRateStatsTest.cpp",
         "RegionSamplingTest.cpp",
         "TimeStatsTest.cpp",
@@ -79,11 +80,14 @@ cc_test {
         "libgui_mocks",
         "libperfetto_client_experimental",
         "librenderengine_mocks",
-        "libtimestats",
         "perfetto_trace_protos",
     ],
     shared_libs: [
+        "libprotoutil",
+        "libstatssocket",
         "libsurfaceflinger",
+        "libtimestats",
+        "libtimestats_proto",
     ],
     header_libs: [
         "libsurfaceflinger_headers",

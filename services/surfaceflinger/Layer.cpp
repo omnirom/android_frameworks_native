@@ -14,6 +14,10 @@
  * limitations under the License.
  */
 
+// TODO(b/129481165): remove the #pragma below and fix conversion issues
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wconversion"
+
 //#define LOG_NDEBUG 0
 #undef LOG_TAG
 #define LOG_TAG "Layer"
@@ -105,11 +109,14 @@ Layer::Layer(const LayerCreationArgs& args)
     mCurrentState.hdrMetadata.validTypes = 0;
     mCurrentState.surfaceDamageRegion = Region::INVALID_REGION;
     mCurrentState.cornerRadius = 0.0f;
+    mCurrentState.backgroundBlurRadius = 0;
     mCurrentState.api = -1;
     mCurrentState.hasColorTransform = false;
     mCurrentState.colorSpaceAgnostic = false;
+    mCurrentState.frameRateSelectionPriority = PRIORITY_UNSET;
     mCurrentState.metadata = args.metadata;
     mCurrentState.shadowRadius = 0.f;
+    mCurrentState.frameRate = 0.f;
 
     // drawing state & current state are identical
     mDrawingState = mCurrentState;
@@ -442,6 +449,7 @@ void Layer::latchBasicGeometry(compositionengine::LayerFECompositionState& compo
 
     compositionState.blendMode = static_cast<Hwc2::IComposerClient::BlendMode>(blendMode);
     compositionState.alpha = alpha;
+    compositionState.backgroundBlurRadius = drawingState.backgroundBlurRadius;
 }
 
 void Layer::latchGeometry(compositionengine::LayerFECompositionState& compositionState) const {
@@ -569,6 +577,7 @@ std::optional<renderengine::LayerSettings> Layer::prepareClientComposition(
 
     layerSettings.alpha = alpha;
     layerSettings.sourceDataspace = getDataSpace();
+    layerSettings.backgroundBlurRadius = getBackgroundBlurRadius();
     return layerSettings;
 }
 
@@ -848,7 +857,7 @@ uint32_t Layer::doTransaction(uint32_t flags) {
         // inevitably waiting on a buffer to return. We recreate this semantic for BufferQueue
         // even though it is a little consistent. detachChildren is shortly slated for removal
         // by the hierarchy mirroring work so we don't need to worry about it too much.
-        mDrawingState.callbackHandles = mCurrentState.callbackHandles;
+        forceSendCallbacks();
         mCurrentState.callbackHandles = {};
         return flags;
     }
@@ -1097,6 +1106,16 @@ bool Layer::setCornerRadius(float cornerRadius) {
     return true;
 }
 
+bool Layer::setBackgroundBlurRadius(int backgroundBlurRadius) {
+    if (mCurrentState.backgroundBlurRadius == backgroundBlurRadius) return false;
+
+    mCurrentState.sequence++;
+    mCurrentState.backgroundBlurRadius = backgroundBlurRadius;
+    mCurrentState.modified = true;
+    setTransactionFlags(eTransactionNeeded);
+    return true;
+}
+
 bool Layer::setMatrix(const layer_state_t::matrix22_t& matrix,
         bool allowNonRectPreservingTransforms) {
     ui::Transform t;
@@ -1120,6 +1139,7 @@ bool Layer::setTransparentRegionHint(const Region& transparent) {
     setTransactionFlags(eTransactionNeeded);
     return true;
 }
+
 bool Layer::setFlags(uint8_t flags, uint8_t mask) {
     const uint32_t newFlags = (mCurrentState.flags & ~mask) | (flags & mask);
     if (mCurrentState.flags == newFlags) return false;
@@ -1176,6 +1196,29 @@ bool Layer::setColorSpaceAgnostic(const bool agnostic) {
     return true;
 }
 
+bool Layer::setFrameRateSelectionPriority(int32_t priority) {
+    if (mCurrentState.frameRateSelectionPriority == priority) return false;
+    mCurrentState.frameRateSelectionPriority = priority;
+    mCurrentState.sequence++;
+    mCurrentState.modified = true;
+    setTransactionFlags(eTransactionNeeded);
+    return true;
+}
+
+int32_t Layer::getFrameRateSelectionPriority() const {
+    // Check if layer has priority set.
+    if (mDrawingState.frameRateSelectionPriority != PRIORITY_UNSET) {
+        return mDrawingState.frameRateSelectionPriority;
+    }
+    // If not, search whether its parents have it set.
+    sp<Layer> parent = getParent();
+    if (parent != nullptr) {
+        return parent->getFrameRateSelectionPriority();
+    }
+
+    return Layer::PRIORITY_UNSET;
+}
+
 uint32_t Layer::getLayerStack() const {
     auto p = mDrawingParent.promote();
     if (p == nullptr) {
@@ -1194,6 +1237,22 @@ bool Layer::setShadowRadius(float shadowRadius) {
     mCurrentState.modified = true;
     setTransactionFlags(eTransactionNeeded);
     return true;
+}
+
+bool Layer::setFrameRate(float frameRate) {
+    if (mCurrentState.frameRate == frameRate) {
+        return false;
+    }
+
+    mCurrentState.sequence++;
+    mCurrentState.frameRate = frameRate;
+    mCurrentState.modified = true;
+    setTransactionFlags(eTransactionNeeded);
+    return true;
+}
+
+float Layer::getFrameRate() const {
+    return getDrawingState().frameRate;
 }
 
 void Layer::deferTransactionUntil_legacy(const sp<Layer>& barrierLayer, uint64_t frameNumber) {
@@ -1827,6 +1886,10 @@ half4 Layer::getColor() const {
     return half4(color.r, color.g, color.b, getAlpha());
 }
 
+int32_t Layer::getBackgroundBlurRadius() const {
+    return getDrawingState().backgroundBlurRadius;
+}
+
 Layer::RoundedCornerState Layer::getRoundedCornerState() const {
     const auto& p = mDrawingParent.promote();
     if (p != nullptr) {
@@ -1893,6 +1956,18 @@ void Layer::setInputInfo(const InputWindowInfo& info) {
     setTransactionFlags(eTransactionNeeded);
 }
 
+LayerProto* Layer::writeToProto(LayersProto& layersProto, uint32_t traceFlags) const {
+    LayerProto* layerProto = layersProto.add_layers();
+    writeToProtoDrawingState(layerProto, traceFlags);
+    writeToProtoCommonState(layerProto, LayerVector::StateSet::Drawing, traceFlags);
+
+    for (const sp<Layer>& layer : mDrawingChildren) {
+        layer->writeToProto(layersProto, traceFlags);
+    }
+
+    return layerProto;
+}
+
 void Layer::writeToProtoDrawingState(LayerProto* layerInfo, uint32_t traceFlags) const {
     ui::Transform transform = getTransform();
 
@@ -1930,6 +2005,11 @@ void Layer::writeToProtoDrawingState(LayerProto* layerInfo, uint32_t traceFlags)
                                        [&]() { return layerInfo->mutable_visible_region(); });
         LayerProtoHelper::writeToProto(surfaceDamageRegion,
                                        [&]() { return layerInfo->mutable_damage_region(); });
+
+        if (hasColorTransform()) {
+            LayerProtoHelper::writeToProto(getColorTransform(),
+                                           layerInfo->mutable_color_transform());
+        }
     }
 
     if (traceFlags & SurfaceTracing::TRACE_EXTRA) {
@@ -2009,6 +2089,8 @@ void Layer::writeToProtoCommonState(LayerProto* layerInfo, LayerVector::StateSet
         } else {
             layerInfo->set_z_order_relative_of(-1);
         }
+
+        layerInfo->set_is_relative_of(state.isRelativeOf);
     }
 
     if (traceFlags & SurfaceTracing::TRACE_INPUT) {
@@ -2285,3 +2367,6 @@ void Layer::addChildToDrawing(const sp<Layer>& layer) {
 #if defined(__gl2_h_)
 #error "don't include gl2/gl2.h in this file"
 #endif
+
+// TODO(b/129481165): remove the #pragma below and fix conversion issues
+#pragma clang diagnostic pop // ignored "-Wconversion"

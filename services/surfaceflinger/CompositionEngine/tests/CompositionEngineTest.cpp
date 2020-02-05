@@ -14,6 +14,10 @@
  * limitations under the License.
  */
 
+// TODO(b/129481165): remove the #pragma below and fix conversion issues
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wconversion"
+
 #include <compositionengine/CompositionRefreshArgs.h>
 #include <compositionengine/LayerFECompositionState.h>
 #include <compositionengine/impl/CompositionEngine.h>
@@ -135,14 +139,14 @@ TEST_F(CompositionEnginePresentTest, worksAsExpected) {
 struct CompositionEngineUpdateCursorAsyncTest : public CompositionEngineTest {
 public:
     CompositionEngineUpdateCursorAsyncTest() {
-        EXPECT_CALL(*mOutput1, getOutputLayerCount()).WillRepeatedly(Return(0));
+        EXPECT_CALL(*mOutput1, getOutputLayerCount()).WillRepeatedly(Return(0u));
         EXPECT_CALL(*mOutput1, getOutputLayerOrderedByZByIndex(_)).Times(0);
 
-        EXPECT_CALL(*mOutput2, getOutputLayerCount()).WillRepeatedly(Return(1));
+        EXPECT_CALL(*mOutput2, getOutputLayerCount()).WillRepeatedly(Return(1u));
         EXPECT_CALL(*mOutput2, getOutputLayerOrderedByZByIndex(0))
                 .WillRepeatedly(Return(&mOutput2OutputLayer1));
 
-        EXPECT_CALL(*mOutput3, getOutputLayerCount()).WillRepeatedly(Return(2));
+        EXPECT_CALL(*mOutput3, getOutputLayerCount()).WillRepeatedly(Return(2u));
         EXPECT_CALL(*mOutput3, getOutputLayerOrderedByZByIndex(0))
                 .WillRepeatedly(Return(&mOutput3OutputLayer1));
         EXPECT_CALL(*mOutput3, getOutputLayerOrderedByZByIndex(1))
@@ -298,3 +302,6 @@ TEST_F(CompositionTestPreComposition,
 
 } // namespace
 } // namespace android::compositionengine
+
+// TODO(b/129481165): remove the #pragma below and fix conversion issues
+#pragma clang diagnostic pop // ignored "-Wconversion"

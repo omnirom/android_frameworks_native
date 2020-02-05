@@ -14,6 +14,10 @@
  * limitations under the License.
  */
 
+// TODO(b/129481165): remove the #pragma below and fix conversion issues
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wconversion"
+
 #include <android-base/stringprintf.h>
 #include <compositionengine/DisplayColorProfile.h>
 #include <compositionengine/Layer.h>
@@ -388,7 +392,8 @@ void OutputLayer::writeOutputIndependentGeometryStateToHWC(
               outputIndependentState.alpha, to_string(error).c_str(), static_cast<int32_t>(error));
     }
 
-    if (auto error = hwcLayer->setInfo(outputIndependentState.type, outputIndependentState.appId);
+    if (auto error = hwcLayer->setInfo(static_cast<uint32_t>(outputIndependentState.type),
+                                       static_cast<uint32_t>(outputIndependentState.appId));
         error != HWC2::Error::None) {
         ALOGE("[%s] Failed to set info %s (%d)", getLayerFE().getDebugName(),
               to_string(error).c_str(), static_cast<int32_t>(error));
@@ -645,3 +650,6 @@ void OutputLayer::dump(std::string& out) const {
 
 } // namespace impl
 } // namespace android::compositionengine
+
+// TODO(b/129481165): remove the #pragma below and fix conversion issues
+#pragma clang diagnostic pop // ignored "-Wconversion"

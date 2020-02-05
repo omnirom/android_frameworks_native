@@ -110,10 +110,10 @@ public:
     }
 
     virtual status_t captureScreen(const sp<IBinder>& display, sp<GraphicBuffer>* outBuffer,
-                                   bool& outCapturedSecureLayers, const ui::Dataspace reqDataspace,
-                                   const ui::PixelFormat reqPixelFormat, Rect sourceCrop,
+                                   bool& outCapturedSecureLayers, ui::Dataspace reqDataspace,
+                                   ui::PixelFormat reqPixelFormat, const Rect& sourceCrop,
                                    uint32_t reqWidth, uint32_t reqHeight, bool useIdentityTransform,
-                                   ISurfaceComposer::Rotation rotation, bool captureSecureLayers) {
+                                   ui::Rotation rotation, bool captureSecureLayers) {
         Parcel data, reply;
         data.writeInterfaceToken(ISurfaceComposer::getInterfaceDescriptor());
         data.writeStrongBinder(display);
@@ -394,32 +394,6 @@ public:
         data.writeInterfaceToken(ISurfaceComposer::getInterfaceDescriptor());
         data.writeStrongBinder(display);
         remote()->transact(BnSurfaceComposer::GET_ACTIVE_CONFIG, data, &reply);
-        return reply.readInt32();
-    }
-
-    virtual status_t setActiveConfig(const sp<IBinder>& display, int id)
-    {
-        Parcel data, reply;
-        status_t result = data.writeInterfaceToken(ISurfaceComposer::getInterfaceDescriptor());
-        if (result != NO_ERROR) {
-            ALOGE("setActiveConfig failed to writeInterfaceToken: %d", result);
-            return result;
-        }
-        result = data.writeStrongBinder(display);
-        if (result != NO_ERROR) {
-            ALOGE("setActiveConfig failed to writeStrongBinder: %d", result);
-            return result;
-        }
-        result = data.writeInt32(id);
-        if (result != NO_ERROR) {
-            ALOGE("setActiveConfig failed to writeInt32: %d", result);
-            return result;
-        }
-        result = remote()->transact(BnSurfaceComposer::SET_ACTIVE_CONFIG, data, &reply);
-        if (result != NO_ERROR) {
-            ALOGE("setActiveConfig failed to transact: %d", result);
-            return result;
-        }
         return reply.readInt32();
     }
 
@@ -1214,8 +1188,7 @@ status_t BnSurfaceComposer::onTransact(
             bool capturedSecureLayers = false;
             status_t res = captureScreen(display, &outBuffer, capturedSecureLayers, reqDataspace,
                                          reqPixelFormat, sourceCrop, reqWidth, reqHeight,
-                                         useIdentityTransform,
-                                         static_cast<ISurfaceComposer::Rotation>(rotation),
+                                         useIdentityTransform, ui::toRotation(rotation),
                                          captureSecureLayers);
 
             reply->writeInt32(res);
@@ -1356,14 +1329,6 @@ status_t BnSurfaceComposer::onTransact(
             sp<IBinder> display = data.readStrongBinder();
             int id = getActiveConfig(display);
             reply->writeInt32(id);
-            return NO_ERROR;
-        }
-        case SET_ACTIVE_CONFIG: {
-            CHECK_INTERFACE(ISurfaceComposer, data, reply);
-            sp<IBinder> display = data.readStrongBinder();
-            int id = data.readInt32();
-            status_t result = setActiveConfig(display, id);
-            reply->writeInt32(result);
             return NO_ERROR;
         }
         case GET_DISPLAY_COLOR_MODES: {

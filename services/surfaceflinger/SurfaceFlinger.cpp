@@ -14,6 +14,10 @@
  * limitations under the License.
  */
 
+// TODO(b/129481165): remove the #pragma below and fix conversion issues
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wconversion"
+
 //#define LOG_NDEBUG 0
 #define ATRACE_TAG ATRACE_TAG_GRAPHICS
 
@@ -163,21 +167,6 @@ bool isWideColorMode(const ColorMode colorMode) {
     return false;
 }
 
-ui::Transform::orientation_flags fromSurfaceComposerRotation(ISurfaceComposer::Rotation rotation) {
-    switch (rotation) {
-        case ISurfaceComposer::eRotateNone:
-            return ui::Transform::ROT_0;
-        case ISurfaceComposer::eRotate90:
-            return ui::Transform::ROT_90;
-        case ISurfaceComposer::eRotate180:
-            return ui::Transform::ROT_180;
-        case ISurfaceComposer::eRotate270:
-            return ui::Transform::ROT_270;
-    }
-    ALOGE("Invalid rotation passed to captureScreen(): %d\n", rotation);
-    return ui::Transform::ROT_0;
-}
-
 #pragma clang diagnostic pop
 
 class ConditionalLock {
@@ -215,7 +204,7 @@ bool SurfaceFlinger::hasSyncFramework;
 bool SurfaceFlinger::useVrFlinger;
 int64_t SurfaceFlinger::maxFrameBufferAcquiredBuffers;
 bool SurfaceFlinger::hasWideColorDisplay;
-int SurfaceFlinger::primaryDisplayOrientation = DisplayState::eOrientationDefault;
+ui::Rotation SurfaceFlinger::internalDisplayOrientation = ui::ROTATION_0;
 bool SurfaceFlinger::useColorManagement;
 bool SurfaceFlinger::useContextPriority;
 Dataspace SurfaceFlinger::defaultCompositionDataspace = Dataspace::V0_SRGB;
@@ -298,23 +287,21 @@ SurfaceFlinger::SurfaceFlinger(Factory& factory) : SurfaceFlinger(factory, SkipI
 
     useContextPriority = use_context_priority(true);
 
-    auto tmpPrimaryDisplayOrientation = primary_display_orientation(
-            SurfaceFlingerProperties::primary_display_orientation_values::ORIENTATION_0);
-    switch (tmpPrimaryDisplayOrientation) {
-        case SurfaceFlingerProperties::primary_display_orientation_values::ORIENTATION_90:
-            SurfaceFlinger::primaryDisplayOrientation = DisplayState::eOrientation90;
+    using Values = SurfaceFlingerProperties::primary_display_orientation_values;
+    switch (primary_display_orientation(Values::ORIENTATION_0)) {
+        case Values::ORIENTATION_0:
             break;
-        case SurfaceFlingerProperties::primary_display_orientation_values::ORIENTATION_180:
-            SurfaceFlinger::primaryDisplayOrientation = DisplayState::eOrientation180;
+        case Values::ORIENTATION_90:
+            internalDisplayOrientation = ui::ROTATION_90;
             break;
-        case SurfaceFlingerProperties::primary_display_orientation_values::ORIENTATION_270:
-            SurfaceFlinger::primaryDisplayOrientation = DisplayState::eOrientation270;
+        case Values::ORIENTATION_180:
+            internalDisplayOrientation = ui::ROTATION_180;
             break;
-        default:
-            SurfaceFlinger::primaryDisplayOrientation = DisplayState::eOrientationDefault;
+        case Values::ORIENTATION_270:
+            internalDisplayOrientation = ui::ROTATION_270;
             break;
     }
-    ALOGV("Primary Display Orientation is set to %2d.", SurfaceFlinger::primaryDisplayOrientation);
+    ALOGV("Internal Display Orientation: %s", toCString(internalDisplayOrientation));
 
     mInternalDisplayPrimaries = sysprop::getDisplayNativePrimaries();
 
@@ -350,6 +337,14 @@ SurfaceFlinger::SurfaceFlinger(Factory& factory) : SurfaceFlinger(factory, SkipI
     property_get("ro.sf.disable_triple_buffer", value, "0");
     mLayerTripleBufferingDisabled = atoi(value);
     ALOGI_IF(mLayerTripleBufferingDisabled, "Disabling Triple Buffering");
+
+    property_get("ro.surface_flinger.supports_background_blur", value, "0");
+    bool supportsBlurs = atoi(value);
+    property_get("debug.sf.disableBlurs", value, "0");
+    bool disableBlurs = atoi(value);
+    mEnableBlurs = supportsBlurs && !disableBlurs;
+    ALOGI_IF(!mEnableBlurs, "Disabling blur effects. supported: %d, disabled: %d", supportsBlurs,
+             disableBlurs);
 
     const size_t defaultListSize = MAX_LAYERS;
     auto listSize = property_get_int32("debug.sf.max_igbp_list_size", int32_t(defaultListSize));
@@ -507,6 +502,7 @@ void SurfaceFlinger::bootFinished()
     ALOGI("Boot is finished (%ld ms)", long(ns2ms(duration)) );
 
     mFrameTracer->initialize();
+    mTimeStats->onBootFinished();
 
     // wait patiently for the window manager death
     const String16 name("window");
@@ -593,6 +589,7 @@ void SurfaceFlinger::init() {
                 .setUseColorManagerment(useColorManagement)
                 .setEnableProtectedContext(enable_protected_contents(false))
                 .setPrecacheToneMapperShaderOnly(false)
+                .setSupportsBackgroundBlur(mEnableBlurs)
                 .setContextPriority(useContextPriority
                         ? renderengine::RenderEngine::ContextPriority::HIGH
                         : renderengine::RenderEngine::ContextPriority::MEDIUM)
@@ -789,9 +786,8 @@ status_t SurfaceFlinger::getDisplayConfigs(const sp<IBinder>& displayToken,
             }
             info.density = density;
 
-            // TODO: this needs to go away (currently needed only by webkit)
             const auto display = getDefaultDisplayDeviceLocked();
-            info.orientation = display ? display->getOrientation() : 0;
+            info.orientation = display->getOrientation();
 
             // This is for screenrecord
             const Rect viewport = display->getViewport();
@@ -804,7 +800,6 @@ status_t SurfaceFlinger::getDisplayConfigs(const sp<IBinder>& displayToken,
             // TODO: where should this value come from?
             static const int TV_DENSITY = 213;
             info.density = TV_DENSITY / 160.0f;
-            info.orientation = 0;
 
             const auto display = getDisplayDeviceLocked(displayToken);
             info.layerStack = display->getLayerStack();
@@ -835,7 +830,8 @@ status_t SurfaceFlinger::getDisplayConfigs(const sp<IBinder>& displayToken,
         info.secure = true;
 
         if (displayId == getInternalDisplayIdLocked() &&
-            primaryDisplayOrientation & DisplayState::eOrientationSwapMask) {
+            (internalDisplayOrientation == ui::ROTATION_90 ||
+             internalDisplayOrientation == ui::ROTATION_270)) {
             std::swap(info.w, info.h);
         }
 
@@ -889,7 +885,7 @@ void SurfaceFlinger::setDesiredActiveConfig(const ActiveConfigInfo& info) {
         repaintEverythingForHWC();
         // Start receiving vsync samples now, so that we can detect a period
         // switch.
-        mScheduler->resyncToHardwareVsync(true, getVsyncPeriod());
+        mScheduler->resyncToHardwareVsync(true, refreshRate.vsyncPeriod);
         // As we called to set period, we will call to onRefreshRateChangeCompleted once
         // DispSync model is locked.
         mVSyncModulator->onRefreshRateChangeInitiated();
@@ -953,8 +949,11 @@ void SurfaceFlinger::setActiveConfigInternal() {
     ATRACE_INT("ActiveConfigFPS", refreshRate.fps);
 
     if (mUpcomingActiveConfig.event != Scheduler::ConfigEvent::None) {
+        const nsecs_t vsyncPeriod =
+                mRefreshRateConfigs->getRefreshRateFromConfigId(mUpcomingActiveConfig.configId)
+                        .vsyncPeriod;
         mScheduler->onConfigChanged(mAppConnectionHandle, display->getId()->value,
-                                    mUpcomingActiveConfig.configId);
+                                    mUpcomingActiveConfig.configId, vsyncPeriod);
     }
 }
 
@@ -963,9 +962,9 @@ void SurfaceFlinger::desiredActiveConfigChangeDone() {
     mDesiredActiveConfig.event = Scheduler::ConfigEvent::None;
     mDesiredActiveConfigChanged = false;
 
-    mScheduler->resyncToHardwareVsync(true, getVsyncPeriod());
-    auto refreshRate =
+    auto const refreshRate =
             mRefreshRateConfigs->getRefreshRateFromConfigId(mDesiredActiveConfig.configId);
+    mScheduler->resyncToHardwareVsync(true, refreshRate.vsyncPeriod);
     mPhaseConfiguration->setRefreshRateFps(refreshRate.fps);
     mVSyncModulator->setPhaseOffsets(mPhaseConfiguration->getCurrentOffsets());
 }
@@ -1567,6 +1566,11 @@ void SurfaceFlinger::onVsyncPeriodTimingChangedReceived(
     mScheduler->onNewVsyncPeriodChangeTimeline(updatedTimeline);
 }
 
+void SurfaceFlinger::onSeamlessPossible(int32_t /*sequenceId*/, hwc2_display_t /*display*/) {
+    // TODO(b/142753666): use constraints when calling to setActiveConfigWithConstrains and
+    // use this callback to know when to retry in case of SEAMLESS_NOT_POSSIBLE.
+}
+
 void SurfaceFlinger::onRefreshReceived(int sequenceId, hwc2_display_t /*hwcDisplayId*/) {
     Mutex::Autolock lock(mStateLock);
     if (sequenceId != getBE().mComposerSequenceId) {
@@ -1757,12 +1761,6 @@ void SurfaceFlinger::onMessageReceived(int32_t what) NO_THREAD_SAFETY_ANALYSIS {
                 mGpuFrameMissedCount++;
             }
 
-            mScheduler->chooseRefreshRateForContent();
-
-            if (performSetActiveConfig()) {
-                break;
-            }
-
             if (frameMissed && mPropagateBackpressure) {
                 if ((hwcFrameMissed && !gpuFrameMissed) ||
                     mPropagateBackpressureClientComposition) {
@@ -1778,6 +1776,13 @@ void SurfaceFlinger::onMessageReceived(int32_t what) NO_THREAD_SAFETY_ANALYSIS {
 
             bool refreshNeeded = handleMessageTransaction();
             refreshNeeded |= handleMessageInvalidate();
+
+            // Layers need to get updated (in the previous line) before we can use them for
+            // choosing the refresh rate.
+            mScheduler->chooseRefreshRateForContent();
+            if (performSetActiveConfig()) {
+                break;
+            }
 
             updateCursorAsync();
             updateInputFlinger();
@@ -2276,8 +2281,8 @@ sp<DisplayDevice> SurfaceFlinger::setupNewDisplayDeviceInternal(
         nativeWindow->setSwapInterval(nativeWindow.get(), 0);
     }
 
-    creationArgs.displayInstallOrientation =
-            isInternalDisplay ? primaryDisplayOrientation : DisplayState::eOrientationDefault;
+    creationArgs.physicalOrientation =
+            isInternalDisplay ? internalDisplayOrientation : ui::ROTATION_0;
 
     // virtual displays are always considered enabled
     creationArgs.initialPowerMode = state.isVirtual() ? HWC_POWER_MODE_NORMAL : HWC_POWER_MODE_OFF;
@@ -2688,6 +2693,17 @@ void SurfaceFlinger::initScheduler(DisplayId primaryDisplayId) {
     mRegionSamplingThread =
             new RegionSamplingThread(*this, *mScheduler,
                                      RegionSamplingThread::EnvironmentTimingTunables());
+    // Dispatch a config change request for the primary display on scheduler
+    // initialization, so that the EventThreads always contain a reference to a
+    // prior configuration.
+    //
+    // This is a bit hacky, but this avoids a back-pointer into the main SF
+    // classes from EventThread, and there should be no run-time binder cost
+    // anyway since there are no connected apps at this point.
+    const nsecs_t vsyncPeriod =
+            mRefreshRateConfigs->getRefreshRateFromConfigId(currentConfig).vsyncPeriod;
+    mScheduler->onConfigChanged(mAppConnectionHandle, primaryDisplayId.value, currentConfig,
+                                vsyncPeriod);
 }
 
 void SurfaceFlinger::commitTransaction()
@@ -3373,6 +3389,9 @@ uint32_t SurfaceFlinger::setClientStateLocked(
         if (layer->setCornerRadius(s.cornerRadius))
             flags |= eTraversalNeeded;
     }
+    if (what & layer_state_t::eBackgroundBlurRadiusChanged) {
+        if (layer->setBackgroundBlurRadius(s.backgroundBlurRadius)) flags |= eTraversalNeeded;
+    }
     if (what & layer_state_t::eLayerStackChanged) {
         ssize_t idx = mCurrentState.layersSortedByZ.indexOf(layer);
         // We only allow setting layer stacks for top level layers,
@@ -3472,6 +3491,14 @@ uint32_t SurfaceFlinger::setClientStateLocked(
     }
     if (what & layer_state_t::eShadowRadiusChanged) {
         if (layer->setShadowRadius(s.shadowRadius)) flags |= eTraversalNeeded;
+    }
+    if (what & layer_state_t::eFrameRateSelectionPriority) {
+        if (privileged && layer->setFrameRateSelectionPriority(s.frameRateSelectionPriority)) {
+            flags |= eTraversalNeeded;
+        }
+    }
+    if (what & layer_state_t::eFrameRateChanged) {
+        if (layer->setFrameRate(s.frameRate)) flags |= eTraversalNeeded;
     }
     // This has to happen after we reparent children because when we reparent to null we remove
     // child layers from current state and remove its relative z. If the children are reparented in
@@ -3803,7 +3830,7 @@ void SurfaceFlinger::onInitializeDisplays() {
              DisplayState::eLayerStackChanged;
     d.token = token;
     d.layerStack = 0;
-    d.orientation = DisplayState::eOrientationDefault;
+    d.orientation = ui::ROTATION_0;
     d.frame.makeInvalid();
     d.viewport.makeInvalid();
     d.width = 0;
@@ -4256,12 +4283,9 @@ void SurfaceFlinger::dumpWideColorInfo(std::string& result) const {
 
 LayersProto SurfaceFlinger::dumpDrawingStateProto(uint32_t traceFlags) const {
     LayersProto layersProto;
-    mDrawingState.traverseInZOrder([&](Layer* layer) {
-        LayerProto* layerProto = layersProto.add_layers();
-        layer->writeToProtoDrawingState(layerProto, traceFlags);
-        layer->writeToProtoCommonState(layerProto, LayerVector::StateSet::Drawing, traceFlags);
-    });
-
+    for (const sp<Layer>& layer : mDrawingState.layersSortedByZ) {
+        layer->writeToProto(layersProto, traceFlags);
+    }
     return layersProto;
 }
 
@@ -4279,21 +4303,8 @@ void SurfaceFlinger::dumpOffscreenLayersProto(LayersProto& layersProto, uint32_t
         rootProto->add_children(offscreenLayer->sequence);
 
         // Add layer
-        LayerProto* layerProto = layersProto.add_layers();
-        offscreenLayer->writeToProtoDrawingState(layerProto, traceFlags);
-        offscreenLayer->writeToProtoCommonState(layerProto, LayerVector::StateSet::Drawing,
-                                                traceFlags);
+        LayerProto* layerProto = offscreenLayer->writeToProto(layersProto, traceFlags);
         layerProto->set_parent(offscreenRootLayerId);
-
-        // Add children
-        offscreenLayer->traverseInZOrder(LayerVector::StateSet::Drawing, [&](Layer* layer) {
-            if (layer == offscreenLayer) {
-                return;
-            }
-            LayerProto* childProto = layersProto.add_layers();
-            layer->writeToProtoDrawingState(childProto, traceFlags);
-            layer->writeToProtoCommonState(childProto, LayerVector::StateSet::Drawing, traceFlags);
-        });
     }
 }
 
@@ -4412,8 +4423,8 @@ void SurfaceFlinger::dumpAllLocked(const DumpArgs& args, std::string& result) co
     if (const auto display = getDefaultDisplayDeviceLocked()) {
         display->getCompositionDisplay()->getState().undefinedRegion.dump(result,
                                                                           "undefinedRegion");
-        StringAppendF(&result, "  orientation=%d, isPoweredOn=%d\n", display->getOrientation(),
-                      display->isPoweredOn());
+        StringAppendF(&result, "  orientation=%s, isPoweredOn=%d\n",
+                      toCString(display->getOrientation()), display->isPoweredOn());
     }
     StringAppendF(&result,
                   "  transaction-flags         : %08x\n"
@@ -4522,7 +4533,6 @@ status_t SurfaceFlinger::CheckTransactCodeCredentials(uint32_t code) {
         case ENABLE_VSYNC_INJECTIONS:
         case GET_ANIMATION_FRAME_STATS:
         case GET_HDR_CAPABILITIES:
-        case SET_ACTIVE_CONFIG:
         case SET_DESIRED_DISPLAY_CONFIG_SPECS:
         case GET_DESIRED_DISPLAY_CONFIG_SPECS:
         case SET_ACTIVE_COLOR_MODE:
@@ -4990,17 +5000,19 @@ private:
 
 status_t SurfaceFlinger::captureScreen(const sp<IBinder>& displayToken,
                                        sp<GraphicBuffer>* outBuffer, bool& outCapturedSecureLayers,
-                                       const Dataspace reqDataspace,
-                                       const ui::PixelFormat reqPixelFormat, Rect sourceCrop,
-                                       uint32_t reqWidth, uint32_t reqHeight,
-                                       bool useIdentityTransform,
-                                       ISurfaceComposer::Rotation rotation,
-                                       bool captureSecureLayers) {
+                                       Dataspace reqDataspace, ui::PixelFormat reqPixelFormat,
+                                       const Rect& sourceCrop, uint32_t reqWidth,
+                                       uint32_t reqHeight, bool useIdentityTransform,
+                                       ui::Rotation rotation, bool captureSecureLayers) {
     ATRACE_CALL();
 
     if (!displayToken) return BAD_VALUE;
 
-    auto renderAreaRotation = fromSurfaceComposerRotation(rotation);
+    auto renderAreaRotation = ui::Transform::toRotationFlags(rotation);
+    if (renderAreaRotation == ui::Transform::ROT_INVALID) {
+        ALOGE("%s: Invalid rotation: %s", __FUNCTION__, toCString(rotation));
+        renderAreaRotation = ui::Transform::ROT_0;
+    }
 
     sp<DisplayDevice> display;
     {
@@ -5062,7 +5074,7 @@ status_t SurfaceFlinger::captureScreen(uint64_t displayOrLayerStack, Dataspace* 
     sp<DisplayDevice> display;
     uint32_t width;
     uint32_t height;
-    ui::Transform::orientation_flags captureOrientation;
+    ui::Transform::RotationFlags captureOrientation;
     {
         Mutex::Autolock _l(mStateLock);
         display = getDisplayByIdOrLayerStack(displayOrLayerStack);
@@ -5073,12 +5085,25 @@ status_t SurfaceFlinger::captureScreen(uint64_t displayOrLayerStack, Dataspace* 
         width = uint32_t(display->getViewport().width());
         height = uint32_t(display->getViewport().height());
 
-        captureOrientation = fromSurfaceComposerRotation(
-                static_cast<ISurfaceComposer::Rotation>(display->getOrientation()));
-        if (captureOrientation == ui::Transform::orientation_flags::ROT_90) {
-            captureOrientation = ui::Transform::orientation_flags::ROT_270;
-        } else if (captureOrientation == ui::Transform::orientation_flags::ROT_270) {
-            captureOrientation = ui::Transform::orientation_flags::ROT_90;
+        const auto orientation = display->getOrientation();
+        captureOrientation = ui::Transform::toRotationFlags(orientation);
+
+        switch (captureOrientation) {
+            case ui::Transform::ROT_90:
+                captureOrientation = ui::Transform::ROT_270;
+                break;
+
+            case ui::Transform::ROT_270:
+                captureOrientation = ui::Transform::ROT_90;
+                break;
+
+            case ui::Transform::ROT_INVALID:
+                ALOGE("%s: Invalid orientation: %s", __FUNCTION__, toCString(orientation));
+                captureOrientation = ui::Transform::ROT_0;
+                break;
+
+            default:
+                break;
         }
         *outDataspace =
                 pickDataspaceFromColorMode(display->getCompositionDisplay()->getState().colorMode);
@@ -5126,7 +5151,7 @@ status_t SurfaceFlinger::captureLayers(
         }
         bool isSecure() const override { return false; }
         bool needsFiltering() const override { return mNeedsFiltering; }
-        const sp<const DisplayDevice> getDisplayDevice() const override { return nullptr; }
+        sp<const DisplayDevice> getDisplayDevice() const override { return nullptr; }
         Rect getSourceCrop() const override {
             if (mCrop.isEmpty()) {
                 return getBounds();
@@ -5577,7 +5602,10 @@ status_t SurfaceFlinger::setDesiredDisplayConfigSpecsInternal(const sp<DisplayDe
 
         auto configId = HwcConfigIndexType(defaultConfig);
         display->setActiveConfig(configId);
-        mScheduler->onConfigChanged(mAppConnectionHandle, display->getId()->value, configId);
+        const nsecs_t vsyncPeriod =
+                mRefreshRateConfigs->getRefreshRateFromConfigId(configId).vsyncPeriod;
+        mScheduler->onConfigChanged(mAppConnectionHandle, display->getId()->value, configId,
+                                    vsyncPeriod);
         return NO_ERROR;
     }
 
@@ -5601,8 +5629,10 @@ status_t SurfaceFlinger::setDesiredDisplayConfigSpecsInternal(const sp<DisplayDe
     // TODO(b/140204874): This hack triggers a notification that something has changed, so
     // that listeners that care about a change in allowed configs can get the notification.
     // Giving current ActiveConfig so that most other listeners would just drop the event
+    const nsecs_t vsyncPeriod =
+            mRefreshRateConfigs->getRefreshRateFromConfigId(display->getActiveConfig()).vsyncPeriod;
     mScheduler->onConfigChanged(mAppConnectionHandle, display->getId()->value,
-                                display->getActiveConfig());
+                                display->getActiveConfig(), vsyncPeriod);
 
     if (mRefreshRateConfigs->refreshRateSwitchingSupported()) {
         auto configId = mScheduler->getPreferredConfigId();
@@ -5767,3 +5797,6 @@ status_t SurfaceFlinger::setGlobalShadowSettings(const half4& ambientColor, cons
 #if defined(__gl2_h_)
 #error "don't include gl2/gl2.h in this file"
 #endif
+
+// TODO(b/129481165): remove the #pragma below and fix conversion issues
+#pragma clang diagnostic pop // ignored "-Wconversion"

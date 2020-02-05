@@ -14,6 +14,10 @@
  * limitations under the License.
  */
 
+// TODO(b/129481165): remove the #pragma below and fix conversion issues
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wconversion"
+
 #define ATRACE_TAG ATRACE_TAG_GRAPHICS
 //#define LOG_NDEBUG 0
 #include "VSyncPredictor.h"
@@ -38,7 +42,7 @@ VSyncPredictor::VSyncPredictor(nsecs_t idealPeriod, size_t historySize,
         kMinimumSamplesForPrediction(minimumSamplesForPrediction),
         kOutlierTolerancePercent(std::min(outlierTolerancePercent, kMaxPercent)),
         mIdealPeriod(idealPeriod) {
-    mRateMap[mIdealPeriod] = {idealPeriod, 0};
+    resetModel();
 }
 
 inline size_t VSyncPredictor::next(int i) const {
@@ -199,6 +203,10 @@ void VSyncPredictor::setPeriod(nsecs_t period) {
         mRateMap[mIdealPeriod] = {period, 0};
     }
 
+    clearTimestamps();
+}
+
+void VSyncPredictor::clearTimestamps() {
     if (!timestamps.empty()) {
         mKnownTimestamp = *std::max_element(timestamps.begin(), timestamps.end());
         timestamps.clear();
@@ -223,4 +231,13 @@ bool VSyncPredictor::needsMoreSamples(nsecs_t now) const {
     return needsMoreSamples;
 }
 
+void VSyncPredictor::resetModel() {
+    std::lock_guard<std::mutex> lk(mMutex);
+    mRateMap[mIdealPeriod] = {mIdealPeriod, 0};
+    clearTimestamps();
+}
+
 } // namespace android::scheduler
+
+// TODO(b/129481165): remove the #pragma below and fix conversion issues
+#pragma clang diagnostic pop // ignored "-Wconversion"

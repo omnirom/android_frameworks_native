@@ -14,6 +14,10 @@
  * limitations under the License.
  */
 
+// TODO(b/129481165): remove the #pragma below and fix conversion issues
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wconversion"
+
 #undef LOG_TAG
 #define LOG_TAG "LibSurfaceFlingerUnittests"
 #define LOG_NDEBUG 0
@@ -351,4 +355,22 @@ TEST_F(VSyncPredictorTest, doesNotPredictBeforeTimePointWithHigherIntercept) {
     EXPECT_THAT(prediction, Ge(timePoint));
 }
 
+TEST_F(VSyncPredictorTest, resetsWhenInstructed) {
+    auto const idealPeriod = 10000;
+    auto const realPeriod = 10500;
+    tracker.setPeriod(idealPeriod);
+    for (auto i = 0; i < kMinimumSamplesForPrediction; i++) {
+        tracker.addVsyncTimestamp(i * realPeriod);
+    }
+
+    EXPECT_THAT(std::get<0>(tracker.getVSyncPredictionModel()),
+                IsCloseTo(realPeriod, mMaxRoundingError));
+    tracker.resetModel();
+    EXPECT_THAT(std::get<0>(tracker.getVSyncPredictionModel()),
+                IsCloseTo(idealPeriod, mMaxRoundingError));
+}
+
 } // namespace android::scheduler
+
+// TODO(b/129481165): remove the #pragma below and fix conversion issues
+#pragma clang diagnostic pop // ignored "-Wconversion"

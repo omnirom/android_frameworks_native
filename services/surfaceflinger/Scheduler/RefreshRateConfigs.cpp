@@ -14,6 +14,10 @@
  * limitations under the License.
  */
 
+// TODO(b/129481165): remove the #pragma below and fix conversion issues
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wconversion"
+
 // #define LOG_NDEBUG 0
 #include "RefreshRateConfigs.h"
 
@@ -126,7 +130,7 @@ status_t RefreshRateConfigs::setPolicy(HwcConfigIndexType defaultConfigId, float
         return BAD_VALUE;
     }
     const RefreshRate& refreshRate = mRefreshRates.at(defaultConfigId);
-    if (refreshRate.fps < minRefreshRate || refreshRate.fps > maxRefreshRate) {
+    if (!refreshRate.inPolicy(minRefreshRate, maxRefreshRate)) {
         return BAD_VALUE;
     }
     mDefaultConfig = defaultConfigId;
@@ -180,8 +184,8 @@ void RefreshRateConfigs::constructAvailableRefreshRates() {
           group.value(), mMinRefreshRateFps, mMaxRefreshRateFps);
     getSortedRefreshRateList(
             [&](const RefreshRate& refreshRate) REQUIRES(mLock) {
-                return refreshRate.configGroup == group && refreshRate.fps >= mMinRefreshRateFps &&
-                        refreshRate.fps <= mMaxRefreshRateFps;
+                return refreshRate.configGroup == group &&
+                        refreshRate.inPolicy(mMinRefreshRateFps, mMaxRefreshRateFps);
             },
             &mAvailableRefreshRates);
     LOG_ALWAYS_FATAL_IF(mAvailableRefreshRates.empty(),
@@ -217,3 +221,5 @@ void RefreshRateConfigs::init(const std::vector<InputConfig>& configs,
 }
 
 } // namespace android::scheduler
+// TODO(b/129481165): remove the #pragma below and fix conversion issues
+#pragma clang diagnostic pop // ignored "-Wconversion"

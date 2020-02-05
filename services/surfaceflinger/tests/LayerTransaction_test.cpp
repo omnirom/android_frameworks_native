@@ -14,6 +14,10 @@
  * limitations under the License.
  */
 
+// TODO(b/129481165): remove the #pragma below and fix conversion issues
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wconversion"
+
 #include <private/android_filesystem_config.h>
 #include <thread>
 #include "LayerTransactionTest.h"
@@ -53,7 +57,7 @@ TEST_F(LayerTransactionTest, SetFlagsSecureEUidSystem) {
     ASSERT_EQ(NO_ERROR,
               composer->captureScreen(mDisplay, &outBuffer, outCapturedSecureLayers,
                                       ui::Dataspace::V0_SRGB, ui::PixelFormat::RGBA_8888, Rect(), 0,
-                                      0, false, ISurfaceComposer::eRotateNone, true));
+                                      0, false, ui::ROTATION_0, true));
     ASSERT_EQ(true, outCapturedSecureLayers);
     ScreenCapture sc(outBuffer);
     sc.expectColor(Rect(0, 0, 32, 32), Color::RED);
@@ -190,3 +194,6 @@ TEST_F(LayerTransactionTest, DISABLED_BufferQueueLayerMergeDamageRegionWhenDropp
     ASSERT_EQ(OK, producer->disconnect(NATIVE_WINDOW_API_CPU));
 }
 } // namespace android
+
+// TODO(b/129481165): remove the #pragma below and fix conversion issues
+#pragma clang diagnostic pop // ignored "-Wconversion"

@@ -157,6 +157,9 @@ private:
     // Cleans up input state when dropping an inbound event.
     void dropInboundEventLocked(const EventEntry& entry, DropReason dropReason) REQUIRES(mLock);
 
+    // Enqueues a focus event.
+    void enqueueFocusEventLocked(const InputWindowHandle& window, bool hasFocus) REQUIRES(mLock);
+
     // Adds an event to a queue of recent events for debugging purposes.
     void addRecentEventLocked(EventEntry* entry) REQUIRES(mLock);
 
@@ -167,9 +170,6 @@ private:
     bool isAppSwitchKeyEvent(const KeyEntry& keyEntry);
     bool isAppSwitchPendingLocked() REQUIRES(mLock);
     void resetPendingAppSwitchLocked(bool handled) REQUIRES(mLock);
-
-    // Stale event latency optimization.
-    static bool isStaleEvent(nsecs_t currentTime, const EventEntry& entry);
 
     // Blocked event latency optimization.  Drops old events when the user intends
     // to transfer focus to a new application.
@@ -302,6 +302,7 @@ private:
                            nsecs_t* nextWakeupTime) REQUIRES(mLock);
     bool dispatchMotionLocked(nsecs_t currentTime, MotionEntry* entry, DropReason* dropReason,
                               nsecs_t* nextWakeupTime) REQUIRES(mLock);
+    void dispatchFocusLocked(nsecs_t currentTime, FocusEntry* entry) REQUIRES(mLock);
     void dispatchEventLocked(nsecs_t currentTime, EventEntry* entry,
                              const std::vector<InputTarget>& inputTargets) REQUIRES(mLock);
 
@@ -381,13 +382,13 @@ private:
     // with the mutex held makes it easier to ensure that connection invariants are maintained.
     // If needed, the methods post commands to run later once the critical bits are done.
     void prepareDispatchCycleLocked(nsecs_t currentTime, const sp<Connection>& connection,
-                                    EventEntry* eventEntry, const InputTarget* inputTarget)
+                                    EventEntry* eventEntry, const InputTarget& inputTarget)
             REQUIRES(mLock);
     void enqueueDispatchEntriesLocked(nsecs_t currentTime, const sp<Connection>& connection,
-                                      EventEntry* eventEntry, const InputTarget* inputTarget)
+                                      EventEntry* eventEntry, const InputTarget& inputTarget)
             REQUIRES(mLock);
     void enqueueDispatchEntryLocked(const sp<Connection>& connection, EventEntry* eventEntry,
-                                    const InputTarget* inputTarget, int32_t dispatchMode)
+                                    const InputTarget& inputTarget, int32_t dispatchMode)
             REQUIRES(mLock);
     void startDispatchCycleLocked(nsecs_t currentTime, const sp<Connection>& connection)
             REQUIRES(mLock);

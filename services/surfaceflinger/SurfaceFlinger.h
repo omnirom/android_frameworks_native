@@ -229,7 +229,7 @@ public:
     // found on devices with wide color gamut (e.g. Display-P3) display.
     static bool hasWideColorDisplay;
 
-    static int primaryDisplayOrientation;
+    static ui::Rotation internalDisplayOrientation;
 
     // Indicate if device wants color management on its display.
     static bool useColorManagement;
@@ -415,10 +415,10 @@ private:
             ISurfaceComposer::ConfigChanged configChanged =
                     ISurfaceComposer::eConfigChangedSuppress) override;
     status_t captureScreen(const sp<IBinder>& displayToken, sp<GraphicBuffer>* outBuffer,
-            bool& outCapturedSecureLayers, const ui::Dataspace reqDataspace,
-            const ui::PixelFormat reqPixelFormat, Rect sourceCrop,
-            uint32_t reqWidth, uint32_t reqHeight,
-            bool useIdentityTransform, ISurfaceComposer::Rotation rotation, bool captureSecureLayers) override;
+                           bool& outCapturedSecureLayers, ui::Dataspace reqDataspace,
+                           ui::PixelFormat reqPixelFormat, const Rect& sourceCrop,
+                           uint32_t reqWidth, uint32_t reqHeight, bool useIdentityTransform,
+                           ui::Rotation rotation, bool captureSecureLayers) override;
     status_t captureScreen(uint64_t displayOrLayerStack, ui::Dataspace* outDataspace,
                            sp<GraphicBuffer>* outBuffer) override;
     status_t captureLayers(
@@ -445,7 +445,6 @@ private:
                                        bool* outSupported) const override;
     void setGameContentType(const sp<IBinder>& displayToken, bool on) override;
     void setPowerMode(const sp<IBinder>& displayToken, int mode) override;
-    status_t setActiveConfig(const sp<IBinder>& displayToken, int id) override;
     status_t clearAnimationFrameStats() override;
     status_t getAnimationFrameStats(FrameStats* outStats) const override;
     status_t getHdrCapabilities(const sp<IBinder>& displayToken,
@@ -505,6 +504,7 @@ private:
     void onVsyncPeriodTimingChangedReceived(
             int32_t sequenceId, hwc2_display_t display,
             const hwc_vsync_period_change_timeline_t& updatedTimeline) override;
+    void onSeamlessPossible(int32_t sequenceId, hwc2_display_t display) override;
 
     /* ------------------------------------------------------------------------
      * ISchedulerCallback
@@ -537,6 +537,7 @@ private:
     void onInitializeDisplays() REQUIRES(mStateLock);
     // Sets the desired active config bit. It obtains the lock, and sets mDesiredActiveConfig.
     void setDesiredActiveConfig(const ActiveConfigInfo& info) REQUIRES(mStateLock);
+    status_t setActiveConfig(const sp<IBinder>& displayToken, int id);
     // Once HWC has returned the present fence, this sets the active config and a new refresh
     // rate in SF.
     void setActiveConfigInternal() REQUIRES(mStateLock);
@@ -1024,6 +1025,7 @@ private:
     const std::shared_ptr<TimeStats> mTimeStats;
     const std::unique_ptr<FrameTracer> mFrameTracer;
     bool mUseHwcVirtualDisplays = false;
+    bool mEnableBlurs = false;
     std::atomic<uint32_t> mFrameMissedCount = 0;
     std::atomic<uint32_t> mHwcFrameMissedCount = 0;
     std::atomic<uint32_t> mGpuFrameMissedCount = 0;

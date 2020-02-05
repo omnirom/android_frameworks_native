@@ -14,6 +14,10 @@
  * limitations under the License.
  */
 
+// TODO(b/129481165): remove the #pragma below and fix conversion issues
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wconversion"
+
 #include <gui/BufferItemConsumer.h>
 #include <ui/Transform.h>
 #include <thread>
@@ -189,12 +193,12 @@ TEST_P(LayerRenderTypeTransactionTest, SetSizeWithScaleToWindow_BufferQueue) {
 }
 
 TEST_P(LayerRenderTypeTransactionTest, CreateLayer_BufferState) {
-    uint32_t transformHint = ui::Transform::orientation_flags::ROT_INVALID;
+    uint32_t transformHint = ui::Transform::ROT_INVALID;
     sp<SurfaceControl> layer;
     ASSERT_NO_FATAL_FAILURE(layer = createLayer("test", 32, 32,
                                                 ISurfaceComposerClient::eFXSurfaceBufferState,
                                                 /*parent*/ nullptr, &transformHint));
-    ASSERT_NE(ui::Transform::orientation_flags::ROT_INVALID, transformHint);
+    ASSERT_NE(ui::Transform::ROT_INVALID, transformHint);
 }
 
 void LayerRenderTypeTransactionTest::setRelativeZBasicHelper(uint32_t layerType) {
@@ -1841,3 +1845,6 @@ TEST_P(LayerRenderTypeTransactionTest, SetColorTransformOnChildAndParent) {
     }
 }
 } // namespace android
+
+// TODO(b/129481165): remove the #pragma below and fix conversion issues
+#pragma clang diagnostic pop // ignored "-Wconversion"

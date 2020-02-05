@@ -14,6 +14,10 @@
  * limitations under the License.
  */
 
+// TODO(b/129481165): remove the #pragma below and fix conversion issues
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wconversion"
+
 #include "LayerRejecter.h"
 
 #include <gui/BufferItem.h>
@@ -49,7 +53,7 @@ bool LayerRejecter::reject(const sp<GraphicBuffer>& buf, const BufferItem& item)
     }
 
     if (mTransformToDisplayInverse) {
-        uint32_t invTransform = DisplayDevice::getPrimaryDisplayOrientationTransform();
+        uint32_t invTransform = DisplayDevice::getPrimaryDisplayRotationFlags();
         if (invTransform & ui::Transform::ROT_90) {
             std::swap(bufWidth, bufHeight);
         }
@@ -136,3 +140,6 @@ bool LayerRejecter::reject(const sp<GraphicBuffer>& buf, const BufferItem& item)
 }
 
 }  // namespace android
+
+// TODO(b/129481165): remove the #pragma below and fix conversion issues
+#pragma clang diagnostic pop // ignored "-Wconversion"

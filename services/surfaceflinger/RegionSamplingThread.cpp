@@ -14,6 +14,10 @@
  * limitations under the License.
  */
 
+// TODO(b/129481165): remove the #pragma below and fix conversion issues
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wconversion"
+
 //#define LOG_NDEBUG 0
 #define ATRACE_TAG ATRACE_TAG_GRAPHICS
 #undef LOG_TAG
@@ -337,19 +341,7 @@ void RegionSamplingThread::captureSample() {
     }
 
     const auto device = mFlinger.getDefaultDisplayDevice();
-    const auto orientation = [](uint32_t orientation) {
-        switch (orientation) {
-            default:
-            case DisplayState::eOrientationDefault:
-                return ui::Transform::ROT_0;
-            case DisplayState::eOrientation90:
-                return ui::Transform::ROT_90;
-            case DisplayState::eOrientation180:
-                return ui::Transform::ROT_180;
-            case DisplayState::eOrientation270:
-                return ui::Transform::ROT_270;
-        }
-    }(device->getOrientation());
+    const auto orientation = ui::Transform::toRotationFlags(device->getOrientation());
 
     std::vector<RegionSamplingThread::Descriptor> descriptors;
     Region sampleRegion;
@@ -484,3 +476,6 @@ void RegionSamplingThread::threadMain() NO_THREAD_SAFETY_ANALYSIS {
 }
 
 } // namespace android
+
+// TODO(b/129481165): remove the #pragma below and fix conversion issues
+#pragma clang diagnostic pop // ignored "-Wconversion"

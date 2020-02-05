@@ -14,6 +14,10 @@
  * limitations under the License.
  */
 
+// TODO(b/129481165): remove the #pragma below and fix conversion issues
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wconversion"
+
 #include <thread>
 
 #include <android-base/stringprintf.h>
@@ -97,7 +101,7 @@ void Output::setCompositionEnabled(bool enabled) {
     dirtyEntireOutput();
 }
 
-void Output::setProjection(const ui::Transform& transform, int32_t orientation, const Rect& frame,
+void Output::setProjection(const ui::Transform& transform, uint32_t orientation, const Rect& frame,
                            const Rect& viewport, const Rect& scissor, bool needsFiltering) {
     auto& outputState = editState();
     outputState.transform = transform;
@@ -429,7 +433,7 @@ void Output::ensureOutputLayerIfVisible(std::shared_ptr<compositionengine::Layer
     if (layerFEState.shadowRadius > 0.0f) {
         // if the layer casts a shadow, offset the layers visible region and
         // calculate the shadow region.
-        const int32_t inset = layerFEState.shadowRadius * -1.0f;
+        const auto inset = static_cast<int32_t>(ceilf(layerFEState.shadowRadius) * -1.0f);
         Rect visibleRectWithShadows(visibleRect);
         visibleRectWithShadows.inset(inset, inset, inset, inset);
         visibleRegion.set(visibleRectWithShadows);
@@ -453,7 +457,7 @@ void Output::ensureOutputLayerIfVisible(std::shared_ptr<compositionengine::Layer
     }
 
     // compute the opaque region
-    const int32_t layerOrientation = tr.getOrientation();
+    const auto layerOrientation = tr.getOrientation();
     if (layerFEState.isOpaque && ((layerOrientation & ui::Transform::ROT_INVALID) == 0)) {
         // If we one of the simple category of transforms (0/90/180/270 rotation
         // + any flip), then the opaque region is the layer's footprint.
@@ -574,13 +578,31 @@ void Output::updateAndWriteCompositionState(
         return;
     }
 
+    mLayerRequestingBackgroundBlur = findLayerRequestingBackgroundComposition();
+    bool forceClientComposition = mLayerRequestingBackgroundBlur != nullptr;
+
     for (auto* layer : getOutputLayersOrderedByZ()) {
         layer->updateCompositionState(refreshArgs.updatingGeometryThisFrame,
-                                      refreshArgs.devOptForceClientComposition);
+                                      refreshArgs.devOptForceClientComposition ||
+                                              forceClientComposition);
+
+        if (mLayerRequestingBackgroundBlur == layer) {
+            forceClientComposition = false;
+        }
 
         // Send the updated state to the HWC, if appropriate.
         layer->writeStateToHWC(refreshArgs.updatingGeometryThisFrame);
     }
+}
+
+compositionengine::OutputLayer* Output::findLayerRequestingBackgroundComposition() const {
+    compositionengine::OutputLayer* layerRequestingBgComposition = nullptr;
+    for (auto* layer : getOutputLayersOrderedByZ()) {
+        if (layer->getLayer().getFEState().backgroundBlurRadius > 0) {
+            layerRequestingBgComposition = layer;
+        }
+    }
+    return layerRequestingBgComposition;
 }
 
 void Output::updateColorProfile(const compositionengine::CompositionRefreshArgs& refreshArgs) {
@@ -788,6 +810,7 @@ std::optional<base::unique_fd> Output::composeSurfaces(const Region& debugRegion
                                                       outputState.usesClientComposition};
     base::unique_fd readyFence;
     if (!hasClientComposition) {
+        setExpensiveRenderingExpected(false);
         return readyFence;
     }
 
@@ -849,11 +872,12 @@ std::optional<base::unique_fd> Output::composeSurfaces(const Region& debugRegion
     }
 
     // We boost GPU frequency here because there will be color spaces conversion
-    // and it's expensive. We boost the GPU frequency so that GPU composition can
-    // finish in time. We must reset GPU frequency afterwards, because high frequency
-    // consumes extra battery.
+    // or complex GPU shaders and it's expensive. We boost the GPU frequency so that
+    // GPU composition can finish in time. We must reset GPU frequency afterwards,
+    // because high frequency consumes extra battery.
     const bool expensiveRenderingExpected =
-            clientCompositionDisplay.outputDataspace == ui::Dataspace::DISPLAY_P3;
+            clientCompositionDisplay.outputDataspace == ui::Dataspace::DISPLAY_P3 ||
+            mLayerRequestingBackgroundBlur != nullptr;
     if (expensiveRenderingExpected) {
         setExpensiveRenderingExpected(true);
     }
@@ -869,10 +893,6 @@ std::optional<base::unique_fd> Output::composeSurfaces(const Region& debugRegion
         timeStats.recordRenderEngineDuration(renderEngineStart,
                                              std::make_shared<FenceTime>(
                                                      new Fence(dup(readyFence.get()))));
-    }
-
-    if (expensiveRenderingExpected) {
-        setExpensiveRenderingExpected(false);
     }
 
     return readyFence;
@@ -1061,3 +1081,6 @@ compositionengine::Output::FrameFences Output::presentAndGetFrameFences() {
 
 } // namespace impl
 } // namespace android::compositionengine
+
+// TODO(b/129481165): remove the #pragma below and fix conversion issues
+#pragma clang diagnostic pop // ignored "-Wconversion"

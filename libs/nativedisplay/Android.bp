@@ -13,7 +13,7 @@
 // limitations under the License.
 
 ndk_headers {
-    name: "libachoreographer_ndk_headers",
+    name: "libnativedisplay_ndk_headers",
     from: "include/android",
     to: "android",
     srcs: ["include/android/*.h"],
@@ -40,9 +40,15 @@ cc_library {
         "-Wno-unused-function",
     ],
 
+    version_script: "libnativedisplay.map.txt",
+
     srcs: [
         "AChoreographer.cpp",
         "ADisplay.cpp",
+        "surfacetexture/surface_texture.cpp",
+        "surfacetexture/SurfaceTexture.cpp",
+        "surfacetexture/ImageConsumer.cpp",
+        "surfacetexture/EGLConsumer.cpp",
     ],
 
     shared_libs: [
@@ -51,6 +57,10 @@ cc_library {
         "libnativewindow",
         "libui",
         "libutils",
+        "libcutils",
+        "libEGL",
+        "libGLESv2",
+        "libnativehelper",
     ],
 
     header_libs: [

@@ -36,7 +36,10 @@ static const size_t EVENT_BUFFER_SIZE = 100;
 DisplayEventDispatcher::DisplayEventDispatcher(const sp<Looper>& looper,
                                                ISurfaceComposer::VsyncSource vsyncSource,
                                                ISurfaceComposer::ConfigChanged configChanged)
-      : mLooper(looper), mReceiver(vsyncSource, configChanged), mWaitingForVsync(false) {
+      : mLooper(looper),
+        mReceiver(vsyncSource, configChanged),
+        mWaitingForVsync(false),
+        mConfigChangeFlag(configChanged) {
     ALOGV("dispatcher %p ~ Initializing display event dispatcher.", this);
 }
 
@@ -47,17 +50,20 @@ status_t DisplayEventDispatcher::initialize() {
         return result;
     }
 
-    int rc = mLooper->addFd(mReceiver.getFd(), 0, Looper::EVENT_INPUT, this, NULL);
-    if (rc < 0) {
-        return UNKNOWN_ERROR;
+    if (mLooper != nullptr) {
+        int rc = mLooper->addFd(mReceiver.getFd(), 0, Looper::EVENT_INPUT, this, NULL);
+        if (rc < 0) {
+            return UNKNOWN_ERROR;
+        }
     }
+
     return OK;
 }
 
 void DisplayEventDispatcher::dispose() {
     ALOGV("dispatcher %p ~ Disposing display event dispatcher.", this);
 
-    if (!mReceiver.initCheck()) {
+    if (!mReceiver.initCheck() && mLooper != nullptr) {
         mLooper->removeFd(mReceiver.getFd());
     }
 }
@@ -84,6 +90,22 @@ status_t DisplayEventDispatcher::scheduleVsync() {
         mWaitingForVsync = true;
     }
     return OK;
+}
+
+void DisplayEventDispatcher::toggleConfigEvents(ISurfaceComposer::ConfigChanged configChangeFlag) {
+    if (mConfigChangeFlag == configChangeFlag) {
+        return;
+    }
+    status_t status = mReceiver.toggleConfigEvents(configChangeFlag);
+    if (status) {
+        ALOGW("Failed enable config events, status=%d", status);
+        return;
+    }
+    mConfigChangeFlag = configChangeFlag;
+}
+
+int DisplayEventDispatcher::getFd() {
+    return mReceiver.getFd();
 }
 
 int DisplayEventDispatcher::handleEvent(int, int events, void*) {
@@ -140,7 +162,7 @@ bool DisplayEventDispatcher::processPendingEvents(nsecs_t* outTimestamp,
                     break;
                 case DisplayEventReceiver::DISPLAY_EVENT_CONFIG_CHANGED:
                     dispatchConfigChanged(ev.header.timestamp, ev.header.displayId,
-                                          ev.config.configId);
+                                          ev.config.configId, ev.config.vsyncPeriod);
                     break;
                 default:
                     ALOGW("dispatcher %p ~ ignoring unknown event type %#x", this, ev.header.type);

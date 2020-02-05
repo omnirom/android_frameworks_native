@@ -36,7 +36,7 @@ public:
     bool isValid() const override;
     std::optional<DisplayId> getDisplayId() const override;
     void setCompositionEnabled(bool) override;
-    void setProjection(const ui::Transform&, int32_t orientation, const Rect& frame,
+    void setProjection(const ui::Transform&, uint32_t orientation, const Rect& frame,
                        const Rect& viewport, const Rect& scissor, bool needsFiltering) override;
     void setBounds(const ui::Size&) override;
     void setLayerStackFilter(uint32_t layerStackId, bool isInternal) override;
@@ -116,6 +116,7 @@ protected:
 
 private:
     void dirtyEntireOutput();
+    compositionengine::OutputLayer* findLayerRequestingBackgroundComposition() const;
     ui::Dataspace getBestDataspace(ui::Dataspace*, bool*) const;
     compositionengine::Output::ColorProfile pickColorProfile(
             const compositionengine::CompositionRefreshArgs&) const;
@@ -126,6 +127,7 @@ private:
     std::unique_ptr<compositionengine::RenderSurface> mRenderSurface;
 
     ReleasedLayers mReleasedLayers;
+    OutputLayer* mLayerRequestingBackgroundBlur = nullptr;
 };
 
 // This template factory function standardizes the implementation details of the
