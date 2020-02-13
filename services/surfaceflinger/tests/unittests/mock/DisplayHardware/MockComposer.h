@@ -111,6 +111,7 @@ public:
                  Error(Display, Layer, const std::vector<IComposerClient::Rect>&));
     MOCK_METHOD3(setLayerZOrder, Error(Display, Layer, uint32_t));
     MOCK_METHOD4(setLayerInfo, Error(Display, Layer, uint32_t, uint32_t));
+    MOCK_METHOD3(setLayerType, Error(Display, Layer, uint32_t));
     MOCK_METHOD3(getRenderIntents, Error(Display, ColorMode, std::vector<RenderIntent>*));
     MOCK_METHOD3(setLayerColorTransform, Error(Display, Layer, const float*));
     MOCK_METHOD4(getDisplayedContentSamplingAttributes,
@@ -122,6 +123,7 @@ public:
     MOCK_METHOD3(setLayerPerFrameMetadataBlobs,
                  Error(Display, Layer, const std::vector<IComposerClient::PerFrameMetadataBlob>&));
     MOCK_METHOD2(setDisplayBrightness, Error(Display, float));
+    MOCK_METHOD2(setDisplayElapseTime, Error(Display, uint64_t));
 };
 
 } // namespace mock

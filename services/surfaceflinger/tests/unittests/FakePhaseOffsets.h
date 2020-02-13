@@ -23,6 +23,8 @@
 namespace android {
 namespace scheduler {
 
+using RefreshRateType = RefreshRateConfigs::RefreshRateType;
+
 class FakePhaseOffsets : public android::scheduler::PhaseOffsets {
     nsecs_t FAKE_PHASE_OFFSET_NS = 0;
 
@@ -34,25 +36,28 @@ public:
     nsecs_t getCurrentSfOffset() override { return FAKE_PHASE_OFFSET_NS; }
 
     PhaseOffsets::Offsets getOffsetsForRefreshRate(
-            RefreshRateConfigs::RefreshRateType /*refreshRateType*/) const override {
+            RefreshRateType /*refreshRateType*/) const override {
         return getCurrentOffsets();
     }
 
     // Returns early, early GL, and late offsets for Apps and SF.
     PhaseOffsets::Offsets getCurrentOffsets() const override {
-        return Offsets{{FAKE_PHASE_OFFSET_NS, FAKE_PHASE_OFFSET_NS},
-                       {FAKE_PHASE_OFFSET_NS, FAKE_PHASE_OFFSET_NS},
-                       {FAKE_PHASE_OFFSET_NS, FAKE_PHASE_OFFSET_NS}};
+        return Offsets{{RefreshRateType::DEFAULT, FAKE_PHASE_OFFSET_NS, FAKE_PHASE_OFFSET_NS},
+                       {RefreshRateType::DEFAULT, FAKE_PHASE_OFFSET_NS, FAKE_PHASE_OFFSET_NS},
+                       {RefreshRateType::DEFAULT, FAKE_PHASE_OFFSET_NS, FAKE_PHASE_OFFSET_NS}};
     }
 
     // This function should be called when the device is switching between different
     // refresh rates, to properly update the offsets.
-    void setRefreshRateType(RefreshRateConfigs::RefreshRateType /*refreshRateType*/) override {}
+    void setRefreshRateType(RefreshRateType /*refreshRateType*/) override {}
 
     nsecs_t getOffsetThresholdForNextVsync() const override { return FAKE_PHASE_OFFSET_NS; }
 
     // Returns current offsets in human friendly format.
     void dump(std::string& /*result*/) const override {}
+
+    // Set Phase Offsets type for the Default Refresh Rate config.
+    void setDefaultRefreshRateType(RefreshRateConfigs::RefreshRateType /* type */) override {}
 };
 
 } // namespace scheduler

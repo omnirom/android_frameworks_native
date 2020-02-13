@@ -176,6 +176,7 @@ public:
                                         const std::vector<IComposerClient::Rect>& visible) = 0;
     virtual Error setLayerZOrder(Display display, Layer layer, uint32_t z) = 0;
     virtual Error setLayerInfo(Display display, Layer layer, uint32_t type, uint32_t appId) = 0;
+    virtual Error setLayerType(Display display, Layer layer, uint32_t type) = 0;
 
     // Composer HAL 2.2
     virtual Error setLayerPerFrameMetadata(
@@ -204,6 +205,7 @@ public:
     virtual Error setLayerPerFrameMetadataBlobs(
             Display display, Layer layer, const std::vector<PerFrameMetadataBlob>& metadata) = 0;
     virtual Error setDisplayBrightness(Display display, float brightness) = 0;
+    virtual Error setDisplayElapseTime(Display display, uint64_t timeStamp) = 0;
 };
 
 namespace impl {
@@ -388,6 +390,7 @@ public:
                                 const std::vector<IComposerClient::Rect>& visible) override;
     Error setLayerZOrder(Display display, Layer layer, uint32_t z) override;
     Error setLayerInfo(Display display, Layer layer, uint32_t type, uint32_t appId) override;
+    Error setLayerType(Display display, Layer layer, uint32_t type) override;
 
     // Composer HAL 2.2
     Error setLayerPerFrameMetadata(
@@ -416,6 +419,7 @@ public:
             Display display, Layer layer,
             const std::vector<IComposerClient::PerFrameMetadataBlob>& metadata) override;
     Error setDisplayBrightness(Display display, float brightness) override;
+    Error setDisplayElapseTime(Display display, uint64_t timeStamp) override;
 
 private:
     class CommandWriter : public CommandWriterBase {
@@ -424,10 +428,12 @@ private:
         ~CommandWriter() override;
 
         void setLayerInfo(uint32_t type, uint32_t appId);
+        void setLayerType(uint32_t type);
         void setClientTargetMetadata(
                 const IVrComposerClient::BufferMetadata& metadata);
         void setLayerBufferMetadata(
                 const IVrComposerClient::BufferMetadata& metadata);
+        void setDisplayElapseTime(uint64_t time);
 
     private:
         void writeBufferMetadata(
