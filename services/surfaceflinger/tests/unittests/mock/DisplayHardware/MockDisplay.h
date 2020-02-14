@@ -80,6 +80,7 @@ public:
     MOCK_METHOD4(presentOrValidate,
                  Error(uint32_t*, uint32_t*, android::sp<android::Fence>*, uint32_t*));
     MOCK_CONST_METHOD1(setDisplayBrightness, Error(float));
+    MOCK_METHOD1(setDisplayElapseTime, Error(uint64_t));
 };
 
 } // namespace mock

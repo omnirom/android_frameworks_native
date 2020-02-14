@@ -123,6 +123,7 @@ public:
     MOCK_METHOD3(setLayerPerFrameMetadataBlobs,
                  Error(Display, Layer, const std::vector<IComposerClient::PerFrameMetadataBlob>&));
     MOCK_METHOD2(setDisplayBrightness, Error(Display, float));
+    MOCK_METHOD2(setDisplayElapseTime, Error(Display, uint64_t));
 };
 
 } // namespace mock
