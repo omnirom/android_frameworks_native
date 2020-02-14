@@ -45,12 +45,17 @@ public:
     void setTransformHint(uint32_t orientation) const override;
     void releasePendingBuffer(nsecs_t dequeueReadyTime) override;
 
+    void finalizeFrameEventHistory(const std::shared_ptr<FenceTime>& glDoneFence,
+                                   const CompositorTiming& compositorTiming) override;
+
     bool shouldPresentNow(nsecs_t expectedPresentTime) const override;
 
     uint32_t doTransactionResize(uint32_t flags, Layer::State* /*stateToCommit*/) override {
         return flags;
     }
-    void pushPendingState() override;
+    /*TODO:vhau return to using BufferStateLayer override once WM
+     * has removed deferred transactions!
+    void pushPendingState() override;*/
     bool applyPendingStates(Layer::State* stateToCommit) override;
 
     uint32_t getActiveWidth(const Layer::State& s) const override { return s.active.w; }
@@ -68,8 +73,8 @@ public:
     bool setTransformToDisplayInverse(bool transformToDisplayInverse) override;
     bool setCrop(const Rect& crop) override;
     bool setFrame(const Rect& frame) override;
-    bool setBuffer(const sp<GraphicBuffer>& buffer, nsecs_t postTime, nsecs_t desiredPresentTime,
-                   const client_cache_t& clientCacheId) override;
+    bool setBuffer(const sp<GraphicBuffer>& buffer, const sp<Fence>& acquireFence, nsecs_t postTime,
+                   nsecs_t desiredPresentTime, const client_cache_t& clientCacheId) override;
     bool setAcquireFence(const sp<Fence>& fence) override;
     bool setDataspace(ui::Dataspace dataspace) override;
     bool setHdrMetadata(const HdrMetadata& hdrMetadata) override;
@@ -78,6 +83,8 @@ public:
     bool setSidebandStream(const sp<NativeHandle>& sidebandStream) override;
     bool setTransactionCompletedListeners(const std::vector<sp<CallbackHandle>>& handles) override;
     void forceSendCallbacks() override;
+    bool addFrameEvent(const sp<Fence>& acquireFence, nsecs_t postedTime,
+                       nsecs_t requestedPresentTime) override;
 
     // Override to ignore legacy layer state properties that are not used by BufferStateLayer
     bool setSize(uint32_t /*w*/, uint32_t /*h*/) override { return false; }
@@ -96,6 +103,7 @@ public:
 
     Rect getBufferSize(const State& s) const override;
     FloatRect computeSourceBounds(const FloatRect& parentBounds) const override;
+    Layer::RoundedCornerState getRoundedCornerState() const override;
 
     // -----------------------------------------------------------------------
 
@@ -104,11 +112,15 @@ public:
     // -----------------------------------------------------------------------
     bool fenceHasSignaled() const override;
     bool framePresentTimeIsCurrent(nsecs_t expectedPresentTime) const override;
+    bool onPreComposition(nsecs_t refreshStartTime) override;
 
 protected:
     void gatherBufferInfo() override;
 
 private:
+    bool updateFrameEventHistory(const sp<Fence>& acquireFence, nsecs_t postedTime,
+                                 nsecs_t requestedPresentTime);
+
     uint64_t getFrameNumber(nsecs_t expectedPresentTime) const override;
 
     bool getAutoRefresh() const override;
@@ -125,7 +137,7 @@ private:
     status_t updateActiveBuffer() override;
     status_t updateFrameNumber(nsecs_t latchTime) override;
 
-    void latchPerFrameState(compositionengine::LayerFECompositionState&) const override;
+    void preparePerFrameCompositionState() override;
     sp<Layer> createClone() override;
 
     // Crop that applies to the buffer

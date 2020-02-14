@@ -27,13 +27,12 @@
 
 #include <limits>
 
-#include <compositionengine/Layer.h>
 #include <compositionengine/LayerFECompositionState.h>
 #include <gui/BufferQueue.h>
 #include <private/gui/SyncFeatures.h>
 #include <renderengine/Image.h>
 
-#include "ColorLayer.h"
+#include "EffectLayer.h"
 #include "FrameTracer/FrameTracer.h"
 #include "TimeStats/TimeStats.h"
 
@@ -98,6 +97,8 @@ void BufferStateLayer::onLayerDisplayed(const sp<Fence>& releaseFence) {
         }
     }
 
+    mPreviousReleaseFence = releaseFence;
+
     // Prevent tracing the same release multiple times.
     if (mPreviousFrameNumber != mPreviousReleasedFrameNumber) {
         mFlinger->mFrameTracer->traceFence(getSequence(), mPreviousBufferId, mPreviousFrameNumber,
@@ -111,15 +112,34 @@ void BufferStateLayer::setTransformHint(uint32_t orientation) const {
     mTransformHint = orientation;
 }
 
-void BufferStateLayer::releasePendingBuffer(nsecs_t /*dequeueReadyTime*/) {
+void BufferStateLayer::releasePendingBuffer(nsecs_t dequeueReadyTime) {
     for (const auto& handle : mDrawingState.callbackHandles) {
         handle->transformHint = mTransformHint;
+        handle->dequeueReadyTime = dequeueReadyTime;
     }
 
     mFlinger->getTransactionCompletedThread().finalizePendingCallbackHandles(
             mDrawingState.callbackHandles);
 
     mDrawingState.callbackHandles = {};
+
+    const sp<Fence>& releaseFence(mPreviousReleaseFence);
+    std::shared_ptr<FenceTime> releaseFenceTime = std::make_shared<FenceTime>(releaseFence);
+    {
+        Mutex::Autolock lock(mFrameEventHistoryMutex);
+        if (mPreviousFrameNumber != 0) {
+            mFrameEventHistory.addRelease(mPreviousFrameNumber, dequeueReadyTime,
+                                          std::move(releaseFenceTime));
+        }
+    }
+}
+
+void BufferStateLayer::finalizeFrameEventHistory(const std::shared_ptr<FenceTime>& glDoneFence,
+                                                 const CompositorTiming& compositorTiming) {
+    for (const auto& handle : mDrawingState.callbackHandles) {
+        handle->gpuCompositionDoneFence = glDoneFence;
+        handle->compositorTiming = compositorTiming;
+    }
 }
 
 bool BufferStateLayer::shouldPresentNow(nsecs_t /*expectedPresentTime*/) const {
@@ -138,6 +158,8 @@ bool BufferStateLayer::willPresentCurrentTransaction() const {
         !mLayerDetached;
 }
 
+/* TODO: vhau uncomment once deferred transaction migration complete in
+ * WindowManager
 void BufferStateLayer::pushPendingState() {
     if (!mCurrentState.modified) {
         return;
@@ -145,13 +167,12 @@ void BufferStateLayer::pushPendingState() {
     mPendingStates.push_back(mCurrentState);
     ATRACE_INT(mTransactionName.c_str(), mPendingStates.size());
 }
+*/
 
 bool BufferStateLayer::applyPendingStates(Layer::State* stateToCommit) {
-    const bool stateUpdateAvailable = !mPendingStates.empty();
-    while (!mPendingStates.empty()) {
-        popPendingState(stateToCommit);
-    }
-    mCurrentStateModified = stateUpdateAvailable && mCurrentState.modified;
+    mCurrentStateModified = mCurrentState.modified;
+    bool stateUpdateAvailable = Layer::applyPendingStates(stateToCommit);
+    mCurrentStateModified = stateUpdateAvailable && mCurrentStateModified;
     mCurrentState.modified = false;
     return stateUpdateAvailable;
 }
@@ -233,8 +254,22 @@ bool BufferStateLayer::setFrame(const Rect& frame) {
     return true;
 }
 
-bool BufferStateLayer::setBuffer(const sp<GraphicBuffer>& buffer, nsecs_t postTime,
-                                 nsecs_t desiredPresentTime, const client_cache_t& clientCacheId) {
+bool BufferStateLayer::addFrameEvent(const sp<Fence>& acquireFence, nsecs_t postedTime,
+                                     nsecs_t desiredPresentTime) {
+    Mutex::Autolock lock(mFrameEventHistoryMutex);
+    mAcquireTimeline.updateSignalTimes();
+    std::shared_ptr<FenceTime> acquireFenceTime =
+            std::make_shared<FenceTime>((acquireFence ? acquireFence : Fence::NO_FENCE));
+    NewFrameEventsEntry newTimestamps = {mCurrentState.frameNumber, postedTime, desiredPresentTime,
+                                         acquireFenceTime};
+    mFrameEventHistory.setProducerWantsEvents();
+    mFrameEventHistory.addQueue(newTimestamps);
+    return true;
+}
+
+bool BufferStateLayer::setBuffer(const sp<GraphicBuffer>& buffer, const sp<Fence>& acquireFence,
+                                 nsecs_t postTime, nsecs_t desiredPresentTime,
+                                 const client_cache_t& clientCacheId) {
     if (mCurrentState.buffer) {
         mReleasePreviousBuffer = true;
     }
@@ -252,11 +287,12 @@ bool BufferStateLayer::setBuffer(const sp<GraphicBuffer>& buffer, nsecs_t postTi
     mFlinger->mFrameTracer->traceNewLayer(layerId, getName().c_str());
     mFlinger->mFrameTracer->traceTimestamp(layerId, buffer->getId(), mCurrentState.frameNumber,
                                            postTime, FrameTracer::FrameEvent::POST);
+    desiredPresentTime = desiredPresentTime <= 0 ? 0 : desiredPresentTime;
     mCurrentState.desiredPresentTime = desiredPresentTime;
 
-    mFlinger->mScheduler->recordLayerHistory(this,
-                                             desiredPresentTime <= 0 ? 0 : desiredPresentTime);
+    mFlinger->mScheduler->recordLayerHistory(this, desiredPresentTime);
 
+    addFrameEvent(acquireFence, postTime, desiredPresentTime);
     return true;
 }
 
@@ -421,6 +457,13 @@ bool BufferStateLayer::framePresentTimeIsCurrent(nsecs_t expectedPresentTime) co
     return mCurrentState.desiredPresentTime <= expectedPresentTime;
 }
 
+bool BufferStateLayer::onPreComposition(nsecs_t refreshStartTime) {
+    for (const auto& handle : mDrawingState.callbackHandles) {
+        handle->refreshStartTime = refreshStartTime;
+    }
+    return BufferLayer::onPreComposition(refreshStartTime);
+}
+
 uint64_t BufferStateLayer::getFrameNumber(nsecs_t /*expectedPresentTime*/) const {
     return mDrawingState.frameNumber;
 }
@@ -438,9 +481,8 @@ bool BufferStateLayer::latchSidebandStream(bool& recomputeVisibleRegions) {
     if (mSidebandStreamChanged.exchange(false)) {
         const State& s(getDrawingState());
         // mSidebandStreamChanged was true
-        LOG_ALWAYS_FATAL_IF(!getCompositionLayer());
         mSidebandStream = s.sidebandStream;
-        getCompositionLayer()->editFEState().sidebandStream = mSidebandStream;
+        editCompositionState()->sidebandStream = mSidebandStream;
         if (mSidebandStream != nullptr) {
             setTransactionFlags(eTransactionNeeded);
             mFlinger->setTransactionFlags(eTraversalNeeded);
@@ -505,6 +547,7 @@ status_t BufferStateLayer::updateTexImage(bool& /*recomputeVisibleRegions*/, nse
 
     for (auto& handle : mDrawingState.callbackHandles) {
         handle->latchTime = latchTime;
+        handle->frameNumber = mDrawingState.frameNumber;
     }
 
     if (!SyncFeatures::getInstance().useNativeFenceSync()) {
@@ -547,29 +590,33 @@ status_t BufferStateLayer::updateActiveBuffer() {
     mPreviousBufferId = getCurrentBufferId();
     mBufferInfo.mBuffer = s.buffer;
     mBufferInfo.mFence = s.acquireFence;
-    auto& layerCompositionState = getCompositionLayer()->editFEState();
-    layerCompositionState.buffer = mBufferInfo.mBuffer;
+    editCompositionState()->buffer = mBufferInfo.mBuffer;
 
     return NO_ERROR;
 }
 
-status_t BufferStateLayer::updateFrameNumber(nsecs_t /*latchTime*/) {
+status_t BufferStateLayer::updateFrameNumber(nsecs_t latchTime) {
     // TODO(marissaw): support frame history events
     mPreviousFrameNumber = mCurrentFrameNumber;
     mCurrentFrameNumber = mDrawingState.frameNumber;
+    {
+        Mutex::Autolock lock(mFrameEventHistoryMutex);
+        mFrameEventHistory.addLatch(mCurrentFrameNumber, latchTime);
+    }
     return NO_ERROR;
 }
 
-void BufferStateLayer::latchPerFrameState(
-        compositionengine::LayerFECompositionState& compositionState) const {
-    BufferLayer::latchPerFrameState(compositionState);
-    if (compositionState.compositionType == Hwc2::IComposerClient::Composition::SIDEBAND) {
+void BufferStateLayer::preparePerFrameCompositionState() {
+    BufferLayer::preparePerFrameCompositionState();
+
+    auto* compositionState = editCompositionState();
+    if (compositionState->compositionType == Hwc2::IComposerClient::Composition::SIDEBAND) {
         return;
     }
 
-    compositionState.buffer = mBufferInfo.mBuffer;
-    compositionState.bufferSlot = mBufferInfo.mBufferSlot;
-    compositionState.acquireFence = mBufferInfo.mFence;
+    compositionState->buffer = mBufferInfo.mBuffer;
+    compositionState->bufferSlot = mBufferInfo.mBufferSlot;
+    compositionState->acquireFence = mBufferInfo.mFence;
 }
 
 void BufferStateLayer::HwcSlotGenerator::bufferErased(const client_cache_t& clientCacheId) {
@@ -694,6 +741,33 @@ sp<Layer> BufferStateLayer::createClone() {
     layer->mHwcSlotGenerator = mHwcSlotGenerator;
     layer->setInitialValuesForClone(this);
     return layer;
+}
+
+Layer::RoundedCornerState BufferStateLayer::getRoundedCornerState() const {
+    const auto& p = mDrawingParent.promote();
+    if (p != nullptr) {
+        RoundedCornerState parentState = p->getRoundedCornerState();
+        if (parentState.radius > 0) {
+            ui::Transform t = getActiveTransform(getDrawingState());
+            t = t.inverse();
+            parentState.cropRect = t.transform(parentState.cropRect);
+            // The rounded corners shader only accepts 1 corner radius for performance reasons,
+            // but a transform matrix can define horizontal and vertical scales.
+            // Let's take the average between both of them and pass into the shader, practically we
+            // never do this type of transformation on windows anyway.
+            parentState.radius *= (t[0][0] + t[1][1]) / 2.0f;
+            return parentState;
+        }
+    }
+    const float radius = getDrawingState().cornerRadius;
+    const State& s(getDrawingState());
+    if (radius <= 0 || (getActiveWidth(s) == UINT32_MAX && getActiveHeight(s) == UINT32_MAX))
+        return RoundedCornerState();
+    return RoundedCornerState(FloatRect(static_cast<float>(s.active.transform.tx()),
+                                        static_cast<float>(s.active.transform.ty()),
+                                        static_cast<float>(s.active.transform.tx() + s.active.w),
+                                        static_cast<float>(s.active.transform.ty() + s.active.h)),
+                              radius);
 }
 } // namespace android
 

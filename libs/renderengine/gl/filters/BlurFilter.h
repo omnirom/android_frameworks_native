@@ -33,7 +33,7 @@ public:
     static constexpr float kFboScale = 0.25f;
     // To avoid downscaling artifacts, we interpolate the blurred fbo with the full composited
     // image, up to this radius.
-    static constexpr float kMaxCrossFadeRadius = 15.0f;
+    static constexpr float kMaxCrossFadeRadius = 30.0f;
 
     explicit BlurFilter(GLESRenderEngine& engine);
     virtual ~BlurFilter(){};
@@ -45,7 +45,7 @@ public:
     // Execute blur passes, rendering to offscreen texture.
     virtual status_t prepare() = 0;
     // Render blur to the bound framebuffer (screen).
-    status_t render();
+    status_t render(bool multiPass);
 
 protected:
     uint32_t mRadius;

@@ -37,10 +37,11 @@ namespace android {
 
 namespace impl {
 
-status_pull_atom_return_t TimeStats::pullAtomCallback(int32_t atom_tag,
-                                                      pulled_stats_event_list* data, void* cookie) {
+AStatsManager_PullAtomCallbackReturn TimeStats::pullAtomCallback(int32_t atom_tag,
+                                                                 AStatsEventList* data,
+                                                                 void* cookie) {
     impl::TimeStats* timeStats = reinterpret_cast<impl::TimeStats*>(cookie);
-    status_pull_atom_return_t result = STATS_PULL_SKIP;
+    AStatsManager_PullAtomCallbackReturn result = AStatsManager_PULL_SKIP;
     if (atom_tag == android::util::SURFACEFLINGER_STATS_GLOBAL_INFO) {
         result = timeStats->populateGlobalAtom(data);
     } else if (atom_tag == android::util::SURFACEFLINGER_STATS_LAYER_INFO) {
@@ -54,25 +55,26 @@ status_pull_atom_return_t TimeStats::pullAtomCallback(int32_t atom_tag,
     return result;
 }
 
-status_pull_atom_return_t TimeStats::populateGlobalAtom(pulled_stats_event_list* data) {
+AStatsManager_PullAtomCallbackReturn TimeStats::populateGlobalAtom(AStatsEventList* data) {
     std::lock_guard<std::mutex> lock(mMutex);
 
     if (mTimeStats.statsStart == 0) {
-        return STATS_PULL_SKIP;
+        return AStatsManager_PULL_SKIP;
     }
     flushPowerTimeLocked();
 
-    struct stats_event* event = mStatsDelegate->addStatsEventToPullData(data);
+    AStatsEvent* event = mStatsDelegate->addStatsEventToPullData(data);
     mStatsDelegate->statsEventSetAtomId(event, android::util::SURFACEFLINGER_STATS_GLOBAL_INFO);
     mStatsDelegate->statsEventWriteInt64(event, mTimeStats.totalFrames);
     mStatsDelegate->statsEventWriteInt64(event, mTimeStats.missedFrames);
     mStatsDelegate->statsEventWriteInt64(event, mTimeStats.clientCompositionFrames);
     mStatsDelegate->statsEventWriteInt64(event, mTimeStats.displayOnTime);
     mStatsDelegate->statsEventWriteInt64(event, mTimeStats.presentToPresent.totalTime());
+    mStatsDelegate->statsEventWriteInt32(event, mTimeStats.displayEventConnectionsCount);
     mStatsDelegate->statsEventBuild(event);
     clearGlobalLocked();
 
-    return STATS_PULL_SUCCESS;
+    return AStatsManager_PULL_SUCCESS;
 }
 
 namespace {
@@ -110,7 +112,7 @@ std::string histogramToProtoByteString(const std::unordered_map<int32_t, int32_t
 }
 } // namespace
 
-status_pull_atom_return_t TimeStats::populateLayerAtom(pulled_stats_event_list* data) {
+AStatsManager_PullAtomCallbackReturn TimeStats::populateLayerAtom(AStatsEventList* data) {
     std::lock_guard<std::mutex> lock(mMutex);
 
     std::vector<TimeStatsHelper::TimeStatsLayer const*> dumpStats;
@@ -129,7 +131,7 @@ status_pull_atom_return_t TimeStats::populateLayerAtom(pulled_stats_event_list* 
     }
 
     for (const auto& layer : dumpStats) {
-        struct stats_event* event = mStatsDelegate->addStatsEventToPullData(data);
+        AStatsEvent* event = mStatsDelegate->addStatsEventToPullData(data);
         mStatsDelegate->statsEventSetAtomId(event, android::util::SURFACEFLINGER_STATS_LAYER_INFO);
         mStatsDelegate->statsEventWriteString8(event, layer->layerName.c_str());
         mStatsDelegate->statsEventWriteInt64(event, layer->totalFrames);
@@ -147,11 +149,14 @@ status_pull_atom_return_t TimeStats::populateLayerAtom(pulled_stats_event_list* 
             }
         }
 
+        mStatsDelegate->statsEventWriteInt64(event, layer->lateAcquireFrames);
+        mStatsDelegate->statsEventWriteInt64(event, layer->badDesiredPresentFrames);
+
         mStatsDelegate->statsEventBuild(event);
     }
     clearLayersLocked();
 
-    return STATS_PULL_SUCCESS;
+    return AStatsManager_PULL_SUCCESS;
 }
 
 TimeStats::TimeStats() : TimeStats(nullptr, std::nullopt, std::nullopt) {}
@@ -266,6 +271,16 @@ void TimeStats::incrementClientCompositionReusedFrames() {
 
     std::lock_guard<std::mutex> lock(mMutex);
     mTimeStats.clientCompositionReusedFrames++;
+}
+
+void TimeStats::recordDisplayEventConnectionCount(int32_t count) {
+    if (!mEnabled.load()) return;
+
+    ATRACE_CALL();
+
+    std::lock_guard<std::mutex> lock(mMutex);
+    mTimeStats.displayEventConnectionsCount =
+            std::max(mTimeStats.displayEventConnectionsCount, count);
 }
 
 static int32_t msBetween(nsecs_t start, nsecs_t end) {
@@ -811,6 +826,7 @@ void TimeStats::clearGlobalLocked() {
     mTimeStats.missedFrames = 0;
     mTimeStats.clientCompositionFrames = 0;
     mTimeStats.clientCompositionReusedFrames = 0;
+    mTimeStats.displayEventConnectionsCount = 0;
     mTimeStats.displayOnTime = 0;
     mTimeStats.presentToPresent.hist.clear();
     mTimeStats.frameDuration.hist.clear();

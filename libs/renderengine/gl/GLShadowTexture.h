@@ -1,5 +1,5 @@
 /*
- * Copyright 2019 The Android Open Source Project
+ * Copyright 2020 The Android Open Source Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,20 +16,29 @@
 
 #pragma once
 
-#include <utils/RefBase.h>
+#include <renderengine/Texture.h>
+#include <cstdint>
 
-namespace android::compositionengine {
+namespace android {
+namespace renderengine {
+namespace gl {
 
-class CompositionEngine;
-class LayerFE;
+class GLShadowTexture {
+public:
+    GLShadowTexture();
+    ~GLShadowTexture();
 
-/**
- * A parameter object for creating Layer instances
- */
-struct LayerCreationArgs {
-    // A weak pointer to the front-end layer instance that the new layer will
-    // represent.
-    wp<LayerFE> layerFE;
+    const Texture& getTexture();
+
+private:
+    static constexpr int SHADOW_TEXTURE_WIDTH = 128;
+    static constexpr int SHADOW_TEXTURE_HEIGHT = 1;
+
+    GLuint mName;
+    Texture mTexture;
+    uint8_t mTextureData[SHADOW_TEXTURE_WIDTH];
 };
 
-} // namespace android::compositionengine
+} // namespace gl
+} // namespace renderengine
+} // namespace android

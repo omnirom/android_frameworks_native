@@ -81,8 +81,8 @@ enum {
 
 enum {
     /** If this bit is set in AndroidBitmapInfo.flags, the Bitmap uses the
-      * HARDWARE Config, and its AHardwareBuffer can be retrieved via
-      * AndroidBitmap_getHardwareBuffer.
+      * HARDWARE Config, and its {@link AHardwareBuffer} can be retrieved via
+      * {@link AndroidBitmap_getHardwareBuffer}.
       */
     ANDROID_BITMAP_FLAGS_IS_HARDWARE = 1 << 31,
 };
@@ -97,15 +97,21 @@ typedef struct {
     uint32_t    stride;
     /** The bitmap pixel format. See {@link AndroidBitmapFormat} */
     int32_t     format;
-    /** Two bits are used to encode alpha. Use ANDROID_BITMAP_FLAGS_ALPHA_MASK
-      * and ANDROID_BITMAP_FLAGS_ALPHA_SHIFT to retrieve them. One bit is used
-      * to encode whether the Bitmap uses the HARDWARE Config. Use
-      * ANDROID_BITMAP_FLAGS_IS_HARDWARE to know.*/
+    /** Bitfield containing information about the bitmap.
+     *
+     * <p>Two bits are used to encode alpha. Use {@link ANDROID_BITMAP_FLAGS_ALPHA_MASK}
+     * and {@link ANDROID_BITMAP_FLAGS_ALPHA_SHIFT} to retrieve them.</p>
+     *
+     * <p>One bit is used to encode whether the Bitmap uses the HARDWARE Config. Use
+     * {@link ANDROID_BITMAP_FLAGS_IS_HARDWARE} to know.</p>
+     *
+     * <p>These flags were introduced in API level 30.</p>
+     */
     uint32_t    flags;
 } AndroidBitmapInfo;
 
 /**
- * Given a java bitmap object, fill out the AndroidBitmapInfo struct for it.
+ * Given a java bitmap object, fill out the {@link AndroidBitmapInfo} struct for it.
  * If the call fails, the info parameter will be ignored.
  */
 int AndroidBitmap_getInfo(JNIEnv* env, jobject jbitmap,
@@ -114,10 +120,10 @@ int AndroidBitmap_getInfo(JNIEnv* env, jobject jbitmap,
 #if __ANDROID_API__ >= 30
 
 /**
- * Given a java bitmap object, return its ADataSpace.
+ * Given a java bitmap object, return its {@link ADataSpace}.
  *
- * Note that ADataSpace only exposes a few values. This may return
- * ADATASPACE_UNKNOWN, even for Named ColorSpaces, if they have no
+ * Note that {@link ADataSpace} only exposes a few values. This may return
+ * {@link ADATASPACE_UNKNOWN}, even for Named ColorSpaces, if they have no
  * corresponding ADataSpace.
  */
 int32_t AndroidBitmap_getDataSpace(JNIEnv* env, jobject jbitmap)  __INTRODUCED_IN(30);
@@ -200,17 +206,17 @@ typedef bool (*AndroidBitmap_CompressWriteFunc)(void* userContext,
  *  @param dataspace {@link ADataSpace} describing the color space of the
  *                   pixels.
  *  @param pixels Pointer to pixels to compress.
- *  @param format (@link AndroidBitmapCompressFormat} to compress to.
+ *  @param format {@link AndroidBitmapCompressFormat} to compress to.
  *  @param quality Hint to the compressor, 0-100. The value is interpreted
  *                 differently depending on the
  *                 {@link AndroidBitmapCompressFormat}.
  *  @param userContext User-defined data which will be passed to the supplied
  *                     {@link AndroidBitmap_CompressWriteFunc} each time it is
  *                     called. May be null.
- *  @parm fn Function that writes the compressed data. Will be called each time
- *           the compressor has compressed more data that is ready to be
- *           written. May be called more than once for each call to this method.
- *           May not be null.
+ *  @param fn Function that writes the compressed data. Will be called each time
+ *            the compressor has compressed more data that is ready to be
+ *            written. May be called more than once for each call to this method.
+ *            May not be null.
  *  @return AndroidBitmap functions result code.
  */
 int AndroidBitmap_compress(const AndroidBitmapInfo* info,
@@ -229,11 +235,11 @@ struct AHardwareBuffer;
  *
  *  @param bitmap Handle to an android.graphics.Bitmap.
  *  @param outBuffer On success, is set to a pointer to the
- *         AHardwareBuffer associated with bitmap. This acquires
+ *         {@link AHardwareBuffer} associated with bitmap. This acquires
  *         a reference on the buffer, and the client must call
- *         AHardwareBuffer_release when finished with it.
+ *         {@link AHardwareBuffer_release} when finished with it.
  *  @return AndroidBitmap functions result code.
- *          ANDROID_BITMAP_RESULT_BAD_PARAMETER if bitmap is not a
+ *          {@link ANDROID_BITMAP_RESULT_BAD_PARAMETER} if bitmap is not a
  *          HARDWARE Bitmap.
  */
 int AndroidBitmap_getHardwareBuffer(JNIEnv* env, jobject bitmap,

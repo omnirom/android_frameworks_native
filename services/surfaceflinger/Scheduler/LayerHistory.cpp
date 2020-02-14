@@ -39,7 +39,7 @@ namespace android::scheduler::impl {
 namespace {
 
 bool isLayerActive(const Layer& layer, const LayerInfo& info, nsecs_t threshold) {
-    if (layer.getFrameRate().has_value()) {
+    if (layer.getFrameRate().rate > 0) {
         return layer.isVisible();
     }
     return layer.isVisible() && info.getLastUpdatedTime() >= threshold;
@@ -66,7 +66,6 @@ void trace(const wp<Layer>& weak, int fps) {
     ATRACE_INT(tag.c_str(), fps);
     ALOGD("%s: %s @ %d Hz", __FUNCTION__, name.c_str(), fps);
 }
-
 } // namespace
 
 LayerHistory::LayerHistory()
@@ -102,23 +101,6 @@ LayerHistory::Summary LayerHistory::summarize(nsecs_t now) {
 
     partitionLayers(now);
 
-    // Find the maximum refresh rate among recently active layers.
-    for (const auto& [activeLayer, info] : activeLayers()) {
-        const bool recent = info->isRecentlyActive(now);
-
-        if (recent || CC_UNLIKELY(mTraceEnabled)) {
-            const float refreshRate = info->getRefreshRate(now);
-            if (recent && refreshRate > 0.0f) {
-                if (const auto layer = activeLayer.promote(); layer) {
-                    const int32_t priority = layer->getFrameRateSelectionPriority();
-                    // TODO(b/142507166): This is where the scoring algorithm should live.
-                    // Layers should be organized by priority
-                    ALOGD("Layer has priority: %d", priority);
-                }
-            }
-        }
-    }
-
     LayerHistory::Summary summary;
     for (const auto& [weakLayer, info] : activeLayers()) {
         const bool recent = info->isRecentlyActive(now);
@@ -126,18 +108,27 @@ LayerHistory::Summary LayerHistory::summarize(nsecs_t now) {
         // Only use the layer if the reference still exists.
         if (layer || CC_UNLIKELY(mTraceEnabled)) {
             // Check if frame rate was set on layer.
-            auto frameRate = layer->getFrameRate();
-            if (frameRate.has_value() && frameRate.value() > 0.f) {
-                summary.push_back(
-                        {layer->getName(), LayerVoteType::Explicit, *frameRate, /* weight */ 1.0f});
+            const auto frameRate = layer->getFrameRate();
+            if (frameRate.rate > 0.f) {
+                const auto voteType = [&]() {
+                    switch (frameRate.type) {
+                        case Layer::FrameRateCompatibility::Default:
+                            return LayerVoteType::ExplicitDefault;
+                        case Layer::FrameRateCompatibility::ExactOrMultiple:
+                            return LayerVoteType::ExplicitExactOrMultiple;
+                        case Layer::FrameRateCompatibility::NoVote:
+                            return LayerVoteType::NoVote;
+                    }
+                }();
+                summary.push_back({layer->getName(), voteType, frameRate.rate, /* weight */ 1.0f});
             } else if (recent) {
-                frameRate = info->getRefreshRate(now);
-                summary.push_back({layer->getName(), LayerVoteType::Heuristic, *frameRate,
+                summary.push_back({layer->getName(), LayerVoteType::Heuristic,
+                                   info->getRefreshRate(now),
                                    /* weight */ 1.0f});
             }
 
             if (CC_UNLIKELY(mTraceEnabled)) {
-                trace(weakLayer, round<int>(*frameRate));
+                trace(weakLayer, round<int>(frameRate.rate));
             }
         }
     }
@@ -187,6 +178,5 @@ void LayerHistory::clear() {
 
     mActiveLayersEnd = 0;
 }
-
 } // namespace android::scheduler::impl
 
