@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2007 The Android Open Source Project
+ * Copyright 2019 The Android Open Source Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,35 +14,18 @@
  * limitations under the License.
  */
 
-#ifndef ANDROID_UI_DISPLAY_INFO_H
-#define ANDROID_UI_DISPLAY_INFO_H
+#pragma once
 
-#include <stdint.h>
-#include <sys/types.h>
-
-#include <ui/Rotation.h>
-#include <utils/Timers.h>
+#include <type_traits>
 
 namespace android {
 
-constexpr uint32_t NO_LAYER_STACK = static_cast<uint32_t>(-1);
-
+// Immutable information about physical display.
 struct DisplayInfo {
-    uint32_t w{0};
-    uint32_t h{0};
-    float xdpi{0};
-    float ydpi{0};
-    float fps{0};
-    float density{0};
-    ui::Rotation orientation{ui::ROTATION_0};
-    bool secure{false};
-    nsecs_t appVsyncOffset{0};
-    nsecs_t presentationDeadline{0};
-    uint32_t viewportW{0};
-    uint32_t viewportH{0};
-    uint32_t layerStack{NO_LAYER_STACK};
+    float density = 0.f;
+    bool secure = false;
 };
 
-} // namespace android
+static_assert(std::is_trivially_copyable_v<DisplayInfo>);
 
-#endif // ANDROID_COMPOSER_DISPLAY_INFO_H
+} // namespace android

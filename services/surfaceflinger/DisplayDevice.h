@@ -16,8 +16,6 @@
 
 #pragma once
 
-#include <stdlib.h>
-
 #include <memory>
 #include <optional>
 #include <string>
@@ -30,7 +28,7 @@
 #include <math/mat4.h>
 #include <renderengine/RenderEngine.h>
 #include <system/window.h>
-#include <ui/DisplayInfo.h>
+#include <ui/DisplayState.h>
 #include <ui/GraphicTypes.h>
 #include <ui/HdrCapabilities.h>
 #include <ui/Region.h>
@@ -80,12 +78,12 @@ public:
     // secure surfaces.
     bool isSecure() const;
 
-    int         getWidth() const;
-    int         getHeight() const;
+    int getWidth() const;
+    int getHeight() const;
+    ui::Size getSize() const { return {getWidth(), getHeight()}; }
 
-    void                    setLayerStack(uint32_t stack);
-    void                    setDisplaySize(const int newWidth, const int newHeight);
-
+    void setLayerStack(ui::LayerStack);
+    void setDisplaySize(int width, int height);
     void setProjection(ui::Rotation orientation, Rect viewport, Rect frame);
 
     ui::Rotation getPhysicalOrientation() const { return mPhysicalOrientation; }
@@ -96,9 +94,9 @@ public:
     const ui::Transform& getTransform() const;
     const Rect& getViewport() const;
     const Rect& getFrame() const;
-    const Rect& getScissor() const;
+    const Rect& getSourceClip() const;
     bool needsFiltering() const;
-    uint32_t getLayerStack() const;
+    ui::LayerStack getLayerStack() const;
 
     const std::optional<DisplayId>& getId() const;
     const wp<IBinder>& getDisplayToken() const { return mDisplayToken; }
@@ -185,7 +183,7 @@ struct DisplayDeviceState {
     int32_t sequenceId = sNextSequenceId++;
     std::optional<DisplayId> displayId;
     sp<IGraphicBufferProducer> surface;
-    uint32_t layerStack = NO_LAYER_STACK;
+    ui::LayerStack layerStack = ui::NO_LAYER_STACK;
     Rect viewport;
     Rect frame;
     ui::Rotation orientation = ui::ROTATION_0;
@@ -227,8 +225,10 @@ class DisplayRenderArea : public RenderArea {
 public:
     DisplayRenderArea(const sp<const DisplayDevice>& display,
                       RotationFlags rotation = ui::Transform::ROT_0)
-          : DisplayRenderArea(display, display->getBounds(), display->getWidth(),
-                              display->getHeight(), display->getCompositionDataSpace(), rotation) {}
+          : DisplayRenderArea(display, display->getBounds(),
+                              static_cast<uint32_t>(display->getWidth()),
+                              static_cast<uint32_t>(display->getHeight()),
+                              display->getCompositionDataSpace(), rotation) {}
 
     DisplayRenderArea(sp<const DisplayDevice> display, const Rect& sourceCrop, uint32_t reqWidth,
                       uint32_t reqHeight, ui::Dataspace reqDataSpace, RotationFlags rotation,
@@ -269,7 +269,7 @@ public:
     Rect getSourceCrop() const override {
         // use the projected display viewport by default.
         if (mSourceCrop.isEmpty()) {
-            return mDisplay->getScissor();
+            return mDisplay->getSourceClip();
         }
 
         // Recompute the device transformation for the source crop.
@@ -278,14 +278,14 @@ public:
         ui::Transform translateLogical;
         ui::Transform scale;
         const Rect& viewport = mDisplay->getViewport();
-        const Rect& scissor = mDisplay->getScissor();
+        const Rect& sourceClip = mDisplay->getSourceClip();
         const Rect& frame = mDisplay->getFrame();
 
         const auto flags = ui::Transform::toRotationFlags(mDisplay->getPhysicalOrientation());
         rotation.set(flags, getWidth(), getHeight());
 
         translateLogical.set(-viewport.left, -viewport.top);
-        translatePhysical.set(scissor.left, scissor.top);
+        translatePhysical.set(sourceClip.left, sourceClip.top);
         scale.set(frame.getWidth() / float(viewport.getWidth()), 0, 0,
                   frame.getHeight() / float(viewport.getHeight()));
         const ui::Transform finalTransform =

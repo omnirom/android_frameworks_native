@@ -78,11 +78,11 @@ class SurfaceInterceptor;
 // ---------------------------------------------------------------------------
 
 struct LayerCreationArgs {
-    LayerCreationArgs(SurfaceFlinger* flinger, const sp<Client>& client, std::string name,
+    LayerCreationArgs(SurfaceFlinger* flinger, const sp<Client> client, std::string name,
                       uint32_t w, uint32_t h, uint32_t flags, LayerMetadata metadata);
 
     SurfaceFlinger* flinger;
-    const sp<Client>& client;
+    const sp<Client> client;
     std::string name;
     uint32_t w;
     uint32_t h;
@@ -189,6 +189,7 @@ public:
         ui::Dataspace dataspace;
 
         // The fields below this point are only used by BufferStateLayer
+        uint64_t frameNumber;
         Geometry active;
 
         uint32_t transform;
@@ -527,10 +528,10 @@ public:
     void latchCompositionState(compositionengine::LayerFECompositionState&,
                                compositionengine::LayerFE::StateSubset subset) const override;
     void latchCursorCompositionState(compositionengine::LayerFECompositionState&) const override;
-    std::optional<renderengine::LayerSettings> prepareClientComposition(
+    std::optional<LayerSettings> prepareClientComposition(
             compositionengine::LayerFE::ClientCompositionTargetSettings&) override;
-    std::optional<renderengine::LayerSettings> prepareShadowClientComposition(
-            const renderengine::LayerSettings& layerSettings, const Rect& displayViewport,
+    std::optional<LayerSettings> prepareShadowClientComposition(
+            const LayerFE::LayerSettings& layerSettings, const Rect& displayViewport,
             ui::Dataspace outputDataspace) override;
     void onLayerDisplayed(const sp<Fence>& releaseFence) override;
     const char* getDebugName() const override;
@@ -678,6 +679,15 @@ public:
 
     renderengine::ShadowSettings getShadowSettings(const Rect& viewport) const;
 
+    /**
+     * Traverse this layer and it's hierarchy of children directly. Unlike traverseInZOrder
+     * which will not emit children who have relativeZOrder to another layer, this method
+     * just directly emits all children. It also emits them in no particular order.
+     * So this method is not suitable for graphical operations, as it doesn't represent
+     * the scene state, but it's also more efficient than traverseInZOrder and so useful for
+     * book-keeping.
+     */
+    void traverse(LayerVector::StateSet stateSet, const LayerVector::Visitor& visitor);
     void traverseInReverseZOrder(LayerVector::StateSet stateSet,
                                  const LayerVector::Visitor& visitor);
     void traverseInZOrder(LayerVector::StateSet stateSet, const LayerVector::Visitor& visitor);
@@ -744,8 +754,9 @@ public:
      */
     Rect getCroppedBufferSize(const Layer::State& s) const;
 
+    constexpr static auto FRAME_RATE_NO_VOTE = -1.0f;
     virtual bool setFrameRate(float frameRate);
-    virtual float getFrameRate() const;
+    virtual std::optional<float> getFrameRate() const;
 
 protected:
     // constant

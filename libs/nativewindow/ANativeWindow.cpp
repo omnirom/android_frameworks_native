@@ -158,6 +158,13 @@ int32_t ANativeWindow_getBuffersDataSpace(ANativeWindow* window) {
     return query(window, NATIVE_WINDOW_DATASPACE);
 }
 
+int32_t ANativeWindow_setFrameRate(ANativeWindow* window, float frameRate) {
+    if (!window || !query(window, NATIVE_WINDOW_IS_VALID) || frameRate < 0) {
+        return -EINVAL;
+    }
+    return native_window_set_frame_rate(window, frameRate);
+}
+
 /**************************************************************************************************
  * vndk-stable
  **************************************************************************************************/
@@ -296,4 +303,35 @@ int64_t ANativeWindow_getLastDequeueStartTime(ANativeWindow* window) {
 
 int ANativeWindow_setDequeueTimeout(ANativeWindow* window, int64_t timeout) {
     return window->perform(window, NATIVE_WINDOW_SET_DEQUEUE_TIMEOUT, timeout);
+}
+
+int ANativeWindow_setCancelBufferInterceptor(ANativeWindow* window,
+                                             ANativeWindow_cancelBufferInterceptor interceptor,
+                                             void* data) {
+    return window->perform(window, NATIVE_WINDOW_SET_CANCEL_INTERCEPTOR, interceptor, data);
+}
+
+int ANativeWindow_setDequeueBufferInterceptor(ANativeWindow* window,
+                                              ANativeWindow_dequeueBufferInterceptor interceptor,
+                                              void* data) {
+    return window->perform(window, NATIVE_WINDOW_SET_DEQUEUE_INTERCEPTOR, interceptor, data);
+}
+
+int ANativeWindow_setPerformInterceptor(ANativeWindow* window,
+                                        ANativeWindow_performInterceptor interceptor, void* data) {
+    return window->perform(window, NATIVE_WINDOW_SET_PERFORM_INTERCEPTOR, interceptor, data);
+}
+
+int ANativeWindow_setQueueBufferInterceptor(ANativeWindow* window,
+                                            ANativeWindow_queueBufferInterceptor interceptor,
+                                            void* data) {
+    return window->perform(window, NATIVE_WINDOW_SET_QUEUE_INTERCEPTOR, interceptor, data);
+}
+
+void ANativeWindow_allocateBuffers(ANativeWindow* window) {
+    window->perform(window, NATIVE_WINDOW_ALLOCATE_BUFFERS);
+}
+
+int64_t ANativeWindow_getNextFrameId(ANativeWindow* window) {
+    return query64(window, NATIVE_WINDOW_GET_NEXT_FRAME_ID);
 }

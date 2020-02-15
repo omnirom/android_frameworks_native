@@ -23,6 +23,10 @@
 #include <utility>
 #include <vector>
 
+// TODO(b/129481165): remove the #pragma below and fix conversion issues
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wconversion"
+
 #if defined(USE_VR_COMPOSER) && USE_VR_COMPOSER
 #include <android/frameworks/vr/composer/2.0/IVrComposerClient.h>
 #endif // defined(USE_VR_COMPOSER) && USE_VR_COMPOSER
@@ -35,6 +39,9 @@
 #include <ui/DisplayedFrameStats.h>
 #include <ui/GraphicBuffer.h>
 #include <utils/StrongPointer.h>
+
+// TODO(b/129481165): remove the #pragma below and fix conversion issues
+#pragma clang diagnostic pop // ignored "-Wconversion"
 
 namespace android {
 
@@ -228,6 +235,11 @@ public:
             std::vector<IComposerClient::ContentType>* outSupportedContentTypes) = 0;
     virtual V2_4::Error setContentType(Display displayId,
                                        IComposerClient::ContentType contentType) = 0;
+    virtual V2_4::Error setLayerGenericMetadata(Display display, Layer layer,
+                                                const std::string& key, bool mandatory,
+                                                const std::vector<uint8_t>& value) = 0;
+    virtual V2_4::Error getLayerGenericMetadataKeys(
+            std::vector<IComposerClient::LayerGenericMetadataKey>* outKeys) = 0;
 };
 
 namespace impl {
@@ -463,6 +475,10 @@ public:
             std::vector<IComposerClient::ContentType>* outSupportedContentTypes) override;
     V2_4::Error setContentType(Display displayId,
                                IComposerClient::ContentType contentType) override;
+    V2_4::Error setLayerGenericMetadata(Display display, Layer layer, const std::string& key,
+                                        bool mandatory, const std::vector<uint8_t>& value) override;
+    V2_4::Error getLayerGenericMetadataKeys(
+            std::vector<IComposerClient::LayerGenericMetadataKey>* outKeys) override;
 
 private:
 #if defined(USE_VR_COMPOSER) && USE_VR_COMPOSER

@@ -27,7 +27,7 @@
 #define ANDROID_IMAGE_DECODER_H
 
 #include "bitmap.h"
-
+#include <android/rect.h>
 #include <stdint.h>
 
 #ifdef __cplusplus
@@ -35,7 +35,6 @@ extern "C" {
 #endif
 
 struct AAsset;
-struct ARect;
 
 #if __ANDROID_API__ >= 30
 
@@ -92,7 +91,8 @@ typedef struct AImageDecoder AImageDecoder;
  * @return {@link ANDROID_IMAGE_DECODER_SUCCESS} on success or a value
  *         indicating reason for the failure.
  */
-int AImageDecoder_createFromAAsset(AAsset* asset, AImageDecoder** outDecoder) __INTRODUCED_IN(30);
+int AImageDecoder_createFromAAsset(struct AAsset* asset, AImageDecoder** outDecoder)
+        __INTRODUCED_IN(30);
 
 /**
  * Create a new AImageDecoder from a file descriptor.
@@ -133,7 +133,7 @@ void AImageDecoder_delete(AImageDecoder* decoder) __INTRODUCED_IN(30);
 /**
  * Choose the desired output format.
  *
- * @param format AndroidBitmapFormat to use
+ * @param format {@link AndroidBitmapFormat} to use for the output.
  * @return {@link ANDROID_IMAGE_DECODER_SUCCESS} if the format is compatible
  *         with the image and {@link ANDROID_IMAGE_DECODER_INVALID_CONVERSION}
  *         otherwise. In the latter case, the AImageDecoder uses the
@@ -196,7 +196,7 @@ int AImageDecoder_setDataSpace(AImageDecoder*, int32_t dataspace) __INTRODUCED_I
  *           pointer is null, width or height is <= 0, or any existing crop is
  *           not contained by the image dimensions.
  */
-int AImageDecoder_setTargetSize(AImageDecoder*, int width, int height) __INTRODUCED_IN(30);
+int AImageDecoder_setTargetSize(AImageDecoder*, int32_t width, int32_t height) __INTRODUCED_IN(30);
 
 
 /**
@@ -219,7 +219,7 @@ int AImageDecoder_setTargetSize(AImageDecoder*, int width, int height) __INTRODU
  * @return ANDROID_IMAGE_DECODER result code.
  */
 int AImageDecoder_computeSampledSize(const AImageDecoder*, int sampleSize,
-                                     int* width, int* height) __INTRODUCED_IN(30);
+                                     int32_t* width, int32_t* height) __INTRODUCED_IN(30);
 /**
  * Specify how to crop the output after scaling (if any).
  *
@@ -276,18 +276,12 @@ const char* AImageDecoderHeaderInfo_getMimeType(
         const AImageDecoderHeaderInfo*) __INTRODUCED_IN(30);
 
 /**
- * Report whether the encoded image represents an animation.
- */
-bool AImageDecoderHeaderInfo_isAnimated(
-        const AImageDecoderHeaderInfo*) __INTRODUCED_IN(30);
-
-/**
- * Report the AndroidBitmapFormat the AImageDecoder will decode to
+ * Report the {@link AndroidBitmapFormat} the AImageDecoder will decode to
  * by default. AImageDecoder will try to choose one that is sensible
  * for the image and the system. Note that this does not indicate the
  * encoded format of the image.
  */
-AndroidBitmapFormat AImageDecoderHeaderInfo_getAndroidBitmapFormat(
+int32_t AImageDecoderHeaderInfo_getAndroidBitmapFormat(
         const AImageDecoderHeaderInfo*) __INTRODUCED_IN(30);
 
 /**
@@ -337,7 +331,8 @@ size_t AImageDecoder_getMinimumStride(AImageDecoder*) __INTRODUCED_IN(30);
  *               {@link AImageDecoder_getMinimumStride}.
  * @param size Size of the pixel buffer in bytes. Must be at least
  *             stride * (height - 1) +
- *             {@link AImageDecoder_getMinimumStride}.
+ *             {@link AImageDecoder_getMinimumStride}. Must also be a multiple
+ *             of the bytes per pixel of the {@link AndroidBitmapFormat}.
  * @return {@link ANDROID_IMAGE_DECODER_SUCCESS} on success, or an error code
  *         from the same enum describing the failure.
  */

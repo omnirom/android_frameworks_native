@@ -325,24 +325,6 @@ static std::unique_ptr<DispatchEntry> createDispatchEntry(const InputTarget& inp
     return dispatchEntry;
 }
 
-// --- InputDispatcherThread ---
-
-class InputDispatcher::InputDispatcherThread : public Thread {
-public:
-    explicit InputDispatcherThread(InputDispatcher* dispatcher)
-          : Thread(/* canCallJava */ true), mDispatcher(dispatcher) {}
-
-    ~InputDispatcherThread() {}
-
-private:
-    InputDispatcher* mDispatcher;
-
-    virtual bool threadLoop() override {
-        mDispatcher->dispatchOnce();
-        return true;
-    }
-};
-
 // --- InputDispatcher ---
 
 InputDispatcher::InputDispatcher(const sp<InputDispatcherPolicyInterface>& policy)
@@ -367,8 +349,6 @@ InputDispatcher::InputDispatcher(const sp<InputDispatcherPolicyInterface>& polic
     mKeyRepeatState.lastKeyEntry = nullptr;
 
     policy->getDispatcherConfiguration(&mConfig);
-
-    mThread = new InputDispatcherThread(this);
 }
 
 InputDispatcher::~InputDispatcher() {
@@ -387,25 +367,21 @@ InputDispatcher::~InputDispatcher() {
 }
 
 status_t InputDispatcher::start() {
-    if (mThread->isRunning()) {
+    if (mThread) {
         return ALREADY_EXISTS;
     }
-    return mThread->run("InputDispatcher", PRIORITY_URGENT_DISPLAY);
+    mThread = std::make_unique<InputThread>(
+            "InputDispatcher", [this]() { dispatchOnce(); }, [this]() { mLooper->wake(); });
+    return OK;
 }
 
 status_t InputDispatcher::stop() {
-    if (!mThread->isRunning()) {
-        return OK;
-    }
-    if (gettid() == mThread->getTid()) {
-        ALOGE("InputDispatcher can only be stopped from outside of the InputDispatcherThread!");
+    if (mThread && mThread->isCallingThread()) {
+        ALOGE("InputDispatcher cannot be stopped from its own thread!");
         return INVALID_OPERATION;
     }
-    // Directly calling requestExitAndWait() causes the thread to not exit
-    // if mLooper is waiting for a long timeout.
-    mThread->requestExit();
-    mLooper->wake();
-    return mThread->requestExitAndWait();
+    mThread.reset();
+    return OK;
 }
 
 void InputDispatcher::dispatchOnce() {
@@ -2410,7 +2386,7 @@ void InputDispatcher::startDispatchCycleLocked(nsecs_t currentTime,
                 status = connection->inputPublisher
                                  .publishKeyEvent(dispatchEntry->seq, keyEntry->deviceId,
                                                   keyEntry->source, keyEntry->displayId,
-                                                  dispatchEntry->resolvedAction,
+                                                  INVALID_HMAC, dispatchEntry->resolvedAction,
                                                   dispatchEntry->resolvedFlags, keyEntry->keyCode,
                                                   keyEntry->scanCode, keyEntry->metaState,
                                                   keyEntry->repeatCount, keyEntry->downTime,
@@ -2424,26 +2400,28 @@ void InputDispatcher::startDispatchCycleLocked(nsecs_t currentTime,
                 PointerCoords scaledCoords[MAX_POINTERS];
                 const PointerCoords* usingCoords = motionEntry->pointerCoords;
 
-                // Set the X and Y offset depending on the input source.
-                float xOffset, yOffset;
+                // Set the X and Y offset and X and Y scale depending on the input source.
+                float xOffset = 0.0f, yOffset = 0.0f;
+                float xScale = 1.0f, yScale = 1.0f;
                 if ((motionEntry->source & AINPUT_SOURCE_CLASS_POINTER) &&
                     !(dispatchEntry->targetFlags & InputTarget::FLAG_ZERO_COORDS)) {
                     float globalScaleFactor = dispatchEntry->globalScaleFactor;
-                    float wxs = dispatchEntry->windowXScale;
-                    float wys = dispatchEntry->windowYScale;
-                    xOffset = dispatchEntry->xOffset * wxs;
-                    yOffset = dispatchEntry->yOffset * wys;
-                    if (wxs != 1.0f || wys != 1.0f || globalScaleFactor != 1.0f) {
+                    xScale = dispatchEntry->windowXScale;
+                    yScale = dispatchEntry->windowYScale;
+                    xOffset = dispatchEntry->xOffset * xScale;
+                    yOffset = dispatchEntry->yOffset * yScale;
+                    if (globalScaleFactor != 1.0f) {
                         for (uint32_t i = 0; i < motionEntry->pointerCount; i++) {
                             scaledCoords[i] = motionEntry->pointerCoords[i];
-                            scaledCoords[i].scale(globalScaleFactor, wxs, wys);
+                            // Don't apply window scale here since we don't want scale to affect raw
+                            // coordinates. The scale will be sent back to the client and applied
+                            // later when requesting relative coordinates.
+                            scaledCoords[i].scale(globalScaleFactor, 1 /* windowXScale */,
+                                                  1 /* windowYScale */);
                         }
                         usingCoords = scaledCoords;
                     }
                 } else {
-                    xOffset = 0.0f;
-                    yOffset = 0.0f;
-
                     // We don't want the dispatch target to know.
                     if (dispatchEntry->targetFlags & InputTarget::FLAG_ZERO_COORDS) {
                         for (uint32_t i = 0; i < motionEntry->pointerCount; i++) {
@@ -2457,13 +2435,13 @@ void InputDispatcher::startDispatchCycleLocked(nsecs_t currentTime,
                 status = connection->inputPublisher
                                  .publishMotionEvent(dispatchEntry->seq, motionEntry->deviceId,
                                                      motionEntry->source, motionEntry->displayId,
-                                                     dispatchEntry->resolvedAction,
+                                                     INVALID_HMAC, dispatchEntry->resolvedAction,
                                                      motionEntry->actionButton,
                                                      dispatchEntry->resolvedFlags,
                                                      motionEntry->edgeFlags, motionEntry->metaState,
                                                      motionEntry->buttonState,
-                                                     motionEntry->classification, xOffset, yOffset,
-                                                     motionEntry->xPrecision,
+                                                     motionEntry->classification, xScale, yScale,
+                                                     xOffset, yOffset, motionEntry->xPrecision,
                                                      motionEntry->yPrecision,
                                                      motionEntry->xCursorPosition,
                                                      motionEntry->yCursorPosition,
@@ -2699,59 +2677,59 @@ void InputDispatcher::synthesizeCancelationEventsForConnectionLocked(
     std::vector<EventEntry*> cancelationEvents =
             connection->inputState.synthesizeCancelationEvents(currentTime, options);
 
-    if (!cancelationEvents.empty()) {
+    if (cancelationEvents.empty()) {
+        return;
+    }
 #if DEBUG_OUTBOUND_EVENT_DETAILS
-        ALOGD("channel '%s' ~ Synthesized %zu cancelation events to bring channel back in sync "
-              "with reality: %s, mode=%d.",
-              connection->getInputChannelName().c_str(), cancelationEvents.size(), options.reason,
-              options.mode);
+    ALOGD("channel '%s' ~ Synthesized %zu cancelation events to bring channel back in sync "
+          "with reality: %s, mode=%d.",
+          connection->getInputChannelName().c_str(), cancelationEvents.size(), options.reason,
+          options.mode);
 #endif
-        for (size_t i = 0; i < cancelationEvents.size(); i++) {
-            EventEntry* cancelationEventEntry = cancelationEvents[i];
-            switch (cancelationEventEntry->type) {
-                case EventEntry::Type::KEY: {
-                    logOutboundKeyDetails("cancel - ",
-                                          static_cast<const KeyEntry&>(*cancelationEventEntry));
-                    break;
-                }
-                case EventEntry::Type::MOTION: {
-                    logOutboundMotionDetails("cancel - ",
-                                             static_cast<const MotionEntry&>(
-                                                     *cancelationEventEntry));
-                    break;
-                }
-                case EventEntry::Type::FOCUS: {
-                    LOG_ALWAYS_FATAL("Canceling focus events is not supported");
-                    break;
-                }
-                case EventEntry::Type::CONFIGURATION_CHANGED:
-                case EventEntry::Type::DEVICE_RESET: {
-                    LOG_ALWAYS_FATAL("%s event should not be found inside Connections's queue",
-                                     EventEntry::typeToString(cancelationEventEntry->type));
-                    break;
-                }
+    for (size_t i = 0; i < cancelationEvents.size(); i++) {
+        EventEntry* cancelationEventEntry = cancelationEvents[i];
+        switch (cancelationEventEntry->type) {
+            case EventEntry::Type::KEY: {
+                logOutboundKeyDetails("cancel - ",
+                                      static_cast<const KeyEntry&>(*cancelationEventEntry));
+                break;
             }
-
-            InputTarget target;
-            sp<InputWindowHandle> windowHandle =
-                    getWindowHandleLocked(connection->inputChannel->getConnectionToken());
-            if (windowHandle != nullptr) {
-                const InputWindowInfo* windowInfo = windowHandle->getInfo();
-                target.setDefaultPointerInfo(-windowInfo->frameLeft, -windowInfo->frameTop,
-                                             windowInfo->windowXScale, windowInfo->windowYScale);
-                target.globalScaleFactor = windowInfo->globalScaleFactor;
+            case EventEntry::Type::MOTION: {
+                logOutboundMotionDetails("cancel - ",
+                                         static_cast<const MotionEntry&>(*cancelationEventEntry));
+                break;
             }
-            target.inputChannel = connection->inputChannel;
-            target.flags = InputTarget::FLAG_DISPATCH_AS_IS;
-
-            enqueueDispatchEntryLocked(connection, cancelationEventEntry, // increments ref
-                                       target, InputTarget::FLAG_DISPATCH_AS_IS);
-
-            cancelationEventEntry->release();
+            case EventEntry::Type::FOCUS: {
+                LOG_ALWAYS_FATAL("Canceling focus events is not supported");
+                break;
+            }
+            case EventEntry::Type::CONFIGURATION_CHANGED:
+            case EventEntry::Type::DEVICE_RESET: {
+                LOG_ALWAYS_FATAL("%s event should not be found inside Connections's queue",
+                                 EventEntry::typeToString(cancelationEventEntry->type));
+                break;
+            }
         }
 
-        startDispatchCycleLocked(currentTime, connection);
+        InputTarget target;
+        sp<InputWindowHandle> windowHandle =
+                getWindowHandleLocked(connection->inputChannel->getConnectionToken());
+        if (windowHandle != nullptr) {
+            const InputWindowInfo* windowInfo = windowHandle->getInfo();
+            target.setDefaultPointerInfo(-windowInfo->frameLeft, -windowInfo->frameTop,
+                                         windowInfo->windowXScale, windowInfo->windowYScale);
+            target.globalScaleFactor = windowInfo->globalScaleFactor;
+        }
+        target.inputChannel = connection->inputChannel;
+        target.flags = InputTarget::FLAG_DISPATCH_AS_IS;
+
+        enqueueDispatchEntryLocked(connection, cancelationEventEntry, // increments ref
+                                   target, InputTarget::FLAG_DISPATCH_AS_IS);
+
+        cancelationEventEntry->release();
     }
+
+    startDispatchCycleLocked(currentTime, connection);
 }
 
 MotionEntry* InputDispatcher::splitMotionEvent(const MotionEntry& originalMotionEntry,
@@ -2930,8 +2908,9 @@ void InputDispatcher::notifyKey(const NotifyKeyArgs* args) {
     accelerateMetaShortcuts(args->deviceId, args->action, keyCode, metaState);
 
     KeyEvent event;
-    event.initialize(args->deviceId, args->source, args->displayId, args->action, flags, keyCode,
-                     args->scanCode, metaState, repeatCount, args->downTime, args->eventTime);
+    event.initialize(args->deviceId, args->source, args->displayId, INVALID_HMAC, args->action,
+                     flags, keyCode, args->scanCode, metaState, repeatCount, args->downTime,
+                     args->eventTime);
 
     android::base::Timer t;
     mPolicy->interceptKeyBeforeQueueing(&event, /*byref*/ policyFlags);
@@ -3024,9 +3003,10 @@ void InputDispatcher::notifyMotion(const NotifyMotionArgs* args) {
             mLock.unlock();
 
             MotionEvent event;
-            event.initialize(args->deviceId, args->source, args->displayId, args->action,
-                             args->actionButton, args->flags, args->edgeFlags, args->metaState,
-                             args->buttonState, args->classification, 0, 0, args->xPrecision,
+            event.initialize(args->deviceId, args->source, args->displayId, INVALID_HMAC,
+                             args->action, args->actionButton, args->flags, args->edgeFlags,
+                             args->metaState, args->buttonState, args->classification, 1 /*xScale*/,
+                             1 /*yScale*/, 0 /* xOffset */, 0 /* yOffset */, args->xPrecision,
                              args->yPrecision, args->xCursorPosition, args->yCursorPosition,
                              args->downTime, args->eventTime, args->pointerCount,
                              args->pointerProperties, args->pointerCoords);
@@ -3126,7 +3106,7 @@ int32_t InputDispatcher::injectInputEvent(const InputEvent* event, int32_t injec
             accelerateMetaShortcuts(keyEvent.getDeviceId(), action,
                                     /*byref*/ keyCode, /*byref*/ metaState);
             keyEvent.initialize(keyEvent.getDeviceId(), keyEvent.getSource(),
-                                keyEvent.getDisplayId(), action, flags, keyCode,
+                                keyEvent.getDisplayId(), INVALID_HMAC, action, flags, keyCode,
                                 keyEvent.getScanCode(), metaState, keyEvent.getRepeatCount(),
                                 keyEvent.getDownTime(), keyEvent.getEventTime());
 
@@ -4682,8 +4662,8 @@ void InputDispatcher::doPokeUserActivityLockedInterruptible(CommandEntry* comman
 
 KeyEvent InputDispatcher::createKeyEvent(const KeyEntry& entry) {
     KeyEvent event;
-    event.initialize(entry.deviceId, entry.source, entry.displayId, entry.action, entry.flags,
-                     entry.keyCode, entry.scanCode, entry.metaState, entry.repeatCount,
+    event.initialize(entry.deviceId, entry.source, entry.displayId, INVALID_HMAC, entry.action,
+                     entry.flags, entry.keyCode, entry.scanCode, entry.metaState, entry.repeatCount,
                      entry.downTime, entry.eventTime);
     return event;
 }

@@ -26,7 +26,12 @@ namespace android {
 // Default display id.
 static constexpr int32_t DISPLAY_ID = ADISPLAY_ID_DEFAULT;
 
-class BaseTest : public testing::Test { };
+class BaseTest : public testing::Test {
+protected:
+    static constexpr std::array<uint8_t, 32> HMAC = {0,  1,  2,  3,  4,  5,  6,  7,  8,  9,  10,
+                                                     11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21,
+                                                     22, 23, 24, 25, 26, 27, 28, 29, 30, 31};
+};
 
 // --- PointerCoordsTest ---
 
@@ -176,16 +181,17 @@ TEST_F(KeyEventTest, Properties) {
     KeyEvent event;
 
     // Initialize and get properties.
-    const nsecs_t ARBITRARY_DOWN_TIME = 1;
-    const nsecs_t ARBITRARY_EVENT_TIME = 2;
-    event.initialize(2, AINPUT_SOURCE_GAMEPAD, DISPLAY_ID, AKEY_EVENT_ACTION_DOWN,
-            AKEY_EVENT_FLAG_FROM_SYSTEM, AKEYCODE_BUTTON_X, 121,
-            AMETA_ALT_ON, 1, ARBITRARY_DOWN_TIME, ARBITRARY_EVENT_TIME);
+    constexpr nsecs_t ARBITRARY_DOWN_TIME = 1;
+    constexpr nsecs_t ARBITRARY_EVENT_TIME = 2;
+    event.initialize(2, AINPUT_SOURCE_GAMEPAD, DISPLAY_ID, HMAC, AKEY_EVENT_ACTION_DOWN,
+                     AKEY_EVENT_FLAG_FROM_SYSTEM, AKEYCODE_BUTTON_X, 121, AMETA_ALT_ON, 1,
+                     ARBITRARY_DOWN_TIME, ARBITRARY_EVENT_TIME);
 
     ASSERT_EQ(AINPUT_EVENT_TYPE_KEY, event.getType());
     ASSERT_EQ(2, event.getDeviceId());
-    ASSERT_EQ(static_cast<int>(AINPUT_SOURCE_GAMEPAD), event.getSource());
+    ASSERT_EQ(AINPUT_SOURCE_GAMEPAD, event.getSource());
     ASSERT_EQ(DISPLAY_ID, event.getDisplayId());
+    EXPECT_EQ(HMAC, event.getHmac());
     ASSERT_EQ(AKEY_EVENT_ACTION_DOWN, event.getAction());
     ASSERT_EQ(AKEY_EVENT_FLAG_FROM_SYSTEM, event.getFlags());
     ASSERT_EQ(AKEYCODE_BUTTON_X, event.getKeyCode());
@@ -197,7 +203,7 @@ TEST_F(KeyEventTest, Properties) {
 
     // Set source.
     event.setSource(AINPUT_SOURCE_JOYSTICK);
-    ASSERT_EQ(static_cast<int>(AINPUT_SOURCE_JOYSTICK), event.getSource());
+    ASSERT_EQ(AINPUT_SOURCE_JOYSTICK, event.getSource());
 
     // Set display id.
     constexpr int32_t newDisplayId = 2;
@@ -210,19 +216,17 @@ TEST_F(KeyEventTest, Properties) {
 
 class MotionEventTest : public BaseTest {
 protected:
-    static const nsecs_t ARBITRARY_DOWN_TIME;
-    static const nsecs_t ARBITRARY_EVENT_TIME;
-    static const float X_OFFSET;
-    static const float Y_OFFSET;
+    static constexpr nsecs_t ARBITRARY_DOWN_TIME = 1;
+    static constexpr nsecs_t ARBITRARY_EVENT_TIME = 2;
+    static constexpr float X_SCALE = 2.0;
+    static constexpr float Y_SCALE = 3.0;
+    static constexpr float X_OFFSET = 1;
+    static constexpr float Y_OFFSET = 1.1;
 
     void initializeEventWithHistory(MotionEvent* event);
     void assertEqualsEventWithHistory(const MotionEvent* event);
 };
 
-const nsecs_t MotionEventTest::ARBITRARY_DOWN_TIME = 1;
-const nsecs_t MotionEventTest::ARBITRARY_EVENT_TIME = 2;
-const float MotionEventTest::X_OFFSET = 1.0f;
-const float MotionEventTest::Y_OFFSET = 1.1f;
 
 void MotionEventTest::initializeEventWithHistory(MotionEvent* event) {
     PointerProperties pointerProperties[2];
@@ -254,12 +258,13 @@ void MotionEventTest::initializeEventWithHistory(MotionEvent* event) {
     pointerCoords[1].setAxisValue(AMOTION_EVENT_AXIS_TOOL_MAJOR, 26);
     pointerCoords[1].setAxisValue(AMOTION_EVENT_AXIS_TOOL_MINOR, 27);
     pointerCoords[1].setAxisValue(AMOTION_EVENT_AXIS_ORIENTATION, 28);
-    event->initialize(2, AINPUT_SOURCE_TOUCHSCREEN, DISPLAY_ID, AMOTION_EVENT_ACTION_MOVE, 0,
+    event->initialize(2, AINPUT_SOURCE_TOUCHSCREEN, DISPLAY_ID, HMAC, AMOTION_EVENT_ACTION_MOVE, 0,
                       AMOTION_EVENT_FLAG_WINDOW_IS_OBSCURED, AMOTION_EVENT_EDGE_FLAG_TOP,
                       AMETA_ALT_ON, AMOTION_EVENT_BUTTON_PRIMARY, MotionClassification::NONE,
-                      X_OFFSET, Y_OFFSET, 2.0f, 2.1f, AMOTION_EVENT_INVALID_CURSOR_POSITION,
-                      AMOTION_EVENT_INVALID_CURSOR_POSITION, ARBITRARY_DOWN_TIME,
-                      ARBITRARY_EVENT_TIME, 2, pointerProperties, pointerCoords);
+                      X_SCALE, Y_SCALE, X_OFFSET, Y_OFFSET, 2.0f, 2.1f,
+                      AMOTION_EVENT_INVALID_CURSOR_POSITION, AMOTION_EVENT_INVALID_CURSOR_POSITION,
+                      ARBITRARY_DOWN_TIME, ARBITRARY_EVENT_TIME, 2, pointerProperties,
+                      pointerCoords);
 
     pointerCoords[0].setAxisValue(AMOTION_EVENT_AXIS_X, 110);
     pointerCoords[0].setAxisValue(AMOTION_EVENT_AXIS_Y, 111);
@@ -306,14 +311,17 @@ void MotionEventTest::assertEqualsEventWithHistory(const MotionEvent* event) {
     // Check properties.
     ASSERT_EQ(AINPUT_EVENT_TYPE_MOTION, event->getType());
     ASSERT_EQ(2, event->getDeviceId());
-    ASSERT_EQ(static_cast<int>(AINPUT_SOURCE_TOUCHSCREEN), event->getSource());
+    ASSERT_EQ(AINPUT_SOURCE_TOUCHSCREEN, event->getSource());
     ASSERT_EQ(DISPLAY_ID, event->getDisplayId());
+    EXPECT_EQ(HMAC, event->getHmac());
     ASSERT_EQ(AMOTION_EVENT_ACTION_MOVE, event->getAction());
     ASSERT_EQ(AMOTION_EVENT_FLAG_WINDOW_IS_OBSCURED, event->getFlags());
     ASSERT_EQ(AMOTION_EVENT_EDGE_FLAG_TOP, event->getEdgeFlags());
     ASSERT_EQ(AMETA_ALT_ON, event->getMetaState());
     ASSERT_EQ(AMOTION_EVENT_BUTTON_PRIMARY, event->getButtonState());
     ASSERT_EQ(MotionClassification::NONE, event->getClassification());
+    EXPECT_EQ(X_SCALE, event->getXScale());
+    EXPECT_EQ(Y_SCALE, event->getYScale());
     ASSERT_EQ(X_OFFSET, event->getXOffset());
     ASSERT_EQ(Y_OFFSET, event->getYOffset());
     ASSERT_EQ(2.0f, event->getXPrecision());
@@ -367,19 +375,19 @@ void MotionEventTest::assertEqualsEventWithHistory(const MotionEvent* event) {
     ASSERT_EQ(211, event->getRawY(0));
     ASSERT_EQ(221, event->getRawY(1));
 
-    ASSERT_EQ(X_OFFSET + 10, event->getHistoricalX(0, 0));
-    ASSERT_EQ(X_OFFSET + 20, event->getHistoricalX(1, 0));
-    ASSERT_EQ(X_OFFSET + 110, event->getHistoricalX(0, 1));
-    ASSERT_EQ(X_OFFSET + 120, event->getHistoricalX(1, 1));
-    ASSERT_EQ(X_OFFSET + 210, event->getX(0));
-    ASSERT_EQ(X_OFFSET + 220, event->getX(1));
+    ASSERT_EQ(X_OFFSET + 10 * X_SCALE, event->getHistoricalX(0, 0));
+    ASSERT_EQ(X_OFFSET + 20 * X_SCALE, event->getHistoricalX(1, 0));
+    ASSERT_EQ(X_OFFSET + 110 * X_SCALE, event->getHistoricalX(0, 1));
+    ASSERT_EQ(X_OFFSET + 120 * X_SCALE, event->getHistoricalX(1, 1));
+    ASSERT_EQ(X_OFFSET + 210 * X_SCALE, event->getX(0));
+    ASSERT_EQ(X_OFFSET + 220 * X_SCALE, event->getX(1));
 
-    ASSERT_EQ(Y_OFFSET + 11, event->getHistoricalY(0, 0));
-    ASSERT_EQ(Y_OFFSET + 21, event->getHistoricalY(1, 0));
-    ASSERT_EQ(Y_OFFSET + 111, event->getHistoricalY(0, 1));
-    ASSERT_EQ(Y_OFFSET + 121, event->getHistoricalY(1, 1));
-    ASSERT_EQ(Y_OFFSET + 211, event->getY(0));
-    ASSERT_EQ(Y_OFFSET + 221, event->getY(1));
+    ASSERT_EQ(Y_OFFSET + 11 * Y_SCALE, event->getHistoricalY(0, 0));
+    ASSERT_EQ(Y_OFFSET + 21 * Y_SCALE, event->getHistoricalY(1, 0));
+    ASSERT_EQ(Y_OFFSET + 111 * Y_SCALE, event->getHistoricalY(0, 1));
+    ASSERT_EQ(Y_OFFSET + 121 * Y_SCALE, event->getHistoricalY(1, 1));
+    ASSERT_EQ(Y_OFFSET + 211 * Y_SCALE, event->getY(0));
+    ASSERT_EQ(Y_OFFSET + 221 * Y_SCALE, event->getY(1));
 
     ASSERT_EQ(12, event->getHistoricalPressure(0, 0));
     ASSERT_EQ(22, event->getHistoricalPressure(1, 0));
@@ -440,7 +448,7 @@ TEST_F(MotionEventTest, Properties) {
 
     // Set source.
     event.setSource(AINPUT_SOURCE_JOYSTICK);
-    ASSERT_EQ(static_cast<int>(AINPUT_SOURCE_JOYSTICK), event.getSource());
+    ASSERT_EQ(AINPUT_SOURCE_JOYSTICK, event.getSource());
 
     // Set displayId.
     constexpr int32_t newDisplayId = 2;
@@ -505,8 +513,8 @@ TEST_F(MotionEventTest, Scale) {
 
     ASSERT_EQ(210 * 2, event.getRawX(0));
     ASSERT_EQ(211 * 2, event.getRawY(0));
-    ASSERT_EQ((X_OFFSET + 210) * 2, event.getX(0));
-    ASSERT_EQ((Y_OFFSET + 211) * 2, event.getY(0));
+    ASSERT_EQ((X_OFFSET + 210 * X_SCALE) * 2, event.getX(0));
+    ASSERT_EQ((Y_OFFSET + 211 * Y_SCALE) * 2, event.getY(0));
     ASSERT_EQ(212, event.getPressure(0));
     ASSERT_EQ(213, event.getSize(0));
     ASSERT_EQ(214 * 2, event.getTouchMajor(0));
@@ -570,12 +578,13 @@ TEST_F(MotionEventTest, Transform) {
         pointerCoords[i].setAxisValue(AMOTION_EVENT_AXIS_ORIENTATION, angle);
     }
     MotionEvent event;
-    event.initialize(0 /*deviceId*/, AINPUT_SOURCE_UNKNOWN, DISPLAY_ID, AMOTION_EVENT_ACTION_MOVE,
-                     0 /*actionButton*/, 0 /*flags*/, AMOTION_EVENT_EDGE_FLAG_NONE, AMETA_NONE,
-                     0 /*buttonState*/, MotionClassification::NONE, 0 /*xOffset*/, 0 /*yOffset*/,
-                     0 /*xPrecision*/, 0 /*yPrecision*/, 3 + RADIUS /*xCursorPosition*/,
-                     2 /*yCursorPosition*/, 0 /*downTime*/, 0 /*eventTime*/, pointerCount,
-                     pointerProperties, pointerCoords);
+    event.initialize(0 /*deviceId*/, AINPUT_SOURCE_UNKNOWN, DISPLAY_ID, INVALID_HMAC,
+                     AMOTION_EVENT_ACTION_MOVE, 0 /*actionButton*/, 0 /*flags*/,
+                     AMOTION_EVENT_EDGE_FLAG_NONE, AMETA_NONE, 0 /*buttonState*/,
+                     MotionClassification::NONE, 1 /*xScale*/, 1 /*yScale*/, 0 /*xOffset*/,
+                     0 /*yOffset*/, 0 /*xPrecision*/, 0 /*yPrecision*/,
+                     3 + RADIUS /*xCursorPosition*/, 2 /*yCursorPosition*/, 0 /*downTime*/,
+                     0 /*eventTime*/, pointerCount, pointerProperties, pointerCoords);
     float originalRawX = 0 + 3;
     float originalRawY = -RADIUS + 2;
 
@@ -634,9 +643,10 @@ TEST_F(MotionEventTest, Initialize_SetsClassification) {
     }
 
     for (MotionClassification classification : classifications) {
-        event.initialize(0 /*deviceId*/, AINPUT_SOURCE_TOUCHSCREEN, DISPLAY_ID,
+        event.initialize(0 /*deviceId*/, AINPUT_SOURCE_TOUCHSCREEN, DISPLAY_ID, INVALID_HMAC,
                          AMOTION_EVENT_ACTION_DOWN, 0, 0, AMOTION_EVENT_EDGE_FLAG_NONE, AMETA_NONE,
-                         0, classification, 0, 0, 0, 0, AMOTION_EVENT_INVALID_CURSOR_POSITION,
+                         0, classification, 1 /*xScale*/, 1 /*yScale*/, 0, 0, 0, 0,
+                         AMOTION_EVENT_INVALID_CURSOR_POSITION,
                          AMOTION_EVENT_INVALID_CURSOR_POSITION, 0 /*downTime*/, 0 /*eventTime*/,
                          pointerCount, pointerProperties, pointerCoords);
         ASSERT_EQ(classification, event.getClassification());
@@ -654,9 +664,10 @@ TEST_F(MotionEventTest, Initialize_SetsCursorPosition) {
         pointerCoords[i].clear();
     }
 
-    event.initialize(0 /*deviceId*/, AINPUT_SOURCE_MOUSE, DISPLAY_ID, AMOTION_EVENT_ACTION_DOWN, 0,
-                     0, AMOTION_EVENT_EDGE_FLAG_NONE, AMETA_NONE, 0, MotionClassification::NONE, 0,
-                     0, 0, 0, 280 /*xCursorPosition*/, 540 /*yCursorPosition*/, 0 /*downTime*/,
+    event.initialize(0 /*deviceId*/, AINPUT_SOURCE_MOUSE, DISPLAY_ID, INVALID_HMAC,
+                     AMOTION_EVENT_ACTION_DOWN, 0, 0, AMOTION_EVENT_EDGE_FLAG_NONE, AMETA_NONE, 0,
+                     MotionClassification::NONE, 1 /*xScale*/, 1 /*yScale*/, 0, 0, 0, 0,
+                     280 /*xCursorPosition*/, 540 /*yCursorPosition*/, 0 /*downTime*/,
                      0 /*eventTime*/, pointerCount, pointerProperties, pointerCoords);
     event.offsetLocation(20, 60);
     ASSERT_EQ(280, event.getRawXCursorPosition());
