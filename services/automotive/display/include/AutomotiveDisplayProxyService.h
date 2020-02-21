@@ -15,11 +15,13 @@
 //
 #pragma once
 
-#include <android/frameworks/automotive/display/1.0/ICarWindowService.h>
+#include <android/frameworks/automotive/display/1.0/IAutomotiveDisplayProxyService.h>
 #include <gui/ISurfaceComposer.h>
 #include <gui/IGraphicBufferProducer.h>
 #include <gui/Surface.h>
 #include <gui/SurfaceComposerClient.h>
+#include <ui/DisplayConfig.h>
+#include <ui/DisplayState.h>
 
 namespace android {
 namespace frameworks {
@@ -32,16 +34,28 @@ using ::android::hardware::Return;
 using ::android::sp;
 using ::android::hardware::graphics::bufferqueue::V2_0::IGraphicBufferProducer;
 
-class CarWindowService : public ICarWindowService {
+class AutomotiveDisplayProxyService : public IAutomotiveDisplayProxyService {
 public:
     Return<sp<IGraphicBufferProducer>> getIGraphicBufferProducer() override;
     Return<bool> showWindow() override;
     Return<bool> hideWindow() override;
+    Return<void> getDisplayInfo(getDisplayInfo_cb _info_cb) override {
+        HwDisplayConfig cfg;
+        cfg.setToExternal((uint8_t*)&mDpyConfig, sizeof(DisplayConfig));
+
+        HwDisplayState state;
+        state.setToExternal((uint8_t*)&mDpyState, sizeof(DisplayState));
+
+       _info_cb(cfg, state);
+        return hardware::Void();
+    }
 
 private:
     sp<android::Surface> mSurface;
     sp<android::SurfaceComposerClient> mSurfaceComposerClient;
     sp<android::SurfaceControl> mSurfaceControl;
+    DisplayConfig mDpyConfig;
+    ui::DisplayState mDpyState;
 };
 }  // namespace implementation
 }  // namespace V1_0

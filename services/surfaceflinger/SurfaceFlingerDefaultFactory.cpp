@@ -25,9 +25,9 @@
 #include "BufferLayerConsumer.h"
 #include "BufferQueueLayer.h"
 #include "BufferStateLayer.h"
-#include "ColorLayer.h"
 #include "ContainerLayer.h"
 #include "DisplayDevice.h"
+#include "EffectLayer.h"
 #include "Layer.h"
 #include "MonitoredProducer.h"
 #include "NativeWindowSurface.h"
@@ -77,7 +77,7 @@ std::unique_ptr<Scheduler> DefaultFactory::createScheduler(
         ISchedulerCallback& schedulerCallback) {
     return std::make_unique<Scheduler>(std::move(setVSyncEnabled), configs, schedulerCallback,
                                        property_get_bool("debug.sf.use_content_detection_v2",
-                                                         false));
+                                                         true));
 }
 
 std::unique_ptr<SurfaceInterceptor> DefaultFactory::createSurfaceInterceptor(
@@ -139,8 +139,8 @@ sp<BufferStateLayer> DefaultFactory::createBufferStateLayer(const LayerCreationA
     return new BufferStateLayer(args);
 }
 
-sp<ColorLayer> DefaultFactory::createColorLayer(const LayerCreationArgs& args) {
-    return new ColorLayer(args);
+sp<EffectLayer> DefaultFactory::createEffectLayer(const LayerCreationArgs& args) {
+    return new EffectLayer(args);
 }
 
 } // namespace android::surfaceflinger

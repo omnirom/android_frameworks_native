@@ -96,11 +96,14 @@ public:
 
     // Describes the different options the layer voted for refresh rate
     enum class LayerVoteType {
-        NoVote,    // Doesn't care about the refresh rate
-        Min,       // Minimal refresh rate available
-        Max,       // Maximal refresh rate available
-        Heuristic, // Specific refresh rate that was calculated by platform using a heuristic
-        Explicit,  // Specific refresh rate that was provided by the app
+        NoVote,          // Doesn't care about the refresh rate
+        Min,             // Minimal refresh rate available
+        Max,             // Maximal refresh rate available
+        Heuristic,       // Specific refresh rate that was calculated by platform using a heuristic
+        ExplicitDefault, // Specific refresh rate that was provided by the app with Default
+                         // compatibility
+        ExplicitExactOrMultiple // Specific refresh rate that was provided by the app with
+                                // ExactOrMultiple compatibility
     };
 
     // Captures the layer requirements for a refresh rate. This will be used to determine the
@@ -146,6 +149,10 @@ public:
     // Returns the current refresh rate
     const RefreshRate& getCurrentRefreshRate() const EXCLUDES(mLock);
 
+    // Returns the current refresh rate, if allowed. Otherwise the default that is allowed by
+    // the policy.
+    const RefreshRate& getCurrentRefreshRateByPolicy() const;
+
     // Returns the refresh rate that corresponds to a HwcConfigIndexType. This won't change at
     // runtime.
     const RefreshRate& getRefreshRateFromConfigId(HwcConfigIndexType configId) const {
@@ -174,6 +181,12 @@ private:
     void getSortedRefreshRateList(
             const std::function<bool(const RefreshRate&)>& shouldAddRefreshRate,
             std::vector<const RefreshRate*>* outRefreshRates);
+
+    // Returns the refresh rate with the highest score in the collection specified from begin
+    // to end. If there are more than one with the same highest refresh rate, the first one is
+    // returned.
+    template <typename Iter>
+    const RefreshRate* getBestRefreshRate(Iter begin, Iter end) const;
 
     // The list of refresh rates, indexed by display config ID. This must not change after this
     // object is initialized.

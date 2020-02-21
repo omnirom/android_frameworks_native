@@ -17,7 +17,6 @@
 #pragma once
 
 #include <compositionengine/Display.h>
-#include <compositionengine/Layer.h>
 #include <compositionengine/LayerFECompositionState.h>
 #include <compositionengine/OutputLayer.h>
 #include <compositionengine/impl/CompositionEngine.h>
@@ -26,9 +25,9 @@
 
 #include "BufferQueueLayer.h"
 #include "BufferStateLayer.h"
-#include "ColorLayer.h"
 #include "ContainerLayer.h"
 #include "DisplayDevice.h"
+#include "EffectLayer.h"
 #include "FakePhaseOffsets.h"
 #include "Layer.h"
 #include "NativeWindowSurface.h"
@@ -148,9 +147,7 @@ public:
         return nullptr;
     }
 
-    sp<ColorLayer> createColorLayer(const LayerCreationArgs&) override {
-        return nullptr;
-    }
+    sp<EffectLayer> createEffectLayer(const LayerCreationArgs&) override { return nullptr; }
 
     sp<ContainerLayer> createContainerLayer(const LayerCreationArgs&) override {
         return nullptr;
@@ -251,7 +248,7 @@ public:
     void setLayerSidebandStream(sp<Layer> layer, sp<NativeHandle> sidebandStream) {
         layer->mDrawingState.sidebandStream = sidebandStream;
         layer->mSidebandStream = sidebandStream;
-        layer->getCompositionLayer()->editFEState().sidebandStream = sidebandStream;
+        layer->editCompositionState()->sidebandStream = sidebandStream;
     }
 
     void setLayerCompositionType(sp<Layer> layer, HWC2::Composition type) {

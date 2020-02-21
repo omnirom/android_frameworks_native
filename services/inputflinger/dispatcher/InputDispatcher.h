@@ -56,6 +56,16 @@ namespace android::inputdispatcher {
 
 class Connection;
 
+class HmacKeyManager {
+public:
+    HmacKeyManager();
+    std::array<uint8_t, 32> sign(const VerifiedInputEvent& event) const;
+
+private:
+    std::array<uint8_t, 32> sign(const std::vector<uint8_t>& data) const;
+    const std::array<uint8_t, 128> mHmacKey;
+};
+
 /* Dispatches events to input targets.  Some functions of the input dispatcher, such as
  * identifying input targets, are controlled by a separate policy object.
  *
@@ -95,6 +105,8 @@ public:
     virtual int32_t injectInputEvent(const InputEvent* event, int32_t injectorPid,
                                      int32_t injectorUid, int32_t syncMode, int32_t timeoutMillis,
                                      uint32_t policyFlags) override;
+
+    virtual std::unique_ptr<VerifiedInputEvent> verifyInputEvent(const InputEvent& event) override;
 
     virtual void setInputWindows(
             const std::vector<sp<InputWindowHandle>>& inputWindowHandles, int32_t displayId,
@@ -415,6 +427,9 @@ private:
             REQUIRES(mLock);
     void synthesizeCancelationEventsForConnectionLocked(const sp<Connection>& connection,
                                                         const CancelationOptions& options)
+            REQUIRES(mLock);
+
+    void synthesizePointerDownEventsForConnectionLocked(const sp<Connection>& connection)
             REQUIRES(mLock);
 
     // Splitting motion events across windows.
