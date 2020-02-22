@@ -18,7 +18,9 @@
 #include <android/hardware/configstore/1.1/ISurfaceFlingerConfigs.h>
 #include <android/hardware/configstore/1.1/types.h>
 #include <configstore/Utils.h>
+#include <utils/Log.h>
 
+#include <log/log.h>
 #include <cstdlib>
 #include <tuple>
 
@@ -226,6 +228,18 @@ int64_t color_space_agnostic_dataspace(Dataspace defaultValue) {
     return static_cast<int64_t>(defaultValue);
 }
 
+bool refresh_rate_switching(bool defaultValue) {
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+    auto temp = SurfaceFlingerProperties::refresh_rate_switching();
+#pragma clang diagnostic pop
+    if (temp.has_value()) {
+        ALOGW("Using deprecated refresh_rate_switching sysprop. Value: %d", *temp);
+        return *temp;
+    }
+    return defaultValue;
+}
+
 int32_t set_idle_timer_ms(int32_t defaultValue) {
     auto temp = SurfaceFlingerProperties::set_idle_timer_ms();
     if (temp.has_value()) {
@@ -250,8 +264,17 @@ int32_t set_display_power_timer_ms(int32_t defaultValue) {
     return defaultValue;
 }
 
-bool use_smart_90_for_video(bool defaultValue) {
-    auto temp = SurfaceFlingerProperties::use_smart_90_for_video();
+bool use_content_detection_for_refresh_rate(bool defaultValue) {
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+    auto smart_90_deprecated = SurfaceFlingerProperties::use_smart_90_for_video();
+#pragma clang diagnostic pop
+    if (smart_90_deprecated.has_value()) {
+        ALOGW("Using deprecated use_smart_90_for_video sysprop. Value: %d", *smart_90_deprecated);
+        return *smart_90_deprecated;
+    }
+
+    auto temp = SurfaceFlingerProperties::use_content_detection_for_refresh_rate();
     if (temp.has_value()) {
         return *temp;
     }
@@ -268,6 +291,14 @@ bool enable_protected_contents(bool defaultValue) {
 
 bool support_kernel_idle_timer(bool defaultValue) {
     auto temp = SurfaceFlingerProperties::support_kernel_idle_timer();
+    if (temp.has_value()) {
+        return *temp;
+    }
+    return defaultValue;
+}
+
+bool use_frame_rate_api(bool defaultValue) {
+    auto temp = SurfaceFlingerProperties::use_frame_rate_api();
     if (temp.has_value()) {
         return *temp;
     }

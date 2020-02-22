@@ -97,7 +97,7 @@ public:
     binder::Status moveCompleteApp(const std::unique_ptr<std::string>& fromUuid,
             const std::unique_ptr<std::string>& toUuid, const std::string& packageName,
             const std::string& dataAppName, int32_t appId, const std::string& seInfo,
-            int32_t targetSdkVersion);
+            int32_t targetSdkVersion, const std::string& fromCodePath);
 
     binder::Status dexopt(const std::string& apkPath, int32_t uid,
             const std::unique_ptr<std::string>& packageName, const std::string& instructionSet,
@@ -155,7 +155,7 @@ public:
     binder::Status invalidateMounts();
     binder::Status isQuotaSupported(const std::unique_ptr<std::string>& volumeUuid,
             bool* _aidl_return);
-    binder::Status onPrivateVolumeMounted(const std::unique_ptr<std::string>& volumeUuid);
+    binder::Status tryMountDataMirror(const std::unique_ptr<std::string>& volumeUuid);
     binder::Status onPrivateVolumeRemoved(const std::unique_ptr<std::string>& volumeUuid);
 
     binder::Status prepareAppProfile(const std::string& packageName,

@@ -45,6 +45,7 @@
 #include <compositionengine/CompositionRefreshArgs.h>
 #include <compositionengine/Display.h>
 #include <compositionengine/DisplayColorProfile.h>
+#include <compositionengine/LayerFECompositionState.h>
 #include <compositionengine/OutputLayer.h>
 #include <compositionengine/RenderSurface.h>
 #include <compositionengine/impl/OutputCompositionState.h>
@@ -82,10 +83,10 @@
 #include "BufferQueueLayer.h"
 #include "BufferStateLayer.h"
 #include "Client.h"
-#include "ColorLayer.h"
 #include "Colorizer.h"
 #include "ContainerLayer.h"
 #include "DisplayDevice.h"
+#include "EffectLayer.h"
 #include "Layer.h"
 #include "LayerVector.h"
 #include "MonitoredProducer.h"
@@ -227,6 +228,7 @@ Dataspace SurfaceFlinger::defaultCompositionDataspace = Dataspace::V0_SRGB;
 ui::PixelFormat SurfaceFlinger::defaultCompositionPixelFormat = ui::PixelFormat::RGBA_8888;
 Dataspace SurfaceFlinger::wideColorGamutCompositionDataspace = Dataspace::V0_SRGB;
 ui::PixelFormat SurfaceFlinger::wideColorGamutCompositionPixelFormat = ui::PixelFormat::RGBA_8888;
+bool SurfaceFlinger::useFrameRateApi;
 
 std::string getHwcServiceName() {
     char value[PROPERTY_VALUE_MAX] = {};
@@ -386,6 +388,8 @@ SurfaceFlinger::SurfaceFlinger(Factory& factory) : SurfaceFlinger(factory, SkipI
         // for production purposes later on.
         setenv("TREBLE_TESTING_OVERRIDE", "true", true);
     }
+
+    useFrameRateApi = use_frame_rate_api(true);
 }
 
 void SurfaceFlinger::onFirstRef()
@@ -1498,10 +1502,8 @@ nsecs_t SurfaceFlinger::getVsyncPeriod() const {
 
 void SurfaceFlinger::onVsyncReceived(int32_t sequenceId, hwc2_display_t hwcDisplayId,
                                      int64_t timestamp,
-                                     std::optional<hwc2_vsync_period_t> /*vsyncPeriod*/) {
+                                     std::optional<hwc2_vsync_period_t> vsyncPeriod) {
     ATRACE_NAME("SF onVsync");
-
-    // TODO(b/140201379): use vsyncPeriod in the new DispSync
 
     Mutex::Autolock lock(mStateLock);
     // Ignore any vsyncs from a previous hardware composer.
@@ -1519,7 +1521,7 @@ void SurfaceFlinger::onVsyncReceived(int32_t sequenceId, hwc2_display_t hwcDispl
     }
 
     bool periodFlushed = false;
-    mScheduler->addResyncSample(timestamp, &periodFlushed);
+    mScheduler->addResyncSample(timestamp, vsyncPeriod, &periodFlushed);
     if (periodFlushed) {
         mVSyncModulator->onRefreshRateChangeCompleted();
     }
@@ -1871,13 +1873,13 @@ void SurfaceFlinger::handleMessageRefresh() {
         refreshArgs.outputs.push_back(display->getCompositionDisplay());
     }
     mDrawingState.traverseInZOrder([&refreshArgs](Layer* layer) {
-        auto compositionLayer = layer->getCompositionLayer();
-        if (compositionLayer) refreshArgs.layers.push_back(compositionLayer);
+        if (auto layerFE = layer->getCompositionEngineLayerFE())
+            refreshArgs.layers.push_back(layerFE);
     });
     refreshArgs.layersWithQueuedFrames.reserve(mLayersWithQueuedFrames.size());
     for (sp<Layer> layer : mLayersWithQueuedFrames) {
-        auto compositionLayer = layer->getCompositionLayer();
-        if (compositionLayer) refreshArgs.layersWithQueuedFrames.push_back(compositionLayer.get());
+        if (auto layerFE = layer->getCompositionEngineLayerFE())
+            refreshArgs.layersWithQueuedFrames.push_back(layerFE);
     }
 
     refreshArgs.repaintEverything = mRepaintEverything.exchange(false);
@@ -2030,12 +2032,10 @@ void SurfaceFlinger::postComposition()
     ATRACE_CALL();
     ALOGV("postComposition");
 
-    // Release any buffers which were replaced this frame
     nsecs_t dequeueReadyTime = systemTime();
     for (auto& layer : mLayersWithQueuedFrames) {
         layer->releasePendingBuffer(dequeueReadyTime);
     }
-
     // |mStateLock| not needed as we are on the main thread
     const auto displayDevice = getDefaultDisplayDeviceLocked();
 
@@ -2081,7 +2081,8 @@ void SurfaceFlinger::postComposition()
         }
     });
 
-    if (presentFenceTime->isValid()) {
+    if (displayDevice && displayDevice->isPrimary() &&
+        displayDevice->getPowerMode() == HWC_POWER_MODE_NORMAL && presentFenceTime->isValid()) {
         mScheduler->addPresentFence(presentFenceTime);
     }
 
@@ -2118,6 +2119,10 @@ void SurfaceFlinger::postComposition()
     }
 
     mTimeStats->setPresentFenceGlobal(presentFenceTime);
+
+    const size_t sfConnections = mScheduler->getEventThreadConnectionCount(mSfConnectionHandle);
+    const size_t appConnections = mScheduler->getEventThreadConnectionCount(mAppConnectionHandle);
+    mTimeStats->recordDisplayEventConnectionCount(sfConnections + appConnections);
 
     if (displayDevice && getHwComposer().isConnected(*displayDevice->getId()) &&
         !displayDevice->isPoweredOn()) {
@@ -3341,6 +3346,11 @@ uint32_t SurfaceFlinger::setClientStateLocked(
         layer->pushPendingState();
     }
 
+    // Only set by BLAST adapter layers
+    if (what & layer_state_t::eProducerDisconnect) {
+        layer->onDisconnect();
+    }
+
     if (what & layer_state_t::ePositionChanged) {
         if (layer->setPosition(s.x, s.y)) {
             flags |= eTraversalNeeded;
@@ -3548,7 +3558,9 @@ uint32_t SurfaceFlinger::setClientStateLocked(
         }
     }
     if (what & layer_state_t::eFrameRateChanged) {
-        if (layer->setFrameRate(s.frameRate)) flags |= eTraversalNeeded;
+        if (layer->setFrameRate(
+                    Layer::FrameRate(s.frameRate, Layer::FrameRateCompatibility::Default)))
+            flags |= eTraversalNeeded;
     }
     // This has to happen after we reparent children because when we reparent to null we remove
     // child layers from current state and remove its relative z. If the children are reparented in
@@ -3590,7 +3602,8 @@ uint32_t SurfaceFlinger::setClientStateLocked(
         buffer = s.buffer;
     }
     if (buffer) {
-        if (layer->setBuffer(buffer, postTime, desiredPresentTime, s.cachedBuffer)) {
+        if (layer->setBuffer(buffer, s.acquireFence, postTime, desiredPresentTime,
+                             s.cachedBuffer)) {
             flags |= eTraversalNeeded;
         }
     }
@@ -3687,7 +3700,7 @@ status_t SurfaceFlinger::createLayer(const String8& name, const sp<Client>& clie
             result = createBufferStateLayer(client, std::move(uniqueName), w, h, flags,
                                             std::move(metadata), handle, outTransformHint, &layer);
             break;
-        case ISurfaceComposerClient::eFXSurfaceColor:
+        case ISurfaceComposerClient::eFXSurfaceEffect:
             // check if buffer size is set for color layer.
             if (w > 0 || h > 0) {
                 ALOGE("createLayer() failed, w or h cannot be set for color layer (w=%d, h=%d)",
@@ -3695,8 +3708,8 @@ status_t SurfaceFlinger::createLayer(const String8& name, const sp<Client>& clie
                 return BAD_VALUE;
             }
 
-            result = createColorLayer(client, std::move(uniqueName), w, h, flags,
-                                      std::move(metadata), handle, &layer);
+            result = createEffectLayer(client, std::move(uniqueName), w, h, flags,
+                                       std::move(metadata), handle, &layer);
             break;
         case ISurfaceComposerClient::eFXSurfaceContainer:
             // check if buffer size is set for container layer.
@@ -3814,10 +3827,10 @@ status_t SurfaceFlinger::createBufferStateLayer(const sp<Client>& client, std::s
     return NO_ERROR;
 }
 
-status_t SurfaceFlinger::createColorLayer(const sp<Client>& client, std::string name, uint32_t w,
-                                          uint32_t h, uint32_t flags, LayerMetadata metadata,
-                                          sp<IBinder>* handle, sp<Layer>* outLayer) {
-    *outLayer = getFactory().createColorLayer(
+status_t SurfaceFlinger::createEffectLayer(const sp<Client>& client, std::string name, uint32_t w,
+                                           uint32_t h, uint32_t flags, LayerMetadata metadata,
+                                           sp<IBinder>* handle, sp<Layer>* outLayer) {
+    *outLayer = getFactory().createEffectLayer(
             {this, client, std::move(name), w, h, flags, std::move(metadata)});
     *handle = (*outLayer)->getHandle();
     return NO_ERROR;
@@ -4435,8 +4448,13 @@ void SurfaceFlinger::dumpAllLocked(const DumpArgs& args, std::string& result) co
     {
         StringAppendF(&result, "Composition layers\n");
         mDrawingState.traverseInZOrder([&](Layer* layer) {
-            auto compositionLayer = layer->getCompositionLayer();
-            if (compositionLayer) compositionLayer->dump(result);
+            auto* compositionState = layer->getCompositionState();
+            if (!compositionState) return;
+
+            android::base::StringAppendF(&result, "* Layer %p (%s)\n", layer,
+                                         layer->getDebugName() ? layer->getDebugName()
+                                                               : "<unknown>");
+            compositionState->dump(result);
         });
     }
 

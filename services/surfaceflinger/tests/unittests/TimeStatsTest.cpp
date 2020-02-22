@@ -37,6 +37,7 @@
 
 using namespace android::surfaceflinger;
 using namespace google::protobuf;
+using namespace std::chrono_literals;
 
 namespace android {
 namespace {
@@ -148,30 +149,32 @@ public:
         FakeStatsEventDelegate() = default;
         ~FakeStatsEventDelegate() override = default;
 
-        struct stats_event* addStatsEventToPullData(pulled_stats_event_list*) override {
+        struct AStatsEvent* addStatsEventToPullData(AStatsEventList*) override {
             return mEvent;
         }
-        void registerStatsPullAtomCallback(int32_t atom_tag, stats_pull_atom_callback_t callback,
-                                           pull_atom_metadata*, void* cookie) override {
+        void registerStatsPullAtomCallback(int32_t atom_tag,
+                                           AStatsManager_PullAtomCallback callback,
+                                           AStatsManager_PullAtomMetadata*, void* cookie) override {
             mAtomTags.push_back(atom_tag);
             mCallback = callback;
             mCookie = cookie;
         }
 
-        status_pull_atom_return_t makePullAtomCallback(int32_t atom_tag, void* cookie) {
+        AStatsManager_PullAtomCallbackReturn makePullAtomCallback(int32_t atom_tag, void* cookie) {
             return (*mCallback)(atom_tag, nullptr, cookie);
         }
 
         MOCK_METHOD1(unregisterStatsPullAtomCallback, void(int32_t));
-        MOCK_METHOD2(statsEventSetAtomId, void(struct stats_event*, uint32_t));
-        MOCK_METHOD2(statsEventWriteInt64, void(struct stats_event*, int64_t));
-        MOCK_METHOD2(statsEventWriteString8, void(struct stats_event*, const char*));
-        MOCK_METHOD3(statsEventWriteByteArray, void(struct stats_event*, const uint8_t*, size_t));
-        MOCK_METHOD1(statsEventBuild, void(struct stats_event*));
+        MOCK_METHOD2(statsEventSetAtomId, void(AStatsEvent*, uint32_t));
+        MOCK_METHOD2(statsEventWriteInt32, void(AStatsEvent*, int32_t));
+        MOCK_METHOD2(statsEventWriteInt64, void(AStatsEvent*, int64_t));
+        MOCK_METHOD2(statsEventWriteString8, void(AStatsEvent*, const char*));
+        MOCK_METHOD3(statsEventWriteByteArray, void(AStatsEvent*, const uint8_t*, size_t));
+        MOCK_METHOD1(statsEventBuild, void(AStatsEvent*));
 
-        struct stats_event* mEvent = stats_event_obtain();
+        AStatsEvent* mEvent = AStatsEvent_obtain();
         std::vector<int32_t> mAtomTags;
-        stats_pull_atom_callback_t mCallback = nullptr;
+        AStatsManager_PullAtomCallback mCallback = nullptr;
         void* mCookie = nullptr;
     };
     FakeStatsEventDelegate* mDelegate = new FakeStatsEventDelegate;
@@ -359,6 +362,45 @@ TEST_F(TimeStatsTest, canIncreaseClientCompositionReusedFrames) {
     EXPECT_THAT(result, HasSubstr(expectedResult));
 }
 
+TEST_F(TimeStatsTest, canAverageFrameDuration) {
+    EXPECT_TRUE(inputCommand(InputCommand::ENABLE, FMT_STRING).empty());
+    mTimeStats->setPowerMode(HWC_POWER_MODE_NORMAL);
+    mTimeStats
+            ->recordFrameDuration(std::chrono::duration_cast<std::chrono::nanoseconds>(1ms).count(),
+                                  std::chrono::duration_cast<std::chrono::nanoseconds>(6ms)
+                                          .count());
+    mTimeStats
+            ->recordFrameDuration(std::chrono::duration_cast<std::chrono::nanoseconds>(1ms).count(),
+                                  std::chrono::duration_cast<std::chrono::nanoseconds>(16ms)
+                                          .count());
+
+    const std::string result(inputCommand(InputCommand::DUMP_ALL, FMT_STRING));
+    EXPECT_THAT(result, HasSubstr("averageFrameDuration = 10.000 ms"));
+}
+
+TEST_F(TimeStatsTest, canAverageRenderEngineTimings) {
+    EXPECT_TRUE(inputCommand(InputCommand::ENABLE, FMT_STRING).empty());
+    mTimeStats->recordRenderEngineDuration(std::chrono::duration_cast<std::chrono::nanoseconds>(1ms)
+                                                   .count(),
+                                           std::make_shared<FenceTime>(
+                                                   std::chrono::duration_cast<
+                                                           std::chrono::nanoseconds>(3ms)
+                                                           .count()));
+
+    mTimeStats->recordRenderEngineDuration(std::chrono::duration_cast<std::chrono::nanoseconds>(4ms)
+                                                   .count(),
+                                           std::chrono::duration_cast<std::chrono::nanoseconds>(8ms)
+                                                   .count());
+
+    // Push a dummy present fence to trigger flushing the RenderEngine timings.
+    mTimeStats->setPowerMode(HWC_POWER_MODE_NORMAL);
+    mTimeStats->setPresentFenceGlobal(std::make_shared<FenceTime>(
+            std::chrono::duration_cast<std::chrono::nanoseconds>(1ms).count()));
+
+    const std::string result(inputCommand(InputCommand::DUMP_ALL, FMT_STRING));
+    EXPECT_THAT(result, HasSubstr("averageRenderEngineTiming = 3.000 ms"));
+}
+
 TEST_F(TimeStatsTest, canInsertGlobalPresentToPresent) {
     EXPECT_TRUE(inputCommand(InputCommand::ENABLE, FMT_STRING).empty());
 
@@ -391,8 +433,6 @@ TEST_F(TimeStatsTest, canInsertGlobalPresentToPresent) {
 TEST_F(TimeStatsTest, canInsertGlobalFrameDuration) {
     EXPECT_TRUE(inputCommand(InputCommand::ENABLE, FMT_STRING).empty());
 
-    using namespace std::chrono_literals;
-
     mTimeStats->setPowerMode(HWC_POWER_MODE_OFF);
     mTimeStats
             ->recordFrameDuration(std::chrono::duration_cast<std::chrono::nanoseconds>(1ms).count(),
@@ -415,8 +455,6 @@ TEST_F(TimeStatsTest, canInsertGlobalFrameDuration) {
 
 TEST_F(TimeStatsTest, canInsertGlobalRenderEngineTiming) {
     EXPECT_TRUE(inputCommand(InputCommand::ENABLE, FMT_STRING).empty());
-
-    using namespace std::chrono_literals;
 
     mTimeStats->recordRenderEngineDuration(std::chrono::duration_cast<std::chrono::nanoseconds>(1ms)
                                                    .count(),
@@ -673,7 +711,6 @@ TEST_F(TimeStatsTest, canClearTimeStats) {
     ASSERT_NO_FATAL_FAILURE(mTimeStats->incrementClientCompositionFrames());
     ASSERT_NO_FATAL_FAILURE(mTimeStats->setPowerMode(HWC_POWER_MODE_NORMAL));
 
-    using namespace std::chrono_literals;
     mTimeStats
             ->recordFrameDuration(std::chrono::duration_cast<std::chrono::nanoseconds>(3ms).count(),
                                   std::chrono::duration_cast<std::chrono::nanoseconds>(6ms)
@@ -703,14 +740,27 @@ TEST_F(TimeStatsTest, canClearTimeStats) {
     EXPECT_EQ(0, globalProto.stats_size());
 }
 
-TEST_F(TimeStatsTest, canClearClientCompositionReusedFrames) {
-    // this stat is not in the proto so verify by checking the string dump
+TEST_F(TimeStatsTest, canClearDumpOnlyTimeStats) {
+    // These stats are not in the proto so verify by checking the string dump.
     EXPECT_TRUE(inputCommand(InputCommand::ENABLE, FMT_STRING).empty());
     ASSERT_NO_FATAL_FAILURE(mTimeStats->incrementClientCompositionReusedFrames());
+    mTimeStats->setPowerMode(HWC_POWER_MODE_NORMAL);
+    mTimeStats
+            ->recordFrameDuration(std::chrono::duration_cast<std::chrono::nanoseconds>(1ms).count(),
+                                  std::chrono::duration_cast<std::chrono::nanoseconds>(5ms)
+                                          .count());
+    mTimeStats->recordRenderEngineDuration(std::chrono::duration_cast<std::chrono::nanoseconds>(4ms)
+                                                   .count(),
+                                           std::chrono::duration_cast<std::chrono::nanoseconds>(6ms)
+                                                   .count());
+    mTimeStats->setPresentFenceGlobal(std::make_shared<FenceTime>(
+            std::chrono::duration_cast<std::chrono::nanoseconds>(1ms).count()));
     EXPECT_TRUE(inputCommand(InputCommand::CLEAR, FMT_STRING).empty());
 
     const std::string result(inputCommand(InputCommand::DUMP_ALL, FMT_STRING));
     EXPECT_THAT(result, HasSubstr("clientCompositionReusedFrames = 0"));
+    EXPECT_THAT(result, HasSubstr("averageFrameDuration = 0.000 ms"));
+    EXPECT_THAT(result, HasSubstr("averageRenderEngineTiming = 0.000 ms"));
 }
 
 TEST_F(TimeStatsTest, canDumpWithMaxLayers) {
@@ -751,6 +801,7 @@ TEST_F(TimeStatsTest, globalStatsCallback) {
     constexpr size_t TOTAL_FRAMES = 5;
     constexpr size_t MISSED_FRAMES = 4;
     constexpr size_t CLIENT_COMPOSITION_FRAMES = 3;
+    constexpr size_t DISPLAY_EVENT_CONNECTIONS = 14;
 
     mTimeStats->onBootFinished();
     EXPECT_TRUE(inputCommand(InputCommand::ENABLE, FMT_STRING).empty());
@@ -764,6 +815,8 @@ TEST_F(TimeStatsTest, globalStatsCallback) {
     for (size_t i = 0; i < CLIENT_COMPOSITION_FRAMES; i++) {
         mTimeStats->incrementClientCompositionFrames();
     }
+
+    mTimeStats->recordDisplayEventConnectionCount(DISPLAY_EVENT_CONNECTIONS);
 
     mTimeStats->setPowerMode(HWC_POWER_MODE_NORMAL);
     mTimeStats->setPresentFenceGlobal(std::make_shared<FenceTime>(3000000));
@@ -785,9 +838,10 @@ TEST_F(TimeStatsTest, globalStatsCallback) {
         EXPECT_CALL(*mDelegate, statsEventWriteInt64(mDelegate->mEvent, CLIENT_COMPOSITION_FRAMES));
         EXPECT_CALL(*mDelegate, statsEventWriteInt64(mDelegate->mEvent, _));
         EXPECT_CALL(*mDelegate, statsEventWriteInt64(mDelegate->mEvent, 2));
+        EXPECT_CALL(*mDelegate, statsEventWriteInt32(mDelegate->mEvent, DISPLAY_EVENT_CONNECTIONS));
         EXPECT_CALL(*mDelegate, statsEventBuild(mDelegate->mEvent));
     }
-    EXPECT_EQ(STATS_PULL_SUCCESS,
+    EXPECT_EQ(AStatsManager_PULL_SUCCESS,
               mDelegate->makePullAtomCallback(android::util::SURFACEFLINGER_STATS_GLOBAL_INFO,
                                               mDelegate->mCookie));
 
@@ -843,12 +897,20 @@ MATCHER_P2(BytesEq, bytes, size, "") {
     return expected == actual;
 }
 
-TEST_F(TimeStatsTest, layerStatsCallback_pullsAllHistogramsAndClears) {
+TEST_F(TimeStatsTest, layerStatsCallback_pullsAllAndClears) {
+    constexpr size_t LATE_ACQUIRE_FRAMES = 2;
+    constexpr size_t BAD_DESIRED_PRESENT_FRAMES = 3;
     EXPECT_TRUE(inputCommand(InputCommand::ENABLE, FMT_STRING).empty());
 
     mTimeStats->onBootFinished();
 
     insertTimeRecord(NORMAL_SEQUENCE, LAYER_ID_0, 1, 1000000);
+    for (size_t i = 0; i < LATE_ACQUIRE_FRAMES; i++) {
+        mTimeStats->incrementLatchSkipped(LAYER_ID_0, TimeStats::LatchSkipReason::LateAcquire);
+    }
+    for (size_t i = 0; i < BAD_DESIRED_PRESENT_FRAMES; i++) {
+        mTimeStats->incrementBadDesiredPresent(LAYER_ID_0);
+    }
     insertTimeRecord(NORMAL_SEQUENCE, LAYER_ID_0, 2, 2000000);
 
     EXPECT_THAT(mDelegate->mAtomTags,
@@ -906,9 +968,12 @@ TEST_F(TimeStatsTest, layerStatsCallback_pullsAllHistogramsAndClears) {
                                              BytesEq((const uint8_t*)expectedPostToAcquire.c_str(),
                                                      expectedPostToAcquire.size()),
                                              expectedPostToAcquire.size()));
+        EXPECT_CALL(*mDelegate, statsEventWriteInt64(mDelegate->mEvent, LATE_ACQUIRE_FRAMES));
+        EXPECT_CALL(*mDelegate,
+                    statsEventWriteInt64(mDelegate->mEvent, BAD_DESIRED_PRESENT_FRAMES));
         EXPECT_CALL(*mDelegate, statsEventBuild(mDelegate->mEvent));
     }
-    EXPECT_EQ(STATS_PULL_SUCCESS,
+    EXPECT_EQ(AStatsManager_PULL_SUCCESS,
               mDelegate->makePullAtomCallback(android::util::SURFACEFLINGER_STATS_LAYER_INFO,
                                               mDelegate->mCookie));
 
@@ -942,7 +1007,7 @@ TEST_F(TimeStatsTest, layerStatsCallback_pullsMultipleLayers) {
                 statsEventWriteString8(mDelegate->mEvent, StrEq(genLayerName(LAYER_ID_0).c_str())));
     EXPECT_CALL(*mDelegate,
                 statsEventWriteString8(mDelegate->mEvent, StrEq(genLayerName(LAYER_ID_1).c_str())));
-    EXPECT_EQ(STATS_PULL_SUCCESS,
+    EXPECT_EQ(AStatsManager_PULL_SUCCESS,
               mDelegate->makePullAtomCallback(android::util::SURFACEFLINGER_STATS_LAYER_INFO,
                                               mDelegate->mCookie));
 }
@@ -983,7 +1048,7 @@ TEST_F(TimeStatsTest, layerStatsCallback_pullsMultipleBuckets) {
         EXPECT_CALL(*mDelegate, statsEventWriteByteArray(mDelegate->mEvent, _, _))
                 .Times(AnyNumber());
     }
-    EXPECT_EQ(STATS_PULL_SUCCESS,
+    EXPECT_EQ(AStatsManager_PULL_SUCCESS,
               mDelegate->makePullAtomCallback(android::util::SURFACEFLINGER_STATS_LAYER_INFO,
                                               mDelegate->mCookie));
 }
@@ -1023,7 +1088,7 @@ TEST_F(TimeStatsTest, layerStatsCallback_limitsHistogramBuckets) {
         EXPECT_CALL(*mDelegate, statsEventWriteByteArray(mDelegate->mEvent, _, _))
                 .Times(AnyNumber());
     }
-    EXPECT_EQ(STATS_PULL_SUCCESS,
+    EXPECT_EQ(AStatsManager_PULL_SUCCESS,
               mDelegate->makePullAtomCallback(android::util::SURFACEFLINGER_STATS_LAYER_INFO,
                                               mDelegate->mCookie));
 }
@@ -1055,7 +1120,7 @@ TEST_F(TimeStatsTest, layerStatsCallback_limitsLayers) {
             .Times(1);
     EXPECT_CALL(*mDelegate,
                 statsEventWriteString8(mDelegate->mEvent, StrEq(genLayerName(LAYER_ID_1).c_str())));
-    EXPECT_EQ(STATS_PULL_SUCCESS,
+    EXPECT_EQ(AStatsManager_PULL_SUCCESS,
               mDelegate->makePullAtomCallback(android::util::SURFACEFLINGER_STATS_LAYER_INFO,
                                               mDelegate->mCookie));
 }

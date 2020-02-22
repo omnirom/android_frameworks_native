@@ -18,6 +18,7 @@
 
 #include <graphicsenv/GpuStatsInfo.h>
 #include <graphicsenv/GraphicsEnv.h>
+#include <stats_pull_atom_callback.h>
 #include <utils/String16.h>
 #include <utils/Vector.h>
 
@@ -29,28 +30,36 @@ namespace android {
 
 class GpuStats {
 public:
-    GpuStats() = default;
-    ~GpuStats() = default;
+    GpuStats();
+    ~GpuStats();
 
-    // Insert new gpu stats into global stats and app stats.
-    void insert(const std::string& driverPackageName, const std::string& driverVersionName,
-                uint64_t driverVersionCode, int64_t driverBuildTime,
-                const std::string& appPackageName, const int32_t vulkanVersion,
-                GpuStatsInfo::Driver driver, bool isDriverLoaded, int64_t driverLoadingTime);
+    // Insert new gpu driver stats into global stats and app stats.
+    void insertDriverStats(const std::string& driverPackageName,
+                           const std::string& driverVersionName, uint64_t driverVersionCode,
+                           int64_t driverBuildTime, const std::string& appPackageName,
+                           const int32_t vulkanVersion, GpuStatsInfo::Driver driver,
+                           bool isDriverLoaded, int64_t driverLoadingTime);
     // Insert target stats into app stats or potentially global stats as well.
     void insertTargetStats(const std::string& appPackageName, const uint64_t driverVersionCode,
                            const GpuStatsInfo::Stats stats, const uint64_t value);
     // dumpsys interface
     void dump(const Vector<String16>& args, std::string* result);
-    // Pull gpu global stats
-    void pullGlobalStats(std::vector<GpuStatsGlobalInfo>* outStats);
-    // Pull gpu app stats
-    void pullAppStats(std::vector<GpuStatsAppInfo>* outStats);
 
     // This limits the worst case number of loading times tracked.
     static const size_t MAX_NUM_LOADING_TIMES = 50;
 
 private:
+    // Friend class for testing.
+    friend class TestableGpuStats;
+
+    // Native atom puller callback registered in statsd.
+    static AStatsManager_PullAtomCallbackReturn pullAtomCallback(int32_t atomTag,
+                                                                 AStatsEventList* data,
+                                                                 void* cookie);
+    // Pull global into into global atom.
+    AStatsManager_PullAtomCallbackReturn pullGlobalInfoAtom(AStatsEventList* data);
+    // Pull app into into app atom.
+    AStatsManager_PullAtomCallbackReturn pullAppInfoAtom(AStatsEventList* data);
     // Dump global stats
     void dumpGlobalLocked(std::string* result);
     // Dump app stats
