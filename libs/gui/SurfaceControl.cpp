@@ -200,7 +200,7 @@ sp<SurfaceControl> SurfaceControl::readFromParcel(const Parcel* parcel) {
                                transformHint);
 }
 
-typedef bool (*InitFunc_t)(sp<IGraphicBufferProducer>*, bool, const sp<IBinder>&);
+typedef bool (*InitFunc_t)(sp<IGraphicBufferProducer>*, const sp<IBinder>&);
 typedef void (*DeinitFunc_t)(const sp<IBinder>&);
 SurfaceControl::VpsExtension::VpsExtension()
    : mIsEnable(false),
@@ -210,12 +210,10 @@ SurfaceControl::VpsExtension::VpsExtension()
 }
 
 SurfaceControl::VpsExtension::VpsExtension(const sp<IBinder> handle,
-                                           sp<IGraphicBufferProducer>* gbp,
-                                           bool flag)
+                                           sp<IGraphicBufferProducer>* gbp)
     : mIsEnable(false),
       mGbp(gbp),
       mHandle(handle),
-      mFlag(!flag),
       mLibHandler(nullptr),
       mFuncInit(nullptr),
       mFuncDeinit(nullptr) {
@@ -229,7 +227,7 @@ SurfaceControl::VpsExtension::VpsExtension(const sp<IBinder> handle,
     mFuncInit = dlsym(mLibHandler, "Init");
     mFuncDeinit = dlsym(mLibHandler, "Deinit");
     if (mFuncInit) {
-        mIsEnable = reinterpret_cast<InitFunc_t>(mFuncInit)(mGbp, mFlag, mHandle);
+        mIsEnable = reinterpret_cast<InitFunc_t>(mFuncInit)(mGbp, mHandle);
     }
 }
 
@@ -245,7 +243,7 @@ SurfaceControl::VpsExtension::~VpsExtension() {
 
 void SurfaceControl::VpsExtension::init() const {
     if (mIsEnable && mFuncInit) {
-        reinterpret_cast<InitFunc_t>(mFuncInit)(mGbp, mFlag, mHandle);
+        reinterpret_cast<InitFunc_t>(mFuncInit)(mGbp, mHandle);
     }
 }
 

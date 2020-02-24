@@ -111,14 +111,13 @@ private:
     class VpsExtension {
     public:
         VpsExtension();
-        VpsExtension(const sp<IBinder> handle, sp<IGraphicBufferProducer>* gbp, bool flag);
+        VpsExtension(const sp<IBinder> handle, sp<IGraphicBufferProducer>* gbp);
         ~VpsExtension();
         void init() const;
     private:
         bool mIsEnable;
         sp<IGraphicBufferProducer>* mGbp;
         sp<IBinder> mHandle;
-        bool mFlag;
         void* mLibHandler;
         void* mFuncInit;
         void* mFuncDeinit;
