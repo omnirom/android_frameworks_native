@@ -274,12 +274,14 @@ ResyncCallback Scheduler::makeResyncCallback(GetVsyncPeriod&& getVsyncPeriod) {
 }
 
 void Scheduler::VsyncState::resync(const GetVsyncPeriod& getVsyncPeriod) {
-    static constexpr nsecs_t kIgnoreDelay = ms2ns(750);
+    static constexpr nsecs_t kIgnoreDelay = ms2ns(400);
+    static constexpr nsecs_t kIgnoreCallbackDelay = ms2ns(400);
 
     const nsecs_t now = systemTime();
     const nsecs_t last = lastResyncTime;
+    const nsecs_t lastCallback = lastCallbackTime.exchange(now);
 
-    if (now - last > kIgnoreDelay) {
+    if (now - last > kIgnoreDelay || now - lastCallback > kIgnoreCallbackDelay) {
         ATRACE_BEGIN("scheduler.resyncToHardwareVsync");
         scheduler.resyncToHardwareVsync(false, getVsyncPeriod());
         lastResyncTime.exchange(now);
