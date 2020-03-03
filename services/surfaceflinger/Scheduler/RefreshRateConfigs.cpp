@@ -107,6 +107,12 @@ const RefreshRate& RefreshRateConfigs::getRefreshRateForContentV2(
         return *mAvailableRefreshRates.back();
     }
 
+    // If there are not layers, there is not content detection, so return the current
+    // refresh rate.
+    if (layers.empty()) {
+        return getCurrentRefreshRateByPolicyLocked();
+    }
+
     int noVoteLayers = 0;
     int minVoteLayers = 0;
     int maxVoteLayers = 0;
@@ -229,13 +235,13 @@ const RefreshRate& RefreshRateConfigs::getRefreshRateForContentV2(
             ? getBestRefreshRate(scores.rbegin(), scores.rend())
             : getBestRefreshRate(scores.begin(), scores.end());
 
-    return bestRefreshRate == nullptr ? *mCurrentRefreshRate : *bestRefreshRate;
+    return *bestRefreshRate;
 }
 
 template <typename Iter>
 const RefreshRate* RefreshRateConfigs::getBestRefreshRate(Iter begin, Iter end) const {
-    const RefreshRate* bestRefreshRate = nullptr;
-    float max = 0;
+    const RefreshRate* bestRefreshRate = begin->first;
+    float max = begin->second;
     for (auto i = begin; i != end; ++i) {
         const auto [refreshRate, score] = *i;
         ALOGV("%s scores %.2f", refreshRate->name.c_str(), score);
@@ -272,6 +278,10 @@ const RefreshRate& RefreshRateConfigs::getCurrentRefreshRate() const {
 
 const RefreshRate& RefreshRateConfigs::getCurrentRefreshRateByPolicy() const {
     std::lock_guard lock(mLock);
+    return getCurrentRefreshRateByPolicyLocked();
+}
+
+const RefreshRate& RefreshRateConfigs::getCurrentRefreshRateByPolicyLocked() const {
     if (std::find(mAvailableRefreshRates.begin(), mAvailableRefreshRates.end(),
                   mCurrentRefreshRate) != mAvailableRefreshRates.end()) {
         return *mCurrentRefreshRate;
