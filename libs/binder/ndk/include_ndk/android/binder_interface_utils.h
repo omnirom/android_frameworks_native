@@ -86,9 +86,15 @@ class SharedRefBase {
         return t->template ref<T>();
     }
 
+    static void operator delete(void* p) { std::free(p); }
+
    private:
     std::once_flag mFlagThis;
     std::weak_ptr<SharedRefBase> mThis;
+
+    // Use 'SharedRefBase::make<T>(...)' to make. SharedRefBase has implicit
+    // ownership. Making this operator private to avoid double-ownership.
+    static void* operator new(size_t s) { return std::malloc(s); }
 };
 
 /**
@@ -232,7 +238,9 @@ AIBinder_Class* ICInterface::defineClass(const char* interfaceDescriptor,
     // ourselves. The defaults are harmless.
     AIBinder_Class_setOnDump(clazz, ICInterfaceData::onDump);
 #ifdef HAS_BINDER_SHELL_COMMAND
-    AIBinder_Class_setHandleShellCommand(clazz, ICInterfaceData::handleShellCommand);
+    if (AIBinder_Class_setHandleShellCommand != nullptr) {
+        AIBinder_Class_setHandleShellCommand(clazz, ICInterfaceData::handleShellCommand);
+    }
 #endif
     return clazz;
 }

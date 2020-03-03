@@ -493,6 +493,8 @@ private:
     status_t notifyPowerHint(int32_t hintId) override;
     status_t setGlobalShadowSettings(const half4& ambientColor, const half4& spotColor,
                                      float lightPosY, float lightPosZ, float lightRadius) override;
+    status_t setFrameRate(const sp<IGraphicBufferProducer>& surface, float frameRate,
+                          int8_t compatibility) override;
     /* ------------------------------------------------------------------------
      * DeathRecipient interface
      */
@@ -757,6 +759,8 @@ private:
         }
         return nullptr;
     }
+
+    std::optional<DeviceProductInfo> getDeviceProductInfoLocked(const DisplayDevice&) const;
 
     // mark a region of a layer stack dirty. this updates the dirty
     // region of all screens presenting this layer stack.
@@ -1039,7 +1043,10 @@ private:
     const std::shared_ptr<TimeStats> mTimeStats;
     const std::unique_ptr<FrameTracer> mFrameTracer;
     bool mUseHwcVirtualDisplays = false;
+    // Disable blurs, for debugging
     bool mEnableBlurs = false;
+    // If blurs are considered expensive and should require high GPU frequency.
+    bool mBlursAreExpensive = false;
     std::atomic<uint32_t> mFrameMissedCount = 0;
     std::atomic<uint32_t> mHwcFrameMissedCount = 0;
     std::atomic<uint32_t> mGpuFrameMissedCount = 0;
@@ -1152,6 +1159,15 @@ private:
     std::unique_ptr<scheduler::RefreshRateStats> mRefreshRateStats;
 
     std::atomic<nsecs_t> mExpectedPresentTime = 0;
+
+    /* ------------------------------------------------------------------------
+     * Generic Layer Metadata
+     */
+    const std::unordered_map<std::string, uint32_t>& getGenericLayerMetadataKeyMap() const;
+
+    /* ------------------------------------------------------------------------
+     * Misc
+     */
 
     std::mutex mActiveConfigLock;
     // This bit is set once we start setting the config. We read from this bit during the
