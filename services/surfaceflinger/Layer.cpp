@@ -677,6 +677,7 @@ void Layer::prepareClearClientComposition(LayerFE::LayerSettings& layerSettings,
     layerSettings.source.buffer.buffer = nullptr;
     layerSettings.source.solidColor = half3(0.0, 0.0, 0.0);
     layerSettings.disableBlending = true;
+    layerSettings.bufferId = 0;
     layerSettings.frameNumber = 0;
 
     // If layer is blacked out, force alpha to 1 so that we draw a black color layer.
@@ -718,9 +719,14 @@ std::vector<compositionengine::LayerFE::LayerSettings> Layer::prepareClientCompo
 Hwc2::IComposerClient::Composition Layer::getCompositionType(
         const sp<const DisplayDevice>& display) const {
     const auto outputLayer = findOutputLayerForDisplay(display);
-    LOG_FATAL_IF(!outputLayer);
-    return outputLayer->getState().hwc ? (*outputLayer->getState().hwc).hwcCompositionType
-                                       : Hwc2::IComposerClient::Composition::CLIENT;
+    if (outputLayer == nullptr) {
+        return Hwc2::IComposerClient::Composition::INVALID;
+    }
+    if (outputLayer->getState().hwc) {
+        return (*outputLayer->getState().hwc).hwcCompositionType;
+    } else {
+        return Hwc2::IComposerClient::Composition::CLIENT;
+    }
 }
 
 bool Layer::getClearClientTarget(const sp<const DisplayDevice>& display) const {
@@ -2051,13 +2057,20 @@ void Layer::setInputInfo(const InputWindowInfo& info) {
     setTransactionFlags(eTransactionNeeded);
 }
 
-LayerProto* Layer::writeToProto(LayersProto& layersProto, uint32_t traceFlags) const {
+LayerProto* Layer::writeToProto(LayersProto& layersProto, uint32_t traceFlags,
+                                const sp<const DisplayDevice>& device) const {
     LayerProto* layerProto = layersProto.add_layers();
     writeToProtoDrawingState(layerProto, traceFlags);
     writeToProtoCommonState(layerProto, LayerVector::StateSet::Drawing, traceFlags);
 
+    // Only populate for the primary display.
+    if (device) {
+        const Hwc2::IComposerClient::Composition compositionType = getCompositionType(device);
+        layerProto->set_hwc_composition_type(static_cast<HwcCompositionType>(compositionType));
+    }
+
     for (const sp<Layer>& layer : mDrawingChildren) {
-        layer->writeToProto(layersProto, traceFlags);
+        layer->writeToProto(layersProto, traceFlags, device);
     }
 
     return layerProto;
