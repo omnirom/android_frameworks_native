@@ -575,6 +575,7 @@ status_t BufferStateLayer::updateActiveBuffer() {
         return BAD_VALUE;
     }
 
+    Mutex::Autolock lock(mActiveBufferLock);
     mActiveBuffer = s.buffer;
     mActiveBufferFence = s.acquireFence;
     auto& layerCompositionState = getCompositionLayer()->editState().frontEnd;
