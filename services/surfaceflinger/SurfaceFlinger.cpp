@@ -367,7 +367,7 @@ SurfaceFlinger::SurfaceFlinger(Factory& factory) : SurfaceFlinger(factory, SkipI
     property_get("ro.sf.blurs_are_expensive", value, "0");
     mBlursAreExpensive = atoi(value);
 
-    const size_t defaultListSize = MAX_LAYERS;
+    const size_t defaultListSize = ISurfaceComposer::MAX_LAYERS;
     auto listSize = property_get_int32("debug.sf.max_igbp_list_size", int32_t(defaultListSize));
     mMaxGraphicBufferProducerListSize = (listSize > 0) ? size_t(listSize) : defaultListSize;
 
@@ -903,7 +903,7 @@ int SurfaceFlinger::getActiveConfig(const sp<IBinder>& displayToken) {
 
 void SurfaceFlinger::setDesiredActiveConfig(const ActiveConfigInfo& info) {
     ATRACE_CALL();
-    auto refreshRate = mRefreshRateConfigs->getRefreshRateFromConfigId(info.configId);
+    auto& refreshRate = mRefreshRateConfigs->getRefreshRateFromConfigId(info.configId);
     ALOGV("setDesiredActiveConfig(%s)", refreshRate.name.c_str());
 
     std::lock_guard<std::mutex> lock(mActiveConfigLock);
@@ -984,7 +984,7 @@ void SurfaceFlinger::setActiveConfigInternal() {
     mRefreshRateStats->setConfigMode(mUpcomingActiveConfig.configId);
     display->setActiveConfig(mUpcomingActiveConfig.configId);
 
-    auto refreshRate =
+    auto& refreshRate =
             mRefreshRateConfigs->getRefreshRateFromConfigId(mUpcomingActiveConfig.configId);
     mPhaseConfiguration->setRefreshRateFps(refreshRate.fps);
     mVSyncModulator->setPhaseOffsets(mPhaseConfiguration->getCurrentOffsets());
@@ -1004,7 +1004,7 @@ void SurfaceFlinger::desiredActiveConfigChangeDone() {
     mDesiredActiveConfig.event = Scheduler::ConfigEvent::None;
     mDesiredActiveConfigChanged = false;
 
-    auto const refreshRate =
+    const auto& refreshRate =
             mRefreshRateConfigs->getRefreshRateFromConfigId(mDesiredActiveConfig.configId);
     mScheduler->resyncToHardwareVsync(true, refreshRate.vsyncPeriod);
     mPhaseConfiguration->setRefreshRateFps(refreshRate.fps);
@@ -1037,7 +1037,7 @@ bool SurfaceFlinger::performSetActiveConfig() {
         desiredActiveConfig = mDesiredActiveConfig;
     }
 
-    auto refreshRate =
+    auto& refreshRate =
             mRefreshRateConfigs->getRefreshRateFromConfigId(desiredActiveConfig.configId);
     ALOGV("performSetActiveConfig changing active config to %d(%s)", refreshRate.configId.value(),
           refreshRate.name.c_str());
@@ -1074,7 +1074,9 @@ bool SurfaceFlinger::performSetActiveConfig() {
                                                            mUpcomingActiveConfig.configId.value(),
                                                            constraints, &outTimeline);
     if (status != NO_ERROR) {
-        LOG_ALWAYS_FATAL("setActiveConfigWithConstraints failed: %d", status);
+        // setActiveConfigWithConstraints may fail if a hotplug event is just about
+        // to be sent. We just log the error in this case.
+        ALOGW("setActiveConfigWithConstraints failed: %d", status);
         return false;
     }
 
@@ -2777,6 +2779,19 @@ void SurfaceFlinger::updateInputFlinger() {
 void SurfaceFlinger::updateInputWindowInfo() {
     std::vector<InputWindowInfo> inputHandles;
 
+    // We use a simple caching algorithm here. mInputDirty begins as true,
+    // after we call setInputWindows we set it to false, so
+    // in the future we wont call it again.. We set input dirty to true again
+    // when any layer that hasInput() has a transaction performed on it
+    // or when any parent or relative parent of such a layer has a transaction
+    // performed on it. Not all of these transactions will really result in
+    // input changes but all input changes will spring from these transactions
+    // so the cache is safe but not optimal. It seems like it might be annoyingly
+    // costly to cache and comapre the actual InputWindowHandle vector though.
+    if (!mInputDirty) {
+        return;
+    }
+
     mDrawingState.traverseInReverseZOrder([&](Layer* layer) {
         if (layer->hasInput()) {
             // When calculating the screen bounds we ignore the transparent region since it may
@@ -2788,6 +2803,8 @@ void SurfaceFlinger::updateInputWindowInfo() {
     mInputFlinger->setInputWindows(inputHandles,
                                    mInputWindowCommands.syncInputWindows ? mSetInputWindowsListener
                                                                          : nullptr);
+
+    mInputDirty = false;
 }
 
 void SurfaceFlinger::commitInputWindowCommands() {
@@ -3066,9 +3083,9 @@ status_t SurfaceFlinger::addClientLayer(const sp<Client>& client, const sp<IBind
             parent = parentLayer;
         }
 
-        if (mNumLayers >= MAX_LAYERS) {
+        if (mNumLayers >= ISurfaceComposer::MAX_LAYERS) {
             ALOGE("AddClientLayer failed, mNumLayers (%zu) >= MAX_LAYERS (%zu)", mNumLayers.load(),
-                  MAX_LAYERS);
+                  ISurfaceComposer::MAX_LAYERS);
             return NO_MEMORY;
         }
 
@@ -3728,10 +3745,6 @@ uint32_t SurfaceFlinger::setClientStateLocked(
 
 uint32_t SurfaceFlinger::addInputWindowCommands(const InputWindowCommands& inputWindowCommands) {
     uint32_t flags = 0;
-    if (!inputWindowCommands.transferTouchFocusCommands.empty()) {
-        flags |= eTraversalNeeded;
-    }
-
     if (inputWindowCommands.syncInputWindows) {
         flags |= eTraversalNeeded;
     }
@@ -5136,7 +5149,7 @@ status_t SurfaceFlinger::onTransact(uint32_t code, const Parcel& data, Parcel* r
                 n = data.readInt32();
                 if (n == 1 && !mRefreshRateOverlay) {
                     mRefreshRateOverlay = std::make_unique<RefreshRateOverlay>(*this);
-                    auto current = mRefreshRateConfigs->getCurrentRefreshRate();
+                    auto& current = mRefreshRateConfigs->getCurrentRefreshRate();
                     mRefreshRateOverlay->changeRefreshRate(current);
                 } else if (n == 0) {
                     mRefreshRateOverlay.reset();
@@ -5192,7 +5205,7 @@ void SurfaceFlinger::kernelTimerChanged(bool expired) {
         if (mRefreshRateOverlay) {
             const auto kernelTimerEnabled = property_get_bool(KERNEL_IDLE_TIMER_PROP, false);
             const bool timerExpired = kernelTimerEnabled && expired;
-            const auto& current = [this]() {
+            const auto& current = [this]() -> const RefreshRate& {
                 std::lock_guard<std::mutex> lock(mActiveConfigLock);
                 if (mDesiredActiveConfigChanged) {
                     return mRefreshRateConfigs->getRefreshRateFromConfigId(
@@ -5872,7 +5885,7 @@ status_t SurfaceFlinger::setDesiredDisplayConfigSpecsInternal(const sp<DisplayDe
                                 display->getActiveConfig(), vsyncPeriod);
 
     auto configId = mScheduler->getPreferredConfigId();
-    auto preferredRefreshRate = configId
+    auto& preferredRefreshRate = configId
             ? mRefreshRateConfigs->getRefreshRateFromConfigId(*configId)
             // NOTE: Choose the default config ID, if Scheduler doesn't have one in mind.
             : mRefreshRateConfigs->getRefreshRateFromConfigId(defaultConfig);

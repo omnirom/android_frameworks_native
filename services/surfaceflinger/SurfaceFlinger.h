@@ -351,7 +351,6 @@ private:
     // every half hour.
     enum { LOG_FRAME_STATS_PERIOD =  30*60*60 };
 
-    static const size_t MAX_LAYERS = 4096;
     static const int MAX_TRACING_MEMORY = 100 * 1024 * 1024; // 100MB
 
 protected:
@@ -976,7 +975,7 @@ private:
 
     // Can't be unordered_set because wp<> isn't hashable
     std::set<wp<IBinder>> mGraphicBufferProducerList;
-    size_t mMaxGraphicBufferProducerListSize = MAX_LAYERS;
+    size_t mMaxGraphicBufferProducerListSize = ISurfaceComposer::MAX_LAYERS;
 
     // protected by mStateLock (but we could use another lock)
     bool mLayersRemoved = false;
@@ -1236,6 +1235,11 @@ private:
     // janky frames there are.
     nsecs_t mMissedFrameJankStart = 0;
     int32_t mMissedFrameJankCount = 0;
+
+    // See updateInputWindowInfo() for details
+    std::atomic<bool> mInputDirty = true;
+    void dirtyInput() { mInputDirty = true; }
+    bool inputDirty() { return mInputDirty; }
 };
 
 } // namespace android
