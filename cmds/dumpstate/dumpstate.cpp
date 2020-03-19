@@ -1477,6 +1477,8 @@ static Dumpstate::RunStatus dumpstate() {
         ds.AddDir(WMTRACE_DATA_DIR, false);
     }
 
+    ds.AddDir(SNAPSHOTCTL_LOG_DIR, false);
+
     RUN_SLOW_FUNCTION_WITH_CONSENT_CHECK(ds.DumpstateBoard);
 
     /* Migrate the ril_dumpstate to a device specific dumpstate? */
@@ -1605,7 +1607,6 @@ Dumpstate::RunStatus Dumpstate::DumpstateDefaultAfterCritical() {
     ds.AddDir(RECOVERY_DATA_DIR, true);
     ds.AddDir(UPDATE_ENGINE_LOG_DIR, true);
     ds.AddDir(LOGPERSIST_DATA_DIR, false);
-    ds.AddDir(SNAPSHOTCTL_LOG_DIR, false);
     if (!PropertiesHelper::IsUserBuild()) {
         ds.AddDir(PROFILE_DATA_DIR_CUR, true);
         ds.AddDir(PROFILE_DATA_DIR_REF, true);
@@ -1727,6 +1728,8 @@ static void DumpstateTelephonyOnly(const std::string& calling_package) {
     RunDumpsys("DUMPSYS", {"wifi"}, CommandOptions::WithTimeout(90).Build(), SEC_TO_MSEC(10));
     RunDumpsys("DUMPSYS", {"netpolicy"}, CommandOptions::WithTimeout(90).Build(), SEC_TO_MSEC(10));
     RunDumpsys("DUMPSYS", {"network_management"}, CommandOptions::WithTimeout(90).Build(),
+               SEC_TO_MSEC(10));
+    RunDumpsys("DUMPSYS", {"telephony.registry"}, CommandOptions::WithTimeout(90).Build(),
                SEC_TO_MSEC(10));
     if (include_sensitive_info) {
         // Contains raw IP addresses, omit from reports on user builds.

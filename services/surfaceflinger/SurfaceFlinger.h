@@ -42,6 +42,7 @@
 #include <system/graphics.h>
 #include <ui/FenceTime.h>
 #include <ui/PixelFormat.h>
+#include <ui/Size.h>
 #include <utils/Errors.h>
 #include <utils/KeyedVector.h>
 #include <utils/RefBase.h>
@@ -224,6 +225,11 @@ public:
     // Controls the number of buffers SurfaceFlinger will allocate for use in
     // FramebufferSurface
     static int64_t maxFrameBufferAcquiredBuffers;
+
+    // Controls the maximum width and height in pixels that the graphics pipeline can support for
+    // GPU fallback composition. For example, 8k devices with 4k GPUs, or 4k devices with 2k GPUs.
+    static uint32_t maxGraphicsWidth;
+    static uint32_t maxGraphicsHeight;
 
     // Indicate if a device has wide color gamut display. This is typically
     // found on devices with wide color gamut (e.g. Display-P3) display.
@@ -814,9 +820,14 @@ private:
             const wp<IBinder>& displayToken,
             std::shared_ptr<compositionengine::Display> compositionDisplay,
             const DisplayDeviceState& state,
-            const sp<compositionengine::DisplaySurface>& dispSurface,
+            const sp<compositionengine::DisplaySurface>& displaySurface,
             const sp<IGraphicBufferProducer>& producer);
     void processDisplayChangesLocked();
+    void processDisplayAdded(const wp<IBinder>& displayToken, const DisplayDeviceState& state);
+    void processDisplayRemoved(const wp<IBinder>& displayToken);
+    void processDisplayChanged(const wp<IBinder>& displayToken,
+                               const DisplayDeviceState& currentState,
+                               const DisplayDeviceState& drawingState);
     void processDisplayHotplugEventsLocked();
 
     void dispatchDisplayHotplugEvent(PhysicalDisplayId displayId, bool connected);
@@ -917,7 +928,8 @@ private:
     void dumpDisplayIdentificationData(std::string& result) const;
     void dumpRawDisplayIdentificationData(const DumpArgs&, std::string& result) const;
     void dumpWideColorInfo(std::string& result) const;
-    LayersProto dumpDrawingStateProto(uint32_t traceFlags = SurfaceTracing::TRACE_ALL) const;
+    LayersProto dumpDrawingStateProto(uint32_t traceFlags = SurfaceTracing::TRACE_ALL,
+                                      const sp<const DisplayDevice>& displayDevice = nullptr) const;
     void dumpOffscreenLayersProto(LayersProto& layersProto,
                                   uint32_t traceFlags = SurfaceTracing::TRACE_ALL) const;
     // Dumps state from HW Composer
@@ -1123,6 +1135,10 @@ private:
 
     // to linkToDeath
     sp<IBinder> mWindowManager;
+    // We want to avoid multiple calls to BOOT_FINISHED as they come in on
+    // different threads without a lock and could trigger unsynchronized writes to
+    // to mWindowManager or mInputFlinger
+    std::atomic<bool> mBootFinished = false;
 
     std::unique_ptr<dvr::VrFlinger> mVrFlinger;
     std::atomic<bool> mVrFlingerRequestsDisplay = false;
