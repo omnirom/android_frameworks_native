@@ -36,6 +36,19 @@ bool fpsEqualsWithMargin(float fpsA, float fpsB) {
     return std::abs(fpsA - fpsB) <= MARGIN;
 }
 
+std::vector<float> getRefreshRatesFromConfigs(
+        const android::scheduler::RefreshRateConfigs& refreshRateConfigs) {
+    const auto& allRefreshRates = refreshRateConfigs.getAllRefreshRates();
+    std::vector<float> refreshRates;
+    refreshRates.reserve(allRefreshRates.size());
+
+    for (const auto& [ignored, refreshRate] : allRefreshRates) {
+        refreshRates.emplace_back(refreshRate->fps);
+    }
+
+    return refreshRates;
+}
+
 } // namespace
 
 namespace android::scheduler {
@@ -45,14 +58,21 @@ PhaseConfiguration::~PhaseConfiguration() = default;
 namespace impl {
 
 PhaseOffsets::PhaseOffsets(const scheduler::RefreshRateConfigs& refreshRateConfigs)
-      : // Below defines the threshold when an offset is considered to be negative, i.e. targeting
-        // for the N+2 vsync instead of N+1. This means that:
-        // For offset < threshold, SF wake up (vsync_duration - offset) before HW vsync.
-        // For offset >= threshold, SF wake up (2 * vsync_duration - offset) before HW vsync.
-        mThresholdForNextVsync(getProperty("debug.sf.phase_offset_threshold_for_next_vsync_ns")
-                                       .value_or(std::numeric_limits<nsecs_t>::max())),
-        mOffsets(initializeOffsets(refreshRateConfigs)),
-        mRefreshRateFps(refreshRateConfigs.getCurrentRefreshRate().fps) {}
+      : PhaseOffsets(getRefreshRatesFromConfigs(refreshRateConfigs),
+                     refreshRateConfigs.getCurrentRefreshRate().fps,
+                     // Below defines the threshold when an offset is considered to be negative,
+                     // i.e. targeting for the N+2 vsync instead of N+1. This means that: For offset
+                     // < threshold, SF wake up (vsync_duration - offset) before HW vsync. For
+                     // offset >= threshold, SF wake up (2 * vsync_duration - offset) before HW
+                     // vsync.
+                     getProperty("debug.sf.phase_offset_threshold_for_next_vsync_ns")
+                             .value_or(std::numeric_limits<nsecs_t>::max())) {}
+
+PhaseOffsets::PhaseOffsets(const std::vector<float>& refreshRates, float currentFps,
+                           nsecs_t thresholdForNextVsync)
+      : mThresholdForNextVsync(thresholdForNextVsync),
+        mOffsets(initializeOffsets(refreshRates)),
+        mRefreshRateFps(currentFps) {}
 
 void PhaseOffsets::dump(std::string& result) const {
     const auto [early, earlyGl, late] = getCurrentOffsets();
@@ -67,12 +87,12 @@ void PhaseOffsets::dump(std::string& result) const {
 }
 
 std::unordered_map<float, PhaseOffsets::Offsets> PhaseOffsets::initializeOffsets(
-        const scheduler::RefreshRateConfigs& refreshRateConfigs) const {
+        const std::vector<float>& refreshRates) const {
     std::unordered_map<float, Offsets> offsets;
 
-    for (const auto& [ignored, refreshRate] : refreshRateConfigs.getAllRefreshRates()) {
-        float fps = refreshRate->fps;
-        offsets.emplace(fps, getPhaseOffsets(fps, refreshRate->vsyncPeriod));
+    for (const auto& refreshRate : refreshRates) {
+        offsets.emplace(refreshRate,
+                        getPhaseOffsets(refreshRate, static_cast<nsecs_t>(1e9f / refreshRate)));
     }
     return offsets;
 }
@@ -169,6 +189,8 @@ PhaseOffsets::Offsets PhaseOffsets::getOffsetsForRefreshRate(float fps) const {
         return iter->second;
     }
 
+    // Unknown refresh rate. This might happen if we get a hotplug event for an external display.
+    // In this case just construct the offset.
     ALOGW("Can't find offset for %.2f fps", fps);
     return getPhaseOffsets(fps, static_cast<nsecs_t>(1e9f / fps));
 }
@@ -241,19 +263,6 @@ PhaseDurations::Offsets PhaseDurations::constructOffsets(nsecs_t vsyncDuration) 
     };
 }
 
-static std::vector<float> getRefreshRatesFromConfigs(
-        const android::scheduler::RefreshRateConfigs& refreshRateConfigs) {
-    const auto& allRefreshRates = refreshRateConfigs.getAllRefreshRates();
-    std::vector<float> refreshRates;
-    refreshRates.reserve(allRefreshRates.size());
-
-    for (const auto& [ignored, refreshRate] : allRefreshRates) {
-        refreshRates.emplace_back(refreshRate->fps);
-    }
-
-    return refreshRates;
-}
-
 std::unordered_map<float, PhaseDurations::Offsets> PhaseDurations::initializeOffsets(
         const std::vector<float>& refreshRates) const {
     std::unordered_map<float, Offsets> offsets;
@@ -298,8 +307,7 @@ PhaseOffsets::Offsets PhaseDurations::getOffsetsForRefreshRate(float fps) const 
         return iter->second;
     }
 
-    // Unknown refresh rate. This might happen if we get a hotplug event for the default display.
-    // This happens only during tests and not during regular device operation.
+    // Unknown refresh rate. This might happen if we get a hotplug event for an external display.
     // In this case just construct the offset.
     ALOGW("Can't find offset for %.2f fps", fps);
     return constructOffsets(static_cast<nsecs_t>(1e9f / fps));
