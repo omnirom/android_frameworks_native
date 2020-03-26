@@ -468,6 +468,9 @@ public:
      */
     bool isSecure() const;
 
+    bool isSecureCamera() const;
+    bool isSecureDisplay() const;
+
     /*
      * isVisible - true if this layer is visible, false otherwise
      */
