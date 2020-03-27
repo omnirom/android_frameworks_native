@@ -34,6 +34,7 @@
 #include "TimeStats/TimeStats.h"
 
 #include "smomo_interface.h"
+#include "layer_extn_intf.h"
 
 namespace android {
 
@@ -517,6 +518,10 @@ void BufferQueueLayer::onFirstRef() {
 
     if (const auto display = mFlinger->getDefaultDisplayDeviceLocked()) {
         updateTransformHint(display);
+    }
+
+    if (mFlinger->mLayerExt) {
+        mLayerClass = mFlinger->mLayerExt->GetLayerClass(mName);
     }
 }
 

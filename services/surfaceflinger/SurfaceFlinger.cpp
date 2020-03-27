@@ -127,6 +127,7 @@
 
 #include "smomo_interface.h"
 #include "QtiGralloc.h"
+#include "layer_extn_intf.h"
 
 namespace android {
 
@@ -309,6 +310,45 @@ SmomoWrapper::~SmomoWrapper() {
 
     if (mSmoMoLibHandle) {
       dlclose(mSmoMoLibHandle);
+    }
+}
+
+bool LayerExtWrapper::init() {
+    mLayerExtLibHandle = dlopen(LAYER_EXTN_LIBRARY_NAME, RTLD_NOW);
+    if (!mLayerExtLibHandle) {
+        ALOGE("Unable to open layer ext lib: %s", dlerror());
+        return false;
+    }
+
+    mLayerExtCreateFunc =
+        reinterpret_cast<CreateLayerExtnFuncPtr>(dlsym(mLayerExtLibHandle,
+            CREATE_LAYER_EXTN_INTERFACE));
+    mLayerExtDestroyFunc =
+        reinterpret_cast<DestroyLayerExtnFuncPtr>(dlsym(mLayerExtLibHandle,
+            DESTROY_LAYER_EXTN_INTERFACE));
+
+    if (!mLayerExtCreateFunc || !mLayerExtDestroyFunc) {
+        ALOGE("Can't load layer ext symbols: %s", dlerror());
+        dlclose(mLayerExtLibHandle);
+        return false;
+    }
+
+    if (!mLayerExtCreateFunc(LAYER_EXTN_VERSION_TAG, &mInst)) {
+        ALOGE("Unable to create layer ext interface");
+        dlclose(mLayerExtLibHandle);
+        return false;
+    }
+
+    return true;
+}
+
+LayerExtWrapper::~LayerExtWrapper() {
+    if (mInst) {
+        mLayerExtDestroyFunc(mInst);
+    }
+
+    if (mLayerExtLibHandle) {
+      dlclose(mLayerExtLibHandle);
     }
 }
 
@@ -790,6 +830,12 @@ void SurfaceFlinger::init() {
         mSmoMo->SetDisplayRefreshRates(refreshRates);
 
         ALOGI("SmoMo is enabled");
+    }
+
+    char layerExtProp[PROPERTY_VALUE_MAX];
+    property_get("vendor.display.use_layer_ext", layerExtProp, "0");
+    if (atoi(layerExtProp) && mLayerExt.init()) {
+        ALOGI("Layer Extension is enabled");
     }
 
     ALOGV("Done initializing");

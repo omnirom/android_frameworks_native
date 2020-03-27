@@ -187,6 +187,9 @@ struct LayerFECompositionState {
     // The output-independent frame for the cursor
     Rect cursorFrame;
 
+    // layer classification
+    uint32_t layerClass;
+
     virtual ~LayerFECompositionState();
     bool isSecureDisplay{false};
     bool isSecureCamera{false};

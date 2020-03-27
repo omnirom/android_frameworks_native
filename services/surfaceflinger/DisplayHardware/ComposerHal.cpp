@@ -119,6 +119,16 @@ Error unwrapRet(Return<Error>& ret)
 
 namespace impl {
 
+void Composer::CommandWriter::setLayerType(uint32_t type)
+{
+    constexpr uint16_t kSetLayerTypeLength = 1;
+    beginCommand(static_cast<V2_1::IComposerClient::Command>(
+                         IQtiComposerClient::Command::SET_LAYER_TYPE),
+                 kSetLayerTypeLength);
+    write(type);
+    endCommand();
+}
+
 #if defined(USE_VR_COMPOSER) && USE_VR_COMPOSER
 Composer::CommandWriter::CommandWriter(uint32_t initialMaxSize)
     : CommandWriterBase(initialMaxSize) {}
@@ -894,6 +904,19 @@ Error Composer::setLayerInfo(Display display, Layer layer, uint32_t, uint32_t) {
     return Error::NONE;
 }
 #endif // defined(USE_VR_COMPOSER) && USE_VR_COMPOSER
+
+Error Composer::setLayerType(Display display, Layer layer, uint32_t type)
+{
+    if (mClient_2_4) {
+        if (sp<IQtiComposerClient> qClient = IQtiComposerClient::castFrom(mClient_2_4)) {
+            mWriter.selectDisplay(display);
+            mWriter.selectLayer(layer);
+            mWriter.setLayerType(type);
+        }
+    }
+
+    return Error::NONE;
+}
 
 Error Composer::execute()
 {

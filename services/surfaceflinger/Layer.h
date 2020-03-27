@@ -977,6 +977,8 @@ protected:
     FenceTimeline mAcquireTimeline;
     FenceTimeline mReleaseTimeline;
 
+    uint32_t mLayerClass{0};
+
     // main thread
     sp<NativeHandle> mSidebandStream;
     // False if the buffer and its contents have been previously used for GPU
