@@ -5855,6 +5855,8 @@ status_t SurfaceFlinger::setDesiredDisplayConfigSpecsInternal(const sp<DisplayDe
     Mutex::Autolock lock(mStateLock);
 
     if (!display->isPrimary()) {
+	return NO_ERROR;
+
         // TODO(b/144711714): For non-primary displays we should be able to set an active config
         // as well. For now, just call directly to setActiveConfigWithConstraints but ideally
         // it should go thru setDesiredActiveConfig, similar to primary display.
