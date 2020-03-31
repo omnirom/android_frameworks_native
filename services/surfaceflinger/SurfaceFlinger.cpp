@@ -6202,6 +6202,8 @@ status_t SurfaceFlinger::setDesiredDisplayConfigSpecsInternal(
     LOG_ALWAYS_FATAL_IF(!policy && !overridePolicy, "Can only clear the override policy");
 
     if (!display->isPrimary()) {
+	return NO_ERROR;
+
         // TODO(b/144711714): For non-primary displays we should be able to set an active config
         // as well. For now, just call directly to setActiveConfigWithConstraints but ideally
         // it should go thru setDesiredActiveConfig, similar to primary display.
