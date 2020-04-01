@@ -20,6 +20,7 @@
 
 //#define LOG_NDEBUG 0
 #define ATRACE_TAG ATRACE_TAG_GRAPHICS
+#define PERF_HINT_FPS_UPDATE 0x00001094
 
 #include "SurfaceFlinger.h"
 
@@ -401,7 +402,12 @@ void SurfaceFlinger::onFirstRef()
     mEventQueue->init(this);
 }
 
-SurfaceFlinger::~SurfaceFlinger() = default;
+SurfaceFlinger::~SurfaceFlinger() {
+    if (mPerfHintEnabled) {
+        dlclose(mPerfLibHandle);
+        mPerfLibHandle = nullptr;
+    }
+}
 
 void SurfaceFlinger::binderDied(const wp<IBinder>& /* who */)
 {
@@ -686,6 +692,21 @@ void SurfaceFlinger::init() {
         ALOGE("Run StartPropertySetThread failed!");
     }
 
+    mPerfLibHandle = dlopen("libqti-perfd-client_system.so", RTLD_NOW);
+    if (mPerfLibHandle) {
+        mPerfHintFunc = (int (*)(int, const char *, int, int))dlsym(mPerfLibHandle, "perf_hint");
+        mPerfLockReleaseFunc = (int (*)(int))dlsym(mPerfLibHandle, "perf_lock_rel");
+        if (mPerfHintFunc && mPerfLockReleaseFunc) {
+            mPerfHintEnabled = true;
+        } else {
+            ALOGE("Unable to open Perf Lib function handle!");
+            dlclose(mPerfLibHandle);
+            mPerfLibHandle = nullptr;
+        }
+    } else {
+        ALOGE("Unable to open Perf Lib: %s", dlerror());
+    }
+
     ALOGV("Done initializing");
 }
 
@@ -918,6 +939,16 @@ void SurfaceFlinger::setDesiredActiveConfig(const ActiveConfigInfo& info) {
     ATRACE_CALL();
     auto& refreshRate = mRefreshRateConfigs->getRefreshRateFromConfigId(info.configId);
     ALOGV("setDesiredActiveConfig(%s)", refreshRate.name.c_str());
+
+    if (mPerfHintEnabled) {
+        if (mPerfLockHandle > 0) {
+            mPerfLockReleaseFunc(mPerfLockHandle);
+        }
+
+        // Send Refresh Rate hint to Perf lib
+        int refreshRateValue = static_cast<int>(refreshRate.fps);
+        mPerfLockHandle = mPerfHintFunc(PERF_HINT_FPS_UPDATE, nullptr, INT_MAX, refreshRateValue);
+    }
 
     std::lock_guard<std::mutex> lock(mActiveConfigLock);
     if (mDesiredActiveConfigChanged) {

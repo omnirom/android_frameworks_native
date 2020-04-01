@@ -1258,6 +1258,13 @@ private:
     std::atomic<bool> mInputDirty = true;
     void dirtyInput() { mInputDirty = true; }
     bool inputDirty() { return mInputDirty; }
+
+    // Perf Hint members
+    int mPerfLockHandle = -1;
+    bool mPerfHintEnabled = false;
+    void *mPerfLibHandle = nullptr;
+    int (*mPerfLockReleaseFunc)(int handle) = nullptr;
+    int (*mPerfHintFunc)(int hintId, const char *package, int duration, int refreshRate) = nullptr;
 };
 
 } // namespace android
