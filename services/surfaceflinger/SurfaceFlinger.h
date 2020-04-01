@@ -1389,6 +1389,8 @@ private:
     bool (*mDolphinMonitor)(int number, nsecs_t vsyncPeriod) = nullptr;
     void (*mDolphinScaling)(int numIdle, int maxQueuedFrames) = nullptr;
     void (*mDolphinRefresh)() = nullptr;
+    void (*mDolphinDequeueBuffer)(const char *name) = nullptr;
+    void (*mDolphinQueueBuffer)(const char *name) = nullptr;
 
     FrameExtnIntf* mFrameExtn = nullptr;
     void *mFrameExtnLibHandle = nullptr;
