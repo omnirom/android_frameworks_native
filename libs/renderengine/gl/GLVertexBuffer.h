@@ -1,6 +1,6 @@
 /*
- * Copyright 2019 The Android Open Source Project
-
+ * Copyright 2020 The Android Open Source Project
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -16,24 +16,34 @@
 
 #pragma once
 
-#include <gmock/gmock.h>
+#include <cstdint>
 
-#include "DisplayHardware/PowerAdvisor.h"
+#include <EGL/egl.h>
+#include <EGL/eglext.h>
+#include <GLES2/gl2.h>
+
+struct ANativeWindowBuffer;
 
 namespace android {
-namespace Hwc2 {
-namespace mock {
+namespace renderengine {
+namespace gl {
 
-class PowerAdvisor : public android::Hwc2::PowerAdvisor {
+class GLESRenderEngine;
+
+class GLVertexBuffer {
 public:
-    PowerAdvisor();
-    ~PowerAdvisor() override;
+    explicit GLVertexBuffer();
+    ~GLVertexBuffer();
 
-    MOCK_METHOD0(onBootFinished, void());
-    MOCK_METHOD2(setExpensiveRenderingExpected, void(DisplayId displayId, bool expected));
-    MOCK_METHOD0(notifyDisplayUpdateImminent, void());
+    void allocateBuffers(const GLfloat data[], const GLuint size);
+    uint32_t getBufferName() const { return mBufferName; }
+    void bind() const;
+    void unbind() const;
+
+private:
+    uint32_t mBufferName;
 };
 
-} // namespace mock
-} // namespace Hwc2
+} // namespace gl
+} // namespace renderengine
 } // namespace android
