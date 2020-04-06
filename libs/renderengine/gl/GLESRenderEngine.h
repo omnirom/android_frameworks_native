@@ -178,7 +178,6 @@ private:
     EGLSurface mDummySurface;
     EGLContext mProtectedEGLContext;
     EGLSurface mProtectedDummySurface;
-    GLuint mProtectedTexName;
     GLint mMaxViewportDims[2];
     GLint mMaxTextureSize;
     GLuint mVpWidth;
@@ -261,8 +260,6 @@ private:
     friend class ImageManager;
     friend class GLFramebuffer;
     friend class BlurFilter;
-    friend class GaussianBlurFilter;
-    friend class KawaseBlurFilter;
     friend class GenericProgram;
     std::unique_ptr<FlushTracer> mFlushTracer;
     std::unique_ptr<ImageManager> mImageManager = std::make_unique<ImageManager>(this);

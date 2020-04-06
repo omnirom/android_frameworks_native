@@ -42,6 +42,7 @@
 #include <system/graphics.h>
 #include <ui/FenceTime.h>
 #include <ui/PixelFormat.h>
+#include <ui/Size.h>
 #include <utils/Errors.h>
 #include <utils/KeyedVector.h>
 #include <utils/RefBase.h>
@@ -225,6 +226,11 @@ public:
     // FramebufferSurface
     static int64_t maxFrameBufferAcquiredBuffers;
 
+    // Controls the maximum width and height in pixels that the graphics pipeline can support for
+    // GPU fallback composition. For example, 8k devices with 4k GPUs, or 4k devices with 2k GPUs.
+    static uint32_t maxGraphicsWidth;
+    static uint32_t maxGraphicsHeight;
+
     // Indicate if a device has wide color gamut display. This is typically
     // found on devices with wide color gamut (e.g. Display-P3) display.
     static bool hasWideColorDisplay;
@@ -351,7 +357,6 @@ private:
     // every half hour.
     enum { LOG_FRAME_STATS_PERIOD =  30*60*60 };
 
-    static const size_t MAX_LAYERS = 4096;
     static const int MAX_TRACING_MEMORY = 100 * 1024 * 1024; // 100MB
 
 protected:
@@ -524,6 +529,8 @@ private:
     void changeRefreshRate(const Scheduler::RefreshRate&, Scheduler::ConfigEvent) override;
     // force full composition on all displays without resetting the scheduler idle timer.
     void repaintEverythingForHWC() override;
+    // Called when kernel idle timer has expired. Used to update the refresh rate overlay.
+    void kernelTimerChanged(bool expired) override;
     /* ------------------------------------------------------------------------
      * Message handling
      */
@@ -810,11 +817,17 @@ private:
      * Display management
      */
     sp<DisplayDevice> setupNewDisplayDeviceInternal(
-            const wp<IBinder>& displayToken, const std::optional<DisplayId>& displayId,
+            const wp<IBinder>& displayToken,
+            std::shared_ptr<compositionengine::Display> compositionDisplay,
             const DisplayDeviceState& state,
-            const sp<compositionengine::DisplaySurface>& dispSurface,
+            const sp<compositionengine::DisplaySurface>& displaySurface,
             const sp<IGraphicBufferProducer>& producer);
     void processDisplayChangesLocked();
+    void processDisplayAdded(const wp<IBinder>& displayToken, const DisplayDeviceState& state);
+    void processDisplayRemoved(const wp<IBinder>& displayToken);
+    void processDisplayChanged(const wp<IBinder>& displayToken,
+                               const DisplayDeviceState& currentState,
+                               const DisplayDeviceState& drawingState);
     void processDisplayHotplugEventsLocked();
 
     void dispatchDisplayHotplugEvent(PhysicalDisplayId displayId, bool connected);
@@ -915,9 +928,12 @@ private:
     void dumpDisplayIdentificationData(std::string& result) const;
     void dumpRawDisplayIdentificationData(const DumpArgs&, std::string& result) const;
     void dumpWideColorInfo(std::string& result) const;
-    LayersProto dumpDrawingStateProto(uint32_t traceFlags = SurfaceTracing::TRACE_ALL) const;
+    LayersProto dumpDrawingStateProto(uint32_t traceFlags = SurfaceTracing::TRACE_ALL,
+                                      const sp<const DisplayDevice>& displayDevice = nullptr) const;
     void dumpOffscreenLayersProto(LayersProto& layersProto,
                                   uint32_t traceFlags = SurfaceTracing::TRACE_ALL) const;
+    // Dumps state from HW Composer
+    void dumpHwc(std::string& result) const;
     LayersProto dumpProtoFromMainThread(uint32_t traceFlags = SurfaceTracing::TRACE_ALL)
             EXCLUDES(mStateLock);
     void dumpOffscreenLayers(std::string& result) EXCLUDES(mStateLock);
@@ -971,7 +987,7 @@ private:
 
     // Can't be unordered_set because wp<> isn't hashable
     std::set<wp<IBinder>> mGraphicBufferProducerList;
-    size_t mMaxGraphicBufferProducerListSize = MAX_LAYERS;
+    size_t mMaxGraphicBufferProducerListSize = ISurfaceComposer::MAX_LAYERS;
 
     // protected by mStateLock (but we could use another lock)
     bool mLayersRemoved = false;
@@ -982,6 +998,7 @@ private:
     // constant members (no synchronization needed for access)
     const nsecs_t mBootTime = systemTime();
     bool mGpuToCpuSupported = false;
+    bool mIsUserBuild = true;
 
     // Can only accessed from the main thread, these members
     // don't need synchronization
@@ -1118,6 +1135,10 @@ private:
 
     // to linkToDeath
     sp<IBinder> mWindowManager;
+    // We want to avoid multiple calls to BOOT_FINISHED as they come in on
+    // different threads without a lock and could trigger unsynchronized writes to
+    // to mWindowManager or mInputFlinger
+    std::atomic<bool> mBootFinished = false;
 
     std::unique_ptr<dvr::VrFlinger> mVrFlinger;
     std::atomic<bool> mVrFlingerRequestsDisplay = false;
@@ -1225,6 +1246,16 @@ private:
     // Flags to capture the state of Vsync in HWC
     HWC2::Vsync mHWCVsyncState = HWC2::Vsync::Disable;
     HWC2::Vsync mHWCVsyncPendingState = HWC2::Vsync::Disable;
+
+    // Fields tracking the current jank event: when it started and how many
+    // janky frames there are.
+    nsecs_t mMissedFrameJankStart = 0;
+    int32_t mMissedFrameJankCount = 0;
+
+    // See updateInputWindowInfo() for details
+    std::atomic<bool> mInputDirty = true;
+    void dirtyInput() { mInputDirty = true; }
+    bool inputDirty() { return mInputDirty; }
 };
 
 } // namespace android

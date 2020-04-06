@@ -506,7 +506,8 @@ public:
     bool isRemovedFromCurrentState() const;
 
     LayerProto* writeToProto(LayersProto& layersProto,
-                             uint32_t traceFlags = SurfaceTracing::TRACE_ALL) const;
+                             uint32_t traceFlags = SurfaceTracing::TRACE_ALL,
+                             const sp<const DisplayDevice>& device = nullptr) const;
 
     // Write states that are modified by the main thread. This includes drawing
     // state as well as buffer data. This should be called in the main or tracing
@@ -995,6 +996,10 @@ protected:
 
     // Window types from WindowManager.LayoutParams
     const int mWindowType;
+
+    // Called when mDrawingState has changed. If we or one of our children/relatives hasInput()
+    // then we will dirty the setInputWindows cache.
+    bool maybeDirtyInput();
 
 private:
     /**

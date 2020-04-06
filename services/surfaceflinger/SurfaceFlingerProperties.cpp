@@ -70,6 +70,22 @@ int64_t max_frame_buffer_acquired_buffers(int64_t defaultValue) {
             defaultValue);
 }
 
+int32_t max_graphics_width(int32_t defaultValue) {
+    auto temp = SurfaceFlingerProperties::max_graphics_width();
+    if (temp.has_value()) {
+        return *temp;
+    }
+    return defaultValue;
+}
+
+int32_t max_graphics_height(int32_t defaultValue) {
+    auto temp = SurfaceFlingerProperties::max_graphics_height();
+    if (temp.has_value()) {
+        return *temp;
+    }
+    return defaultValue;
+}
+
 bool has_wide_color_display(bool defaultValue) {
     auto temp = SurfaceFlingerProperties::has_wide_color_display();
     if (temp.has_value()) {
@@ -299,6 +315,14 @@ bool support_kernel_idle_timer(bool defaultValue) {
 
 bool use_frame_rate_api(bool defaultValue) {
     auto temp = SurfaceFlingerProperties::use_frame_rate_api();
+    if (temp.has_value()) {
+        return *temp;
+    }
+    return defaultValue;
+}
+
+int32_t display_update_imminent_timeout_ms(int32_t defaultValue) {
+    auto temp = SurfaceFlingerProperties::display_update_imminent_timeout_ms();
     if (temp.has_value()) {
         return *temp;
     }

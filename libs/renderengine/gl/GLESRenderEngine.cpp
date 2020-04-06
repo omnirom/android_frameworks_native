@@ -50,8 +50,6 @@
 #include "Program.h"
 #include "ProgramCache.h"
 #include "filters/BlurFilter.h"
-#include "filters/GaussianBlurFilter.h"
-#include "filters/KawaseBlurFilter.h"
 
 extern "C" EGLAPI const char* eglQueryStringImplementationANDROID(EGLDisplay dpy, EGLint name);
 
@@ -383,15 +381,6 @@ GLESRenderEngine::GLESRenderEngine(const RenderEngineCreationArgs& args, EGLDisp
         LOG_ALWAYS_FATAL_IF(!success, "can't make default context current");
     }
 
-    const uint16_t protTexData[] = {0};
-    glGenTextures(1, &mProtectedTexName);
-    glBindTexture(GL_TEXTURE_2D, mProtectedTexName);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, 1, 1, 0, GL_RGB, GL_UNSIGNED_SHORT_5_6_5, protTexData);
-
     // mColorBlindnessCorrection = M;
 
     if (mUseColorManagement) {
@@ -430,17 +419,12 @@ GLESRenderEngine::GLESRenderEngine(const RenderEngineCreationArgs& args, EGLDisp
     }
 
     if (args.supportsBackgroundBlur) {
-        char isGaussian[PROPERTY_VALUE_MAX];
-        property_get("debug.sf.gaussianBlur", isGaussian, "0");
-        if (atoi(isGaussian)) {
-            mBlurFilter = new GaussianBlurFilter(*this);
-        } else {
-            mBlurFilter = new KawaseBlurFilter(*this);
-        }
+        mBlurFilter = new BlurFilter(*this);
         checkErrors("BlurFilter creation");
     }
 
     mImageManager = std::make_unique<ImageManager>(this);
+    mImageManager->initThread();
     mDrawingBuffer = createFramebuffer();
 }
 
@@ -973,9 +957,13 @@ status_t GLESRenderEngine::drawLayers(const DisplaySettings& display,
         return NO_ERROR;
     }
 
-    if (bufferFence.get() >= 0 && !waitFence(std::move(bufferFence))) {
-        ATRACE_NAME("Waiting before draw");
-        sync_wait(bufferFence.get(), -1);
+    if (bufferFence.get() >= 0) {
+        // Duplicate the fence for passing to waitFence.
+        base::unique_fd bufferFenceDup(dup(bufferFence.get()));
+        if (bufferFenceDup < 0 || !waitFence(std::move(bufferFenceDup))) {
+            ATRACE_NAME("Waiting before draw");
+            sync_wait(bufferFence.get(), -1);
+        }
     }
 
     if (buffer == nullptr) {

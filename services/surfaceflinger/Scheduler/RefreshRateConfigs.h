@@ -59,6 +59,8 @@ public:
                 configGroup(configGroup),
                 name(std::move(name)),
                 fps(fps) {}
+
+        RefreshRate(const RefreshRate&) = delete;
         // This config ID corresponds to the position of the config in the vector that is stored
         // on the device.
         const HwcConfigIndexType configId;
@@ -85,7 +87,8 @@ public:
         bool operator==(const RefreshRate& other) const { return !(*this != other); }
     };
 
-    using AllRefreshRatesMapType = std::unordered_map<HwcConfigIndexType, const RefreshRate>;
+    using AllRefreshRatesMapType =
+            std::unordered_map<HwcConfigIndexType, std::unique_ptr<const RefreshRate>>;
 
     // Sets the current policy to choose refresh rates. Returns NO_ERROR if the requested policy is
     // valid, or a negative error value otherwise. policyChanged, if non-null, will be set to true
@@ -134,9 +137,11 @@ public:
 
     // Returns the refresh rate that fits best to the given layers. This function also gets a
     // boolean flag that indicates whether user touched the screen recently to be factored in when
-    // choosing the refresh rate.
+    // choosing the refresh rate and returns whether the refresh rate was chosen as a result of
+    // a touch event.
     const RefreshRate& getRefreshRateForContentV2(const std::vector<LayerRequirement>& layers,
-                                                  bool touchActive) const EXCLUDES(mLock);
+                                                  bool touchActive, bool* touchConsidered) const
+            EXCLUDES(mLock);
 
     // Returns all the refresh rates supported by the device. This won't change at runtime.
     const AllRefreshRatesMapType& getAllRefreshRates() const EXCLUDES(mLock);
@@ -163,7 +168,7 @@ public:
     // Returns the refresh rate that corresponds to a HwcConfigIndexType. This won't change at
     // runtime.
     const RefreshRate& getRefreshRateFromConfigId(HwcConfigIndexType configId) const {
-        return mRefreshRates.at(configId);
+        return *mRefreshRates.at(configId);
     };
 
     // Stores the current configId the device operates at
@@ -198,6 +203,10 @@ private:
     // Returns number of display frames and remainder when dividing the layer refresh period by
     // display refresh period.
     std::pair<nsecs_t, nsecs_t> getDisplayFrames(nsecs_t layerPeriod, nsecs_t displayPeriod) const;
+
+    // Returns the current refresh rate, if allowed. Otherwise the default that is allowed by
+    // the policy.
+    const RefreshRate& getCurrentRefreshRateByPolicyLocked() const REQUIRES(mLock);
 
     // The list of refresh rates, indexed by display config ID. This must not change after this
     // object is initialized.

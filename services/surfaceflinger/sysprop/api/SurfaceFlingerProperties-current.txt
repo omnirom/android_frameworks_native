@@ -36,6 +36,11 @@ props {
     prop_name: "ro.surface_flinger.display_primary_white"
   }
   prop {
+    api_name: "display_update_imminent_timeout_ms"
+    type: Integer
+    prop_name: "ro.surface_flinger.display_update_imminent_timeout_ms"
+  }
+  prop {
     api_name: "enable_protected_contents"
     prop_name: "ro.surface_flinger.protected_contents"
   }
@@ -55,6 +60,16 @@ props {
     api_name: "max_frame_buffer_acquired_buffers"
     type: Long
     prop_name: "ro.surface_flinger.max_frame_buffer_acquired_buffers"
+  }
+  prop {
+    api_name: "max_graphics_height"
+    type: Integer
+    prop_name: "ro.surface_flinger.max_graphics_height"
+  }
+  prop {
+    api_name: "max_graphics_width"
+    type: Integer
+    prop_name: "ro.surface_flinger.max_graphics_width"
   }
   prop {
     api_name: "max_virtual_display_dimension"

@@ -346,8 +346,6 @@ status_t BufferQueueLayer::updateActiveBuffer() {
     mPreviousBufferId = getCurrentBufferId();
     mBufferInfo.mBuffer =
             mConsumer->getCurrentBuffer(&mBufferInfo.mBufferSlot, &mBufferInfo.mFence);
-    auto* layerCompositionState = editCompositionState();
-    layerCompositionState->buffer = mBufferInfo.mBuffer;
 
     if (mBufferInfo.mBuffer == nullptr) {
         // this can only happen if the very first buffer was rejected.
@@ -441,7 +439,7 @@ void BufferQueueLayer::onFrameAvailable(const BufferItem& item) {
         mQueueItemCondition.broadcast();
     }
 
-    mFlinger->mInterceptor->saveBufferUpdate(this, item.mGraphicBuffer->getWidth(),
+    mFlinger->mInterceptor->saveBufferUpdate(layerId, item.mGraphicBuffer->getWidth(),
                                              item.mGraphicBuffer->getHeight(), item.mFrameNumber);
 
     mFlinger->signalLayerUpdate();
@@ -564,8 +562,6 @@ void BufferQueueLayer::gatherBufferInfo() {
     mBufferInfo.mApi = mConsumer->getCurrentApi();
     mBufferInfo.mPixelFormat = mFormat;
     mBufferInfo.mTransformToDisplayInverse = mConsumer->getTransformToDisplayInverse();
-    float latchedFrameRate;
-    mConsumer->getFrameRate(&latchedFrameRate);
 }
 
 sp<Layer> BufferQueueLayer::createClone() {

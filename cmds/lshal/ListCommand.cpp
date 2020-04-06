@@ -206,9 +206,12 @@ VintfInfo ListCommand::getVintfInfo(const std::string& fqInstanceName,
 static bool scanBinderContext(pid_t pid,
         const std::string &contextName,
         std::function<void(const std::string&)> eachLine) {
-    std::ifstream ifs("/d/binder/proc/" + std::to_string(pid));
+    std::ifstream ifs("/dev/binderfs/binder_logs/proc/" + std::to_string(pid));
     if (!ifs.is_open()) {
-        return false;
+        ifs.open("/d/binder/proc/" + std::to_string(pid));
+        if (!ifs.is_open()) {
+            return false;
+        }
     }
 
     static const std::regex kContextLine("^context (\\w+)$");
@@ -403,7 +406,7 @@ bool ListCommand::addEntryWithInstance(const TableEntry& entry,
         return false;
     }
 
-    if (fqInstance.getPackage() == gIBaseFqName.package()) {
+    if (fqInstance.getPackage() == "android.hidl.base") {
         return true; // always remove IBase from manifest
     }
 

@@ -132,7 +132,7 @@ void CursorInputMapper::configure(nsecs_t when, const InputReaderConfiguration* 
                 mYPrecision = 1.0f;
                 mXScale = 1.0f;
                 mYScale = 1.0f;
-                mPointerController = getPolicy()->obtainPointerController(getDeviceId());
+                mPointerController = getContext()->getPointerController(getDeviceId());
                 break;
             case Parameters::MODE_NAVIGATION:
                 mSource = AINPUT_SOURCE_TRACKBALL;
@@ -168,7 +168,7 @@ void CursorInputMapper::configure(nsecs_t when, const InputReaderConfiguration* 
         }
         bumpGeneration();
         if (changes) {
-            NotifyDeviceResetArgs args(getContext()->getNextSequenceNum(), when, getDeviceId());
+            NotifyDeviceResetArgs args(getContext()->getNextId(), when, getDeviceId());
             getListener()->notifyDeviceReset(&args);
         }
     }
@@ -189,32 +189,8 @@ void CursorInputMapper::configure(nsecs_t when, const InputReaderConfiguration* 
             }
         }
 
-        // Update the PointerController if viewports changed.
-        if (mParameters.mode == Parameters::MODE_POINTER) {
-            updatePointerControllerDisplayViewport(*config);
-        }
         bumpGeneration();
     }
-}
-
-void CursorInputMapper::updatePointerControllerDisplayViewport(
-        const InputReaderConfiguration& config) {
-    std::optional<DisplayViewport> viewport =
-            config.getDisplayViewportById(config.defaultPointerDisplayId);
-    if (!viewport) {
-        ALOGW("Can't find the designated viewport with ID %" PRId32 " to update cursor input "
-              "mapper. Fall back to default display",
-              config.defaultPointerDisplayId);
-        viewport = config.getDisplayViewportById(ADISPLAY_ID_DEFAULT);
-    }
-
-    if (!viewport) {
-        ALOGE("Still can't find a viable viewport to update cursor input mapper. Skip setting it to"
-              " PointerController.");
-        return;
-    }
-
-    mPointerController->setDisplayViewport(*viewport);
 }
 
 void CursorInputMapper::configureParameters() {
@@ -398,8 +374,8 @@ void CursorInputMapper::sync(nsecs_t when) {
             while (!released.isEmpty()) {
                 int32_t actionButton = BitSet32::valueForBit(released.clearFirstMarkedBit());
                 buttonState &= ~actionButton;
-                NotifyMotionArgs releaseArgs(getContext()->getNextSequenceNum(), when,
-                                             getDeviceId(), mSource, displayId, policyFlags,
+                NotifyMotionArgs releaseArgs(getContext()->getNextId(), when, getDeviceId(),
+                                             mSource, displayId, policyFlags,
                                              AMOTION_EVENT_ACTION_BUTTON_RELEASE, actionButton, 0,
                                              metaState, buttonState, MotionClassification::NONE,
                                              AMOTION_EVENT_EDGE_FLAG_NONE, 1, &pointerProperties,
@@ -410,11 +386,11 @@ void CursorInputMapper::sync(nsecs_t when) {
             }
         }
 
-        NotifyMotionArgs args(getContext()->getNextSequenceNum(), when, getDeviceId(), mSource,
-                              displayId, policyFlags, motionEventAction, 0, 0, metaState,
-                              currentButtonState, MotionClassification::NONE,
-                              AMOTION_EVENT_EDGE_FLAG_NONE, 1, &pointerProperties, &pointerCoords,
-                              mXPrecision, mYPrecision, xCursorPosition, yCursorPosition, downTime,
+        NotifyMotionArgs args(getContext()->getNextId(), when, getDeviceId(), mSource, displayId,
+                              policyFlags, motionEventAction, 0, 0, metaState, currentButtonState,
+                              MotionClassification::NONE, AMOTION_EVENT_EDGE_FLAG_NONE, 1,
+                              &pointerProperties, &pointerCoords, mXPrecision, mYPrecision,
+                              xCursorPosition, yCursorPosition, downTime,
                               /* videoFrames */ {});
         getListener()->notifyMotion(&args);
 
@@ -423,8 +399,8 @@ void CursorInputMapper::sync(nsecs_t when) {
             while (!pressed.isEmpty()) {
                 int32_t actionButton = BitSet32::valueForBit(pressed.clearFirstMarkedBit());
                 buttonState |= actionButton;
-                NotifyMotionArgs pressArgs(getContext()->getNextSequenceNum(), when, getDeviceId(),
-                                           mSource, displayId, policyFlags,
+                NotifyMotionArgs pressArgs(getContext()->getNextId(), when, getDeviceId(), mSource,
+                                           displayId, policyFlags,
                                            AMOTION_EVENT_ACTION_BUTTON_PRESS, actionButton, 0,
                                            metaState, buttonState, MotionClassification::NONE,
                                            AMOTION_EVENT_EDGE_FLAG_NONE, 1, &pointerProperties,
@@ -439,10 +415,9 @@ void CursorInputMapper::sync(nsecs_t when) {
 
         // Send hover move after UP to tell the application that the mouse is hovering now.
         if (motionEventAction == AMOTION_EVENT_ACTION_UP && (mSource == AINPUT_SOURCE_MOUSE)) {
-            NotifyMotionArgs hoverArgs(getContext()->getNextSequenceNum(), when, getDeviceId(),
-                                       mSource, displayId, policyFlags,
-                                       AMOTION_EVENT_ACTION_HOVER_MOVE, 0, 0, metaState,
-                                       currentButtonState, MotionClassification::NONE,
+            NotifyMotionArgs hoverArgs(getContext()->getNextId(), when, getDeviceId(), mSource,
+                                       displayId, policyFlags, AMOTION_EVENT_ACTION_HOVER_MOVE, 0,
+                                       0, metaState, currentButtonState, MotionClassification::NONE,
                                        AMOTION_EVENT_EDGE_FLAG_NONE, 1, &pointerProperties,
                                        &pointerCoords, mXPrecision, mYPrecision, xCursorPosition,
                                        yCursorPosition, downTime, /* videoFrames */ {});
@@ -454,10 +429,9 @@ void CursorInputMapper::sync(nsecs_t when) {
             pointerCoords.setAxisValue(AMOTION_EVENT_AXIS_VSCROLL, vscroll);
             pointerCoords.setAxisValue(AMOTION_EVENT_AXIS_HSCROLL, hscroll);
 
-            NotifyMotionArgs scrollArgs(getContext()->getNextSequenceNum(), when, getDeviceId(),
-                                        mSource, displayId, policyFlags,
-                                        AMOTION_EVENT_ACTION_SCROLL, 0, 0, metaState,
-                                        currentButtonState, MotionClassification::NONE,
+            NotifyMotionArgs scrollArgs(getContext()->getNextId(), when, getDeviceId(), mSource,
+                                        displayId, policyFlags, AMOTION_EVENT_ACTION_SCROLL, 0, 0,
+                                        metaState, currentButtonState, MotionClassification::NONE,
                                         AMOTION_EVENT_EDGE_FLAG_NONE, 1, &pointerProperties,
                                         &pointerCoords, mXPrecision, mYPrecision, xCursorPosition,
                                         yCursorPosition, downTime, /* videoFrames */ {});
@@ -478,12 +452,6 @@ int32_t CursorInputMapper::getScanCodeState(uint32_t sourceMask, int32_t scanCod
         return getDeviceContext().getScanCodeState(scanCode);
     } else {
         return AKEY_STATE_UNKNOWN;
-    }
-}
-
-void CursorInputMapper::fadePointer() {
-    if (mPointerController != nullptr) {
-        mPointerController->fade(PointerControllerInterface::TRANSITION_GRADUAL);
     }
 }
 

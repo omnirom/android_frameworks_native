@@ -45,19 +45,21 @@ void SurfaceTracing::mainLoop() {
 }
 
 void SurfaceTracing::addFirstEntry() {
+    const auto displayDevice = mFlinger.getDefaultDisplayDevice();
     LayersTraceProto entry;
     {
         std::scoped_lock lock(mSfLock);
-        entry = traceLayersLocked("tracing.enable");
+        entry = traceLayersLocked("tracing.enable", displayDevice);
     }
     addTraceToBuffer(entry);
 }
 
 LayersTraceProto SurfaceTracing::traceWhenNotified() {
+    const auto displayDevice = mFlinger.getDefaultDisplayDevice();
     std::unique_lock<std::mutex> lock(mSfLock);
     mCanStartTrace.wait(lock);
     android::base::ScopedLockAssertion assumeLock(mSfLock);
-    LayersTraceProto entry = traceLayersLocked(mWhere);
+    LayersTraceProto entry = traceLayersLocked(mWhere, displayDevice);
     lock.unlock();
     return entry;
 }
@@ -160,15 +162,22 @@ void SurfaceTracing::setTraceFlags(uint32_t flags) {
     mTraceFlags = flags;
 }
 
-LayersTraceProto SurfaceTracing::traceLayersLocked(const char* where) {
+LayersTraceProto SurfaceTracing::traceLayersLocked(const char* where,
+                                                   const sp<const DisplayDevice>& displayDevice) {
     ATRACE_CALL();
 
     LayersTraceProto entry;
     entry.set_elapsed_realtime_nanos(elapsedRealtimeNano());
     entry.set_where(where);
-    LayersProto layers(mFlinger.dumpDrawingStateProto(mTraceFlags));
+    LayersProto layers(mFlinger.dumpDrawingStateProto(mTraceFlags, displayDevice));
     mFlinger.dumpOffscreenLayersProto(layers);
     entry.mutable_layers()->Swap(&layers);
+
+    if (mTraceFlags & SurfaceTracing::TRACE_HWC) {
+        std::string hwcDump;
+        mFlinger.dumpHwc(hwcDump);
+        entry.set_hwc_blob(hwcDump);
+    }
 
     return entry;
 }

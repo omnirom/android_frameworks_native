@@ -846,7 +846,8 @@ class FakeInputReaderContext : public InputReaderContext {
     int32_t mGlobalMetaState;
     bool mUpdateGlobalMetaStateWasCalled;
     int32_t mGeneration;
-    uint32_t mNextSequenceNum;
+    int32_t mNextId;
+    wp<PointerControllerInterface> mPointerController;
 
 public:
     FakeInputReaderContext(std::shared_ptr<EventHubInterface> eventHub,
@@ -856,7 +857,7 @@ public:
             mPolicy(policy),
             mListener(listener),
             mGlobalMetaState(0),
-            mNextSequenceNum(1) {}
+            mNextId(1) {}
 
     virtual ~FakeInputReaderContext() { }
 
@@ -872,6 +873,18 @@ public:
 
     uint32_t getGeneration() {
         return mGeneration;
+    }
+
+    void updatePointerDisplay() {
+        sp<PointerControllerInterface> controller = mPointerController.promote();
+        if (controller != nullptr) {
+            InputReaderConfiguration config;
+            mPolicy->getReaderConfiguration(&config);
+            auto viewport = config.getDisplayViewportById(config.defaultPointerDisplayId);
+            if (viewport) {
+                controller->setDisplayViewport(*viewport);
+            }
+        }
     }
 
 private:
@@ -900,6 +913,16 @@ private:
 
     virtual bool shouldDropVirtualKey(nsecs_t, int32_t, int32_t) { return false; }
 
+    virtual sp<PointerControllerInterface> getPointerController(int32_t deviceId) {
+        sp<PointerControllerInterface> controller = mPointerController.promote();
+        if (controller == nullptr) {
+            controller = mPolicy->obtainPointerController(deviceId);
+            mPointerController = controller;
+            updatePointerDisplay();
+        }
+        return controller;
+    }
+
     virtual void fadePointer() {
     }
 
@@ -918,9 +941,7 @@ private:
 
     }
 
-    virtual uint32_t getNextSequenceNum() {
-        return mNextSequenceNum++;
-    }
+    virtual int32_t getNextId() { return mNextId++; }
 };
 
 
@@ -1621,7 +1642,7 @@ TEST_F(InputReaderTest, LoopOnce_ForwardsRawEventsToMappers) {
     ASSERT_EQ(1, event.value);
 }
 
-TEST_F(InputReaderTest, DeviceReset_IncrementsSequenceNumber) {
+TEST_F(InputReaderTest, DeviceReset_RandomId) {
     constexpr int32_t deviceId = END_RESERVED_ID + 1000;
     constexpr uint32_t deviceClass = INPUT_DEVICE_CLASS_KEYBOARD;
     constexpr int32_t eventHubId = 1;
@@ -1633,25 +1654,40 @@ TEST_F(InputReaderTest, DeviceReset_IncrementsSequenceNumber) {
 
     NotifyDeviceResetArgs resetArgs;
     ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyDeviceResetWasCalled(&resetArgs));
-    uint32_t prevSequenceNum = resetArgs.sequenceNum;
+    int32_t prevId = resetArgs.id;
 
     disableDevice(deviceId);
     mReader->loopOnce();
     ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyDeviceResetWasCalled(&resetArgs));
-    ASSERT_TRUE(prevSequenceNum < resetArgs.sequenceNum);
-    prevSequenceNum = resetArgs.sequenceNum;
+    ASSERT_NE(prevId, resetArgs.id);
+    prevId = resetArgs.id;
 
     enableDevice(deviceId);
     mReader->loopOnce();
     ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyDeviceResetWasCalled(&resetArgs));
-    ASSERT_TRUE(prevSequenceNum < resetArgs.sequenceNum);
-    prevSequenceNum = resetArgs.sequenceNum;
+    ASSERT_NE(prevId, resetArgs.id);
+    prevId = resetArgs.id;
 
     disableDevice(deviceId);
     mReader->loopOnce();
     ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyDeviceResetWasCalled(&resetArgs));
-    ASSERT_TRUE(prevSequenceNum < resetArgs.sequenceNum);
-    prevSequenceNum = resetArgs.sequenceNum;
+    ASSERT_NE(prevId, resetArgs.id);
+    prevId = resetArgs.id;
+}
+
+TEST_F(InputReaderTest, DeviceReset_GenerateIdWithInputReaderSource) {
+    constexpr int32_t deviceId = 1;
+    constexpr uint32_t deviceClass = INPUT_DEVICE_CLASS_KEYBOARD;
+    constexpr int32_t eventHubId = 1;
+    std::shared_ptr<InputDevice> device = mReader->newDevice(deviceId, "fake");
+    // Must add at least one mapper or the device will be ignored!
+    device->addMapper<FakeInputMapper>(eventHubId, AINPUT_SOURCE_KEYBOARD);
+    mReader->setNextDevice(device);
+    ASSERT_NO_FATAL_FAILURE(addDevice(deviceId, "fake", deviceClass, nullptr));
+
+    NotifyDeviceResetArgs resetArgs;
+    ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyDeviceResetWasCalled(&resetArgs));
+    ASSERT_EQ(IdGenerator::Source::INPUT_READER, IdGenerator::getSource(resetArgs.id));
 }
 
 TEST_F(InputReaderTest, Device_CanDispatchToDisplay) {
@@ -1712,7 +1748,7 @@ protected:
 
     virtual void SetUp() override {
         mFakePolicy = new FakeInputReaderPolicy();
-        mTestListener = new TestInputListener();
+        mTestListener = new TestInputListener(50ms);
 
         mReader = new InputReader(std::make_shared<EventHub>(), mFakePolicy, mTestListener);
         ASSERT_EQ(mReader->start(), OK);
@@ -1793,22 +1829,151 @@ TEST_F(InputReaderIntegrationTest, SendsEventsToInputListener) {
     NotifyConfigurationChangedArgs configChangedArgs;
     ASSERT_NO_FATAL_FAILURE(
             mTestListener->assertNotifyConfigurationChangedWasCalled(&configChangedArgs));
-    uint32_t prevSequenceNum = configChangedArgs.sequenceNum;
+    int32_t prevId = configChangedArgs.id;
     nsecs_t prevTimestamp = configChangedArgs.eventTime;
 
     NotifyKeyArgs keyArgs;
     keyboard->pressAndReleaseHomeKey();
     ASSERT_NO_FATAL_FAILURE(mTestListener->assertNotifyKeyWasCalled(&keyArgs));
     ASSERT_EQ(AKEY_EVENT_ACTION_DOWN, keyArgs.action);
-    ASSERT_LT(prevSequenceNum, keyArgs.sequenceNum);
-    prevSequenceNum = keyArgs.sequenceNum;
+    ASSERT_NE(prevId, keyArgs.id);
+    prevId = keyArgs.id;
     ASSERT_LE(prevTimestamp, keyArgs.eventTime);
     prevTimestamp = keyArgs.eventTime;
 
     ASSERT_NO_FATAL_FAILURE(mTestListener->assertNotifyKeyWasCalled(&keyArgs));
     ASSERT_EQ(AKEY_EVENT_ACTION_UP, keyArgs.action);
-    ASSERT_LT(prevSequenceNum, keyArgs.sequenceNum);
+    ASSERT_NE(prevId, keyArgs.id);
     ASSERT_LE(prevTimestamp, keyArgs.eventTime);
+}
+
+// --- TouchProcessTest ---
+class TouchIntegrationTest : public InputReaderIntegrationTest {
+protected:
+    static const int32_t FIRST_SLOT = 0;
+    static const int32_t SECOND_SLOT = 1;
+    static const int32_t FIRST_TRACKING_ID = 0;
+    static const int32_t SECOND_TRACKING_ID = 1;
+    const std::string UNIQUE_ID = "local:0";
+
+    virtual void SetUp() override {
+        InputReaderIntegrationTest::SetUp();
+        // At least add an internal display.
+        setDisplayInfoAndReconfigure(DISPLAY_ID, DISPLAY_WIDTH, DISPLAY_HEIGHT,
+                                     DISPLAY_ORIENTATION_0, UNIQUE_ID, NO_PORT,
+                                     ViewportType::VIEWPORT_INTERNAL);
+
+        mDevice = createUinputDevice<UinputTouchScreen>(Rect(0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT));
+        ASSERT_NO_FATAL_FAILURE(mFakePolicy->assertInputDevicesChanged());
+        ASSERT_NO_FATAL_FAILURE(mTestListener->assertNotifyConfigurationChangedWasCalled());
+    }
+
+    void setDisplayInfoAndReconfigure(int32_t displayId, int32_t width, int32_t height,
+                                      int32_t orientation, const std::string& uniqueId,
+                                      std::optional<uint8_t> physicalPort,
+                                      ViewportType viewportType) {
+        mFakePolicy->addDisplayViewport(displayId, width, height, orientation, uniqueId,
+                                        physicalPort, viewportType);
+        mReader->requestRefreshConfiguration(InputReaderConfiguration::CHANGE_DISPLAY_INFO);
+    }
+
+    std::unique_ptr<UinputTouchScreen> mDevice;
+};
+
+TEST_F(TouchIntegrationTest, InputEvent_ProcessSingleTouch) {
+    NotifyMotionArgs args;
+    const Point centerPoint = mDevice->getCenterPoint();
+
+    // ACTION_DOWN
+    mDevice->sendDown(centerPoint);
+    ASSERT_NO_FATAL_FAILURE(mTestListener->assertNotifyMotionWasCalled(&args));
+    ASSERT_EQ(AMOTION_EVENT_ACTION_DOWN, args.action);
+
+    // ACTION_MOVE
+    mDevice->sendMove(centerPoint + Point(1, 1));
+    ASSERT_NO_FATAL_FAILURE(mTestListener->assertNotifyMotionWasCalled(&args));
+    ASSERT_EQ(AMOTION_EVENT_ACTION_MOVE, args.action);
+
+    // ACTION_UP
+    mDevice->sendUp();
+    ASSERT_NO_FATAL_FAILURE(mTestListener->assertNotifyMotionWasCalled(&args));
+    ASSERT_EQ(AMOTION_EVENT_ACTION_UP, args.action);
+}
+
+TEST_F(TouchIntegrationTest, InputEvent_ProcessMultiTouch) {
+    NotifyMotionArgs args;
+    const Point centerPoint = mDevice->getCenterPoint();
+
+    // ACTION_DOWN
+    mDevice->sendDown(centerPoint);
+    ASSERT_NO_FATAL_FAILURE(mTestListener->assertNotifyMotionWasCalled(&args));
+    ASSERT_EQ(AMOTION_EVENT_ACTION_DOWN, args.action);
+
+    // ACTION_POINTER_DOWN (Second slot)
+    const Point secondPoint = centerPoint + Point(100, 100);
+    mDevice->sendSlot(SECOND_SLOT);
+    mDevice->sendTrackingId(SECOND_TRACKING_ID);
+    mDevice->sendDown(secondPoint + Point(1, 1));
+    ASSERT_NO_FATAL_FAILURE(mTestListener->assertNotifyMotionWasCalled(&args));
+    ASSERT_EQ(AMOTION_EVENT_ACTION_POINTER_DOWN | (1 << AMOTION_EVENT_ACTION_POINTER_INDEX_SHIFT),
+              args.action);
+
+    // ACTION_MOVE (Second slot)
+    mDevice->sendMove(secondPoint);
+    ASSERT_NO_FATAL_FAILURE(mTestListener->assertNotifyMotionWasCalled(&args));
+    ASSERT_EQ(AMOTION_EVENT_ACTION_MOVE, args.action);
+
+    // ACTION_POINTER_UP (Second slot)
+    mDevice->sendUp();
+    ASSERT_NO_FATAL_FAILURE(mTestListener->assertNotifyMotionWasCalled(&args));
+    ASSERT_EQ(AMOTION_EVENT_ACTION_POINTER_UP | (0 << AMOTION_EVENT_ACTION_POINTER_INDEX_SHIFT),
+              args.action);
+
+    // ACTION_UP
+    mDevice->sendSlot(FIRST_SLOT);
+    mDevice->sendUp();
+    ASSERT_NO_FATAL_FAILURE(mTestListener->assertNotifyMotionWasCalled(&args));
+    ASSERT_EQ(AMOTION_EVENT_ACTION_UP, args.action);
+}
+
+TEST_F(TouchIntegrationTest, InputEvent_ProcessPalm) {
+    NotifyMotionArgs args;
+    const Point centerPoint = mDevice->getCenterPoint();
+
+    // ACTION_DOWN
+    mDevice->sendDown(centerPoint);
+    ASSERT_NO_FATAL_FAILURE(mTestListener->assertNotifyMotionWasCalled(&args));
+    ASSERT_EQ(AMOTION_EVENT_ACTION_DOWN, args.action);
+
+    // ACTION_POINTER_DOWN (Second slot)
+    const Point secondPoint = centerPoint + Point(100, 100);
+    mDevice->sendSlot(SECOND_SLOT);
+    mDevice->sendTrackingId(SECOND_TRACKING_ID);
+    mDevice->sendDown(secondPoint);
+    ASSERT_NO_FATAL_FAILURE(mTestListener->assertNotifyMotionWasCalled(&args));
+    ASSERT_EQ(AMOTION_EVENT_ACTION_POINTER_DOWN | (1 << AMOTION_EVENT_ACTION_POINTER_INDEX_SHIFT),
+              args.action);
+
+    // ACTION_MOVE (Second slot)
+    mDevice->sendMove(secondPoint + Point(1, 1));
+    ASSERT_NO_FATAL_FAILURE(mTestListener->assertNotifyMotionWasCalled(&args));
+    ASSERT_EQ(AMOTION_EVENT_ACTION_MOVE, args.action);
+
+    // Send MT_TOOL_PALM, which indicates that the touch IC has determined this to be a grip event.
+    // Expect to receive ACTION_CANCEL, to abort the entire gesture.
+    mDevice->sendToolType(MT_TOOL_PALM);
+    ASSERT_NO_FATAL_FAILURE(mTestListener->assertNotifyMotionWasCalled(&args));
+    ASSERT_EQ(AMOTION_EVENT_ACTION_CANCEL, args.action);
+
+    // ACTION_POINTER_UP (Second slot)
+    mDevice->sendUp();
+
+    // ACTION_UP
+    mDevice->sendSlot(FIRST_SLOT);
+    mDevice->sendUp();
+
+    // Expect no event received after abort the entire gesture.
+    ASSERT_NO_FATAL_FAILURE(mTestListener->assertNotifyMotionWasNotCalled());
 }
 
 // --- InputDeviceTest ---
@@ -2095,6 +2260,9 @@ protected:
     }
 
     void configureDevice(uint32_t changes) {
+        if (!changes || (changes & InputReaderConfiguration::CHANGE_DISPLAY_INFO)) {
+            mFakeContext->updatePointerDisplay();
+        }
         mDevice->configure(ARBITRARY_TIME, mFakePolicy->getReaderConfiguration(), changes);
     }
 
@@ -6993,5 +7161,4 @@ TEST_F(MultiTouchInputMapperTest_ExternalDevice, Viewports_Fallback) {
     ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyMotionWasCalled(&motionArgs));
     ASSERT_EQ(SECONDARY_DISPLAY_ID, motionArgs.displayId);
 }
-
 } // namespace android
