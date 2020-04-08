@@ -239,13 +239,15 @@ static bool CopyFileToFd(const std::string& input_file, int out_fd) {
 }
 
 static bool UnlinkAndLogOnError(const std::string& file) {
+    if (file.empty()) {
+        return false;
+    }
     if (unlink(file.c_str())) {
         MYLOGE("Failed to unlink file (%s): %s\n", file.c_str(), strerror(errno));
         return false;
     }
     return true;
 }
-
 
 int64_t GetModuleMetadataVersion() {
     auto binder = defaultServiceManager()->getService(android::String16("package_native"));
@@ -2171,7 +2173,7 @@ static void PrepareToWriteToFile() {
     }
 
     if (ds.options_->do_screenshot) {
-        ds.screenshot_path_ = ds.GetPath(ds.CalledByApi() ? "-tmp.png" : ".png");
+        ds.screenshot_path_ = ds.GetPath(ds.CalledByApi() ? "-png.tmp" : ".png");
     }
     ds.tmp_path_ = ds.GetPath(".tmp");
     ds.log_path_ = ds.GetPath("-dumpstate_log-" + std::to_string(ds.pid_) + ".txt");
@@ -2190,7 +2192,7 @@ static void PrepareToWriteToFile() {
         ds.tmp_path_.c_str(), ds.screenshot_path_.c_str());
 
     if (ds.options_->do_zip_file) {
-        ds.path_ = ds.GetPath(ds.CalledByApi() ? "-tmp.zip" : ".zip");
+        ds.path_ = ds.GetPath(ds.CalledByApi() ? "-zip.tmp" : ".zip");
         MYLOGD("Creating initial .zip file (%s)\n", ds.path_.c_str());
         create_parent_dirs(ds.path_.c_str());
         ds.zip_file.reset(fopen(ds.path_.c_str(), "wb"));
@@ -2417,6 +2419,17 @@ Dumpstate::RunStatus Dumpstate::Run(int32_t calling_uid, const std::string& call
         }
     }
     return status;
+}
+
+void Dumpstate::Cancel() {
+    CleanupTmpFiles();
+    android::os::UnlinkAndLogOnError(log_path_);
+    for (int i = 0; i < NUM_OF_DUMPS; i++) {
+        android::os::UnlinkAndLogOnError(ds.bugreport_internal_dir_ + "/" +
+                                         kDumpstateBoardFiles[i]);
+    }
+    tombstone_data_.clear();
+    anr_data_.clear();
 }
 
 /*
@@ -2755,7 +2768,7 @@ bool Dumpstate::CalledByApi() const {
     return ds.options_->bugreport_fd.get() != -1 ? true : false;
 }
 
-void Dumpstate::CleanupFiles() {
+void Dumpstate::CleanupTmpFiles() {
     android::os::UnlinkAndLogOnError(tmp_path_);
     android::os::UnlinkAndLogOnError(screenshot_path_);
     android::os::UnlinkAndLogOnError(path_);
@@ -2763,7 +2776,7 @@ void Dumpstate::CleanupFiles() {
 
 Dumpstate::RunStatus Dumpstate::HandleUserConsentDenied() {
     MYLOGD("User denied consent; deleting files and returning\n");
-    CleanupFiles();
+    CleanupTmpFiles();
     return USER_CONSENT_DENIED;
 }
 
