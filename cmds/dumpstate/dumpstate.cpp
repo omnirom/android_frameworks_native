@@ -2395,6 +2395,13 @@ void Dumpstate::SetOptions(std::unique_ptr<DumpOptions> options) {
     options_ = std::move(options);
 }
 
+void Dumpstate::Initialize() {
+    /* gets the sequential id */
+    uint32_t last_id = android::base::GetIntProperty(PROPERTY_LAST_ID, 0);
+    id_ = ++last_id;
+    android::base::SetProperty(PROPERTY_LAST_ID, std::to_string(last_id));
+}
+
 Dumpstate::RunStatus Dumpstate::Run(int32_t calling_uid, const std::string& calling_package) {
     Dumpstate::RunStatus status = RunInternal(calling_uid, calling_package);
     if (listener_ != nullptr) {
@@ -2504,11 +2511,6 @@ Dumpstate::RunStatus Dumpstate::RunInternal(int32_t calling_uid,
             ? android::base::StringPrintf("%s/dumpstate-stats.txt", bugreport_internal_dir_.c_str())
             : "";
     progress_.reset(new Progress(stats_path));
-
-    /* gets the sequential id */
-    uint32_t last_id = android::base::GetIntProperty(PROPERTY_LAST_ID, 0);
-    id_ = ++last_id;
-    android::base::SetProperty(PROPERTY_LAST_ID, std::to_string(last_id));
 
     if (acquire_wake_lock(PARTIAL_WAKE_LOCK, WAKE_LOCK_NAME) < 0) {
         MYLOGE("Failed to acquire wake lock: %s\n", strerror(errno));
@@ -2675,15 +2677,6 @@ Dumpstate::RunStatus Dumpstate::RunInternal(int32_t calling_uid,
             MYLOGI("User denied consent. Returning\n");
             return status;
         }
-        if (options_->do_screenshot &&
-            options_->screenshot_fd.get() != -1 &&
-            !options_->is_screenshot_copied) {
-            bool copy_succeeded = android::os::CopyFileToFd(screenshot_path_,
-                                                            options_->screenshot_fd.get());
-            if (copy_succeeded) {
-                android::os::UnlinkAndLogOnError(screenshot_path_);
-            }
-        }
         if (status == Dumpstate::RunStatus::USER_CONSENT_TIMED_OUT) {
             MYLOGI(
                 "Did not receive user consent yet."
@@ -2813,6 +2806,16 @@ Dumpstate::RunStatus Dumpstate::CopyBugreportIfUserConsented(int32_t calling_uid
         bool copy_succeeded = android::os::CopyFileToFd(path_, options_->bugreport_fd.get());
         if (copy_succeeded) {
             android::os::UnlinkAndLogOnError(path_);
+            if (options_->do_screenshot &&
+                options_->screenshot_fd.get() != -1 &&
+                !options_->is_screenshot_copied) {
+                copy_succeeded = android::os::CopyFileToFd(screenshot_path_,
+                                                           options_->screenshot_fd.get());
+                options_->is_screenshot_copied = copy_succeeded;
+                if (copy_succeeded) {
+                    android::os::UnlinkAndLogOnError(screenshot_path_);
+                }
+            }
         }
         return copy_succeeded ? Dumpstate::RunStatus::OK : Dumpstate::RunStatus::ERROR;
     } else if (consent_result == UserConsentResult::UNAVAILABLE) {
@@ -2837,8 +2840,9 @@ Dumpstate::RunStatus Dumpstate::ParseCommandlineAndRun(int argc, char* argv[]) {
         assert(options_->bugreport_fd.get() == -1);
 
         // calling_uid and calling_package are for user consent to share the bugreport with
-        // an app; they are irrelvant here because bugreport is only written to a local
-        // directory, and not shared.
+        // an app; they are irrelevant here because bugreport is triggered via command line.
+        // Update Last ID before calling Run().
+        Initialize();
         status = Run(-1 /* calling_uid */, "" /* calling_package */);
     }
     return status;
