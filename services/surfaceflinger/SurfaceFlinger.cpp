@@ -125,6 +125,8 @@
 #include "android-base/parseint.h"
 #include "android-base/stringprintf.h"
 
+#include "smomo_interface.h"
+
 namespace android {
 
 using namespace std::string_literals;
@@ -259,6 +261,45 @@ std::string decodeDisplayColorSetting(DisplayColorSetting displayColorSetting) {
 }
 
 SurfaceFlingerBE::SurfaceFlingerBE() : mHwcServiceName(getHwcServiceName()) {}
+
+bool SmomoWrapper::init() {
+    mSmoMoLibHandle = dlopen(SMOMO_LIBRARY_NAME, RTLD_NOW);
+    if (!mSmoMoLibHandle) {
+        ALOGE("Unable to open SmoMo lib: %s", dlerror());
+        return false;
+    }
+
+    mSmoMoCreateFunc =
+        reinterpret_cast<CreateSmoMoFuncPtr>(dlsym(mSmoMoLibHandle,
+            CREATE_SMOMO_INTERFACE_NAME));
+    mSmoMoDestroyFunc =
+        reinterpret_cast<DestroySmoMoFuncPtr>(dlsym(mSmoMoLibHandle,
+            DESTROY_SMOMO_INTERFACE_NAME));
+
+    if (!mSmoMoCreateFunc || !mSmoMoDestroyFunc) {
+        ALOGE("Can't load SmoMo symbols: %s", dlerror());
+        dlclose(mSmoMoLibHandle);
+        return false;
+    }
+
+    if (!mSmoMoCreateFunc(SMOMO_VERSION_TAG, &mInst)) {
+        ALOGE("Unable to create SmoMo interface");
+        dlclose(mSmoMoLibHandle);
+        return false;
+    }
+
+    return true;
+}
+
+SmomoWrapper::~SmomoWrapper() {
+    if (mInst) {
+        mSmoMoDestroyFunc(mInst);
+    }
+
+    if (mSmoMoLibHandle) {
+      dlclose(mSmoMoLibHandle);
+    }
+}
 
 SurfaceFlinger::SurfaceFlinger(Factory& factory, SkipInitializationTag)
       : mFactory(factory),
@@ -706,6 +747,27 @@ void SurfaceFlinger::init() {
         }
     } else {
         ALOGE("Unable to open Perf Lib: %s", dlerror());
+    }
+
+    char smomoProp[PROPERTY_VALUE_MAX];
+    property_get("vendor.display.use_smooth_motion", smomoProp, "0");
+    if (atoi(smomoProp) && mSmoMo.init()) {
+        mSmoMo->SetChangeRefreshRateCallback(
+            [this](int32_t refreshRate) {
+                setRefreshRateTo(refreshRate);
+            });
+
+        std::vector<float> refreshRates;
+        auto iter = mRefreshRateConfigs->getAllRefreshRates().cbegin();
+        while (iter != mRefreshRateConfigs->getAllRefreshRates().cend()) {
+            if (iter->second->fps > 0) {
+                refreshRates.push_back(iter->second->fps);
+            }
+            ++iter;
+        }
+        mSmoMo->SetDisplayRefreshRates(refreshRates);
+
+        ALOGI("SmoMo is enabled");
     }
 
     ALOGV("Done initializing");
@@ -1643,6 +1705,23 @@ void SurfaceFlinger::changeRefreshRateLocked(const RefreshRate& refreshRate,
     setDesiredActiveConfig({refreshRate.configId, event});
 }
 
+void SurfaceFlinger::setRefreshRateTo(int32_t refreshRate) {
+    auto& currentRefreshRate = mRefreshRateConfigs->getCurrentRefreshRate();
+
+    auto iter = mRefreshRateConfigs->getAllRefreshRates().cbegin();
+    while (iter != mRefreshRateConfigs->getAllRefreshRates().cend()) {
+        if (std::abs(iter->second->fps - refreshRate) <
+                scheduler::RefreshRateConfigs::RefreshRate::FPS_EPSILON) {
+            break;
+        }
+        ++iter;
+    }
+
+    if (currentRefreshRate != *iter->second) {
+        changeRefreshRate(*iter->second, Scheduler::ConfigEvent::Changed);
+    }
+}
+
 void SurfaceFlinger::onHotplugReceived(int32_t sequenceId, hwc2_display_t hwcDisplayId,
                                        HWC2::Connection connection) {
     ALOGV("%s(%d, %" PRIu64 ", %s)", __FUNCTION__, sequenceId, hwcDisplayId,
@@ -2330,6 +2409,29 @@ void SurfaceFlinger::postComposition()
     if (mLumaSampling && mRegionSamplingThread) {
         mRegionSamplingThread->notifyNewContent();
     }
+
+    if (mSmoMo) {
+        ATRACE_NAME("SmoMoUpdateState");
+        Mutex::Autolock lock(mStateLock);
+
+        uint32_t fps = 0;
+        std::vector<smomo::SmomoLayerStats> layers;
+
+        // Disable SmoMo by passing empty layer stack in multiple display case
+        if (mDisplays.size() == 1) {
+            for (auto& layer : mLayersWithQueuedFrames) {
+                smomo::SmomoLayerStats layerStats;
+                layerStats.id = layer->getSequence();
+                layerStats.name = layer->getName();
+                layers.push_back(layerStats);
+            }
+
+            fps = mRefreshRateConfigs->getCurrentRefreshRate().fps;
+        }
+
+        mSmoMo->UpdateSmomoState(layers, fps);
+    }
+
 
     // Even though ATRACE_INT64 already checks if tracing is enabled, it doesn't prevent the
     // side-effect of getTotalSize(), so we check that again here

@@ -84,6 +84,12 @@
 
 using namespace android::surfaceflinger;
 
+namespace smomo {
+class SmomoIntf;
+} // namespace smomo
+
+using smomo::SmomoIntf;
+
 namespace android {
 
 class Client;
@@ -170,6 +176,29 @@ public:
     // use to differentiate callbacks from different hardware composer
     // instances. Each hardware composer instance gets a different sequence id.
     int32_t mComposerSequenceId = 0;
+};
+
+class SmomoWrapper {
+public:
+    SmomoWrapper() {}
+    ~SmomoWrapper();
+
+    bool init();
+
+    SmomoIntf* operator->() { return mInst; }
+    operator bool() { return mInst != nullptr; }
+
+    SmomoWrapper(const SmomoWrapper&) = delete;
+    SmomoWrapper& operator=(const SmomoWrapper&) = delete;
+
+private:
+    SmomoIntf *mInst = nullptr;
+    void *mSmoMoLibHandle = nullptr;
+
+    using CreateSmoMoFuncPtr = std::add_pointer<bool(uint16_t, SmomoIntf**)>::type;
+    using DestroySmoMoFuncPtr = std::add_pointer<void(SmomoIntf*)>::type;
+    CreateSmoMoFuncPtr mSmoMoCreateFunc;
+    DestroySmoMoFuncPtr mSmoMoDestroyFunc;
 };
 
 class SurfaceFlinger : public BnSurfaceComposer,
@@ -845,6 +874,8 @@ private:
     void changeRefreshRateLocked(const RefreshRate&, Scheduler::ConfigEvent event)
             REQUIRES(mStateLock);
 
+    void setRefreshRateTo(int32_t refreshRate);
+
     bool isDisplayConfigAllowed(HwcConfigIndexType configId) const REQUIRES(mStateLock);
 
     // Gets the fence for the previous frame.
@@ -1282,6 +1313,8 @@ private:
     void *mPerfLibHandle = nullptr;
     int (*mPerfLockReleaseFunc)(int handle) = nullptr;
     int (*mPerfHintFunc)(int hintId, const char *package, int duration, int refreshRate) = nullptr;
+
+    SmomoWrapper mSmoMo;
 };
 
 } // namespace android
