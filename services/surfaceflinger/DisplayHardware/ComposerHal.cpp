@@ -32,12 +32,14 @@
 #include <gui/BufferQueue.h>
 #include <hidl/HidlTransportSupport.h>
 #include <hidl/HidlTransportUtils.h>
+#include <vendor/qti/hardware/display/composer/3.0/IQtiComposerClient.h>
 
 namespace android {
 
 using hardware::Return;
 using hardware::hidl_vec;
 using hardware::hidl_handle;
+using vendor::qti::hardware::display::composer::V3_0::IQtiComposerClient;
 
 namespace Hwc2 {
 
@@ -169,6 +171,16 @@ void Composer::CommandWriter::writeBufferMetadata(
     write64(metadata.usage);
 }
 #endif // defined(USE_VR_COMPOSER) && USE_VR_COMPOSER
+
+void Composer::CommandWriter::setDisplayElapseTime(uint64_t time)
+{
+    constexpr uint16_t kSetDisplayElapseTimeLength = 2;
+    beginCommand(static_cast<V2_1::IComposerClient::Command>(
+                         IQtiComposerClient::Command::SET_DISPLAY_ELAPSE_TIME),
+                 kSetDisplayElapseTimeLength);
+    write64(time);
+    endCommand();
+}
 
 Composer::Composer(const std::string& serviceName)
     : mWriter(kWriterInitialSize),
@@ -639,6 +651,18 @@ Error Composer::setOutputBuffer(Display display, const native_handle_t* buffer,
 {
     mWriter.selectDisplay(display);
     mWriter.setOutputBuffer(0, buffer, dup(releaseFence));
+    return Error::NONE;
+}
+
+Error Composer::setDisplayElapseTime(Display display, uint64_t timeStamp)
+{
+    if (mClient_2_4) {
+        if (sp<IQtiComposerClient> qClient = IQtiComposerClient::castFrom(mClient_2_4)) {
+            mWriter.selectDisplay(display);
+            mWriter.setDisplayElapseTime(timeStamp);
+        }
+    }
+
     return Error::NONE;
 }
 

@@ -411,6 +411,10 @@ SurfaceFlinger::SurfaceFlinger(Factory& factory) : SurfaceFlinger(factory, SkipI
     property_get("ro.sf.blurs_are_expensive", value, "0");
     mBlursAreExpensive = atoi(value);
 
+    property_get("debug.sf.enable_advanced_sf_phase_offset", value, "0");
+    mUseAdvanceSfOffset = atoi(value);
+    ALOGI_IF(mUseAdvanceSfOffset, "Enable Advance SF Phase Offset");
+
     const size_t defaultListSize = ISurfaceComposer::MAX_LAYERS;
     auto listSize = property_get_int32("debug.sf.max_igbp_list_size", int32_t(defaultListSize));
     mMaxGraphicBufferProducerListSize = (listSize > 0) ? size_t(listSize) : defaultListSize;
@@ -1451,6 +1455,21 @@ status_t SurfaceFlinger::setDisplayContentSamplingEnabled(const sp<IBinder>& dis
                                                             componentMask, maxFrames);
 }
 
+status_t SurfaceFlinger::setDisplayElapseTime(const sp<DisplayDevice>& display) const {
+    nsecs_t sfOffset = mPhaseConfiguration->getCurrentOffsets().late.sf;
+    if (!mUseAdvanceSfOffset && (sfOffset >= 0)) {
+        return OK;
+    }
+
+    if (mDisplays.size() != 1) {
+        // Revisit this for multi displays.
+        return OK;
+    }
+
+    uint64_t timeStamp = static_cast<uint64_t>(mVsyncTimeStamp + (sfOffset * -1));
+    return getHwComposer().setDisplayElapseTime(*display->getId(), timeStamp);
+}
+
 status_t SurfaceFlinger::getDisplayedContentSample(const sp<IBinder>& displayToken,
                                                    uint64_t maxFrames, uint64_t timestamp,
                                                    DisplayedFrameStats* outStats) const {
@@ -1896,8 +1915,8 @@ sp<Fence> SurfaceFlinger::previousFrameFence() NO_THREAD_SAFETY_ANALYSIS {
     // We are storing the last 2 present fences. If sf's phase offset is to be
     // woken up before the actual vsync but targeting the next vsync, we need to check
     // fence N-2
-    return mVSyncModulator->getOffsets().sf > 0 ? mPreviousPresentFences[0]
-                                                : mPreviousPresentFences[1];
+    return mVSyncModulator->getOffsets().sf >= 0 ? mPreviousPresentFences[0]
+                                                 : mPreviousPresentFences[1];
 }
 
 bool SurfaceFlinger::previousFramePending(int graceTimeMs) NO_THREAD_SAFETY_ANALYSIS {
@@ -2157,6 +2176,10 @@ void SurfaceFlinger::handleMessageRefresh() {
     // Store the present time just before calling to the composition engine so we could notify
     // the scheduler.
     const auto presentTime = systemTime();
+
+    for (const auto& [_, display] : mDisplays) {
+        setDisplayElapseTime(display);
+    }
 
     mCompositionEngine->present(refreshArgs);
     mTimeStats->recordFrameDuration(mFrameStartTime, systemTime());

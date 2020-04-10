@@ -370,6 +370,8 @@ public:
     // debug.sf.disable_client_composition_cache
     bool mDisableClientCompositionCache = false;
 
+    nsecs_t mVsyncTimeStamp = -1;
+
 private:
     friend class BufferLayer;
     friend class BufferQueueLayer;
@@ -532,6 +534,8 @@ private:
                                      float lightPosY, float lightPosZ, float lightRadius) override;
     status_t setFrameRate(const sp<IGraphicBufferProducer>& surface, float frameRate,
                           int8_t compatibility) override;
+    status_t setDisplayElapseTime(const sp<DisplayDevice>& display) const;
+
     /* ------------------------------------------------------------------------
      * DeathRecipient interface
      */
@@ -1114,6 +1118,7 @@ private:
     std::atomic<bool> mDisableBlurs = false;
     // If blurs are considered expensive and should require high GPU frequency.
     bool mBlursAreExpensive = false;
+    bool mUseAdvanceSfOffset = false;
     std::atomic<uint32_t> mFrameMissedCount = 0;
     std::atomic<uint32_t> mHwcFrameMissedCount = 0;
     std::atomic<uint32_t> mGpuFrameMissedCount = 0;
