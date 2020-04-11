@@ -217,6 +217,7 @@ public:
 
     virtual std::optional<DisplayId> toPhysicalDisplayId(hwc2_display_t hwcDisplayId) const = 0;
     virtual std::optional<hwc2_display_t> fromPhysicalDisplayId(DisplayId displayId) const = 0;
+    virtual status_t setDisplayElapseTime(DisplayId displayId, uint64_t timeStamp) = 0;
 };
 
 namespace impl {
@@ -313,6 +314,7 @@ public:
 
     bool onVsync(hwc2_display_t hwcDisplayId, int64_t timestamp) override;
     void setVsyncEnabled(DisplayId displayId, HWC2::Vsync enabled) override;
+    status_t setDisplayElapseTime(DisplayId displayId, uint64_t timeStamp) override;
 
     nsecs_t getRefreshTimestamp(DisplayId displayId) const override;
     bool isConnected(DisplayId displayId) const override;

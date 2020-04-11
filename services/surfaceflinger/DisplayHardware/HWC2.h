@@ -239,6 +239,7 @@ public:
     [[clang::warn_unused_result]] virtual Error getSupportedContentTypes(
             std::vector<HWC2::ContentType>*) const = 0;
     [[clang::warn_unused_result]] virtual Error setContentType(HWC2::ContentType) const = 0;
+    [[clang::warn_unused_result]] virtual Error setDisplayElapseTime(uint64_t timeStamp) = 0;
 };
 
 namespace impl {
@@ -306,6 +307,8 @@ public:
     Error getSupportedContentTypes(
             std::vector<HWC2::ContentType>* outSupportedContentTypes) const override;
     Error setContentType(HWC2::ContentType contentType) const override;
+    Error setDisplayElapseTime(uint64_t timeStamp) override;
+
     // Other Display methods
     hwc2_display_t getId() const override { return mId; }
     bool isConnected() const override { return mIsConnected; }

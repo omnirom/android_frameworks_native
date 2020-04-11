@@ -1003,6 +1003,16 @@ uint32_t HWComposer::getMaxVirtualDisplayCount() const {
     return mComposer->getMaxVirtualDisplayCount();
 }
 
+status_t HWComposer::setDisplayElapseTime(DisplayId displayId, uint64_t timeStamp) {
+    RETURN_IF_INVALID_DISPLAY(displayId, BAD_INDEX);
+    const auto& displayData = mDisplayData[displayId];
+
+    auto error = displayData.hwcDisplay->setDisplayElapseTime(timeStamp);
+    if (error == HWC2::Error::BadParameter) RETURN_IF_HWC_ERROR(error, displayId, BAD_VALUE);
+    RETURN_IF_HWC_ERROR(error, displayId, UNKNOWN_ERROR);
+    return NO_ERROR;
+}
+
 } // namespace impl
 } // namespace android
 
