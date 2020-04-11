@@ -1011,6 +1011,8 @@ private:
             ScreenshotArgs& args, const std::shared_ptr<renderengine::ExternalTexture>&,
             ScreenCaptureResults&);
 
+    bool canAllocateHwcDisplayIdForVDS(uint64_t usage);
+
     void readPersistentProperties();
 
     uint32_t getMaxAcquiredBufferCountForCurrentRefreshRate(uid_t uid) const;
