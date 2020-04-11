@@ -1950,7 +1950,7 @@ void SurfaceFlinger::populateExpectedPresentTime() {
     const nsecs_t presentTime = mScheduler->getDispSyncExpectedPresentTime();
     // Inflate the expected present time if we're targetting the next vsync.
     mExpectedPresentTime.store(
-            mVSyncModulator->getOffsets().sf > 0 ? presentTime : presentTime + stats.vsyncPeriod);
+            mVSyncModulator->getOffsets().sf >= 0 ? presentTime : presentTime + stats.vsyncPeriod);
 }
 
 void SurfaceFlinger::onMessageReceived(int32_t what) NO_THREAD_SAFETY_ANALYSIS {
