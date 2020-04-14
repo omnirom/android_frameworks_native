@@ -272,6 +272,8 @@ public:
 
     static bool useContextPriority;
 
+    static bool sDirectStreaming;
+
     // The data space and pixel format that SurfaceFlinger expects hardware composer
     // to composite efficiently. Meaning under most scenarios, hardware composer
     // will accept layers with the data space and pixel format.
@@ -755,6 +757,9 @@ private:
     void traverseLayersInDisplay(const sp<const DisplayDevice>& display,
                                  const LayerVector::Visitor& visitor);
 
+
+    bool canAllocateHwcDisplayIdForVDS(uint64_t usage);
+    bool skipColorLayer(const char* layerType);
     sp<StartPropertySetThread> mStartPropertySetThread;
 
     /* ------------------------------------------------------------------------
