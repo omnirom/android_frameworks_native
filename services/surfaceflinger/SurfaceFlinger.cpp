@@ -6069,6 +6069,9 @@ void SurfaceFlinger::renderScreenImplLocked(const RenderArea& renderArea,
     std::vector<Layer*> renderedLayers;
     Region clearRegion = Region::INVALID_REGION;
     traverseLayers([&](Layer* layer) {
+        if (layer->isSecureDisplay()) {
+            return;
+        }
         const bool supportProtectedContent = false;
         Region clip(renderArea.getBounds());
         compositionengine::LayerFE::ClientCompositionTargetSettings targetSettings{

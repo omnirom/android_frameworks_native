@@ -188,6 +188,8 @@ struct LayerFECompositionState {
     Rect cursorFrame;
 
     virtual ~LayerFECompositionState();
+    bool isSecureDisplay{false};
+    bool isSecureCamera{false};
 
     // Debugging
     virtual void dump(std::string& out) const;
