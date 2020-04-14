@@ -81,6 +81,7 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
+#include <list>
 
 using namespace android::surfaceflinger;
 
@@ -271,6 +272,8 @@ public:
 
     static bool useContextPriority;
 
+    static bool sDirectStreaming;
+
     // The data space and pixel format that SurfaceFlinger expects hardware composer
     // to composite efficiently. Meaning under most scenarios, hardware composer
     // will accept layers with the data space and pixel format.
@@ -336,10 +339,10 @@ public:
 
     // enable/disable h/w composer event
     // TODO: this should be made accessible only to EventThread
-    void setPrimaryVsyncEnabled(bool enabled);
+    void setVsyncEnabled(bool enabled);
 
     // main thread function to enable/disable h/w composer event
-    void setPrimaryVsyncEnabledInternal(bool enabled);
+    void setVsyncEnabledInternal(bool enabled);
     void setVsyncEnabledInHWC(DisplayId displayId, HWC2::Vsync enabled);
 
     // called on the main thread by MessageQueue when an internal message
@@ -438,7 +441,8 @@ private:
      */
     status_t onTransact(uint32_t code, const Parcel& data, Parcel* reply, uint32_t flags) override;
     status_t dump(int fd, const Vector<String16>& args) override { return priorityDump(fd, args); }
-    bool callingThreadHasUnscopedSurfaceFlingerAccess() EXCLUDES(mStateLock);
+    bool callingThreadHasUnscopedSurfaceFlingerAccess(bool usePermissionCache = true)
+            EXCLUDES(mStateLock);
 
     /* ------------------------------------------------------------------------
      * ISurfaceComposer interface
@@ -534,6 +538,7 @@ private:
                                      float lightPosY, float lightPosZ, float lightRadius) override;
     status_t setFrameRate(const sp<IGraphicBufferProducer>& surface, float frameRate,
                           int8_t compatibility) override;
+    status_t acquireFrameRateFlexibilityToken(sp<IBinder>* outToken) override;
     status_t setDisplayElapseTime(const sp<DisplayDevice>& display) const;
 
     /* ------------------------------------------------------------------------
@@ -607,9 +612,9 @@ private:
     void setPowerModeInternal(const sp<DisplayDevice>& display, int mode) REQUIRES(mStateLock);
 
     // Sets the desired display configs.
-    status_t setDesiredDisplayConfigSpecsInternal(const sp<DisplayDevice>& display,
-                                                  HwcConfigIndexType defaultConfig,
-                                                  float minRefreshRate, float maxRefreshRate)
+    status_t setDesiredDisplayConfigSpecsInternal(
+            const sp<DisplayDevice>& display,
+            const std::optional<scheduler::RefreshRateConfigs::Policy>& policy, bool overridePolicy)
             EXCLUDES(mStateLock);
 
     // called on the main thread in response to setAutoLowLatencyMode()
@@ -752,6 +757,9 @@ private:
     void traverseLayersInDisplay(const sp<const DisplayDevice>& display,
                                  const LayerVector::Visitor& visitor);
 
+
+    bool canAllocateHwcDisplayIdForVDS(uint64_t usage);
+    bool skipColorLayer(const char* layerType);
     sp<StartPropertySetThread> mStartPropertySetThread;
 
     /* ------------------------------------------------------------------------
@@ -840,6 +848,8 @@ private:
      */
     void invalidateHwcGeometry();
 
+    sp<DisplayDevice> getVsyncSource();
+    void updateVsyncSource();
     void postComposition();
     void getCompositorTiming(CompositorTiming* compositorTiming);
     void updateCompositorTiming(const DisplayStatInfo& stats, nsecs_t compositeTime,
@@ -1003,6 +1013,8 @@ private:
         return doDump(fd, args, asProto);
     }
 
+    void onFrameRateFlexibilityTokenReleased();
+
     /* ------------------------------------------------------------------------
      * VrFlinger
      */
@@ -1021,6 +1033,7 @@ private:
 
     // access must be protected by mStateLock
     mutable Mutex mStateLock;
+    mutable Mutex mVsyncLock;
     State mCurrentState{LayerVector::StateSet::Current};
     std::atomic<int32_t> mTransactionFlags = 0;
     Condition mTransactionCV;
@@ -1099,6 +1112,7 @@ private:
 
     // don't use a lock for these, we don't care
     int mDebugRegion = 0;
+    bool mVsyncSourceReliableOnDoze = false;
     bool mDebugDisableHWC = false;
     bool mDebugDisableTransformHint = false;
     volatile nsecs_t mDebugInTransaction = 0;
@@ -1108,6 +1122,7 @@ private:
     std::unique_ptr<SurfaceInterceptor> mInterceptor;
     SurfaceTracing mTracing{*this};
     bool mTracingEnabled = false;
+    bool mAddCompositionStateToTrace = false;
     bool mTracingEnabledChanged GUARDED_BY(mStateLock) = false;
     const std::shared_ptr<TimeStats> mTimeStats;
     const std::unique_ptr<FrameTracer> mFrameTracer;
@@ -1183,6 +1198,10 @@ private:
     bool mHasPoweredOff = false;
 
     std::atomic<size_t> mNumLayers = 0;
+    // Vsync Source
+    sp<DisplayDevice> mActiveVsyncSource = NULL;
+    sp<DisplayDevice> mNextVsyncSource = NULL;
+    std::list<sp<DisplayDevice>> mDisplaysList;
 
     // Verify that transaction is being called by an approved process:
     // either AID_GRAPHICS or AID_SYSTEM.
@@ -1311,6 +1330,8 @@ private:
     std::atomic<bool> mInputDirty = true;
     void dirtyInput() { mInputDirty = true; }
     bool inputDirty() { return mInputDirty; }
+
+    int mFrameRateFlexibilityTokenCount = 0;
 
     // Perf Hint members
     int mPerfLockHandle = -1;
