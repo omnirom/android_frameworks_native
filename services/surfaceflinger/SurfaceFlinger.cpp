@@ -780,8 +780,8 @@ void SurfaceFlinger::init() {
         std::vector<float> refreshRates;
         auto iter = mRefreshRateConfigs->getAllRefreshRates().cbegin();
         while (iter != mRefreshRateConfigs->getAllRefreshRates().cend()) {
-            if (iter->second->fps > 0) {
-                refreshRates.push_back(iter->second->fps);
+            if (iter->second->getFps() > 0) {
+                refreshRates.push_back(iter->second->getFps());
             }
             ++iter;
         }
@@ -1029,7 +1029,7 @@ void SurfaceFlinger::setDesiredActiveConfig(const ActiveConfigInfo& info) {
         }
 
         // Send Refresh Rate hint to Perf lib
-        int refreshRateValue = static_cast<int>(refreshRate.fps);
+        int refreshRateValue = static_cast<int>(refreshRate.getFps());
         mPerfLockHandle = mPerfHintFunc(PERF_HINT_FPS_UPDATE, nullptr, INT_MAX, refreshRateValue);
     }
 
@@ -1740,8 +1740,7 @@ void SurfaceFlinger::setRefreshRateTo(int32_t refreshRate) {
 
     auto iter = mRefreshRateConfigs->getAllRefreshRates().cbegin();
     while (iter != mRefreshRateConfigs->getAllRefreshRates().cend()) {
-        if (std::abs(iter->second->fps - refreshRate) <
-                scheduler::RefreshRateConfigs::RefreshRate::FPS_EPSILON) {
+        if (iter->second->inPolicy(refreshRate, refreshRate)) {
             break;
         }
         ++iter;
@@ -2493,7 +2492,7 @@ void SurfaceFlinger::postComposition()
                 layers.push_back(layerStats);
             }
 
-            fps = mRefreshRateConfigs->getCurrentRefreshRate().fps;
+            fps = mRefreshRateConfigs->getCurrentRefreshRate().getFps();
         }
 
         mSmoMo->UpdateSmomoState(layers, fps);
