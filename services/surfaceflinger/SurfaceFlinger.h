@@ -1055,6 +1055,8 @@ private:
 
     void onFrameRateFlexibilityTokenReleased();
 
+    void SetContentFps(int contentFps);
+
     /* ------------------------------------------------------------------------
      * VrFlinger
      */
@@ -1379,8 +1381,11 @@ private:
     sp<IBinder> mDebugFrameRateFlexibilityToken;
 
     // Perf Hint members
+    static const int CONTENT_FPS_CHANGE_LIMIT = 5;
+    int mContentFps = 0;
     int mPerfLockHandle = -1;
     bool mPerfHintEnabled = false;
+    bool mPerfHintPending = false;
     void *mPerfLibHandle = nullptr;
     int (*mPerfLockReleaseFunc)(int handle) = nullptr;
     int (*mPerfHintFunc)(int hintId, const char *package, int duration, int refreshRate) = nullptr;
