@@ -2487,12 +2487,14 @@ void SurfaceFlinger::postComposition()
 
         // Disable SmoMo by passing empty layer stack in multiple display case
         if (mDisplays.size() == 1) {
-            for (auto& layer : mLayersWithQueuedFrames) {
-                smomo::SmomoLayerStats layerStats;
-                layerStats.id = layer->getSequence();
-                layerStats.name = layer->getName();
-                layers.push_back(layerStats);
-            }
+            mDrawingState.traverse([&](Layer* layer) {
+                if (layer->findOutputLayerForDisplay(displayDevice)) {
+                    smomo::SmomoLayerStats layerStats;
+                    layerStats.id = layer->getSequence();
+                    layerStats.name = layer->getName();
+                    layers.push_back(layerStats);
+                }
+            });
 
             fps = mRefreshRateConfigs->getCurrentRefreshRate().getFps();
         }
