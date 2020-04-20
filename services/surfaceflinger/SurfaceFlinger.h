@@ -91,6 +91,12 @@ class SmomoIntf;
 
 using smomo::SmomoIntf;
 
+namespace composer {
+class LayerExtnIntf;
+}
+
+using composer::LayerExtnIntf;
+
 namespace android {
 
 class Client;
@@ -200,6 +206,29 @@ private:
     using DestroySmoMoFuncPtr = std::add_pointer<void(SmomoIntf*)>::type;
     CreateSmoMoFuncPtr mSmoMoCreateFunc;
     DestroySmoMoFuncPtr mSmoMoDestroyFunc;
+};
+
+class LayerExtWrapper {
+public:
+    LayerExtWrapper() {}
+    ~LayerExtWrapper();
+
+    bool init();
+
+    LayerExtnIntf* operator->() { return     mInst; }
+    operator bool() { return mInst != nullptr; }
+
+    LayerExtWrapper(const LayerExtWrapper&) = delete;
+    LayerExtWrapper& operator=(const LayerExtWrapper&) = delete;
+
+private:
+    LayerExtnIntf *mInst = nullptr;
+    void *mLayerExtLibHandle = nullptr;
+
+    using CreateLayerExtnFuncPtr = std::add_pointer<bool(uint16_t, LayerExtnIntf**)>::type;
+    using DestroyLayerExtnFuncPtr = std::add_pointer<void(LayerExtnIntf*)>::type;
+    CreateLayerExtnFuncPtr mLayerExtCreateFunc;
+    DestroyLayerExtnFuncPtr mLayerExtDestroyFunc;
 };
 
 class SurfaceFlinger : public BnSurfaceComposer,
@@ -1339,6 +1368,7 @@ private:
     int (*mPerfHintFunc)(int hintId, const char *package, int duration, int refreshRate) = nullptr;
 
     SmomoWrapper mSmoMo;
+    LayerExtWrapper mLayerExt;
 };
 
 } // namespace android

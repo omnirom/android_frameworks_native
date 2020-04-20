@@ -987,6 +987,20 @@ Error Layer::setInfo(uint32_t type, uint32_t appId)
   return static_cast<Error>(intError);
 }
 
+Error Layer::setType(uint32_t type)
+{
+    if (type == mType) {
+        return Error::None;
+    }
+    auto intError = mComposer.setLayerType(mDisplayId, mId, type);
+    Error error = static_cast<Error>(intError);
+    if (error != Error::None) {
+        return error;
+    }
+    mType = type;
+    return error;
+}
+
 // Composer HAL 2.3
 Error Layer::setColorTransform(const android::mat4& matrix) {
     if (matrix == mColorMatrix) {
