@@ -97,6 +97,11 @@ class LayerExtnIntf;
 
 using composer::LayerExtnIntf;
 
+namespace composer {
+class FrameExtnIntf;
+}
+using composer::FrameExtnIntf;
+
 namespace android {
 
 class Client;
@@ -1061,6 +1066,7 @@ private:
     // access must be protected by mStateLock
     mutable Mutex mStateLock;
     mutable Mutex mVsyncLock;
+    mutable Mutex mDolphinStateLock;
     State mCurrentState{LayerVector::StateSet::Current};
     std::atomic<int32_t> mTransactionFlags = 0;
     Condition mTransactionCV;
@@ -1369,6 +1375,25 @@ private:
 
     SmomoWrapper mSmoMo;
     LayerExtWrapper mLayerExt;
+
+public:
+    nsecs_t mRefreshTimeStamp = -1;
+    std::string mNameLayerMax;
+    int mMaxQueuedFrames = -1;
+    int mNumIdle = -1;
+
+private:
+    bool mDolphinFuncsEnabled = false;
+    void *mDolphinHandle = nullptr;
+    bool (*mDolphinInit)() = nullptr;
+    bool (*mDolphinMonitor)(int number, nsecs_t vsyncPeriod) = nullptr;
+    void (*mDolphinScaling)(int numIdle, int maxQueuedFrames) = nullptr;
+    void (*mDolphinRefresh)() = nullptr;
+
+    FrameExtnIntf* mFrameExtn = nullptr;
+    void *mFrameExtnLibHandle = nullptr;
+    bool (*mCreateFrameExtnFunc)(FrameExtnIntf **interface) = nullptr;
+    bool (*mDestroyFrameExtnFunc)(FrameExtnIntf *interface) = nullptr;
 };
 
 } // namespace android

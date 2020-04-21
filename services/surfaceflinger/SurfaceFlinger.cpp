@@ -125,6 +125,7 @@
 #include "android-base/parseint.h"
 #include "android-base/stringprintf.h"
 
+#include "frame_extn_intf.h"
 #include "smomo_interface.h"
 #include "QtiGralloc.h"
 #include "layer_extn_intf.h"
@@ -498,6 +499,44 @@ SurfaceFlinger::SurfaceFlinger(Factory& factory) : SurfaceFlinger(factory, SkipI
     }
 
     useFrameRateApi = use_frame_rate_api(true);
+
+    mDolphinHandle = dlopen("libdolphin.so", RTLD_NOW);
+    if (!mDolphinHandle) {
+        ALOGW("Unable to open libdolphin.so: %s.", dlerror());
+    } else {
+        mDolphinInit = (bool (*) ())dlsym(mDolphinHandle, "dolphinInit");
+        mDolphinMonitor = (bool (*) (int, nsecs_t))dlsym(mDolphinHandle, "dolphinMonitor");
+        mDolphinScaling = (void (*)(int, int))dlsym(mDolphinHandle, "dolphinScaling");
+        mDolphinRefresh = (void (*) ())dlsym(mDolphinHandle, "dolphinRefresh");
+        if (mDolphinInit && mDolphinMonitor && mDolphinScaling && mDolphinRefresh) {
+            if (mDolphinInit())
+                mDolphinFuncsEnabled = true;
+        }
+        if (!mDolphinFuncsEnabled)
+            dlclose(mDolphinHandle);
+    }
+
+    mFrameExtnLibHandle = dlopen(EXTENSION_LIBRARY_NAME, RTLD_NOW);
+    if (!mFrameExtnLibHandle) {
+        ALOGE("Unable to open libframeextension.so: %s.", dlerror());
+    } else {
+        mCreateFrameExtnFunc =
+            (bool (*) (composer::FrameExtnIntf**))(dlsym(mFrameExtnLibHandle,
+                                                                CREATE_FRAME_EXTN_INTERFACE));
+        mDestroyFrameExtnFunc =
+            (bool (*) (composer::FrameExtnIntf*))(dlsym(mFrameExtnLibHandle,
+                                                                 DESTROY_FRAME_EXTN_INTERFACE));
+        if (mCreateFrameExtnFunc && mDestroyFrameExtnFunc) {
+            mCreateFrameExtnFunc(&mFrameExtn);
+            if (!mFrameExtn) {
+                ALOGE("Frame Extension Object create failed.");
+                dlclose(mFrameExtnLibHandle);
+            }
+        } else {
+            ALOGE("Can't load libframeextension symbols: %s", dlerror());
+            dlclose(mFrameExtnLibHandle);
+        }
+    }
 }
 
 void SurfaceFlinger::onFirstRef()
@@ -510,6 +549,10 @@ SurfaceFlinger::~SurfaceFlinger() {
         dlclose(mPerfLibHandle);
         mPerfLibHandle = nullptr;
     }
+    if (mDolphinFuncsEnabled)
+        dlclose(mDolphinHandle);
+    if (mFrameExtn)
+        dlclose(mFrameExtnLibHandle);
 }
 
 void SurfaceFlinger::binderDied(const wp<IBinder>& /* who */)
@@ -2102,6 +2145,38 @@ void SurfaceFlinger::onMessageReceived(int32_t what) NO_THREAD_SAFETY_ANALYSIS {
                 }
             }
 
+            if (mDolphinFuncsEnabled) {
+                int maxQueuedFrames = 0;
+                mDrawingState.traverseInZOrder([&](Layer* layer) {
+                    if (layer->hasReadyFrame()) {
+                        nsecs_t expectedPresentTime;
+                        expectedPresentTime = mScheduler->getDispSyncExpectedPresentTime();
+                        if (layer->shouldPresentNow(expectedPresentTime)) {
+                            int layerQueuedFrames = layer->getQueuedFrameCount();
+                            Mutex::Autolock lock(mDolphinStateLock);
+                            if (maxQueuedFrames < layerQueuedFrames &&
+                                !layer->getVisibleNonTransparentRegion().isEmpty()) {
+                                maxQueuedFrames = layerQueuedFrames;
+                                mNameLayerMax = layer->getName();
+                            }
+                        }
+                    }
+                });
+                mMaxQueuedFrames = maxQueuedFrames;
+                DisplayStatInfo stats;
+                mScheduler->getDisplayStatInfo(&stats);
+                if(mDolphinMonitor(maxQueuedFrames, stats.vsyncPeriod)) {
+                    signalLayerUpdate();
+                    if (mFrameExtn) {
+                        mNumIdle++;
+                    }
+                    break;
+                }
+                if (mFrameExtn) {
+                    mNumIdle++;
+                }
+            }
+
             // Our jank window is always at least 100ms since we missed a
             // frame...
             static constexpr nsecs_t kMinJankyDuration =
@@ -2182,10 +2257,24 @@ void SurfaceFlinger::onMessageReceived(int32_t what) NO_THREAD_SAFETY_ANALYSIS {
                 }
                 signalRefresh();
             }
+            if (mFrameExtn && mDolphinFuncsEnabled) {
+                if (!refreshNeeded) {
+                    mDolphinScaling(mNumIdle, mMaxQueuedFrames);
+                }
+            }
             break;
         }
         case MessageQueue::REFRESH: {
+            if (mFrameExtn) {
+                mRefreshTimeStamp = systemTime(SYSTEM_TIME_MONOTONIC);
+            }
+            if (mDolphinFuncsEnabled) {
+                mDolphinRefresh();
+            }
             handleMessageRefresh();
+            if (mFrameExtn) {
+                mNumIdle = 0;
+            }
             break;
         }
     }
@@ -2266,7 +2355,11 @@ void SurfaceFlinger::handleMessageRefresh() {
         setDisplayElapseTime(display);
     }
 
-    mCompositionEngine->present(refreshArgs);
+    {
+        Mutex::Autolock lock(mDolphinStateLock);
+        mCompositionEngine->present(refreshArgs);
+    }
+
     mTimeStats->recordFrameDuration(mFrameStartTime, systemTime());
     // Reset the frame start time now that we've recorded this frame.
     mFrameStartTime = 0;
