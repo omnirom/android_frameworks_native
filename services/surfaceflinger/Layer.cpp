@@ -2418,6 +2418,20 @@ Region Layer::debugGetVisibleRegionOnDefaultDisplay() const {
     return outputLayer->getState().visibleRegion;
 }
 
+Region Layer::getVisibleNonTransparentRegion() const {
+    sp<DisplayDevice> displayDevice = mFlinger->getDefaultDisplayDeviceLocked();
+    if (displayDevice == nullptr) {
+        return {};
+    }
+
+    auto outputLayer = findOutputLayerForDisplay(displayDevice);
+    if (outputLayer == nullptr) {
+        return {};
+    }
+
+    return outputLayer->getState().visibleNonTransparentRegion;
+}
+
 void Layer::setInitialValuesForClone(const sp<Layer>& clonedFrom) {
     // copy drawing state from cloned layer
     mDrawingState = clonedFrom->mDrawingState;
