@@ -33,6 +33,7 @@
 #include "FrameTracer/FrameTracer.h"
 #include "TimeStats/TimeStats.h"
 
+#include "frame_extn_intf.h"
 #include "smomo_interface.h"
 #include "layer_extn_intf.h"
 
@@ -447,6 +448,33 @@ void BufferQueueLayer::onFrameAvailable(const BufferItem& item) {
         bufferStats.auto_timestamp = item.mIsAutoTimestamp;
         bufferStats.timestamp = item.mTimestamp;
         mFlinger->mSmoMo->CollectLayerStats(bufferStats);
+    }
+
+    if (mFlinger->mFrameExtn && mFlinger->mDolphinFuncsEnabled) {
+        composer::FrameInfo frameInfo;
+        frameInfo.version.major = (uint8_t)(1);
+        frameInfo.version.minor = (uint8_t)(0);
+        frameInfo.max_queued_frames = mFlinger->mMaxQueuedFrames;
+        frameInfo.num_idle = mFlinger->mNumIdle;
+        frameInfo.max_queued_layer_name = mFlinger->mNameLayerMax;
+        frameInfo.current_timestamp = systemTime(SYSTEM_TIME_MONOTONIC);
+        frameInfo.previous_timestamp = mLastTimeStamp;
+        frameInfo.vsync_timestamp = mFlinger->mVsyncTimeStamp;
+        frameInfo.refresh_timestamp = mFlinger->mRefreshTimeStamp;
+        frameInfo.ref_latency = mFrameTracker.getPreviousGfxInfo();
+        {
+            Mutex::Autolock lock(mFlinger->mStateLock);
+            frameInfo.vsync_period = mFlinger->getVsyncPeriod();
+        }
+        mLastTimeStamp = frameInfo.current_timestamp;
+        {
+            Mutex::Autolock lock(mFlinger->mDolphinStateLock);
+            frameInfo.transparent_region = this->getVisibleNonTransparentRegion().isEmpty();
+        }
+        frameInfo.width = item.mGraphicBuffer->getWidth();
+        frameInfo.height = item.mGraphicBuffer->getHeight();
+        frameInfo.layer_name = this->getName().c_str();
+        mFlinger->mFrameExtn->SetFrameInfo(frameInfo);
     }
 
     mFlinger->signalLayerUpdate();
