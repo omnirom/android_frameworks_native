@@ -513,9 +513,15 @@ SurfaceFlinger::SurfaceFlinger(Factory& factory) : SurfaceFlinger(factory, SkipI
         mDolphinMonitor = (bool (*) (int, nsecs_t))dlsym(mDolphinHandle, "dolphinMonitor");
         mDolphinScaling = (void (*)(int, int))dlsym(mDolphinHandle, "dolphinScaling");
         mDolphinRefresh = (void (*) ())dlsym(mDolphinHandle, "dolphinRefresh");
-        if (mDolphinInit && mDolphinMonitor && mDolphinScaling && mDolphinRefresh) {
-            if (mDolphinInit())
-                mDolphinFuncsEnabled = true;
+        mDolphinDequeueBuffer = (void (*)(const char *))dlsym(mDolphinHandle,
+                "dolphinDequeueBuffer");
+        mDolphinQueueBuffer = (void (*)(const char *))dlsym(mDolphinHandle,
+                "dolphinQueueBuffer");
+        bool allDolphinSymbolsFound = mDolphinInit && mDolphinMonitor &&
+                mDolphinScaling && mDolphinRefresh && mDolphinDequeueBuffer &&
+                mDolphinQueueBuffer;
+        if (allDolphinSymbolsFound && mDolphinInit()) {
+            mDolphinFuncsEnabled = true;
         }
         if (!mDolphinFuncsEnabled)
             dlclose(mDolphinHandle);
