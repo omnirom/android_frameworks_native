@@ -64,6 +64,12 @@ status_t MonitoredProducer::dequeueBuffer(int* slot, sp<Fence>* fence, uint32_t 
                                           PixelFormat format, uint64_t usage,
                                           uint64_t* outBufferAge,
                                           FrameEventHistoryDelta* outTimestamps) {
+    if (mFlinger->mDolphinFuncsEnabled) {
+        sp<Layer> layer = mLayer.promote();
+        if (layer != nullptr) {
+            mFlinger->mDolphinDequeueBuffer(layer->getName().c_str());
+        }
+    }
     return mProducer->dequeueBuffer(slot, fence, w, h, format, usage, outBufferAge, outTimestamps);
 }
 
@@ -83,6 +89,12 @@ status_t MonitoredProducer::attachBuffer(int* outSlot,
 
 status_t MonitoredProducer::queueBuffer(int slot, const QueueBufferInput& input,
         QueueBufferOutput* output) {
+    if (mFlinger->mDolphinFuncsEnabled) {
+        sp<Layer> layer = mLayer.promote();
+        if (layer != nullptr) {
+            mFlinger->mDolphinQueueBuffer(layer->getName().c_str());
+        }
+    }
     return mProducer->queueBuffer(slot, input, output);
 }
 
