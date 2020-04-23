@@ -594,7 +594,7 @@ status_t HWComposer::presentAndGetReleaseFences(DisplayId displayId) {
     return NO_ERROR;
 }
 
-status_t HWComposer::setPowerMode(DisplayId displayId, int32_t intMode) {
+status_t HWComposer::setPowerMode(DisplayId displayId, hal::PowerMode mode) {
     RETURN_IF_INVALID_DISPLAY(displayId, BAD_INDEX);
 
     const auto& displayData = mDisplayData[displayId];
@@ -602,8 +602,6 @@ status_t HWComposer::setPowerMode(DisplayId displayId, int32_t intMode) {
         LOG_DISPLAY_ERROR(displayId, "Invalid operation on virtual display");
         return INVALID_OPERATION;
     }
-
-    auto mode = static_cast<hal::PowerMode>(intMode);
 
     auto& hwcDisplay = displayData.hwcDisplay;
     switch (mode) {
@@ -925,7 +923,7 @@ std::optional<DisplayIdentificationInfo> HWComposer::onHotplugConnect(
             } else {
                 ALOGW_IF(hasDisplayIdentificationData,
                          "Ignoring identification data for display %" PRIu64, hwcDisplayId);
-                port = isPrimary ? HWC_DISPLAY_PRIMARY : HWC_DISPLAY_EXTERNAL;
+                port = isPrimary ? LEGACY_DISPLAY_TYPE_PRIMARY : LEGACY_DISPLAY_TYPE_EXTERNAL;
             }
 
             return DisplayIdentificationInfo{.id = getFallbackDisplayId(port),

@@ -1969,7 +1969,7 @@ void SurfaceFlinger::updateVrFlinger() {
     sp<DisplayDevice> display = getDefaultDisplayDeviceLocked();
     LOG_ALWAYS_FATAL_IF(!display);
 
-    const int currentDisplayPowerMode = display->getPowerMode();
+    const hal::PowerMode currentDisplayPowerMode = display->getPowerMode();
 
     // Clear out all the output layers from the composition engine for all
     // displays before destroying the hardware composer interface. This ensures
@@ -2062,16 +2062,16 @@ nsecs_t SurfaceFlinger::previousFramePresentTime() NO_THREAD_SAFETY_ANALYSIS {
     return fence->getSignalTime();
 }
 
-void SurfaceFlinger::populateExpectedPresentTime() {
+void SurfaceFlinger::populateExpectedPresentTime(nsecs_t wakeupTime) {
     DisplayStatInfo stats;
     mScheduler->getDisplayStatInfo(&stats);
-    const nsecs_t presentTime = mScheduler->getDispSyncExpectedPresentTime();
+    const nsecs_t presentTime = mScheduler->getDispSyncExpectedPresentTime(wakeupTime);
     // Inflate the expected present time if we're targetting the next vsync.
     mExpectedPresentTime.store(
             mVSyncModulator->getOffsets().sf >= 0 ? presentTime : presentTime + stats.vsyncPeriod);
 }
 
-void SurfaceFlinger::onMessageReceived(int32_t what) NO_THREAD_SAFETY_ANALYSIS {
+void SurfaceFlinger::onMessageReceived(int32_t what, nsecs_t when) NO_THREAD_SAFETY_ANALYSIS {
     ATRACE_CALL();
     switch (what) {
         case MessageQueue::INVALIDATE: {
@@ -2080,7 +2080,7 @@ void SurfaceFlinger::onMessageReceived(int32_t what) NO_THREAD_SAFETY_ANALYSIS {
             // value throughout this frame to make sure all layers are
             // seeing this same value.
             const nsecs_t lastExpectedPresentTime = mExpectedPresentTime.load();
-            populateExpectedPresentTime();
+            populateExpectedPresentTime(when);
 
             // When Backpressure propagation is enabled we want to give a small grace period
             // for the present fence to fire instead of just giving up on this frame to handle cases
@@ -2161,8 +2161,9 @@ void SurfaceFlinger::onMessageReceived(int32_t what) NO_THREAD_SAFETY_ANALYSIS {
                 int maxQueuedFrames = 0;
                 mDrawingState.traverseInZOrder([&](Layer* layer) {
                     if (layer->hasReadyFrame()) {
+                        const nsecs_t now = systemTime(SYSTEM_TIME_MONOTONIC);
                         nsecs_t expectedPresentTime;
-                        expectedPresentTime = mScheduler->getDispSyncExpectedPresentTime();
+                        expectedPresentTime = mScheduler->getDispSyncExpectedPresentTime(now);
                         if (layer->shouldPresentNow(expectedPresentTime)) {
                             int layerQueuedFrames = layer->getQueuedFrameCount();
                             Mutex::Autolock lock(mDolphinStateLock);
@@ -2203,7 +2204,7 @@ void SurfaceFlinger::onMessageReceived(int32_t what) NO_THREAD_SAFETY_ANALYSIS {
                 // power mode may operate at a different frame rate than is
                 // reported in their config, which causes noticeable (but less
                 // severe) jank.
-                if (displayDevice && displayDevice->getPowerMode() == HWC_POWER_MODE_NORMAL) {
+                if (displayDevice && displayDevice->getPowerMode() == hal::PowerMode::ON) {
                     const nsecs_t currentTime = systemTime();
                     const nsecs_t jankDuration = currentTime - mMissedFrameJankStart;
                     if (jankDuration > kMinJankyDuration && jankDuration < kMaxJankyDuration) {
@@ -2560,7 +2561,7 @@ void SurfaceFlinger::postComposition()
     mTransactionCompletedThread.sendCallbacks();
 
     if (displayDevice && displayDevice->isPrimary() &&
-        displayDevice->getPowerMode() == HWC_POWER_MODE_NORMAL && presentFenceTime->isValid()) {
+        displayDevice->getPowerMode() == hal::PowerMode::ON && presentFenceTime->isValid()) {
         mScheduler->addPresentFence(presentFenceTime);
     }
 
@@ -2621,6 +2622,9 @@ void SurfaceFlinger::postComposition()
         getBE().mTotalTime += elapsedTime;
     }
     getBE().mLastSwapTime = currentTime;
+
+    // Cleanup any outstanding resources due to rendering a prior frame.
+    getRenderEngine().cleanupPostRender();
 
     {
         std::lock_guard lock(mTexturePoolMutex);
@@ -2698,18 +2702,18 @@ sp<DisplayDevice> SurfaceFlinger::getVsyncSource() {
     // of priority is Primary (Built-in/Pluggable) followed by
     // Secondary built-ins followed by pluggable.
     for (const auto& display : mDisplaysList) {
-        int mode = display->getPowerMode();
-        if (display->isVirtual() || (mode == HWC_POWER_MODE_OFF) ||
-            (mode == HWC_POWER_MODE_DOZE_SUSPEND)) {
+        hal::PowerMode mode = display->getPowerMode();
+        if (display->isVirtual() || (mode == hal::PowerMode::OFF) ||
+            (mode == hal::PowerMode::DOZE_SUSPEND)) {
             continue;
         }
 
         if (mVsyncSourceReliableOnDoze) {
-            if ((mode == HWC_POWER_MODE_NORMAL) ||
-                (mode == HWC_POWER_MODE_DOZE)) {
+            if ((mode == hal::PowerMode::ON) ||
+                (mode == hal::PowerMode::DOZE)) {
               return display;
             }
-        } else if (mode == HWC_POWER_MODE_NORMAL) {
+        } else if (mode == hal::PowerMode::ON) {
             return display;
         }
     }
@@ -2719,12 +2723,12 @@ sp<DisplayDevice> SurfaceFlinger::getVsyncSource() {
     // in the same order of display priority as above.
     if (!mVsyncSourceReliableOnDoze) {
         for (const auto& display : mDisplaysList) {
-            int mode = display->getPowerMode();
+            hal::PowerMode mode = display->getPowerMode();
             if (display->isVirtual()) {
                 continue;
             }
 
-            if (mode == HWC_POWER_MODE_DOZE) {
+            if (mode == hal::PowerMode::DOZE) {
                 return display;
             }
         }
@@ -2911,7 +2915,7 @@ sp<DisplayDevice> SurfaceFlinger::setupNewDisplayDeviceInternal(
             isInternalDisplay ? internalDisplayOrientation : ui::ROTATION_0;
 
     // virtual displays are always considered enabled
-    creationArgs.initialPowerMode = state.isVirtual() ? HWC_POWER_MODE_NORMAL : HWC_POWER_MODE_OFF;
+    creationArgs.initialPowerMode = state.isVirtual() ? hal::PowerMode::ON : hal::PowerMode::OFF;
 
     sp<DisplayDevice> display = getFactory().createDisplayDevice(creationArgs);
 
@@ -3296,19 +3300,6 @@ void SurfaceFlinger::updateInputFlinger() {
 void SurfaceFlinger::updateInputWindowInfo() {
     std::vector<InputWindowInfo> inputHandles;
 
-    // We use a simple caching algorithm here. mInputDirty begins as true,
-    // after we call setInputWindows we set it to false, so
-    // in the future we wont call it again.. We set input dirty to true again
-    // when any layer that hasInput() has a transaction performed on it
-    // or when any parent or relative parent of such a layer has a transaction
-    // performed on it. Not all of these transactions will really result in
-    // input changes but all input changes will spring from these transactions
-    // so the cache is safe but not optimal. It seems like it might be annoyingly
-    // costly to cache and comapre the actual InputWindowHandle vector though.
-    if (!mInputDirty && !mInputWindowCommands.syncInputWindows) {
-        return;
-    }
-
     mDrawingState.traverseInReverseZOrder([&](Layer* layer) {
         if (layer->hasInput()) {
             // When calculating the screen bounds we ignore the transparent region since it may
@@ -3320,8 +3311,6 @@ void SurfaceFlinger::updateInputWindowInfo() {
     mInputFlinger->setInputWindows(inputHandles,
                                    mInputWindowCommands.syncInputWindows ? mSetInputWindowsListener
                                                                          : nullptr);
-
-    mInputDirty = false;
 }
 
 void SurfaceFlinger::commitInputWindowCommands() {
@@ -3366,7 +3355,7 @@ void SurfaceFlinger::initScheduler(DisplayId primaryDisplayId) {
                                                             currentConfig);
     mRefreshRateStats =
             std::make_unique<scheduler::RefreshRateStats>(*mRefreshRateConfigs, *mTimeStats,
-                                                          currentConfig, HWC_POWER_MODE_OFF);
+                                                          currentConfig, hal::PowerMode::OFF);
     mRefreshRateStats->setConfigMode(currentConfig);
 
     mPhaseConfiguration = getFactory().createPhaseConfiguration(*mRefreshRateConfigs);
@@ -3687,8 +3676,7 @@ bool SurfaceFlinger::transactionFlushNeeded() {
 bool SurfaceFlinger::transactionIsReadyToBeApplied(int64_t desiredPresentTime,
                                                    bool useCachedExpectedPresentTime,
                                                    const Vector<ComposerState>& states) {
-    if (!useCachedExpectedPresentTime)
-        populateExpectedPresentTime();
+    if (!useCachedExpectedPresentTime) populateExpectedPresentTime(systemTime());
 
     const nsecs_t expectedPresentTime = mExpectedPresentTime.load();
     // Do not present if the desiredPresentTime has not passed unless it is more than one second
@@ -4525,7 +4513,7 @@ void SurfaceFlinger::onInitializeDisplays() {
     setTransactionState(state, displays, 0, nullptr, mPendingInputWindowCommands, -1, {}, false,
                         {});
 
-    setPowerModeInternal(display, HWC_POWER_MODE_NORMAL);
+    setPowerModeInternal(display, hal::PowerMode::ON);
 
     const nsecs_t vsyncPeriod = getVsyncPeriod();
     mAnimFrameTracker.setDisplayRefreshPeriod(vsyncPeriod);
@@ -4549,7 +4537,7 @@ void SurfaceFlinger::setVsyncEnabledInHWC(DisplayId displayId, hal::Vsync enable
     }
 }
 
-void SurfaceFlinger::setPowerModeInternal(const sp<DisplayDevice>& display, int mode) {
+void SurfaceFlinger::setPowerModeInternal(const sp<DisplayDevice>& display, hal::PowerMode mode) {
     if (display->isVirtual()) {
         ALOGE("%s: Invalid operation on virtual display", __FUNCTION__);
         return;
@@ -4560,7 +4548,7 @@ void SurfaceFlinger::setPowerModeInternal(const sp<DisplayDevice>& display, int 
 
     ALOGD("Setting power mode %d on display %s", mode, to_string(*displayId).c_str());
 
-    int currentMode = display->getPowerMode();
+    const hal::PowerMode currentMode = display->getPowerMode();
     if (mode == currentMode) {
         return;
     }
@@ -4575,16 +4563,16 @@ void SurfaceFlinger::setPowerModeInternal(const sp<DisplayDevice>& display, int 
         mDisplaysList.end(), display) == mDisplaysList.end());
 
     if (mInterceptor->isEnabled()) {
-        mInterceptor->savePowerModeUpdate(display->getSequenceId(), mode);
+        mInterceptor->savePowerModeUpdate(display->getSequenceId(), static_cast<int32_t>(mode));
     }
 
-    if (currentMode == HWC_POWER_MODE_OFF) {
+    if (currentMode == hal::PowerMode::OFF) {
         if (SurfaceFlinger::setSchedFifo(true) != NO_ERROR) {
             ALOGW("Couldn't set SCHED_FIFO on display on: %s\n", strerror(errno));
         }
         getHwComposer().setPowerMode(*displayId, mode);
         if (isDummyDisplay) {
-            if (display->isPrimary() && mode != HWC_POWER_MODE_DOZE_SUSPEND) {
+            if (display->isPrimary() && mode != hal::PowerMode::DOZE_SUSPEND) {
                 setVsyncEnabledInHWC(*displayId, mHWCVsyncPendingState);
                 mScheduler->onScreenAcquired(mAppConnectionHandle);
                 mScheduler->resyncToHardwareVsync(true, getVsyncPeriod());
@@ -4596,13 +4584,13 @@ void SurfaceFlinger::setPowerModeInternal(const sp<DisplayDevice>& display, int 
         mVisibleRegionsDirty = true;
         mHasPoweredOff = true;
         repaintEverything();
-    } else if (mode == HWC_POWER_MODE_OFF) {
+    } else if (mode == hal::PowerMode::OFF) {
         // Turn off the display
         if (isDummyDisplay) {
             if (SurfaceFlinger::setSchedFifo(false) != NO_ERROR) {
                 ALOGW("Couldn't set SCHED_OTHER on display off: %s\n", strerror(errno));
             }
-            if (display->isPrimary() && currentMode != HWC_POWER_MODE_DOZE_SUSPEND) {
+            if (display->isPrimary() && currentMode != hal::PowerMode::DOZE_SUSPEND) {
                 mScheduler->disableHardwareVsync(true);
                 mScheduler->onScreenReleased(mAppConnectionHandle);
             }
@@ -4615,19 +4603,18 @@ void SurfaceFlinger::setPowerModeInternal(const sp<DisplayDevice>& display, int 
         getHwComposer().setPowerMode(*displayId, mode);
         mVisibleRegionsDirty = true;
         // from this point on, SF will stop drawing on this display
-    } else if (mode == HWC_POWER_MODE_DOZE ||
-               mode == HWC_POWER_MODE_NORMAL) {
+    } else if (mode == hal::PowerMode::DOZE || mode == hal::PowerMode::ON) {
         // Update display while dozing
         getHwComposer().setPowerMode(*displayId, mode);
         if (isDummyDisplay) {
-            if (display->isPrimary() && currentMode == HWC_POWER_MODE_DOZE_SUSPEND) {
+            if (display->isPrimary() && currentMode == hal::PowerMode::DOZE_SUSPEND) {
                 mScheduler->onScreenAcquired(mAppConnectionHandle);
                 mScheduler->resyncToHardwareVsync(true, getVsyncPeriod());
             }
         } else {
             updateVsyncSource();
         }
-    } else if (mode == HWC_POWER_MODE_DOZE_SUSPEND) {
+    } else if (mode == hal::PowerMode::DOZE_SUSPEND) {
         // Leave display going to doze
         if (isDummyDisplay) {
             if (display->isPrimary()) {
@@ -4659,7 +4646,7 @@ void SurfaceFlinger::setPowerModeInternal(const sp<DisplayDevice>& display, int 
     if (display->isPrimary()) {
         mTimeStats->setPowerMode(mode);
         mRefreshRateStats->setPowerMode(mode);
-        mScheduler->setDisplayPowerState(mode == HWC_POWER_MODE_NORMAL);
+        mScheduler->setDisplayPowerState(mode == hal::PowerMode::ON);
     }
 
     ALOGD("Finished setting power mode %d on display %s", mode, to_string(*displayId).c_str());
@@ -4674,7 +4661,7 @@ void SurfaceFlinger::setPowerMode(const sp<IBinder>& displayToken, int mode) {
         } else if (display->isVirtual()) {
             ALOGW("Attempt to set power mode %d for virtual display", mode);
         } else {
-            setPowerModeInternal(display, mode);
+            setPowerModeInternal(display, static_cast<hal::PowerMode>(mode));
         }
     }));
 }
@@ -4834,11 +4821,19 @@ void SurfaceFlinger::dumpVSync(std::string& result) const {
 
     scheduler::RefreshRateConfigs::Policy policy = mRefreshRateConfigs->getDisplayManagerPolicy();
     StringAppendF(&result,
-                  "DesiredDisplayConfigSpecs: default config ID: %d"
+                  "DesiredDisplayConfigSpecs (DisplayManager): default config ID: %d"
                   ", min: %.2f Hz, max: %.2f Hz",
                   policy.defaultConfig.value(), policy.minRefreshRate, policy.maxRefreshRate);
     StringAppendF(&result, "(config override by backdoor: %s)\n\n",
                   mDebugDisplayConfigSetByBackdoor ? "yes" : "no");
+    scheduler::RefreshRateConfigs::Policy currentPolicy = mRefreshRateConfigs->getCurrentPolicy();
+    if (currentPolicy != policy) {
+        StringAppendF(&result,
+                      "DesiredDisplayConfigSpecs (Override): default config ID: %d"
+                      ", min: %.2f Hz, max: %.2f Hz\n\n",
+                      currentPolicy.defaultConfig.value(), currentPolicy.minRefreshRate,
+                      currentPolicy.maxRefreshRate);
+    }
 
     mScheduler->dump(mAppConnectionHandle, result);
     mScheduler->getPrimaryDispSync().dump(result);
@@ -5363,9 +5358,9 @@ status_t SurfaceFlinger::CheckTransactCodeCredentials(uint32_t code) {
         code == IBinder::SYSPROPS_TRANSACTION) {
         return OK;
     }
-    // Numbers from 1000 to 1035 and 20000 are currently used for backdoors. The code
+    // Numbers from 1000 to 1036 and 20000 are currently used for backdoors. The code
     // in onTransact verifies that the user is root, and has access to use SF.
-    if ((code >= 1000 && code <= 1035) || (code == 20000)) {
+    if ((code >= 1000 && code <= 1036) || (code == 20000)) {
         ALOGV("Accessing SurfaceFlinger through backdoor code: %u", code);
         return OK;
     }
@@ -5691,6 +5686,18 @@ status_t SurfaceFlinger::onTransact(uint32_t code, const Parcel& data, Parcel* r
                         return result;
                     }
                     mDebugDisplayConfigSetByBackdoor = true;
+                }
+                return NO_ERROR;
+            }
+            case 1036: {
+                if (data.readInt32() > 0) {
+                    status_t result =
+                            acquireFrameRateFlexibilityToken(&mDebugFrameRateFlexibilityToken);
+                    if (result != NO_ERROR) {
+                        return result;
+                    }
+                } else {
+                    mDebugFrameRateFlexibilityToken = nullptr;
                 }
                 return NO_ERROR;
             }
