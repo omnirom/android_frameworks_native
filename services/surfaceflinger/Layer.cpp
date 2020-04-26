@@ -222,9 +222,6 @@ void Layer::removeFromCurrentState() {
     }
 
     mFlinger->markLayerPendingRemovalLocked(this);
-    if (hasInput()) {
-        mFlinger->dirtyInput();
-    }
 }
 
 void Layer::onRemovedFromCurrentState() {
@@ -1014,8 +1011,6 @@ uint32_t Layer::doTransaction(uint32_t flags) {
     mPendingStatesSnapshot = mPendingStates;
     mCurrentState.callbackHandles = {};
 
-    maybeDirtyInput();
-
     return flags;
 }
 
@@ -1399,6 +1394,9 @@ bool Layer::setFrameRate(FrameRate frameRate) {
     if (mCurrentState.frameRate == frameRate) {
         return false;
     }
+
+    // Activate the layer in Scheduler's LayerHistory
+    mFlinger->mScheduler->recordLayerHistory(this, systemTime());
 
     mCurrentState.sequence++;
     mCurrentState.frameRate = frameRate;
@@ -2575,32 +2573,6 @@ Layer::FrameRateCompatibility Layer::FrameRate::convertCompatibility(int8_t comp
             LOG_ALWAYS_FATAL("Invalid frame rate compatibility value %d", compatibility);
             return FrameRateCompatibility::Default;
     }
-}
-
-bool Layer::maybeDirtyInput() {
-    // No sense redirtying input.
-    if (mFlinger->inputDirty()) return true;
-
-    if (hasInput()) {
-        mFlinger->dirtyInput();
-        return true;
-    }
-
-    // If a child or relative dirties the input, no sense continuing to traverse
-    // so we return early and halt the recursion. We traverse ourselves instead
-    // of using traverse() so we can implement this early halt.
-    for (const sp<Layer>& child : mDrawingChildren) {
-        if (child->maybeDirtyInput()) {
-            return true;
-        }
-    }
-    for (const wp<Layer>& weakRelative : mDrawingState.zOrderRelatives) {
-        sp<Layer> relative = weakRelative.promote();
-        if (relative && relative->maybeDirtyInput()) {
-            return true;
-        }
-    }
-    return false;
 }
 
 // ---------------------------------------------------------------------------

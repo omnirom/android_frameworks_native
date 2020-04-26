@@ -381,7 +381,7 @@ public:
     // called on the main thread by MessageQueue when an internal message
     // is received
     // TODO: this should be made accessible only to MessageQueue
-    void onMessageReceived(int32_t what);
+    void onMessageReceived(int32_t what, nsecs_t when);
 
     renderengine::RenderEngine& getRenderEngine() const;
 
@@ -639,7 +639,8 @@ private:
     // Called when active config is no longer is progress
     void desiredActiveConfigChangeDone() REQUIRES(mStateLock);
     // called on the main thread in response to setPowerMode()
-    void setPowerModeInternal(const sp<DisplayDevice>& display, int mode) REQUIRES(mStateLock);
+    void setPowerModeInternal(const sp<DisplayDevice>& display, hal::PowerMode mode)
+            REQUIRES(mStateLock);
 
     // Sets the desired display configs.
     status_t setDesiredDisplayConfigSpecsInternal(
@@ -925,7 +926,7 @@ private:
 
     // Populates the expected present time for this frame. For negative offsets, performs a
     // correction using the predicted vsync for the next frame instead.
-    void populateExpectedPresentTime();
+    void populateExpectedPresentTime(nsecs_t now);
 
     /*
      * Display identification
@@ -1340,12 +1341,9 @@ private:
     nsecs_t mMissedFrameJankStart = 0;
     int32_t mMissedFrameJankCount = 0;
 
-    // See updateInputWindowInfo() for details
-    std::atomic<bool> mInputDirty = true;
-    void dirtyInput() { mInputDirty = true; }
-    bool inputDirty() { return mInputDirty; }
-
     int mFrameRateFlexibilityTokenCount = 0;
+
+    sp<IBinder> mDebugFrameRateFlexibilityToken;
 
     // Perf Hint members
     int mPerfLockHandle = -1;
