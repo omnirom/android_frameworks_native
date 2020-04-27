@@ -117,7 +117,7 @@ void DispSyncSource::setPhaseOffset(nsecs_t phaseOffset) {
     }
 }
 
-void DispSyncSource::onDispSyncEvent(nsecs_t when) {
+void DispSyncSource::onDispSyncEvent(nsecs_t when, nsecs_t expectedVSyncTimestamp) {
     VSyncSource::Callback* callback;
     {
         std::lock_guard lock(mCallbackMutex);
@@ -129,7 +129,7 @@ void DispSyncSource::onDispSyncEvent(nsecs_t when) {
     }
 
     if (callback != nullptr) {
-        callback->onVSyncEvent(when);
+        callback->onVSyncEvent(when, expectedVSyncTimestamp);
     }
 }
 
