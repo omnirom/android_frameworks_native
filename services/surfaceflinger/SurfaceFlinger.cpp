@@ -1479,7 +1479,7 @@ status_t SurfaceFlinger::setDisplayElapseTime(const sp<DisplayDevice>& display) 
         return OK;
     }
 
-    if (mDisplaysList.size() != 1) {
+    if (mDisplaysList.size() != 1 || display->isVirtual()) {
         // Revisit this for multi displays.
         return OK;
     }
