@@ -405,6 +405,13 @@ public:
      */
     bool hasPendingBatch() const;
 
+    /* Returns the source of first pending batch if exist.
+     *
+     * Should be called after calling consume() with consumeBatches == false to determine
+     * whether consume() should be called again later on with consumeBatches == true.
+     */
+    int32_t getPendingBatchSource() const;
+
 private:
     int mTouchMoveCounter = 0;
 

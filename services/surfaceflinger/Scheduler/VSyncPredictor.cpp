@@ -22,6 +22,7 @@
 //#define LOG_NDEBUG 0
 #include "VSyncPredictor.h"
 #include <android-base/logging.h>
+#include <android-base/stringprintf.h>
 #include <cutils/compiler.h>
 #include <cutils/properties.h>
 #include <utils/Log.h>
@@ -31,6 +32,7 @@
 #include <sstream>
 
 namespace android::scheduler {
+using base::StringAppendF;
 
 static auto constexpr kMaxPercent = 100u;
 
@@ -115,10 +117,10 @@ bool VSyncPredictor::addVsyncTimestamp(nsecs_t timestamp) {
     auto it = mRateMap.find(mIdealPeriod);
     auto const currentPeriod = std::get<0>(it->second);
     // TODO (b/144707443): its important that there's some precision in the mean of the ordinals
-    //                     for the intercept calculation, so scale the ordinals by 10 to continue
+    //                     for the intercept calculation, so scale the ordinals by 1000 to continue
     //                     fixed point calculation. Explore expanding
     //                     scheduler::utils::calculate_mean to have a fixed point fractional part.
-    static constexpr int kScalingFactor = 10;
+    static constexpr int64_t kScalingFactor = 1000;
 
     for (auto i = 0u; i < mTimestamps.size(); i++) {
         traceInt64If("VSP-ts", mTimestamps[i]);
@@ -147,7 +149,7 @@ bool VSyncPredictor::addVsyncTimestamp(nsecs_t timestamp) {
         return false;
     }
 
-    nsecs_t const anticipatedPeriod = top / bottom * kScalingFactor;
+    nsecs_t const anticipatedPeriod = top * kScalingFactor / bottom;
     nsecs_t const intercept = meanTS - (anticipatedPeriod * meanOrdinal / kScalingFactor);
 
     auto const percent = std::abs(anticipatedPeriod - mIdealPeriod) * kMaxPercent / mIdealPeriod;
@@ -261,6 +263,18 @@ void VSyncPredictor::resetModel() {
     std::lock_guard<std::mutex> lk(mMutex);
     mRateMap[mIdealPeriod] = {mIdealPeriod, 0};
     clearTimestamps();
+}
+
+void VSyncPredictor::dump(std::string& result) const {
+    std::lock_guard<std::mutex> lk(mMutex);
+    StringAppendF(&result, "\tmIdealPeriod=%.2f\n", mIdealPeriod / 1e6f);
+    StringAppendF(&result, "\tRefresh Rate Map:\n");
+    for (const auto& [idealPeriod, periodInterceptTuple] : mRateMap) {
+        StringAppendF(&result,
+                      "\t\tFor ideal period %.2fms: period = %.2fms, intercept = %" PRId64 "\n",
+                      idealPeriod / 1e6f, std::get<0>(periodInterceptTuple) / 1e6f,
+                      std::get<1>(periodInterceptTuple));
+    }
 }
 
 } // namespace android::scheduler

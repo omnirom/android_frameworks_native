@@ -45,6 +45,7 @@ public:
 
     MOCK_METHOD3(allocateVirtualDisplay,
                  std::optional<DisplayId>(uint32_t, uint32_t, ui::PixelFormat*));
+    MOCK_METHOD2(allocatePhysicalDisplay, void(hwc2_display_t, DisplayId));
     MOCK_METHOD1(createLayer, HWC2::Layer*(DisplayId));
     MOCK_METHOD2(destroyLayer, void(DisplayId, HWC2::Layer*));
     MOCK_METHOD3(getDeviceCompositionChanges,
@@ -73,6 +74,7 @@ public:
     MOCK_METHOD4(getDisplayedContentSample,
                  status_t(DisplayId, uint64_t, uint64_t, DisplayedFrameStats*));
     MOCK_METHOD2(setDisplayBrightness, status_t(DisplayId, float));
+    MOCK_METHOD2(setDisplayElapseTime, status_t(DisplayId, uint64_t));
     MOCK_METHOD2(getDisplayBrightnessSupport, status_t(DisplayId, bool*));
 
     MOCK_METHOD2(onHotplug,

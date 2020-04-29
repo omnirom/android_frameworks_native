@@ -77,6 +77,8 @@ public:
     virtual std::optional<DisplayId> allocateVirtualDisplay(uint32_t width, uint32_t height,
                                                             ui::PixelFormat* format) = 0;
 
+    virtual void allocatePhysicalDisplay(hwc2_display_t hwcDisplayId, DisplayId displayId) = 0;
+
     // Attempts to create a new layer on this display
     virtual HWC2::Layer* createLayer(DisplayId displayId) = 0;
     // Destroy a previously created layer
@@ -164,6 +166,7 @@ public:
 
     // Returns stable display ID (and display name on connection of new or previously disconnected
     // display), or std::nullopt if hotplug event was ignored.
+    // This function is called from SurfaceFlinger.
     virtual std::optional<DisplayIdentificationInfo> onHotplug(hwc2_display_t hwcDisplayId,
                                                                HWC2::Connection connection) = 0;
 
@@ -214,6 +217,7 @@ public:
 
     virtual std::optional<DisplayId> toPhysicalDisplayId(hwc2_display_t hwcDisplayId) const = 0;
     virtual std::optional<hwc2_display_t> fromPhysicalDisplayId(DisplayId displayId) const = 0;
+    virtual status_t setDisplayElapseTime(DisplayId displayId, uint64_t timeStamp) = 0;
 };
 
 namespace impl {
@@ -237,6 +241,9 @@ public:
     // Attempts to allocate a virtual display and returns its ID if created on the HWC device.
     std::optional<DisplayId> allocateVirtualDisplay(uint32_t width, uint32_t height,
                                                     ui::PixelFormat* format) override;
+
+    // Called from SurfaceFlinger, when the state for a new physical display needs to be recreated.
+    void allocatePhysicalDisplay(hwc2_display_t hwcDisplayId, DisplayId displayId) override;
 
     // Attempts to create a new layer on this display
     HWC2::Layer* createLayer(DisplayId displayId) override;
@@ -307,6 +314,7 @@ public:
 
     bool onVsync(hwc2_display_t hwcDisplayId, int64_t timestamp) override;
     void setVsyncEnabled(DisplayId displayId, HWC2::Vsync enabled) override;
+    status_t setDisplayElapseTime(DisplayId displayId, uint64_t timeStamp) override;
 
     nsecs_t getRefreshTimestamp(DisplayId displayId) const override;
     bool isConnected(DisplayId displayId) const override;
@@ -361,6 +369,10 @@ private:
     friend TestableSurfaceFlinger;
 
     std::optional<DisplayIdentificationInfo> onHotplugConnect(hwc2_display_t hwcDisplayId);
+    std::optional<DisplayIdentificationInfo> onHotplugDisconnect(hwc2_display_t hwcDisplayId);
+    bool shouldIgnoreHotplugConnect(hwc2_display_t hwcDisplayId,
+                                    bool hasDisplayIdentificationData) const;
+
     void loadCapabilities();
     void loadLayerMetadataSupport();
     uint32_t getMaxVirtualDisplayCount() const;

@@ -216,6 +216,9 @@ class Dumpstate {
     /* Checkes whether dumpstate is generating a zipped bugreport. */
     bool IsZipping() const;
 
+    /* Initialize dumpstate fields before starting bugreport generation */
+    void Initialize();
+
     /*
      * Forks a command, waits for it to finish, and returns its status.
      *
@@ -329,10 +332,18 @@ class Dumpstate {
 
     struct DumpOptions;
 
-    /* Main entry point for running a complete bugreport. */
+    /*
+     * Main entry point for running a complete bugreport.
+     *
+     * Initialize() dumpstate before calling this method.
+     *
+     */
     RunStatus Run(int32_t calling_uid, const std::string& calling_package);
 
     RunStatus ParseCommandlineAndRun(int argc, char* argv[]);
+
+    /* Deletes in-progress files */
+    void Cancel();
 
     /* Sets runtime options. */
     void SetOptions(std::unique_ptr<DumpOptions> options);
@@ -390,7 +401,8 @@ class Dumpstate {
 
         /* Initializes options from the requested mode. */
         void Initialize(BugreportMode bugreport_mode, const android::base::unique_fd& bugreport_fd,
-                        const android::base::unique_fd& screenshot_fd);
+                        const android::base::unique_fd& screenshot_fd,
+                        bool is_screenshot_requested);
 
         /* Returns true if the options set so far are consistent. */
         bool ValidateOptions() const;
@@ -501,7 +513,7 @@ class Dumpstate {
 
     // Removes the in progress files output files (tmp file, zip/txt file, screenshot),
     // but leaves the log file alone.
-    void CleanupFiles();
+    void CleanupTmpFiles();
 
     RunStatus HandleUserConsentDenied();
 

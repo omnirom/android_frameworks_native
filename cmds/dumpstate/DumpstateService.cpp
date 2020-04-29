@@ -84,7 +84,8 @@ binder::Status DumpstateService::startBugreport(int32_t calling_uid,
                                                 android::base::unique_fd bugreport_fd,
                                                 android::base::unique_fd screenshot_fd,
                                                 int bugreport_mode,
-                                                const sp<IDumpstateListener>& listener) {
+                                                const sp<IDumpstateListener>& listener,
+                                                bool is_screenshot_requested) {
     MYLOGI("startBugreport() with mode: %d\n", bugreport_mode);
 
     // Ensure there is only one bugreport in progress at a time.
@@ -118,7 +119,7 @@ binder::Status DumpstateService::startBugreport(int32_t calling_uid,
 
     std::unique_ptr<Dumpstate::DumpOptions> options = std::make_unique<Dumpstate::DumpOptions>();
     options->Initialize(static_cast<Dumpstate::BugreportMode>(bugreport_mode), bugreport_fd,
-                        screenshot_fd);
+                        screenshot_fd, is_screenshot_requested);
 
     if (bugreport_fd.get() == -1 || (options->do_screenshot && screenshot_fd.get() == -1)) {
         MYLOGE("Invalid filedescriptor");
@@ -136,6 +137,8 @@ binder::Status DumpstateService::startBugreport(int32_t calling_uid,
     ds_info->calling_package = calling_package;
 
     pthread_t thread;
+    // Initialize dumpstate
+    ds_->Initialize();
     status_t err = pthread_create(&thread, nullptr, dumpstate_thread_main, ds_info);
     if (err != 0) {
         delete ds_info;
@@ -147,14 +150,13 @@ binder::Status DumpstateService::startBugreport(int32_t calling_uid,
 }
 
 binder::Status DumpstateService::cancelBugreport() {
-    // This is a no-op since the cancellation is done from java side via setting sys properties.
-    // See BugreportManagerServiceImpl.
-    // TODO(b/111441001): maybe make native and java sides use different binder interface
-    // to avoid these annoyances.
+    std::lock_guard<std::mutex> lock(lock_);
+    ds_->Cancel();
     return binder::Status::ok();
 }
 
 status_t DumpstateService::dump(int fd, const Vector<String16>&) {
+    std::lock_guard<std::mutex> lock(lock_);
     if (ds_ == nullptr) {
         dprintf(fd, "Bugreport not in progress yet");
         return NO_ERROR;

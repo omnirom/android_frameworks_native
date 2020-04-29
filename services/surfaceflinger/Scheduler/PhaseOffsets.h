@@ -66,12 +66,15 @@ public:
     // Returns current offsets in human friendly format.
     void dump(std::string& result) const override;
 
-private:
+protected:
+    // Used for unit tests
+    PhaseOffsets(const std::vector<float>& refreshRates, float currentFps,
+                 nsecs_t thresholdForNextVsync);
     std::unordered_map<float, Offsets> initializeOffsets(
-            const scheduler::RefreshRateConfigs&) const;
-    Offsets getDefaultOffsets(nsecs_t vsyncDuration) const;
-    Offsets getHighFpsOffsets(nsecs_t vsyncDuration) const;
-    Offsets getPhaseOffsets(float fps, nsecs_t vsyncDuration) const;
+            const std::vector<float>& refreshRates) const;
+    Offsets getDefaultOffsets(nsecs_t vsyncPeriod) const;
+    Offsets getHighFpsOffsets(nsecs_t vsyncPeriod) const;
+    Offsets getPhaseOffsets(float fps, nsecs_t vsyncPeriod) const;
 
     const nsecs_t mThresholdForNextVsync;
     const std::unordered_map<float, Offsets> mOffsets;

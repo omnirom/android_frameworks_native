@@ -67,9 +67,11 @@
 #include "MonitoredProducer.h"
 #include "SurfaceFlinger.h"
 #include "TimeStats/TimeStats.h"
+#include "QtiGralloc.h"
 
 #define DEBUG_RESIZE 0
 
+using android::hardware::graphics::common::V1_0::BufferUsage;
 namespace android {
 
 using base::StringAppendF;
@@ -116,6 +118,7 @@ Layer::Layer(const LayerCreationArgs& args)
     mCurrentState.frameRateSelectionPriority = PRIORITY_UNSET;
     mCurrentState.metadata = args.metadata;
     mCurrentState.shadowRadius = 0.f;
+    mCurrentState.treeHasFrameRateVote = false;
 
     // drawing state & current state are identical
     mDrawingState = mCurrentState;
@@ -219,6 +222,9 @@ void Layer::removeFromCurrentState() {
     }
 
     mFlinger->markLayerPendingRemovalLocked(this);
+    if (hasInput()) {
+        mFlinger->dirtyInput();
+    }
 }
 
 void Layer::onRemovedFromCurrentState() {
@@ -473,6 +479,8 @@ void Layer::prepareGeometryCompositionState() {
     compositionState->geomBufferUsesDisplayInverseTransform = getTransformToDisplayInverse();
     compositionState->geomUsesSourceCrop = usesSourceCrop();
     compositionState->isSecure = isSecure();
+    compositionState->isSecureDisplay = isSecureDisplay();
+    compositionState->isSecureCamera = isSecureCamera();
 
     compositionState->type = type;
     compositionState->appId = appId;
@@ -759,6 +767,17 @@ bool Layer::isSecure() const {
     return (s.flags & layer_state_t::eLayerSecure);
 }
 
+bool Layer::isSecureDisplay() const {
+    sp<const GraphicBuffer> buffer = getBuffer();
+    return buffer && (buffer->getUsage() & GRALLOC_USAGE_PRIVATE_SECURE_DISPLAY);
+}
+
+bool Layer::isSecureCamera() const {
+    sp<const GraphicBuffer> buffer = getBuffer();
+    bool protected_buffer = buffer && (buffer->getUsage() & BufferUsage::PROTECTED);
+    bool camera_output = buffer && (buffer->getUsage() & BufferUsage::CAMERA_OUTPUT);
+    return protected_buffer && camera_output;
+}
 // ----------------------------------------------------------------------------
 // transaction
 // ----------------------------------------------------------------------------
@@ -1334,6 +1353,44 @@ bool Layer::setShadowRadius(float shadowRadius) {
     return true;
 }
 
+void Layer::updateTreeHasFrameRateVote() {
+    const auto traverseTree = [&](const LayerVector::Visitor& visitor) {
+        auto parent = getParent();
+        while (parent) {
+            visitor(parent.get());
+            parent = parent->getParent();
+        }
+
+        traverse(LayerVector::StateSet::Current, visitor);
+    };
+
+    // update parents and children about the vote
+    // First traverse the tree and count how many layers has votes
+    int layersWithVote = 0;
+    traverseTree([&layersWithVote](Layer* layer) {
+        if (layer->mCurrentState.frameRate.rate > 0 ||
+            layer->mCurrentState.frameRate.type == FrameRateCompatibility::NoVote) {
+            layersWithVote++;
+        }
+    });
+
+    // Now update the other layers
+    bool transactionNeeded = false;
+    traverseTree([layersWithVote, &transactionNeeded](Layer* layer) {
+        if (layer->mCurrentState.treeHasFrameRateVote != layersWithVote > 0) {
+            layer->mCurrentState.sequence++;
+            layer->mCurrentState.treeHasFrameRateVote = layersWithVote > 0;
+            layer->mCurrentState.modified = true;
+            layer->setTransactionFlags(eTransactionNeeded);
+            transactionNeeded = true;
+        }
+    });
+
+    if (transactionNeeded) {
+        mFlinger->setTransactionFlags(eTraversalNeeded);
+    }
+}
+
 bool Layer::setFrameRate(FrameRate frameRate) {
     if (!mFlinger->useFrameRateApi) {
         return false;
@@ -1345,12 +1402,26 @@ bool Layer::setFrameRate(FrameRate frameRate) {
     mCurrentState.sequence++;
     mCurrentState.frameRate = frameRate;
     mCurrentState.modified = true;
+
+    updateTreeHasFrameRateVote();
+
     setTransactionFlags(eTransactionNeeded);
     return true;
 }
 
-Layer::FrameRate Layer::getFrameRate() const {
-    return getDrawingState().frameRate;
+Layer::FrameRate Layer::getFrameRateForLayerTree() const {
+    const auto frameRate = getDrawingState().frameRate;
+    if (frameRate.rate > 0 || frameRate.type == FrameRateCompatibility::NoVote) {
+        return frameRate;
+    }
+
+    // This layer doesn't have a frame rate. If one of its ancestors or successors
+    // have a vote, return a NoVote for ancestors/successors to set the vote
+    if (getDrawingState().treeHasFrameRateVote) {
+        return {0, FrameRateCompatibility::NoVote};
+    }
+
+    return frameRate;
 }
 
 void Layer::deferTransactionUntil_legacy(const sp<Layer>& barrierLayer, uint64_t frameNumber) {
@@ -1608,6 +1679,7 @@ void Layer::addChild(const sp<Layer>& layer) {
 
     mCurrentChildren.add(layer);
     layer->setParent(this);
+    updateTreeHasFrameRateVote();
 }
 
 ssize_t Layer::removeChild(const sp<Layer>& layer) {
@@ -1615,7 +1687,24 @@ ssize_t Layer::removeChild(const sp<Layer>& layer) {
     setTransactionFlags(eTransactionNeeded);
 
     layer->setParent(nullptr);
-    return mCurrentChildren.remove(layer);
+    const auto removeResult = mCurrentChildren.remove(layer);
+
+    updateTreeHasFrameRateVote();
+    layer->updateTreeHasFrameRateVote();
+
+    return removeResult;
+}
+
+void Layer::reparentChildren(const sp<Layer>& newParent) {
+    if (attachChildren()) {
+        setTransactionFlags(eTransactionNeeded);
+    }
+
+    for (const sp<Layer>& child : mCurrentChildren) {
+        newParent->addChild(child);
+    }
+    mCurrentChildren.clear();
+    updateTreeHasFrameRateVote();
 }
 
 bool Layer::reparentChildren(const sp<IBinder>& newParentHandle) {
@@ -1631,13 +1720,7 @@ bool Layer::reparentChildren(const sp<IBinder>& newParentHandle) {
         return false;
     }
 
-    if (attachChildren()) {
-        setTransactionFlags(eTransactionNeeded);
-    }
-    for (const sp<Layer>& child : mCurrentChildren) {
-        newParent->addChild(child);
-    }
-    mCurrentChildren.clear();
+    reparentChildren(newParent);
 
     return true;
 }
@@ -2066,10 +2149,12 @@ LayerProto* Layer::writeToProto(LayersProto& layersProto, uint32_t traceFlags,
     writeToProtoDrawingState(layerProto, traceFlags);
     writeToProtoCommonState(layerProto, LayerVector::StateSet::Drawing, traceFlags);
 
-    // Only populate for the primary display.
-    if (device) {
-        const Hwc2::IComposerClient::Composition compositionType = getCompositionType(device);
-        layerProto->set_hwc_composition_type(static_cast<HwcCompositionType>(compositionType));
+    if (traceFlags & SurfaceTracing::TRACE_COMPOSITION) {
+        // Only populate for the primary display.
+        if (device) {
+            const Hwc2::IComposerClient::Composition compositionType = getCompositionType(device);
+            layerProto->set_hwc_composition_type(static_cast<HwcCompositionType>(compositionType));
+        }
     }
 
     for (const sp<Layer>& layer : mDrawingChildren) {
@@ -2112,8 +2197,10 @@ void Layer::writeToProtoDrawingState(LayerProto* layerInfo, uint32_t traceFlags)
         LayerProtoHelper::writePositionToProto(transform.tx(), transform.ty(),
                                                [&]() { return layerInfo->mutable_position(); });
         LayerProtoHelper::writeToProto(mBounds, [&]() { return layerInfo->mutable_bounds(); });
-        LayerProtoHelper::writeToProto(debugGetVisibleRegionOnDefaultDisplay(),
-                                       [&]() { return layerInfo->mutable_visible_region(); });
+        if (traceFlags & SurfaceTracing::TRACE_COMPOSITION) {
+            LayerProtoHelper::writeToProto(debugGetVisibleRegionOnDefaultDisplay(),
+                                           [&]() { return layerInfo->mutable_visible_region(); });
+        }
         LayerProtoHelper::writeToProto(surfaceDamageRegion,
                                        [&]() { return layerInfo->mutable_damage_region(); });
 
@@ -2123,15 +2210,13 @@ void Layer::writeToProtoDrawingState(LayerProto* layerInfo, uint32_t traceFlags)
         }
     }
 
-    if (traceFlags & SurfaceTracing::TRACE_EXTRA) {
-        LayerProtoHelper::writeToProto(mSourceBounds,
-                                       [&]() { return layerInfo->mutable_source_bounds(); });
-        LayerProtoHelper::writeToProto(mScreenBounds,
-                                       [&]() { return layerInfo->mutable_screen_bounds(); });
-        LayerProtoHelper::writeToProto(getRoundedCornerState().cropRect,
-                                       [&]() { return layerInfo->mutable_corner_radius_crop(); });
-        layerInfo->set_shadow_radius(mEffectiveShadowRadius);
-    }
+    LayerProtoHelper::writeToProto(mSourceBounds,
+                                   [&]() { return layerInfo->mutable_source_bounds(); });
+    LayerProtoHelper::writeToProto(mScreenBounds,
+                                   [&]() { return layerInfo->mutable_screen_bounds(); });
+    LayerProtoHelper::writeToProto(getRoundedCornerState().cropRect,
+                                   [&]() { return layerInfo->mutable_corner_radius_crop(); });
+    layerInfo->set_shadow_radius(mEffectiveShadowRadius);
 }
 
 void Layer::writeToProtoCommonState(LayerProto* layerInfo, LayerVector::StateSet stateSet,

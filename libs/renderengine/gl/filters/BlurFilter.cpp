@@ -49,13 +49,30 @@ BlurFilter::BlurFilter(GLESRenderEngine& engine)
     mBUvLoc = mBlurProgram.getAttributeLocation("aUV");
     mBTextureLoc = mBlurProgram.getUniformLocation("uTexture");
     mBOffsetLoc = mBlurProgram.getUniformLocation("uOffset");
+
+    static constexpr auto size = 2.0f;
+    static constexpr auto translation = 1.0f;
+    const GLfloat vboData[] = {
+        // Vertex data
+        translation - size, -translation - size,
+        translation - size, -translation + size,
+        translation + size, -translation + size,
+        // UV data
+        0.0f, 0.0f - translation,
+        0.0f, size - translation,
+        size, size - translation
+    };
+    mMeshBuffer.allocateBuffers(vboData, 12 /* size */);
 }
 
 status_t BlurFilter::setAsDrawTarget(const DisplaySettings& display, uint32_t radius) {
     ATRACE_NAME("BlurFilter::setAsDrawTarget");
     mRadius = radius;
 
-    if (!mTexturesAllocated) {
+    if (mDisplayWidth < display.physicalDisplay.width() ||
+        mDisplayHeight < display.physicalDisplay.height()) {
+        ATRACE_NAME("BlurFilter::allocatingTextures");
+
         mDisplayWidth = display.physicalDisplay.width();
         mDisplayHeight = display.physicalDisplay.height();
         mCompositionFbo.allocateBuffers(mDisplayWidth, mDisplayHeight);
@@ -64,16 +81,23 @@ status_t BlurFilter::setAsDrawTarget(const DisplaySettings& display, uint32_t ra
         const uint32_t fboHeight = floorf(mDisplayHeight * kFboScale);
         mPingFbo.allocateBuffers(fboWidth, fboHeight);
         mPongFbo.allocateBuffers(fboWidth, fboHeight);
-        mTexturesAllocated = true;
-    }
 
-    if (mPingFbo.getStatus() != GL_FRAMEBUFFER_COMPLETE) {
-        ALOGE("Invalid blur buffer");
-        return mPingFbo.getStatus();
-    }
-    if (mCompositionFbo.getStatus() != GL_FRAMEBUFFER_COMPLETE) {
-        ALOGE("Invalid composition buffer");
-        return mCompositionFbo.getStatus();
+        if (mPingFbo.getStatus() != GL_FRAMEBUFFER_COMPLETE) {
+            ALOGE("Invalid ping buffer");
+            return mPingFbo.getStatus();
+        }
+        if (mPongFbo.getStatus() != GL_FRAMEBUFFER_COMPLETE) {
+            ALOGE("Invalid pong buffer");
+            return mPongFbo.getStatus();
+        }
+        if (mCompositionFbo.getStatus() != GL_FRAMEBUFFER_COMPLETE) {
+            ALOGE("Invalid composition buffer");
+            return mCompositionFbo.getStatus();
+        }
+        if (!mBlurProgram.isValid()) {
+            ALOGE("Invalid shader");
+            return GL_INVALID_OPERATION;
+        }
     }
 
     mCompositionFbo.bind();
@@ -82,70 +106,56 @@ status_t BlurFilter::setAsDrawTarget(const DisplaySettings& display, uint32_t ra
 }
 
 void BlurFilter::drawMesh(GLuint uv, GLuint position) {
-    static constexpr auto size = 2.0f;
-    static constexpr auto translation = 1.0f;
-    GLfloat positions[] = {
-        translation-size, -translation-size,
-        translation-size, -translation+size,
-        translation+size, -translation+size
-    };
-    GLfloat texCoords[] = {
-        0.0f, 0.0f-translation,
-        0.0f, size-translation,
-        size, size-translation
-    };
 
-    // set attributes
     glEnableVertexAttribArray(uv);
-    glVertexAttribPointer(uv, 2 /* size */, GL_FLOAT, GL_FALSE, 0, texCoords);
     glEnableVertexAttribArray(position);
-    glVertexAttribPointer(position, 2 /* size */, GL_FLOAT, GL_FALSE, 2 * sizeof(GLfloat),
-                          positions);
+    mMeshBuffer.bind();
+    glVertexAttribPointer(position, 2 /* size */, GL_FLOAT, GL_FALSE,
+                          2 * sizeof(GLfloat) /* stride */, 0 /* offset */);
+    glVertexAttribPointer(uv, 2 /* size */, GL_FLOAT, GL_FALSE, 0 /* stride */,
+                          (GLvoid*)(6 * sizeof(GLfloat)) /* offset */);
+    mMeshBuffer.unbind();
 
     // draw mesh
     glDrawArrays(GL_TRIANGLES, 0 /* first */, 3 /* count */);
-    mEngine.checkErrors("Drawing blur mesh");
 }
 
 status_t BlurFilter::prepare() {
     ATRACE_NAME("BlurFilter::prepare");
 
-    if (mPongFbo.getStatus() != GL_FRAMEBUFFER_COMPLETE) {
-        ALOGE("Invalid FBO");
-        return mPongFbo.getStatus();
-    }
-    if (!mBlurProgram.isValid()) {
-        ALOGE("Invalid shader");
-        return GL_INVALID_OPERATION;
-    }
-
-    blit(mCompositionFbo, mPingFbo);
-
     // Kawase is an approximation of Gaussian, but it behaves differently from it.
     // A radius transformation is required for approximating them, and also to introduce
     // non-integer steps, necessary to smoothly interpolate large radii.
-    auto radius = mRadius / 6.0f;
+    const auto radius = mRadius / 6.0f;
 
     // Calculate how many passes we'll do, based on the radius.
     // Too many passes will make the operation expensive.
-    auto passes = min(kMaxPasses, (uint32_t)ceil(radius));
+    const auto passes = min(kMaxPasses, (uint32_t)ceil(radius));
 
-    // We'll ping pong between our textures, to accumulate the result of various offsets.
+    const float radiusByPasses = radius / (float)passes;
+    const float stepX = radiusByPasses / (float)mCompositionFbo.getBufferWidth();
+    const float stepY = radiusByPasses / (float)mCompositionFbo.getBufferHeight();
+
+    // Let's start by downsampling and blurring the composited frame simultaneously.
     mBlurProgram.useProgram();
-    GLFramebuffer* read = &mPingFbo;
-    GLFramebuffer* draw = &mPongFbo;
-    float stepX = radius / (float)mCompositionFbo.getBufferWidth() / (float)passes;
-    float stepY = radius / (float)mCompositionFbo.getBufferHeight() / (float)passes;
     glActiveTexture(GL_TEXTURE0);
     glUniform1i(mBTextureLoc, 0);
-    for (auto i = 0; i < passes; i++) {
+    glBindTexture(GL_TEXTURE_2D, mCompositionFbo.getTextureName());
+    glUniform2f(mBOffsetLoc, stepX, stepY);
+    glViewport(0, 0, mPingFbo.getBufferWidth(), mPingFbo.getBufferHeight());
+    mPingFbo.bind();
+    drawMesh(mBUvLoc, mBPosLoc);
+
+    // And now we'll ping pong between our textures, to accumulate the result of various offsets.
+    GLFramebuffer* read = &mPingFbo;
+    GLFramebuffer* draw = &mPongFbo;
+    glViewport(0, 0, draw->getBufferWidth(), draw->getBufferHeight());
+    for (auto i = 1; i < passes; i++) {
         ATRACE_NAME("BlurFilter::renderPass");
         draw->bind();
 
-        glViewport(0, 0, draw->getBufferWidth(), draw->getBufferHeight());
         glBindTexture(GL_TEXTURE_2D, read->getTextureName());
         glUniform2f(mBOffsetLoc, stepX * i, stepY * i);
-        mEngine.checkErrors("Setting uniforms");
 
         drawMesh(mBUvLoc, mBPosLoc);
 
@@ -155,9 +165,6 @@ status_t BlurFilter::prepare() {
         read = tmp;
     }
     mLastDrawTarget = read;
-
-    // Cleanup
-    glBindFramebuffer(GL_FRAMEBUFFER, 0);
 
     return NO_ERROR;
 }
@@ -177,7 +184,6 @@ status_t BlurFilter::render(bool multiPass) {
         glBlitFramebuffer(0, 0, mLastDrawTarget->getBufferWidth(),
                           mLastDrawTarget->getBufferHeight(), 0, 0, mDisplayWidth, mDisplayHeight,
                           GL_COLOR_BUFFER_BIT, GL_LINEAR);
-        glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
         return NO_ERROR;
     }
 
@@ -189,17 +195,18 @@ status_t BlurFilter::render(bool multiPass) {
     glActiveTexture(GL_TEXTURE1);
     glBindTexture(GL_TEXTURE_2D, mCompositionFbo.getTextureName());
     glUniform1i(mMCompositionTextureLoc, 1);
-    mEngine.checkErrors("Setting final pass uniforms");
 
     drawMesh(mMUvLoc, mMPosLoc);
 
     glUseProgram(0);
     glActiveTexture(GL_TEXTURE0);
+    mEngine.checkErrors("Drawing blur mesh");
     return NO_ERROR;
 }
 
 string BlurFilter::getVertexShader() const {
     return R"SHADER(#version 310 es
+        precision mediump float;
 
         in vec2 aPosition;
         in highp vec2 aUV;
@@ -219,7 +226,7 @@ string BlurFilter::getFragmentShader() const {
         uniform sampler2D uTexture;
         uniform vec2 uOffset;
 
-        highp in vec2 vUV;
+        in highp vec2 vUV;
         out vec4 fragColor;
 
         void main() {
@@ -255,12 +262,12 @@ string BlurFilter::getMixFragShader() const {
 }
 
 void BlurFilter::blit(GLFramebuffer& read, GLFramebuffer& draw) const {
+    ATRACE_NAME("BlurFilter::blit");
     read.bindAsReadBuffer();
     draw.bindAsDrawBuffer();
     glBlitFramebuffer(0, 0, read.getBufferWidth(), read.getBufferHeight(), 0, 0,
                       draw.getBufferWidth(), draw.getBufferHeight(), GL_COLOR_BUFFER_BIT,
                       GL_LINEAR);
-    glBindFramebuffer(GL_FRAMEBUFFER, 0);
 }
 
 } // namespace gl

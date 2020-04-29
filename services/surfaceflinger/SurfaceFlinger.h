@@ -81,8 +81,15 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
+#include <list>
 
 using namespace android::surfaceflinger;
+
+namespace smomo {
+class SmomoIntf;
+} // namespace smomo
+
+using smomo::SmomoIntf;
 
 namespace android {
 
@@ -172,6 +179,29 @@ public:
     int32_t mComposerSequenceId = 0;
 };
 
+class SmomoWrapper {
+public:
+    SmomoWrapper() {}
+    ~SmomoWrapper();
+
+    bool init();
+
+    SmomoIntf* operator->() { return mInst; }
+    operator bool() { return mInst != nullptr; }
+
+    SmomoWrapper(const SmomoWrapper&) = delete;
+    SmomoWrapper& operator=(const SmomoWrapper&) = delete;
+
+private:
+    SmomoIntf *mInst = nullptr;
+    void *mSmoMoLibHandle = nullptr;
+
+    using CreateSmoMoFuncPtr = std::add_pointer<bool(uint16_t, SmomoIntf**)>::type;
+    using DestroySmoMoFuncPtr = std::add_pointer<void(SmomoIntf*)>::type;
+    CreateSmoMoFuncPtr mSmoMoCreateFunc;
+    DestroySmoMoFuncPtr mSmoMoDestroyFunc;
+};
+
 class SurfaceFlinger : public BnSurfaceComposer,
                        public PriorityDumper,
                        public ClientCache::ErasedRecipient,
@@ -242,6 +272,8 @@ public:
 
     static bool useContextPriority;
 
+    static bool sDirectStreaming;
+
     // The data space and pixel format that SurfaceFlinger expects hardware composer
     // to composite efficiently. Meaning under most scenarios, hardware composer
     // will accept layers with the data space and pixel format.
@@ -258,6 +290,9 @@ public:
     // variable is caches in SF, so that we can check it with each layer creation, and a void the
     // overhead that is caused by reading from sysprop.
     static bool useFrameRateApi;
+
+    // set main thread scheduling policy
+    static status_t setSchedFifo(bool enabled) ANDROID_API;
 
     static char const* getServiceName() ANDROID_API {
         return "SurfaceFlinger";
@@ -304,10 +339,10 @@ public:
 
     // enable/disable h/w composer event
     // TODO: this should be made accessible only to EventThread
-    void setPrimaryVsyncEnabled(bool enabled);
+    void setVsyncEnabled(bool enabled);
 
     // main thread function to enable/disable h/w composer event
-    void setPrimaryVsyncEnabledInternal(bool enabled);
+    void setVsyncEnabledInternal(bool enabled);
     void setVsyncEnabledInHWC(DisplayId displayId, HWC2::Vsync enabled);
 
     // called on the main thread by MessageQueue when an internal message
@@ -337,6 +372,8 @@ public:
     // If set, disables reusing client composition buffers. This can be set by
     // debug.sf.disable_client_composition_cache
     bool mDisableClientCompositionCache = false;
+
+    nsecs_t mVsyncTimeStamp = -1;
 
 private:
     friend class BufferLayer;
@@ -404,7 +441,8 @@ private:
      */
     status_t onTransact(uint32_t code, const Parcel& data, Parcel* reply, uint32_t flags) override;
     status_t dump(int fd, const Vector<String16>& args) override { return priorityDump(fd, args); }
-    bool callingThreadHasUnscopedSurfaceFlingerAccess() EXCLUDES(mStateLock);
+    bool callingThreadHasUnscopedSurfaceFlingerAccess(bool usePermissionCache = true)
+            EXCLUDES(mStateLock);
 
     /* ------------------------------------------------------------------------
      * ISurfaceComposer interface
@@ -500,6 +538,9 @@ private:
                                      float lightPosY, float lightPosZ, float lightRadius) override;
     status_t setFrameRate(const sp<IGraphicBufferProducer>& surface, float frameRate,
                           int8_t compatibility) override;
+    status_t acquireFrameRateFlexibilityToken(sp<IBinder>* outToken) override;
+    status_t setDisplayElapseTime(const sp<DisplayDevice>& display) const;
+
     /* ------------------------------------------------------------------------
      * DeathRecipient interface
      */
@@ -571,9 +612,9 @@ private:
     void setPowerModeInternal(const sp<DisplayDevice>& display, int mode) REQUIRES(mStateLock);
 
     // Sets the desired display configs.
-    status_t setDesiredDisplayConfigSpecsInternal(const sp<DisplayDevice>& display,
-                                                  HwcConfigIndexType defaultConfig,
-                                                  float minRefreshRate, float maxRefreshRate)
+    status_t setDesiredDisplayConfigSpecsInternal(
+            const sp<DisplayDevice>& display,
+            const std::optional<scheduler::RefreshRateConfigs::Policy>& policy, bool overridePolicy)
             EXCLUDES(mStateLock);
 
     // called on the main thread in response to setAutoLowLatencyMode()
@@ -716,6 +757,9 @@ private:
     void traverseLayersInDisplay(const sp<const DisplayDevice>& display,
                                  const LayerVector::Visitor& visitor);
 
+
+    bool canAllocateHwcDisplayIdForVDS(uint64_t usage);
+    bool skipColorLayer(const char* layerType);
     sp<StartPropertySetThread> mStartPropertySetThread;
 
     /* ------------------------------------------------------------------------
@@ -804,6 +848,8 @@ private:
      */
     void invalidateHwcGeometry();
 
+    sp<DisplayDevice> getVsyncSource();
+    void updateVsyncSource();
     void postComposition();
     void getCompositorTiming(CompositorTiming* compositorTiming);
     void updateCompositorTiming(const DisplayStatInfo& stats, nsecs_t compositeTime,
@@ -842,9 +888,25 @@ private:
     void changeRefreshRateLocked(const RefreshRate&, Scheduler::ConfigEvent event)
             REQUIRES(mStateLock);
 
+    void setRefreshRateTo(int32_t refreshRate);
+
     bool isDisplayConfigAllowed(HwcConfigIndexType configId) const REQUIRES(mStateLock);
 
-    bool previousFrameMissed(int graceTimeMs = 0);
+    // Gets the fence for the previous frame.
+    // Must be called on the main thread.
+    sp<Fence> previousFrameFence();
+
+    // Whether the previous frame has not yet been presented to the display.
+    // If graceTimeMs is positive, this method waits for at most the provided
+    // grace period before reporting if the frame missed.
+    // Must be called on the main thread.
+    bool previousFramePending(int graceTimeMs = 0);
+
+    // Returns the previous time that the frame was presented. If the frame has
+    // not been presented yet, then returns Fence::SIGNAL_TIME_PENDING. If there
+    // is no pending frame, then returns Fence::SIGNAL_TIME_INVALID.
+    // Must be called on the main thread.
+    nsecs_t previousFramePresentTime();
 
     // Populates the expected present time for this frame. For negative offsets, performs a
     // correction using the predicted vsync for the next frame instead.
@@ -951,6 +1013,8 @@ private:
         return doDump(fd, args, asProto);
     }
 
+    void onFrameRateFlexibilityTokenReleased();
+
     /* ------------------------------------------------------------------------
      * VrFlinger
      */
@@ -969,6 +1033,7 @@ private:
 
     // access must be protected by mStateLock
     mutable Mutex mStateLock;
+    mutable Mutex mVsyncLock;
     State mCurrentState{LayerVector::StateSet::Current};
     std::atomic<int32_t> mTransactionFlags = 0;
     Condition mTransactionCV;
@@ -1047,6 +1112,7 @@ private:
 
     // don't use a lock for these, we don't care
     int mDebugRegion = 0;
+    bool mVsyncSourceReliableOnDoze = false;
     bool mDebugDisableHWC = false;
     bool mDebugDisableTransformHint = false;
     volatile nsecs_t mDebugInTransaction = 0;
@@ -1056,14 +1122,18 @@ private:
     std::unique_ptr<SurfaceInterceptor> mInterceptor;
     SurfaceTracing mTracing{*this};
     bool mTracingEnabled = false;
+    bool mAddCompositionStateToTrace = false;
     bool mTracingEnabledChanged GUARDED_BY(mStateLock) = false;
     const std::shared_ptr<TimeStats> mTimeStats;
     const std::unique_ptr<FrameTracer> mFrameTracer;
     bool mUseHwcVirtualDisplays = false;
+    // If blurs should be enabled on this device.
+    bool mSupportsBlur = false;
     // Disable blurs, for debugging
-    bool mEnableBlurs = false;
+    std::atomic<bool> mDisableBlurs = false;
     // If blurs are considered expensive and should require high GPU frequency.
     bool mBlursAreExpensive = false;
+    bool mUseAdvanceSfOffset = false;
     std::atomic<uint32_t> mFrameMissedCount = 0;
     std::atomic<uint32_t> mHwcFrameMissedCount = 0;
     std::atomic<uint32_t> mGpuFrameMissedCount = 0;
@@ -1128,6 +1198,10 @@ private:
     bool mHasPoweredOff = false;
 
     std::atomic<size_t> mNumLayers = 0;
+    // Vsync Source
+    sp<DisplayDevice> mActiveVsyncSource = NULL;
+    sp<DisplayDevice> mNextVsyncSource = NULL;
+    std::list<sp<DisplayDevice>> mDisplaysList;
 
     // Verify that transaction is being called by an approved process:
     // either AID_GRAPHICS or AID_SYSTEM.
@@ -1256,6 +1330,17 @@ private:
     std::atomic<bool> mInputDirty = true;
     void dirtyInput() { mInputDirty = true; }
     bool inputDirty() { return mInputDirty; }
+
+    int mFrameRateFlexibilityTokenCount = 0;
+
+    // Perf Hint members
+    int mPerfLockHandle = -1;
+    bool mPerfHintEnabled = false;
+    void *mPerfLibHandle = nullptr;
+    int (*mPerfLockReleaseFunc)(int handle) = nullptr;
+    int (*mPerfHintFunc)(int hintId, const char *package, int duration, int refreshRate) = nullptr;
+
+    SmomoWrapper mSmoMo;
 };
 
 } // namespace android

@@ -259,6 +259,9 @@ public:
         int32_t frameRateSelectionPriority;
 
         FrameRate frameRate;
+
+        // Indicates whether parents / children of this layer had set FrameRate
+        bool treeHasFrameRateVote;
     };
 
     explicit Layer(const LayerCreationArgs& args);
@@ -344,7 +347,8 @@ public:
     virtual void deferTransactionUntil_legacy(const sp<Layer>& barrierLayer, uint64_t frameNumber);
     virtual bool setOverrideScalingMode(int32_t overrideScalingMode);
     virtual bool setMetadata(const LayerMetadata& data);
-    virtual bool reparentChildren(const sp<IBinder>& layer);
+    bool reparentChildren(const sp<IBinder>& newParentHandle);
+    void reparentChildren(const sp<Layer>& newParent);
     virtual void setChildrenDrawingParent(const sp<Layer>& layer);
     virtual bool reparent(const sp<IBinder>& newParentHandle);
     virtual bool detachChildren();
@@ -464,6 +468,9 @@ public:
      */
     bool isSecure() const;
 
+    bool isSecureCamera() const;
+    bool isSecureDisplay() const;
+
     /*
      * isVisible - true if this layer is visible, false otherwise
      */
@@ -531,6 +538,19 @@ public:
     }
     virtual Rect getCrop(const Layer::State& s) const { return s.crop_legacy; }
     virtual bool needsFiltering(const sp<const DisplayDevice>&) const { return false; }
+    // True if this layer requires filtering
+    // This method is distinct from needsFiltering() in how the filter
+    // requirement is computed. needsFiltering() compares displayFrame and crop,
+    // where as this method transforms the displayFrame to layer-stack space
+    // first. This method should be used if there is no physical display to
+    // project onto when taking screenshots, as the filtering requirements are
+    // different.
+    // If the parent transform needs to be undone when capturing the layer, then
+    // the inverse parent transform is also required.
+    virtual bool needsFilteringForScreenshots(const sp<const DisplayDevice>&,
+                                              const ui::Transform&) const {
+        return false;
+    }
 
     // This layer is not a clone, but it's the parent to the cloned hierarchy. The
     // variable mClonedChild represents the top layer that will be cloned so this
@@ -801,7 +821,7 @@ public:
     Rect getCroppedBufferSize(const Layer::State& s) const;
 
     bool setFrameRate(FrameRate frameRate);
-    virtual FrameRate getFrameRate() const;
+    virtual FrameRate getFrameRateForLayerTree() const;
 
 protected:
     // constant
@@ -830,6 +850,7 @@ protected:
     // For unit tests
     friend class TestableSurfaceFlinger;
     friend class RefreshRateSelectionTest;
+    friend class SetFrameRateTest;
 
     virtual void commitTransaction(const State& stateToCommit);
 
@@ -1016,6 +1037,8 @@ private:
                                        const LayerVector::Visitor& visitor);
     LayerVector makeChildrenTraversalList(LayerVector::StateSet stateSet,
                                           const std::vector<Layer*>& layersInTree);
+
+    void updateTreeHasFrameRateVote();
 
     // Cached properties computed from drawing state
     // Effective transform taking into account parent transforms and any parent scaling.

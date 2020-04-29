@@ -688,11 +688,22 @@ compositionengine::Output::ColorProfile Output::pickColorProfile(
     }
 
     // respect hdrDataSpace only when there is no legacy HDR support
-    const bool isHdr = hdrDataSpace != ui::Dataspace::UNKNOWN &&
+    bool isHdr = hdrDataSpace != ui::Dataspace::UNKNOWN &&
             !mDisplayColorProfile->hasLegacyHdrSupport(hdrDataSpace) && !isHdrClientComposition;
+
+    auto layers = getOutputLayersOrderedByZ();
+    bool hasSecureDisplay = std::any_of(layers.begin(), layers.end(), [](auto* layer) {
+         return layer->getLayerFE().getCompositionState()->isSecureDisplay;
+    });
+
     if (isHdr) {
         bestDataSpace = hdrDataSpace;
     }
+
+    if (hasSecureDisplay) {
+        bestDataSpace = ui::Dataspace::V0_SRGB;
+        isHdr = false;
+     }
 
     ui::RenderIntent intent;
     switch (refreshArgs.outputColorSetting) {
@@ -823,8 +834,20 @@ std::optional<base::unique_fd> Output::composeSurfaces(
 
     ALOGV("hasClientComposition");
 
+
+    auto layers = getOutputLayersOrderedByZ();
+    bool hasSecureCamera = std::any_of(layers.begin(), layers.end(), [](auto* layer) {
+         return layer->getLayerFE().getCompositionState()->isSecureCamera;
+    });
+
+    bool hasSecureDisplay = std::any_of(layers.begin(), layers.end(), [](auto* layer) {
+         return layer->getLayerFE().getCompositionState()->isSecureDisplay;
+    });
+
     auto& renderEngine = getCompositionEngine().getRenderEngine();
-    const bool supportsProtectedContent = renderEngine.supportsProtectedContent();
+    const bool supportsProtectedContent = renderEngine.supportsProtectedContent() &&
+                                          !hasSecureCamera && !hasSecureDisplay;
+
 
     renderengine::DisplaySettings clientCompositionDisplay;
     clientCompositionDisplay.physicalDisplay = outputState.destinationClip;
@@ -856,7 +879,6 @@ std::optional<base::unique_fd> Output::composeSurfaces(
     // least one layer has protected content, we need to use a secure back
     // buffer.
     if (outputState.isSecure && supportsProtectedContent) {
-        auto layers = getOutputLayersOrderedByZ();
         bool needsProtected = std::any_of(layers.begin(), layers.end(), [](auto* layer) {
             return layer->getLayerFE().getCompositionState()->hasProtectedContent;
         });

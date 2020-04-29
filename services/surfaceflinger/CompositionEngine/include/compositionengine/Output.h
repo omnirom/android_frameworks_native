@@ -147,6 +147,8 @@ public:
         Region dirtyRegion;
     };
 
+    bool hasSecureDisplay{false};
+
     virtual ~Output();
 
     // Returns true if the output is valid. This is meant to be checked post-

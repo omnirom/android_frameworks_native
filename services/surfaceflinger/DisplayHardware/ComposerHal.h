@@ -240,6 +240,7 @@ public:
                                                 const std::vector<uint8_t>& value) = 0;
     virtual V2_4::Error getLayerGenericMetadataKeys(
             std::vector<IComposerClient::LayerGenericMetadataKey>* outKeys) = 0;
+    virtual Error setDisplayElapseTime(Display display, uint64_t timeStamp) = 0;
 };
 
 namespace impl {
@@ -457,6 +458,7 @@ public:
             Display display, Layer layer,
             const std::vector<IComposerClient::PerFrameMetadataBlob>& metadata) override;
     Error setDisplayBrightness(Display display, float brightness) override;
+    Error setDisplayElapseTime(Display display, uint64_t timeStamp) override;
 
     // Composer HAL 2.4
     bool isVsyncPeriodSwitchSupported() override { return mClient_2_4 != nullptr; }
@@ -492,6 +494,7 @@ private:
                 const IVrComposerClient::BufferMetadata& metadata);
         void setLayerBufferMetadata(
                 const IVrComposerClient::BufferMetadata& metadata);
+        void setDisplayElapseTime(uint64_t time);
 
     private:
         void writeBufferMetadata(
@@ -502,6 +505,8 @@ private:
     public:
         explicit CommandWriter(uint32_t initialMaxSize) : CommandWriterBase(initialMaxSize) {}
         ~CommandWriter() override {}
+
+        void setDisplayElapseTime(uint64_t time);
     };
 #endif // defined(USE_VR_COMPOSER) && USE_VR_COMPOSER
 

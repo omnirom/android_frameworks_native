@@ -239,13 +239,15 @@ static bool CopyFileToFd(const std::string& input_file, int out_fd) {
 }
 
 static bool UnlinkAndLogOnError(const std::string& file) {
+    if (file.empty()) {
+        return false;
+    }
     if (unlink(file.c_str())) {
         MYLOGE("Failed to unlink file (%s): %s\n", file.c_str(), strerror(errno));
         return false;
     }
     return true;
 }
-
 
 int64_t GetModuleMetadataVersion() {
     auto binder = defaultServiceManager()->getService(android::String16("package_native"));
@@ -2171,7 +2173,7 @@ static void PrepareToWriteToFile() {
     }
 
     if (ds.options_->do_screenshot) {
-        ds.screenshot_path_ = ds.GetPath(ds.CalledByApi() ? "-tmp.png" : ".png");
+        ds.screenshot_path_ = ds.GetPath(ds.CalledByApi() ? "-png.tmp" : ".png");
     }
     ds.tmp_path_ = ds.GetPath(".tmp");
     ds.log_path_ = ds.GetPath("-dumpstate_log-" + std::to_string(ds.pid_) + ".txt");
@@ -2190,7 +2192,7 @@ static void PrepareToWriteToFile() {
         ds.tmp_path_.c_str(), ds.screenshot_path_.c_str());
 
     if (ds.options_->do_zip_file) {
-        ds.path_ = ds.GetPath(ds.CalledByApi() ? "-tmp.zip" : ".zip");
+        ds.path_ = ds.GetPath(ds.CalledByApi() ? "-zip.tmp" : ".zip");
         MYLOGD("Creating initial .zip file (%s)\n", ds.path_.c_str());
         create_parent_dirs(ds.path_.c_str());
         ds.zip_file.reset(fopen(ds.path_.c_str(), "wb"));
@@ -2249,20 +2251,21 @@ static inline const char* ModeToString(Dumpstate::BugreportMode mode) {
     }
 }
 
-static void SetOptionsFromMode(Dumpstate::BugreportMode mode, Dumpstate::DumpOptions* options) {
+static void SetOptionsFromMode(Dumpstate::BugreportMode mode, Dumpstate::DumpOptions* options,
+                               bool is_screenshot_requested) {
     // Modify com.android.shell.BugreportProgressService#isDefaultScreenshotRequired as well for
     // default system screenshots.
     options->bugreport_mode = ModeToString(mode);
     switch (mode) {
         case Dumpstate::BugreportMode::BUGREPORT_FULL:
-            options->do_screenshot = true;
+            options->do_screenshot = is_screenshot_requested;
             options->dumpstate_hal_mode = DumpstateMode::FULL;
             break;
         case Dumpstate::BugreportMode::BUGREPORT_INTERACTIVE:
             // Currently, the dumpstate binder is only used by Shell to update progress.
             options->do_start_service = true;
             options->do_progress_updates = true;
-            options->do_screenshot = true;
+            options->do_screenshot = is_screenshot_requested;
             options->dumpstate_hal_mode = DumpstateMode::INTERACTIVE;
             break;
         case Dumpstate::BugreportMode::BUGREPORT_REMOTE:
@@ -2275,7 +2278,7 @@ static void SetOptionsFromMode(Dumpstate::BugreportMode mode, Dumpstate::DumpOpt
             options->do_start_service = true;
             options->do_progress_updates = true;
             options->do_zip_file = true;
-            options->do_screenshot = true;
+            options->do_screenshot = is_screenshot_requested;
             options->dumpstate_hal_mode = DumpstateMode::WEAR;
             break;
         // TODO(b/148168577) rename TELEPHONY everywhere to CONNECTIVITY.
@@ -2312,7 +2315,8 @@ static void LogDumpOptions(const Dumpstate::DumpOptions& options) {
 
 void Dumpstate::DumpOptions::Initialize(BugreportMode bugreport_mode,
                                         const android::base::unique_fd& bugreport_fd_in,
-                                        const android::base::unique_fd& screenshot_fd_in) {
+                                        const android::base::unique_fd& screenshot_fd_in,
+                                        bool is_screenshot_requested) {
     // In the new API world, date is always added; output is always a zip file.
     // TODO(111441001): remove these options once they are obsolete.
     do_add_date = true;
@@ -2322,7 +2326,7 @@ void Dumpstate::DumpOptions::Initialize(BugreportMode bugreport_mode,
     bugreport_fd.reset(dup(bugreport_fd_in.get()));
     screenshot_fd.reset(dup(screenshot_fd_in.get()));
 
-    SetOptionsFromMode(bugreport_mode, this);
+    SetOptionsFromMode(bugreport_mode, this, is_screenshot_requested);
 }
 
 Dumpstate::RunStatus Dumpstate::DumpOptions::Initialize(int argc, char* argv[]) {
@@ -2391,6 +2395,13 @@ void Dumpstate::SetOptions(std::unique_ptr<DumpOptions> options) {
     options_ = std::move(options);
 }
 
+void Dumpstate::Initialize() {
+    /* gets the sequential id */
+    uint32_t last_id = android::base::GetIntProperty(PROPERTY_LAST_ID, 0);
+    id_ = ++last_id;
+    android::base::SetProperty(PROPERTY_LAST_ID, std::to_string(last_id));
+}
+
 Dumpstate::RunStatus Dumpstate::Run(int32_t calling_uid, const std::string& calling_package) {
     Dumpstate::RunStatus status = RunInternal(calling_uid, calling_package);
     if (listener_ != nullptr) {
@@ -2415,6 +2426,17 @@ Dumpstate::RunStatus Dumpstate::Run(int32_t calling_uid, const std::string& call
         }
     }
     return status;
+}
+
+void Dumpstate::Cancel() {
+    CleanupTmpFiles();
+    android::os::UnlinkAndLogOnError(log_path_);
+    for (int i = 0; i < NUM_OF_DUMPS; i++) {
+        android::os::UnlinkAndLogOnError(ds.bugreport_internal_dir_ + "/" +
+                                         kDumpstateBoardFiles[i]);
+    }
+    tombstone_data_.clear();
+    anr_data_.clear();
 }
 
 /*
@@ -2489,11 +2511,6 @@ Dumpstate::RunStatus Dumpstate::RunInternal(int32_t calling_uid,
             ? android::base::StringPrintf("%s/dumpstate-stats.txt", bugreport_internal_dir_.c_str())
             : "";
     progress_.reset(new Progress(stats_path));
-
-    /* gets the sequential id */
-    uint32_t last_id = android::base::GetIntProperty(PROPERTY_LAST_ID, 0);
-    id_ = ++last_id;
-    android::base::SetProperty(PROPERTY_LAST_ID, std::to_string(last_id));
 
     if (acquire_wake_lock(PARTIAL_WAKE_LOCK, WAKE_LOCK_NAME) < 0) {
         MYLOGE("Failed to acquire wake lock: %s\n", strerror(errno));
@@ -2660,15 +2677,6 @@ Dumpstate::RunStatus Dumpstate::RunInternal(int32_t calling_uid,
             MYLOGI("User denied consent. Returning\n");
             return status;
         }
-        if (options_->do_screenshot &&
-            options_->screenshot_fd.get() != -1 &&
-            !options_->is_screenshot_copied) {
-            bool copy_succeeded = android::os::CopyFileToFd(screenshot_path_,
-                                                            options_->screenshot_fd.get());
-            if (copy_succeeded) {
-                android::os::UnlinkAndLogOnError(screenshot_path_);
-            }
-        }
         if (status == Dumpstate::RunStatus::USER_CONSENT_TIMED_OUT) {
             MYLOGI(
                 "Did not receive user consent yet."
@@ -2753,7 +2761,7 @@ bool Dumpstate::CalledByApi() const {
     return ds.options_->bugreport_fd.get() != -1 ? true : false;
 }
 
-void Dumpstate::CleanupFiles() {
+void Dumpstate::CleanupTmpFiles() {
     android::os::UnlinkAndLogOnError(tmp_path_);
     android::os::UnlinkAndLogOnError(screenshot_path_);
     android::os::UnlinkAndLogOnError(path_);
@@ -2761,7 +2769,7 @@ void Dumpstate::CleanupFiles() {
 
 Dumpstate::RunStatus Dumpstate::HandleUserConsentDenied() {
     MYLOGD("User denied consent; deleting files and returning\n");
-    CleanupFiles();
+    CleanupTmpFiles();
     return USER_CONSENT_DENIED;
 }
 
@@ -2798,6 +2806,16 @@ Dumpstate::RunStatus Dumpstate::CopyBugreportIfUserConsented(int32_t calling_uid
         bool copy_succeeded = android::os::CopyFileToFd(path_, options_->bugreport_fd.get());
         if (copy_succeeded) {
             android::os::UnlinkAndLogOnError(path_);
+            if (options_->do_screenshot &&
+                options_->screenshot_fd.get() != -1 &&
+                !options_->is_screenshot_copied) {
+                copy_succeeded = android::os::CopyFileToFd(screenshot_path_,
+                                                           options_->screenshot_fd.get());
+                options_->is_screenshot_copied = copy_succeeded;
+                if (copy_succeeded) {
+                    android::os::UnlinkAndLogOnError(screenshot_path_);
+                }
+            }
         }
         return copy_succeeded ? Dumpstate::RunStatus::OK : Dumpstate::RunStatus::ERROR;
     } else if (consent_result == UserConsentResult::UNAVAILABLE) {
@@ -2822,8 +2840,9 @@ Dumpstate::RunStatus Dumpstate::ParseCommandlineAndRun(int argc, char* argv[]) {
         assert(options_->bugreport_fd.get() == -1);
 
         // calling_uid and calling_package are for user consent to share the bugreport with
-        // an app; they are irrelvant here because bugreport is only written to a local
-        // directory, and not shared.
+        // an app; they are irrelevant here because bugreport is triggered via command line.
+        // Update Last ID before calling Run().
+        Initialize();
         status = Run(-1 /* calling_uid */, "" /* calling_package */);
     }
     return status;

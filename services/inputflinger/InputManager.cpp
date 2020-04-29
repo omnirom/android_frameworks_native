@@ -111,8 +111,10 @@ void InputManager::setInputWindows(const std::vector<InputWindowInfo>& infos,
         handlesPerDisplay.emplace(info.displayId, std::vector<sp<InputWindowHandle>>());
         handlesPerDisplay[info.displayId].push_back(new BinderWindowHandle(info));
     }
-    for (auto const& i : handlesPerDisplay) {
-        mDispatcher->setInputWindows(i.second, i.first, setInputWindowsListener);
+    mDispatcher->setInputWindows(handlesPerDisplay);
+
+    if (setInputWindowsListener) {
+        setInputWindowsListener->onSetInputWindowsFinished();
     }
 }
 
@@ -130,6 +132,10 @@ void InputManager::registerInputChannel(const sp<InputChannel>& channel) {
 
 void InputManager::unregisterInputChannel(const sp<InputChannel>& channel) {
     mDispatcher->unregisterInputChannel(channel);
+}
+
+void InputManager::setMotionClassifierEnabled(bool enabled) {
+    mClassifier->setMotionClassifierEnabled(enabled);
 }
 
 } // namespace android

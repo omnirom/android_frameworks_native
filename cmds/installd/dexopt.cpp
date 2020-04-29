@@ -374,6 +374,14 @@ class RunDex2Oat : public ExecVHelper {
         bool skip_compilation = vold_decrypt == "trigger_restart_min_framework" ||
                                 vold_decrypt == "1";
 
+        std::string updatable_bcp_packages =
+            MapPropertyToArg("dalvik.vm.dex2oat-updatable-bcp-packages-file",
+                             "--updatable-bcp-packages-file=%s");
+        if (updatable_bcp_packages.empty()) {
+          // Make dex2oat fail by providing non-existent file name.
+          updatable_bcp_packages = "--updatable-bcp-packages-file=/nonx/updatable-bcp-packages.txt";
+        }
+
         std::string resolve_startup_string_arg =
                 MapPropertyToArg("persist.device_config.runtime.dex2oat_resolve_startup_strings",
                                  "--resolve-startup-const-strings=%s");
@@ -520,6 +528,7 @@ class RunDex2Oat : public ExecVHelper {
         AddRuntimeArg(dex2oat_Xms_arg);
         AddRuntimeArg(dex2oat_Xmx_arg);
 
+        AddArg(updatable_bcp_packages);
         AddArg(resolve_startup_string_arg);
         AddArg(image_block_size_arg);
         AddArg(dex2oat_compiler_filter_arg);
@@ -1272,11 +1281,6 @@ class Dex2oatFileWrapper {
 // (re)Creates the app image if needed.
 Dex2oatFileWrapper maybe_open_app_image(const char* out_oat_path,
         bool generate_app_image, bool is_public, int uid, bool is_secondary_dex) {
-
-    // We don't create an image for secondary dex files.
-    if (is_secondary_dex) {
-        return Dex2oatFileWrapper();
-    }
 
     const std::string image_path = create_image_filename(out_oat_path);
     if (image_path.empty()) {

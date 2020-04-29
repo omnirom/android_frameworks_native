@@ -122,7 +122,16 @@ public:
         OP_LEGACY_STORAGE = 87,
         OP_ACCESS_ACCESSIBILITY = 88,
         OP_READ_DEVICE_IDENTIFIERS = 89,
-        _NUM_OP = 90
+        OP_ACCESS_MEDIA_LOCATION = 90,
+        OP_QUERY_ALL_PACKAGES = 91,
+        OP_MANAGE_EXTERNAL_STORAGE = 92,
+        OP_INTERACT_ACROSS_PROFILES = 93,
+        OP_ACTIVATE_PLATFORM_VPN = 94,
+        OP_LOADER_USAGE_STATS = 95,
+        OP_DEPRECATED_1 = 96,
+        OP_AUTO_REVOKE_PERMISSIONS_IF_UNUSED = 97,
+        OP_AUTO_REVOKE_MANAGED_BY_INSTALLER = 98,
+        _NUM_OP = 99
     };
 
     AppOpsManager();
@@ -134,18 +143,18 @@ public:
     //              const String16&) instead
     int32_t noteOp(int32_t op, int32_t uid, const String16& callingPackage);
     int32_t noteOp(int32_t op, int32_t uid, const String16& callingPackage,
-            const std::unique_ptr<String16>& featureId, const String16& message);
+            const std::unique_ptr<String16>& attributionTag, const String16& message);
     // @Deprecated, use startOpNoThrow(int32_t, int32_t, const String16&, bool, const String16&,
     //              const String16&) instead
     int32_t startOpNoThrow(int32_t op, int32_t uid, const String16& callingPackage,
             bool startIfModeDefault);
     int32_t startOpNoThrow(int32_t op, int32_t uid, const String16& callingPackage,
-            bool startIfModeDefault, const std::unique_ptr<String16>& featureId,
+            bool startIfModeDefault, const std::unique_ptr<String16>& attributionTag,
             const String16& message);
     // @Deprecated, use finishOp(int32_t, int32_t, const String16&, bool, const String16&) instead
     void finishOp(int32_t op, int32_t uid, const String16& callingPackage);
     void finishOp(int32_t op, int32_t uid, const String16& callingPackage,
-            const std::unique_ptr<String16>& featureId);
+            const std::unique_ptr<String16>& attributionTag);
     void startWatchingMode(int32_t op, const String16& packageName,
             const sp<IAppOpsCallback>& callback);
     void stopWatchingMode(const sp<IAppOpsCallback>& callback);
