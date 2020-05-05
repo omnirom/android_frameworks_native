@@ -89,6 +89,7 @@ public:
 
         Scheduler& scheduler;
         std::atomic<nsecs_t> lastResyncTime = 0;
+        std::atomic<nsecs_t> lastCallbackTime = 0;
     };
 
     explicit Scheduler(impl::EventControlThread::SetVSyncEnabledFunction function,

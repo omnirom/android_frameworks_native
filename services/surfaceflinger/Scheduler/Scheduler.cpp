@@ -274,12 +274,14 @@ ResyncCallback Scheduler::makeResyncCallback(GetVsyncPeriod&& getVsyncPeriod) {
 }
 
 void Scheduler::VsyncState::resync(const GetVsyncPeriod& getVsyncPeriod) {
-    static constexpr nsecs_t kIgnoreDelay = ms2ns(750);
+    static constexpr nsecs_t kIgnoreDelay = ms2ns(400);
+    static constexpr nsecs_t kIgnoreCallbackDelay = ms2ns(400);
 
     const nsecs_t now = systemTime();
     const nsecs_t last = lastResyncTime;
+    const nsecs_t lastCallback = lastCallbackTime.exchange(now);
 
-    if (now - last > kIgnoreDelay) {
+    if (now - last > kIgnoreDelay || now - lastCallback > kIgnoreCallbackDelay) {
         ATRACE_BEGIN("scheduler.resyncToHardwareVsync");
         scheduler.resyncToHardwareVsync(false, getVsyncPeriod());
         lastResyncTime.exchange(now);
@@ -343,7 +345,7 @@ std::unique_ptr<scheduler::LayerHistory::LayerHandle> Scheduler::registerLayer(
         std::string const& name, int windowType) {
     RefreshRateType refreshRateType = (windowType == InputWindowInfo::TYPE_WALLPAPER)
             ? RefreshRateType::DEFAULT
-            : RefreshRateType::PERFORMANCE;
+            : mRefreshRateConfigs.getMaxPerfRefreshRateType();
 
     const auto refreshRate = mRefreshRateConfigs.getRefreshRate(refreshRateType);
     const uint32_t performanceFps = (refreshRate) ? refreshRate->fps : 0;
@@ -564,9 +566,9 @@ Scheduler::RefreshRateType Scheduler::calculateRefreshRateType() {
         return RefreshRateType::DEFAULT;
     }
 
-    // If content detection is off we choose performance as we don't know the content fps
+    // If content detection is off we choose the Max Allowed Perf Refresh Rate type.
     if (mCurrentContentFeatureState == ContentFeatureState::CONTENT_DETECTION_OFF) {
-        return RefreshRateType::PERFORMANCE;
+        return mRefreshRateConfigs.getMaxPerfRefreshRateType();
     }
 
     // Content detection is on, find the appropriate refresh rate with minimal error
