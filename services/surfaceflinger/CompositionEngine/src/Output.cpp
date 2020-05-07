@@ -588,7 +588,8 @@ void Output::updateAndWriteCompositionState(
     for (auto* layer : getOutputLayersOrderedByZ()) {
         layer->updateCompositionState(refreshArgs.updatingGeometryThisFrame,
                                       refreshArgs.devOptForceClientComposition ||
-                                              forceClientComposition);
+                                              forceClientComposition,
+                                      refreshArgs.internalDisplayRotationFlags);
 
         if (mLayerRequestingBackgroundBlur == layer) {
             forceClientComposition = false;
@@ -826,14 +827,6 @@ std::optional<base::unique_fd> Output::composeSurfaces(
     OutputCompositionState& outputCompositionState = editState();
     const TracedOrdinal<bool> hasClientComposition = {"hasClientComposition",
                                                       outputState.usesClientComposition};
-    base::unique_fd readyFence;
-    if (!hasClientComposition) {
-        setExpensiveRenderingExpected(false);
-        return readyFence;
-    }
-
-    ALOGV("hasClientComposition");
-
 
     auto layers = getOutputLayersOrderedByZ();
     bool hasSecureCamera = std::any_of(layers.begin(), layers.end(), [](auto* layer) {
@@ -848,6 +841,45 @@ std::optional<base::unique_fd> Output::composeSurfaces(
     const bool supportsProtectedContent = renderEngine.supportsProtectedContent() &&
                                           !hasSecureCamera && !hasSecureDisplay;
 
+    // If we the display is secure, protected content support is enabled, and at
+    // least one layer has protected content, we need to use a secure back
+    // buffer.
+    if (outputState.isSecure && supportsProtectedContent) {
+        bool needsProtected = std::any_of(layers.begin(), layers.end(), [](auto* layer) {
+            return layer->getLayerFE().getCompositionState()->hasProtectedContent;
+        });
+        if (needsProtected != renderEngine.isProtected()) {
+            renderEngine.useProtectedContext(needsProtected);
+        }
+        if (needsProtected != mRenderSurface->isProtected() &&
+            needsProtected == renderEngine.isProtected()) {
+            mRenderSurface->setProtected(needsProtected);
+        }
+    }
+
+    base::unique_fd fd;
+    sp<GraphicBuffer> buf;
+
+    // If we aren't doing client composition on this output, but do have a
+    // flipClientTarget request for this frame on this output, we still need to
+    // dequeue a buffer.
+    if (hasClientComposition || outputState.flipClientTarget) {
+        buf = mRenderSurface->dequeueBuffer(&fd);
+        if (buf == nullptr) {
+            ALOGW("Dequeuing buffer for display [%s] failed, bailing out of "
+                  "client composition for this frame",
+                  mName.c_str());
+            return {};
+        }
+    }
+
+    base::unique_fd readyFence;
+    if (!hasClientComposition) {
+        setExpensiveRenderingExpected(false);
+        return readyFence;
+    }
+
+    ALOGV("hasClientComposition");
 
     renderengine::DisplaySettings clientCompositionDisplay;
     clientCompositionDisplay.physicalDisplay = outputState.destinationClip;
@@ -873,31 +905,6 @@ std::optional<base::unique_fd> Output::composeSurfaces(
                                               clientCompositionDisplay.clearRegion,
                                               clientCompositionDisplay.outputDataspace);
     appendRegionFlashRequests(debugRegion, clientCompositionLayers);
-
-    // If we the display is secure, protected content support is enabled, and at
-    // least one layer has protected content, we need to use a secure back
-    // buffer.
-    if (outputState.isSecure && supportsProtectedContent) {
-        bool needsProtected = std::any_of(layers.begin(), layers.end(), [](auto* layer) {
-            return layer->getLayerFE().getCompositionState()->hasProtectedContent;
-        });
-        if (needsProtected != renderEngine.isProtected()) {
-            renderEngine.useProtectedContext(needsProtected);
-        }
-        if (needsProtected != mRenderSurface->isProtected() &&
-            needsProtected == renderEngine.isProtected()) {
-            mRenderSurface->setProtected(needsProtected);
-        }
-    }
-
-    base::unique_fd fd;
-    sp<GraphicBuffer> buf = mRenderSurface->dequeueBuffer(&fd);
-    if (buf == nullptr) {
-        ALOGW("Dequeuing buffer for display [%s] failed, bailing out of "
-              "client composition for this frame",
-              mName.c_str());
-        return std::nullopt;
-    }
 
     // Check if the client composition requests were rendered into the provided graphic buffer. If
     // so, we can reuse the buffer and avoid client composition.
