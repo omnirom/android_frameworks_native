@@ -824,6 +824,7 @@ public:
 
     bool setFrameRate(FrameRate frameRate);
     virtual FrameRate getFrameRateForLayerTree() const;
+    static std::string frameRateCompatibilityString(FrameRateCompatibility compatibility);
 
 protected:
     // constant
