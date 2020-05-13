@@ -125,12 +125,14 @@
 #include "TimeStats/TimeStats.h"
 #include "android-base/parseint.h"
 #include "android-base/stringprintf.h"
+#include <composer_extn_intf.h>
 
 #include "frame_extn_intf.h"
 #include "smomo_interface.h"
 #include "QtiGralloc.h"
 #include "layer_extn_intf.h"
 
+composer::ComposerExtnLib composer::ComposerExtnLib::g_composer_ext_lib_;
 namespace android {
 
 using namespace std::string_literals;
@@ -897,6 +899,15 @@ void SurfaceFlinger::init() {
         ALOGI("Layer Extension is enabled");
     }
 
+    mComposerExtnIntf = composer::ComposerExtnLib::GetInstance();
+    if (!mComposerExtnIntf) {
+        ALOGE("Failed to create composer extension");
+    } else {
+        int ret = mComposerExtnIntf->CreateFrameScheduler(&mFrameSchedulerExtnIntf);
+        if (ret == -1 || !mFrameSchedulerExtnIntf) {
+            ALOGI("Failed to create frame scheduler extension");
+        }
+    }
     ALOGV("Done initializing");
 }
 
@@ -2038,6 +2049,35 @@ nsecs_t SurfaceFlinger::calculateExpectedPresentTime(nsecs_t now) const {
     return mVSyncModulator->getOffsets().sf >= 0 ? presentTime : presentTime + stats.vsyncPeriod;
 }
 
+void SurfaceFlinger::updateFrameScheduler() NO_THREAD_SAFETY_ANALYSIS {
+    if (!mFrameSchedulerExtnIntf) {
+        return;
+    }
+
+    const sp<Fence>& fence = mVSyncModulator->getOffsets().sf > 0 ? mPreviousPresentFences[0]
+                                                                  : mPreviousPresentFences[1];
+
+    if (fence == Fence::NO_FENCE) {
+        return;
+    }
+    int fenceFd = fence->get();
+    nsecs_t timeStamp = 0;
+    int ret = mFrameSchedulerExtnIntf->UpdateFrameScheduling(fenceFd, &timeStamp);
+    if (ret <= 0) {
+        return;
+    }
+
+    const nsecs_t period = getVsyncPeriod();
+    mScheduler->resyncToHardwareVsync(true, period, true /* force resync */);
+    if (timeStamp > 0) {
+        bool periodFlushed = false;
+        mScheduler->addResyncSample(timeStamp, period, &periodFlushed);
+        if (periodFlushed) {
+            mVSyncModulator->onRefreshRateChangeCompleted();
+        }
+    }
+}
+
 void SurfaceFlinger::onMessageReceived(int32_t what,
                                        nsecs_t expectedVSyncTime) NO_THREAD_SAFETY_ANALYSIS {
     ATRACE_CALL();
@@ -2071,7 +2111,7 @@ void SurfaceFlinger::onMessageInvalidate(nsecs_t expectedVSyncTime) NO_THREAD_SA
     // seeing this same value.
     const nsecs_t lastExpectedPresentTime = mExpectedPresentTime.load();
     mExpectedPresentTime = expectedVSyncTime;
-
+    updateFrameScheduler();
     // When Backpressure propagation is enabled we want to give a small grace period
     // for the present fence to fire instead of just giving up on this frame to handle cases
     // where present fence is just about to get signaled.
