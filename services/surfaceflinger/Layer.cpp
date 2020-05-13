@@ -119,6 +119,7 @@ Layer::Layer(const LayerCreationArgs& args)
     mCurrentState.metadata = args.metadata;
     mCurrentState.shadowRadius = 0.f;
     mCurrentState.treeHasFrameRateVote = false;
+    mCurrentState.fixedTransformHint = ui::Transform::ROT_INVALID;
 
     // drawing state & current state are identical
     mDrawingState = mCurrentState;
@@ -1349,6 +1350,18 @@ bool Layer::setShadowRadius(float shadowRadius) {
     return true;
 }
 
+bool Layer::setFixedTransformHint(ui::Transform::RotationFlags fixedTransformHint) {
+    if (mCurrentState.fixedTransformHint == fixedTransformHint) {
+        return false;
+    }
+
+    mCurrentState.sequence++;
+    mCurrentState.fixedTransformHint = fixedTransformHint;
+    mCurrentState.modified = true;
+    setTransactionFlags(eTransactionNeeded);
+    return true;
+}
+
 void Layer::updateTreeHasFrameRateVote() {
     const auto traverseTree = [&](const LayerVector::Visitor& visitor) {
         auto parent = getParent();
@@ -1476,19 +1489,19 @@ uint32_t Layer::getEffectiveUsage(uint32_t usage) const {
 }
 
 void Layer::updateTransformHint(const sp<const DisplayDevice>& display) const {
-    uint32_t orientation = 0;
+    ui::Transform::RotationFlags transformHint = ui::Transform::ROT_0;
     // Disable setting transform hint if the debug flag is set.
     if (!mFlinger->mDebugDisableTransformHint) {
         // The transform hint is used to improve performance, but we can
         // only have a single transform hint, it cannot
         // apply to all displays.
         const ui::Transform& planeTransform = display->getTransform();
-        orientation = planeTransform.getOrientation();
-        if (orientation & ui::Transform::ROT_INVALID) {
-            orientation = 0;
+        transformHint = static_cast<ui::Transform::RotationFlags>(planeTransform.getOrientation());
+        if (transformHint & ui::Transform::ROT_INVALID) {
+            transformHint = ui::Transform::ROT_0;
         }
     }
-    setTransformHint(orientation);
+    setTransformHint(transformHint);
 }
 
 // ----------------------------------------------------------------------------
@@ -2092,6 +2105,16 @@ half Layer::getAlpha() const {
 
     half parentAlpha = (p != nullptr) ? p->getAlpha() : 1.0_hf;
     return parentAlpha * getDrawingState().color.a;
+}
+
+ui::Transform::RotationFlags Layer::getFixedTransformHint() const {
+    ui::Transform::RotationFlags fixedTransformHint = mCurrentState.fixedTransformHint;
+    if (fixedTransformHint != ui::Transform::ROT_INVALID) {
+        return fixedTransformHint;
+    }
+    const auto& p = mCurrentParent.promote();
+    if (!p) return fixedTransformHint;
+    return p->getFixedTransformHint();
 }
 
 half4 Layer::getColor() const {
