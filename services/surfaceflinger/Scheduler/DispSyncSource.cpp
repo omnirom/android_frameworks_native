@@ -23,6 +23,7 @@
 #include "DispSyncSource.h"
 
 #include <android-base/stringprintf.h>
+#include <dlfcn.h>
 #include <utils/Trace.h>
 #include <mutex>
 
@@ -39,7 +40,21 @@ DispSyncSource::DispSyncSource(DispSync* dispSync, nsecs_t phaseOffset, bool tra
         mTraceVsync(traceVsync),
         mVsyncOnLabel(base::StringPrintf("VsyncOn-%s", name)),
         mDispSync(dispSync),
-        mPhaseOffset(base::StringPrintf("VsyncOffset-%s", name), phaseOffset) {}
+        mPhaseOffset(base::StringPrintf("VsyncOffset-%s", name), phaseOffset) {
+        mDolphinHandle = dlopen("libdolphin.so", RTLD_NOW);
+        if (!mDolphinHandle) {
+            ALOGW("Unable to open libdolphin.so: %s.", dlerror());
+        } else {
+            mDolphinCheck = (bool (*) (const char*))dlsym(mDolphinHandle, "dolphinCheck");
+            if (!mDolphinCheck)
+                dlclose(mDolphinHandle);
+        }
+}
+
+DispSyncSource::~DispSyncSource() {
+    if(mDolphinCheck)
+        dlclose(mDolphinHandle);
+}
 
 void DispSyncSource::setVSyncEnabled(bool enable) {
     std::lock_guard lock(mVsyncMutex);
@@ -58,6 +73,16 @@ void DispSyncSource::setVSyncEnabled(bool enable) {
             ALOGE("error unregistering vsync callback: %s (%d)", strerror(-err), err);
         }
         // ATRACE_INT(mVsyncOnLabel.c_str(), 0);
+        if (mDolphinCheck) {
+            if (mDolphinCheck(mName)) {
+                status_t err = mDispSync->addEventListener(mName, mPhaseOffset,
+                                                           static_cast<DispSync::Callback*>(this),
+                                                           mLastCallbackTime);
+                if (err != NO_ERROR) {
+                    ALOGE("error registering vsync callback: %s (%d)", strerror(-err), err);
+                }
+            }
+        }
     }
     mEnabled = enable;
 }
@@ -92,7 +117,7 @@ void DispSyncSource::setPhaseOffset(nsecs_t phaseOffset) {
     }
 }
 
-void DispSyncSource::onDispSyncEvent(nsecs_t when) {
+void DispSyncSource::onDispSyncEvent(nsecs_t when, nsecs_t expectedVSyncTimestamp) {
     VSyncSource::Callback* callback;
     {
         std::lock_guard lock(mCallbackMutex);
@@ -104,7 +129,7 @@ void DispSyncSource::onDispSyncEvent(nsecs_t when) {
     }
 
     if (callback != nullptr) {
-        callback->onVSyncEvent(when);
+        callback->onVSyncEvent(when, expectedVSyncTimestamp);
     }
 }
 

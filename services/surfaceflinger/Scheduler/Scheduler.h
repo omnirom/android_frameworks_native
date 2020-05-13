@@ -95,7 +95,7 @@ public:
     ConnectionHandle enableVSyncInjection(bool enable);
 
     // Returns false if injection is disabled.
-    bool injectVSync(nsecs_t when);
+    bool injectVSync(nsecs_t when, nsecs_t expectedVSyncTime);
 
     void enableHardwareVsync();
     void disableHardwareVsync(bool makeUnavailable);
@@ -114,7 +114,7 @@ public:
                          bool* periodFlushed);
     void addPresentFence(const std::shared_ptr<FenceTime>&);
     void setIgnorePresentFences(bool ignore);
-    nsecs_t getDispSyncExpectedPresentTime();
+    nsecs_t getDispSyncExpectedPresentTime(nsecs_t now);
 
     // Layers are registered on creation, and unregistered when the weak reference expires.
     void registerLayer(Layer*);
@@ -138,7 +138,7 @@ public:
     std::optional<HwcConfigIndexType> getPreferredConfigId();
 
     // Notifies the scheduler about a refresh rate timeline change.
-    void onNewVsyncPeriodChangeTimeline(const HWC2::VsyncPeriodChangeTimeline& timeline);
+    void onNewVsyncPeriodChangeTimeline(const hal::VsyncPeriodChangeTimeline& timeline);
 
     // Notifies the scheduler when the display was refreshed
     void onDisplayRefreshed(nsecs_t timestamp);
@@ -242,7 +242,7 @@ private:
     const scheduler::RefreshRateConfigs& mRefreshRateConfigs;
 
     std::mutex mVsyncTimelineLock;
-    std::optional<HWC2::VsyncPeriodChangeTimeline> mLastVsyncPeriodChangeTimeline
+    std::optional<hal::VsyncPeriodChangeTimeline> mLastVsyncPeriodChangeTimeline
             GUARDED_BY(mVsyncTimelineLock);
     static constexpr std::chrono::nanoseconds MAX_VSYNC_APPLIED_TIME = 200ms;
 

@@ -26,9 +26,11 @@
 #include <thread>
 
 #include "Scheduler/RefreshRateStats.h"
+#include "mock/DisplayHardware/MockDisplay.h"
 #include "mock/MockTimeStats.h"
 
 using namespace std::chrono_literals;
+using android::hardware::graphics::composer::hal::PowerMode;
 using testing::_;
 using testing::AtLeast;
 
@@ -39,25 +41,29 @@ class RefreshRateStatsTest : public testing::Test {
 protected:
     static inline const auto CONFIG_ID_0 = HwcConfigIndexType(0);
     static inline const auto CONFIG_ID_1 = HwcConfigIndexType(1);
-    static inline const auto CONFIG_GROUP_0 = HwcConfigGroupType(0);
+    static inline const auto CONFIG_GROUP_0 = 0;
     static constexpr int64_t VSYNC_90 = 11111111;
     static constexpr int64_t VSYNC_60 = 16666667;
 
     RefreshRateStatsTest();
     ~RefreshRateStatsTest();
 
-    void init(const std::vector<RefreshRateConfigs::InputConfig>& configs) {
+    void init(const std::vector<std::shared_ptr<const HWC2::Display::Config>>& configs) {
         mRefreshRateConfigs =
                 std::make_unique<RefreshRateConfigs>(configs, /*currentConfig=*/CONFIG_ID_0);
-        mRefreshRateStats =
-                std::make_unique<RefreshRateStats>(*mRefreshRateConfigs, mTimeStats,
-                                                   /*currentConfigId=*/CONFIG_ID_0,
-                                                   /*currentPowerMode=*/HWC_POWER_MODE_OFF);
+        mRefreshRateStats = std::make_unique<RefreshRateStats>(*mRefreshRateConfigs, mTimeStats,
+                                                               /*currentConfigId=*/CONFIG_ID_0,
+                                                               /*currentPowerMode=*/PowerMode::OFF);
     }
 
+    Hwc2::mock::Display mDisplay;
     mock::TimeStats mTimeStats;
     std::unique_ptr<RefreshRateConfigs> mRefreshRateConfigs;
     std::unique_ptr<RefreshRateStats> mRefreshRateStats;
+
+    std::shared_ptr<const HWC2::Display::Config> createConfig(HwcConfigIndexType configId,
+                                                              int32_t configGroup,
+                                                              int64_t vsyncPeriod);
 };
 
 RefreshRateStatsTest::RefreshRateStatsTest() {
@@ -72,12 +78,20 @@ RefreshRateStatsTest::~RefreshRateStatsTest() {
     ALOGD("**** Tearing down after %s.%s\n", test_info->test_case_name(), test_info->name());
 }
 
+std::shared_ptr<const HWC2::Display::Config> RefreshRateStatsTest::createConfig(
+        HwcConfigIndexType configId, int32_t configGroup, int64_t vsyncPeriod) {
+    return HWC2::Display::Config::Builder(mDisplay, configId.value())
+            .setVsyncPeriod(int32_t(vsyncPeriod))
+            .setConfigGroup(configGroup)
+            .build();
+}
+
 namespace {
 /* ------------------------------------------------------------------------
  * Test cases
  */
 TEST_F(RefreshRateStatsTest, oneConfigTest) {
-    init({{{CONFIG_ID_0, CONFIG_GROUP_0, VSYNC_90}}});
+    init({createConfig(CONFIG_ID_0, CONFIG_GROUP_0, VSYNC_90)});
 
     EXPECT_CALL(mTimeStats, recordRefreshRate(0, _)).Times(AtLeast(1));
     EXPECT_CALL(mTimeStats, recordRefreshRate(90, _)).Times(AtLeast(1));
@@ -97,7 +111,7 @@ TEST_F(RefreshRateStatsTest, oneConfigTest) {
     EXPECT_EQ(0u, times.count("90fps"));
 
     mRefreshRateStats->setConfigMode(CONFIG_ID_0);
-    mRefreshRateStats->setPowerMode(HWC_POWER_MODE_NORMAL);
+    mRefreshRateStats->setPowerMode(PowerMode::ON);
     screenOff = mRefreshRateStats->getTotalTimes()["ScreenOff"];
     std::this_thread::sleep_for(std::chrono::milliseconds(2));
     times = mRefreshRateStats->getTotalTimes();
@@ -105,7 +119,7 @@ TEST_F(RefreshRateStatsTest, oneConfigTest) {
     ASSERT_EQ(1u, times.count("90fps"));
     EXPECT_LT(0, times["90fps"]);
 
-    mRefreshRateStats->setPowerMode(HWC_POWER_MODE_DOZE);
+    mRefreshRateStats->setPowerMode(PowerMode::DOZE);
     int ninety = mRefreshRateStats->getTotalTimes()["90fps"];
     std::this_thread::sleep_for(std::chrono::milliseconds(2));
     times = mRefreshRateStats->getTotalTimes();
@@ -116,14 +130,15 @@ TEST_F(RefreshRateStatsTest, oneConfigTest) {
     screenOff = mRefreshRateStats->getTotalTimes()["ScreenOff"];
     std::this_thread::sleep_for(std::chrono::milliseconds(2));
     times = mRefreshRateStats->getTotalTimes();
-    // Because the power mode is not HWC_POWER_MODE_NORMAL, switching the config
+    // Because the power mode is not PowerMode::ON, switching the config
     // does not update refresh rates that come from the config.
     EXPECT_LT(screenOff, times["ScreenOff"]);
     EXPECT_EQ(ninety, times["90fps"]);
 }
 
 TEST_F(RefreshRateStatsTest, twoConfigsTest) {
-    init({{{CONFIG_ID_0, CONFIG_GROUP_0, VSYNC_90}, {CONFIG_ID_1, CONFIG_GROUP_0, VSYNC_60}}});
+    init({createConfig(CONFIG_ID_0, CONFIG_GROUP_0, VSYNC_90),
+          createConfig(CONFIG_ID_1, CONFIG_GROUP_0, VSYNC_60)});
 
     EXPECT_CALL(mTimeStats, recordRefreshRate(0, _)).Times(AtLeast(1));
     EXPECT_CALL(mTimeStats, recordRefreshRate(60, _)).Times(AtLeast(1));
@@ -143,7 +158,7 @@ TEST_F(RefreshRateStatsTest, twoConfigsTest) {
     EXPECT_LT(screenOff, times["ScreenOff"]);
 
     mRefreshRateStats->setConfigMode(CONFIG_ID_0);
-    mRefreshRateStats->setPowerMode(HWC_POWER_MODE_NORMAL);
+    mRefreshRateStats->setPowerMode(PowerMode::ON);
     screenOff = mRefreshRateStats->getTotalTimes()["ScreenOff"];
     std::this_thread::sleep_for(std::chrono::milliseconds(2));
     times = mRefreshRateStats->getTotalTimes();
@@ -177,9 +192,9 @@ TEST_F(RefreshRateStatsTest, twoConfigsTest) {
     EXPECT_EQ(ninety, times["90fps"]);
     EXPECT_LT(sixty, times["60fps"]);
 
-    // Because the power mode is not HWC_POWER_MODE_NORMAL, switching the config
+    // Because the power mode is not PowerMode::ON, switching the config
     // does not update refresh rates that come from the config.
-    mRefreshRateStats->setPowerMode(HWC_POWER_MODE_DOZE);
+    mRefreshRateStats->setPowerMode(PowerMode::DOZE);
     mRefreshRateStats->setConfigMode(CONFIG_ID_0);
     sixty = mRefreshRateStats->getTotalTimes()["60fps"];
     std::this_thread::sleep_for(std::chrono::milliseconds(2));

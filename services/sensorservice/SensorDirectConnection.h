@@ -42,21 +42,15 @@ public:
     void dump(String8& result) const;
     void dump(util::ProtoOutputStream* proto) const;
     uid_t getUid() const { return mUid; }
+    const String16& getOpPackageName() const { return mOpPackageName; }
     int32_t getHalChannelHandle() const;
     bool isEquivalent(const sensors_direct_mem_t *mem) const;
 
-    // stop all active sensor report. if backupRecord is set to false,
-    // those report can be recovered by recoverAll
-    // called by SensorService when enter restricted mode
-    void stopAll(bool backupRecord = false);
+    // Invoked when access to sensors for this connection has changed, e.g. lost or
+    // regained due to changes in the sensor restricted/privacy mode or the
+    // app changed to idle/active status.
+    void onSensorAccessChanged(bool hasAccess);
 
-    // recover sensor reports previously stopped by stopAll(true)
-    // called by SensorService when return to NORMAL mode.
-    void recoverAll();
-
-    void updateSensorSubscriptions();
-
-    void setSensorAccess(bool hasAccess);
 protected:
     virtual ~SensorDirectConnection();
     // ISensorEventConnection functions
@@ -70,6 +64,24 @@ protected:
     virtual void destroy();
 private:
     bool hasSensorAccess() const;
+
+    // Stops all active sensor direct report requests.
+    //
+    // If backupRecord is true, stopped requests can be recovered
+    // by a subsequent recoverAll() call (e.g. when temporarily stopping
+    // sensors for sensor privacy/restrict mode or when an app becomes
+    // idle).
+    void stopAll(bool backupRecord = false);
+    // Same as stopAll() but with mConnectionLock held.
+    void stopAllLocked(bool backupRecord);
+
+    // Recover sensor requests previously stopped by stopAll(true).
+    // This method can be called when a sensor access resumes (e.g.
+    // sensor privacy/restrict mode lifted or app becomes active).
+    //
+    // If no requests are backed up by stopAll(), this method is no-op.
+    void recoverAll();
+
     const sp<SensorService> mService;
     const uid_t mUid;
     const sensors_direct_mem_t mMem;
@@ -79,8 +91,6 @@ private:
     mutable Mutex mConnectionLock;
     std::unordered_map<int, int> mActivated;
     std::unordered_map<int, int> mActivatedBackup;
-
-    std::atomic_bool mHasSensorAccess = true;
 
     mutable Mutex mDestroyLock;
     bool mDestroyed;

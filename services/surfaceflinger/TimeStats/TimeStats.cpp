@@ -290,6 +290,15 @@ void TimeStats::incrementRefreshRateSwitches() {
     mTimeStats.refreshRateSwitches++;
 }
 
+void TimeStats::incrementCompositionStrategyChanges() {
+    if (!mEnabled.load()) return;
+
+    ATRACE_CALL();
+
+    std::lock_guard<std::mutex> lock(mMutex);
+    mTimeStats.compositionStrategyChanges++;
+}
+
 void TimeStats::recordDisplayEventConnectionCount(int32_t count) {
     if (!mEnabled.load()) return;
 
@@ -312,7 +321,7 @@ void TimeStats::recordFrameDuration(nsecs_t startTime, nsecs_t endTime) {
     if (!mEnabled.load()) return;
 
     std::lock_guard<std::mutex> lock(mMutex);
-    if (mPowerTime.powerMode == HWC_POWER_MODE_NORMAL) {
+    if (mPowerTime.powerMode == PowerMode::ON) {
         mTimeStats.frameDuration.insert(msBetween(startTime, endTime));
     }
 }
@@ -683,12 +692,13 @@ void TimeStats::flushPowerTimeLocked() {
     int64_t elapsedTime = (curTime - mPowerTime.prevTime) / 1000000;
 
     switch (mPowerTime.powerMode) {
-        case HWC_POWER_MODE_NORMAL:
+        case PowerMode::ON:
             mTimeStats.displayOnTime += elapsedTime;
             break;
-        case HWC_POWER_MODE_OFF:
-        case HWC_POWER_MODE_DOZE:
-        case HWC_POWER_MODE_DOZE_SUSPEND:
+        case PowerMode::OFF:
+        case PowerMode::DOZE:
+        case PowerMode::DOZE_SUSPEND:
+        case PowerMode::ON_SUSPEND:
         default:
             break;
     }
@@ -696,7 +706,7 @@ void TimeStats::flushPowerTimeLocked() {
     mPowerTime.prevTime = curTime;
 }
 
-void TimeStats::setPowerMode(int32_t powerMode) {
+void TimeStats::setPowerMode(PowerMode powerMode) {
     if (!mEnabled.load()) {
         std::lock_guard<std::mutex> lock(mMutex);
         mPowerTime.powerMode = powerMode;
@@ -784,8 +794,8 @@ void TimeStats::setPresentFenceGlobal(const std::shared_ptr<FenceTime>& presentF
         return;
     }
 
-    if (mPowerTime.powerMode != HWC_POWER_MODE_NORMAL) {
-        // Try flushing the last present fence on HWC_POWER_MODE_NORMAL.
+    if (mPowerTime.powerMode != PowerMode::ON) {
+        // Try flushing the last present fence on PowerMode::ON.
         flushAvailableGlobalRecordsToStatsLocked();
         mGlobalRecord.presentFences.clear();
         mGlobalRecord.prevPresentTime = 0;
@@ -844,6 +854,7 @@ void TimeStats::clearGlobalLocked() {
     mTimeStats.clientCompositionFrames = 0;
     mTimeStats.clientCompositionReusedFrames = 0;
     mTimeStats.refreshRateSwitches = 0;
+    mTimeStats.compositionStrategyChanges = 0;
     mTimeStats.displayEventConnectionsCount = 0;
     mTimeStats.displayOnTime = 0;
     mTimeStats.presentToPresent.hist.clear();

@@ -128,7 +128,7 @@ private:
             mLastCallTime = vsynctime;
         }
 
-        mCallback->onDispSyncEvent(wakeupTime);
+        mCallback->onDispSyncEvent(wakeupTime, vsynctime);
 
         {
             std::lock_guard<std::mutex> lk(mMutex);
@@ -221,14 +221,13 @@ void VSyncReactor::updateIgnorePresentFencesInternal() {
     }
 }
 
-nsecs_t VSyncReactor::computeNextRefresh(int periodOffset) const {
-    auto const now = mClock->now();
+nsecs_t VSyncReactor::computeNextRefresh(int periodOffset, nsecs_t now) const {
     auto const currentPeriod = periodOffset ? mTracker->currentPeriod() : 0;
     return mTracker->nextAnticipatedVSyncTimeFrom(now + periodOffset * currentPeriod);
 }
 
-nsecs_t VSyncReactor::expectedPresentTime() {
-    return mTracker->nextAnticipatedVSyncTimeFrom(mClock->now());
+nsecs_t VSyncReactor::expectedPresentTime(nsecs_t now) {
+    return mTracker->nextAnticipatedVSyncTimeFrom(now);
 }
 
 void VSyncReactor::startPeriodTransition(nsecs_t newPeriod) {

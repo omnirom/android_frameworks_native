@@ -147,52 +147,6 @@ static status_t selectConfigForAttribute(EGLDisplay dpy, EGLint const* attrs, EG
     return NAME_NOT_FOUND;
 }
 
-class EGLAttributeVector {
-    struct Attribute;
-    class Adder;
-    friend class Adder;
-    KeyedVector<Attribute, EGLint> mList;
-    struct Attribute {
-        Attribute() : v(0){};
-        explicit Attribute(EGLint v) : v(v) {}
-        EGLint v;
-        bool operator<(const Attribute& other) const {
-            // this places EGL_NONE at the end
-            EGLint lhs(v);
-            EGLint rhs(other.v);
-            if (lhs == EGL_NONE) lhs = 0x7FFFFFFF;
-            if (rhs == EGL_NONE) rhs = 0x7FFFFFFF;
-            return lhs < rhs;
-        }
-    };
-    class Adder {
-        friend class EGLAttributeVector;
-        EGLAttributeVector& v;
-        EGLint attribute;
-        Adder(EGLAttributeVector& v, EGLint attribute) : v(v), attribute(attribute) {}
-
-    public:
-        void operator=(EGLint value) {
-            if (attribute != EGL_NONE) {
-                v.mList.add(Attribute(attribute), value);
-            }
-        }
-        operator EGLint() const { return v.mList[attribute]; }
-    };
-
-public:
-    EGLAttributeVector() { mList.add(Attribute(EGL_NONE), EGL_NONE); }
-    void remove(EGLint attribute) {
-        if (attribute != EGL_NONE) {
-            mList.removeItem(Attribute(attribute));
-        }
-    }
-    Adder operator[](EGLint attribute) { return Adder(*this, attribute); }
-    EGLint operator[](EGLint attribute) const { return mList[attribute]; }
-    // cast-operator to (EGLint const*)
-    operator EGLint const*() const { return &mList.keyAt(0).v; }
-};
-
 static status_t selectEGLConfig(EGLDisplay display, EGLint format, EGLint renderableType,
                                 EGLConfig* config) {
     // select our EGLConfig. It must support EGL_RECORDABLE_ANDROID if
@@ -201,16 +155,33 @@ static status_t selectEGLConfig(EGLDisplay display, EGLint format, EGLint render
     EGLint wantedAttribute;
     EGLint wantedAttributeValue;
 
-    EGLAttributeVector attribs;
+    std::vector<EGLint> attribs;
     if (renderableType) {
-        attribs[EGL_RENDERABLE_TYPE] = renderableType;
-        attribs[EGL_RECORDABLE_ANDROID] = EGL_TRUE;
-        attribs[EGL_SURFACE_TYPE] = EGL_WINDOW_BIT | EGL_PBUFFER_BIT;
-        attribs[EGL_FRAMEBUFFER_TARGET_ANDROID] = EGL_TRUE;
-        attribs[EGL_RED_SIZE] = 8;
-        attribs[EGL_GREEN_SIZE] = 8;
-        attribs[EGL_BLUE_SIZE] = 8;
-        attribs[EGL_ALPHA_SIZE] = 8;
+        const ui::PixelFormat pixelFormat = static_cast<ui::PixelFormat>(format);
+        const bool is1010102 = pixelFormat == ui::PixelFormat::RGBA_1010102;
+
+        // Default to 8 bits per channel.
+        const EGLint tmpAttribs[] = {
+                EGL_RENDERABLE_TYPE,
+                renderableType,
+                EGL_RECORDABLE_ANDROID,
+                EGL_TRUE,
+                EGL_SURFACE_TYPE,
+                EGL_WINDOW_BIT | EGL_PBUFFER_BIT,
+                EGL_FRAMEBUFFER_TARGET_ANDROID,
+                EGL_TRUE,
+                EGL_RED_SIZE,
+                is1010102 ? 10 : 8,
+                EGL_GREEN_SIZE,
+                is1010102 ? 10 : 8,
+                EGL_BLUE_SIZE,
+                is1010102 ? 10 : 8,
+                EGL_ALPHA_SIZE,
+                is1010102 ? 2 : 8,
+                EGL_NONE,
+        };
+        std::copy(tmpAttribs, tmpAttribs + (sizeof(tmpAttribs) / sizeof(EGLint)),
+                  std::back_inserter(attribs));
         wantedAttribute = EGL_NONE;
         wantedAttributeValue = EGL_NONE;
     } else {
@@ -219,7 +190,8 @@ static status_t selectEGLConfig(EGLDisplay display, EGLint format, EGLint render
         wantedAttributeValue = format;
     }
 
-    err = selectConfigForAttribute(display, attribs, wantedAttribute, wantedAttributeValue, config);
+    err = selectConfigForAttribute(display, attribs.data(), wantedAttribute, wantedAttributeValue,
+                                   config);
     if (err == NO_ERROR) {
         EGLint caveat;
         if (eglGetConfigAttrib(display, *config, EGL_CONFIG_CAVEAT, &caveat))
@@ -793,34 +765,65 @@ void GLESRenderEngine::handleRoundedCorners(const DisplaySettings& display,
     // top rectangle and the bottom rectangle, and turn off blending for the middle rectangle.
     FloatRect bounds = layer.geometry.roundedCornersCrop;
 
-    // Firstly, we need to convert the coordination from layer native coordination space to
-    // device coordination space.
-    // TODO(143929254): Verify that this transformation is correct
-    const auto transformMatrix = display.globalTransform * layer.geometry.positionTransform;
-    const vec4 leftTopCoordinate(bounds.left, bounds.top, 1.0, 1.0);
-    const vec4 rightBottomCoordinate(bounds.right, bounds.bottom, 1.0, 1.0);
-    const vec4 leftTopCoordinateInBuffer = transformMatrix * leftTopCoordinate;
-    const vec4 rightBottomCoordinateInBuffer = transformMatrix * rightBottomCoordinate;
-    bounds = FloatRect(leftTopCoordinateInBuffer[0], leftTopCoordinateInBuffer[1],
-                       rightBottomCoordinateInBuffer[0], rightBottomCoordinateInBuffer[1]);
-
-    // Secondly, if the display is rotated, we need to undo the rotation on coordination and
-    // align the (left, top) and (right, bottom) coordination with the device coordination
-    // space.
+    // Explicitly compute the transform from the clip rectangle to the physical
+    // display. Normally, this is done in glViewport but we explicitly compute
+    // it here so that we can get the scissor bounds correct.
+    const Rect& source = display.clip;
+    const Rect& destination = display.physicalDisplay;
+    // Here we compute the following transform:
+    // 1. Translate the top left corner of the source clip to (0, 0)
+    // 2. Rotate the clip rectangle about the origin in accordance with the
+    // orientation flag
+    // 3. Translate the top left corner back to the origin.
+    // 4. Scale the clip rectangle to the destination rectangle dimensions
+    // 5. Translate the top left corner to the destination rectangle's top left
+    // corner.
+    const mat4 translateSource = mat4::translate(vec4(-source.left, -source.top, 0, 1));
+    mat4 rotation;
+    int displacementX = 0;
+    int displacementY = 0;
+    float destinationWidth = static_cast<float>(destination.getWidth());
+    float destinationHeight = static_cast<float>(destination.getHeight());
+    float sourceWidth = static_cast<float>(source.getWidth());
+    float sourceHeight = static_cast<float>(source.getHeight());
+    const float rot90InRadians = 2.0f * static_cast<float>(M_PI) / 4.0f;
     switch (display.orientation) {
         case ui::Transform::ROT_90:
-            std::swap(bounds.left, bounds.right);
+            rotation = mat4::rotate(rot90InRadians, vec3(0, 0, 1));
+            displacementX = source.getHeight();
+            std::swap(sourceHeight, sourceWidth);
             break;
         case ui::Transform::ROT_180:
-            std::swap(bounds.left, bounds.right);
-            std::swap(bounds.top, bounds.bottom);
+            rotation = mat4::rotate(rot90InRadians * 2.0f, vec3(0, 0, 1));
+            displacementY = source.getHeight();
+            displacementX = source.getWidth();
             break;
         case ui::Transform::ROT_270:
-            std::swap(bounds.top, bounds.bottom);
+            rotation = mat4::rotate(rot90InRadians * 3.0f, vec3(0, 0, 1));
+            displacementY = source.getWidth();
+            std::swap(sourceHeight, sourceWidth);
             break;
         default:
             break;
     }
+
+    const mat4 intermediateTranslation = mat4::translate(vec4(displacementX, displacementY, 0, 1));
+    const mat4 scale = mat4::scale(
+            vec4(destinationWidth / sourceWidth, destinationHeight / sourceHeight, 1, 1));
+    const mat4 translateDestination =
+            mat4::translate(vec4(destination.left, destination.top, 0, 1));
+    const mat4 globalTransform =
+            translateDestination * scale * intermediateTranslation * rotation * translateSource;
+
+    const mat4 transformMatrix = globalTransform * layer.geometry.positionTransform;
+    const vec4 leftTopCoordinate(bounds.left, bounds.top, 1.0, 1.0);
+    const vec4 rightBottomCoordinate(bounds.right, bounds.bottom, 1.0, 1.0);
+    const vec4 leftTopCoordinateInBuffer = transformMatrix * leftTopCoordinate;
+    const vec4 rightBottomCoordinateInBuffer = transformMatrix * rightBottomCoordinate;
+    bounds = FloatRect(std::min(leftTopCoordinateInBuffer[0], rightBottomCoordinateInBuffer[0]),
+                       std::min(leftTopCoordinateInBuffer[1], rightBottomCoordinateInBuffer[1]),
+                       std::max(leftTopCoordinateInBuffer[0], rightBottomCoordinateInBuffer[0]),
+                       std::max(leftTopCoordinateInBuffer[1], rightBottomCoordinateInBuffer[1]));
 
     // Finally, we cut the layer into 3 parts, with top and bottom parts having rounded corners
     // and the middle part without rounded corners.
@@ -866,11 +869,30 @@ status_t GLESRenderEngine::bindFrameBuffer(Framebuffer* framebuffer) {
     return glStatus == GL_FRAMEBUFFER_COMPLETE_OES ? NO_ERROR : BAD_VALUE;
 }
 
-void GLESRenderEngine::unbindFrameBuffer(Framebuffer* /* framebuffer */) {
+void GLESRenderEngine::unbindFrameBuffer(Framebuffer* /*framebuffer*/) {
     ATRACE_CALL();
 
     // back to main framebuffer
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
+}
+
+bool GLESRenderEngine::cleanupPostRender() {
+    ATRACE_CALL();
+
+    if (mPriorResourcesCleaned ||
+        (mLastDrawFence != nullptr && mLastDrawFence->getStatus() != Fence::Status::Signaled)) {
+        // If we don't have a prior frame needing cleanup, then don't do anything.
+        return false;
+    }
+
+    // Bind the texture to dummy data so that backing image data can be freed.
+    GLFramebuffer* glFramebuffer = static_cast<GLFramebuffer*>(getFramebufferForDrawing());
+    glFramebuffer->allocateBuffers(1, 1, mPlaceholderDrawBuffer);
+    // Release the cached fence here, so that we don't churn reallocations when
+    // we could no-op repeated calls of this method instead.
+    mLastDrawFence = nullptr;
+    mPriorResourcesCleaned = true;
+    return true;
 }
 
 void GLESRenderEngine::checkErrors() const {
@@ -1158,7 +1180,13 @@ status_t GLESRenderEngine::drawLayers(const DisplaySettings& display,
             // us bad parameters, or we messed up our shader generation).
             return INVALID_OPERATION;
         }
+        mLastDrawFence = nullptr;
+    } else {
+        // The caller takes ownership of drawFence, so we need to duplicate the
+        // fd here.
+        mLastDrawFence = new Fence(dup(drawFence->get()));
     }
+    mPriorResourcesCleaned = false;
 
     checkErrors();
     return NO_ERROR;

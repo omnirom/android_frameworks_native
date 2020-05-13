@@ -250,7 +250,7 @@ void Scheduler::setPhaseOffset(ConnectionHandle handle, nsecs_t phaseOffset) {
 }
 
 void Scheduler::getDisplayStatInfo(DisplayStatInfo* stats) {
-    stats->vsyncTime = mPrimaryDispSync->computeNextRefresh(0);
+    stats->vsyncTime = mPrimaryDispSync->computeNextRefresh(0, systemTime());
     stats->vsyncPeriod = mPrimaryDispSync->getPeriod();
 }
 
@@ -276,12 +276,12 @@ Scheduler::ConnectionHandle Scheduler::enableVSyncInjection(bool enable) {
     return mInjectorConnectionHandle;
 }
 
-bool Scheduler::injectVSync(nsecs_t when) {
+bool Scheduler::injectVSync(nsecs_t when, nsecs_t expectedVSyncTime) {
     if (!mInjectVSyncs || !mVSyncInjector) {
         return false;
     }
 
-    mVSyncInjector->onInjectSyncEvent(when);
+    mVSyncInjector->onInjectSyncEvent(when, expectedVSyncTime);
     return true;
 }
 
@@ -332,7 +332,7 @@ void Scheduler::resync() {
     const nsecs_t last = mLastResyncTime.exchange(now);
 
     if (now - last > kIgnoreDelay) {
-        resyncToHardwareVsync(false, mRefreshRateConfigs.getCurrentRefreshRate().vsyncPeriod);
+        resyncToHardwareVsync(false, mRefreshRateConfigs.getCurrentRefreshRate().getVsyncPeriod());
     }
 }
 
@@ -378,8 +378,8 @@ void Scheduler::setIgnorePresentFences(bool ignore) {
     mPrimaryDispSync->setIgnorePresentFences(ignore);
 }
 
-nsecs_t Scheduler::getDispSyncExpectedPresentTime() {
-    return mPrimaryDispSync->expectedPresentTime();
+nsecs_t Scheduler::getDispSyncExpectedPresentTime(nsecs_t now) {
+    return mPrimaryDispSync->expectedPresentTime(now);
 }
 
 void Scheduler::registerLayer(Layer* layer) {
@@ -389,34 +389,34 @@ void Scheduler::registerLayer(Layer* layer) {
     // keep the layer history, since we use it for other features (like Frame Rate API), so layers
     // still need to be registered.
     if (!mUseContentDetection) {
-        mLayerHistory->registerLayer(layer, mRefreshRateConfigs.getMinRefreshRate().fps,
-                                     mRefreshRateConfigs.getMaxRefreshRate().fps,
+        mLayerHistory->registerLayer(layer, mRefreshRateConfigs.getMinRefreshRate().getFps(),
+                                     mRefreshRateConfigs.getMaxRefreshRate().getFps(),
                                      scheduler::LayerHistory::LayerVoteType::NoVote);
         return;
     }
 
     // In V1 of content detection, all layers are registered as Heuristic (unless it's wallpaper).
     if (!mUseContentDetectionV2) {
-        const auto lowFps = mRefreshRateConfigs.getMinRefreshRate().fps;
+        const auto lowFps = mRefreshRateConfigs.getMinRefreshRate().getFps();
         const auto highFps = layer->getWindowType() == InputWindowInfo::TYPE_WALLPAPER
                 ? lowFps
-                : mRefreshRateConfigs.getMaxRefreshRate().fps;
+                : mRefreshRateConfigs.getMaxRefreshRate().getFps();
 
         mLayerHistory->registerLayer(layer, lowFps, highFps,
                                      scheduler::LayerHistory::LayerVoteType::Heuristic);
     } else {
         if (layer->getWindowType() == InputWindowInfo::TYPE_WALLPAPER) {
             // Running Wallpaper at Min is considered as part of content detection.
-            mLayerHistory->registerLayer(layer, mRefreshRateConfigs.getMinRefreshRate().fps,
-                                         mRefreshRateConfigs.getMaxRefreshRate().fps,
+            mLayerHistory->registerLayer(layer, mRefreshRateConfigs.getMinRefreshRate().getFps(),
+                                         mRefreshRateConfigs.getMaxRefreshRate().getFps(),
                                          scheduler::LayerHistory::LayerVoteType::Min);
         } else if (layer->getWindowType() == InputWindowInfo::TYPE_STATUS_BAR) {
-            mLayerHistory->registerLayer(layer, mRefreshRateConfigs.getMinRefreshRate().fps,
-                                         mRefreshRateConfigs.getMaxRefreshRate().fps,
+            mLayerHistory->registerLayer(layer, mRefreshRateConfigs.getMinRefreshRate().getFps(),
+                                         mRefreshRateConfigs.getMaxRefreshRate().getFps(),
                                          scheduler::LayerHistory::LayerVoteType::NoVote);
         } else {
-            mLayerHistory->registerLayer(layer, mRefreshRateConfigs.getMinRefreshRate().fps,
-                                         mRefreshRateConfigs.getMaxRefreshRate().fps,
+            mLayerHistory->registerLayer(layer, mRefreshRateConfigs.getMinRefreshRate().getFps(),
+                                         mRefreshRateConfigs.getMaxRefreshRate().getFps(),
                                          scheduler::LayerHistory::LayerVoteType::Heuristic);
         }
     }
@@ -503,12 +503,13 @@ void Scheduler::kernelIdleTimerCallback(TimerState state) {
     // magic number
     const auto& refreshRate = mRefreshRateConfigs.getCurrentRefreshRate();
     constexpr float FPS_THRESHOLD_FOR_KERNEL_TIMER = 65.0f;
-    if (state == TimerState::Reset && refreshRate.fps > FPS_THRESHOLD_FOR_KERNEL_TIMER) {
+    if (state == TimerState::Reset && refreshRate.getFps() > FPS_THRESHOLD_FOR_KERNEL_TIMER) {
         // If we're not in performance mode then the kernel timer shouldn't do
         // anything, as the refresh rate during DPU power collapse will be the
         // same.
-        resyncToHardwareVsync(true /* makeAvailable */, refreshRate.vsyncPeriod);
-    } else if (state == TimerState::Expired && refreshRate.fps <= FPS_THRESHOLD_FOR_KERNEL_TIMER) {
+        resyncToHardwareVsync(true /* makeAvailable */, refreshRate.getVsyncPeriod());
+    } else if (state == TimerState::Expired &&
+               refreshRate.getFps() <= FPS_THRESHOLD_FOR_KERNEL_TIMER) {
         // Disable HW VSYNC if the timer expired, as we don't need it enabled if
         // we're not pushing frames, and if we're in PERFORMANCE mode then we'll
         // need to update the DispSync model anyway.
@@ -573,37 +574,36 @@ void Scheduler::handleTimerStateChanged(T* currentState, T newState, bool eventO
 HwcConfigIndexType Scheduler::calculateRefreshRateConfigIndexType() {
     ATRACE_CALL();
 
-    // NOTE: If we remove the kernel idle timer, and use our internal idle timer, this
-    // code will have to be refactored. If Display Power is not in normal operation we want to be in
-    // performance mode. When coming back to normal mode, a grace period is given with
-    // DisplayPowerTimer.
+    // If Display Power is not in normal operation we want to be in performance mode. When coming
+    // back to normal mode, a grace period is given with DisplayPowerTimer.
     if (mDisplayPowerTimer &&
         (!mFeatures.isDisplayPowerStateNormal ||
          mFeatures.displayPowerTimer == TimerState::Reset)) {
-        return mRefreshRateConfigs.getMaxRefreshRateByPolicy().configId;
+        return mRefreshRateConfigs.getMaxRefreshRateByPolicy().getConfigId();
     }
 
     if (!mUseContentDetectionV2) {
         // As long as touch is active we want to be in performance mode.
         if (mTouchTimer && mFeatures.touch == TouchState::Active) {
-            return mRefreshRateConfigs.getMaxRefreshRateByPolicy().configId;
+            return mRefreshRateConfigs.getMaxRefreshRateByPolicy().getConfigId();
         }
     }
 
     // If timer has expired as it means there is no new content on the screen.
     if (mIdleTimer && mFeatures.idleTimer == TimerState::Expired) {
-        return mRefreshRateConfigs.getMinRefreshRateByPolicy().configId;
+        return mRefreshRateConfigs.getMinRefreshRateByPolicy().getConfigId();
     }
 
     if (!mUseContentDetectionV2) {
         // If content detection is off we choose performance as we don't know the content fps.
         if (mFeatures.contentDetectionV1 == ContentDetectionState::Off) {
             // NOTE: V1 always calls this, but this is not a default behavior for V2.
-            return mRefreshRateConfigs.getMaxRefreshRateByPolicy().configId;
+            return mRefreshRateConfigs.getMaxRefreshRateByPolicy().getConfigId();
         }
 
         // Content detection is on, find the appropriate refresh rate with minimal error
-        return mRefreshRateConfigs.getRefreshRateForContent(mFeatures.contentRequirements).configId;
+        return mRefreshRateConfigs.getRefreshRateForContent(mFeatures.contentRequirements)
+                .getConfigId();
     }
 
     bool touchConsidered;
@@ -613,7 +613,7 @@ HwcConfigIndexType Scheduler::calculateRefreshRateConfigIndexType() {
                                                 mTouchTimer &&
                                                         mFeatures.touch == TouchState::Active,
                                                 &touchConsidered)
-                    .configId;
+                    .getConfigId();
     if (touchConsidered) {
         // Clear layer history if refresh rate was selected based on touch to allow
         // the hueristic to pick up with the new rate.
@@ -632,7 +632,7 @@ std::optional<HwcConfigIndexType> Scheduler::getPreferredConfigId() {
     return mFeatures.configId;
 }
 
-void Scheduler::onNewVsyncPeriodChangeTimeline(const HWC2::VsyncPeriodChangeTimeline& timeline) {
+void Scheduler::onNewVsyncPeriodChangeTimeline(const hal::VsyncPeriodChangeTimeline& timeline) {
     if (timeline.refreshRequired) {
         mSchedulerCallback.repaintEverythingForHWC();
     }

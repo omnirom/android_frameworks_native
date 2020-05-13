@@ -57,7 +57,7 @@ public:
     class Callback {
     public:
         virtual ~Callback() {}
-        virtual void onVSyncEvent(nsecs_t when) = 0;
+        virtual void onVSyncEvent(nsecs_t when, nsecs_t expectedVSyncTimestamp) = 0;
     };
 
     virtual ~VSyncSource() {}
@@ -189,7 +189,7 @@ private:
             REQUIRES(mMutex);
 
     // Implements VSyncSource::Callback
-    void onVSyncEvent(nsecs_t timestamp) override;
+    void onVSyncEvent(nsecs_t timestamp, nsecs_t expectedVSyncTimestamp) override;
 
     const std::unique_ptr<VSyncSource> mVSyncSource GUARDED_BY(mMutex);
 
@@ -232,6 +232,8 @@ private:
     State mState GUARDED_BY(mMutex) = State::Idle;
 
     static const char* toCString(State);
+    void *mDolphinHandle = nullptr;
+    bool (*mDolphinCheck)(const char* name) = nullptr;
 };
 
 // ---------------------------------------------------------------------------

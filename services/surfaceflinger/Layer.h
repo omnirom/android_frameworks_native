@@ -812,6 +812,8 @@ public:
 
     Region debugGetVisibleRegionOnDefaultDisplay() const;
 
+    Region getVisibleNonTransparentRegion() const;
+
     /**
      * Returns the cropped buffer size or the layer crop if the layer has no buffer. Return
      * INVALID_RECT if the layer has no buffer and no crop.
@@ -977,6 +979,8 @@ protected:
     FenceTimeline mAcquireTimeline;
     FenceTimeline mReleaseTimeline;
 
+    uint32_t mLayerClass{0};
+
     // main thread
     sp<NativeHandle> mSidebandStream;
     // False if the buffer and its contents have been previously used for GPU
@@ -1017,10 +1021,6 @@ protected:
 
     // Window types from WindowManager.LayoutParams
     const int mWindowType;
-
-    // Called when mDrawingState has changed. If we or one of our children/relatives hasInput()
-    // then we will dirty the setInputWindows cache.
-    bool maybeDirtyInput();
 
 private:
     /**

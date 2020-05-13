@@ -82,7 +82,6 @@ private:
     status_t updateActiveBuffer() override;
     status_t updateFrameNumber(nsecs_t latchTime) override;
 
-    void preparePerFrameCompositionState() override;
     sp<Layer> createClone() override;
 
     void onFrameAvailable(const BufferItem& item);
@@ -150,6 +149,7 @@ private:
     std::atomic<bool> mSidebandStreamChanged{false};
 
     sp<ContentsChangedListener> mContentsChangedListener;
+    nsecs_t mLastTimeStamp = -1;
 };
 
 } // namespace android

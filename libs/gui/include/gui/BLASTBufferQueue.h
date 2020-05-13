@@ -66,7 +66,9 @@ class BLASTBufferQueue
     : public ConsumerBase::FrameAvailableListener, public BufferItemConsumer::BufferFreedListener
 {
 public:
-    BLASTBufferQueue(const sp<SurfaceControl>& surface, int width, int height);
+    BLASTBufferQueue(const sp<SurfaceControl>& surface, int width, int height,
+                     bool enableTripleBuffering = true);
+
     sp<IGraphicBufferProducer> getIGraphicBufferProducer() const {
         return mProducer;
     }
@@ -90,7 +92,7 @@ private:
     BLASTBufferQueue& operator = (const BLASTBufferQueue& rhs);
     BLASTBufferQueue(const BLASTBufferQueue& rhs);
 
-    void processNextBufferLocked() REQUIRES(mMutex);
+    void processNextBufferLocked(bool useNextTransaction) REQUIRES(mMutex);
     Rect computeCrop(const BufferItem& item);
 
     sp<SurfaceControl> mSurfaceControl;
@@ -123,8 +125,6 @@ private:
     sp<BLASTBufferItemConsumer> mBufferItemConsumer;
 
     SurfaceComposerClient::Transaction* mNextTransaction GUARDED_BY(mMutex);
-
-    bool mUseNextTransaction = false;
 };
 
 } // namespace android

@@ -38,13 +38,7 @@ MonitoredProducer::~MonitoredProducer() {
     // because we don't know where this destructor is called from. It could be
     // called with the mStateLock held, leading to a dead-lock (it actually
     // happens).
-    sp<LambdaMessage> cleanUpListMessage =
-            new LambdaMessage([flinger = mFlinger, asBinder = wp<IBinder>(onAsBinder())]() {
-                Mutex::Autolock lock(flinger->mStateLock);
-                flinger->mGraphicBufferProducerList.erase(asBinder);
-            });
-
-    mFlinger->postMessageAsync(cleanUpListMessage);
+    mFlinger->removeGraphicBufferProducerAsync(onAsBinder());
 }
 
 status_t MonitoredProducer::requestBuffer(int slot, sp<GraphicBuffer>* buf) {
@@ -64,6 +58,12 @@ status_t MonitoredProducer::dequeueBuffer(int* slot, sp<Fence>* fence, uint32_t 
                                           PixelFormat format, uint64_t usage,
                                           uint64_t* outBufferAge,
                                           FrameEventHistoryDelta* outTimestamps) {
+    if (mFlinger->mDolphinFuncsEnabled) {
+        sp<Layer> layer = mLayer.promote();
+        if (layer != nullptr) {
+            mFlinger->mDolphinDequeueBuffer(layer->getName().c_str());
+        }
+    }
     return mProducer->dequeueBuffer(slot, fence, w, h, format, usage, outBufferAge, outTimestamps);
 }
 
@@ -83,6 +83,12 @@ status_t MonitoredProducer::attachBuffer(int* outSlot,
 
 status_t MonitoredProducer::queueBuffer(int slot, const QueueBufferInput& input,
         QueueBufferOutput* output) {
+    if (mFlinger->mDolphinFuncsEnabled) {
+        sp<Layer> layer = mLayer.promote();
+        if (layer != nullptr) {
+            mFlinger->mDolphinQueueBuffer(layer->getName().c_str());
+        }
+    }
     return mProducer->queueBuffer(slot, input, output);
 }
 

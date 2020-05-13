@@ -24,7 +24,6 @@
 #include <android/native_window.h>
 #include <binder/IBinder.h>
 #include <gui/LayerState.h>
-#include <hardware/hwcomposer_defs.h>
 #include <math/mat4.h>
 #include <renderengine/RenderEngine.h>
 #include <system/window.h>
@@ -39,6 +38,7 @@
 #include <utils/Timers.h>
 
 #include "DisplayHardware/DisplayIdentification.h"
+#include "DisplayHardware/Hal.h"
 #include "DisplayHardware/PowerAdvisor.h"
 #include "RenderArea.h"
 #include "Scheduler/HwcStrongTypes.h"
@@ -135,8 +135,8 @@ public:
     /* ------------------------------------------------------------------------
      * Display power mode management.
      */
-    int getPowerMode() const;
-    void setPowerMode(int mode);
+    hardware::graphics::composer::hal::PowerMode getPowerMode() const;
+    void setPowerMode(hardware::graphics::composer::hal::PowerMode mode);
     bool isPoweredOn() const;
 
     ui::Dataspace getCompositionDataSpace() const;
@@ -172,7 +172,8 @@ private:
 
     static ui::Transform::RotationFlags sPrimaryDisplayRotationFlags;
 
-    int mPowerMode = HWC_POWER_MODE_OFF;
+    hardware::graphics::composer::hal::PowerMode mPowerMode =
+            hardware::graphics::composer::hal::PowerMode::OFF;
     HwcConfigIndexType mActiveConfig;
 
     // TODO(b/74619554): Remove special cases for primary display.
@@ -183,7 +184,7 @@ struct DisplayDeviceState {
     struct Physical {
         DisplayId id;
         DisplayConnectionType type;
-        hwc2_display_t hwcDisplayId;
+        hardware::graphics::composer::hal::HWDisplayId hwcDisplayId;
 
         bool operator==(const Physical& other) const {
             return id == other.id && type == other.type && hwcDisplayId == other.hwcDisplayId;
@@ -227,7 +228,8 @@ struct DisplayDeviceCreationArgs {
     HdrCapabilities hdrCapabilities;
     int32_t supportedPerFrameMetadata{0};
     std::unordered_map<ui::ColorMode, std::vector<ui::RenderIntent>> hwcColorModes;
-    int initialPowerMode{HWC_POWER_MODE_NORMAL};
+    hardware::graphics::composer::hal::PowerMode initialPowerMode{
+            hardware::graphics::composer::hal::PowerMode::ON};
     bool isPrimary{false};
 };
 

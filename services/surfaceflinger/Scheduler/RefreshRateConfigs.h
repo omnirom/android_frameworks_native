@@ -29,6 +29,8 @@
 #include "Scheduler/StrongTyping.h"
 
 namespace android::scheduler {
+class RefreshRateConfigsTest;
+
 using namespace std::chrono_literals;
 
 enum class RefreshRateConfigEvent : unsigned { None = 0b0, Changed = 0b1 };
@@ -49,30 +51,27 @@ public:
     static constexpr nsecs_t MARGIN_FOR_PERIOD_CALCULATION =
         std::chrono::nanoseconds(800us).count();
 
-    struct RefreshRate {
-        // The tolerance within which we consider FPS approximately equals.
-        static constexpr float FPS_EPSILON = 0.001f;
+    class RefreshRate {
+    private:
+        // Effectively making the constructor private while allowing
+        // std::make_unique to create the object
+        struct ConstructorTag {
+            explicit ConstructorTag(int) {}
+        };
 
-        RefreshRate(HwcConfigIndexType configId, nsecs_t vsyncPeriod,
-                    HwcConfigGroupType configGroup, std::string name, float fps)
-              : configId(configId),
-                vsyncPeriod(vsyncPeriod),
-                configGroup(configGroup),
-                name(std::move(name)),
-                fps(fps) {}
+    public:
+        RefreshRate(HwcConfigIndexType configId,
+                    std::shared_ptr<const HWC2::Display::Config> config, std::string name,
+                    float fps, ConstructorTag)
+              : configId(configId), hwcConfig(config), name(std::move(name)), fps(fps) {}
 
         RefreshRate(const RefreshRate&) = delete;
-        // This config ID corresponds to the position of the config in the vector that is stored
-        // on the device.
-        const HwcConfigIndexType configId;
-        // Vsync period in nanoseconds.
-        const nsecs_t vsyncPeriod;
-        // This configGroup for the config.
-        const HwcConfigGroupType configGroup;
-        // Human readable name of the refresh rate.
-        const std::string name;
-        // Refresh rate in frames per second
-        const float fps = 0;
+
+        HwcConfigIndexType getConfigId() const { return configId; }
+        nsecs_t getVsyncPeriod() const { return hwcConfig->getVsyncPeriod(); }
+        int32_t getConfigGroup() const { return hwcConfig->getConfigGroup(); }
+        const std::string& getName() const { return name; }
+        float getFps() const { return fps; }
 
         // Checks whether the fps of this RefreshRate struct is within a given min and max refresh
         // rate passed in. FPS_EPSILON is applied to the boundaries for approximation.
@@ -81,29 +80,73 @@ public:
         }
 
         bool operator!=(const RefreshRate& other) const {
-            return configId != other.configId || vsyncPeriod != other.vsyncPeriod ||
-                    configGroup != other.configGroup;
+            return configId != other.configId || hwcConfig != other.hwcConfig;
         }
 
         bool operator==(const RefreshRate& other) const { return !(*this != other); }
+
+    private:
+        friend RefreshRateConfigs;
+        friend RefreshRateConfigsTest;
+
+        // The tolerance within which we consider FPS approximately equals.
+        static constexpr float FPS_EPSILON = 0.001f;
+
+        // This config ID corresponds to the position of the config in the vector that is stored
+        // on the device.
+        const HwcConfigIndexType configId;
+        // The config itself
+        std::shared_ptr<const HWC2::Display::Config> hwcConfig;
+        // Human readable name of the refresh rate.
+        const std::string name;
+        // Refresh rate in frames per second
+        const float fps = 0;
     };
 
     using AllRefreshRatesMapType =
             std::unordered_map<HwcConfigIndexType, std::unique_ptr<const RefreshRate>>;
 
     struct Policy {
+        struct Range {
+            float min = 0;
+            float max = std::numeric_limits<float>::max();
+
+            bool operator==(const Range& other) const {
+                return min == other.min && max == other.max;
+            }
+
+            bool operator!=(const Range& other) const { return !(*this == other); }
+        };
+
         // The default config, used to ensure we only initiate display config switches within the
         // same config group as defaultConfigId's group.
         HwcConfigIndexType defaultConfig;
-        // The min and max FPS allowed by the policy.
-        float minRefreshRate = 0;
-        float maxRefreshRate = std::numeric_limits<float>::max();
+        // The primary refresh rate range represents display manager's general guidance on the
+        // display configs we'll consider when switching refresh rates. Unless we get an explicit
+        // signal from an app, we should stay within this range.
+        Range primaryRange;
+        // The app request refresh rate range allows us to consider more display configs when
+        // switching refresh rates. Although we should generally stay within the primary range,
+        // specific considerations, such as layer frame rate settings specified via the
+        // setFrameRate() api, may cause us to go outside the primary range. We never go outside the
+        // app request range. The app request range will be greater than or equal to the primary
+        // refresh rate range, never smaller.
+        Range appRequestRange;
         // Whether or not we switch config groups to get the best frame rate. Only used by tests.
         bool allowGroupSwitching = false;
 
+        Policy() = default;
+        Policy(HwcConfigIndexType defaultConfig, const Range& range)
+              : Policy(defaultConfig, range, range) {}
+        Policy(HwcConfigIndexType defaultConfig, const Range& primaryRange,
+               const Range& appRequestRange)
+              : defaultConfig(defaultConfig),
+                primaryRange(primaryRange),
+                appRequestRange(appRequestRange) {}
+
         bool operator==(const Policy& other) const {
-            return defaultConfig == other.defaultConfig && minRefreshRate == other.minRefreshRate &&
-                    maxRefreshRate == other.maxRefreshRate &&
+            return defaultConfig == other.defaultConfig && primaryRange == other.primaryRange &&
+                    appRequestRange == other.appRequestRange &&
                     allowGroupSwitching == other.allowGroupSwitching;
         }
 
@@ -183,13 +226,15 @@ public:
     // Returns the lowest refresh rate supported by the device. This won't change at runtime.
     const RefreshRate& getMinRefreshRate() const { return *mMinSupportedRefreshRate; }
 
-    // Returns the lowest refresh rate according to the current policy. May change in runtime.
+    // Returns the lowest refresh rate according to the current policy. May change at runtime. Only
+    // uses the primary range, not the app request range.
     const RefreshRate& getMinRefreshRateByPolicy() const EXCLUDES(mLock);
 
     // Returns the highest refresh rate supported by the device. This won't change at runtime.
     const RefreshRate& getMaxRefreshRate() const { return *mMaxSupportedRefreshRate; }
 
-    // Returns the highest refresh rate according to the current policy. May change in runtime.
+    // Returns the highest refresh rate according to the current policy. May change at runtime. Only
+    // uses the primary range, not the app request range.
     const RefreshRate& getMaxRefreshRateByPolicy() const EXCLUDES(mLock);
 
     // Returns the current refresh rate
@@ -208,20 +253,10 @@ public:
     // Stores the current configId the device operates at
     void setCurrentConfigId(HwcConfigIndexType configId) EXCLUDES(mLock);
 
-    struct InputConfig {
-        HwcConfigIndexType configId = HwcConfigIndexType(0);
-        HwcConfigGroupType configGroup = HwcConfigGroupType(0);
-        nsecs_t vsyncPeriod = 0;
-    };
-
-    RefreshRateConfigs(const std::vector<InputConfig>& configs,
-                       HwcConfigIndexType currentHwcConfig);
     RefreshRateConfigs(const std::vector<std::shared_ptr<const HWC2::Display::Config>>& configs,
                        HwcConfigIndexType currentConfigId);
 
 private:
-    void init(const std::vector<InputConfig>& configs, HwcConfigIndexType currentHwcConfig);
-
     void constructAvailableRefreshRates() REQUIRES(mLock);
 
     void getSortedRefreshRateList(
@@ -238,6 +273,14 @@ private:
     // display refresh period.
     std::pair<nsecs_t, nsecs_t> getDisplayFrames(nsecs_t layerPeriod, nsecs_t displayPeriod) const;
 
+    // Returns the lowest refresh rate according to the current policy. May change at runtime. Only
+    // uses the primary range, not the app request range.
+    const RefreshRate& getMinRefreshRateByPolicyLocked() const REQUIRES(mLock);
+
+    // Returns the highest refresh rate according to the current policy. May change at runtime. Only
+    // uses the primary range, not the app request range.
+    const RefreshRate& getMaxRefreshRateByPolicyLocked() const REQUIRES(mLock);
+
     // Returns the current refresh rate, if allowed. Otherwise the default that is allowed by
     // the policy.
     const RefreshRate& getCurrentRefreshRateByPolicyLocked() const REQUIRES(mLock);
@@ -249,9 +292,13 @@ private:
     // object is initialized.
     AllRefreshRatesMapType mRefreshRates;
 
-    // The list of refresh rates which are available in the current policy, ordered by vsyncPeriod
-    // (the first element is the lowest refresh rate)
-    std::vector<const RefreshRate*> mAvailableRefreshRates GUARDED_BY(mLock);
+    // The list of refresh rates in the primary range of the current policy, ordered by vsyncPeriod
+    // (the first element is the lowest refresh rate).
+    std::vector<const RefreshRate*> mPrimaryRefreshRates GUARDED_BY(mLock);
+
+    // The list of refresh rates in the app request range of the current policy, ordered by
+    // vsyncPeriod (the first element is the lowest refresh rate).
+    std::vector<const RefreshRate*> mAppRequestRefreshRates GUARDED_BY(mLock);
 
     // The current config. This will change at runtime. This is set by SurfaceFlinger on
     // the main thread, and read by the Scheduler (and other objects) on other threads.

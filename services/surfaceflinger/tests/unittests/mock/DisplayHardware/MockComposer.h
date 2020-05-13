@@ -45,6 +45,7 @@ using android::hardware::graphics::composer::V2_4::IComposerClient;
 
 class Composer : public Hwc2::Composer {
 public:
+    using Display = android::hardware::graphics::composer::V2_1::Display;
     Composer();
     ~Composer() override;
 
@@ -110,6 +111,7 @@ public:
                  Error(Display, Layer, const std::vector<IComposerClient::Rect>&));
     MOCK_METHOD3(setLayerZOrder, Error(Display, Layer, uint32_t));
     MOCK_METHOD4(setLayerInfo, Error(Display, Layer, uint32_t, uint32_t));
+    MOCK_METHOD3(setLayerType, Error(Display, Layer, uint32_t));
     MOCK_METHOD3(getRenderIntents, Error(Display, ColorMode, std::vector<RenderIntent>*));
     MOCK_METHOD3(setLayerColorTransform, Error(Display, Layer, const float*));
     MOCK_METHOD4(getDisplayedContentSamplingAttributes,

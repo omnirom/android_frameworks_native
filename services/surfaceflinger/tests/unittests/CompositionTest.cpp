@@ -50,6 +50,14 @@
 namespace android {
 namespace {
 
+namespace hal = android::hardware::graphics::composer::hal;
+
+using hal::Error;
+using hal::IComposer;
+using hal::IComposerClient;
+using hal::PowerMode;
+using hal::Transform;
+
 using testing::_;
 using testing::AtLeast;
 using testing::Between;
@@ -65,16 +73,11 @@ using testing::Return;
 using testing::ReturnRef;
 using testing::SetArgPointee;
 
-using android::Hwc2::Error;
-using android::Hwc2::IComposer;
-using android::Hwc2::IComposerClient;
-using android::Hwc2::Transform;
-
 using FakeHwcDisplayInjector = TestableSurfaceFlinger::FakeHwcDisplayInjector;
 using FakeDisplayDeviceInjector = TestableSurfaceFlinger::FakeDisplayDeviceInjector;
 
-constexpr hwc2_display_t HWC_DISPLAY = FakeHwcDisplayInjector::DEFAULT_HWC_DISPLAY_ID;
-constexpr hwc2_layer_t HWC_LAYER = 5000;
+constexpr hal::HWDisplayId HWC_DISPLAY = FakeHwcDisplayInjector::DEFAULT_HWC_DISPLAY_ID;
+constexpr hal::HWLayerId HWC_LAYER = 5000;
 constexpr Transform DEFAULT_TRANSFORM = static_cast<Transform>(0);
 
 constexpr DisplayId DEFAULT_DISPLAY_ID = DisplayId{42};
@@ -141,10 +144,10 @@ public:
 
         auto primaryDispSync = std::make_unique<mock::DispSync>();
 
-        EXPECT_CALL(*primaryDispSync, computeNextRefresh(0)).WillRepeatedly(Return(0));
+        EXPECT_CALL(*primaryDispSync, computeNextRefresh(0, _)).WillRepeatedly(Return(0));
         EXPECT_CALL(*primaryDispSync, getPeriod())
                 .WillRepeatedly(Return(FakeHwcDisplayInjector::DEFAULT_REFRESH_RATE));
-        EXPECT_CALL(*primaryDispSync, expectedPresentTime()).WillRepeatedly(Return(0));
+        EXPECT_CALL(*primaryDispSync, expectedPresentTime(_)).WillRepeatedly(Return(0));
 
         mFlinger.setupScheduler(std::move(primaryDispSync),
                                 std::make_unique<mock::EventControlThread>(),
@@ -170,7 +173,7 @@ public:
     template <typename Case>
     void captureScreenComposition();
 
-    std::unordered_set<HWC2::Capability> mDefaultCapabilities = {HWC2::Capability::SidebandStream};
+    std::unordered_set<hal::Capability> mDefaultCapabilities = {hal::Capability::SIDEBAND_STREAM};
 
     bool mDisplayOff = false;
     TestableSurfaceFlinger mFlinger;
@@ -228,6 +231,7 @@ void CompositionTest::captureScreenComposition() {
     const Rect sourceCrop(0, 0, DEFAULT_DISPLAY_WIDTH, DEFAULT_DISPLAY_HEIGHT);
     constexpr bool useIdentityTransform = true;
     constexpr bool forSystem = true;
+    constexpr bool regionSampling = false;
 
     DisplayRenderArea renderArea(mDisplay, sourceCrop, DEFAULT_DISPLAY_WIDTH,
                                  DEFAULT_DISPLAY_HEIGHT, ui::Dataspace::V0_SRGB,
@@ -246,7 +250,7 @@ void CompositionTest::captureScreenComposition() {
     int fd = -1;
     status_t result =
             mFlinger.captureScreenImplLocked(renderArea, traverseLayers, mCaptureScreenBuffer.get(),
-                                             useIdentityTransform, forSystem, &fd);
+                                             useIdentityTransform, forSystem, &fd, regionSampling);
     if (fd >= 0) {
         close(fd);
     }
@@ -263,17 +267,13 @@ void CompositionTest::captureScreenComposition() {
 template <typename Derived>
 struct BaseDisplayVariant {
     static constexpr bool IS_SECURE = true;
-    static constexpr int INIT_POWER_MODE = HWC_POWER_MODE_NORMAL;
+    static constexpr hal::PowerMode INIT_POWER_MODE = hal::PowerMode::ON;
 
     static void setupPreconditions(CompositionTest* test) {
-        EXPECT_CALL(*test->mComposer,
-                    setPowerMode(HWC_DISPLAY,
-                                 static_cast<Hwc2::IComposerClient::PowerMode>(
-                                         Derived::INIT_POWER_MODE)))
+        EXPECT_CALL(*test->mComposer, setPowerMode(HWC_DISPLAY, Derived::INIT_POWER_MODE))
                 .WillOnce(Return(Error::NONE));
 
-        FakeHwcDisplayInjector(DEFAULT_DISPLAY_ID, HWC2::DisplayType::Physical,
-                               true /* isPrimary */)
+        FakeHwcDisplayInjector(DEFAULT_DISPLAY_ID, hal::DisplayType::PHYSICAL, true /* isPrimary */)
                 .setCapabilities(&test->mDefaultCapabilities)
                 .setPowerMode(Derived::INIT_POWER_MODE)
                 .inject(&test->mFlinger, test->mComposer);
@@ -437,7 +437,7 @@ struct InsecureDisplaySetupVariant : public BaseDisplayVariant<InsecureDisplaySe
 };
 
 struct PoweredOffDisplaySetupVariant : public BaseDisplayVariant<PoweredOffDisplaySetupVariant> {
-    static constexpr int INIT_POWER_MODE = HWC_POWER_MODE_OFF;
+    static constexpr hal::PowerMode INIT_POWER_MODE = hal::PowerMode::OFF;
 
     template <typename Case>
     static void setupPreconditionCallExpectations(CompositionTest*) {}
@@ -542,7 +542,7 @@ struct BaseLayerProperties {
 
         EXPECT_CALL(*test->mMessageQueue, invalidate()).Times(1);
         enqueueBuffer(test, layer);
-        Mock::VerifyAndClear(test->mMessageQueue);
+        Mock::VerifyAndClearExpectations(test->mMessageQueue);
 
         EXPECT_CALL(*test->mRenderEngine, useNativeFenceSync()).WillRepeatedly(Return(true));
         bool ignoredRecomputeVisibleRegions;
@@ -834,7 +834,7 @@ template <typename LayerProperties>
 struct BaseLayerVariant {
     template <typename L, typename F>
     static sp<L> createLayerWithFactory(CompositionTest* test, F factory) {
-        EXPECT_CALL(*test->mMessageQueue, postMessage(_, 0)).Times(0);
+        EXPECT_CALL(*test->mMessageQueue, postMessage(_)).Times(0);
 
         sp<L> layer = factory();
 
@@ -843,7 +843,7 @@ struct BaseLayerVariant {
 
         Mock::VerifyAndClear(test->mComposer);
         Mock::VerifyAndClear(test->mRenderEngine);
-        Mock::VerifyAndClear(test->mMessageQueue);
+        Mock::VerifyAndClearExpectations(test->mMessageQueue);
 
         auto& layerDrawingState = test->mFlinger.mutableLayerDrawingState(layer);
         layerDrawingState.layerStack = DEFAULT_LAYER_STACK;
@@ -944,7 +944,7 @@ struct BufferLayerVariant : public BaseLayerVariant<LayerProperties> {
     }
 
     static void cleanupInjectedLayers(CompositionTest* test) {
-        EXPECT_CALL(*test->mMessageQueue, postMessage(_, 0)).Times(1);
+        EXPECT_CALL(*test->mMessageQueue, postMessage(_)).Times(1);
         Base::cleanupInjectedLayers(test);
     }
 
@@ -989,7 +989,7 @@ struct NoCompositionTypeVariant {
 
 template <IComposerClient::Composition CompositionType>
 struct KeepCompositionTypeVariant {
-    static constexpr HWC2::Composition TYPE = static_cast<HWC2::Composition>(CompositionType);
+    static constexpr hal::Composition TYPE = CompositionType;
 
     static void setupHwcSetCallExpectations(CompositionTest* test) {
         if (!test->mDisplayOff) {
@@ -1007,7 +1007,7 @@ struct KeepCompositionTypeVariant {
 template <IComposerClient::Composition InitialCompositionType,
           IComposerClient::Composition FinalCompositionType>
 struct ChangeCompositionTypeVariant {
-    static constexpr HWC2::Composition TYPE = static_cast<HWC2::Composition>(FinalCompositionType);
+    static constexpr hal::Composition TYPE = FinalCompositionType;
 
     static void setupHwcSetCallExpectations(CompositionTest* test) {
         if (!test->mDisplayOff) {

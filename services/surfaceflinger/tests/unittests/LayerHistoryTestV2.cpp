@@ -72,14 +72,15 @@ protected:
 
     auto createLayer() { return sp<mock::MockLayer>(new mock::MockLayer(mFlinger.flinger())); }
 
-    RefreshRateConfigs mConfigs{{
-                                        RefreshRateConfigs::InputConfig{HwcConfigIndexType(0),
-                                                                        HwcConfigGroupType(0),
-                                                                        LO_FPS_PERIOD},
-                                        RefreshRateConfigs::InputConfig{HwcConfigIndexType(1),
-                                                                        HwcConfigGroupType(0),
-                                                                        HI_FPS_PERIOD},
-                                },
+    Hwc2::mock::Display mDisplay;
+    RefreshRateConfigs mConfigs{{HWC2::Display::Config::Builder(mDisplay, 0)
+                                         .setVsyncPeriod(int32_t(LO_FPS_PERIOD))
+                                         .setConfigGroup(0)
+                                         .build(),
+                                 HWC2::Display::Config::Builder(mDisplay, 1)
+                                         .setVsyncPeriod(int32_t(HI_FPS_PERIOD))
+                                         .setConfigGroup(0)
+                                         .build()},
                                 HwcConfigIndexType(0)};
     TestableScheduler* const mScheduler{new TestableScheduler(mConfigs, true)};
     TestableSurfaceFlinger mFlinger;
@@ -269,12 +270,12 @@ TEST_F(LayerHistoryTestV2, oneLayerExplicitVote) {
     EXPECT_EQ(1, activeLayerCount());
     EXPECT_EQ(1, frequentLayerCount(time));
 
-    // layer became inactive
+    // layer became inactive, but the vote stays
     setLayerInfoVote(layer.get(), LayerHistory::LayerVoteType::Heuristic);
     time += MAX_ACTIVE_LAYER_PERIOD_NS.count();
-    ASSERT_TRUE(history().summarize(time).empty());
-    // TODO: activeLayerCount() should be 0 but it is 1 since getFrameRateForLayerTree() returns a
-    // value > 0
+    ASSERT_EQ(1, history().summarize(time).size());
+    EXPECT_EQ(LayerHistory::LayerVoteType::ExplicitDefault, history().summarize(time)[0].vote);
+    EXPECT_FLOAT_EQ(73.4f, history().summarize(time)[0].desiredRefreshRate);
     EXPECT_EQ(1, activeLayerCount());
     EXPECT_EQ(0, frequentLayerCount(time));
 }
@@ -302,12 +303,13 @@ TEST_F(LayerHistoryTestV2, oneLayerExplicitExactVote) {
     EXPECT_EQ(1, activeLayerCount());
     EXPECT_EQ(1, frequentLayerCount(time));
 
-    // layer became inactive
+    // layer became inactive, but the vote stays
     setLayerInfoVote(layer.get(), LayerHistory::LayerVoteType::Heuristic);
     time += MAX_ACTIVE_LAYER_PERIOD_NS.count();
-    ASSERT_TRUE(history().summarize(time).empty());
-    // TODO: activeLayerCount() should be 0 but it is 1 since getFrameRateForLayerTree() returns a
-    // value > 0
+    ASSERT_EQ(1, history().summarize(time).size());
+    EXPECT_EQ(LayerHistory::LayerVoteType::ExplicitExactOrMultiple,
+              history().summarize(time)[0].vote);
+    EXPECT_FLOAT_EQ(73.4f, history().summarize(time)[0].desiredRefreshRate);
     EXPECT_EQ(1, activeLayerCount());
     EXPECT_EQ(0, frequentLayerCount(time));
 }

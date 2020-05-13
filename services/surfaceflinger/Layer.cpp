@@ -222,9 +222,6 @@ void Layer::removeFromCurrentState() {
     }
 
     mFlinger->markLayerPendingRemovalLocked(this);
-    if (hasInput()) {
-        mFlinger->dirtyInput();
-    }
 }
 
 void Layer::onRemovedFromCurrentState() {
@@ -484,6 +481,7 @@ void Layer::prepareGeometryCompositionState() {
 
     compositionState->type = type;
     compositionState->appId = appId;
+    compositionState->layerClass = mLayerClass;
 
     compositionState->metadata.clear();
     const auto& supportedMetadata = mFlinger->getHwComposer().getSupportedLayerGenericMetadata();
@@ -1013,8 +1011,6 @@ uint32_t Layer::doTransaction(uint32_t flags) {
     mPendingStatesSnapshot = mPendingStates;
     mCurrentState.callbackHandles = {};
 
-    maybeDirtyInput();
-
     return flags;
 }
 
@@ -1399,6 +1395,9 @@ bool Layer::setFrameRate(FrameRate frameRate) {
         return false;
     }
 
+    // Activate the layer in Scheduler's LayerHistory
+    mFlinger->mScheduler->recordLayerHistory(this, systemTime());
+
     mCurrentState.sequence++;
     mCurrentState.frameRate = frameRate;
     mCurrentState.modified = true;
@@ -1553,6 +1552,7 @@ void Layer::miniDumpHeader(std::string& result) {
     result.append(" Layer name\n");
     result.append("           Z | ");
     result.append(" Window Type | ");
+    result.append(" Layer Class | ");
     result.append(" Comp Type | ");
     result.append(" Transform | ");
     result.append("  Disp Frame (LTRB) | ");
@@ -1590,6 +1590,7 @@ void Layer::miniDump(std::string& result, const sp<DisplayDevice>& displayDevice
         StringAppendF(&result, "  %10d | ", layerState.z);
     }
     StringAppendF(&result, "  %10d | ", mWindowType);
+    StringAppendF(&result, "  %10d | ", mLayerClass);
     StringAppendF(&result, "%10s | ", toString(getCompositionType(displayDevice)).c_str());
     StringAppendF(&result, "%10s | ", toString(outputLayerState.bufferTransform).c_str());
     const Rect& frame = outputLayerState.displayFrame;
@@ -2415,6 +2416,20 @@ Region Layer::debugGetVisibleRegionOnDefaultDisplay() const {
     return outputLayer->getState().visibleRegion;
 }
 
+Region Layer::getVisibleNonTransparentRegion() const {
+    sp<DisplayDevice> displayDevice = mFlinger->getDefaultDisplayDeviceLocked();
+    if (displayDevice == nullptr) {
+        return {};
+    }
+
+    auto outputLayer = findOutputLayerForDisplay(displayDevice);
+    if (outputLayer == nullptr) {
+        return {};
+    }
+
+    return outputLayer->getState().visibleNonTransparentRegion;
+}
+
 void Layer::setInitialValuesForClone(const sp<Layer>& clonedFrom) {
     // copy drawing state from cloned layer
     mDrawingState = clonedFrom->mDrawingState;
@@ -2558,32 +2573,6 @@ Layer::FrameRateCompatibility Layer::FrameRate::convertCompatibility(int8_t comp
             LOG_ALWAYS_FATAL("Invalid frame rate compatibility value %d", compatibility);
             return FrameRateCompatibility::Default;
     }
-}
-
-bool Layer::maybeDirtyInput() {
-    // No sense redirtying input.
-    if (mFlinger->inputDirty()) return true;
-
-    if (hasInput()) {
-        mFlinger->dirtyInput();
-        return true;
-    }
-
-    // If a child or relative dirties the input, no sense continuing to traverse
-    // so we return early and halt the recursion. We traverse ourselves instead
-    // of using traverse() so we can implement this early halt.
-    for (const sp<Layer>& child : mDrawingChildren) {
-        if (child->maybeDirtyInput()) {
-            return true;
-        }
-    }
-    for (const wp<Layer>& weakRelative : mDrawingState.zOrderRelatives) {
-        sp<Layer> relative = weakRelative.promote();
-        if (relative && relative->maybeDirtyInput()) {
-            return true;
-        }
-    }
-    return false;
 }
 
 // ---------------------------------------------------------------------------

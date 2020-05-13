@@ -294,6 +294,7 @@ void BufferLayer::preparePerFrameCompositionState() {
     auto* compositionState = editCompositionState();
     if (compositionState->sidebandStream.get()) {
         compositionState->compositionType = Hwc2::IComposerClient::Composition::SIDEBAND;
+        return;
     } else {
         // Normal buffer layers
         compositionState->hdrMetadata = mBufferInfo.mHdrMetadata;
@@ -301,6 +302,12 @@ void BufferLayer::preparePerFrameCompositionState() {
                 ? Hwc2::IComposerClient::Composition::CURSOR
                 : Hwc2::IComposerClient::Composition::DEVICE;
     }
+
+    compositionState->buffer = mBufferInfo.mBuffer;
+    compositionState->bufferSlot = (mBufferInfo.mBufferSlot == BufferQueue::INVALID_BUFFER_SLOT)
+            ? 0
+            : mBufferInfo.mBufferSlot;
+    compositionState->acquireFence = mBufferInfo.mFence;
 }
 
 bool BufferLayer::onPreComposition(nsecs_t refreshStartTime) {
@@ -488,10 +495,6 @@ bool BufferLayer::latchBuffer(bool& recomputeVisibleRegions, nsecs_t latchTime,
                 ++point;
             }
         }
-    }
-
-    if (recomputeVisibleRegions == true) {
-        maybeDirtyInput();
     }
 
     return true;

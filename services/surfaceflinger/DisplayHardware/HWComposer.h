@@ -18,6 +18,7 @@
 #define ANDROID_SF_HWCOMPOSER_H
 
 #include <cstdint>
+#include <future>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -39,8 +40,11 @@
 
 #include "DisplayIdentification.h"
 #include "HWC2.h"
+#include "Hal.h"
 
 namespace android {
+
+namespace hal = hardware::graphics::composer::hal;
 
 struct DisplayedFrameStats;
 class GraphicBuffer;
@@ -66,18 +70,18 @@ public:
 
     virtual void setConfiguration(HWC2::ComposerCallback* callback, int32_t sequenceId) = 0;
 
-    virtual bool getDisplayIdentificationData(hwc2_display_t hwcDisplayId, uint8_t* outPort,
+    virtual bool getDisplayIdentificationData(hal::HWDisplayId hwcDisplayId, uint8_t* outPort,
                                               DisplayIdentificationData* outData) const = 0;
 
-    virtual bool hasCapability(HWC2::Capability capability) const = 0;
-    virtual bool hasDisplayCapability(const std::optional<DisplayId>& displayId,
-                                      HWC2::DisplayCapability capability) const = 0;
+    virtual bool hasCapability(hal::Capability capability) const = 0;
+    virtual bool hasDisplayCapability(DisplayId displayId,
+                                      hal::DisplayCapability capability) const = 0;
 
     // Attempts to allocate a virtual display and returns its ID if created on the HWC device.
     virtual std::optional<DisplayId> allocateVirtualDisplay(uint32_t width, uint32_t height,
                                                             ui::PixelFormat* format) = 0;
 
-    virtual void allocatePhysicalDisplay(hwc2_display_t hwcDisplayId, DisplayId displayId) = 0;
+    virtual void allocatePhysicalDisplay(hal::HWDisplayId hwcDisplayId, DisplayId displayId) = 0;
 
     // Attempts to create a new layer on this display
     virtual HWC2::Layer* createLayer(DisplayId displayId) = 0;
@@ -85,9 +89,9 @@ public:
     virtual void destroyLayer(DisplayId displayId, HWC2::Layer* layer) = 0;
 
     struct DeviceRequestedChanges {
-        using ChangedTypes = std::unordered_map<HWC2::Layer*, HWC2::Composition>;
-        using DisplayRequests = HWC2::DisplayRequest;
-        using LayerRequests = std::unordered_map<HWC2::Layer*, HWC2::LayerRequest>;
+        using ChangedTypes = std::unordered_map<HWC2::Layer*, hal::Composition>;
+        using DisplayRequests = hal::DisplayRequest;
+        using LayerRequests = std::unordered_map<HWC2::Layer*, hal::LayerRequest>;
 
         ChangedTypes changedTypes;
         DisplayRequests displayRequests;
@@ -113,7 +117,7 @@ public:
     virtual status_t presentAndGetReleaseFences(DisplayId displayId) = 0;
 
     // set power mode
-    virtual status_t setPowerMode(DisplayId displayId, int mode) = 0;
+    virtual status_t setPowerMode(DisplayId displayId, hal::PowerMode mode) = 0;
 
     // Sets a color transform to be applied to the result of composition
     virtual status_t setColorTransform(DisplayId displayId, const mat4& transform) = 0;
@@ -160,18 +164,18 @@ public:
                                                DisplayedFrameStats* outStats) = 0;
 
     // Sets the brightness of a display.
-    virtual status_t setDisplayBrightness(DisplayId displayId, float brightness) = 0;
+    virtual std::future<status_t> setDisplayBrightness(DisplayId displayId, float brightness) = 0;
 
     // Events handling ---------------------------------------------------------
 
     // Returns stable display ID (and display name on connection of new or previously disconnected
     // display), or std::nullopt if hotplug event was ignored.
     // This function is called from SurfaceFlinger.
-    virtual std::optional<DisplayIdentificationInfo> onHotplug(hwc2_display_t hwcDisplayId,
-                                                               HWC2::Connection connection) = 0;
+    virtual std::optional<DisplayIdentificationInfo> onHotplug(hal::HWDisplayId hwcDisplayId,
+                                                               hal::Connection connection) = 0;
 
-    virtual bool onVsync(hwc2_display_t hwcDisplayId, int64_t timestamp) = 0;
-    virtual void setVsyncEnabled(DisplayId displayId, HWC2::Vsync enabled) = 0;
+    virtual bool onVsync(hal::HWDisplayId hwcDisplayId, int64_t timestamp) = 0;
+    virtual void setVsyncEnabled(DisplayId displayId, hal::Vsync enabled) = 0;
 
     virtual nsecs_t getRefreshTimestamp(DisplayId displayId) const = 0;
     virtual bool isConnected(DisplayId displayId) const = 0;
@@ -197,12 +201,12 @@ public:
     virtual nsecs_t getDisplayVsyncPeriod(DisplayId displayId) const = 0;
     virtual status_t setActiveConfigWithConstraints(
             DisplayId displayId, size_t configId,
-            const HWC2::VsyncPeriodChangeConstraints& constraints,
-            HWC2::VsyncPeriodChangeTimeline* outTimeline) = 0;
+            const hal::VsyncPeriodChangeConstraints& constraints,
+            hal::VsyncPeriodChangeTimeline* outTimeline) = 0;
     virtual status_t setAutoLowLatencyMode(DisplayId displayId, bool on) = 0;
     virtual status_t getSupportedContentTypes(
-            DisplayId displayId, std::vector<HWC2::ContentType>* outSupportedContentTypes) = 0;
-    virtual status_t setContentType(DisplayId displayId, HWC2::ContentType contentType) = 0;
+            DisplayId displayId, std::vector<hal::ContentType>* outSupportedContentTypes) = 0;
+    virtual status_t setContentType(DisplayId displayId, hal::ContentType contentType) = 0;
     virtual const std::unordered_map<std::string, bool>& getSupportedLayerGenericMetadata()
             const = 0;
 
@@ -212,11 +216,11 @@ public:
     virtual Hwc2::Composer* getComposer() const = 0;
 
     // TODO(b/74619554): Remove special cases for internal/external display.
-    virtual std::optional<hwc2_display_t> getInternalHwcDisplayId() const = 0;
-    virtual std::optional<hwc2_display_t> getExternalHwcDisplayId() const = 0;
+    virtual std::optional<hal::HWDisplayId> getInternalHwcDisplayId() const = 0;
+    virtual std::optional<hal::HWDisplayId> getExternalHwcDisplayId() const = 0;
 
-    virtual std::optional<DisplayId> toPhysicalDisplayId(hwc2_display_t hwcDisplayId) const = 0;
-    virtual std::optional<hwc2_display_t> fromPhysicalDisplayId(DisplayId displayId) const = 0;
+    virtual std::optional<DisplayId> toPhysicalDisplayId(hal::HWDisplayId hwcDisplayId) const = 0;
+    virtual std::optional<hal::HWDisplayId> fromPhysicalDisplayId(DisplayId displayId) const = 0;
     virtual status_t setDisplayElapseTime(DisplayId displayId, uint64_t timeStamp) = 0;
 };
 
@@ -231,19 +235,19 @@ public:
 
     void setConfiguration(HWC2::ComposerCallback* callback, int32_t sequenceId) override;
 
-    bool getDisplayIdentificationData(hwc2_display_t hwcDisplayId, uint8_t* outPort,
+    bool getDisplayIdentificationData(hal::HWDisplayId hwcDisplayId, uint8_t* outPort,
                                       DisplayIdentificationData* outData) const override;
 
-    bool hasCapability(HWC2::Capability capability) const override;
-    bool hasDisplayCapability(const std::optional<DisplayId>& displayId,
-                              HWC2::DisplayCapability capability) const override;
+    bool hasCapability(hal::Capability capability) const override;
+    bool hasDisplayCapability(DisplayId displayId,
+                              hal::DisplayCapability capability) const override;
 
     // Attempts to allocate a virtual display and returns its ID if created on the HWC device.
     std::optional<DisplayId> allocateVirtualDisplay(uint32_t width, uint32_t height,
                                                     ui::PixelFormat* format) override;
 
     // Called from SurfaceFlinger, when the state for a new physical display needs to be recreated.
-    void allocatePhysicalDisplay(hwc2_display_t hwcDisplayId, DisplayId displayId) override;
+    void allocatePhysicalDisplay(hal::HWDisplayId hwcDisplayId, DisplayId displayId) override;
 
     // Attempts to create a new layer on this display
     HWC2::Layer* createLayer(DisplayId displayId) override;
@@ -261,7 +265,7 @@ public:
     status_t presentAndGetReleaseFences(DisplayId displayId) override;
 
     // set power mode
-    status_t setPowerMode(DisplayId displayId, int mode) override;
+    status_t setPowerMode(DisplayId displayId, hal::PowerMode mode) override;
 
     // Sets a color transform to be applied to the result of composition
     status_t setColorTransform(DisplayId displayId, const mat4& transform) override;
@@ -303,17 +307,17 @@ public:
                                               uint8_t componentMask, uint64_t maxFrames) override;
     status_t getDisplayedContentSample(DisplayId displayId, uint64_t maxFrames, uint64_t timestamp,
                                        DisplayedFrameStats* outStats) override;
-    status_t setDisplayBrightness(DisplayId displayId, float brightness) override;
+    std::future<status_t> setDisplayBrightness(DisplayId displayId, float brightness) override;
 
     // Events handling ---------------------------------------------------------
 
     // Returns stable display ID (and display name on connection of new or previously disconnected
     // display), or std::nullopt if hotplug event was ignored.
-    std::optional<DisplayIdentificationInfo> onHotplug(hwc2_display_t hwcDisplayId,
-                                                       HWC2::Connection connection) override;
+    std::optional<DisplayIdentificationInfo> onHotplug(hal::HWDisplayId hwcDisplayId,
+                                                       hal::Connection connection) override;
 
-    bool onVsync(hwc2_display_t hwcDisplayId, int64_t timestamp) override;
-    void setVsyncEnabled(DisplayId displayId, HWC2::Vsync enabled) override;
+    bool onVsync(hal::HWDisplayId hwcDisplayId, int64_t timestamp) override;
+    void setVsyncEnabled(DisplayId displayId, hal::Vsync enabled) override;
     status_t setDisplayElapseTime(DisplayId displayId, uint64_t timeStamp) override;
 
     nsecs_t getRefreshTimestamp(DisplayId displayId) const override;
@@ -339,12 +343,11 @@ public:
     bool isVsyncPeriodSwitchSupported(DisplayId displayId) const override;
     nsecs_t getDisplayVsyncPeriod(DisplayId displayId) const override;
     status_t setActiveConfigWithConstraints(DisplayId displayId, size_t configId,
-                                            const HWC2::VsyncPeriodChangeConstraints& constraints,
-                                            HWC2::VsyncPeriodChangeTimeline* outTimeline) override;
+                                            const hal::VsyncPeriodChangeConstraints& constraints,
+                                            hal::VsyncPeriodChangeTimeline* outTimeline) override;
     status_t setAutoLowLatencyMode(DisplayId displayId, bool) override;
-    status_t getSupportedContentTypes(DisplayId displayId,
-                                      std::vector<HWC2::ContentType>*) override;
-    status_t setContentType(DisplayId displayId, HWC2::ContentType) override;
+    status_t getSupportedContentTypes(DisplayId displayId, std::vector<hal::ContentType>*) override;
+    status_t setContentType(DisplayId displayId, hal::ContentType) override;
 
     const std::unordered_map<std::string, bool>& getSupportedLayerGenericMetadata() const override;
 
@@ -354,23 +357,23 @@ public:
     Hwc2::Composer* getComposer() const override { return mComposer.get(); }
 
     // TODO(b/74619554): Remove special cases for internal/external display.
-    std::optional<hwc2_display_t> getInternalHwcDisplayId() const override {
+    std::optional<hal::HWDisplayId> getInternalHwcDisplayId() const override {
         return mInternalHwcDisplayId;
     }
-    std::optional<hwc2_display_t> getExternalHwcDisplayId() const override {
+    std::optional<hal::HWDisplayId> getExternalHwcDisplayId() const override {
         return mExternalHwcDisplayId;
     }
 
-    std::optional<DisplayId> toPhysicalDisplayId(hwc2_display_t hwcDisplayId) const override;
-    std::optional<hwc2_display_t> fromPhysicalDisplayId(DisplayId displayId) const override;
+    std::optional<DisplayId> toPhysicalDisplayId(hal::HWDisplayId hwcDisplayId) const override;
+    std::optional<hal::HWDisplayId> fromPhysicalDisplayId(DisplayId displayId) const override;
 
 private:
     // For unit tests
     friend TestableSurfaceFlinger;
 
-    std::optional<DisplayIdentificationInfo> onHotplugConnect(hwc2_display_t hwcDisplayId);
-    std::optional<DisplayIdentificationInfo> onHotplugDisconnect(hwc2_display_t hwcDisplayId);
-    bool shouldIgnoreHotplugConnect(hwc2_display_t hwcDisplayId,
+    std::optional<DisplayIdentificationInfo> onHotplugConnect(hal::HWDisplayId hwcDisplayId);
+    std::optional<DisplayIdentificationInfo> onHotplugDisconnect(hal::HWDisplayId hwcDisplayId);
+    bool shouldIgnoreHotplugConnect(hal::HWDisplayId hwcDisplayId,
                                     bool hasDisplayIdentificationData) const;
 
     void loadCapabilities();
@@ -388,12 +391,12 @@ private:
                 std::shared_ptr<const HWC2::Display::Config>> configMap;
 
         bool validateWasSkipped;
-        HWC2::Error presentError;
+        hal::Error presentError;
 
         bool vsyncTraceToggle = false;
 
         std::mutex vsyncEnabledLock;
-        HWC2::Vsync vsyncEnabled GUARDED_BY(vsyncEnabledLock) = HWC2::Vsync::Disable;
+        hal::Vsync vsyncEnabled GUARDED_BY(vsyncEnabledLock) = hal::Vsync::DISABLE;
 
         mutable std::mutex lastHwVsyncLock;
         nsecs_t lastHwVsync GUARDED_BY(lastHwVsyncLock) = 0;
@@ -402,13 +405,13 @@ private:
     std::unordered_map<DisplayId, DisplayData> mDisplayData;
 
     std::unique_ptr<android::Hwc2::Composer> mComposer;
-    std::unordered_set<HWC2::Capability> mCapabilities;
+    std::unordered_set<hal::Capability> mCapabilities;
     std::unordered_map<std::string, bool> mSupportedLayerGenericMetadata;
     bool mRegisteredCallback = false;
 
-    std::unordered_map<hwc2_display_t, DisplayId> mPhysicalDisplayIdMap;
-    std::optional<hwc2_display_t> mInternalHwcDisplayId;
-    std::optional<hwc2_display_t> mExternalHwcDisplayId;
+    std::unordered_map<hal::HWDisplayId, DisplayId> mPhysicalDisplayIdMap;
+    std::optional<hal::HWDisplayId> mInternalHwcDisplayId;
+    std::optional<hal::HWDisplayId> mExternalHwcDisplayId;
     bool mHasMultiDisplaySupport = false;
 
     std::unordered_set<DisplayId> mFreeVirtualDisplayIds;

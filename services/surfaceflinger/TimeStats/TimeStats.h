@@ -16,7 +16,15 @@
 
 #pragma once
 
-#include <hardware/hwcomposer_defs.h>
+// TODO(b/129481165): remove the #pragma below and fix conversion issues
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wconversion"
+
+#include <android/hardware/graphics/composer/2.4/IComposerClient.h>
+
+// TODO(b/129481165): remove the #pragma below and fix conversion issues
+#pragma clang diagnostic pop // ignored "-Wconversion"
+
 #include <stats_event.h>
 #include <stats_pull_atom_callback.h>
 #include <statslog.h>
@@ -54,6 +62,10 @@ public:
     virtual void incrementClientCompositionReusedFrames() = 0;
     // Increments the number of times the display refresh rate changed.
     virtual void incrementRefreshRateSwitches() = 0;
+    // Increments the number of changes in composition strategy
+    // The intention is to reflect the number of changes between hwc and gpu
+    // composition, where "gpu composition" may also include mixed composition.
+    virtual void incrementCompositionStrategyChanges() = 0;
     // Records the most up-to-date count of display event connections.
     // The stored count will be the maximum ever recoded.
     virtual void recordDisplayEventConnectionCount(int32_t count) = 0;
@@ -101,7 +113,8 @@ public:
     // If SF skips or rejects a buffer, remove the corresponding TimeRecord.
     virtual void removeTimeRecord(int32_t layerId, uint64_t frameNumber) = 0;
 
-    virtual void setPowerMode(int32_t powerMode) = 0;
+    virtual void setPowerMode(
+            hardware::graphics::composer::V2_4::IComposerClient::PowerMode powerMode) = 0;
     // Source of truth is RefrehRateStats.
     virtual void recordRefreshRate(uint32_t fps, nsecs_t duration) = 0;
     virtual void setPresentFenceGlobal(const std::shared_ptr<FenceTime>& presentFence) = 0;
@@ -110,6 +123,8 @@ public:
 namespace impl {
 
 class TimeStats : public android::TimeStats {
+    using PowerMode = android::hardware::graphics::composer::V2_4::IComposerClient::PowerMode;
+
     struct FrameTime {
         uint64_t frameNumber = 0;
         nsecs_t postTime = 0;
@@ -140,7 +155,7 @@ class TimeStats : public android::TimeStats {
     };
 
     struct PowerTime {
-        int32_t powerMode = HWC_POWER_MODE_OFF;
+        PowerMode powerMode = PowerMode::OFF;
         nsecs_t prevTime = 0;
     };
 
@@ -218,6 +233,7 @@ public:
     void incrementClientCompositionFrames() override;
     void incrementClientCompositionReusedFrames() override;
     void incrementRefreshRateSwitches() override;
+    void incrementCompositionStrategyChanges() override;
     void recordDisplayEventConnectionCount(int32_t count) override;
 
     void recordFrameDuration(nsecs_t startTime, nsecs_t endTime) override;
@@ -242,7 +258,8 @@ public:
     // If SF skips or rejects a buffer, remove the corresponding TimeRecord.
     void removeTimeRecord(int32_t layerId, uint64_t frameNumber) override;
 
-    void setPowerMode(int32_t powerMode) override;
+    void setPowerMode(
+            hardware::graphics::composer::V2_4::IComposerClient::PowerMode powerMode) override;
     // Source of truth is RefrehRateStats.
     void recordRefreshRate(uint32_t fps, nsecs_t duration) override;
     void setPresentFenceGlobal(const std::shared_ptr<FenceTime>& presentFence) override;
