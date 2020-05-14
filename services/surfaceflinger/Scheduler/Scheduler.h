@@ -105,7 +105,7 @@ public:
     // Otherwise, if hardware vsync is not already enabled then this method will
     // no-op.
     // The period is the vsync period from the current display configuration.
-    void resyncToHardwareVsync(bool makeAvailable, nsecs_t period);
+    void resyncToHardwareVsync(bool makeAvailable, nsecs_t period, bool force_resync = false);
     void resync();
 
     // Passes a vsync sample to DispSync. periodFlushed will be true if
@@ -179,7 +179,7 @@ private:
     template <class T>
     void handleTimerStateChanged(T* currentState, T newState, bool eventOnContentDetection);
 
-    void setVsyncPeriod(nsecs_t period);
+    void setVsyncPeriod(nsecs_t period, bool force_resync = false);
 
     // This function checks whether individual features that are affecting the refresh rate
     // selection were initialized, prioritizes them, and calculates the HwcConfigIndexType
