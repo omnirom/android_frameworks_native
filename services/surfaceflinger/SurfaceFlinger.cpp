@@ -1649,10 +1649,10 @@ status_t SurfaceFlinger::getLayerDebugInfo(std::vector<LayerDebugInfo>* outLayer
         return TIMED_OUT;
     }
 
+    const auto display = getDefaultDisplayDeviceLocked();
     outLayers->clear();
-    mCurrentState.traverseInZOrder([&](Layer* layer) {
-        outLayers->push_back(layer->getLayerDebugInfo());
-    });
+    mCurrentState.traverseInZOrder(
+            [&](Layer* layer) { outLayers->push_back(layer->getLayerDebugInfo(display.get())); });
 
     mStateLock.unlock();
     return NO_ERROR;
@@ -2565,8 +2565,9 @@ void SurfaceFlinger::postComposition()
     }
 
     mDrawingState.traverse([&](Layer* layer) {
-        bool frameLatched = layer->onPostComposition(displayDevice, glCompositionDoneFenceTime,
-                                                     presentFenceTime, compositorTiming);
+        const bool frameLatched =
+                layer->onPostComposition(displayDevice.get(), glCompositionDoneFenceTime,
+                                         presentFenceTime, compositorTiming);
         if (frameLatched) {
             recordBufferingStats(layer->getName(), layer->getOccupancyHistory(false));
         }
@@ -2672,7 +2673,7 @@ void SurfaceFlinger::postComposition()
         // Disable SmoMo by passing empty layer stack in multiple display case
         if (mDisplays.size() == 1) {
             mDrawingState.traverse([&](Layer* layer) {
-                if (layer->findOutputLayerForDisplay(displayDevice)) {
+                if (layer->findOutputLayerForDisplay(displayDevice.get())) {
                     smomo::SmomoLayerStats layerStats;
                     layerStats.id = layer->getSequence();
                     layerStats.name = layer->getName();
@@ -3266,7 +3267,7 @@ void SurfaceFlinger::handleTransactionLocked(uint32_t transactionFlags)
             // could be null if there is no display available at all to get
             // the transform hint from.
             if (hintDisplay) {
-                layer->updateTransformHint(hintDisplay);
+                layer->updateTransformHint(hintDisplay->getTransformHint());
             }
 
             first = false;
@@ -3621,7 +3622,7 @@ status_t SurfaceFlinger::addClientLayer(const sp<Client>& client, const sp<IBind
         }
 
         if (const auto display = getDefaultDisplayDeviceLocked()) {
-            lbc->updateTransformHint(display);
+            lbc->updateTransformHint(display->getTransformHint());
         }
         if (outTransformHint) {
             *outTransformHint = lbc->getTransformHint();
@@ -4480,7 +4481,6 @@ status_t SurfaceFlinger::createBufferStateLayer(const sp<Client>& client, std::s
                                                 LayerMetadata metadata, sp<IBinder>* handle,
                                                 sp<Layer>* outLayer) {
     LayerCreationArgs args(this, client, std::move(name), w, h, flags, std::move(metadata));
-    args.displayDevice = getDefaultDisplayDevice();
     args.textureName = getNewTexture();
     sp<BufferStateLayer> layer = getFactory().createBufferStateLayer(args);
     *handle = layer->getHandle();
@@ -5047,7 +5047,7 @@ LayersProto SurfaceFlinger::dumpDrawingStateProto(uint32_t traceFlags) const {
 
     LayersProto layersProto;
     for (const sp<Layer>& layer : mDrawingState.layersSortedByZ) {
-        layer->writeToProto(layersProto, traceFlags, display);
+        layer->writeToProto(layersProto, traceFlags, display.get());
     }
 
     return layersProto;
@@ -5236,9 +5236,9 @@ void SurfaceFlinger::dumpAllLocked(const DumpArgs& args, std::string& result) co
 
         StringAppendF(&result, "Display %s HWC layers:\n", to_string(*displayId).c_str());
         Layer::miniDumpHeader(result);
-        const sp<DisplayDevice> displayDevice = display;
-        mCurrentState.traverseInZOrder(
-                [&](Layer* layer) { layer->miniDump(result, displayDevice); });
+
+        const DisplayDevice& ref = *display;
+        mCurrentState.traverseInZOrder([&](Layer* layer) { layer->miniDump(result, ref); });
         result.append("\n");
     }
 
@@ -6234,6 +6234,7 @@ void SurfaceFlinger::renderScreenImplLocked(const RenderArea& renderArea,
     fillLayer.alpha = half(alpha);
     clientCompositionLayers.push_back(fillLayer);
 
+    const auto display = renderArea.getDisplayDevice();
     std::vector<Layer*> renderedLayers;
     Region clearRegion = Region::INVALID_REGION;
     traverseLayers([&](Layer* layer) {
@@ -6245,7 +6246,7 @@ void SurfaceFlinger::renderScreenImplLocked(const RenderArea& renderArea,
         compositionengine::LayerFE::ClientCompositionTargetSettings targetSettings{
                 clip,
                 useIdentityTransform,
-                layer->needsFilteringForScreenshots(renderArea.getDisplayDevice(), transform) ||
+                layer->needsFilteringForScreenshots(display.get(), transform) ||
                         renderArea.needsFiltering(),
                 renderArea.isSecure(),
                 supportProtectedContent,
