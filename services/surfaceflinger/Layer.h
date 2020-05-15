@@ -954,9 +954,9 @@ public:
     InputWindowInfo fillInputInfo();
     bool hasInput() const;
 
-protected:
     compositionengine::OutputLayer* findOutputLayerForDisplay(const DisplayDevice*) const;
 
+protected:
     bool usingRelativeZ(LayerVector::StateSet stateSet) const;
 
     bool mPremultipliedAlpha{true};
