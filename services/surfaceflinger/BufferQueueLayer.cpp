@@ -62,8 +62,9 @@ void BufferQueueLayer::onLayerDisplayed(const sp<Fence>& releaseFence) {
     }
 }
 
-void BufferQueueLayer::setTransformHint(uint32_t orientation) const {
-    mConsumer->setTransformHint(orientation);
+void BufferQueueLayer::setTransformHint(ui::Transform::RotationFlags displayTransformHint) const {
+    BufferLayer::setTransformHint(displayTransformHint);
+    mConsumer->setTransformHint(mTransformHint);
 }
 
 std::vector<OccupancyTracker::Segment> BufferQueueLayer::getOccupancyHistory(bool forceFlush) {
@@ -544,10 +545,6 @@ void BufferQueueLayer::onFirstRef() {
     // BufferQueueCore::mMaxDequeuedBufferCount is default to 1
     if (!mFlinger->isLayerTripleBufferingDisabled()) {
         mProducer->setMaxDequeuedBufferCount(2);
-    }
-
-    if (const auto display = mFlinger->getDefaultDisplayDeviceLocked()) {
-        updateTransformHint(display);
     }
 
     if (mFlinger->mLayerExt) {
