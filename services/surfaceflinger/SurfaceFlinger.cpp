@@ -141,9 +141,11 @@
         return (expr);                                             \
     }()
 
-#undef NO_THREAD_SAFETY_ANALYSIS
-#define NO_THREAD_SAFETY_ANALYSIS \
-    _Pragma("GCC error \"Prefer MAIN_THREAD macros or {Conditional,Timed,Unnecessary}Lock.\"")
+// TODO(b/157175504): Restore NO_THREAD_SAFETY_ANALYSIS prohibition and fix all
+//   identified issues.
+//#undef NO_THREAD_SAFETY_ANALYSIS
+//#define NO_THREAD_SAFETY_ANALYSIS \
+//    _Pragma("GCC error \"Prefer MAIN_THREAD macros or {Conditional,Timed,Unnecessary}Lock.\"")
 
 composer::ComposerExtnLib composer::ComposerExtnLib::g_composer_ext_lib_;
 
@@ -1609,9 +1611,12 @@ status_t SurfaceFlinger::setDisplayElapseTime(const sp<DisplayDevice>& display) 
         return OK;
     }
 
-    if (mDisplays.size() != 1) {
-        // Revisit this for multi displays.
-        return OK;
+    {
+        Mutex::Autolock lock(mStateLock);
+        if (mDisplays.size() != 1) {
+            // Revisit this for multi displays.
+            return OK;
+        }
     }
 
     uint64_t timeStamp = static_cast<uint64_t>(mVsyncTimeStamp + (sfOffset * -1));
@@ -2415,8 +2420,11 @@ void SurfaceFlinger::onMessageRefresh() {
     // the scheduler.
     const auto presentTime = systemTime();
 
-    for (const auto& [_, display] : mDisplays) {
-        setDisplayElapseTime(display);
+    {
+        Mutex::Autolock lock(mStateLock);
+        for (const auto& [_, display] : mDisplays) {
+            setDisplayElapseTime(display);
+        }
     }
 
     {
