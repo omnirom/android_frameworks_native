@@ -195,7 +195,7 @@ struct ConditionalLockGuard {
 using ConditionalLock = ConditionalLockGuard<Mutex>;
 
 // TODO(b/141333600): Consolidate with HWC2::Display::Config::Builder::getDefaultDensity.
-constexpr float FALLBACK_DENSITY = ACONFIGURATION_DENSITY_TV / 160.f;
+constexpr float FALLBACK_DENSITY = ACONFIGURATION_DENSITY_TV;
 
 float getDensityFromProperty(const char* property, bool required) {
     char value[PROPERTY_VALUE_MAX];
@@ -204,7 +204,7 @@ float getDensityFromProperty(const char* property, bool required) {
         ALOGE("%s must be defined as a build property", property);
         return FALLBACK_DENSITY;
     }
-    return density / 160.f;
+    return density;
 }
 
 // Currently we only support V0_SRGB and DISPLAY_P3 as composition preference.
@@ -731,14 +731,13 @@ void SurfaceFlinger::bootFinished()
     LOG_EVENT_LONG(LOGTAG_SF_STOP_BOOTANIM,
                    ns2ms(systemTime(SYSTEM_TIME_MONOTONIC)));
 
-    static_cast<void>(schedule([this]() NO_THREAD_SAFETY_ANALYSIS {
+    static_cast<void>(schedule([this] {
         readPersistentProperties();
         mPowerAdvisor.onBootFinished();
         mBootStage = BootStage::FINISHED;
 
         if (property_get_bool("sf.debug.show_refresh_rate_overlay", false)) {
-            mRefreshRateOverlay = std::make_unique<RefreshRateOverlay>(*this);
-            mRefreshRateOverlay->changeRefreshRate(mRefreshRateConfigs->getCurrentRefreshRate());
+            enableRefreshRateOverlay(true);
         }
     }));
 }
@@ -1021,6 +1020,7 @@ status_t SurfaceFlinger::getDisplayInfo(const sp<IBinder>& displayToken, Display
                 ? mInternalDisplayDensity
                 : FALLBACK_DENSITY;
     }
+    info->density /= ACONFIGURATION_DENSITY_MEDIUM;
 
     info->secure = display->isSecure();
     info->deviceProductInfo = getDeviceProductInfoLocked(*display);
@@ -1125,9 +1125,8 @@ int SurfaceFlinger::getActiveConfig(const sp<IBinder>& displayToken) {
     }
 
     if (isPrimary) {
-        std::lock_guard<std::mutex> lock(mActiveConfigLock);
-        if (mDesiredActiveConfigChanged) {
-            return mDesiredActiveConfig.configId.value();
+        if (const auto config = getDesiredActiveConfig()) {
+            return config->configId.value();
         }
     }
 
@@ -1264,14 +1263,7 @@ void SurfaceFlinger::performSetActiveConfig() {
     ATRACE_CALL();
     ALOGV("performSetActiveConfig");
     // Store the local variable to release the lock.
-    const auto desiredActiveConfig = [&]() -> std::optional<ActiveConfigInfo> {
-        std::lock_guard<std::mutex> lock(mActiveConfigLock);
-        if (mDesiredActiveConfigChanged) {
-            return mDesiredActiveConfig;
-        }
-        return std::nullopt;
-    }();
-
+    const auto desiredActiveConfig = getDesiredActiveConfig();
     if (!desiredActiveConfig) {
         // No desired active config pending to be applied
         return;
@@ -1832,7 +1824,7 @@ void SurfaceFlinger::setRefreshRateTo(int32_t refreshRate) {
 }
 
 void SurfaceFlinger::onHotplugReceived(int32_t sequenceId, hal::HWDisplayId hwcDisplayId,
-                                       hal::Connection connection) {
+                                       hal::Connection connection) NO_THREAD_SAFETY_ANALYSIS {
     ALOGV("%s(%d, %" PRIu64 ", %s)", __FUNCTION__, sequenceId, hwcDisplayId,
           connection == hal::Connection::CONNECTED ? "connected" : "disconnected");
 
@@ -2207,8 +2199,11 @@ void SurfaceFlinger::onMessageInvalidate(nsecs_t expectedVSyncTime) NO_THREAD_SA
                 ATRACE_NAME("Jank detected");
                 ALOGD("Detected janky event. Missed frames: %d", mMissedFrameJankCount);
                 const int32_t jankyDurationMillis = jankDuration / (1000 * 1000);
-                android::util::stats_write(android::util::DISPLAY_JANK_REPORTED,
-                                           jankyDurationMillis, mMissedFrameJankCount);
+                {
+                    ATRACE_NAME("Pushing to statsd");
+                    android::util::stats_write(android::util::DISPLAY_JANK_REPORTED,
+                                               jankyDurationMillis, mMissedFrameJankCount);
+                }
             }
 
             // We either reported a jank event or we missed the trace
@@ -2332,6 +2327,7 @@ void SurfaceFlinger::onMessageRefresh() {
     refreshArgs.updatingOutputGeometryThisFrame = mVisibleRegionsDirty;
     refreshArgs.updatingGeometryThisFrame = mGeometryInvalid || mVisibleRegionsDirty;
     refreshArgs.blursAreExpensive = mBlursAreExpensive;
+    refreshArgs.internalDisplayRotationFlags = DisplayDevice::getPrimaryDisplayRotationFlags();
 
     if (CC_UNLIKELY(mDrawingState.colorMatrixChanged)) {
         refreshArgs.colorTransformMatrix = mDrawingState.colorMatrix;
@@ -3078,8 +3074,13 @@ void SurfaceFlinger::processDisplayChanged(const wp<IBinder>& displayToken,
         if (currentState.width != drawingState.width ||
             currentState.height != drawingState.height) {
             display->setDisplaySize(currentState.width, currentState.height);
+
             if (display->isPrimary()) {
                 mScheduler->onPrimaryDisplayAreaChanged(currentState.width * currentState.height);
+            }
+
+            if (mRefreshRateOverlay) {
+                mRefreshRateOverlay->setViewport(display->getSize());
             }
         }
     }
@@ -5663,15 +5664,15 @@ status_t SurfaceFlinger::onTransact(uint32_t code, const Parcel& data, Parcel* r
                 return NO_ERROR;
             }
             case 1034: {
-                n = data.readInt32();
-                if (n == 1 && !mRefreshRateOverlay) {
-                    mRefreshRateOverlay = std::make_unique<RefreshRateOverlay>(*this);
-                    auto& current = mRefreshRateConfigs->getCurrentRefreshRate();
-                    mRefreshRateOverlay->changeRefreshRate(current);
-                } else if (n == 0) {
-                    mRefreshRateOverlay.reset();
-                } else {
-                    reply->writeBool(mRefreshRateOverlay != nullptr);
+                switch (n = data.readInt32()) {
+                    case 0:
+                    case 1:
+                        enableRefreshRateOverlay(static_cast<bool>(n));
+                        break;
+                    default: {
+                        Mutex::Autolock lock(mStateLock);
+                        reply->writeBool(mRefreshRateOverlay != nullptr);
+                    }
                 }
                 return NO_ERROR;
             }
@@ -5726,29 +5727,26 @@ void SurfaceFlinger::repaintEverythingForHWC() {
 void SurfaceFlinger::kernelTimerChanged(bool expired) {
     static bool updateOverlay =
             property_get_bool("debug.sf.kernel_idle_timer_update_overlay", true);
-    if (!updateOverlay || !mRefreshRateOverlay) return;
+    if (!updateOverlay) return;
+    if (Mutex::Autolock lock(mStateLock); !mRefreshRateOverlay) return;
 
     // Update the overlay on the main thread to avoid race conditions with
     // mRefreshRateConfigs->getCurrentRefreshRate()
-    static_cast<void>(schedule([=]() NO_THREAD_SAFETY_ANALYSIS {
-        if (mRefreshRateOverlay) {
+    static_cast<void>(schedule([=] {
+        const auto desiredActiveConfig = getDesiredActiveConfig();
+        const auto& current = desiredActiveConfig
+                ? mRefreshRateConfigs->getRefreshRateFromConfigId(desiredActiveConfig->configId)
+                : mRefreshRateConfigs->getCurrentRefreshRate();
+        const auto& min = mRefreshRateConfigs->getMinRefreshRate();
+
+        if (current != min) {
             const auto kernelTimerEnabled = property_get_bool(KERNEL_IDLE_TIMER_PROP, false);
             const bool timerExpired = kernelTimerEnabled && expired;
-            const auto& current = [this]() -> const RefreshRate& {
-                std::lock_guard<std::mutex> lock(mActiveConfigLock);
-                if (mDesiredActiveConfigChanged) {
-                    return mRefreshRateConfigs->getRefreshRateFromConfigId(
-                            mDesiredActiveConfig.configId);
-                }
 
-                return mRefreshRateConfigs->getCurrentRefreshRate();
-            }();
-            const auto& min = mRefreshRateConfigs->getMinRefreshRate();
-
-            if (current != min) {
+            if (Mutex::Autolock lock(mStateLock); mRefreshRateOverlay) {
                 mRefreshRateOverlay->changeRefreshRate(timerExpired ? min : current);
-                mEventQueue->invalidate();
             }
+            mEventQueue->invalidate();
         }
     }));
 }
@@ -6687,6 +6685,29 @@ void SurfaceFlinger::onFrameRateFlexibilityTokenReleased() {
             constexpr bool kOverridePolicy = true;
             status_t result = setDesiredDisplayConfigSpecsInternal(display, {}, kOverridePolicy);
             LOG_ALWAYS_FATAL_IF(result < 0, "Failed releasing frame rate flexibility token");
+        }
+    }));
+}
+
+void SurfaceFlinger::enableRefreshRateOverlay(bool enable) {
+    static_cast<void>(schedule([=] {
+        std::unique_ptr<RefreshRateOverlay> overlay;
+        if (enable) {
+            overlay = std::make_unique<RefreshRateOverlay>(*this);
+        }
+
+        {
+            Mutex::Autolock lock(mStateLock);
+
+            // Destroy the layer of the current overlay, if any, outside the lock.
+            mRefreshRateOverlay.swap(overlay);
+            if (!mRefreshRateOverlay) return;
+
+            if (const auto display = getDefaultDisplayDeviceLocked()) {
+                mRefreshRateOverlay->setViewport(display->getSize());
+            }
+
+            mRefreshRateOverlay->changeRefreshRate(mRefreshRateConfigs->getCurrentRefreshRate());
         }
     }));
 }
