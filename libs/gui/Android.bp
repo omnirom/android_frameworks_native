@@ -126,6 +126,11 @@ cc_defaults {
 cc_library_static {
     name: "libgui_bufferqueue_static",
     vendor_available: true,
+    apex_available: [
+        "//apex_available:platform",
+        "com.android.media.swcodec",
+    ],
+    min_sdk_version: "29",
 
     cflags: [
         "-DNO_BUFFERHUB",
