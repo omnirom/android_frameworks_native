@@ -2442,7 +2442,7 @@ Region Layer::getVisibleRegion(const DisplayDevice* display) const {
 }
 
 Region Layer::getVisibleNonTransparentRegion() const {
-    sp<const DisplayDevice> displayDevice = mFlinger->getDefaultDisplayDeviceLocked();
+    sp<const DisplayDevice> displayDevice = mFlinger->getDefaultDisplayDevice();
     if (displayDevice == nullptr) {
         return {};
     }
