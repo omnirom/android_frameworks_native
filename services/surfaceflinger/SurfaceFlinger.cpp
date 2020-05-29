@@ -1184,6 +1184,7 @@ int SurfaceFlinger::getActiveConfig(const sp<IBinder>& displayToken) {
 void SurfaceFlinger::setDesiredActiveConfig(const ActiveConfigInfo& info) {
     ATRACE_CALL();
     auto& refreshRate = mRefreshRateConfigs->getRefreshRateFromConfigId(info.configId);
+    mVsyncPeriod = refreshRate.getVsyncPeriod();
     ALOGV("setDesiredActiveConfig(%s)", refreshRate.getName().c_str());
 
     if (mPerfHintEnabled) {

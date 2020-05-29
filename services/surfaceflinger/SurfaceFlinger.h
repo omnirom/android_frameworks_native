@@ -1390,6 +1390,7 @@ private:
 
 public:
     nsecs_t mRefreshTimeStamp = -1;
+    nsecs_t mVsyncPeriod = -1;
     std::string mNameLayerMax;
     int mMaxQueuedFrames = -1;
     int mNumIdle = -1;
