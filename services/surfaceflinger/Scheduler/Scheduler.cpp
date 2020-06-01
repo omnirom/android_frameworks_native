@@ -385,38 +385,33 @@ nsecs_t Scheduler::getDispSyncExpectedPresentTime(nsecs_t now) {
 void Scheduler::registerLayer(Layer* layer) {
     if (!mLayerHistory) return;
 
-    // If the content detection feature is off, all layers are registered at NoVote. We still
-    // keep the layer history, since we use it for other features (like Frame Rate API), so layers
-    // still need to be registered.
-    if (!mUseContentDetection) {
-        mLayerHistory->registerLayer(layer, mRefreshRateConfigs.getMinRefreshRate().getFps(),
-                                     mRefreshRateConfigs.getMaxRefreshRate().getFps(),
+    const auto minFps = mRefreshRateConfigs.getMinRefreshRate().getFps();
+    const auto maxFps = mRefreshRateConfigs.getMaxRefreshRate().getFps();
+
+    if (layer->getWindowType() == InputWindowInfo::TYPE_STATUS_BAR) {
+        mLayerHistory->registerLayer(layer, minFps, maxFps,
                                      scheduler::LayerHistory::LayerVoteType::NoVote);
-        return;
-    }
+    } else if (!mUseContentDetection) {
+        // If the content detection feature is off, all layers are registered at Max. We still keep
+        // the layer history, since we use it for other features (like Frame Rate API), so layers
+        // still need to be registered.
+        mLayerHistory->registerLayer(layer, minFps, maxFps,
+                                     scheduler::LayerHistory::LayerVoteType::Max);
+    } else if (!mUseContentDetectionV2) {
+        // In V1 of content detection, all layers are registered as Heuristic (unless it's
+        // wallpaper).
+        const auto highFps =
+                layer->getWindowType() == InputWindowInfo::TYPE_WALLPAPER ? minFps : maxFps;
 
-    // In V1 of content detection, all layers are registered as Heuristic (unless it's wallpaper).
-    if (!mUseContentDetectionV2) {
-        const auto lowFps = mRefreshRateConfigs.getMinRefreshRate().getFps();
-        const auto highFps = layer->getWindowType() == InputWindowInfo::TYPE_WALLPAPER
-                ? lowFps
-                : mRefreshRateConfigs.getMaxRefreshRate().getFps();
-
-        mLayerHistory->registerLayer(layer, lowFps, highFps,
+        mLayerHistory->registerLayer(layer, minFps, highFps,
                                      scheduler::LayerHistory::LayerVoteType::Heuristic);
     } else {
         if (layer->getWindowType() == InputWindowInfo::TYPE_WALLPAPER) {
             // Running Wallpaper at Min is considered as part of content detection.
-            mLayerHistory->registerLayer(layer, mRefreshRateConfigs.getMinRefreshRate().getFps(),
-                                         mRefreshRateConfigs.getMaxRefreshRate().getFps(),
+            mLayerHistory->registerLayer(layer, minFps, maxFps,
                                          scheduler::LayerHistory::LayerVoteType::Min);
-        } else if (layer->getWindowType() == InputWindowInfo::TYPE_STATUS_BAR) {
-            mLayerHistory->registerLayer(layer, mRefreshRateConfigs.getMinRefreshRate().getFps(),
-                                         mRefreshRateConfigs.getMaxRefreshRate().getFps(),
-                                         scheduler::LayerHistory::LayerVoteType::NoVote);
         } else {
-            mLayerHistory->registerLayer(layer, mRefreshRateConfigs.getMinRefreshRate().getFps(),
-                                         mRefreshRateConfigs.getMaxRefreshRate().getFps(),
+            mLayerHistory->registerLayer(layer, minFps, maxFps,
                                          scheduler::LayerHistory::LayerVoteType::Heuristic);
         }
     }
@@ -425,6 +420,12 @@ void Scheduler::registerLayer(Layer* layer) {
 void Scheduler::recordLayerHistory(Layer* layer, nsecs_t presentTime) {
     if (mLayerHistory) {
         mLayerHistory->record(layer, presentTime, systemTime());
+    }
+}
+
+void Scheduler::setConfigChangePending(bool pending) {
+    if (mLayerHistory) {
+        mLayerHistory->setConfigChangePending(pending);
     }
 }
 
@@ -526,7 +527,9 @@ void Scheduler::idleTimerCallback(TimerState state) {
 
 void Scheduler::touchTimerCallback(TimerState state) {
     const TouchState touch = state == TimerState::Reset ? TouchState::Active : TouchState::Inactive;
-    handleTimerStateChanged(&mFeatures.touch, touch, true /* eventOnContentDetection */);
+    if (handleTimerStateChanged(&mFeatures.touch, touch, true /* eventOnContentDetection */)) {
+        mLayerHistory->clear();
+    }
     ATRACE_INT("TouchState", static_cast<int>(touch));
 }
 
@@ -549,18 +552,19 @@ void Scheduler::dump(std::string& result) const {
 }
 
 template <class T>
-void Scheduler::handleTimerStateChanged(T* currentState, T newState, bool eventOnContentDetection) {
+bool Scheduler::handleTimerStateChanged(T* currentState, T newState, bool eventOnContentDetection) {
     ConfigEvent event = ConfigEvent::None;
     HwcConfigIndexType newConfigId;
+    bool touchConsidered = false;
     {
         std::lock_guard<std::mutex> lock(mFeatureStateLock);
         if (*currentState == newState) {
-            return;
+            return touchConsidered;
         }
         *currentState = newState;
-        newConfigId = calculateRefreshRateConfigIndexType();
+        newConfigId = calculateRefreshRateConfigIndexType(&touchConsidered);
         if (mFeatures.configId == newConfigId) {
-            return;
+            return touchConsidered;
         }
         mFeatures.configId = newConfigId;
         if (eventOnContentDetection && !mFeatures.contentRequirements.empty()) {
@@ -569,10 +573,12 @@ void Scheduler::handleTimerStateChanged(T* currentState, T newState, bool eventO
     }
     const RefreshRate& newRefreshRate = mRefreshRateConfigs.getRefreshRateFromConfigId(newConfigId);
     mSchedulerCallback.changeRefreshRate(newRefreshRate, event);
+    return touchConsidered;
 }
 
-HwcConfigIndexType Scheduler::calculateRefreshRateConfigIndexType() {
+HwcConfigIndexType Scheduler::calculateRefreshRateConfigIndexType(bool* touchConsidered) {
     ATRACE_CALL();
+    if (touchConsidered) *touchConsidered = false;
 
     // If Display Power is not in normal operation we want to be in performance mode. When coming
     // back to normal mode, a grace period is given with DisplayPowerTimer.
@@ -607,18 +613,9 @@ HwcConfigIndexType Scheduler::calculateRefreshRateConfigIndexType() {
                 .getConfigId();
     }
 
-    bool touchConsidered;
-    const auto& ret = mRefreshRateConfigs
-                              .getBestRefreshRate(mFeatures.contentRequirements, touchActive, idle,
-                                                  &touchConsidered)
-                              .getConfigId();
-    if (touchConsidered) {
-        // Clear layer history if refresh rate was selected based on touch to allow
-        // the hueristic to pick up with the new rate.
-        mLayerHistory->clear();
-    }
-
-    return ret;
+    return mRefreshRateConfigs
+            .getBestRefreshRate(mFeatures.contentRequirements, touchActive, idle, touchConsidered)
+            .getConfigId();
 }
 
 std::optional<HwcConfigIndexType> Scheduler::getPreferredConfigId() {

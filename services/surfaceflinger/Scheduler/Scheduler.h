@@ -119,6 +119,7 @@ public:
     // Layers are registered on creation, and unregistered when the weak reference expires.
     void registerLayer(Layer*);
     void recordLayerHistory(Layer*, nsecs_t presentTime);
+    void setConfigChangePending(bool pending);
 
     // Detects content using layer history, and selects a matching refresh rate.
     void chooseRefreshRateForContent();
@@ -177,14 +178,15 @@ private:
 
     // handles various timer features to change the refresh rate.
     template <class T>
-    void handleTimerStateChanged(T* currentState, T newState, bool eventOnContentDetection);
+    bool handleTimerStateChanged(T* currentState, T newState, bool eventOnContentDetection);
 
     void setVsyncPeriod(nsecs_t period, bool force_resync = false);
 
     // This function checks whether individual features that are affecting the refresh rate
     // selection were initialized, prioritizes them, and calculates the HwcConfigIndexType
     // for the suggested refresh rate.
-    HwcConfigIndexType calculateRefreshRateConfigIndexType() REQUIRES(mFeatureStateLock);
+    HwcConfigIndexType calculateRefreshRateConfigIndexType(bool* touchConsidered = nullptr)
+            REQUIRES(mFeatureStateLock);
 
     // Stores EventThread associated with a given VSyncSource, and an initial EventThreadConnection.
     struct Connection {

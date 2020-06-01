@@ -90,7 +90,7 @@ LayerHistoryV2::~LayerHistoryV2() = default;
 void LayerHistoryV2::registerLayer(Layer* layer, float /*lowRefreshRate*/, float highRefreshRate,
                                    LayerVoteType type) {
     const nsecs_t highRefreshRatePeriod = static_cast<nsecs_t>(1e9f / highRefreshRate);
-    auto info = std::make_unique<LayerInfoV2>(highRefreshRatePeriod, type);
+    auto info = std::make_unique<LayerInfoV2>(layer->getName(), highRefreshRatePeriod, type);
     std::lock_guard lock(mLock);
     mLayerInfos.emplace_back(layer, std::move(info));
 }
@@ -103,7 +103,7 @@ void LayerHistoryV2::record(Layer* layer, nsecs_t presentTime, nsecs_t now) {
     LOG_FATAL_IF(it == mLayerInfos.end(), "%s: unknown layer %p", __FUNCTION__, layer);
 
     const auto& info = it->second;
-    info->setLastPresentTime(presentTime, now);
+    info->setLastPresentTime(presentTime, now, mConfigChangePending);
 
     // Activate layer if inactive.
     if (const auto end = activeLayers().end(); it >= end) {
