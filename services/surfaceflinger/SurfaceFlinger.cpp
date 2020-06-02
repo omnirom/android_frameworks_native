@@ -1186,16 +1186,6 @@ void SurfaceFlinger::setDesiredActiveConfig(const ActiveConfigInfo& info) {
     auto& refreshRate = mRefreshRateConfigs->getRefreshRateFromConfigId(info.configId);
     ALOGV("setDesiredActiveConfig(%s)", refreshRate.getName().c_str());
 
-    if (mPerfHintEnabled) {
-        if (mPerfLockHandle > 0) {
-            mPerfLockReleaseFunc(mPerfLockHandle);
-        }
-
-        // Send Refresh Rate hint to Perf lib
-        int refreshRateValue = static_cast<int>(refreshRate.getFps());
-        mPerfLockHandle = mPerfHintFunc(PERF_HINT_FPS_UPDATE, nullptr, INT_MAX, refreshRateValue);
-    }
-
     std::lock_guard<std::mutex> lock(mActiveConfigLock);
     if (mDesiredActiveConfigChanged) {
         // If a config change is pending, just cache the latest request in
@@ -1231,6 +1221,8 @@ void SurfaceFlinger::setDesiredActiveConfig(const ActiveConfigInfo& info) {
     if (mRefreshRateOverlay) {
         mRefreshRateOverlay->changeRefreshRate(refreshRate);
     }
+
+    SetContentFps(static_cast<int>(refreshRate.getFps()));
 }
 
 status_t SurfaceFlinger::setActiveConfig(const sp<IBinder>& displayToken, int mode) {
@@ -2714,6 +2706,8 @@ void SurfaceFlinger::postComposition()
         }
 
         mSmoMo->UpdateSmomoState(layers, fps);
+        int content_fps = mSmoMo->GetFrameRate();
+        SetContentFps((content_fps > 0) ? content_fps : fps);
     }
 
 
@@ -6778,6 +6772,35 @@ void SurfaceFlinger::enableRefreshRateOverlay(bool enable) {
             mRefreshRateOverlay->changeRefreshRate(mRefreshRateConfigs->getCurrentRefreshRate());
         }
     }));
+}
+
+void SurfaceFlinger::SetContentFps(int contentFps) {
+    // Called from SF main thread only, no lock needed.
+    if (!mPerfHintEnabled || mPerfHintPending || mSetActiveConfigPending) {
+        return;
+    }
+
+    if ((contentFps <= 0) || (std::abs(mContentFps - contentFps) <= CONTENT_FPS_CHANGE_LIMIT)) {
+        return;
+    }
+
+    ATRACE_CALL();
+    mPerfHintPending = true;
+    mContentFps = contentFps;
+
+    // Detach a worker thread to send the Content Frame Rate hint to Perf lib
+    std::thread worker(
+        [this](int content_rate) {
+            if (mPerfLockHandle > 0) {
+                mPerfLockReleaseFunc(mPerfLockHandle);
+                mPerfLockHandle = -1;
+            }
+
+            mPerfLockHandle = mPerfHintFunc(PERF_HINT_FPS_UPDATE, nullptr, INT_MAX, content_rate);
+            mPerfHintPending = false;
+        }, mContentFps);
+
+    worker.detach();
 }
 
 } // namespace android
