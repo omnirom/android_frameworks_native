@@ -141,6 +141,7 @@ public:
                              const std::vector<uint8_t>&));
     MOCK_METHOD1(getLayerGenericMetadataKeys,
                  V2_4::Error(std::vector<IComposerClient::LayerGenericMetadataKey>*));
+    MOCK_METHOD2(getClientTargetProperty, Error(Display, IComposerClient::ClientTargetProperty*));
     MOCK_METHOD2(setDisplayElapseTime, Error(Display, uint64_t));
 };
 

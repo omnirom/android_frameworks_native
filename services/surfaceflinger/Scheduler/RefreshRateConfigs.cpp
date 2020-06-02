@@ -31,6 +31,23 @@ namespace android::scheduler {
 using AllRefreshRatesMapType = RefreshRateConfigs::AllRefreshRatesMapType;
 using RefreshRate = RefreshRateConfigs::RefreshRate;
 
+std::string RefreshRateConfigs::layerVoteTypeString(LayerVoteType vote) {
+    switch (vote) {
+        case LayerVoteType::NoVote:
+            return "NoVote";
+        case LayerVoteType::Min:
+            return "Min";
+        case LayerVoteType::Max:
+            return "Max";
+        case LayerVoteType::Heuristic:
+            return "Heuristic";
+        case LayerVoteType::ExplicitDefault:
+            return "ExplicitDefault";
+        case LayerVoteType::ExplicitExactOrMultiple:
+            return "ExplicitExactOrMultiple";
+    }
+}
+
 const RefreshRate& RefreshRateConfigs::getRefreshRateForContent(
         const std::vector<LayerRequirement>& layers) const {
     std::lock_guard lock(mLock);
@@ -128,15 +145,25 @@ const RefreshRate& RefreshRateConfigs::getBestRefreshRate(
         }
     }
 
+    const bool hasExplicitVoteLayers =
+            explicitDefaultVoteLayers > 0 || explicitExactOrMultipleVoteLayers > 0;
+
     // Consider the touch event if there are no Explicit* layers. Otherwise wait until after we've
     // selected a refresh rate to see if we should apply touch boost.
-    if (touchActive && explicitDefaultVoteLayers == 0 && explicitExactOrMultipleVoteLayers == 0) {
+    if (touchActive && !hasExplicitVoteLayers) {
         ALOGV("TouchBoost - choose %s", getMaxRefreshRateByPolicyLocked().getName().c_str());
         if (touchConsidered) *touchConsidered = true;
         return getMaxRefreshRateByPolicyLocked();
     }
 
-    if (!touchActive && idle) {
+    // If the primary range consists of a single refresh rate then we can only
+    // move out the of range if layers explicitly request a different refresh
+    // rate.
+    const Policy* policy = getCurrentPolicyLocked();
+    const bool primaryRangeIsSingleRate = policy->primaryRange.min == policy->primaryRange.max;
+
+    if (!touchActive && idle && !(primaryRangeIsSingleRate && hasExplicitVoteLayers)) {
+        ALOGV("Idle - choose %s", getMinRefreshRateByPolicyLocked().getName().c_str());
         return getMinRefreshRateByPolicyLocked();
     }
 
@@ -150,8 +177,6 @@ const RefreshRate& RefreshRateConfigs::getBestRefreshRate(
         return getMinRefreshRateByPolicyLocked();
     }
 
-    const Policy* policy = getCurrentPolicyLocked();
-
     // Find the best refresh rate based on score
     std::vector<std::pair<const RefreshRate*, float>> scores;
     scores.reserve(mAppRequestRefreshRates.size());
@@ -161,7 +186,8 @@ const RefreshRate& RefreshRateConfigs::getBestRefreshRate(
     }
 
     for (const auto& layer : layers) {
-        ALOGV("Calculating score for %s (type: %d)", layer.name.c_str(), layer.vote);
+        ALOGV("Calculating score for %s (%s, weight %.2f)", layer.name.c_str(),
+              layerVoteTypeString(layer.vote).c_str(), layer.weight);
         if (layer.vote == LayerVoteType::NoVote || layer.vote == LayerVoteType::Min) {
             continue;
         }
@@ -171,7 +197,8 @@ const RefreshRate& RefreshRateConfigs::getBestRefreshRate(
         for (auto i = 0u; i < scores.size(); i++) {
             bool inPrimaryRange =
                     scores[i].first->inPolicy(policy->primaryRange.min, policy->primaryRange.max);
-            if (!inPrimaryRange && layer.vote != LayerVoteType::ExplicitDefault &&
+            if ((primaryRangeIsSingleRate || !inPrimaryRange) &&
+                layer.vote != LayerVoteType::ExplicitDefault &&
                 layer.vote != LayerVoteType::ExplicitExactOrMultiple) {
                 // Only layers with explicit frame rate settings are allowed to score refresh rates
                 // outside the primary range.
@@ -246,10 +273,8 @@ const RefreshRate& RefreshRateConfigs::getBestRefreshRate(
                     return 1.0f / iter;
                 }();
                 ALOGV("%s (%s, weight %.2f) %.2fHz gives %s score of %.2f", layer.name.c_str(),
-                      layer.vote == LayerVoteType::ExplicitExactOrMultiple
-                              ? "ExplicitExactOrMultiple"
-                              : "Heuristic",
-                      weight, 1e9f / layerPeriod, scores[i].first->name.c_str(), layerScore);
+                      layerVoteTypeString(layer.vote).c_str(), weight, 1e9f / layerPeriod,
+                      scores[i].first->name.c_str(), layerScore);
                 scores[i].second += weight * layerScore;
                 continue;
             }
@@ -263,11 +288,25 @@ const RefreshRate& RefreshRateConfigs::getBestRefreshRate(
             ? getBestRefreshRate(scores.rbegin(), scores.rend())
             : getBestRefreshRate(scores.begin(), scores.end());
 
+    if (primaryRangeIsSingleRate) {
+        // If we never scored any layers, then choose the rate from the primary
+        // range instead of picking a random score from the app range.
+        if (std::all_of(scores.begin(), scores.end(),
+                        [](std::pair<const RefreshRate*, float> p) { return p.second == 0; })) {
+            ALOGV("layers not scored - choose %s",
+                  getMaxRefreshRateByPolicyLocked().getName().c_str());
+            return getMaxRefreshRateByPolicyLocked();
+        } else {
+            return *bestRefreshRate;
+        }
+    }
+
     // Consider the touch event if there are no ExplicitDefault layers. ExplicitDefault are mostly
     // interactive (as opposed to ExplicitExactOrMultiple) and therefore if those posted an explicit
     // vote we should not change it if we get a touch event. Only apply touch boost if it will
     // actually increase the refresh rate over the normal selection.
     const RefreshRate& touchRefreshRate = getMaxRefreshRateByPolicyLocked();
+
     if (touchActive && explicitDefaultVoteLayers == 0 &&
         bestRefreshRate->fps < touchRefreshRate.fps) {
         if (touchConsidered) *touchConsidered = true;
