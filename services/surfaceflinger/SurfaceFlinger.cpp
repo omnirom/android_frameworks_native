@@ -6776,11 +6776,12 @@ void SurfaceFlinger::enableRefreshRateOverlay(bool enable) {
 
 void SurfaceFlinger::SetContentFps(int contentFps) {
     // Called from SF main thread only, no lock needed.
-    if (!mPerfHintEnabled || mPerfHintPending || mSetActiveConfigPending) {
+    if (!mBootFinished || !mPerfHintEnabled || mPerfHintPending || mSetActiveConfigPending) {
         return;
     }
 
-    if ((contentFps <= 0) || (std::abs(mContentFps - contentFps) <= CONTENT_FPS_CHANGE_LIMIT)) {
+    if ((contentFps <= 0) || ((mPerfLockHandle > 0) &&
+        (std::abs(mContentFps - contentFps) <= CONTENT_FPS_CHANGE_LIMIT))) {
         return;
     }
 
@@ -6793,7 +6794,6 @@ void SurfaceFlinger::SetContentFps(int contentFps) {
         [this](int content_rate) {
             if (mPerfLockHandle > 0) {
                 mPerfLockReleaseFunc(mPerfLockHandle);
-                mPerfLockHandle = -1;
             }
 
             mPerfLockHandle = mPerfHintFunc(PERF_HINT_FPS_UPDATE, nullptr, INT_MAX, content_rate);
