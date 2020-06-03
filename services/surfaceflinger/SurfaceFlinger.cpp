@@ -20,7 +20,6 @@
 
 //#define LOG_NDEBUG 0
 #define ATRACE_TAG ATRACE_TAG_GRAPHICS
-#define PERF_HINT_FPS_UPDATE 0x00001094
 
 #include "SurfaceFlinger.h"
 
@@ -596,10 +595,6 @@ SurfaceFlinger::SurfaceFlinger(Factory& factory) : SurfaceFlinger(factory, SkipI
 }
 
 SurfaceFlinger::~SurfaceFlinger() {
-    if (mPerfHintEnabled) {
-        dlclose(mPerfLibHandle);
-        mPerfLibHandle = nullptr;
-    }
     if (mDolphinFuncsEnabled)
         dlclose(mDolphinHandle);
     if (mFrameExtn)
@@ -899,21 +894,6 @@ void SurfaceFlinger::init() {
         ALOGE("Run StartPropertySetThread failed!");
     }
 
-    mPerfLibHandle = dlopen("libqti-perfd-client_system.so", RTLD_NOW);
-    if (mPerfLibHandle) {
-        mPerfHintFunc = (int (*)(int, const char *, int, int))dlsym(mPerfLibHandle, "perf_hint");
-        mPerfLockReleaseFunc = (int (*)(int))dlsym(mPerfLibHandle, "perf_lock_rel");
-        if (mPerfHintFunc && mPerfLockReleaseFunc) {
-            mPerfHintEnabled = true;
-        } else {
-            ALOGE("Unable to open Perf Lib function handle!");
-            dlclose(mPerfLibHandle);
-            mPerfLibHandle = nullptr;
-        }
-    } else {
-        ALOGE("Unable to open Perf Lib: %s", dlerror());
-    }
-
     char smomoProp[PROPERTY_VALUE_MAX];
     property_get("vendor.display.use_smooth_motion", smomoProp, "0");
     if (atoi(smomoProp) && mSmoMo.init()) {
@@ -943,11 +923,16 @@ void SurfaceFlinger::init() {
 
     mComposerExtnIntf = composer::ComposerExtnLib::GetInstance();
     if (!mComposerExtnIntf) {
-        ALOGE("Failed to create composer extension");
+        ALOGE("Unable to get composer extension");
     } else {
         int ret = mComposerExtnIntf->CreateFrameScheduler(&mFrameSchedulerExtnIntf);
-        if (ret == -1 || !mFrameSchedulerExtnIntf) {
-            ALOGI("Failed to create frame scheduler extension");
+        if (ret) {
+            ALOGI("Unable to create frame scheduler extension");
+        }
+
+        ret = mComposerExtnIntf->CreateDisplayExtn(&mDisplayExtnIntf);
+        if (ret) {
+            ALOGI("Unable to create display extension");
         }
     }
     ALOGV("Done initializing");
@@ -1228,7 +1213,7 @@ void SurfaceFlinger::setDesiredActiveConfig(const ActiveConfigInfo& info) {
         mRefreshRateOverlay->changeRefreshRate(refreshRate);
     }
 
-    SetContentFps(static_cast<int>(refreshRate.getFps()));
+    setContentFps(static_cast<uint32_t>(refreshRate.getFps()));
 }
 
 status_t SurfaceFlinger::setActiveConfig(const sp<IBinder>& displayToken, int mode) {
@@ -2712,7 +2697,7 @@ void SurfaceFlinger::postComposition()
 
         mSmoMo->UpdateSmomoState(layers, fps);
         int content_fps = mSmoMo->GetFrameRate();
-        SetContentFps((content_fps > 0) ? content_fps : fps);
+        setContentFps((content_fps > 0) ? content_fps : fps);
     }
 
 
@@ -6839,33 +6824,12 @@ void SurfaceFlinger::enableRefreshRateOverlay(bool enable) {
     }));
 }
 
-void SurfaceFlinger::SetContentFps(int contentFps) {
-    // Called from SF main thread only, no lock needed.
-    if (!mBootFinished || !mPerfHintEnabled || mPerfHintPending || mSetActiveConfigPending) {
-        return;
+void SurfaceFlinger::setContentFps(uint32_t contentFps) {
+    if (mBootFinished && !mSetActiveConfigPending) {
+        if (mDisplayExtnIntf) {
+            mDisplayExtnIntf->SetContentFps(contentFps);
+        }
     }
-
-    if ((contentFps <= 0) || ((mPerfLockHandle > 0) &&
-        (std::abs(mContentFps - contentFps) <= CONTENT_FPS_CHANGE_LIMIT))) {
-        return;
-    }
-
-    ATRACE_CALL();
-    mPerfHintPending = true;
-    mContentFps = contentFps;
-
-    // Detach a worker thread to send the Content Frame Rate hint to Perf lib
-    std::thread worker(
-        [this](int content_rate) {
-            if (mPerfLockHandle > 0) {
-                mPerfLockReleaseFunc(mPerfLockHandle);
-            }
-
-            mPerfLockHandle = mPerfHintFunc(PERF_HINT_FPS_UPDATE, nullptr, INT_MAX, content_rate);
-            mPerfHintPending = false;
-        }, mContentFps);
-
-    worker.detach();
 }
 
 } // namespace android
