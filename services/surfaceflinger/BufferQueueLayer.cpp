@@ -467,7 +467,7 @@ void BufferQueueLayer::onFrameAvailable(const BufferItem& item) {
         frameInfo.ref_latency = mFrameTracker.getPreviousGfxInfo();
         {
             Mutex::Autolock lock(mFlinger->mStateLock);
-            frameInfo.vsync_period = mFlinger->getVsyncPeriod();
+            frameInfo.vsync_period = mFlinger->mVsyncPeriod;
         }
         mLastTimeStamp = frameInfo.current_timestamp;
         {
