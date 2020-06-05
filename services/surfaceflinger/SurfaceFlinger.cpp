@@ -116,6 +116,7 @@
 #include "Scheduler/DispSyncSource.h"
 #include "Scheduler/EventControlThread.h"
 #include "Scheduler/EventThread.h"
+#include "Scheduler/LayerHistory.h"
 #include "Scheduler/MessageQueue.h"
 #include "Scheduler/PhaseOffsets.h"
 #include "Scheduler/Scheduler.h"
@@ -3687,6 +3688,10 @@ uint32_t SurfaceFlinger::setTransactionFlags(uint32_t flags,
     return old;
 }
 
+uint32_t SurfaceFlinger::setTransactionFlagsNoWake(uint32_t flags) {
+    return mTransactionFlags.fetch_or(flags);
+}
+
 bool SurfaceFlinger::flushTransactionQueues() {
     // to prevent onHandleDestroyed from being called while the lock is held,
     // we must keep a copy of the transactions (specifically the composer
@@ -3846,6 +3851,12 @@ void SurfaceFlinger::applyTransactionState(
     for (const ComposerState& state : states) {
         clientStateFlags |= setClientStateLocked(state, desiredPresentTime, postTime, privileged,
                                                  listenerCallbacksWithSurfaces);
+        if ((flags & eAnimation) && state.state.surface) {
+            if (const auto layer = fromHandleLocked(state.state.surface).promote(); layer) {
+                mScheduler->recordLayerHistory(layer.get(), desiredPresentTime,
+                                               LayerHistory::LayerUpdateType::AnimationTX);
+            }
+        }
     }
 
     for (const auto& listenerCallback : listenerCallbacksWithSurfaces) {
@@ -4130,7 +4141,7 @@ uint32_t SurfaceFlinger::setClientStateLocked(
         if (layer->setCornerRadius(s.cornerRadius))
             flags |= eTraversalNeeded;
     }
-    if (what & layer_state_t::eBackgroundBlurRadiusChanged && !mDisableBlurs) {
+    if (what & layer_state_t::eBackgroundBlurRadiusChanged && !mDisableBlurs && mSupportsBlur) {
         if (layer->setBackgroundBlurRadius(s.backgroundBlurRadius)) flags |= eTraversalNeeded;
     }
     if (what & layer_state_t::eLayerStackChanged) {
