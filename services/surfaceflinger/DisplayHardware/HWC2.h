@@ -234,6 +234,8 @@ public:
     [[clang::warn_unused_result]] virtual hal::Error getSupportedContentTypes(
             std::vector<hal::ContentType>*) const = 0;
     [[clang::warn_unused_result]] virtual hal::Error setContentType(hal::ContentType) = 0;
+    [[clang::warn_unused_result]] virtual hal::Error getClientTargetProperty(
+            hal::ClientTargetProperty* outClientTargetProperty) = 0;
     [[clang::warn_unused_result]] virtual hal::Error setDisplayElapseTime(uint64_t timeStamp) = 0;
 };
 
@@ -306,6 +308,7 @@ public:
     hal::Error getSupportedContentTypes(
             std::vector<hal::ContentType>* outSupportedContentTypes) const override;
     hal::Error setContentType(hal::ContentType) override;
+    hal::Error getClientTargetProperty(hal::ClientTargetProperty* outClientTargetProperty) override;
     hal::Error setDisplayElapseTime(uint64_t timeStamp) override;
 
     // Other Display methods
