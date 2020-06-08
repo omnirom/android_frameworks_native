@@ -121,6 +121,13 @@ Layer::Layer(const LayerCreationArgs& args)
     mCurrentState.treeHasFrameRateVote = false;
     mCurrentState.fixedTransformHint = ui::Transform::ROT_INVALID;
 
+    if (args.flags & ISurfaceComposerClient::eNoColorFill) {
+        // Set an invalid color so there is no color fill.
+        mCurrentState.color.r = -1.0_hf;
+        mCurrentState.color.g = -1.0_hf;
+        mCurrentState.color.b = -1.0_hf;
+    }
+
     // drawing state & current state are identical
     mDrawingState = mCurrentState;
 
@@ -864,11 +871,14 @@ bool Layer::applyPendingStates(State* stateToCommit) {
         }
     }
 
-    // If we still have pending updates, wake SurfaceFlinger back up and point
-    // it at this layer so we can process them
+    // If we still have pending updates, we need to ensure SurfaceFlinger
+    // will keep calling doTransaction, and so we set the transaction flags.
+    // However, our pending states won't clear until a frame is available,
+    // and so there is no need to specifically trigger a wakeup. Rather
+    // we set the flags and wait for something else to wake us up.
     if (!mPendingStates.empty()) {
         setTransactionFlags(eTransactionNeeded);
-        mFlinger->setTransactionFlags(eTraversalNeeded);
+        mFlinger->setTransactionFlagsNoWake(eTraversalNeeded);
     }
 
     mCurrentState.modified = false;
@@ -1408,7 +1418,8 @@ bool Layer::setFrameRate(FrameRate frameRate) {
     }
 
     // Activate the layer in Scheduler's LayerHistory
-    mFlinger->mScheduler->recordLayerHistory(this, systemTime());
+    mFlinger->mScheduler->recordLayerHistory(this, systemTime(),
+                                             LayerHistory::LayerUpdateType::SetFrameRate);
 
     mCurrentState.sequence++;
     mCurrentState.frameRate = frameRate;
@@ -2129,7 +2140,9 @@ Layer::RoundedCornerState Layer::getRoundedCornerState() const {
             // but a transform matrix can define horizontal and vertical scales.
             // Let's take the average between both of them and pass into the shader, practically we
             // never do this type of transformation on windows anyway.
-            parentState.radius *= (t[0][0] + t[1][1]) / 2.0f;
+            auto scaleX = sqrtf(t[0][0] * t[0][0] + t[0][1] * t[0][1]);
+            auto scaleY = sqrtf(t[1][0] * t[1][0] + t[1][1] * t[1][1]);
+            parentState.radius *= (scaleX + scaleY) / 2.0f;
             return parentState;
         }
     }
