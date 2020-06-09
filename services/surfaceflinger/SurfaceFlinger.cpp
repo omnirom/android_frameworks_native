@@ -1607,12 +1607,9 @@ status_t SurfaceFlinger::setDisplayElapseTime(const sp<DisplayDevice>& display) 
         return OK;
     }
 
-    {
-        Mutex::Autolock lock(mStateLock);
-        if (mDisplays.size() != 1) {
-            // Revisit this for multi displays.
-            return OK;
-        }
+    if (mDisplaysList.size() != 1) {
+        // Revisit this for multi displays.
+        return OK;
     }
 
     uint64_t timeStamp = static_cast<uint64_t>(mVsyncTimeStamp + (sfOffset * -1));
