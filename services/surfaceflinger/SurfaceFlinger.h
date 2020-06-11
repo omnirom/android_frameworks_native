@@ -1070,6 +1070,24 @@ private:
 
     void setContentFps(uint32_t contentFps);
 
+    bool isInternalDisplay(const sp<DisplayDevice>& display);
+
+    bool getHwcDisplayId(const sp<DisplayDevice>& display, uint32_t *hwcDisplayId);
+
+    void updateDisplayExtension(uint32_t displayId, uint32_t configId, bool connected);
+
+    void setDisplayExtnActiveConfig(uint32_t displayId, uint32_t activeConfigId);
+
+    void notifyAllDisplaysUpdateImminent();
+
+    void notifyDisplayUpdateImminent();
+
+    void handlePresentationDisplaysEarlyWakeup(size_t updatingDisplays, uint32_t layerStackId);
+
+    void updateInternalDisplaysPresentationMode();
+
+    void setupEarlyWakeUpFeature();
+
     /* ------------------------------------------------------------------------
      * VrFlinger
      */
@@ -1403,6 +1421,9 @@ public:
     int mNumIdle = -1;
 
 private:
+    bool mEarlyWakeUpEnabled = false;
+    bool wakeUpPresentationDisplays = false;
+    bool mInternalPresentationDisplays = false;
     bool mDolphinFuncsEnabled = false;
     void *mDolphinHandle = nullptr;
     bool (*mDolphinInit)() = nullptr;
