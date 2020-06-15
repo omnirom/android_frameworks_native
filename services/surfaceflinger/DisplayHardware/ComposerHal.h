@@ -241,6 +241,8 @@ public:
                                                 const std::vector<uint8_t>& value) = 0;
     virtual V2_4::Error getLayerGenericMetadataKeys(
             std::vector<IComposerClient::LayerGenericMetadataKey>* outKeys) = 0;
+    virtual Error getClientTargetProperty(
+            Display display, IComposerClient::ClientTargetProperty* outClientTargetProperty) = 0;
     virtual Error setDisplayElapseTime(Display display, uint64_t timeStamp) = 0;
 };
 
@@ -283,6 +285,10 @@ public:
 
     // Get what stage succeeded during PresentOrValidate: Present or Validate
     void takePresentOrValidateStage(Display display, uint32_t * state);
+
+    // Get the client target properties requested by hardware composer.
+    void takeClientTargetProperty(Display display,
+                                  IComposerClient::ClientTargetProperty* outClientTargetProperty);
 
 private:
     void resetData();
@@ -483,6 +489,9 @@ public:
                                         bool mandatory, const std::vector<uint8_t>& value) override;
     V2_4::Error getLayerGenericMetadataKeys(
             std::vector<IComposerClient::LayerGenericMetadataKey>* outKeys) override;
+    Error getClientTargetProperty(
+            Display display,
+            IComposerClient::ClientTargetProperty* outClientTargetProperty) override;
 
 private:
 #if defined(USE_VR_COMPOSER) && USE_VR_COMPOSER

@@ -28,7 +28,6 @@
 
 #include <log/log.h>
 #include <renderengine/RenderEngine.h>
-#include <sync/sync.h>
 #include <system/window.h>
 #include <ui/GraphicBuffer.h>
 #include <ui/Rect.h>
@@ -103,6 +102,10 @@ void RenderSurface::setDisplaySize(const ui::Size& size) {
 void RenderSurface::setBufferDataspace(ui::Dataspace dataspace) {
     native_window_set_buffers_data_space(mNativeWindow.get(),
                                          static_cast<android_dataspace>(dataspace));
+}
+
+void RenderSurface::setBufferPixelFormat(ui::PixelFormat pixelFormat) {
+    native_window_set_buffers_format(mNativeWindow.get(), static_cast<int32_t>(pixelFormat));
 }
 
 void RenderSurface::setProtected(bool useProtected) {

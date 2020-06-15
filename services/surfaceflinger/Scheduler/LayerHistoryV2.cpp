@@ -62,13 +62,17 @@ void trace(const wp<Layer>& weak, LayerHistory::LayerVoteType type, int fps) {
     const auto layer = weak.promote();
     if (!layer) return;
 
-    const auto& name = layer->getName();
-    const auto noVoteTag = "LFPS NoVote " + name;
-    const auto heuristicVoteTag = "LFPS Heuristic " + name;
-    const auto explicitDefaultVoteTag = "LFPS ExplicitDefault" + name;
-    const auto explicitExactOrMultipleVoteTag = "LFPS ExplicitExactOrMultiple" + name;
-    const auto minVoteTag = "LFPS Min " + name;
-    const auto maxVoteTag = "LFPS Max " + name;
+    const auto makeTag = [layer](LayerHistory::LayerVoteType vote) {
+        return "LFPS " + RefreshRateConfigs::layerVoteTypeString(vote) + " " + layer->getName();
+    };
+
+    const auto noVoteTag = makeTag(LayerHistory::LayerVoteType::NoVote);
+    const auto heuristicVoteTag = makeTag(LayerHistory::LayerVoteType::Heuristic);
+    const auto explicitDefaultVoteTag = makeTag(LayerHistory::LayerVoteType::ExplicitDefault);
+    const auto explicitExactOrMultipleVoteTag =
+            makeTag(LayerHistory::LayerVoteType::ExplicitExactOrMultiple);
+    const auto minVoteTag = makeTag(LayerHistory::LayerVoteType::Min);
+    const auto maxVoteTag = makeTag(LayerHistory::LayerVoteType::Max);
 
     ATRACE_INT(noVoteTag.c_str(), type == LayerHistory::LayerVoteType::NoVote ? 1 : 0);
     ATRACE_INT(heuristicVoteTag.c_str(), type == LayerHistory::LayerVoteType::Heuristic ? fps : 0);
@@ -79,7 +83,7 @@ void trace(const wp<Layer>& weak, LayerHistory::LayerVoteType type, int fps) {
     ATRACE_INT(minVoteTag.c_str(), type == LayerHistory::LayerVoteType::Min ? 1 : 0);
     ATRACE_INT(maxVoteTag.c_str(), type == LayerHistory::LayerVoteType::Max ? 1 : 0);
 
-    ALOGD("%s: %s @ %d Hz", __FUNCTION__, name.c_str(), fps);
+    ALOGD("%s: %s @ %d Hz", __FUNCTION__, layer->getName().c_str(), fps);
 }
 } // namespace
 
@@ -90,12 +94,13 @@ LayerHistoryV2::~LayerHistoryV2() = default;
 void LayerHistoryV2::registerLayer(Layer* layer, float /*lowRefreshRate*/, float highRefreshRate,
                                    LayerVoteType type) {
     const nsecs_t highRefreshRatePeriod = static_cast<nsecs_t>(1e9f / highRefreshRate);
-    auto info = std::make_unique<LayerInfoV2>(highRefreshRatePeriod, type);
+    auto info = std::make_unique<LayerInfoV2>(layer->getName(), highRefreshRatePeriod, type);
     std::lock_guard lock(mLock);
     mLayerInfos.emplace_back(layer, std::move(info));
 }
 
-void LayerHistoryV2::record(Layer* layer, nsecs_t presentTime, nsecs_t now) {
+void LayerHistoryV2::record(Layer* layer, nsecs_t presentTime, nsecs_t now,
+                            LayerUpdateType updateType) {
     std::lock_guard lock(mLock);
 
     const auto it = std::find_if(mLayerInfos.begin(), mLayerInfos.end(),
@@ -103,7 +108,7 @@ void LayerHistoryV2::record(Layer* layer, nsecs_t presentTime, nsecs_t now) {
     LOG_FATAL_IF(it == mLayerInfos.end(), "%s: unknown layer %p", __FUNCTION__, layer);
 
     const auto& info = it->second;
-    info->setLastPresentTime(presentTime, now);
+    info->setLastPresentTime(presentTime, now, updateType, mConfigChangePending);
 
     // Activate layer if inactive.
     if (const auto end = activeLayers().end(); it >= end) {
@@ -174,8 +179,10 @@ void LayerHistoryV2::partitionLayers(nsecs_t now) {
                         return LayerVoteType::NoVote;
                 }
             }();
-            if (layer->isVisible() && (frameRate.rate > 0 || voteType == LayerVoteType::NoVote)) {
-                info->setLayerVote(voteType, frameRate.rate);
+
+            if (frameRate.rate > 0 || voteType == LayerVoteType::NoVote) {
+                const auto type = layer->isVisible() ? voteType : LayerVoteType::NoVote;
+                info->setLayerVote(type, frameRate.rate);
             } else {
                 info->resetLayerVote();
             }
@@ -186,7 +193,7 @@ void LayerHistoryV2::partitionLayers(nsecs_t now) {
             trace(weak, LayerHistory::LayerVoteType::NoVote, 0);
         }
 
-        info->clearHistory();
+        info->onLayerInactive(now);
         std::swap(mLayerInfos[i], mLayerInfos[--mActiveLayersEnd]);
     }
 
@@ -207,7 +214,7 @@ void LayerHistoryV2::clear() {
     std::lock_guard lock(mLock);
 
     for (const auto& [layer, info] : activeLayers()) {
-        info->clearHistory();
+        info->clearHistory(systemTime());
     }
 }
 } // namespace android::scheduler::impl

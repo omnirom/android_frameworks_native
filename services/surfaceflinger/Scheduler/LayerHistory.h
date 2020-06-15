@@ -52,8 +52,18 @@ public:
     // Sets the display size. Client is responsible for synchronization.
     virtual void setDisplayArea(uint32_t displayArea) = 0;
 
+    // Sets whether a config change is pending to be applied
+    virtual void setConfigChangePending(bool pending) = 0;
+
+    // Represents which layer activity is recorded
+    enum class LayerUpdateType {
+        Buffer,       // a new buffer queued
+        AnimationTX,  // a new transaction with eAnimation flag set
+        SetFrameRate, // setFrameRate API was called
+    };
+
     // Marks the layer as active, and records the given state to its history.
-    virtual void record(Layer*, nsecs_t presentTime, nsecs_t now) = 0;
+    virtual void record(Layer*, nsecs_t presentTime, nsecs_t now, LayerUpdateType updateType) = 0;
 
     using Summary = std::vector<RefreshRateConfigs::LayerRequirement>;
 
@@ -78,8 +88,10 @@ public:
 
     void setDisplayArea(uint32_t /*displayArea*/) override {}
 
+    void setConfigChangePending(bool /*pending*/) override {}
+
     // Marks the layer as active, and records the given state to its history.
-    void record(Layer*, nsecs_t presentTime, nsecs_t now) override;
+    void record(Layer*, nsecs_t presentTime, nsecs_t now, LayerUpdateType updateType) override;
 
     // Rebuilds sets of active/inactive layers, and accumulates stats for active layers.
     android::scheduler::LayerHistory::Summary summarize(nsecs_t now) override;
@@ -134,8 +146,10 @@ public:
     // Sets the display size. Client is responsible for synchronization.
     void setDisplayArea(uint32_t displayArea) override { mDisplayArea = displayArea; }
 
+    void setConfigChangePending(bool pending) override { mConfigChangePending = pending; }
+
     // Marks the layer as active, and records the given state to its history.
-    void record(Layer*, nsecs_t presentTime, nsecs_t now) override;
+    void record(Layer*, nsecs_t presentTime, nsecs_t now, LayerUpdateType updateType) override;
 
     // Rebuilds sets of active/inactive layers, and accumulates stats for active layers.
     android::scheduler::LayerHistory::Summary summarize(nsecs_t /*now*/) override;
@@ -178,6 +192,9 @@ private:
 
     // Whether to use priority sent from WindowManager to determine the relevancy of the layer.
     const bool mUseFrameRatePriority;
+
+    // Whether a config change is in progress or not
+    std::atomic<bool> mConfigChangePending = false;
 };
 
 } // namespace impl

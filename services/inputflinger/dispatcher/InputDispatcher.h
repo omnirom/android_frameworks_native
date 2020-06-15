@@ -197,6 +197,11 @@ private:
     // All registered connections mapped by channel file descriptor.
     std::unordered_map<int, sp<Connection>> mConnectionsByFd GUARDED_BY(mLock);
 
+    sp<Connection> getConnectionLocked(const sp<IBinder>& inputConnectionToken) const
+            REQUIRES(mLock);
+
+    void removeConnectionLocked(const sp<Connection>& connection) REQUIRES(mLock);
+
     struct IBinderHash {
         std::size_t operator()(const sp<IBinder>& b) const {
             return std::hash<IBinder*>{}(b.get());
@@ -209,7 +214,6 @@ private:
     std::optional<int32_t> findGestureMonitorDisplayByTokenLocked(const sp<IBinder>& token)
             REQUIRES(mLock);
 
-    sp<Connection> getConnectionLocked(const sp<IBinder>& inputConnectionToken) REQUIRES(mLock);
 
     // Input channels that will receive a copy of all input events sent to the provided display.
     std::unordered_map<int32_t, std::vector<Monitor>> mGlobalMonitorsByDisplay GUARDED_BY(mLock);
@@ -344,6 +348,8 @@ private:
     nsecs_t mInputTargetWaitTimeoutTime GUARDED_BY(mLock);
     bool mInputTargetWaitTimeoutExpired GUARDED_BY(mLock);
     sp<IBinder> mInputTargetWaitApplicationToken GUARDED_BY(mLock);
+
+    bool shouldPruneInboundQueueLocked(const MotionEntry& motionEntry) REQUIRES(mLock);
 
     // Contains the last window which received a hover event.
     sp<InputWindowHandle> mLastHoverWindowHandle GUARDED_BY(mLock);
@@ -497,8 +503,8 @@ private:
     LatencyStatistics mTouchStatistics{TOUCH_STATS_REPORT_PERIOD};
 
     void reportTouchEventForStatistics(const MotionEntry& entry);
-    void updateDispatchStatistics(nsecs_t currentTime, const EventEntry& entry,
-                                  int32_t injectionResult, nsecs_t timeSpentWaitingForApplication);
+    void reportDispatchStatistics(std::chrono::nanoseconds eventDuration,
+                                  const Connection& connection, bool handled);
     void traceInboundQueueLengthLocked() REQUIRES(mLock);
     void traceOutboundQueueLength(const sp<Connection>& connection);
     void traceWaitQueueLength(const sp<Connection>& connection);

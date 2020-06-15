@@ -55,6 +55,7 @@ uint64_t getValidUsageBits() {
              hardware::hidl_enum_range<hardware::graphics::common::V1_2::BufferUsage>()) {
             bits = bits | bit;
         }
+        bits = bits | ((1 << 10) | (1 << 13) | (1 << 21) | (1 << 27));
         return bits;
     }();
     return validUsageBits;

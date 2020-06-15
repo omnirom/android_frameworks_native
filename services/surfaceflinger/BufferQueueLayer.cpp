@@ -31,6 +31,7 @@
 #include "SurfaceInterceptor.h"
 
 #include "FrameTracer/FrameTracer.h"
+#include "Scheduler/LayerHistory.h"
 #include "TimeStats/TimeStats.h"
 
 #include "frame_extn_intf.h"
@@ -62,8 +63,9 @@ void BufferQueueLayer::onLayerDisplayed(const sp<Fence>& releaseFence) {
     }
 }
 
-void BufferQueueLayer::setTransformHint(uint32_t orientation) const {
-    mConsumer->setTransformHint(orientation);
+void BufferQueueLayer::setTransformHint(ui::Transform::RotationFlags displayTransformHint) {
+    BufferLayer::setTransformHint(displayTransformHint);
+    mConsumer->setTransformHint(mTransformHint);
 }
 
 std::vector<OccupancyTracker::Segment> BufferQueueLayer::getOccupancyHistory(bool forceFlush) {
@@ -413,7 +415,8 @@ void BufferQueueLayer::onFrameAvailable(const BufferItem& item) {
     // Add this buffer from our internal queue tracker
     { // Autolock scope
         const nsecs_t presentTime = item.mIsAutoTimestamp ? 0 : item.mTimestamp;
-        mFlinger->mScheduler->recordLayerHistory(this, presentTime);
+        mFlinger->mScheduler->recordLayerHistory(this, presentTime,
+                                                 LayerHistory::LayerUpdateType::Buffer);
 
         Mutex::Autolock lock(mQueueItemLock);
         // Reset the frame number tracker when we receive the first buffer after
@@ -466,7 +469,7 @@ void BufferQueueLayer::onFrameAvailable(const BufferItem& item) {
         frameInfo.ref_latency = mFrameTracker.getPreviousGfxInfo();
         {
             Mutex::Autolock lock(mFlinger->mStateLock);
-            frameInfo.vsync_period = mFlinger->getVsyncPeriod();
+            frameInfo.vsync_period = mFlinger->mVsyncPeriod;
         }
         mLastTimeStamp = frameInfo.current_timestamp;
         {
@@ -544,10 +547,6 @@ void BufferQueueLayer::onFirstRef() {
     // BufferQueueCore::mMaxDequeuedBufferCount is default to 1
     if (!mFlinger->isLayerTripleBufferingDisabled()) {
         mProducer->setMaxDequeuedBufferCount(2);
-    }
-
-    if (const auto display = mFlinger->getDefaultDisplayDeviceLocked()) {
-        updateTransformHint(display);
     }
 
     if (mFlinger->mLayerExt) {

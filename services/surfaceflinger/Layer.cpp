@@ -119,6 +119,14 @@ Layer::Layer(const LayerCreationArgs& args)
     mCurrentState.metadata = args.metadata;
     mCurrentState.shadowRadius = 0.f;
     mCurrentState.treeHasFrameRateVote = false;
+    mCurrentState.fixedTransformHint = ui::Transform::ROT_INVALID;
+
+    if (args.flags & ISurfaceComposerClient::eNoColorFill) {
+        // Set an invalid color so there is no color fill.
+        mCurrentState.color.r = -1.0_hf;
+        mCurrentState.color.g = -1.0_hf;
+        mCurrentState.color.b = -1.0_hf;
+    }
 
     // drawing state & current state are identical
     mDrawingState = mCurrentState;
@@ -146,11 +154,10 @@ Layer::~Layer() {
     mFlinger->onLayerDestroyed(this);
 }
 
-LayerCreationArgs::LayerCreationArgs(SurfaceFlinger* flinger, const sp<Client> client,
-                                     std::string name, uint32_t w, uint32_t h, uint32_t flags,
-                                     LayerMetadata metadata)
+LayerCreationArgs::LayerCreationArgs(SurfaceFlinger* flinger, sp<Client> client, std::string name,
+                                     uint32_t w, uint32_t h, uint32_t flags, LayerMetadata metadata)
       : flinger(flinger),
-        client(client),
+        client(std::move(client)),
         name(std::move(name)),
         w(w),
         h(h),
@@ -224,13 +231,23 @@ void Layer::removeFromCurrentState() {
     mFlinger->markLayerPendingRemovalLocked(this);
 }
 
+sp<Layer> Layer::getRootLayer() {
+    sp<Layer> parent = getParent();
+    if (parent == nullptr) {
+        return this;
+    }
+    return parent->getRootLayer();
+}
+
 void Layer::onRemovedFromCurrentState() {
-    auto layersInTree = getLayersInTree(LayerVector::StateSet::Current);
+    // Use the root layer since we want to maintain the hierarchy for the entire subtree.
+    auto layersInTree = getRootLayer()->getLayersInTree(LayerVector::StateSet::Current);
     std::sort(layersInTree.begin(), layersInTree.end());
-    for (const auto& layer : layersInTree) {
+
+    traverse(LayerVector::StateSet::Current, [&](Layer* layer) {
         layer->removeFromCurrentState();
         layer->removeRelativeZ(layersInTree);
-    }
+    });
 }
 
 void Layer::addToCurrentState() {
@@ -722,9 +739,8 @@ std::vector<compositionengine::LayerFE::LayerSettings> Layer::prepareClientCompo
     return {*shadowSettings};
 }
 
-Hwc2::IComposerClient::Composition Layer::getCompositionType(
-        const sp<const DisplayDevice>& display) const {
-    const auto outputLayer = findOutputLayerForDisplay(display);
+Hwc2::IComposerClient::Composition Layer::getCompositionType(const DisplayDevice& display) const {
+    const auto outputLayer = findOutputLayerForDisplay(&display);
     if (outputLayer == nullptr) {
         return Hwc2::IComposerClient::Composition::INVALID;
     }
@@ -733,12 +749,6 @@ Hwc2::IComposerClient::Composition Layer::getCompositionType(
     } else {
         return Hwc2::IComposerClient::Composition::CLIENT;
     }
-}
-
-bool Layer::getClearClientTarget(const sp<const DisplayDevice>& display) const {
-    const auto outputLayer = findOutputLayerForDisplay(display);
-    LOG_FATAL_IF(!outputLayer);
-    return outputLayer->getState().clearClientTarget;
 }
 
 bool Layer::addSyncPoint(const std::shared_ptr<SyncPoint>& point) {
@@ -871,11 +881,14 @@ bool Layer::applyPendingStates(State* stateToCommit) {
         }
     }
 
-    // If we still have pending updates, wake SurfaceFlinger back up and point
-    // it at this layer so we can process them
+    // If we still have pending updates, we need to ensure SurfaceFlinger
+    // will keep calling doTransaction, and so we set the transaction flags.
+    // However, our pending states won't clear until a frame is available,
+    // and so there is no need to specifically trigger a wakeup. Rather
+    // we set the flags and wait for something else to wake us up.
     if (!mPendingStates.empty()) {
         setTransactionFlags(eTransactionNeeded);
-        mFlinger->setTransactionFlags(eTraversalNeeded);
+        mFlinger->setTransactionFlagsNoWake(eTraversalNeeded);
     }
 
     mCurrentState.modified = false;
@@ -1349,6 +1362,18 @@ bool Layer::setShadowRadius(float shadowRadius) {
     return true;
 }
 
+bool Layer::setFixedTransformHint(ui::Transform::RotationFlags fixedTransformHint) {
+    if (mCurrentState.fixedTransformHint == fixedTransformHint) {
+        return false;
+    }
+
+    mCurrentState.sequence++;
+    mCurrentState.fixedTransformHint = fixedTransformHint;
+    mCurrentState.modified = true;
+    setTransactionFlags(eTransactionNeeded);
+    return true;
+}
+
 void Layer::updateTreeHasFrameRateVote() {
     const auto traverseTree = [&](const LayerVector::Visitor& visitor) {
         auto parent = getParent();
@@ -1364,8 +1389,15 @@ void Layer::updateTreeHasFrameRateVote() {
     // First traverse the tree and count how many layers has votes
     int layersWithVote = 0;
     traverseTree([&layersWithVote](Layer* layer) {
-        if (layer->mCurrentState.frameRate.rate > 0 ||
-            layer->mCurrentState.frameRate.type == FrameRateCompatibility::NoVote) {
+        const auto layerVotedWithDefaultCompatibility = layer->mCurrentState.frameRate.rate > 0 &&
+                layer->mCurrentState.frameRate.type == FrameRateCompatibility::Default;
+        const auto layerVotedWithNoVote =
+                layer->mCurrentState.frameRate.type == FrameRateCompatibility::NoVote;
+
+        // We do not count layers that are ExactOrMultiple for the same reason
+        // we are allowing touch boost for those layers. See
+        // RefreshRateConfigs::getBestRefreshRate for more details.
+        if (layerVotedWithDefaultCompatibility || layerVotedWithNoVote) {
             layersWithVote++;
         }
     });
@@ -1396,7 +1428,8 @@ bool Layer::setFrameRate(FrameRate frameRate) {
     }
 
     // Activate the layer in Scheduler's LayerHistory
-    mFlinger->mScheduler->recordLayerHistory(this, systemTime());
+    mFlinger->mScheduler->recordLayerHistory(this, systemTime(),
+                                             LayerHistory::LayerUpdateType::SetFrameRate);
 
     mCurrentState.sequence++;
     mCurrentState.frameRate = frameRate;
@@ -1475,20 +1508,12 @@ uint32_t Layer::getEffectiveUsage(uint32_t usage) const {
     return usage;
 }
 
-void Layer::updateTransformHint(const sp<const DisplayDevice>& display) const {
-    uint32_t orientation = 0;
-    // Disable setting transform hint if the debug flag is set.
-    if (!mFlinger->mDebugDisableTransformHint) {
-        // The transform hint is used to improve performance, but we can
-        // only have a single transform hint, it cannot
-        // apply to all displays.
-        const ui::Transform& planeTransform = display->getTransform();
-        orientation = planeTransform.getOrientation();
-        if (orientation & ui::Transform::ROT_INVALID) {
-            orientation = 0;
-        }
+void Layer::updateTransformHint(ui::Transform::RotationFlags transformHint) {
+    if (mFlinger->mDebugDisableTransformHint || transformHint & ui::Transform::ROT_INVALID) {
+        transformHint = ui::Transform::ROT_0;
     }
-    setTransformHint(orientation);
+
+    setTransformHint(transformHint);
 }
 
 // ----------------------------------------------------------------------------
@@ -1496,18 +1521,18 @@ void Layer::updateTransformHint(const sp<const DisplayDevice>& display) const {
 // ----------------------------------------------------------------------------
 
 // TODO(marissaw): add new layer state info to layer debugging
-LayerDebugInfo Layer::getLayerDebugInfo() const {
+LayerDebugInfo Layer::getLayerDebugInfo(const DisplayDevice* display) const {
     using namespace std::string_literals;
 
     LayerDebugInfo info;
     const State& ds = getDrawingState();
     info.mName = getName();
-    sp<Layer> parent = getParent();
+    sp<Layer> parent = mDrawingParent.promote();
     info.mParentName = parent ? parent->getName() : "none"s;
     info.mType = getType();
     info.mTransparentRegion = ds.activeTransparentRegion_legacy;
 
-    info.mVisibleRegion = debugGetVisibleRegionOnDefaultDisplay();
+    info.mVisibleRegion = getVisibleRegion(display);
     info.mSurfaceDamageRegion = surfaceDamageRegion;
     info.mLayerStack = getLayerStack();
     info.mX = ds.active_legacy.transform.tx();
@@ -1578,8 +1603,8 @@ std::string Layer::frameRateCompatibilityString(Layer::FrameRateCompatibility co
     }
 }
 
-void Layer::miniDump(std::string& result, const sp<DisplayDevice>& displayDevice) const {
-    auto outputLayer = findOutputLayerForDisplay(displayDevice);
+void Layer::miniDump(std::string& result, const DisplayDevice& display) const {
+    const auto outputLayer = findOutputLayerForDisplay(&display);
     if (!outputLayer) {
         return;
     }
@@ -1607,7 +1632,7 @@ void Layer::miniDump(std::string& result, const sp<DisplayDevice>& displayDevice
     }
     StringAppendF(&result, "  %10d | ", mWindowType);
     StringAppendF(&result, "  %10d | ", mLayerClass);
-    StringAppendF(&result, "%10s | ", toString(getCompositionType(displayDevice)).c_str());
+    StringAppendF(&result, "%10s | ", toString(getCompositionType(display)).c_str());
     StringAppendF(&result, "%10s | ", toString(outputLayerState.bufferTransform).c_str());
     const Rect& frame = outputLayerState.displayFrame;
     StringAppendF(&result, "%4d %4d %4d %4d | ", frame.left, frame.top, frame.right, frame.bottom);
@@ -2094,6 +2119,16 @@ half Layer::getAlpha() const {
     return parentAlpha * getDrawingState().color.a;
 }
 
+ui::Transform::RotationFlags Layer::getFixedTransformHint() const {
+    ui::Transform::RotationFlags fixedTransformHint = mCurrentState.fixedTransformHint;
+    if (fixedTransformHint != ui::Transform::ROT_INVALID) {
+        return fixedTransformHint;
+    }
+    const auto& p = mCurrentParent.promote();
+    if (!p) return fixedTransformHint;
+    return p->getFixedTransformHint();
+}
+
 half4 Layer::getColor() const {
     const half4 color(getDrawingState().color);
     return half4(color.r, color.g, color.b, getAlpha());
@@ -2115,7 +2150,9 @@ Layer::RoundedCornerState Layer::getRoundedCornerState() const {
             // but a transform matrix can define horizontal and vertical scales.
             // Let's take the average between both of them and pass into the shader, practically we
             // never do this type of transformation on windows anyway.
-            parentState.radius *= (t[0][0] + t[1][1]) / 2.0f;
+            auto scaleX = sqrtf(t[0][0] * t[0][0] + t[0][1] * t[0][1]);
+            auto scaleY = sqrtf(t[1][0] * t[1][0] + t[1][1] * t[1][1]);
+            parentState.radius *= (scaleX + scaleY) / 2.0f;
             return parentState;
         }
     }
@@ -2170,27 +2207,28 @@ void Layer::setInputInfo(const InputWindowInfo& info) {
 }
 
 LayerProto* Layer::writeToProto(LayersProto& layersProto, uint32_t traceFlags,
-                                const sp<const DisplayDevice>& device) const {
+                                const DisplayDevice* display) const {
     LayerProto* layerProto = layersProto.add_layers();
-    writeToProtoDrawingState(layerProto, traceFlags);
+    writeToProtoDrawingState(layerProto, traceFlags, display);
     writeToProtoCommonState(layerProto, LayerVector::StateSet::Drawing, traceFlags);
 
     if (traceFlags & SurfaceTracing::TRACE_COMPOSITION) {
         // Only populate for the primary display.
-        if (device) {
-            const Hwc2::IComposerClient::Composition compositionType = getCompositionType(device);
+        if (display) {
+            const Hwc2::IComposerClient::Composition compositionType = getCompositionType(*display);
             layerProto->set_hwc_composition_type(static_cast<HwcCompositionType>(compositionType));
         }
     }
 
     for (const sp<Layer>& layer : mDrawingChildren) {
-        layer->writeToProto(layersProto, traceFlags, device);
+        layer->writeToProto(layersProto, traceFlags, display);
     }
 
     return layerProto;
 }
 
-void Layer::writeToProtoDrawingState(LayerProto* layerInfo, uint32_t traceFlags) const {
+void Layer::writeToProtoDrawingState(LayerProto* layerInfo, uint32_t traceFlags,
+                                     const DisplayDevice* display) const {
     ui::Transform transform = getTransform();
 
     if (traceFlags & SurfaceTracing::TRACE_CRITICAL) {
@@ -2224,7 +2262,7 @@ void Layer::writeToProtoDrawingState(LayerProto* layerInfo, uint32_t traceFlags)
                                                [&]() { return layerInfo->mutable_position(); });
         LayerProtoHelper::writeToProto(mBounds, [&]() { return layerInfo->mutable_bounds(); });
         if (traceFlags & SurfaceTracing::TRACE_COMPOSITION) {
-            LayerProtoHelper::writeToProto(debugGetVisibleRegionOnDefaultDisplay(),
+            LayerProtoHelper::writeToProto(getVisibleRegion(display),
                                            [&]() { return layerInfo->mutable_visible_region(); });
         }
         LayerProtoHelper::writeToProto(surfaceDamageRegion,
@@ -2333,6 +2371,16 @@ bool Layer::isRemovedFromCurrentState() const  {
 }
 
 InputWindowInfo Layer::fillInputInfo() {
+    if (!hasInputInfo()) {
+        mDrawingState.inputInfo.name = getName();
+        mDrawingState.inputInfo.ownerUid = mCallingUid;
+        mDrawingState.inputInfo.ownerPid = mCallingPid;
+        mDrawingState.inputInfo.inputFeatures =
+            InputWindowInfo::INPUT_FEATURE_NO_INPUT_CHANNEL;
+        mDrawingState.inputInfo.layoutParamsFlags = InputWindowInfo::FLAG_NOT_TOUCH_MODAL;
+        mDrawingState.inputInfo.displayId = getLayerStack();
+    }
+
     InputWindowInfo info = mDrawingState.inputInfo;
     info.id = sequence;
 
@@ -2414,7 +2462,7 @@ sp<Layer> Layer::getClonedRoot() {
     return mDrawingParent.promote()->getClonedRoot();
 }
 
-bool Layer::hasInput() const {
+bool Layer::hasInputInfo() const {
     return mDrawingState.inputInfo.token != nullptr;
 }
 
@@ -2423,31 +2471,23 @@ bool Layer::canReceiveInput() const {
 }
 
 compositionengine::OutputLayer* Layer::findOutputLayerForDisplay(
-        const sp<const DisplayDevice>& display) const {
+        const DisplayDevice* display) const {
+    if (!display) return nullptr;
     return display->getCompositionDisplay()->getOutputLayerForLayer(getCompositionEngineLayerFE());
 }
 
-Region Layer::debugGetVisibleRegionOnDefaultDisplay() const {
-    sp<DisplayDevice> displayDevice = mFlinger->getDefaultDisplayDeviceLocked();
-    if (displayDevice == nullptr) {
-        return {};
-    }
-
-    auto outputLayer = findOutputLayerForDisplay(displayDevice);
-    if (outputLayer == nullptr) {
-        return {};
-    }
-
-    return outputLayer->getState().visibleRegion;
+Region Layer::getVisibleRegion(const DisplayDevice* display) const {
+    const auto outputLayer = findOutputLayerForDisplay(display);
+    return outputLayer ? outputLayer->getState().visibleRegion : Region();
 }
 
 Region Layer::getVisibleNonTransparentRegion() const {
-    sp<DisplayDevice> displayDevice = mFlinger->getDefaultDisplayDeviceLocked();
+    sp<const DisplayDevice> displayDevice = mFlinger->getDefaultDisplayDevice();
     if (displayDevice == nullptr) {
         return {};
     }
 
-    auto outputLayer = findOutputLayerForDisplay(displayDevice);
+    auto outputLayer = findOutputLayerForDisplay(displayDevice.get());
     if (outputLayer == nullptr) {
         return {};
     }

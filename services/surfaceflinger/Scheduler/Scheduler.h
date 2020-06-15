@@ -39,6 +39,7 @@
 namespace android {
 
 using namespace std::chrono_literals;
+using scheduler::LayerHistory;
 
 class DispSync;
 class FenceTime;
@@ -105,7 +106,7 @@ public:
     // Otherwise, if hardware vsync is not already enabled then this method will
     // no-op.
     // The period is the vsync period from the current display configuration.
-    void resyncToHardwareVsync(bool makeAvailable, nsecs_t period);
+    void resyncToHardwareVsync(bool makeAvailable, nsecs_t period, bool force_resync = false);
     void resync();
 
     // Passes a vsync sample to DispSync. periodFlushed will be true if
@@ -118,7 +119,8 @@ public:
 
     // Layers are registered on creation, and unregistered when the weak reference expires.
     void registerLayer(Layer*);
-    void recordLayerHistory(Layer*, nsecs_t presentTime);
+    void recordLayerHistory(Layer*, nsecs_t presentTime, LayerHistory::LayerUpdateType updateType);
+    void setConfigChangePending(bool pending);
 
     // Detects content using layer history, and selects a matching refresh rate.
     void chooseRefreshRateForContent();
@@ -177,14 +179,15 @@ private:
 
     // handles various timer features to change the refresh rate.
     template <class T>
-    void handleTimerStateChanged(T* currentState, T newState, bool eventOnContentDetection);
+    bool handleTimerStateChanged(T* currentState, T newState, bool eventOnContentDetection);
 
-    void setVsyncPeriod(nsecs_t period);
+    void setVsyncPeriod(nsecs_t period, bool force_resync = false);
 
     // This function checks whether individual features that are affecting the refresh rate
     // selection were initialized, prioritizes them, and calculates the HwcConfigIndexType
     // for the suggested refresh rate.
-    HwcConfigIndexType calculateRefreshRateConfigIndexType() REQUIRES(mFeatureStateLock);
+    HwcConfigIndexType calculateRefreshRateConfigIndexType(bool* touchConsidered = nullptr)
+            REQUIRES(mFeatureStateLock);
 
     // Stores EventThread associated with a given VSyncSource, and an initial EventThreadConnection.
     struct Connection {
@@ -205,14 +208,14 @@ private:
 
     std::atomic<nsecs_t> mLastResyncTime = 0;
 
+    // Whether to use idle timer callbacks that support the kernel timer.
+    const bool mSupportKernelTimer;
+
     std::unique_ptr<DispSync> mPrimaryDispSync;
     std::unique_ptr<EventControlThread> mEventControlThread;
 
     // Used to choose refresh rate if content detection is enabled.
-    std::unique_ptr<scheduler::LayerHistory> mLayerHistory;
-
-    // Whether to use idle timer callbacks that support the kernel timer.
-    const bool mSupportKernelTimer;
+    std::unique_ptr<LayerHistory> mLayerHistory;
 
     // Timer that records time between requests for next vsync.
     std::optional<scheduler::OneShotTimer> mIdleTimer;
@@ -234,7 +237,7 @@ private:
         TimerState displayPowerTimer = TimerState::Expired;
 
         std::optional<HwcConfigIndexType> configId;
-        scheduler::LayerHistory::Summary contentRequirements;
+        LayerHistory::Summary contentRequirements;
 
         bool isDisplayPowerStateNormal = true;
     } mFeatures GUARDED_BY(mFeatureStateLock);

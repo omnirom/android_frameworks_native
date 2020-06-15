@@ -108,6 +108,7 @@ struct InputWindowInfo {
         TYPE_ACCESSIBILITY_OVERLAY = FIRST_SYSTEM_WINDOW + 32,
         TYPE_DOCK_DIVIDER = FIRST_SYSTEM_WINDOW + 34,
         TYPE_NOTIFICATION_SHADE = FIRST_SYSTEM_WINDOW + 40,
+        TYPE_TRUSTED_APPLICATION_OVERLAY = FIRST_SYSTEM_WINDOW + 42,
         LAST_SYSTEM_WINDOW = 2999,
     };
 
@@ -219,6 +220,11 @@ public:
 
     inline nsecs_t getDispatchingTimeout(nsecs_t defaultValue) const {
         return mInfo.token ? mInfo.dispatchingTimeout : defaultValue;
+    }
+
+    inline std::chrono::nanoseconds getDispatchingTimeout(
+            std::chrono::nanoseconds defaultValue) const {
+        return mInfo.token ? std::chrono::nanoseconds(mInfo.dispatchingTimeout) : defaultValue;
     }
 
     /**
