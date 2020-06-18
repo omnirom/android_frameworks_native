@@ -2216,9 +2216,9 @@ void SurfaceFlinger::onMessageInvalidate(nsecs_t expectedVSyncTime) {
                 expectedPresentTime = mScheduler->getDispSyncExpectedPresentTime(now);
                 if (layer->shouldPresentNow(expectedPresentTime)) {
                     int layerQueuedFrames = layer->getQueuedFrameCount();
-                    Mutex::Autolock lock(mDolphinStateLock);
+                    const auto& drawingState{layer->getDrawingState()};
                     if (maxQueuedFrames < layerQueuedFrames &&
-                        !layer->getVisibleNonTransparentRegion().isEmpty()) {
+                        layer->isOpaque(drawingState)) {
                         maxQueuedFrames = layerQueuedFrames;
                         mNameLayerMax = layer->getName();
                     }
@@ -2412,10 +2412,7 @@ void SurfaceFlinger::onMessageRefresh() {
         }
     }
 
-    {
-        Mutex::Autolock lock(mDolphinStateLock);
-        mCompositionEngine->present(refreshArgs);
-    }
+    mCompositionEngine->present(refreshArgs);
 
     mTimeStats->recordFrameDuration(mFrameStartTime, systemTime());
     // Reset the frame start time now that we've recorded this frame.

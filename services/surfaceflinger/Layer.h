@@ -817,8 +817,6 @@ public:
         return parentBounds;
     }
 
-    Region getVisibleNonTransparentRegion() const;
-
     /**
      * Returns the cropped buffer size or the layer crop if the layer has no buffer. Return
      * INVALID_RECT if the layer has no buffer and no crop.
