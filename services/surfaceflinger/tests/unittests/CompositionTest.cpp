@@ -125,17 +125,7 @@ public:
     }
 
     void setupScheduler() {
-        std::vector<scheduler::RefreshRateConfigs::InputConfig> configs{{/*hwcId=*/0, 16666667}};
-        mFlinger.mutableRefreshRateConfigs() =
-                std::make_unique<scheduler::RefreshRateConfigs>(/*refreshRateSwitching=*/false,
-                                                                configs,
-                                                                /*currentConfig=*/0);
-        mFlinger.mutableRefreshRateStats() =
-                std::make_unique<scheduler::RefreshRateStats>(*mFlinger.mutableRefreshRateConfigs(),
-                                                              *mFlinger.mutableTimeStats(),
-                                                              /*currentConfig=*/0,
-                                                              /*powerMode=*/HWC_POWER_MODE_OFF);
-        mScheduler = new TestableScheduler(*mFlinger.mutableRefreshRateConfigs());
+        mScheduler = new TestableScheduler(mFlinger.mutableRefreshRateConfigs());
         mScheduler->mutableEventControlThread().reset(mEventControlThread);
         mScheduler->mutablePrimaryDispSync().reset(mPrimaryDispSync);
         EXPECT_CALL(*mEventThread.get(), registerDisplayEventConnection(_));

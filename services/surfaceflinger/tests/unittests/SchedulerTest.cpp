@@ -3,13 +3,13 @@
 
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
+
 #include <log/log.h>
 
 #include <mutex>
 
 #include "Scheduler/EventControlThread.h"
 #include "Scheduler/EventThread.h"
-#include "Scheduler/RefreshRateConfigs.h"
 #include "Scheduler/Scheduler.h"
 #include "mock/MockEventThread.h"
 
@@ -34,7 +34,7 @@ protected:
         MOCK_METHOD0(requestNextVsync, void());
     };
 
-    std::unique_ptr<scheduler::RefreshRateConfigs> mRefreshRateConfigs;
+    scheduler::RefreshRateConfigs mRefreshRateConfigs;
 
     /**
      * This mock Scheduler class uses implementation of mock::EventThread but keeps everything else
@@ -73,14 +73,9 @@ SchedulerTest::SchedulerTest() {
             ::testing::UnitTest::GetInstance()->current_test_info();
     ALOGD("**** Setting up for %s.%s\n", test_info->test_case_name(), test_info->name());
 
-    std::vector<scheduler::RefreshRateConfigs::InputConfig> configs{{/*hwcId=*/0, 16666667}};
-    mRefreshRateConfigs =
-            std::make_unique<scheduler::RefreshRateConfigs>(/*refreshRateSwitching=*/false, configs,
-                                                            /*currentConfig=*/0);
-
     std::unique_ptr<mock::EventThread> eventThread = std::make_unique<mock::EventThread>();
     mEventThread = eventThread.get();
-    mScheduler = std::make_unique<MockScheduler>(*mRefreshRateConfigs, std::move(eventThread));
+    mScheduler = std::make_unique<MockScheduler>(mRefreshRateConfigs, std::move(eventThread));
     EXPECT_CALL(*mEventThread, registerDisplayEventConnection(_)).WillOnce(Return(0));
 
     mEventThreadConnection = new MockEventThreadConnection(mEventThread);
@@ -90,7 +85,7 @@ SchedulerTest::SchedulerTest() {
     EXPECT_CALL(*mEventThread, createEventConnection(_, _))
             .WillRepeatedly(Return(mEventThreadConnection));
 
-    mConnectionHandle = mScheduler->createConnection("appConnection", 16, 16,
+    mConnectionHandle = mScheduler->createConnection("appConnection", 16, 16, ResyncCallback(),
                                                      impl::EventThread::InterceptVSyncsCallback());
     EXPECT_TRUE(mConnectionHandle != nullptr);
 }
@@ -112,7 +107,7 @@ TEST_F(SchedulerTest, testNullPtr) {
     sp<IDisplayEventConnection> returnedValue;
     ASSERT_NO_FATAL_FAILURE(
             returnedValue =
-                    mScheduler->createDisplayEventConnection(nullptr,
+                    mScheduler->createDisplayEventConnection(nullptr, ResyncCallback(),
                                                              ISurfaceComposer::
                                                                      eConfigChangedSuppress));
     EXPECT_TRUE(returnedValue == nullptr);
@@ -135,7 +130,7 @@ TEST_F(SchedulerTest, invalidConnectionHandle) {
     sp<IDisplayEventConnection> returnedValue;
     ASSERT_NO_FATAL_FAILURE(
             returnedValue =
-                    mScheduler->createDisplayEventConnection(connectionHandle,
+                    mScheduler->createDisplayEventConnection(connectionHandle, ResyncCallback(),
                                                              ISurfaceComposer::
                                                                      eConfigChangedSuppress));
     EXPECT_TRUE(returnedValue == nullptr);
@@ -166,7 +161,7 @@ TEST_F(SchedulerTest, validConnectionHandle) {
     sp<IDisplayEventConnection> returnedValue;
     ASSERT_NO_FATAL_FAILURE(
             returnedValue =
-                    mScheduler->createDisplayEventConnection(mConnectionHandle,
+                    mScheduler->createDisplayEventConnection(mConnectionHandle, ResyncCallback(),
                                                              ISurfaceComposer::
                                                                      eConfigChangedSuppress));
     EXPECT_TRUE(returnedValue != nullptr);
