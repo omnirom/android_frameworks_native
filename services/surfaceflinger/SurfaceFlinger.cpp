@@ -24,6 +24,7 @@
 
 #include "SurfaceFlinger.h"
 
+#include <android-base/properties.h>
 #include <android/configuration.h>
 #include <android/hardware/configstore/1.0/ISurfaceFlingerConfigs.h>
 #include <android/hardware/configstore/1.1/ISurfaceFlingerConfigs.h>
@@ -269,7 +270,7 @@ const String16 sHardwareTest("android.permission.HARDWARE_TEST");
 const String16 sAccessSurfaceFlinger("android.permission.ACCESS_SURFACE_FLINGER");
 const String16 sReadFramebuffer("android.permission.READ_FRAME_BUFFER");
 const String16 sDump("android.permission.DUMP");
-const char* KERNEL_IDLE_TIMER_PROP = "vendor.display.enable_kernel_idle_timer";
+const char* KERNEL_IDLE_TIMER_PROP = "graphics.display.kernel_idle_timer.enabled";
 
 // ---------------------------------------------------------------------------
 int64_t SurfaceFlinger::dispSyncPresentTimeOffset;
@@ -545,6 +546,9 @@ SurfaceFlinger::SurfaceFlinger(Factory& factory) : SurfaceFlinger(factory, SkipI
     }
 
     useFrameRateApi = use_frame_rate_api(true);
+
+    mKernelIdleTimerEnabled = mSupportKernelIdleTimer = sysprop::support_kernel_idle_timer(false);
+    base::SetProperty(KERNEL_IDLE_TIMER_PROP, mKernelIdleTimerEnabled ? "true" : "false");
 
     mDolphinHandle = dlopen("libdolphin.so", RTLD_NOW);
     if (!mDolphinHandle) {
@@ -1285,8 +1289,8 @@ void SurfaceFlinger::setActiveConfigInternal() {
         const nsecs_t vsyncPeriod =
                 mRefreshRateConfigs->getRefreshRateFromConfigId(mUpcomingActiveConfig.configId)
                         .getVsyncPeriod();
-        mScheduler->onConfigChanged(mAppConnectionHandle, display->getId()->value,
-                                    mUpcomingActiveConfig.configId, vsyncPeriod);
+        mScheduler->onPrimaryDisplayConfigChanged(mAppConnectionHandle, display->getId()->value,
+                                                  mUpcomingActiveConfig.configId, vsyncPeriod);
     }
 }
 
@@ -1927,13 +1931,13 @@ void SurfaceFlinger::setVsyncEnabledInternal(bool enabled) {
         // Disable current vsync source before enabling the next source
         if (mActiveVsyncSource) {
             displayId = mActiveVsyncSource->getId();
-            setVsyncEnabledInHWC(*displayId, hal::Vsync::DISABLE);
+            getHwComposer().setVsyncEnabled(*displayId, hal::Vsync::DISABLE);
         }
         displayId = mNextVsyncSource->getId();
     } else if (mActiveVsyncSource) {
         displayId = mActiveVsyncSource->getId();
     }
-    setVsyncEnabledInHWC(*displayId, mHWCVsyncPendingState);
+    getHwComposer().setVsyncEnabled(*displayId, mHWCVsyncPendingState);
     if (mNextVsyncSource) {
         mActiveVsyncSource = mNextVsyncSource;
         mNextVsyncSource = NULL;
@@ -2338,8 +2342,9 @@ bool SurfaceFlinger::handleMessageTransaction() {
 
     bool flushedATransaction = flushTransactionQueues();
 
-    bool runHandleTransaction = transactionFlags &&
-            ((transactionFlags != eTransactionFlushNeeded) || flushedATransaction);
+    bool runHandleTransaction =
+            (transactionFlags && (transactionFlags != eTransactionFlushNeeded)) ||
+            flushedATransaction;
 
     if (runHandleTransaction) {
         handleTransaction(eTransactionMask);
@@ -3203,7 +3208,8 @@ void SurfaceFlinger::handleTransactionLocked(uint32_t transactionFlags)
      * (perform the transaction for each of them if needed)
      */
 
-    if ((transactionFlags & eTraversalNeeded) || mTraversalNeededMainThread) {
+    if ((transactionFlags & eTraversalNeeded) || mForceTraversal) {
+        mForceTraversal = false;
         mCurrentState.traverse([&](Layer* layer) {
             uint32_t trFlags = layer->getTransactionFlags(eTransactionNeeded);
             if (!trFlags) return;
@@ -3216,7 +3222,6 @@ void SurfaceFlinger::handleTransactionLocked(uint32_t transactionFlags)
                 mInputInfoChanged = true;
             }
         });
-        mTraversalNeededMainThread = false;
     }
 
     /*
@@ -3434,8 +3439,8 @@ void SurfaceFlinger::initScheduler(DisplayId primaryDisplayId) {
     // anyway since there are no connected apps at this point.
     const nsecs_t vsyncPeriod =
             mRefreshRateConfigs->getRefreshRateFromConfigId(currentConfig).getVsyncPeriod();
-    mScheduler->onConfigChanged(mAppConnectionHandle, primaryDisplayId.value, currentConfig,
-                                vsyncPeriod);
+    mScheduler->onPrimaryDisplayConfigChanged(mAppConnectionHandle, primaryDisplayId.value,
+                                              currentConfig, vsyncPeriod);
 }
 
 void SurfaceFlinger::commitTransaction()
@@ -3674,7 +3679,7 @@ uint32_t SurfaceFlinger::getTransactionFlags(uint32_t flags) {
 }
 
 uint32_t SurfaceFlinger::setTransactionFlags(uint32_t flags) {
-    return setTransactionFlags(flags, Scheduler::TransactionStart::NORMAL);
+    return setTransactionFlags(flags, Scheduler::TransactionStart::Normal);
 }
 
 uint32_t SurfaceFlinger::setTransactionFlags(uint32_t flags,
@@ -3687,8 +3692,8 @@ uint32_t SurfaceFlinger::setTransactionFlags(uint32_t flags,
     return old;
 }
 
-uint32_t SurfaceFlinger::setTransactionFlagsNoWake(uint32_t flags) {
-    return mTransactionFlags.fetch_or(flags);
+void SurfaceFlinger::setTraversalNeeded() {
+    mForceTraversal = true;
 }
 
 bool SurfaceFlinger::flushTransactionQueues() {
@@ -3888,18 +3893,39 @@ void SurfaceFlinger::applyTransactionState(
     // so we don't have to wake up again next frame to preform an uneeded traversal.
     if (isMainThread && (transactionFlags & eTraversalNeeded)) {
         transactionFlags = transactionFlags & (~eTraversalNeeded);
-        mTraversalNeededMainThread = true;
+        mForceTraversal = true;
     }
+
+    const auto transactionStart = [](uint32_t flags) {
+        if (flags & eEarlyWakeup) {
+            return Scheduler::TransactionStart::Early;
+        }
+        if (flags & eExplicitEarlyWakeupEnd) {
+            return Scheduler::TransactionStart::EarlyEnd;
+        }
+        if (flags & eExplicitEarlyWakeupStart) {
+            return Scheduler::TransactionStart::EarlyStart;
+        }
+        return Scheduler::TransactionStart::Normal;
+    }(flags);
 
     if (transactionFlags) {
         if (mInterceptor->isEnabled()) {
             mInterceptor->saveTransaction(states, mCurrentState.displays, displays, flags);
         }
 
+        // TODO(b/159125966): Remove eEarlyWakeup completly as no client should use this flag
+        if (flags & eEarlyWakeup) {
+            ALOGW("eEarlyWakeup is deprecated. Use eExplicitEarlyWakeup[Start|End]");
+        }
+
+        if (!privileged && (flags & (eExplicitEarlyWakeupStart | eExplicitEarlyWakeupEnd))) {
+            ALOGE("Only WindowManager is allowed to use eExplicitEarlyWakeup[Start|End] flags");
+            flags &= ~(eExplicitEarlyWakeupStart | eExplicitEarlyWakeupEnd);
+        }
+
         // this triggers the transaction
-        const auto start = (flags & eEarlyWakeup) ? Scheduler::TransactionStart::EARLY
-                                                  : Scheduler::TransactionStart::NORMAL;
-        setTransactionFlags(transactionFlags, start);
+        setTransactionFlags(transactionFlags, transactionStart);
 
         if (flags & eAnimation) {
             mAnimTransactionPending = true;
@@ -3935,6 +3961,13 @@ void SurfaceFlinger::applyTransactionState(
                 mPendingSyncInputWindows = false;
                 break;
             }
+        }
+    } else {
+        // even if a transaction is not needed, we need to update VsyncModulator
+        // about explicit early indications
+        if (transactionStart == Scheduler::TransactionStart::EarlyStart ||
+            transactionStart == Scheduler::TransactionStart::EarlyEnd) {
+            mVSyncModulator->setTransactionStart(transactionStart);
         }
     }
 }
@@ -4611,13 +4644,6 @@ void SurfaceFlinger::initializeDisplays() {
     static_cast<void>(schedule([this]() MAIN_THREAD { onInitializeDisplays(); }));
 }
 
-void SurfaceFlinger::setVsyncEnabledInHWC(DisplayId displayId, hal::Vsync enabled) {
-    if (mHWCVsyncState != enabled) {
-        getHwComposer().setVsyncEnabled(displayId, enabled);
-        mHWCVsyncState = enabled;
-    }
-}
-
 void SurfaceFlinger::setPowerModeInternal(const sp<DisplayDevice>& display, hal::PowerMode mode) {
     if (display->isVirtual()) {
         ALOGE("%s: Invalid operation on virtual display", __FUNCTION__);
@@ -4654,7 +4680,7 @@ void SurfaceFlinger::setPowerModeInternal(const sp<DisplayDevice>& display, hal:
         getHwComposer().setPowerMode(*displayId, mode);
         if (isDummyDisplay) {
             if (display->isPrimary() && mode != hal::PowerMode::DOZE_SUSPEND) {
-                setVsyncEnabledInHWC(*displayId, mHWCVsyncPendingState);
+                getHwComposer().setVsyncEnabled(*displayId, mHWCVsyncPendingState);
                 mScheduler->onScreenAcquired(mAppConnectionHandle);
                 mScheduler->resyncToHardwareVsync(true, getVsyncPeriod());
             }
@@ -4677,7 +4703,7 @@ void SurfaceFlinger::setPowerModeInternal(const sp<DisplayDevice>& display, hal:
             }
 
             // Make sure HWVsync is disabled before turning off the display
-            setVsyncEnabledInHWC(*displayId, hal::Vsync::DISABLE);
+            getHwComposer().setVsyncEnabled(*displayId, hal::Vsync::DISABLE);
         } else {
             updateVsyncSource();
         }
@@ -5814,8 +5840,7 @@ void SurfaceFlinger::kernelTimerChanged(bool expired) {
         const auto& min = mRefreshRateConfigs->getMinRefreshRate();
 
         if (current != min) {
-            const auto kernelTimerEnabled = property_get_bool(KERNEL_IDLE_TIMER_PROP, false);
-            const bool timerExpired = kernelTimerEnabled && expired;
+            const bool timerExpired = mKernelIdleTimerEnabled && expired;
 
             if (Mutex::Autolock lock(mStateLock); mRefreshRateOverlay) {
                 mRefreshRateOverlay->changeRefreshRate(timerExpired ? min : current);
@@ -5823,6 +5848,35 @@ void SurfaceFlinger::kernelTimerChanged(bool expired) {
             mEventQueue->invalidate();
         }
     }));
+}
+
+void SurfaceFlinger::toggleKernelIdleTimer() {
+    using KernelIdleTimerAction = scheduler::RefreshRateConfigs::KernelIdleTimerAction;
+
+    // If the support for kernel idle timer is disabled in SF code, don't do anything.
+    if (!mSupportKernelIdleTimer) {
+        return;
+    }
+    const KernelIdleTimerAction action = mRefreshRateConfigs->getIdleTimerAction();
+
+    switch (action) {
+        case KernelIdleTimerAction::TurnOff:
+            if (mKernelIdleTimerEnabled) {
+                ATRACE_INT("KernelIdleTimer", 0);
+                base::SetProperty(KERNEL_IDLE_TIMER_PROP, "false");
+                mKernelIdleTimerEnabled = false;
+            }
+            break;
+        case KernelIdleTimerAction::TurnOn:
+            if (!mKernelIdleTimerEnabled) {
+                ATRACE_INT("KernelIdleTimer", 1);
+                base::SetProperty(KERNEL_IDLE_TIMER_PROP, "true");
+                mKernelIdleTimerEnabled = true;
+            }
+            break;
+        case KernelIdleTimerAction::NoChange:
+            break;
+    }
 }
 
 // A simple RAII class to disconnect from an ANativeWindow* when it goes out of scope
@@ -6429,8 +6483,8 @@ status_t SurfaceFlinger::setDesiredDisplayConfigSpecsInternal(
         const nsecs_t vsyncPeriod = getHwComposer()
                                             .getConfigs(*displayId)[policy->defaultConfig.value()]
                                             ->getVsyncPeriod();
-        mScheduler->onConfigChanged(mAppConnectionHandle, display->getId()->value,
-                                    policy->defaultConfig, vsyncPeriod);
+        mScheduler->onNonPrimaryDisplayConfigChanged(mAppConnectionHandle, display->getId()->value,
+                                                     policy->defaultConfig, vsyncPeriod);
         return NO_ERROR;
     }
 
@@ -6456,14 +6510,14 @@ status_t SurfaceFlinger::setDesiredDisplayConfigSpecsInternal(
           currentPolicy.primaryRange.max, currentPolicy.appRequestRange.min,
           currentPolicy.appRequestRange.max);
 
-    // TODO(b/140204874): This hack triggers a notification that something has changed, so
-    // that listeners that care about a change in allowed configs can get the notification.
-    // Giving current ActiveConfig so that most other listeners would just drop the event
+    // TODO(b/140204874): Leave the event in until we do proper testing with all apps that might
+    // be depending in this callback.
     const nsecs_t vsyncPeriod =
             mRefreshRateConfigs->getRefreshRateFromConfigId(display->getActiveConfig())
                     .getVsyncPeriod();
-    mScheduler->onConfigChanged(mAppConnectionHandle, display->getId()->value,
-                                display->getActiveConfig(), vsyncPeriod);
+    mScheduler->onPrimaryDisplayConfigChanged(mAppConnectionHandle, display->getId()->value,
+                                              display->getActiveConfig(), vsyncPeriod);
+    toggleKernelIdleTimer();
 
     auto configId = mScheduler->getPreferredConfigId();
     auto& preferredRefreshRate = configId

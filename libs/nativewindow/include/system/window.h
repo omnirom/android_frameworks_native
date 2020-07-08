@@ -63,6 +63,9 @@ __BEGIN_DECLS
 
 /* attributes queriable with query() */
 enum {
+    /* Get the mode whether to set present time when queueBuffer */
+    NATIVE_WINDOW_PRESENT_TIME_MODE = -1,
+
     NATIVE_WINDOW_WIDTH = 0,
     NATIVE_WINDOW_HEIGHT = 1,
     NATIVE_WINDOW_FORMAT = 2,

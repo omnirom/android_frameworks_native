@@ -25,16 +25,17 @@
 #include <cutils/properties.h>
 #include <utils/Trace.h>
 
+#include <chrono>
 #include <cinttypes>
 #include <mutex>
 
 namespace android::scheduler {
 
-VSyncModulator::VSyncModulator(Scheduler& scheduler,
+VSyncModulator::VSyncModulator(IPhaseOffsetControl& phaseOffsetControl,
                                Scheduler::ConnectionHandle appConnectionHandle,
                                Scheduler::ConnectionHandle sfConnectionHandle,
                                const OffsetsConfig& config)
-      : mScheduler(scheduler),
+      : mPhaseOffsetControl(phaseOffsetControl),
         mAppConnectionHandle(appConnectionHandle),
         mSfConnectionHandle(sfConnectionHandle),
         mOffsetsConfig(config) {
@@ -50,13 +51,35 @@ void VSyncModulator::setPhaseOffsets(const OffsetsConfig& config) {
 }
 
 void VSyncModulator::setTransactionStart(Scheduler::TransactionStart transactionStart) {
-    if (transactionStart == Scheduler::TransactionStart::EARLY) {
+    switch (transactionStart) {
+        case Scheduler::TransactionStart::EarlyStart:
+            ALOGW_IF(mExplicitEarlyWakeup, "Already in TransactionStart::EarlyStart");
+            mExplicitEarlyWakeup = true;
+            break;
+        case Scheduler::TransactionStart::EarlyEnd:
+            ALOGW_IF(!mExplicitEarlyWakeup, "Not in TransactionStart::EarlyStart");
+            mExplicitEarlyWakeup = false;
+            break;
+        case Scheduler::TransactionStart::Normal:
+        case Scheduler::TransactionStart::Early:
+            // Non explicit don't change the explicit early wakeup state
+            break;
+    }
+
+    if (mTraceDetailedInfo) {
+        ATRACE_INT("mExplicitEarlyWakeup", mExplicitEarlyWakeup);
+    }
+
+    if (!mExplicitEarlyWakeup &&
+        (transactionStart == Scheduler::TransactionStart::Early ||
+         transactionStart == Scheduler::TransactionStart::EarlyEnd)) {
         mRemainingEarlyFrameCount = MIN_EARLY_FRAME_COUNT_TRANSACTION;
+        mEarlyTxnStartTime = std::chrono::steady_clock::now();
     }
 
     // An early transaction stays an early transaction.
     if (transactionStart == mTransactionStart ||
-        mTransactionStart == Scheduler::TransactionStart::EARLY) {
+        mTransactionStart == Scheduler::TransactionStart::EarlyEnd) {
         return;
     }
     mTransactionStart = transactionStart;
@@ -64,8 +87,9 @@ void VSyncModulator::setTransactionStart(Scheduler::TransactionStart transaction
 }
 
 void VSyncModulator::onTransactionHandled() {
-    if (mTransactionStart == Scheduler::TransactionStart::NORMAL) return;
-    mTransactionStart = Scheduler::TransactionStart::NORMAL;
+    mTxnAppliedTime = std::chrono::steady_clock::now();
+    if (mTransactionStart == Scheduler::TransactionStart::Normal) return;
+    mTransactionStart = Scheduler::TransactionStart::Normal;
     updateOffsets();
 }
 
@@ -87,9 +111,15 @@ void VSyncModulator::onRefreshRateChangeCompleted() {
 
 void VSyncModulator::onRefreshed(bool usedRenderEngine) {
     bool updateOffsetsNeeded = false;
-    if (mRemainingEarlyFrameCount > 0) {
-        mRemainingEarlyFrameCount--;
-        updateOffsetsNeeded = true;
+
+    // Apply a margin to account for potential data races
+    // This might make us stay in early offsets for one
+    // additional frame but it's better to be conservative here.
+    if ((mEarlyTxnStartTime.load() + MARGIN_FOR_TX_APPLY) < mTxnAppliedTime.load()) {
+        if (mRemainingEarlyFrameCount > 0) {
+            mRemainingEarlyFrameCount--;
+            updateOffsetsNeeded = true;
+        }
     }
     if (usedRenderEngine) {
         mRemainingRenderEngineUsageCount = MIN_EARLY_GL_FRAME_COUNT_TRANSACTION;
@@ -111,8 +141,8 @@ VSyncModulator::Offsets VSyncModulator::getOffsets() const {
 const VSyncModulator::Offsets& VSyncModulator::getNextOffsets() const {
     // Early offsets are used if we're in the middle of a refresh rate
     // change, or if we recently begin a transaction.
-    if (mTransactionStart == Scheduler::TransactionStart::EARLY || mRemainingEarlyFrameCount > 0 ||
-        mRefreshRateChangePending) {
+    if (mExplicitEarlyWakeup || mTransactionStart == Scheduler::TransactionStart::EarlyEnd ||
+        mRemainingEarlyFrameCount > 0 || mRefreshRateChangePending) {
         return mOffsetsConfig.early;
     } else if (mRemainingRenderEngineUsageCount > 0) {
         return mOffsetsConfig.earlyGl;
@@ -129,8 +159,8 @@ void VSyncModulator::updateOffsets() {
 void VSyncModulator::updateOffsetsLocked() {
     const Offsets& offsets = getNextOffsets();
 
-    mScheduler.setPhaseOffset(mSfConnectionHandle, offsets.sf);
-    mScheduler.setPhaseOffset(mAppConnectionHandle, offsets.app);
+    mPhaseOffsetControl.setPhaseOffset(mSfConnectionHandle, offsets.sf);
+    mPhaseOffsetControl.setPhaseOffset(mAppConnectionHandle, offsets.app);
 
     mOffsets = offsets;
 

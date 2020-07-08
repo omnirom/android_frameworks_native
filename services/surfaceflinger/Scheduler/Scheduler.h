@@ -55,13 +55,24 @@ public:
     virtual void kernelTimerChanged(bool expired) = 0;
 };
 
-class Scheduler {
+class IPhaseOffsetControl {
+public:
+    virtual ~IPhaseOffsetControl() = default;
+    virtual void setPhaseOffset(scheduler::ConnectionHandle, nsecs_t phaseOffset) = 0;
+};
+
+class Scheduler : public IPhaseOffsetControl {
 public:
     using RefreshRate = scheduler::RefreshRateConfigs::RefreshRate;
     using ConfigEvent = scheduler::RefreshRateConfigEvent;
 
     // Indicates whether to start the transaction early, or at vsync time.
-    enum class TransactionStart { EARLY, NORMAL };
+    enum class TransactionStart {
+        Early,      // DEPRECATED. Start the transaction early. Times out on its own
+        EarlyStart, // Start the transaction early and keep this config until EarlyEnd
+        EarlyEnd,   // End the early config started at EarlyStart
+        Normal      // Start the transaction at the normal time
+    };
 
     Scheduler(impl::EventControlThread::SetVSyncEnabledFunction,
               const scheduler::RefreshRateConfigs&, ISchedulerCallback& schedulerCallback,
@@ -81,14 +92,16 @@ public:
     sp<EventThreadConnection> getEventConnection(ConnectionHandle);
 
     void onHotplugReceived(ConnectionHandle, PhysicalDisplayId, bool connected);
-    void onConfigChanged(ConnectionHandle, PhysicalDisplayId, HwcConfigIndexType configId,
-                         nsecs_t vsyncPeriod);
-
+    void onPrimaryDisplayConfigChanged(ConnectionHandle, PhysicalDisplayId,
+                                       HwcConfigIndexType configId, nsecs_t vsyncPeriod)
+            EXCLUDES(mFeatureStateLock);
+    void onNonPrimaryDisplayConfigChanged(ConnectionHandle, PhysicalDisplayId,
+                                          HwcConfigIndexType configId, nsecs_t vsyncPeriod);
     void onScreenAcquired(ConnectionHandle);
     void onScreenReleased(ConnectionHandle);
 
     // Modifies phase offset in the event thread.
-    void setPhaseOffset(ConnectionHandle, nsecs_t phaseOffset);
+    void setPhaseOffset(ConnectionHandle, nsecs_t phaseOffset) override;
 
     void getDisplayStatInfo(DisplayStatInfo* stats);
 
@@ -179,15 +192,18 @@ private:
 
     // handles various timer features to change the refresh rate.
     template <class T>
-    bool handleTimerStateChanged(T* currentState, T newState, bool eventOnContentDetection);
+    bool handleTimerStateChanged(T* currentState, T newState);
 
     void setVsyncPeriod(nsecs_t period, bool force_resync = false);
 
     // This function checks whether individual features that are affecting the refresh rate
     // selection were initialized, prioritizes them, and calculates the HwcConfigIndexType
     // for the suggested refresh rate.
-    HwcConfigIndexType calculateRefreshRateConfigIndexType(bool* touchConsidered = nullptr)
+    HwcConfigIndexType calculateRefreshRateConfigIndexType(
+            scheduler::RefreshRateConfigs::GlobalSignals* consideredSignals = nullptr)
             REQUIRES(mFeatureStateLock);
+
+    void dispatchCachedReportedConfig() REQUIRES(mFeatureStateLock);
 
     // Stores EventThread associated with a given VSyncSource, and an initial EventThreadConnection.
     struct Connection {
@@ -240,6 +256,16 @@ private:
         LayerHistory::Summary contentRequirements;
 
         bool isDisplayPowerStateNormal = true;
+
+        // Used to cache the last parameters of onPrimaryDisplayConfigChanged
+        struct ConfigChangedParams {
+            ConnectionHandle handle;
+            PhysicalDisplayId displayId;
+            HwcConfigIndexType configId;
+            nsecs_t vsyncPeriod;
+        };
+
+        std::optional<ConfigChangedParams> cachedConfigChangedParams;
     } mFeatures GUARDED_BY(mFeatureStateLock);
 
     const scheduler::RefreshRateConfigs& mRefreshRateConfigs;

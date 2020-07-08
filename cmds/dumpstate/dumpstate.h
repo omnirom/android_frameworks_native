@@ -378,7 +378,7 @@ class Dumpstate {
         bool telephony_only = false;
         bool wifi_only = false;
         // Trimmed-down version of dumpstate to only include whitelisted logs.
-        bool arc_only = false;
+        bool limited_only = false;
         // Whether progress updates should be published.
         bool do_progress_updates = false;
         // The mode we'll use when calling IDumpstateDevice::dumpstateBoard.
@@ -386,10 +386,12 @@ class Dumpstate {
         // The HAL is actually an API surface that can be validated, while the AIDL is not (@hide).
         ::android::hardware::dumpstate::V1_1::DumpstateMode dumpstate_hal_mode =
             ::android::hardware::dumpstate::V1_1::DumpstateMode::DEFAULT;
-        // File descriptor to output zip file.
+        // File descriptor to output zip file. Takes precedence over out_dir.
         android::base::unique_fd bugreport_fd;
         // File descriptor to screenshot file.
         android::base::unique_fd screenshot_fd;
+        // Custom output directory.
+        std::string out_dir;
         // Bugreport mode of the bugreport.
         std::string bugreport_mode;
         // Command-line arguments as string
@@ -414,6 +416,12 @@ class Dumpstate {
             // If we are not writing to socket, we will write to a file. If bugreport_fd is
             // specified, it is preferred. If not bugreport is written to /bugreports.
             return !use_socket;
+        }
+
+        /* Returns if options specified require writing to custom file location */
+        bool OutputToCustomFile() {
+            // Custom location is only honored in limited mode.
+            return limited_only && !out_dir.empty() && bugreport_fd.get() == -1;
         }
     };
 
