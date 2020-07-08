@@ -2215,9 +2215,7 @@ void SurfaceFlinger::onMessageInvalidate(nsecs_t expectedVSyncTime) {
         int maxQueuedFrames = 0;
         mDrawingState.traverseInZOrder([&](Layer* layer) {
             if (layer->hasReadyFrame()) {
-                const nsecs_t now = systemTime(SYSTEM_TIME_MONOTONIC);
-                nsecs_t expectedPresentTime;
-                expectedPresentTime = mScheduler->getDispSyncExpectedPresentTime(now);
+                const nsecs_t expectedPresentTime = mExpectedPresentTime.load();
                 if (layer->shouldPresentNow(expectedPresentTime)) {
                     int layerQueuedFrames = layer->getQueuedFrameCount();
                     const auto& drawingState{layer->getDrawingState()};
