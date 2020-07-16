@@ -93,6 +93,7 @@ namespace composer {
 class ComposerExtnIntf;
 class ComposerExtnLib;
 class FrameSchedulerIntf;
+class DisplayExtnIntf;
 } // namespace composer
 
 using smomo::SmomoIntf;
@@ -1067,7 +1068,7 @@ private:
 
     void onFrameRateFlexibilityTokenReleased();
 
-    void SetContentFps(int contentFps);
+    void setContentFps(uint32_t contentFps);
 
     /* ------------------------------------------------------------------------
      * VrFlinger
@@ -1391,16 +1392,6 @@ private:
 
     sp<IBinder> mDebugFrameRateFlexibilityToken;
 
-    // Perf Hint members
-    static const int CONTENT_FPS_CHANGE_LIMIT = 5;
-    int mContentFps = 0;
-    int mPerfLockHandle = -1;
-    bool mPerfHintEnabled = false;
-    bool mPerfHintPending = false;
-    void *mPerfLibHandle = nullptr;
-    int (*mPerfLockReleaseFunc)(int handle) = nullptr;
-    int (*mPerfHintFunc)(int hintId, const char *package, int duration, int refreshRate) = nullptr;
-
     SmomoWrapper mSmoMo;
     LayerExtWrapper mLayerExt;
 
@@ -1427,6 +1418,7 @@ private:
     bool (*mDestroyFrameExtnFunc)(FrameExtnIntf *interface) = nullptr;
     composer::ComposerExtnIntf *mComposerExtnIntf = nullptr;
     composer::FrameSchedulerIntf *mFrameSchedulerExtnIntf = nullptr;
+    composer::DisplayExtnIntf *mDisplayExtnIntf = nullptr;
 };
 
 } // namespace android
