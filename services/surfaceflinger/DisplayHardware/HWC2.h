@@ -457,7 +457,7 @@ private:
     android::HdrMetadata mHdrMetadata;
     android::mat4 mColorMatrix;
     uint32_t mBufferSlot;
-    uint32_t mType;
+    uint32_t mType{0};
 };
 
 } // namespace impl
