@@ -212,6 +212,13 @@ std::unique_ptr<compositionengine::OutputLayer> Display::createOutputLayer(
         ALOGE_IF(!hwcLayer, "Failed to create a HWC layer for a HWC supported display %s",
                  getName().c_str());
         result->setHwcLayer(std::move(hwcLayer));
+#ifdef QTI_DISPLAY_CONFIG_ENABLED
+        if (layerFE->getCompositionState()->internalOnly && mDisplayConfigIntf) {
+            const auto hwcDisplayId = hwc.fromPhysicalDisplayId(*mId);
+            mDisplayConfigIntf->SetLayerAsMask(static_cast<uint32_t>(*hwcDisplayId),
+                                               result->getHwcLayer()->getId());
+        }
+#endif
     }
     return result;
 }

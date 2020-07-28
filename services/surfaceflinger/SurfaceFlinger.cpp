@@ -1596,7 +1596,7 @@ status_t SurfaceFlinger::setDisplayElapseTime(const sp<DisplayDevice>& display) 
         return OK;
     }
 
-    if (mDisplaysList.size() != 1) {
+    if (mDisplaysList.size() != 1 || display->isVirtual()) {
         // Revisit this for multi displays.
         return OK;
     }
@@ -5763,7 +5763,8 @@ status_t SurfaceFlinger::onTransact(uint32_t code, const Parcel& data, Parcel* r
             case 1035: {
                 n = data.readInt32();
                 mDebugDisplayConfigSetByBackdoor = false;
-                if (n >= 0) {
+                const auto numConfigs = mRefreshRateConfigs->getAllRefreshRates().size();
+                if ((n >= 0) && (n < numConfigs)) {
                     const auto displayToken = getInternalDisplayToken();
                     status_t result = setActiveConfig(displayToken, n);
                     if (result != NO_ERROR) {
