@@ -35,6 +35,7 @@ struct FakePhaseOffsets : PhaseConfiguration {
 
     void setRefreshRateFps(float) override {}
     void dump(std::string&) const override {}
+    void UpdateSfOffsets(std::unordered_map<float, int64_t>) override {}
 };
 
 } // namespace android::scheduler

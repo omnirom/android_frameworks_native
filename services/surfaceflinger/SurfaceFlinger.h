@@ -1091,6 +1091,8 @@ private:
 
     void setupEarlyWakeUpFeature();
 
+    void createPhaseOffsetExtn();
+
     /* ------------------------------------------------------------------------
      * VrFlinger
      */

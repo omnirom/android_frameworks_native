@@ -41,6 +41,8 @@ public:
     virtual void setRefreshRateFps(float fps) = 0;
 
     virtual void dump(std::string& result) const = 0;
+
+    virtual void UpdateSfOffsets(std::unordered_map<float, int64_t> advancedSfOffsets) = 0;
 };
 
 namespace impl {
@@ -66,6 +68,9 @@ public:
     // Returns current offsets in human friendly format.
     void dump(std::string& result) const override;
 
+    // Update the Advanced Sf Offsets for the given refresh rates in mOffsets map.
+    void UpdateSfOffsets(std::unordered_map<float, int64_t> advancedSfOffsets) override;
+
 protected:
     // Used for unit tests
     PhaseOffsets(const std::vector<float>& refreshRates, float currentFps,
@@ -86,8 +91,8 @@ protected:
     const std::optional<nsecs_t> mEarlyAppOffsetNs;
     const std::optional<nsecs_t> mEarlyGlAppOffsetNs;
     const nsecs_t mThresholdForNextVsync;
-    const std::unordered_map<float, Offsets> mOffsets;
 
+    std::unordered_map<float, Offsets> mOffsets;
     std::atomic<float> mRefreshRateFps;
 };
 
@@ -112,6 +117,9 @@ public:
 
     // Returns current offsets in human friendly format.
     void dump(std::string& result) const override;
+
+    // Update the Advanced Sf Offsets for the given refresh rates in mOffsets map.
+    void UpdateSfOffsets(std::unordered_map<float, int64_t> advancedSfOffsets) override;
 
 protected:
     // Used for unit tests
