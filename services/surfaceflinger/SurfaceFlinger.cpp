@@ -2772,7 +2772,6 @@ sp<DisplayDevice> SurfaceFlinger::getVsyncSource() {
 void SurfaceFlinger::updateVsyncSource()
             NO_THREAD_SAFETY_ANALYSIS {
     Mutex::Autolock lock(mVsyncLock);
-    nsecs_t vsync = getVsyncPeriod();
     mNextVsyncSource = getVsyncSource();
 
     if (mNextVsyncSource == NULL) {
@@ -2781,11 +2780,13 @@ void SurfaceFlinger::updateVsyncSource()
         mScheduler->onScreenReleased(mAppConnectionHandle);
     } else if (mNextVsyncSource && (mActiveVsyncSource == NULL)) {
         mScheduler->onScreenAcquired(mAppConnectionHandle);
+        bool isPrimary = mNextVsyncSource->isPrimary();
+        nsecs_t vsync = (isPrimary && (mVsyncPeriod > 0)) ? mVsyncPeriod : getVsyncPeriod();
         mScheduler->resyncToHardwareVsync(true, vsync);
     } else if ((mNextVsyncSource != NULL) &&
         (mActiveVsyncSource != NULL)) {
         // Switch vsync to the new source
-        mScheduler->resyncToHardwareVsync(true, vsync);
+        mScheduler->resyncToHardwareVsync(true, getVsyncPeriod());
     }
 }
 
