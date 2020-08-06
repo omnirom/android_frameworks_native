@@ -34,6 +34,7 @@ public:
     virtual void onBootFinished() = 0;
     virtual void setExpensiveRenderingExpected(DisplayId displayId, bool expected) = 0;
     virtual void notifyDisplayUpdateImminent() = 0;
+    virtual bool canNotifyDisplayUpdateImminent() = 0;
 };
 
 namespace impl {
@@ -56,6 +57,7 @@ public:
     void onBootFinished() override;
     void setExpensiveRenderingExpected(DisplayId displayId, bool expected) override;
     void notifyDisplayUpdateImminent() override;
+    bool canNotifyDisplayUpdateImminent() override;
 
 private:
     HalWrapper* getPowerHal() REQUIRES(mPowerHalMutex);
