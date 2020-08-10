@@ -666,13 +666,8 @@ Error Composer::setOutputBuffer(Display display, const native_handle_t* buffer,
 
 Error Composer::setDisplayElapseTime(Display display, uint64_t timeStamp)
 {
-    if (mClient_2_4) {
-        if (sp<IQtiComposerClient> qClient = IQtiComposerClient::castFrom(mClient_2_4)) {
-            mWriter.selectDisplay(display);
-            mWriter.setDisplayElapseTime(timeStamp);
-        }
-    }
-
+    mWriter.selectDisplay(display);
+    mWriter.setDisplayElapseTime(timeStamp);
     return Error::NONE;
 }
 

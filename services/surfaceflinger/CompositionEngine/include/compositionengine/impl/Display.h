@@ -91,6 +91,7 @@ private:
     bool mIsVirtual = false;
     std::optional<DisplayId> mId;
     Hwc2::PowerAdvisor* mPowerAdvisor = nullptr;
+    bool mHasScreenshot = false;
 };
 
 // This template factory function standardizes the implementation details of the

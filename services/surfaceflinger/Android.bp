@@ -1,3 +1,30 @@
+soong_config_module_type {
+      name: "libdisplayconfig_cc_defaults",
+      module_type: "cc_defaults",
+      config_namespace: "qtidisplaycommonsys",
+      bool_variables: [
+          "displayconfig_enabled",
+      ],
+      properties: [
+          "cflags",
+          "srcs",
+          "shared_libs",
+      ],
+  }
+
+  libdisplayconfig_cc_defaults {
+      name: "libdisplayconfig_defaults",
+      soong_config_variables: {
+          displayconfig_enabled : {
+              cflags: [
+              "-Wno-unused-parameter",
+              "-DQTI_DISPLAY_CONFIG_ENABLED"
+              ],
+              shared_libs : ["libdisplayconfig.qti"]
+          }
+      }
+  }
+
 cc_defaults {
     name: "surfaceflinger_defaults",
     cflags: [
@@ -11,9 +38,9 @@ cc_defaults {
     ],
 }
 
-cc_defaults {
+libdisplayconfig_cc_defaults {
     name: "libsurfaceflinger_defaults",
-    defaults: ["surfaceflinger_defaults"],
+    defaults: ["surfaceflinger_defaults", "libdisplayconfig_defaults"],
     cflags: [
         "-DLOG_TAG=\"SurfaceFlinger\"",
         "-DGL_GLEXT_PROTOTYPES",
