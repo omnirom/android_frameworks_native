@@ -603,6 +603,7 @@ private:
             int32_t sequenceId, hal::HWDisplayId display,
             const hal::VsyncPeriodChangeTimeline& updatedTimeline) override;
     void onSeamlessPossible(int32_t sequenceId, hal::HWDisplayId display) override;
+    void setPowerModeOnMainThread(const sp<IBinder>& displayToken, int mode);
 
     /* ------------------------------------------------------------------------
      * ISchedulerCallback
