@@ -518,6 +518,9 @@ SurfaceFlinger::SurfaceFlinger(Factory& factory) : SurfaceFlinger(factory, SkipI
     property_get("ro.sf.blurs_are_expensive", value, "0");
     mBlursAreExpensive = atoi(value);
 
+    property_get("ro.sf.enable_fb_scaling", value, "0");
+    mUseFbScaling = atoi(value);
+    ALOGI_IF(mUseFbScaling, "Enable FrameBuffer Scaling");
     property_get("debug.sf.enable_advanced_sf_phase_offset", value, "0");
     mUseAdvanceSfOffset = atoi(value);
     ALOGI_IF(mUseAdvanceSfOffset, "Enable Advance SF Phase Offset");
@@ -794,6 +797,17 @@ void SurfaceFlinger::bootFinished()
         if (property_get_bool("sf.debug.show_refresh_rate_overlay", false)) {
             enableRefreshRateOverlay(true);
         }
+        if (mUseFbScaling) {
+            Mutex::Autolock _l(mStateLock);
+            ssize_t index = mCurrentState.displays.indexOfKey(getInternalDisplayTokenLocked());
+            if (index < 0) {
+                ALOGE("Invalid token %p", getInternalDisplayTokenLocked().get());
+            } else {
+                const DisplayDeviceState& state = mCurrentState.displays.valueAt(index);
+                setFrameBufferSizeForScaling(getDefaultDisplayDeviceLocked(), state);
+            }
+        }
+
     }));
 
     setupEarlyWakeUpFeature();
@@ -3170,30 +3184,70 @@ void SurfaceFlinger::processDisplayChanged(const wp<IBinder>& displayToken,
     }
 
     if (const auto display = getDisplayDeviceLocked(displayToken)) {
+        bool displaySizeChanged = false;
         if (currentState.layerStack != drawingState.layerStack) {
             display->setLayerStack(currentState.layerStack);
         }
         if ((currentState.orientation != drawingState.orientation) ||
             (currentState.viewport != drawingState.viewport) ||
             (currentState.frame != drawingState.frame)) {
-            display->setProjection(currentState.orientation, currentState.viewport,
+            if (mUseFbScaling && display->isPrimary()) {
+                const ssize_t index = mCurrentState.displays.indexOfKey(displayToken);
+                DisplayDeviceState& tmpState = mCurrentState.displays.editValueAt(index);
+                tmpState.width =  currentState.viewport.width();
+                tmpState.height = currentState.viewport.height();
+                tmpState.frame =  currentState.viewport;
+                setFrameBufferSizeForScaling(display, currentState);
+                displaySizeChanged = true;
+            } else {
+                display->setProjection(currentState.orientation, currentState.viewport,
                                    currentState.frame);
+            }
         }
         if (currentState.width != drawingState.width ||
             currentState.height != drawingState.height) {
-            display->setDisplaySize(currentState.width, currentState.height);
+            if (!displaySizeChanged) {
+                display->setDisplaySize(currentState.width, currentState.height);
 
-            if (display->isPrimary()) {
-                mScheduler->onPrimaryDisplayAreaChanged(currentState.width * currentState.height);
-            }
+                if (display->isPrimary()) {
+                    mScheduler->onPrimaryDisplayAreaChanged(
+                                   currentState.width * currentState.height);
+                }
 
-            if (mRefreshRateOverlay) {
-                mRefreshRateOverlay->setViewport(display->getSize());
+                if (mRefreshRateOverlay) {
+                    mRefreshRateOverlay->setViewport(display->getSize());
+                }
             }
         }
     }
 }
 
+void SurfaceFlinger::setFrameBufferSizeForScaling(sp<DisplayDevice> displayDevice,
+                                                  const DisplayDeviceState& state) {
+    base::unique_fd fd;
+    auto display = displayDevice->getCompositionDisplay();
+    int newWidth = state.viewport.width();
+    int newHeight = state.viewport.height();
+    if (state.orientation == ui::ROTATION_90 || state.orientation == ui::ROTATION_270){
+        std::swap(newWidth, newHeight);
+    }
+    if (displayDevice->getWidth() == newWidth && displayDevice->getHeight() == newHeight) {
+        displayDevice->setProjection(state.orientation, state.viewport, state.viewport);
+        return;
+    }
+
+    if (mBootStage == BootStage::FINISHED) {
+        displayDevice->setDisplaySize(newWidth, newHeight);
+        displayDevice->setProjection(state.orientation, state.viewport, state.viewport);
+        display->getRenderSurface()->setViewportAndProjection();
+        display->getRenderSurface()->flipClientTarget(true);
+        // queue a scratch buffer to flip Client Target with updated size
+        display->getRenderSurface()->queueBuffer(std::move(fd));
+        display->getRenderSurface()->flipClientTarget(false);
+        // releases the FrameBuffer that was acquired as part of queueBuffer()
+        display->getRenderSurface()->onPresentDisplayCompleted();
+    }
+}
 void SurfaceFlinger::processDisplayChangesLocked() {
     // here we take advantage of Vector's copy-on-write semantics to
     // improve performance by skipping the transaction entirely when
