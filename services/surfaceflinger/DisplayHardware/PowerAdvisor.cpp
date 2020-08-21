@@ -127,6 +127,14 @@ void PowerAdvisor::notifyDisplayUpdateImminent() {
     }
 }
 
+bool PowerAdvisor::canNotifyDisplayUpdateImminent() {
+    bool canNotify = mSendUpdateImminent.load();
+    if (mUseUpdateImminentTimer) {
+        mUpdateImminentTimer.reset();
+    }
+    return canNotify;
+}
+
 class HidlPowerHalWrapper : public PowerAdvisor::HalWrapper {
 public:
     HidlPowerHalWrapper(sp<V1_3::IPower> powerHal) : mPowerHal(std::move(powerHal)) {}
