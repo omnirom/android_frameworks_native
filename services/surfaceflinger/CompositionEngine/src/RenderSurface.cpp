@@ -172,7 +172,8 @@ sp<GraphicBuffer> RenderSurface::dequeueBuffer(base::unique_fd* bufferFence) {
 void RenderSurface::queueBuffer(base::unique_fd readyFence) {
     auto& state = mDisplay.getState();
 
-    if (state.usesClientComposition || state.flipClientTarget) {
+
+    if (state.usesClientComposition || state.flipClientTarget || mFlipClientTarget) {
         // hasFlipClientTargetRequest could return true even if we haven't
         // dequeued a buffer before. Try dequeueing one if we don't have a
         // buffer ready.
@@ -193,7 +194,8 @@ void RenderSurface::queueBuffer(base::unique_fd readyFence) {
         } else {
             status_t result =
                     mNativeWindow->queueBuffer(mNativeWindow.get(),
-                                               mGraphicBuffer->getNativeBuffer(), dup(readyFence));
+                                               mGraphicBuffer->getNativeBuffer(),
+                                               mFlipClientTarget ? -1 : dup(readyFence));
             if (result != NO_ERROR) {
                 ALOGE("Error when queueing buffer for display [%s]: %d", mDisplay.getName().c_str(),
                       result);
@@ -203,7 +205,8 @@ void RenderSurface::queueBuffer(base::unique_fd readyFence) {
                     LOG_ALWAYS_FATAL("ANativeWindow::queueBuffer failed with error: %d", result);
                 } else {
                     mNativeWindow->cancelBuffer(mNativeWindow.get(),
-                                                mGraphicBuffer->getNativeBuffer(), dup(readyFence));
+                                                mGraphicBuffer->getNativeBuffer(),
+                                                mFlipClientTarget ? -1 : dup(readyFence));
                 }
             }
 
@@ -225,6 +228,12 @@ void RenderSurface::flip() {
     mPageFlipCount++;
 }
 
+void RenderSurface::setViewportAndProjection() {
+    Rect sourceCrop = Rect(mSize);
+    Rect viewPort = Rect(mSize.width,  mSize.height);
+    auto& renderEngine = mCompositionEngine.getRenderEngine();
+    renderEngine.setViewportAndProjection(viewPort, sourceCrop);
+}
 void RenderSurface::dump(std::string& out) const {
     using android::base::StringAppendF;
 
@@ -257,6 +266,10 @@ void RenderSurface::setSizeForTest(const ui::Size& size) {
 
 sp<GraphicBuffer>& RenderSurface::mutableGraphicBufferForTest() {
     return mGraphicBuffer;
+}
+
+void RenderSurface::flipClientTarget(bool flip) {
+    mFlipClientTarget = flip;
 }
 
 } // namespace impl
