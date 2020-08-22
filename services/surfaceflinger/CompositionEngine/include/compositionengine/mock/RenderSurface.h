@@ -41,9 +41,11 @@ public:
     MOCK_METHOD2(prepareFrame, void(bool, bool));
     MOCK_METHOD1(dequeueBuffer, sp<GraphicBuffer>(base::unique_fd*));
     MOCK_METHOD1(queueBuffer, void(base::unique_fd));
+    MOCK_METHOD1(flipClientTarget, void(bool flip));
     MOCK_METHOD0(onPresentDisplayCompleted, void());
     MOCK_METHOD0(flip, void());
     MOCK_CONST_METHOD1(dump, void(std::string& result));
+    MOCK_METHOD0(setViewportAndProjection, void());
     MOCK_CONST_METHOD0(getPageFlipCount, std::uint32_t());
 };
 
