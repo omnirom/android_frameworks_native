@@ -1444,6 +1444,8 @@ private:
     composer::ComposerExtnIntf *mComposerExtnIntf = nullptr;
     composer::FrameSchedulerIntf *mFrameSchedulerExtnIntf = nullptr;
     composer::DisplayExtnIntf *mDisplayExtnIntf = nullptr;
+    bool mUseLayerExt = false;
+    bool mSplitLayerExt = false;
 };
 
 } // namespace android
