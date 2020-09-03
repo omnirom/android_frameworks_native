@@ -69,6 +69,13 @@
 #include "TimeStats/TimeStats.h"
 #include "QtiGralloc.h"
 
+#ifdef QTI_DISPLAY_CONFIG_ENABLED
+#include <config/client_interface.h>
+namespace DisplayConfig {
+    class ClientInterface;
+}
+#endif
+
 #define DEBUG_RESIZE 0
 
 using android::hardware::graphics::common::V1_0::BufferUsage;
@@ -138,6 +145,11 @@ Layer::Layer(const LayerCreationArgs& args)
 
     mCallingPid = args.callingPid;
     mCallingUid = args.callingUid;
+    if (mWindowType == InputWindowInfo::TYPE_NAVIGATION_BAR_PANEL) {
+        // Align with SurfaceFlinger changing window type from WINDOW_TYPE_DONT_SCREENSHOT to
+        // InputWindowInfo::TYPE_NAVIGATION_BAR_PANEL.
+        mPrimaryDisplayOnly = true;
+    }
 }
 
 void Layer::onFirstRef() {
@@ -1514,6 +1526,30 @@ uint32_t Layer::getEffectiveUsage(uint32_t usage) const {
     if (mPotentialCursor) {
         usage |= GraphicBuffer::USAGE_CURSOR;
     }
+#ifdef QTI_DISPLAY_CONFIG_ENABLED
+    if (mPrimaryDisplayOnly) {
+        // This is a WINDOW_TYPE_DONT_SCREENSHOT "mask" layer which needs to be CPU-read for
+        // special processing and programming of mask h/w IF the feature is supported.
+        static bool rc_supported = false;
+        static int read_rc_supported = true;
+        if (read_rc_supported) {
+          // Do this once per process lifetime.
+          read_rc_supported = false;
+          ::DisplayConfig::ClientInterface *DisplayConfigIntf = nullptr;
+          ::DisplayConfig::ClientInterface::Create("SurfaceFlinger::Layer" + std::to_string(0),
+              nullptr, &DisplayConfigIntf);
+          if (DisplayConfigIntf) {
+              DisplayConfigIntf->IsRCSupported(0, &rc_supported);
+              ::DisplayConfig::ClientInterface::Destroy(DisplayConfigIntf);
+          }
+          ALOGI("Mask layers are %sCPU-readable.", rc_supported ? "" : "*NOT* ");
+        }
+        if (rc_supported) {
+            usage |= GraphicBuffer::USAGE_SW_READ_RARELY;
+            usage |= GraphicBuffer::USAGE_SW_WRITE_RARELY;
+        }
+    }
+#endif  // QTI_DISPLAY_CONFIG_ENABLED
     usage |= GraphicBuffer::USAGE_HW_COMPOSER;
     return usage;
 }
