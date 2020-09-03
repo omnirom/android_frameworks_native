@@ -133,6 +133,13 @@
 #include "QtiGralloc.h"
 #include "layer_extn_intf.h"
 
+#ifdef QTI_DISPLAY_CONFIG_ENABLED
+#include <config/client_interface.h>
+namespace DisplayConfig {
+class ClientInterface;
+}
+#endif
+
 #define MAIN_THREAD ACQUIRE(mStateLock) RELEASE(mStateLock)
 
 #define ON_MAIN_THREAD(expr)                                       \
@@ -290,7 +297,9 @@ Dataspace SurfaceFlinger::wideColorGamutCompositionDataspace = Dataspace::V0_SRG
 ui::PixelFormat SurfaceFlinger::wideColorGamutCompositionPixelFormat = ui::PixelFormat::RGBA_8888;
 bool SurfaceFlinger::useFrameRateApi;
 bool SurfaceFlinger::sDirectStreaming;
-
+#ifdef QTI_DISPLAY_CONFIG_ENABLED
+::DisplayConfig::ClientInterface *mDisplayConfigIntf = nullptr;
+#endif
 std::string getHwcServiceName() {
     char value[PROPERTY_VALUE_MAX] = {};
     property_get("debug.sf.hwc_service_name", value, "default");
@@ -509,6 +518,9 @@ SurfaceFlinger::SurfaceFlinger(Factory& factory) : SurfaceFlinger(factory, SkipI
     property_get("ro.sf.blurs_are_expensive", value, "0");
     mBlursAreExpensive = atoi(value);
 
+    property_get("ro.sf.enable_fb_scaling", value, "0");
+    mUseFbScaling = atoi(value);
+    ALOGI_IF(mUseFbScaling, "Enable FrameBuffer Scaling");
     property_get("debug.sf.enable_advanced_sf_phase_offset", value, "0");
     mUseAdvanceSfOffset = atoi(value);
     ALOGI_IF(mUseAdvanceSfOffset, "Enable Advance SF Phase Offset");
@@ -545,7 +557,14 @@ SurfaceFlinger::SurfaceFlinger(Factory& factory) : SurfaceFlinger(factory, SkipI
     }
 
     useFrameRateApi = use_frame_rate_api(true);
-
+#ifdef QTI_DISPLAY_CONFIG_ENABLED
+    int ret = ::DisplayConfig::ClientInterface::Create("SurfaceFlinger"+std::to_string(0),
+                                                        nullptr, &mDisplayConfigIntf);
+    if (ret || !mDisplayConfigIntf) {
+        ALOGE("DisplayConfig HIDL not present\n");
+        mDisplayConfigIntf = nullptr;
+    }
+#endif
     mKernelIdleTimerEnabled = mSupportKernelIdleTimer = sysprop::support_kernel_idle_timer(false);
     base::SetProperty(KERNEL_IDLE_TIMER_PROP, mKernelIdleTimerEnabled ? "true" : "false");
 
@@ -778,6 +797,17 @@ void SurfaceFlinger::bootFinished()
         if (property_get_bool("sf.debug.show_refresh_rate_overlay", false)) {
             enableRefreshRateOverlay(true);
         }
+        if (mUseFbScaling) {
+            Mutex::Autolock _l(mStateLock);
+            ssize_t index = mCurrentState.displays.indexOfKey(getInternalDisplayTokenLocked());
+            if (index < 0) {
+                ALOGE("Invalid token %p", getInternalDisplayTokenLocked().get());
+            } else {
+                const DisplayDeviceState& state = mCurrentState.displays.valueAt(index);
+                setFrameBufferSizeForScaling(getDefaultDisplayDeviceLocked(), state);
+            }
+        }
+
     }));
 
     setupEarlyWakeUpFeature();
@@ -919,7 +949,14 @@ void SurfaceFlinger::init() {
 
     char layerExtProp[PROPERTY_VALUE_MAX];
     property_get("vendor.display.use_layer_ext", layerExtProp, "0");
-    if (atoi(layerExtProp) && mLayerExt.init()) {
+    if (atoi(layerExtProp)) {
+        mUseLayerExt = true;
+    }
+    property_get("vendor.display.split_layer_ext", layerExtProp, "0");
+    if (atoi(layerExtProp)) {
+        mSplitLayerExt = true;
+    }
+    if ((mUseLayerExt || mSplitLayerExt) && mLayerExt.init()) {
         ALOGI("Layer Extension is enabled");
     }
 
@@ -2680,6 +2717,17 @@ void SurfaceFlinger::postComposition()
         mRegionSamplingThread->notifyNewContent();
     }
 
+    if (mSplitLayerExt && mLayerExt) {
+        std::vector<std::string> layerInfo;
+        mDrawingState.traverse([&](Layer* layer) {
+            if (layer->findOutputLayerForDisplay(display)) {
+                layerInfo.push_back(layer->getName());
+                ALOGI("Split update layer: %s", layer->getName().c_str());
+            }
+        });
+        mLayerExt->UpdateLayerState(layerInfo, mNumLayers);
+    }
+
     if (mSmoMo) {
         ATRACE_NAME("SmoMoUpdateState");
         Mutex::Autolock lock(mStateLock);
@@ -3084,7 +3132,17 @@ void SurfaceFlinger::processDisplayAdded(const wp<IBinder>& displayToken,
     const auto display = setupNewDisplayDeviceInternal(displayToken, compositionDisplay, state,
                                                        displaySurface, producer);
     mDisplays.emplace(displayToken, display);
-
+#ifdef QTI_DISPLAY_CONFIG_ENABLED
+    const auto hwcDisplayId = getHwComposer().fromPhysicalDisplayId(*displayId);
+    bool supported = false;
+    if (mDisplayConfigIntf) {
+        mDisplayConfigIntf->IsPowerModeOverrideSupported(*hwcDisplayId, &supported);
+    }
+    if (supported) {
+      sp<DisplayDevice> display = getDisplayDeviceLocked(displayToken);
+      display->setPowerModeOverrideConfig(true);
+    }
+#endif
     if (!state.isVirtual()) {
         mDisplaysList.push_back(getDisplayDeviceLocked(displayToken));
         LOG_FATAL_IF(!displayId);
@@ -3144,30 +3202,70 @@ void SurfaceFlinger::processDisplayChanged(const wp<IBinder>& displayToken,
     }
 
     if (const auto display = getDisplayDeviceLocked(displayToken)) {
+        bool displaySizeChanged = false;
         if (currentState.layerStack != drawingState.layerStack) {
             display->setLayerStack(currentState.layerStack);
         }
         if ((currentState.orientation != drawingState.orientation) ||
             (currentState.viewport != drawingState.viewport) ||
             (currentState.frame != drawingState.frame)) {
-            display->setProjection(currentState.orientation, currentState.viewport,
+            if (mUseFbScaling && display->isPrimary()) {
+                const ssize_t index = mCurrentState.displays.indexOfKey(displayToken);
+                DisplayDeviceState& tmpState = mCurrentState.displays.editValueAt(index);
+                tmpState.width =  currentState.viewport.width();
+                tmpState.height = currentState.viewport.height();
+                tmpState.frame =  currentState.viewport;
+                setFrameBufferSizeForScaling(display, currentState);
+                displaySizeChanged = true;
+            } else {
+                display->setProjection(currentState.orientation, currentState.viewport,
                                    currentState.frame);
+            }
         }
         if (currentState.width != drawingState.width ||
             currentState.height != drawingState.height) {
-            display->setDisplaySize(currentState.width, currentState.height);
+            if (!displaySizeChanged) {
+                display->setDisplaySize(currentState.width, currentState.height);
 
-            if (display->isPrimary()) {
-                mScheduler->onPrimaryDisplayAreaChanged(currentState.width * currentState.height);
-            }
+                if (display->isPrimary()) {
+                    mScheduler->onPrimaryDisplayAreaChanged(
+                                   currentState.width * currentState.height);
+                }
 
-            if (mRefreshRateOverlay) {
-                mRefreshRateOverlay->setViewport(display->getSize());
+                if (mRefreshRateOverlay) {
+                    mRefreshRateOverlay->setViewport(display->getSize());
+                }
             }
         }
     }
 }
 
+void SurfaceFlinger::setFrameBufferSizeForScaling(sp<DisplayDevice> displayDevice,
+                                                  const DisplayDeviceState& state) {
+    base::unique_fd fd;
+    auto display = displayDevice->getCompositionDisplay();
+    int newWidth = state.viewport.width();
+    int newHeight = state.viewport.height();
+    if (state.orientation == ui::ROTATION_90 || state.orientation == ui::ROTATION_270){
+        std::swap(newWidth, newHeight);
+    }
+    if (displayDevice->getWidth() == newWidth && displayDevice->getHeight() == newHeight) {
+        displayDevice->setProjection(state.orientation, state.viewport, state.viewport);
+        return;
+    }
+
+    if (mBootStage == BootStage::FINISHED) {
+        displayDevice->setDisplaySize(newWidth, newHeight);
+        displayDevice->setProjection(state.orientation, state.viewport, state.viewport);
+        display->getRenderSurface()->setViewportAndProjection();
+        display->getRenderSurface()->flipClientTarget(true);
+        // queue a scratch buffer to flip Client Target with updated size
+        display->getRenderSurface()->queueBuffer(std::move(fd));
+        display->getRenderSurface()->flipClientTarget(false);
+        // releases the FrameBuffer that was acquired as part of queueBuffer()
+        display->getRenderSurface()->onPresentDisplayCompleted();
+    }
+}
 void SurfaceFlinger::processDisplayChangesLocked() {
     // here we take advantage of Vector's copy-on-write semantics to
     // improve performance by skipping the transaction entirely when
@@ -4781,7 +4879,7 @@ void SurfaceFlinger::setPowerModeInternal(const sp<DisplayDevice>& display, hal:
     ALOGD("Finished setting power mode %d on display %s", mode, to_string(*displayId).c_str());
 }
 
-void SurfaceFlinger::setPowerMode(const sp<IBinder>& displayToken, int mode) {
+void SurfaceFlinger::setPowerModeOnMainThread(const sp<IBinder>& displayToken, int mode) {
     schedule([=]() MAIN_THREAD {
         const auto display = getDisplayDeviceLocked(displayToken);
         if (!display) {
@@ -4793,6 +4891,58 @@ void SurfaceFlinger::setPowerMode(const sp<IBinder>& displayToken, int mode) {
             setPowerModeInternal(display, static_cast<hal::PowerMode>(mode));
         }
     }).wait();
+}
+
+void SurfaceFlinger::setPowerMode(const sp<IBinder>& displayToken, int mode) {
+    sp<DisplayDevice> display = nullptr;
+    {
+        Mutex::Autolock lock(mStateLock);
+        display = (getDisplayDeviceLocked(displayToken));
+    }
+    if (!display) {
+        ALOGE("Attempt to set power mode %d for invalid display token %p", mode,
+               displayToken.get());
+        return;
+    } else if (display->isVirtual()) {
+         ALOGW("Attempt to set power mode %d for virtual display", mode);
+         return;
+    }
+
+#ifdef QTI_DISPLAY_CONFIG_ENABLED
+    const auto displayId = display->getId();
+    const auto hwcDisplayId = getHwComposer().fromPhysicalDisplayId(*displayId);
+    // Fallback to default power state behavior as HWC does not support power mode override.
+    if (!display->getPowerModeOverrideConfig() ||
+        mode  ==  HWC_POWER_MODE_DOZE ||
+        mode  ==  HWC_POWER_MODE_DOZE_SUSPEND) {
+        setPowerModeOnMainThread(displayToken, mode);
+        return;
+    }
+
+     ::DisplayConfig::PowerMode hwcMode = ::DisplayConfig::PowerMode::kOff;
+     switch (mode) {
+     case HWC_POWER_MODE_NORMAL: hwcMode = ::DisplayConfig::PowerMode::kOn; break;
+     default: hwcMode = ::DisplayConfig::PowerMode::kOff; break;
+     }
+
+     bool step_up = false;
+     if (mode == HWC_POWER_MODE_NORMAL) {
+         step_up = true;
+    }
+    // Change hardware state first while stepping up.
+    if (step_up) {
+        mDisplayConfigIntf->SetPowerMode(*hwcDisplayId, hwcMode);
+    }
+    // Change SF state now.
+    setPowerModeOnMainThread(displayToken, mode);
+    // Change hardware state now while stepping down.
+
+    if (!step_up) {
+        mDisplayConfigIntf->SetPowerMode(*hwcDisplayId, hwcMode);
+    }
+#else
+    setPowerModeOnMainThread(displayToken, mode);
+#endif
 }
 
 status_t SurfaceFlinger::doDump(int fd, const DumpArgs& args, bool asProto) {

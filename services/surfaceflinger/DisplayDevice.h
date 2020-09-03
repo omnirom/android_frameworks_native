@@ -151,6 +151,8 @@ public:
     HwcConfigIndexType getActiveConfig() const;
     void setActiveConfig(HwcConfigIndexType mode);
 
+    void setPowerModeOverrideConfig(bool supported);
+    bool getPowerModeOverrideConfig() const;
     // release HWC resources (if any) for removable displays
     void disconnect();
 
@@ -182,6 +184,7 @@ private:
 
     // TODO(b/74619554): Remove special cases for primary display.
     const bool mIsPrimary;
+    bool mIsPowerModeOverride;
 };
 
 struct DisplayDeviceState {
