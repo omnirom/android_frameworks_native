@@ -469,6 +469,11 @@ void BufferQueueLayer::onFrameAvailable(const BufferItem& item) {
         frameInfo.ref_latency = mFrameTracker.getPreviousGfxInfo();
         frameInfo.vsync_period = mFlinger->mVsyncPeriod;
         frameInfo.transparent_region = !this->isOpaque(mDrawingState);
+        if (frameInfo.transparent_region) {
+            if (this->isLayerFocusedBasedOnPriority(this->getFrameRateSelectionPriority())) {
+                frameInfo.transparent_region = false;
+            }
+        }
         frameInfo.width = item.mGraphicBuffer->getWidth();
         frameInfo.height = item.mGraphicBuffer->getHeight();
         frameInfo.layer_name = this->getName().c_str();
