@@ -725,6 +725,7 @@ private:
     bool transactionIsReadyToBeApplied(int64_t desiredPresentTime,
                                        const Vector<ComposerState>& states);
     uint32_t setDisplayStateLocked(const DisplayState& s) REQUIRES(mStateLock);
+    void checkVirtualDisplayHint(const Vector<DisplayState>& displays);
     uint32_t addInputWindowCommands(const InputWindowCommands& inputWindowCommands)
             REQUIRES(mStateLock);
 
@@ -1189,6 +1190,7 @@ private:
     // don't use a lock for these, we don't care
     int mDebugRegion = 0;
     bool mVsyncSourceReliableOnDoze = false;
+    bool mPluggableVsyncPrioritized = false;
     bool mDebugDisableHWC = false;
     bool mDebugDisableTransformHint = false;
     volatile nsecs_t mDebugInTransaction = 0;
@@ -1214,6 +1216,7 @@ private:
     bool mBlursAreExpensive = false;
     bool mUseAdvanceSfOffset = false;
     bool mUseFbScaling = false;
+    bool mAsyncVdsCreationSupported = false;
     std::atomic<uint32_t> mFrameMissedCount = 0;
     std::atomic<uint32_t> mHwcFrameMissedCount = 0;
     std::atomic<uint32_t> mGpuFrameMissedCount = 0;

@@ -549,6 +549,14 @@ SurfaceFlinger::SurfaceFlinger(Factory& factory) : SurfaceFlinger(factory, SkipI
         mVsyncSourceReliableOnDoze = true;
     }
 
+    // If mPluggableVsyncPrioritized is true then the order of priority of V-syncs is Pluggable
+    // followed by Primary and Secondary built-ins.
+    if((property_get("vendor.display.pluggable_vsync_prioritized", property, "0") > 0) &&
+        (!strncmp(property, "1", PROPERTY_VALUE_MAX ) ||
+        (!strncasecmp(property,"true", PROPERTY_VALUE_MAX )))) {
+        mPluggableVsyncPrioritized = true;
+    }
+
     // We should be reading 'persist.sys.sf.color_saturation' here
     // but since /data may be encrypted, we need to wait until after vold
     // comes online to attempt to read the property. The property is
@@ -886,6 +894,15 @@ void SurfaceFlinger::init() {
     LOG_ALWAYS_FATAL_IF(!display, "Missing internal display after registering composer callback.");
     LOG_ALWAYS_FATAL_IF(!getHwComposer().isConnected(*display->getId()),
                         "Internal display is disconnected.");
+#ifdef QTI_DISPLAY_CONFIG_ENABLED
+    if (!mDisplayConfigIntf) {
+        ALOGE("DisplayConfig HIDL not present\n");
+        mDisplayConfigIntf = nullptr;
+    } else {
+        mDisplayConfigIntf->IsAsyncVDSCreationSupported(&mAsyncVdsCreationSupported);
+        ALOGI("IsAsyncVDSCreationSupported %d", mAsyncVdsCreationSupported);
+    }
+#endif
 
     if (useVrFlinger) {
         auto vrFlingerRequestDisplayCallback = [this](bool requestDisplay) {
@@ -1823,7 +1840,13 @@ void SurfaceFlinger::signalRefresh() {
 }
 
 nsecs_t SurfaceFlinger::getVsyncPeriod() const {
-    const auto displayId = getInternalDisplayIdLocked();
+    auto displayId = getInternalDisplayIdLocked();
+    if (mNextVsyncSource) {
+        displayId = mNextVsyncSource->getId();
+    } else if (mActiveVsyncSource) {
+        displayId = mActiveVsyncSource->getId();
+    }
+
     if (!displayId || !getHwComposer().isConnected(*displayId)) {
         return 0;
     }
@@ -1918,6 +1941,15 @@ void SurfaceFlinger::onHotplugReceived(int32_t sequenceId, hal::HWDisplayId hwcD
     ConditionalLock lock(mStateLock, std::this_thread::get_id() != mMainThreadId);
 
     mPendingHotplugEvents.emplace_back(HotplugEvent{hwcDisplayId, connection});
+
+    if (connection != hal::Connection::CONNECTED) {
+        const std::optional<DisplayIdentificationInfo> info =
+           getHwComposer().onHotplug(hwcDisplayId, connection);
+        if (info) {
+            mDisplaysList.remove(getDisplayDeviceLocked(mPhysicalDisplayTokens[info->id]));
+        }
+        mNextVsyncSource = getVsyncSource();
+    }
 
     if (std::this_thread::get_id() == mMainThreadId) {
         // Process all pending hot plug events immediately if we are on the main thread.
@@ -2601,9 +2633,13 @@ void SurfaceFlinger::postComposition()
 
     getBE().mDisplayTimeline.updateSignalTimes();
     mPreviousPresentFences[1] = mPreviousPresentFences[0];
-    mPreviousPresentFences[0] = mActiveVsyncSource
-            ? getHwComposer().getPresentFence(*mActiveVsyncSource->getId())
-            : Fence::NO_FENCE;
+
+    sp<DisplayDevice> vSyncSource = mNextVsyncSource;
+    if (mNextVsyncSource == NULL) {
+        vSyncSource = mActiveVsyncSource;
+    }
+    mPreviousPresentFences[0] = vSyncSource ?
+        getHwComposer().getPresentFence(*vSyncSource->getId()) : Fence::NO_FENCE;
     auto presentFenceTime = std::make_shared<FenceTime>(mPreviousPresentFences[0]);
     getBE().mDisplayTimeline.push(presentFenceTime);
 
@@ -2793,10 +2829,12 @@ void SurfaceFlinger::computeLayerBounds() {
 }
 
 sp<DisplayDevice> SurfaceFlinger::getVsyncSource() {
-    // Return the vsync source from the active displays based on
-    // the order in which they are connected. Normally the order
-    // of priority is Primary (Built-in/Pluggable) followed by
-    // Secondary built-ins followed by pluggable.
+    // Return the vsync source from the active displays based on the order in which they are
+    // connected.
+    // Normally the order of priority is Primary (Built-in/Pluggable) followed by Secondary
+    // built-ins followed by Pluggable. But if mPluggableVsyncPrioritized is true then the
+    // order of priority is Pluggables followed by Primary and Secondary built-ins.
+
     for (const auto& display : mDisplaysList) {
         hal::PowerMode mode = display->getPowerMode();
         if (display->isVirtual() || (mode == hal::PowerMode::OFF) ||
@@ -2850,6 +2888,7 @@ void SurfaceFlinger::updateVsyncSource()
     } else if ((mNextVsyncSource != NULL) &&
         (mActiveVsyncSource != NULL)) {
         // Switch vsync to the new source
+        mScheduler->disableHardwareVsync(true);
         mScheduler->resyncToHardwareVsync(true, getVsyncPeriod());
     }
 }
@@ -2941,9 +2980,8 @@ void SurfaceFlinger::processDisplayHotplugEventsLocked() {
                 mInterceptor->saveDisplayDeletion(state.sequenceId);
                 mCurrentState.displays.removeItemsAt(index);
             }
-            mDisplaysList.remove(getDisplayDeviceLocked(it->second));
-            updateVsyncSource();
             mPhysicalDisplayTokens.erase(it);
+            updateVsyncSource();
             if (mInternalPresentationDisplays && isInternalDisplay) {
                 // Update mInternalPresentationDisplays flag
                 updateInternalDisplaysPresentationMode();
@@ -3153,7 +3191,20 @@ void SurfaceFlinger::processDisplayAdded(const wp<IBinder>& displayToken,
     }
 #endif
     if (!state.isVirtual()) {
-        mDisplaysList.push_back(getDisplayDeviceLocked(displayToken));
+        sp<DisplayDevice> display = getDisplayDeviceLocked(displayToken);
+        if (mPluggableVsyncPrioritized && !isInternalDisplay(display)) {
+            // Insert the pluggable display just before the first built-in display
+            // so that the earlier pluggable display remains the V-sync source.
+            auto it = mDisplaysList.begin();
+            for (; it != mDisplaysList.end(); it++ ) {
+                if(isInternalDisplay(*it)) {
+                    break;
+                }
+            }
+            mDisplaysList.insert(it, display);
+        } else {
+            mDisplaysList.push_back(display);
+        }
         LOG_FATAL_IF(!displayId);
         dispatchDisplayHotplugEvent(displayId->value, true);
 
@@ -3905,6 +3956,10 @@ void SurfaceFlinger::setTransactionState(
 
     bool privileged = callingThreadHasUnscopedSurfaceFlingerAccess();
 
+    if (mAsyncVdsCreationSupported) {
+        checkVirtualDisplayHint(displays);
+    }
+
     Mutex::Autolock _l(mStateLock);
 
     // If its TransactionQueue already has a pending TransactionState or if it is pending
@@ -4097,6 +4152,47 @@ void SurfaceFlinger::applyTransactionState(
         if (transactionStart == Scheduler::TransactionStart::EarlyStart ||
             transactionStart == Scheduler::TransactionStart::EarlyEnd) {
             mVSyncModulator->setTransactionStart(transactionStart);
+        }
+    }
+}
+
+void SurfaceFlinger::checkVirtualDisplayHint(const Vector<DisplayState>& displays) {
+    for (const DisplayState& s : displays) {
+        const ssize_t index = mCurrentState.displays.indexOfKey(s.token);
+        if (index < 0)
+            continue;
+
+        DisplayDeviceState& state = mCurrentState.displays.editValueAt(index);
+        const uint32_t what = s.what;
+        if (what & DisplayState::eSurfaceChanged) {
+            if (IInterface::asBinder(state.surface) != IInterface::asBinder(s.surface)) {
+                if (state.isVirtual() && s.surface != nullptr &&
+                    (mUseHwcVirtualDisplays || getHwComposer().isUsingVrComposer())) {
+                    int width = 0;
+                    int status = s.surface->query(NATIVE_WINDOW_WIDTH, &width);
+                    ALOGE_IF(status != NO_ERROR, "Unable to query width (%d)", status);
+                    int height = 0;
+                    status = s.surface->query(NATIVE_WINDOW_HEIGHT, &height);
+                    ALOGE_IF(status != NO_ERROR, "Unable to query height (%d)", status);
+                    int format = 0;
+                    status = s.surface->query(NATIVE_WINDOW_FORMAT, &format);
+                    ALOGE_IF(status != NO_ERROR, "Unable to query format (%d)", status);
+#ifdef QTI_DISPLAY_CONFIG_ENABLED
+                    if ((mDisplayConfigIntf) && (maxVirtualDisplaySize == 0 ||
+                        ((uint64_t)width <= maxVirtualDisplaySize &&
+                        (uint64_t)height <= maxVirtualDisplaySize))) {
+                        uint64_t usage = 0;
+                        // Replace with native_window_get_consumer_usage ?
+                        status = s.surface->getConsumerUsage(&usage);
+                        ALOGW_IF(status != NO_ERROR, "Unable to query usage (%d)", status);
+                        if ((status == NO_ERROR) && canAllocateHwcDisplayIdForVDS(usage)) {
+                            mDisplayConfigIntf->CreateVirtualDisplay(width, height, format);
+                            return;
+                        }
+                    }
+#endif
+                }
+            }
         }
     }
 }
@@ -4813,7 +4909,8 @@ void SurfaceFlinger::setPowerModeInternal(const sp<DisplayDevice>& display, hal:
                 mScheduler->onScreenAcquired(mAppConnectionHandle);
                 mScheduler->resyncToHardwareVsync(true, getVsyncPeriod());
             }
-        } else {
+        } else if ((mPluggableVsyncPrioritized && (displayId != getInternalDisplayIdLocked())) ||
+                    displayId == getInternalDisplayIdLocked()) {
             updateVsyncSource();
         }
 
