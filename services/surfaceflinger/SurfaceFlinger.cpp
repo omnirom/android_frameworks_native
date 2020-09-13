@@ -5017,23 +5017,41 @@ void SurfaceFlinger::setPowerMode(const sp<IBinder>& displayToken, int mode) {
 #ifdef QTI_DISPLAY_CONFIG_ENABLED
     const auto displayId = display->getId();
     const auto hwcDisplayId = getHwComposer().fromPhysicalDisplayId(*displayId);
+    const hal::PowerMode currentDisplayPowerMode = display->getPowerMode();
+    const hal::PowerMode newDisplayPowerMode = static_cast<hal::PowerMode>(mode);
     // Fallback to default power state behavior as HWC does not support power mode override.
     if (!display->getPowerModeOverrideConfig() ||
-        mode  ==  HWC_POWER_MODE_DOZE ||
-        mode  ==  HWC_POWER_MODE_DOZE_SUSPEND) {
+        !((currentDisplayPowerMode  ==  hal::PowerMode::OFF &&
+        newDisplayPowerMode == hal::PowerMode::ON) ||
+        (currentDisplayPowerMode  ==  hal::PowerMode::ON &&
+        newDisplayPowerMode == hal::PowerMode::OFF))) {
         setPowerModeOnMainThread(displayToken, mode);
         return;
     }
 
-     ::DisplayConfig::PowerMode hwcMode = ::DisplayConfig::PowerMode::kOff;
-     switch (mode) {
-     case HWC_POWER_MODE_NORMAL: hwcMode = ::DisplayConfig::PowerMode::kOn; break;
-     default: hwcMode = ::DisplayConfig::PowerMode::kOff; break;
-     }
+    ::DisplayConfig::PowerMode hwcMode = ::DisplayConfig::PowerMode::kOff;
+    switch (mode) {
+    case HWC_POWER_MODE_DOZE:         hwcMode = ::DisplayConfig::PowerMode::kDoze;        break;
+    case HWC_POWER_MODE_NORMAL:       hwcMode = ::DisplayConfig::PowerMode::kOn;          break;
+    case HWC_POWER_MODE_DOZE_SUSPEND: hwcMode = ::DisplayConfig::PowerMode::kDozeSuspend; break;
+    default:                          hwcMode = ::DisplayConfig::PowerMode::kOff;         break;
+    }
 
-     bool step_up = false;
-     if (mode == HWC_POWER_MODE_NORMAL) {
-         step_up = true;
+    bool step_up = false;
+    if (currentDisplayPowerMode == hal::PowerMode::OFF) {
+        if (newDisplayPowerMode == hal::PowerMode::DOZE ||
+            newDisplayPowerMode == hal::PowerMode::ON) {
+            step_up = true;
+        }
+    } else if (currentDisplayPowerMode == hal::PowerMode::DOZE_SUSPEND) {
+        if (newDisplayPowerMode == hal::PowerMode::DOZE ||
+            newDisplayPowerMode == hal::PowerMode::ON) {
+            step_up = true;
+        }
+    } else if (currentDisplayPowerMode == hal::PowerMode::DOZE) {
+        if (newDisplayPowerMode == hal::PowerMode::ON) {
+            step_up = true;
+        }
     }
     // Change hardware state first while stepping up.
     if (step_up) {
