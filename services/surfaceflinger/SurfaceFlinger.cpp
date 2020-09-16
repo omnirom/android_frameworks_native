@@ -2289,8 +2289,15 @@ void SurfaceFlinger::onMessageInvalidate(nsecs_t expectedVSyncTime) {
                 if (layer->shouldPresentNow(expectedPresentTime)) {
                     int layerQueuedFrames = layer->getQueuedFrameCount();
                     const auto& drawingState{layer->getDrawingState()};
+                    bool isLayerAvailable = layer->isOpaque(drawingState);
+                    if (!isLayerAvailable) {
+                        int32_t priority = layer->getFrameRateSelectionPriority();
+                        if (layer->isLayerFocusedBasedOnPriority(priority)) {
+                            isLayerAvailable = true;
+                        }
+                    }
                     if (maxQueuedFrames < layerQueuedFrames &&
-                        layer->isOpaque(drawingState)) {
+                        isLayerAvailable) {
                         maxQueuedFrames = layerQueuedFrames;
                         mNameLayerMax = layer->getName();
                     }
