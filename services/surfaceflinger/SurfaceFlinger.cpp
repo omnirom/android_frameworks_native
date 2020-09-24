@@ -1980,6 +1980,18 @@ void SurfaceFlinger::onRefreshReceived(int sequenceId, hal::HWDisplayId /*hwcDis
         return;
     }
     repaintEverythingForHWC();
+
+    if (mDisplaysList.size() != 1) {
+        // Revisit this for multi displays.
+        return;
+    }
+
+    {
+        // Track Vsync Period before and after refresh.
+        std::lock_guard lock(mVsyncPeriodMutex);
+        mVsyncPeriods = {};
+        mVsyncPeriods.push_back(getVsyncPeriod());
+    }
 }
 
 void SurfaceFlinger::setVsyncEnabled(bool enabled) {
@@ -2680,6 +2692,8 @@ void SurfaceFlinger::postComposition()
         mScheduler->addPresentFence(presentFenceTime);
     }
 
+    forceResyncModel();
+
     const bool isDisplayConnected = display && getHwComposer().isConnected(*display->getId());
 
     if (!hasSyncFramework) {
@@ -2817,6 +2831,30 @@ void SurfaceFlinger::postComposition()
 
 FloatRect SurfaceFlinger::getLayerClipBoundsForDisplay(const DisplayDevice& displayDevice) const {
     return displayDevice.getViewport().toFloatRect();
+}
+
+void SurfaceFlinger::forceResyncModel() NO_THREAD_SAFETY_ANALYSIS {
+    std::lock_guard lock(mVsyncPeriodMutex);
+    if (!mVsyncPeriods.size()) {
+        return;
+    }
+
+    const nsecs_t period = getVsyncPeriod();
+    // Model resync should happen at every fps change.
+    // Upon increase/decrease in vsync period start resync immediately.
+    // Initial set of vsync wakeups happen at ref_time + N * period where N = 1, 2, 3 ..
+    // Since if doesnt make use of timestamp to compute period, resync can be triggered
+    // as soon as change is fps(period) is observed.
+    if (period > mVsyncPeriods.at(mVsyncPeriods.size() - 1)) {
+        ATRACE_CALL();
+        mScheduler->resyncToHardwareVsync(true, period, true /* force resync */);
+        mVsyncPeriods.push_back(period);
+    } else if (period < mVsyncPeriods.at(mVsyncPeriods.size() - 1)) {
+        // Vsync period changed. Trigger resync.
+        ATRACE_CALL();
+        mScheduler->resyncToHardwareVsync(true, period, true /* force resync */);
+        mVsyncPeriods = {};
+    }
 }
 
 void SurfaceFlinger::computeLayerBounds() {
