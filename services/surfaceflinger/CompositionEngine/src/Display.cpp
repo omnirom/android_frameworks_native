@@ -279,11 +279,13 @@ void Display::chooseCompositionStrategy() {
     bool hasScreenshot = std::any_of(layers.begin(), layers.end(), [](auto* layer) {
          return layer->getLayerFE().getCompositionState()->isScreenshot;
     });
-    if ((hwc.getDisplayConnectionType(*mId) == DisplayConnectionType::External) &&
+    if ((mIsVirtual || (hwc.getDisplayConnectionType(*mId) == DisplayConnectionType::External)) &&
         (hasScreenshot != mHasScreenshot) && mDisplayConfigIntf) {
         const auto hwcDisplayId = hwc.fromPhysicalDisplayId(*mId);
-        mDisplayConfigIntf->SetDisplayAnimating(*hwcDisplayId, hasScreenshot);
-        mHasScreenshot = hasScreenshot;
+        if (hwcDisplayId) {
+            mDisplayConfigIntf->SetDisplayAnimating(*hwcDisplayId, hasScreenshot);
+            mHasScreenshot = hasScreenshot;
+        }
     }
 #endif
     if (status_t result = hwc.getDeviceCompositionChanges(*mId, anyLayersRequireClientComposition(),
