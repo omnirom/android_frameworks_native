@@ -2788,7 +2788,6 @@ void SurfaceFlinger::postComposition()
         mDrawingState.traverse([&](Layer* layer) {
             if (layer->findOutputLayerForDisplay(display)) {
                 layerInfo.push_back(layer->getName());
-                ALOGI("Split update layer: %s", layer->getName().c_str());
             }
         });
         mLayerExt->UpdateLayerState(layerInfo, mNumLayers);
