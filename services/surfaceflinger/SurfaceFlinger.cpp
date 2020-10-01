@@ -894,6 +894,15 @@ void SurfaceFlinger::init() {
     LOG_ALWAYS_FATAL_IF(!display, "Missing internal display after registering composer callback.");
     LOG_ALWAYS_FATAL_IF(!getHwComposer().isConnected(*display->getId()),
                         "Internal display is disconnected.");
+#ifdef QTI_DISPLAY_CONFIG_ENABLED
+    if (!mDisplayConfigIntf) {
+        ALOGE("DisplayConfig HIDL not present\n");
+        mDisplayConfigIntf = nullptr;
+    } else {
+        mDisplayConfigIntf->IsAsyncVDSCreationSupported(&mAsyncVdsCreationSupported);
+        ALOGI("IsAsyncVDSCreationSupported %d", mAsyncVdsCreationSupported);
+    }
+#endif
 
     if (useVrFlinger) {
         auto vrFlingerRequestDisplayCallback = [this](bool requestDisplay) {
@@ -2292,8 +2301,15 @@ void SurfaceFlinger::onMessageInvalidate(nsecs_t expectedVSyncTime) {
                 if (layer->shouldPresentNow(expectedPresentTime)) {
                     int layerQueuedFrames = layer->getQueuedFrameCount();
                     const auto& drawingState{layer->getDrawingState()};
+                    bool isLayerAvailable = layer->isOpaque(drawingState);
+                    if (!isLayerAvailable) {
+                        int32_t priority = layer->getFrameRateSelectionPriority();
+                        if (layer->isLayerFocusedBasedOnPriority(priority)) {
+                            isLayerAvailable = true;
+                        }
+                    }
                     if (maxQueuedFrames < layerQueuedFrames &&
-                        layer->isOpaque(drawingState)) {
+                        isLayerAvailable) {
                         maxQueuedFrames = layerQueuedFrames;
                         mNameLayerMax = layer->getName();
                     }
@@ -2772,7 +2788,6 @@ void SurfaceFlinger::postComposition()
         mDrawingState.traverse([&](Layer* layer) {
             if (layer->findOutputLayerForDisplay(display)) {
                 layerInfo.push_back(layer->getName());
-                ALOGI("Split update layer: %s", layer->getName().c_str());
             }
         });
         mLayerExt->UpdateLayerState(layerInfo, mNumLayers);
@@ -3985,6 +4000,10 @@ void SurfaceFlinger::setTransactionState(
 
     bool privileged = callingThreadHasUnscopedSurfaceFlingerAccess();
 
+    if (mAsyncVdsCreationSupported) {
+        checkVirtualDisplayHint(displays);
+    }
+
     Mutex::Autolock _l(mStateLock);
 
     // If its TransactionQueue already has a pending TransactionState or if it is pending
@@ -4177,6 +4196,47 @@ void SurfaceFlinger::applyTransactionState(
         if (transactionStart == Scheduler::TransactionStart::EarlyStart ||
             transactionStart == Scheduler::TransactionStart::EarlyEnd) {
             mVSyncModulator->setTransactionStart(transactionStart);
+        }
+    }
+}
+
+void SurfaceFlinger::checkVirtualDisplayHint(const Vector<DisplayState>& displays) {
+    for (const DisplayState& s : displays) {
+        const ssize_t index = mCurrentState.displays.indexOfKey(s.token);
+        if (index < 0)
+            continue;
+
+        DisplayDeviceState& state = mCurrentState.displays.editValueAt(index);
+        const uint32_t what = s.what;
+        if (what & DisplayState::eSurfaceChanged) {
+            if (IInterface::asBinder(state.surface) != IInterface::asBinder(s.surface)) {
+                if (state.isVirtual() && s.surface != nullptr &&
+                    (mUseHwcVirtualDisplays || getHwComposer().isUsingVrComposer())) {
+                    int width = 0;
+                    int status = s.surface->query(NATIVE_WINDOW_WIDTH, &width);
+                    ALOGE_IF(status != NO_ERROR, "Unable to query width (%d)", status);
+                    int height = 0;
+                    status = s.surface->query(NATIVE_WINDOW_HEIGHT, &height);
+                    ALOGE_IF(status != NO_ERROR, "Unable to query height (%d)", status);
+                    int format = 0;
+                    status = s.surface->query(NATIVE_WINDOW_FORMAT, &format);
+                    ALOGE_IF(status != NO_ERROR, "Unable to query format (%d)", status);
+#ifdef QTI_DISPLAY_CONFIG_ENABLED
+                    if ((mDisplayConfigIntf) && (maxVirtualDisplaySize == 0 ||
+                        ((uint64_t)width <= maxVirtualDisplaySize &&
+                        (uint64_t)height <= maxVirtualDisplaySize))) {
+                        uint64_t usage = 0;
+                        // Replace with native_window_get_consumer_usage ?
+                        status = s.surface->getConsumerUsage(&usage);
+                        ALOGW_IF(status != NO_ERROR, "Unable to query usage (%d)", status);
+                        if ((status == NO_ERROR) && canAllocateHwcDisplayIdForVDS(usage)) {
+                            mDisplayConfigIntf->CreateVirtualDisplay(width, height, format);
+                            return;
+                        }
+                    }
+#endif
+                }
+            }
         }
     }
 }

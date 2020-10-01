@@ -381,7 +381,11 @@ DisplayConnectionType HWComposer::getDisplayConnectionType(DisplayId displayId) 
             ? DisplayConnectionType::Internal
             : DisplayConnectionType::External;
 
-    RETURN_IF_HWC_ERROR(error, displayId, FALLBACK_TYPE);
+    if (error != hal::Error::NONE) {
+      ALOGV("%s failed with error %s", __FUNCTION__, to_string(error).c_str());
+      return FALLBACK_TYPE;
+    }
+
     return type;
 }
 
