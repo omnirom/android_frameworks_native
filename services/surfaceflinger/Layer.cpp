@@ -790,7 +790,8 @@ bool Layer::isSecureCamera() const {
 
 bool Layer::isScreenshot() const {
     return ((getName().find("ScreenshotSurface") != std::string::npos) ||
-            (getName().find("RotationLayer") != std::string::npos));
+            (getName().find("RotationLayer") != std::string::npos) ||
+            (getName().find("BackColorSurface") != std::string::npos));
 }
 // ----------------------------------------------------------------------------
 // transaction

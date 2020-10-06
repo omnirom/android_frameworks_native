@@ -203,6 +203,23 @@ PhaseOffsets::Offsets PhaseOffsets::getOffsetsForRefreshRate(float fps) const {
     return getPhaseOffsets(fps, static_cast<nsecs_t>(1e9f / fps));
 }
 
+void PhaseOffsets::UpdateSfOffsets(std::unordered_map<float, int64_t> advancedSfOffsets) {
+    for (auto& item: advancedSfOffsets) {
+        float fps = item.first;
+        auto iter = std::find_if(mOffsets.begin(), mOffsets.end(),
+                                 [&fps](const std::pair<float, Offsets>& candidateFps) {
+                                     return fpsEqualsWithMargin(fps, candidateFps.first);
+                                 });
+
+        if (iter != mOffsets.end()) {
+            auto& [early, earlyGl, late] = iter->second;
+            late.sf = item.second;
+            early.sf = item.second;
+            earlyGl.sf = item.second;
+        }
+    }
+}
+
 static void validateSysprops() {
     const auto validatePropertyBool = [](const char* prop) {
         LOG_ALWAYS_FATAL_IF(!property_get_bool(prop, false), "%s is false", prop);
@@ -352,6 +369,10 @@ void PhaseDurations::dump(std::string& result) const {
                   earlyGl.sf,
 
                   mAppEarlyGlDuration, mSfEarlyGlDuration);
+}
+
+void PhaseDurations::UpdateSfOffsets(std::unordered_map<float, int64_t> advancedSfOffsets) {
+    ALOGW("UpdateSfOffsets not supported for map with size: %zu", advancedSfOffsets.size());
 }
 
 } // namespace impl

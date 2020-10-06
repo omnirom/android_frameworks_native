@@ -543,7 +543,7 @@ void BufferQueueLayer::onFirstRef() {
         mProducer->setMaxDequeuedBufferCount(2);
     }
 
-    if (mFlinger->mLayerExt) {
+    if (mFlinger->mUseLayerExt && mFlinger->mLayerExt) {
         mLayerClass = mFlinger->mLayerExt->GetLayerClass(mName);
     }
 }
