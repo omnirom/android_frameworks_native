@@ -411,6 +411,8 @@ public:
 
     nsecs_t mVsyncTimeStamp = -1;
 
+    void NotifyIdleStatus();
+
 private:
     friend class BufferLayer;
     friend class BufferQueueLayer;
