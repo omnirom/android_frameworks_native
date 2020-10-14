@@ -409,6 +409,7 @@ public:
     //  If the variable is not set on the layer, it traverses up the tree to inherit the frame
     //  rate priority from its parent.
     virtual int32_t getFrameRateSelectionPriority() const;
+    int32_t getPriority();
     static bool isLayerFocusedBasedOnPriority(int32_t priority);
 
     virtual ui::Dataspace getDataSpace() const { return ui::Dataspace::UNKNOWN; }
@@ -1107,6 +1108,8 @@ private:
     // final shadow radius for this layer. If a shadow is specified for a layer, then effective
     // shadow radius is the set shadow radius, otherwise its the parent's shadow radius.
     float mEffectiveShadowRadius = 0.f;
+
+    mutable int32_t mPriority = Layer::PRIORITY_UNSET;
 
     // Returns true if the layer can draw shadows on its border.
     virtual bool canDrawShadows() const { return true; }

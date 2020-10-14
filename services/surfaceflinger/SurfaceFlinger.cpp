@@ -2303,7 +2303,7 @@ void SurfaceFlinger::onMessageInvalidate(nsecs_t expectedVSyncTime) {
                     const auto& drawingState{layer->getDrawingState()};
                     bool isLayerAvailable = layer->isOpaque(drawingState);
                     if (!isLayerAvailable) {
-                        int32_t priority = layer->getFrameRateSelectionPriority();
+                        int32_t priority = layer->getPriority();
                         if (layer->isLayerFocusedBasedOnPriority(priority)) {
                             isLayerAvailable = true;
                         }
