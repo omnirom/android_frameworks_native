@@ -599,7 +599,13 @@ SurfaceFlinger::SurfaceFlinger(Factory& factory) : SurfaceFlinger(factory, SkipI
 
     if (mDisplayConfigIntf) {
 #ifdef DISPLAY_CONFIG_API_LEVEL_1
-        mDisplayConfigIntf->ControlIdleStatusCallback(true);
+        std::string value = "";
+        std::string qsync_prop = "enable_qsync_idle";
+        ret = mDisplayConfigIntf->GetDebugProperty(qsync_prop, &value);
+        ALOGI("enable_qsync_idle, ret:%d value:%s", ret, value.c_str());
+        if (!ret && (value == "1")) {
+          mDisplayConfigIntf->ControlIdleStatusCallback(true);
+        }
 #endif
     }
 #endif
