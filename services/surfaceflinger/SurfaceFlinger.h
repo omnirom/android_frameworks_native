@@ -1097,6 +1097,8 @@ private:
 
     void createPhaseOffsetExtn();
 
+    void setEarlyWakeUpConfig(const sp<DisplayDevice>& display, hal::PowerMode mode);
+
     /* ------------------------------------------------------------------------
      * VrFlinger
      */
