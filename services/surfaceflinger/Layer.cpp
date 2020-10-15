@@ -1349,15 +1349,21 @@ bool Layer::setFrameRateSelectionPriority(int32_t priority) {
 int32_t Layer::getFrameRateSelectionPriority() const {
     // Check if layer has priority set.
     if (mDrawingState.frameRateSelectionPriority != PRIORITY_UNSET) {
-        return mDrawingState.frameRateSelectionPriority;
+        mPriority = mDrawingState.frameRateSelectionPriority;
+        return mPriority;
     }
     // If not, search whether its parents have it set.
     sp<Layer> parent = getParent();
     if (parent != nullptr) {
-        return parent->getFrameRateSelectionPriority();
+        mPriority = parent->getFrameRateSelectionPriority();
+        return mPriority;
     }
 
     return Layer::PRIORITY_UNSET;
+}
+
+int32_t Layer::getPriority() {
+    return mPriority;
 }
 
 bool Layer::isLayerFocusedBasedOnPriority(int32_t priority) {
