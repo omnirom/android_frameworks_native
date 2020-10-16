@@ -556,6 +556,8 @@ SurfaceFlinger::SurfaceFlinger(Factory& factory) : SurfaceFlinger(factory, SkipI
         (!strncasecmp(property,"true", PROPERTY_VALUE_MAX )))) {
         mPluggableVsyncPrioritized = true;
     }
+    property_get("debug.sf.disable_hwc_overlays", value, "0");
+    mDebugDisableHWC = atoi(value);
 
     // We should be reading 'persist.sys.sf.color_saturation' here
     // but since /data may be encrypted, we need to wait until after vold
