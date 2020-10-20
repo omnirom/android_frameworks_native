@@ -61,6 +61,7 @@ Display::~Display() = default;
 void Display::setConfiguration(const compositionengine::DisplayCreationArgs& args) {
     mIsVirtual = !args.physical;
     mId = args.physical ? std::make_optional(args.physical->id) : std::nullopt;
+    mConnectionType = args.physical ? args.physical->type : DisplayConnectionType::Internal;
     mPowerAdvisor = args.powerAdvisor;
 
     editState().isSecure = args.isSecure;
@@ -279,7 +280,7 @@ void Display::chooseCompositionStrategy() {
     bool hasScreenshot = std::any_of(layers.begin(), layers.end(), [](auto* layer) {
          return layer->getLayerFE().getCompositionState()->isScreenshot;
     });
-    if ((mIsVirtual || (hwc.getDisplayConnectionType(*mId) == DisplayConnectionType::External)) &&
+    if ((mIsVirtual || (mConnectionType == DisplayConnectionType::External)) &&
         (hasScreenshot != mHasScreenshot) && mDisplayConfigIntf) {
         const auto hwcDisplayId = hwc.fromPhysicalDisplayId(*mId);
         if (hwcDisplayId) {
