@@ -27,6 +27,7 @@
 
 #undef LOG_TAG
 #define LOG_TAG "LayerInfoV2"
+#define MAX_FRAME_TIME 100000000
 
 namespace android::scheduler {
 
@@ -126,14 +127,19 @@ std::optional<nsecs_t> LayerInfoV2::calculateAverageFrameTime() const {
     bool missingPresentTime = false;
     int numFrames = 0;
     for (auto it = mFrameTimes.begin(); it != mFrameTimes.end() - 1; ++it) {
+        bool noUpdate = false;
         // Ignore frames captured during a config change
         if (it->pendingConfigChange || (it + 1)->pendingConfigChange) {
             return std::nullopt;
         }
-
-        totalQueueTimeDeltas +=
-                std::max(((it + 1)->queueTime - it->queueTime), mHighRefreshRatePeriod);
-        numFrames++;
+        nsecs_t val = std::max(((it + 1)->queueTime - it->queueTime), mHighRefreshRatePeriod);
+        // Only if val < 10,000,000ns (10FPS) add to count.
+        if (val < MAX_FRAME_TIME) {
+            totalQueueTimeDeltas += val;
+            numFrames++;
+        } else {
+            noUpdate = true;
+        }
 
         if (!missingPresentTime && (it->presetTime == 0 || (it + 1)->presetTime == 0)) {
             missingPresentTime = true;
@@ -144,9 +150,15 @@ std::optional<nsecs_t> LayerInfoV2::calculateAverageFrameTime() const {
             }
             continue;
         }
-
-        totalPresentTimeDeltas +=
-                std::max(((it + 1)->presetTime - it->presetTime), mHighRefreshRatePeriod);
+        // Check threshold here as well
+        val = std::max(((it + 1)->presetTime - it->presetTime), mHighRefreshRatePeriod);
+        if (val < MAX_FRAME_TIME) {
+            totalPresentTimeDeltas += val;
+            if (noUpdate && !missingPresentTime) {
+                //If queueTime was out of bound but presentTime was in bound, increment numFrames
+                numFrames++;
+            }
+        }
     }
 
     // Calculate the average frame time based on presentation timestamps. If those
@@ -157,6 +169,9 @@ std::optional<nsecs_t> LayerInfoV2::calculateAverageFrameTime() const {
     // presentation timestamps we look at the queue time to see if the current refresh rate still
     // matches the content.
 
+    if (!numFrames) {
+        return std::nullopt;
+    }
     const auto averageFrameTime =
             static_cast<float>(missingPresentTime ? totalQueueTimeDeltas : totalPresentTimeDeltas) /
             numFrames;
