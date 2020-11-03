@@ -145,11 +145,8 @@ Layer::Layer(const LayerCreationArgs& args)
 
     mCallingPid = args.callingPid;
     mCallingUid = args.callingUid;
-    if (mWindowType == InputWindowInfo::TYPE_NAVIGATION_BAR_PANEL) {
-        // Align with SurfaceFlinger changing window type from WINDOW_TYPE_DONT_SCREENSHOT to
-        // InputWindowInfo::TYPE_NAVIGATION_BAR_PANEL.
-        mPrimaryDisplayOnly = true;
-    }
+    mDontScreenShot = args.metadata.getInt32(METADATA_WINDOW_TYPE_DONT_SCREENSHOT, 0) ?
+                      true : false;
 }
 
 void Layer::onFirstRef() {
@@ -1533,7 +1530,7 @@ uint32_t Layer::getEffectiveUsage(uint32_t usage) const {
         usage |= GraphicBuffer::USAGE_CURSOR;
     }
 #ifdef QTI_DISPLAY_CONFIG_ENABLED
-    if (mPrimaryDisplayOnly) {
+    if (mDontScreenShot) {
         // This is a WINDOW_TYPE_DONT_SCREENSHOT "mask" layer which needs to be CPU-read for
         // special processing and programming of mask h/w IF the feature is supported.
         static bool rc_supported = false;
