@@ -4710,10 +4710,12 @@ status_t SurfaceFlinger::createLayer(const String8& name, const sp<Client>& clie
 
     // window type is WINDOW_TYPE_DONT_SCREENSHOT from SurfaceControl.java
     // TODO b/64227542
+    metadata.setInt32(METADATA_WINDOW_TYPE_DONT_SCREENSHOT, 0);
     if (metadata.has(METADATA_WINDOW_TYPE)) {
         int32_t windowType = metadata.getInt32(METADATA_WINDOW_TYPE, 0);
         if (windowType == 441731) {
             metadata.setInt32(METADATA_WINDOW_TYPE, InputWindowInfo::TYPE_NAVIGATION_BAR_PANEL);
+            metadata.setInt32(METADATA_WINDOW_TYPE_DONT_SCREENSHOT, 1);
             primaryDisplayOnly = true;
         }
     }
