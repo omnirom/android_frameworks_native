@@ -140,6 +140,7 @@ void EventThreadConnection::onFirstRef() {
 
 status_t EventThreadConnection::stealReceiveChannel(gui::BitTube* outChannel) {
     outChannel->setReceiveFd(mChannel.moveReceiveFd());
+    outChannel->setSendFd(base::unique_fd(dup(mChannel.getSendFd())));
     return NO_ERROR;
 }
 
@@ -151,11 +152,6 @@ status_t EventThreadConnection::setVsyncRate(uint32_t rate) {
 void EventThreadConnection::requestNextVsync() {
     ATRACE_NAME("requestNextVsync");
     mEventThread->requestNextVsync(this);
-}
-
-void EventThreadConnection::requestLatestConfig() {
-    ATRACE_NAME("requestLatestConfig");
-    mEventThread->requestLatestConfig(this);
 }
 
 status_t EventThreadConnection::postEvent(const DisplayEventReceiver::Event& event) {
@@ -280,28 +276,6 @@ void EventThread::requestNextVsync(const sp<EventThreadConnection>& connection) 
     }
 }
 
-void EventThread::requestLatestConfig(const sp<EventThreadConnection>& connection) {
-    std::lock_guard<std::mutex> lock(mMutex);
-    if (connection->mForcedConfigChangeDispatch) {
-        return;
-    }
-    connection->mForcedConfigChangeDispatch = true;
-    auto pendingConfigChange =
-            std::find_if(std::begin(mPendingEvents), std::end(mPendingEvents),
-                         [&](const DisplayEventReceiver::Event& event) {
-                             return event.header.type ==
-                                     DisplayEventReceiver::DISPLAY_EVENT_CONFIG_CHANGED;
-                         });
-
-    // If we didn't find a pending config change event, then push out the
-    // latest one we've ever seen.
-    if (pendingConfigChange == std::end(mPendingEvents)) {
-        mPendingEvents.push_back(mLastConfigChangeEvent);
-    }
-
-    mCondition.notify_all();
-}
-
 void EventThread::onScreenReleased() {
     std::lock_guard<std::mutex> lock(mMutex);
     if (!mVSyncState || mVSyncState->synthetic) {
@@ -377,9 +351,6 @@ void EventThread::threadMain(std::unique_lock<std::mutex>& lock) {
                         mInterceptVSyncsCallback(event->header.timestamp);
                     }
                     break;
-                case DisplayEventReceiver::DISPLAY_EVENT_CONFIG_CHANGED:
-                    mLastConfigChangeEvent = *event;
-                    break;
             }
         }
 
@@ -393,10 +364,6 @@ void EventThread::threadMain(std::unique_lock<std::mutex>& lock) {
                 vsyncRequested |= connection->vsyncRequest != VSyncRequest::None;
 
                 if (event && shouldConsumeEvent(*event, connection)) {
-                    if (event->header.type == DisplayEventReceiver::DISPLAY_EVENT_CONFIG_CHANGED &&
-                        connection->mForcedConfigChangeDispatch) {
-                        connection->mForcedConfigChangeDispatch = false;
-                    }
                     consumers.push_back(connection);
                     if (mDolphinCheck)
                         aliveCount++;
@@ -489,9 +456,7 @@ bool EventThread::shouldConsumeEvent(const DisplayEventReceiver::Event& event,
             return true;
 
         case DisplayEventReceiver::DISPLAY_EVENT_CONFIG_CHANGED: {
-            const bool oneTimeDispatch = connection->mForcedConfigChangeDispatch;
-            return oneTimeDispatch ||
-                    connection->mConfigChanged == ISurfaceComposer::eConfigChangedDispatch;
+            return connection->mConfigChanged == ISurfaceComposer::eConfigChangedDispatch;
         }
 
         case DisplayEventReceiver::DISPLAY_EVENT_VSYNC:
