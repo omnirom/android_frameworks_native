@@ -275,6 +275,20 @@ private:
     std::function<void()> mCallback;
 };
 
+#ifdef QTI_DISPLAY_CONFIG_ENABLED
+class DisplayConfigCallbackHandler : public ::DisplayConfig::ConfigCallback {
+public:
+    DisplayConfigCallbackHandler(SurfaceFlinger& flinger) : mFlinger(flinger) {
+    }
+    void NotifyIdleStatus(bool is_idle) {
+      ALOGV("received idle notification");
+      ATRACE_CALL();
+      mFlinger.NotifyIdleStatus();
+    }
+  private:
+    SurfaceFlinger& mFlinger;
+};
+#endif
 }  // namespace anonymous
 
 // ---------------------------------------------------------------------------
@@ -306,6 +320,7 @@ bool SurfaceFlinger::useFrameRateApi;
 bool SurfaceFlinger::sDirectStreaming;
 #ifdef QTI_DISPLAY_CONFIG_ENABLED
 ::DisplayConfig::ClientInterface *mDisplayConfigIntf = nullptr;
+DisplayConfigCallbackHandler *mDisplayConfigCallbackhandler = nullptr;
 #endif
 std::string getHwcServiceName() {
     char value[PROPERTY_VALUE_MAX] = {};
@@ -573,11 +588,25 @@ SurfaceFlinger::SurfaceFlinger(Factory& factory) : SurfaceFlinger(factory, SkipI
 
     useFrameRateApi = use_frame_rate_api(true);
 #ifdef QTI_DISPLAY_CONFIG_ENABLED
+    mDisplayConfigCallbackhandler = new DisplayConfigCallbackHandler(*this);
     int ret = ::DisplayConfig::ClientInterface::Create("SurfaceFlinger"+std::to_string(0),
-                                                        nullptr, &mDisplayConfigIntf);
+                                                        mDisplayConfigCallbackhandler,
+                                                        &mDisplayConfigIntf);
     if (ret || !mDisplayConfigIntf) {
         ALOGE("DisplayConfig HIDL not present\n");
         mDisplayConfigIntf = nullptr;
+    }
+
+    if (mDisplayConfigIntf) {
+#ifdef DISPLAY_CONFIG_API_LEVEL_1
+        std::string value = "";
+        std::string qsync_prop = "enable_qsync_idle";
+        ret = mDisplayConfigIntf->GetDebugProperty(qsync_prop, &value);
+        ALOGI("enable_qsync_idle, ret:%d value:%s", ret, value.c_str());
+        if (!ret && (value == "1")) {
+          mDisplayConfigIntf->ControlIdleStatusCallback(true);
+        }
+#endif
     }
 #endif
     mKernelIdleTimerEnabled = mSupportKernelIdleTimer = sysprop::support_kernel_idle_timer(false);
@@ -1816,10 +1845,10 @@ status_t SurfaceFlinger::notifyPowerHint(int32_t hintId) {
 
 sp<IDisplayEventConnection> SurfaceFlinger::createDisplayEventConnection(
         ISurfaceComposer::VsyncSource vsyncSource, ISurfaceComposer::ConfigChanged configChanged) {
-    const auto& handle =
-            vsyncSource == eVsyncSourceSurfaceFlinger ? mSfConnectionHandle : mAppConnectionHandle;
+    bool triggerRefresh = vsyncSource != eVsyncSourceSurfaceFlinger;
+    const auto& handle = triggerRefresh ? mAppConnectionHandle : mSfConnectionHandle;
 
-    return mScheduler->createDisplayEventConnection(handle, configChanged);
+    return mScheduler->createDisplayEventConnection(handle, configChanged, triggerRefresh);
 }
 
 void SurfaceFlinger::signalTransaction() {
@@ -5026,6 +5055,7 @@ void SurfaceFlinger::setPowerModeInternal(const sp<DisplayDevice>& display, hal:
         mScheduler->setDisplayPowerState(mode == hal::PowerMode::ON);
     }
 
+    setEarlyWakeUpConfig(display, mode);
     ALOGD("Finished setting power mode %d on display %s", mode, to_string(*displayId).c_str());
 }
 
@@ -5061,23 +5091,41 @@ void SurfaceFlinger::setPowerMode(const sp<IBinder>& displayToken, int mode) {
 #ifdef QTI_DISPLAY_CONFIG_ENABLED
     const auto displayId = display->getId();
     const auto hwcDisplayId = getHwComposer().fromPhysicalDisplayId(*displayId);
+    const hal::PowerMode currentDisplayPowerMode = display->getPowerMode();
+    const hal::PowerMode newDisplayPowerMode = static_cast<hal::PowerMode>(mode);
     // Fallback to default power state behavior as HWC does not support power mode override.
     if (!display->getPowerModeOverrideConfig() ||
-        mode  ==  HWC_POWER_MODE_DOZE ||
-        mode  ==  HWC_POWER_MODE_DOZE_SUSPEND) {
+        !((currentDisplayPowerMode  ==  hal::PowerMode::OFF &&
+        newDisplayPowerMode == hal::PowerMode::ON) ||
+        (currentDisplayPowerMode  ==  hal::PowerMode::ON &&
+        newDisplayPowerMode == hal::PowerMode::OFF))) {
         setPowerModeOnMainThread(displayToken, mode);
         return;
     }
 
-     ::DisplayConfig::PowerMode hwcMode = ::DisplayConfig::PowerMode::kOff;
-     switch (mode) {
-     case HWC_POWER_MODE_NORMAL: hwcMode = ::DisplayConfig::PowerMode::kOn; break;
-     default: hwcMode = ::DisplayConfig::PowerMode::kOff; break;
-     }
+    ::DisplayConfig::PowerMode hwcMode = ::DisplayConfig::PowerMode::kOff;
+    switch (mode) {
+    case HWC_POWER_MODE_DOZE:         hwcMode = ::DisplayConfig::PowerMode::kDoze;        break;
+    case HWC_POWER_MODE_NORMAL:       hwcMode = ::DisplayConfig::PowerMode::kOn;          break;
+    case HWC_POWER_MODE_DOZE_SUSPEND: hwcMode = ::DisplayConfig::PowerMode::kDozeSuspend; break;
+    default:                          hwcMode = ::DisplayConfig::PowerMode::kOff;         break;
+    }
 
-     bool step_up = false;
-     if (mode == HWC_POWER_MODE_NORMAL) {
-         step_up = true;
+    bool step_up = false;
+    if (currentDisplayPowerMode == hal::PowerMode::OFF) {
+        if (newDisplayPowerMode == hal::PowerMode::DOZE ||
+            newDisplayPowerMode == hal::PowerMode::ON) {
+            step_up = true;
+        }
+    } else if (currentDisplayPowerMode == hal::PowerMode::DOZE_SUSPEND) {
+        if (newDisplayPowerMode == hal::PowerMode::DOZE ||
+            newDisplayPowerMode == hal::PowerMode::ON) {
+            step_up = true;
+        }
+    } else if (currentDisplayPowerMode == hal::PowerMode::DOZE) {
+        if (newDisplayPowerMode == hal::PowerMode::ON) {
+            step_up = true;
+        }
     }
     // Change hardware state first while stepping up.
     if (step_up) {
@@ -7316,6 +7364,10 @@ void SurfaceFlinger::updateInternalDisplaysPresentationMode() {
     }
 }
 
+void SurfaceFlinger::NotifyIdleStatus() {
+  mScheduler->setIdleState();
+}
+
 void SurfaceFlinger::setupEarlyWakeUpFeature() {
 #ifdef EARLY_WAKEUP_FEATURE
     mEarlyWakeUpEnabled = false;
@@ -7358,6 +7410,20 @@ void SurfaceFlinger::createPhaseOffsetExtn() {
         mVSyncModulator->setPhaseOffsets(mPhaseConfiguration->getCurrentOffsets());
     }
 #endif
+}
+
+void SurfaceFlinger::setEarlyWakeUpConfig(const sp<DisplayDevice>& display, hal::PowerMode mode) {
+    if (mEarlyWakeUpEnabled && isInternalDisplay(display)) {
+        uint32_t hwcDisplayId;
+        if (getHwcDisplayId(display, &hwcDisplayId)) {
+            // Enable/disable Early Wake-up feature on a display based on its Power mode.
+            bool enable = (mode == hal::PowerMode::ON) || (mode == hal::PowerMode::DOZE);
+            ALOGV("setEarlyWakeUpConfig: Display: %d, Enable: %d", hwcDisplayId, enable);
+#ifdef DYNAMIC_EARLY_WAKEUP_CONFIG
+            mDisplayExtnIntf->SetEarlyWakeUpConfig(hwcDisplayId, enable);
+#endif
+        }
+    }
 }
 
 } // namespace android

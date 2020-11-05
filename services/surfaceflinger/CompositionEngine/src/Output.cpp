@@ -828,33 +828,35 @@ std::optional<base::unique_fd> Output::composeSurfaces(
     const TracedOrdinal<bool> hasClientComposition = {"hasClientComposition",
                                                       outputState.usesClientComposition};
 
-    auto layers = getOutputLayersOrderedByZ();
-    bool hasSecureCamera = std::any_of(layers.begin(), layers.end(), [](auto* layer) {
-         return layer->getLayerFE().getCompositionState()->isSecureCamera;
-    });
-
-    bool hasSecureDisplay = std::any_of(layers.begin(), layers.end(), [](auto* layer) {
-         return layer->getLayerFE().getCompositionState()->isSecureDisplay;
-    });
+    bool hasSecureCamera = false;
+    bool hasSecureDisplay = false;
+    bool needsProtected = false;
+    for (auto* layer : getOutputLayersOrderedByZ()) {
+         if (layer->getLayerFE().getCompositionState()->isSecureCamera) {
+             hasSecureCamera = true;
+         }
+         if (layer->getLayerFE().getCompositionState()->isSecureDisplay) {
+             hasSecureDisplay = true;
+         }
+         if (layer->getLayerFE().getCompositionState()->hasProtectedContent) {
+            needsProtected = true;
+         }
+    }
 
     auto& renderEngine = getCompositionEngine().getRenderEngine();
     const bool supportsProtectedContent = renderEngine.supportsProtectedContent() &&
-                                          !hasSecureCamera && !hasSecureDisplay;
+                                          !hasSecureCamera && !hasSecureDisplay &&
+                                          outputState.isSecure && needsProtected;
 
     // If we the display is secure, protected content support is enabled, and at
     // least one layer has protected content, we need to use a secure back
     // buffer.
-    if (outputState.isSecure && supportsProtectedContent) {
-        bool needsProtected = std::any_of(layers.begin(), layers.end(), [](auto* layer) {
-            return layer->getLayerFE().getCompositionState()->hasProtectedContent;
-        });
-        if (needsProtected != renderEngine.isProtected()) {
-            renderEngine.useProtectedContext(needsProtected);
-        }
-        if (needsProtected != mRenderSurface->isProtected() &&
-            needsProtected == renderEngine.isProtected()) {
-            mRenderSurface->setProtected(needsProtected);
-        }
+    if (supportsProtectedContent != renderEngine.isProtected()) {
+        renderEngine.useProtectedContext(supportsProtectedContent);
+    }
+    if (supportsProtectedContent != mRenderSurface->isProtected() &&
+        supportsProtectedContent == renderEngine.isProtected()) {
+        mRenderSurface->setProtected(supportsProtectedContent);
     }
 
     base::unique_fd fd;

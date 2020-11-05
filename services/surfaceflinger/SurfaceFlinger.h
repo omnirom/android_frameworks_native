@@ -411,6 +411,8 @@ public:
 
     nsecs_t mVsyncTimeStamp = -1;
 
+    void NotifyIdleStatus();
+
 private:
     friend class BufferLayer;
     friend class BufferQueueLayer;
@@ -1094,6 +1096,8 @@ private:
     void setupEarlyWakeUpFeature();
 
     void createPhaseOffsetExtn();
+
+    void setEarlyWakeUpConfig(const sp<DisplayDevice>& display, hal::PowerMode mode);
 
     /* ------------------------------------------------------------------------
      * VrFlinger
