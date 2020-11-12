@@ -360,7 +360,15 @@ void MultiTouchInputMapper::configureRawPointerAxes() {
         mMultiTouchMotionAccumulator.configure(getDeviceContext(), MAX_POINTERS,
                                                false /*usingSlotsProtocol*/);
     }
-}
+    String8 ignoreTouchPressureMode;
+    if (getDeviceContext().getConfiguration().tryGetProperty(String8("touch.pressure.invalid"),
+                                                             ignoreTouchPressureMode)) {
+        if (ignoreTouchPressureMode == "1") {
+            ALOGD("ignoreTouchPressureMode = %s", ignoreTouchPressureMode.c_str());
+            mRawPointerAxes.pressure.valid = false;
+        }
+    }
+                                                            }
 
 bool MultiTouchInputMapper::hasStylus() const {
     return mMultiTouchMotionAccumulator.hasStylus() || mTouchButtonAccumulator.hasStylus();
