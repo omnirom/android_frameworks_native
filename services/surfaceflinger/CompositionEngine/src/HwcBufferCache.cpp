@@ -29,7 +29,8 @@
 // TODO(b/129481165): remove the #pragma below and fix conversion issues
 #pragma clang diagnostic pop // ignored "-Wconversion"
 
-constexpr int MAX_VIDEO_WIDTH = 7000;
+constexpr int MAX_VIDEO_WIDTH = 5760;
+constexpr int MAX_VIDEO_HEIGHT = 2160;
 constexpr int MAX_NUM_SLOTS_FOR_WIDE_VIDEOS = 4;
 
 namespace android::compositionengine::impl {
@@ -83,16 +84,19 @@ void HwcBufferCache::getHwcBuffer(int slot, const sp<GraphicBuffer>& buffer, uin
     // default is 0
     wp<GraphicBuffer> weakCopy(buffer);
     uint32_t width = 0;
+    uint32_t height = 0;
     PixelFormat format = PIXEL_FORMAT_NONE;
     if (buffer) {
         width = buffer->getWidth();
+        height = buffer->getHeight();
         format = buffer->getPixelFormat();
     }
     bool widevideo = false;
     uint32_t numSlots = BufferQueue::NUM_BUFFER_SLOTS;
 
     // Workaround to reduce slots for 8k buffers
-    if (width > MAX_VIDEO_WIDTH && mReduceSlotsForWideVideo && formatIsYuv(format)) {
+    if ((width * height > MAX_VIDEO_WIDTH * MAX_VIDEO_HEIGHT) && mReduceSlotsForWideVideo &&
+        formatIsYuv(format)) {
         numSlots = MAX_NUM_SLOTS_FOR_WIDE_VIDEOS;
         widevideo = true;
     }
