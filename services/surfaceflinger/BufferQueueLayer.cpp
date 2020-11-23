@@ -471,7 +471,7 @@ void BufferQueueLayer::onFrameAvailable(const BufferItem& item) {
         frameInfo.vsync_period = mFlinger->mVsyncPeriod;
         frameInfo.transparent_region = !this->isOpaque(mDrawingState);
         if (frameInfo.transparent_region) {
-            if (this->isLayerFocusedBasedOnPriority(this->getFrameRateSelectionPriority())) {
+            if (this->isLayerFocusedBasedOnPriority(this->getPriority())) {
                 frameInfo.transparent_region = false;
             }
         }
