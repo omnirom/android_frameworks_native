@@ -3875,6 +3875,12 @@ status_t SurfaceFlinger::addClientLayer(const sp<Client>& client, const sp<IBind
         if (mNumLayers >= ISurfaceComposer::MAX_LAYERS) {
             ALOGE("AddClientLayer failed, mNumLayers (%zu) >= MAX_LAYERS (%zu)", mNumLayers.load(),
                   ISurfaceComposer::MAX_LAYERS);
+            mCurrentState.traverseInZOrder([&](Layer* layer) {
+                const auto& p = layer->getParent();
+                ALOGE("layer (%s) ::  parent (%s).",
+                layer->getName().c_str(),
+                (p != nullptr) ? p->getName().c_str() : "no-parent");
+            });
             return NO_MEMORY;
         }
 
