@@ -2477,7 +2477,21 @@ InputWindowInfo Layer::fillInputInfo() {
     info.frameTop = layerBounds.top;
     info.frameRight = layerBounds.right;
     info.frameBottom = layerBounds.bottom;
-
+    // validate layer bound before access
+    //layer = #1
+    //layerBounds  l = 2147483647 t = -2147483648 r = 2147483647 b = -2147483648
+    //Todo:  Need to fix at framework level.
+    if (info.frameLeft > INT16_MAX || info.frameTop > INT16_MAX ||
+        info.frameRight > INT16_MAX || info.frameBottom > INT16_MAX ||
+        info.frameLeft < INT16_MIN || info.frameTop < INT16_MIN ||
+        info.frameRight < INT16_MIN || info.frameBottom < INT16_MIN) {
+        ALOGE("Layer %s left = %d top = %d right = %d  bottom = %d", getName().c_str(),
+               info.frameLeft, info.frameTop, info.frameRight,  info.frameBottom);
+        info.frameLeft = 0;
+        info.frameTop = 0;
+        info.frameRight = 0;
+        info.frameBottom = 0;
+    }
     // Position the touchable region relative to frame screen location and restrict it to frame
     // bounds.
     info.touchableRegion = info.touchableRegion.translate(info.frameLeft, info.frameTop);
