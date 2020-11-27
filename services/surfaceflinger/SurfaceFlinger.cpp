@@ -6038,9 +6038,9 @@ status_t SurfaceFlinger::CheckTransactCodeCredentials(uint32_t code) {
         code == IBinder::SYSPROPS_TRANSACTION) {
         return OK;
     }
-    // Numbers from 1000 to 1036 and 20000 are currently used for backdoors. The code
+    // Numbers from 1000 to 1036 and 20000 to 20002 are currently used for backdoors. The code
     // in onTransact verifies that the user is root, and has access to use SF.
-    if ((code >= 1000 && code <= 1036) || (code == 20000)) {
+    if ((code >= 1000 && code <= 1036) || (code >= 20000 && code <= 20002)) {
         ALOGV("Accessing SurfaceFlinger through backdoor code: %u", code);
         return OK;
     }
@@ -6386,11 +6386,161 @@ status_t SurfaceFlinger::onTransact(uint32_t code, const Parcel& data, Parcel* r
                 return NO_ERROR;
             }
             case 20000: {
-              uint64_t disp = data.readUint64();
-              int mode = data.readInt32();
-              ALOGI("Debug: Set display = %llu, power mode = %d", (unsigned long long)disp, mode);
-              setPowerMode(getPhysicalDisplayToken(disp), mode);
-              return NO_ERROR;
+                uint64_t disp = 0;
+                int32_t mode = HWC_POWER_MODE_NORMAL;
+                int32_t tile_h_loc = -1;
+                int32_t tile_v_loc = -1;
+                uint32_t num_h_tiles = 1;
+                uint32_t num_v_tiles = 1;
+                if (data.readUint64(&disp) != NO_ERROR) {
+                    err = BAD_TYPE;
+                    ALOGE("Invalid 64-bit unsigned-int display id parameter.");
+                    break;
+                }
+                if (data.readInt32(&mode) != NO_ERROR) {
+                    err = BAD_TYPE;
+                    ALOGE("Invalid 32-bit signed-int power mode parameter.");
+                    break;
+                }
+                if (data.readInt32(&tile_h_loc) != NO_ERROR) {
+                    tile_h_loc = -1;
+                }
+                if (data.readInt32(&tile_v_loc) != NO_ERROR) {
+                    tile_v_loc = 0;
+                }
+                if (tile_h_loc < 0) {
+                    ALOGI("Debug: Set display = %llu, power mode = %d", (unsigned long long)disp,
+                          mode);
+                    setPowerMode(getPhysicalDisplayToken(disp), mode);
+                } else {
+#if defined(QTI_DISPLAY_CONFIG_ENABLED) && defined(DISPLAY_CONFIG_TILE_DISPLAY_APIS_1_0)
+                    ::DisplayConfig::PowerMode hwcMode = ::DisplayConfig::PowerMode::kOff;
+                    switch (mode) {
+                        case HWC_POWER_MODE_DOZE:
+                            hwcMode = ::DisplayConfig::PowerMode::kDoze;
+                            break;
+                        case HWC_POWER_MODE_NORMAL:
+                            hwcMode = ::DisplayConfig::PowerMode::kOn;
+                            break;
+                        case HWC_POWER_MODE_DOZE_SUSPEND:
+                            hwcMode = ::DisplayConfig::PowerMode::kDozeSuspend;
+                            break;
+                        default:
+                            break;
+                    }
+                    // A regular display has one h tile and one v tile.
+                    mDisplayConfigIntf->GetDisplayTileCount(disp, &num_h_tiles, &num_v_tiles);
+                    if (((num_h_tiles * num_v_tiles) < 2) || tile_h_loc >= num_h_tiles
+                        || tile_v_loc >= num_v_tiles) {
+                        ALOGE("Debug: Display %llu has only %u h tiles and %u v tiles. Not a true "
+                              "tile display or invalid tile h or v locations given.",
+                              (unsigned long long)disp, num_h_tiles, num_v_tiles);
+                    } else {
+                        err = mDisplayConfigIntf->SetPowerModeTiled(disp, hwcMode, tile_h_loc,
+                                                                    tile_v_loc);
+                        if (NO_ERROR != err) {
+                            ALOGE("Debug: DisplayConfig::SetPowerModeTiled() returned error %d",
+                                  err);
+                            break;
+                        }
+                    }
+#endif
+                    ALOGI("Debug: Set display = %llu, power mode = %d at tile h loc = %d, tile v "
+                          "loc = %d (Has %u h tiles and %u v tiles)", (unsigned long long)disp,
+                          mode, tile_h_loc, tile_v_loc, num_h_tiles, num_v_tiles);
+                }
+                return NO_ERROR;
+            }
+            case 20001: {
+                uint64_t disp = 0;
+                int32_t level = 0;
+                int32_t tile_h_loc = -1;
+                int32_t tile_v_loc = -1;
+                uint32_t num_h_tiles = 1;
+                uint32_t num_v_tiles = 1;
+                if (data.readUint64(&disp) != NO_ERROR) {
+                    err = BAD_TYPE;
+                    ALOGE("Invalid 64-bit unsigned-int display id parameter.");
+                    break;
+                }
+                if (data.readInt32(&level) != NO_ERROR) {
+                    err = BAD_TYPE;
+                    ALOGE("Invalid 32-bit signed-int brightess parameter.");
+                    break;
+                }
+                float levelf = static_cast<float>(level)/255.0f;
+                if (data.readInt32(&tile_h_loc) != NO_ERROR) {
+                    tile_h_loc = -1;
+                }
+                if (data.readInt32(&tile_v_loc) != NO_ERROR) {
+                    tile_v_loc = 0;
+                }
+                if (tile_h_loc < 0) {
+                    ALOGI("Debug: Set display = %llu, brightness level = %d/255 (%0.2ff)",
+                          (unsigned long long)disp, level, levelf);
+                    setDisplayBrightness(getPhysicalDisplayToken(disp), levelf);
+                } else {
+#if defined(QTI_DISPLAY_CONFIG_ENABLED) && defined(DISPLAY_CONFIG_TILE_DISPLAY_APIS_1_0)
+                    // A regular display has one h tile and one v tile.
+                    mDisplayConfigIntf->GetDisplayTileCount(disp, &num_h_tiles, &num_v_tiles);
+                    if (((num_h_tiles * num_v_tiles) < 2) || tile_h_loc >= num_h_tiles
+                        || tile_v_loc >= num_v_tiles) {
+                        ALOGE("Debug: Display %llu has only %u h tiles and %u v tiles. Not a true "
+                              "tile display or invalid tile h or v locations given.",
+                              (unsigned long long)disp, num_h_tiles, num_v_tiles);
+                    } else {
+                        err = mDisplayConfigIntf->SetPanelBrightnessTiled(disp, level, tile_h_loc,
+                                                                          tile_v_loc);
+                        if (NO_ERROR != err) {
+                            ALOGE("Debug: DisplayConfig::SetPanelBrightnessTiled() returned error "
+                                  "%d", err);
+                            break;
+                        }
+                    }
+#endif
+                    ALOGI("Debug: Set display = %llu, brightness level = %d/255 (%0.2ff) at tile h "
+                          "loc = %d, tile v loc = %d (Has %u h tiles and %u v tiles)",
+                          (unsigned long long)disp, level, levelf, tile_h_loc, tile_v_loc,
+                          num_h_tiles, num_v_tiles);
+                }
+                return NO_ERROR;
+            }
+            case 20002: {
+                uint64_t disp = 0;
+                int32_t pref = 0;
+                if (data.readUint64(&disp) != NO_ERROR) {
+                    err = BAD_TYPE;
+                    ALOGE("Invalid 64-bit unsigned-int display id parameter.");
+                    break;
+                }
+                if (data.readInt32(&pref) != NO_ERROR) {
+                    err = BAD_TYPE;
+                    ALOGE("Invalid 32-bit signed-int wider-mode preference parameter.");
+                    break;
+                }
+                ALOGI("Debug: Set display = %llu, wider-mode preference = %d",
+                      (unsigned long long)disp, pref);
+#if defined(QTI_DISPLAY_CONFIG_ENABLED) && defined(DISPLAY_CONFIG_TILE_DISPLAY_APIS_1_0)
+                ::DisplayConfig::WiderModePref wider_mode_pref =
+                    ::DisplayConfig::WiderModePref::kNoPreference;
+                switch (pref) {
+                    case 1:
+                        wider_mode_pref = ::DisplayConfig::WiderModePref::kWiderAsyncMode;
+                        break;
+                    case 2:
+                        wider_mode_pref = ::DisplayConfig::WiderModePref::kWiderSyncMode;
+                        break;
+                    default:
+                        // Use default DisplayConfig::WiderModePref::kNoPreference.
+                        break;
+                }
+                err = mDisplayConfigIntf->SetWiderModePreference(disp, wider_mode_pref);
+                if (NO_ERROR != err) {
+                    ALOGE("Debug: DisplayConfig::SetWiderModePreference() returned error %d", err);
+                    break;
+                }
+#endif
+                return NO_ERROR;
             }
         }
     }
