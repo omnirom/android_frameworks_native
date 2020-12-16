@@ -984,6 +984,7 @@ protected:
     const std::string mTransactionName{"TX - " + mName};
 
     bool mPrimaryDisplayOnly = false;
+    bool mDontScreenShot = false;
 
     // These are only accessed by the main thread or the tracing thread.
     State mDrawingState;
