@@ -582,6 +582,7 @@ private:
                           int8_t compatibility) override;
     status_t acquireFrameRateFlexibilityToken(sp<IBinder>* outToken) override;
     status_t setDisplayElapseTime(const sp<DisplayDevice>& display) const;
+    status_t isSupportedConfigSwitch(const sp<IBinder>& displayToken, int config);
 
     /* ------------------------------------------------------------------------
      * DeathRecipient interface
