@@ -540,7 +540,7 @@ SurfaceFlinger::SurfaceFlinger(Factory& factory) : SurfaceFlinger(factory, SkipI
     property_get("ro.sf.blurs_are_expensive", value, "0");
     mBlursAreExpensive = atoi(value);
 
-    property_get("ro.sf.enable_fb_scaling", value, "0");
+    property_get("vendor.display.enable_fb_scaling", value, "0");
     mUseFbScaling = atoi(value);
     ALOGI_IF(mUseFbScaling, "Enable FrameBuffer Scaling");
     property_get("debug.sf.enable_advanced_sf_phase_offset", value, "0");
@@ -3875,6 +3875,12 @@ status_t SurfaceFlinger::addClientLayer(const sp<Client>& client, const sp<IBind
         if (mNumLayers >= ISurfaceComposer::MAX_LAYERS) {
             ALOGE("AddClientLayer failed, mNumLayers (%zu) >= MAX_LAYERS (%zu)", mNumLayers.load(),
                   ISurfaceComposer::MAX_LAYERS);
+            mCurrentState.traverseInZOrder([&](Layer* layer) {
+                const auto& p = layer->getParent();
+                ALOGE("layer (%s) ::  parent (%s).",
+                layer->getName().c_str(),
+                (p != nullptr) ? p->getName().c_str() : "no-parent");
+            });
             return NO_MEMORY;
         }
 
