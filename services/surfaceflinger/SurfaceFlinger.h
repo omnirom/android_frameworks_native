@@ -582,6 +582,7 @@ private:
                           int8_t compatibility) override;
     status_t acquireFrameRateFlexibilityToken(sp<IBinder>* outToken) override;
     status_t setDisplayElapseTime(const sp<DisplayDevice>& display) const;
+    status_t isSupportedConfigSwitch(const sp<IBinder>& displayToken, int config);
 
     /* ------------------------------------------------------------------------
      * DeathRecipient interface
@@ -1033,7 +1034,7 @@ private:
     }
 
     void dumpAllLocked(const DumpArgs& args, std::string& result) const REQUIRES(mStateLock);
-
+    void dumpMini(std::string& result) const REQUIRES(mStateLock);
     void appendSfConfigString(std::string& result) const;
     void listLayersLocked(std::string& result) const;
     void dumpStatsLocked(const DumpArgs& args, std::string& result) const REQUIRES(mStateLock);
@@ -1066,6 +1067,19 @@ private:
     }
 
     status_t doDump(int fd, const DumpArgs& args, bool asProto);
+
+    status_t doDumpContinuous(int fd, const DumpArgs& args);
+    void dumpDrawCycle(bool prePrepare);
+
+    struct {
+      Mutex lock;
+      const char *name = "/data/misc/wmtrace/dumpsys.txt";
+      bool running = false;
+      bool noLimit = false;
+      bool fullDump = false;
+      bool replaceAfterCommit = false;
+      long int position = 0;
+    } mFileDump;
 
     status_t dumpCritical(int fd, const DumpArgs&, bool asProto);
 
