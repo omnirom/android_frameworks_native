@@ -58,7 +58,7 @@ public:
     MOCK_METHOD1(useProtectedContext, bool(bool));
     MOCK_METHOD2(setViewportAndProjection,
                  void(Rect,  Rect));
-    MOCK_METHOD0(cleanupPostRender, bool());
+    MOCK_METHOD1(cleanupPostRender, bool(CleanupMode mode));
     MOCK_METHOD6(drawLayers,
                  status_t(const DisplaySettings&, const std::vector<const LayerSettings*>&,
                           ANativeWindowBuffer*, const bool, base::unique_fd&&, base::unique_fd*));
