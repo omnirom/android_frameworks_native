@@ -1896,7 +1896,7 @@ void SurfaceFlinger::signalRefresh() {
     mEventQueue->refresh();
 }
 
-nsecs_t SurfaceFlinger::getVsyncPeriod() const {
+nsecs_t SurfaceFlinger::getVsyncPeriodFromHWC() const {
     auto displayId = getInternalDisplayIdLocked();
     if (mNextVsyncSource) {
         displayId = mNextVsyncSource->getId();
@@ -2047,7 +2047,7 @@ void SurfaceFlinger::onRefreshReceived(int sequenceId, hal::HWDisplayId /*hwcDis
         // Track Vsync Period before and after refresh.
         std::lock_guard lock(mVsyncPeriodMutex);
         mVsyncPeriods = {};
-        mVsyncPeriods.push_back(getVsyncPeriod());
+        mVsyncPeriods.push_back(getVsyncPeriodFromHWC());
     }
 }
 
@@ -2157,7 +2157,7 @@ void SurfaceFlinger::updateVrFlinger() {
     setPowerModeInternal(display, currentDisplayPowerMode);
 
     // Reset the timing values to account for the period of the swapped in HWC
-    const nsecs_t vsyncPeriod = getVsyncPeriod();
+    const nsecs_t vsyncPeriod = mRefreshRateConfigs->getCurrentRefreshRate().getVsyncPeriod();
     mAnimFrameTracker.setDisplayRefreshPeriod(vsyncPeriod);
 
     // The present fences returned from vr_hwc are not an accurate
@@ -2233,7 +2233,7 @@ void SurfaceFlinger::updateFrameScheduler() NO_THREAD_SAFETY_ANALYSIS {
         return;
     }
 
-    const nsecs_t period = getVsyncPeriod();
+    const nsecs_t period = getVsyncPeriodFromHWC();
     mScheduler->resyncToHardwareVsync(true, period, true /* force resync */);
     if (timeStamp > 0) {
         bool periodFlushed = false;
@@ -2595,7 +2595,8 @@ void SurfaceFlinger::onMessageRefresh() {
         mTimeStats->incrementCompositionStrategyChanges();
     }
 
-    mVSyncModulator->onRefreshed(mHadClientComposition);
+    // TODO: b/160583065 Enable skip validation when SF caches all client composition layers
+    mVSyncModulator->onRefreshed(mHadClientComposition || mReusedClientComposition);
 
     mLayersWithQueuedFrames.clear();
     if (mVisibleRegionsDirty) {
@@ -2898,7 +2899,7 @@ void SurfaceFlinger::forceResyncModel() NO_THREAD_SAFETY_ANALYSIS {
         return;
     }
 
-    const nsecs_t period = getVsyncPeriod();
+    const nsecs_t period = getVsyncPeriodFromHWC();
     // Model resync should happen at every fps change.
     // Upon increase/decrease in vsync period start resync immediately.
     // Initial set of vsync wakeups happen at ref_time + N * period where N = 1, 2, 3 ..
@@ -2987,13 +2988,13 @@ void SurfaceFlinger::updateVsyncSource()
     } else if (mNextVsyncSource && (mActiveVsyncSource == NULL)) {
         mScheduler->onScreenAcquired(mAppConnectionHandle);
         bool isPrimary = mNextVsyncSource->isPrimary();
-        nsecs_t vsync = (isPrimary && (mVsyncPeriod > 0)) ? mVsyncPeriod : getVsyncPeriod();
+        nsecs_t vsync = (isPrimary && (mVsyncPeriod > 0)) ? mVsyncPeriod : getVsyncPeriodFromHWC();
         mScheduler->resyncToHardwareVsync(true, vsync);
     } else if ((mNextVsyncSource != NULL) &&
         (mActiveVsyncSource != NULL)) {
         // Switch vsync to the new source
         mScheduler->disableHardwareVsync(true);
-        mScheduler->resyncToHardwareVsync(true, getVsyncPeriod());
+        mScheduler->resyncToHardwareVsync(true, getVsyncPeriodFromHWC());
     }
 }
 
@@ -4966,8 +4967,7 @@ void SurfaceFlinger::onInitializeDisplays() {
                         {});
 
     setPowerModeInternal(display, hal::PowerMode::ON);
-
-    const nsecs_t vsyncPeriod = getVsyncPeriod();
+    const nsecs_t vsyncPeriod = mRefreshRateConfigs->getCurrentRefreshRate().getVsyncPeriod();
     mAnimFrameTracker.setDisplayRefreshPeriod(vsyncPeriod);
 
     // Use phase of 0 since phase is not known.
@@ -5009,7 +5009,7 @@ void SurfaceFlinger::setPowerModeInternal(const sp<DisplayDevice>& display, hal:
     if (mInterceptor->isEnabled()) {
         mInterceptor->savePowerModeUpdate(display->getSequenceId(), static_cast<int32_t>(mode));
     }
-
+    const auto vsyncPeriod = mRefreshRateConfigs->getCurrentRefreshRate().getVsyncPeriod();
     if (currentMode == hal::PowerMode::OFF) {
         if (SurfaceFlinger::setSchedFifo(true) != NO_ERROR) {
             ALOGW("Couldn't set SCHED_FIFO on display on: %s\n", strerror(errno));
@@ -5019,7 +5019,7 @@ void SurfaceFlinger::setPowerModeInternal(const sp<DisplayDevice>& display, hal:
             if (display->isPrimary() && mode != hal::PowerMode::DOZE_SUSPEND) {
                 getHwComposer().setVsyncEnabled(*displayId, mHWCVsyncPendingState);
                 mScheduler->onScreenAcquired(mAppConnectionHandle);
-                mScheduler->resyncToHardwareVsync(true, getVsyncPeriod());
+                mScheduler->resyncToHardwareVsync(true, vsyncPeriod);
             }
         } else if ((mPluggableVsyncPrioritized && (displayId != getInternalDisplayIdLocked())) ||
                     displayId == getInternalDisplayIdLocked()) {
@@ -5054,7 +5054,7 @@ void SurfaceFlinger::setPowerModeInternal(const sp<DisplayDevice>& display, hal:
         if (isDummyDisplay) {
             if (display->isPrimary() && currentMode == hal::PowerMode::DOZE_SUSPEND) {
                 mScheduler->onScreenAcquired(mAppConnectionHandle);
-                mScheduler->resyncToHardwareVsync(true, getVsyncPeriod());
+                mScheduler->resyncToHardwareVsync(true, vsyncPeriod);
             }
         } else {
             updateVsyncSource();
@@ -5392,7 +5392,7 @@ void SurfaceFlinger::listLayersLocked(std::string& result) const {
 }
 
 void SurfaceFlinger::dumpStatsLocked(const DumpArgs& args, std::string& result) const {
-    StringAppendF(&result, "%" PRId64 "\n", getVsyncPeriod());
+    StringAppendF(&result, "%" PRId64 "\n", getVsyncPeriodFromHWC());
 
     if (args.size() > 1) {
         const auto name = String8(args[1]);
@@ -5457,7 +5457,7 @@ void SurfaceFlinger::dumpVSync(std::string& result) const {
     mPhaseConfiguration->dump(result);
     StringAppendF(&result,
                   "      present offset: %9" PRId64 " ns\t     VSYNC period: %9" PRId64 " ns\n\n",
-                  dispSyncPresentTimeOffset, getVsyncPeriod());
+                  dispSyncPresentTimeOffset, getVsyncPeriodFromHWC());
 
     scheduler::RefreshRateConfigs::Policy policy = mRefreshRateConfigs->getDisplayManagerPolicy();
     StringAppendF(&result,
@@ -7328,6 +7328,11 @@ status_t SurfaceFlinger::setFrameRate(const sp<IGraphicBufferProducer>& surface,
         Mutex::Autolock lock(mStateLock);
         if (authenticateSurfaceTextureLocked(surface)) {
             sp<Layer> layer = (static_cast<MonitoredProducer*>(surface.get()))->getLayer();
+            if (layer == nullptr) {
+                ALOGE("Attempt to set frame rate on a layer that no longer exists");
+                return BAD_VALUE;
+            }
+
             if (layer->setFrameRate(
                         Layer::FrameRate(frameRate,
                                          Layer::FrameRate::convertCompatibility(compatibility)))) {
