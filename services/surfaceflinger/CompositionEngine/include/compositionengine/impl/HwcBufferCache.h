@@ -61,6 +61,8 @@ private:
     // buffer) pair. "counter" is a unique value that indicates the last time this slot was updated
     // or used and allows us to keep track of the least-recently used buffer.
     wp<GraphicBuffer> mBuffers[BufferQueue::NUM_BUFFER_SLOTS];
+    uint32_t mNextSlot = 0;
+    bool mReduceSlotsForWideVideo = false;
 };
 
 } // namespace compositionengine::impl

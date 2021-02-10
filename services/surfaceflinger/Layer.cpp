@@ -145,11 +145,8 @@ Layer::Layer(const LayerCreationArgs& args)
 
     mCallingPid = args.callingPid;
     mCallingUid = args.callingUid;
-    if (mWindowType == InputWindowInfo::TYPE_NAVIGATION_BAR_PANEL) {
-        // Align with SurfaceFlinger changing window type from WINDOW_TYPE_DONT_SCREENSHOT to
-        // InputWindowInfo::TYPE_NAVIGATION_BAR_PANEL.
-        mPrimaryDisplayOnly = true;
-    }
+    mDontScreenShot = args.metadata.getInt32(METADATA_WINDOW_TYPE_DONT_SCREENSHOT, 0) ?
+                      true : false;
 }
 
 void Layer::onFirstRef() {
@@ -1486,6 +1483,13 @@ Layer::FrameRate Layer::getFrameRateForLayerTree() const {
 
 void Layer::deferTransactionUntil_legacy(const sp<Layer>& barrierLayer, uint64_t frameNumber) {
     ATRACE_CALL();
+    if (mLayerDetached) {
+        // If the layer is detached, then we don't defer this transaction since we will not
+        // commit the pending state while the layer is detached. Adding sync points may cause
+        // the barrier layer to wait for the states to be committed before dequeuing a buffer.
+        return;
+    }
+
     mCurrentState.barrierLayer_legacy = barrierLayer;
     mCurrentState.frameNumber_legacy = frameNumber;
     // We don't set eTransactionNeeded, because just receiving a deferral
@@ -1533,7 +1537,7 @@ uint32_t Layer::getEffectiveUsage(uint32_t usage) const {
         usage |= GraphicBuffer::USAGE_CURSOR;
     }
 #ifdef QTI_DISPLAY_CONFIG_ENABLED
-    if (mPrimaryDisplayOnly) {
+    if (mDontScreenShot) {
         // This is a WINDOW_TYPE_DONT_SCREENSHOT "mask" layer which needs to be CPU-read for
         // special processing and programming of mask h/w IF the feature is supported.
         static bool rc_supported = false;
@@ -2470,14 +2474,36 @@ InputWindowInfo Layer::fillInputInfo() {
     xSurfaceInset = (xSurfaceInset >= 0) ? std::min(xSurfaceInset, layerBounds.getWidth() / 2) : 0;
     ySurfaceInset = (ySurfaceInset >= 0) ? std::min(ySurfaceInset, layerBounds.getHeight() / 2) : 0;
 
-    layerBounds.inset(xSurfaceInset, ySurfaceInset, xSurfaceInset, ySurfaceInset);
+    // inset while protecting from overflow TODO(b/161235021): What is going wrong
+    // in the overflow scenario?
+    {
+    int32_t tmp;
+    if (!__builtin_add_overflow(layerBounds.left, xSurfaceInset, &tmp)) layerBounds.left = tmp;
+    if (!__builtin_sub_overflow(layerBounds.right, xSurfaceInset, &tmp)) layerBounds.right = tmp;
+    if (!__builtin_add_overflow(layerBounds.top, ySurfaceInset, &tmp)) layerBounds.top = tmp;
+    if (!__builtin_sub_overflow(layerBounds.bottom, ySurfaceInset, &tmp)) layerBounds.bottom = tmp;
+    }
 
     // Input coordinate should match the layer bounds.
     info.frameLeft = layerBounds.left;
     info.frameTop = layerBounds.top;
     info.frameRight = layerBounds.right;
     info.frameBottom = layerBounds.bottom;
-
+    // validate layer bound before access
+    //layer = #1
+    //layerBounds  l = 2147483647 t = -2147483648 r = 2147483647 b = -2147483648
+    //Todo:  Need to fix at framework level.
+    if (info.frameLeft > INT16_MAX || info.frameTop > INT16_MAX ||
+        info.frameRight > INT16_MAX || info.frameBottom > INT16_MAX ||
+        info.frameLeft < INT16_MIN || info.frameTop < INT16_MIN ||
+        info.frameRight < INT16_MIN || info.frameBottom < INT16_MIN) {
+        ALOGE("Layer %s left = %d top = %d right = %d  bottom = %d", getName().c_str(),
+               info.frameLeft, info.frameTop, info.frameRight,  info.frameBottom);
+        info.frameLeft = 0;
+        info.frameTop = 0;
+        info.frameRight = 0;
+        info.frameBottom = 0;
+    }
     // Position the touchable region relative to frame screen location and restrict it to frame
     // bounds.
     info.touchableRegion = info.touchableRegion.translate(info.frameLeft, info.frameTop);
