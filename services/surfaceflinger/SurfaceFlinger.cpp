@@ -2267,7 +2267,9 @@ void SurfaceFlinger::onMessageReceived(int32_t what, nsecs_t expectedVSyncTime) 
         }
     }
 #ifdef PASS_COMPOSITOR_PID
-    mDisplayExtnIntf->SendCompositorPid();
+    if (mDisplayExtnIntf) {
+        mDisplayExtnIntf->SendCompositorPid();
+    }
 #endif
 }
 
