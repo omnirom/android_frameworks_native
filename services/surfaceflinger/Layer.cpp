@@ -1549,7 +1549,13 @@ uint32_t Layer::getEffectiveUsage(uint32_t usage) const {
           ::DisplayConfig::ClientInterface::Create("SurfaceFlinger::Layer" + std::to_string(0),
               nullptr, &DisplayConfigIntf);
           if (DisplayConfigIntf) {
-              DisplayConfigIntf->IsRCSupported(0, &rc_supported);
+              std::string value = "0";
+              std::string rc_prop = "enable_rc_support";
+              int ret = DisplayConfigIntf->GetDebugProperty(rc_prop, &value);
+              ALOGI("enable_rc_support, ret:%d value:%s", ret, value.c_str());
+              if (!ret && (value == "1")) {
+                  DisplayConfigIntf->IsRCSupported(0, &rc_supported);
+              }
               ::DisplayConfig::ClientInterface::Destroy(DisplayConfigIntf);
           }
           ALOGI("Mask layers are %sCPU-readable.", rc_supported ? "" : "*NOT* ");
