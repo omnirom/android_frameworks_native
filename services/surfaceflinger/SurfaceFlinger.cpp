@@ -2268,6 +2268,11 @@ void SurfaceFlinger::onMessageReceived(int32_t what, nsecs_t expectedVSyncTime) 
             break;
         }
     }
+#ifdef PASS_COMPOSITOR_PID
+    if (mDisplayExtnIntf) {
+        mDisplayExtnIntf->SendCompositorPid();
+    }
+#endif
 }
 
 void SurfaceFlinger::onMessageInvalidate(nsecs_t expectedVSyncTime) {
@@ -5018,14 +5023,16 @@ void SurfaceFlinger::setPowerModeInternal(const sp<DisplayDevice>& display, hal:
             ALOGW("Couldn't set SCHED_FIFO on display on: %s\n", strerror(errno));
         }
         getHwComposer().setPowerMode(*displayId, mode);
+        bool internalDisplay = isInternalDisplay(display);
         if (isDummyDisplay) {
             if (display->isPrimary() && mode != hal::PowerMode::DOZE_SUSPEND) {
                 getHwComposer().setVsyncEnabled(*displayId, mHWCVsyncPendingState);
                 mScheduler->onScreenAcquired(mAppConnectionHandle);
                 mScheduler->resyncToHardwareVsync(true, vsyncPeriod);
             }
-        } else if ((mPluggableVsyncPrioritized && (displayId != getInternalDisplayIdLocked())) ||
-                    displayId == getInternalDisplayIdLocked()) {
+        } else if ((mPluggableVsyncPrioritized && !internalDisplay) ||
+                   (displayId == getInternalDisplayIdLocked()) ||
+                   internalDisplay) {
             updateVsyncSource();
         }
 
