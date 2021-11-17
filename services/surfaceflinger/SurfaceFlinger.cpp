@@ -461,6 +461,9 @@ SurfaceFlinger::SurfaceFlinger(Factory& factory) : SurfaceFlinger(factory, SkipI
     property_get("debug.sf.disable_hwc_overlays", value, "0");
     mDebugDisableHWC = atoi(value);
 
+    property_get("debug.sf.disable_display_mode_check", value, "0");
+    mDebugDisableDisplayModeCheck = atoi(value);
+
     // We should be reading 'persist.sys.sf.color_saturation' here
     // but since /data may be encrypted, we need to wait until after vold
     // comes online to attempt to read the property. The property is
@@ -2519,6 +2522,12 @@ void SurfaceFlinger::loadDisplayModes(PhysicalDisplayId displayId, DisplayModes&
                                 return mode.hwcId == *activeModeHwcId;
                             });
     } while (!activeModeIsSupported && ++attempt < kMaxAttempts);
+
+    if (!activeModeIsSupported && mDebugDisableDisplayModeCheck) {
+        // ignore
+        return;
+    }
+
     LOG_ALWAYS_FATAL_IF(!activeModeIsSupported,
                         "After %d attempts HWC still returns an active mode which is not"
                         " supported. Active mode ID = %" PRIu64 " . Supported modes = %s",
