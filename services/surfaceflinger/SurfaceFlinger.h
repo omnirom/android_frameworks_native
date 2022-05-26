@@ -1461,6 +1461,9 @@ private:
 
     const sp<WindowInfosListenerInvoker> mWindowInfosListenerInvoker;
 
+    bool mAllowHwcForVDS = false;
+    bool mAllowHwcForWFD = false;
+
     // returns the framerate of the layer with the given sequence ID
     float getLayerFramerate(nsecs_t now, int32_t id) const {
         return mScheduler->getLayerFramerate(now, id);
