@@ -203,6 +203,9 @@ public:
     std::optional<Fps> onKernelTimerChanged(std::optional<DisplayModeId> desiredActiveModeId,
                                             bool timerExpired) const EXCLUDES(mLock);
 
+    // Returns the lowest refresh rate supported by the display.
+    DisplayModePtr getMinRefreshRate() const EXCLUDES(mLock);
+
     // Returns the highest refresh rate according to the current policy. May change at runtime. Only
     // uses the primary range, not the app request range.
     DisplayModePtr getMaxRefreshRateByPolicy() const EXCLUDES(mLock);
