@@ -16,13 +16,13 @@ flag {
 }
 
 flag {
-  name: "enable_gestures_library_timer_provider"
+  name: "remove_input_channel_from_windowstate"
   namespace: "input"
-  description: "Set to true to enable timer support for the touchpad Gestures library"
-  bug: "297192727"
- }
+  description: "Do not store a copy of input channel inside WindowState."
+  bug: "323450804"
+}
 
- flag {
+flag {
   name: "enable_input_event_tracing"
   namespace: "input"
   description: "Set to true to enable input event tracing, including always-on tracing on non-user builds"
@@ -34,6 +34,13 @@ flag {
   namespace: "input"
   description: "Set to true to enable multi-device input: touch and stylus can be active at the same time, but in different windows"
   bug: "211379801"
+}
+
+flag {
+  name: "split_all_touches"
+  namespace: "input"
+  description: "Set FLAG_SPLIT_TOUCHES to true for all windows, regardless of what they specify. This is essentially deprecating this flag by forcefully enabling the split functionality"
+  bug: "239934827"
 }
 
 flag {
@@ -84,13 +91,6 @@ flag {
   namespace: "input"
   description: "enable override key behavior permission APIs"
   bug: "309018874"
-}
-
-flag {
-  name: "remove_pointer_event_tracking_in_wm"
-  namespace: "input"
-  description: "Remove pointer event tracking in WM after the Pointer Icon Refactor"
-  bug: "315321016"
 }
 
 flag {
@@ -156,4 +156,54 @@ flag {
   namespace: "input"
   description: "Keyboard classifier that classifies all keyboards into alphabetic or non-alphabetic"
   bug: "263559234"
+}
+
+flag {
+  name: "show_pointers_for_partial_screenshare"
+  namespace: "input"
+  description: "Show touch and pointer indicators when mirroring a single task"
+  bug: "310179437"
+}
+
+flag {
+  name: "include_relative_axis_values_for_captured_touchpads"
+  namespace: "input"
+  description: "Include AXIS_RELATIVE_X and AXIS_RELATIVE_Y values when reporting touches from captured touchpads."
+  bug: "330522990"
+}
+
+flag {
+  name: "enable_per_device_input_latency_metrics"
+  namespace: "input"
+  description: "Capture input latency metrics on a per device granular level using histograms."
+  bug: "270049345"
+}
+
+flag {
+  name: "collect_palm_rejection_quality_metrics"
+  namespace: "input"
+  description: "Collect quality metrics on framework palm rejection."
+  bug: "341717757"
+}
+
+flag {
+  name: "enable_touchpad_no_focus_change"
+  namespace: "input"
+  description: "Prevents touchpad gesture changing window focus."
+  bug: "364460018"
+}
+
+flag {
+  name: "enable_input_policy_profile"
+  namespace: "input"
+  description: "Apply input policy profile for input threads."
+  bug: "347122505"
+  is_fixed_read_only: true
+}
+
+flag {
+  name: "keyboard_repeat_keys"
+  namespace: "input"
+  description: "Allow user to enable key repeats or configure timeout before key repeat and key repeat delay rates."
+  bug: "336585002"
 }

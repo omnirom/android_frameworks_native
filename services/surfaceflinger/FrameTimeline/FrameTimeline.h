@@ -214,7 +214,8 @@ public:
     // enabled. The displayFrameToken is needed to link the SurfaceFrame to the corresponding
     // DisplayFrame at the trace processor side. monoBootOffset is the difference
     // between SYSTEM_TIME_BOOTTIME and SYSTEM_TIME_MONOTONIC.
-    void trace(int64_t displayFrameToken, nsecs_t monoBootOffset) const;
+    void trace(int64_t displayFrameToken, nsecs_t monoBootOffset,
+               bool filterFramesBeforeTraceStarts) const;
 
     // Getter functions used only by FrameTimelineTests and SurfaceFrame internally
     TimelineItem getActuals() const;
@@ -234,8 +235,10 @@ public:
             std::chrono::duration_cast<std::chrono::nanoseconds>(2ms).count();
 
 private:
-    void tracePredictions(int64_t displayFrameToken, nsecs_t monoBootOffset) const;
-    void traceActuals(int64_t displayFrameToken, nsecs_t monoBootOffset) const;
+    void tracePredictions(int64_t displayFrameToken, nsecs_t monoBootOffset,
+                          bool filterFramesBeforeTraceStarts) const;
+    void traceActuals(int64_t displayFrameToken, nsecs_t monoBootOffset,
+                      bool filterFramesBeforeTraceStarts) const;
     void classifyJankLocked(int32_t displayFrameJankType, const Fps& refreshRate,
                             Fps displayFrameRenderRate, nsecs_t* outDeadlineDelta) REQUIRES(mMutex);
 
@@ -367,9 +370,15 @@ private:
 class FrameTimeline : public android::frametimeline::FrameTimeline {
 public:
     class FrameTimelineDataSource : public perfetto::DataSource<FrameTimelineDataSource> {
-        void OnSetup(const SetupArgs&) override{};
-        void OnStart(const StartArgs&) override{};
-        void OnStop(const StopArgs&) override{};
+    public:
+        nsecs_t getStartTime() const { return mTraceStartTime; }
+
+    private:
+        void OnSetup(const SetupArgs&) override {};
+        void OnStart(const StartArgs&) override { mTraceStartTime = systemTime(); };
+        void OnStop(const StopArgs&) override {};
+
+        nsecs_t mTraceStartTime = 0;
     };
 
     /*
@@ -390,7 +399,8 @@ public:
         // is enabled. monoBootOffset is the difference between SYSTEM_TIME_BOOTTIME
         // and SYSTEM_TIME_MONOTONIC.
         nsecs_t trace(pid_t surfaceFlingerPid, nsecs_t monoBootOffset,
-                      nsecs_t previousPredictionPresentTime) const;
+                      nsecs_t previousPredictionPresentTime,
+                      bool filterFramesBeforeTraceStarts) const;
         // Sets the token, vsyncPeriod, predictions and SF start time.
         void onSfWakeUp(int64_t token, Fps refreshRate, Fps renderRate,
                         std::optional<TimelineItem> predictions, nsecs_t wakeUpTime);
@@ -424,10 +434,13 @@ public:
 
     private:
         void dump(std::string& result, nsecs_t baseTime) const;
-        void tracePredictions(pid_t surfaceFlingerPid, nsecs_t monoBootOffset) const;
-        void traceActuals(pid_t surfaceFlingerPid, nsecs_t monoBootOffset) const;
+        void tracePredictions(pid_t surfaceFlingerPid, nsecs_t monoBootOffset,
+                              bool filterFramesBeforeTraceStarts) const;
+        void traceActuals(pid_t surfaceFlingerPid, nsecs_t monoBootOffset,
+                          bool filterFramesBeforeTraceStarts) const;
         void addSkippedFrame(pid_t surfaceFlingerPid, nsecs_t monoBootOffset,
-                             nsecs_t previousActualPresentTime) const;
+                             nsecs_t previousActualPresentTime,
+                             bool filterFramesBeforeTraceStarts) const;
         void classifyJank(nsecs_t& deadlineDelta, nsecs_t& deltaToVsync,
                           nsecs_t previousPresentTime);
 
@@ -471,7 +484,8 @@ public:
     };
 
     FrameTimeline(std::shared_ptr<TimeStats> timeStats, pid_t surfaceFlingerPid,
-                  JankClassificationThresholds thresholds = {}, bool useBootTimeClock = true);
+                  JankClassificationThresholds thresholds = {}, bool useBootTimeClock = true,
+                  bool filterFramesBeforeTraceStarts = true);
     ~FrameTimeline() = default;
 
     frametimeline::TokenManager* getTokenManager() override { return &mTokenManager; }
@@ -516,6 +530,7 @@ private:
     TraceCookieCounter mTraceCookieCounter;
     mutable std::mutex mMutex;
     const bool mUseBootTimeClock;
+    const bool mFilterFramesBeforeTraceStarts;
     uint32_t mMaxDisplayFrames;
     std::shared_ptr<TimeStats> mTimeStats;
     const pid_t mSurfaceFlingerPid;

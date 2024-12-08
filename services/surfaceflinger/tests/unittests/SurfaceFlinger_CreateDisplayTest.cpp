@@ -97,7 +97,7 @@ TEST_F(CreateDisplayTest, createDisplaySetsCurrentStateForNonsecureDisplay) {
     // Cleanup conditions
 
     // Creating the display commits a display transaction.
-    EXPECT_CALL(*mFlinger.scheduler(), scheduleFrame()).Times(1);
+    EXPECT_CALL(*mFlinger.scheduler(), scheduleFrame(_)).Times(1);
 }
 
 TEST_F(CreateDisplayTest, createDisplaySetsCurrentStateForSecureDisplay) {
@@ -129,7 +129,7 @@ TEST_F(CreateDisplayTest, createDisplaySetsCurrentStateForSecureDisplay) {
     // Cleanup conditions
 
     // Creating the display commits a display transaction.
-    EXPECT_CALL(*mFlinger.scheduler(), scheduleFrame()).Times(1);
+    EXPECT_CALL(*mFlinger.scheduler(), scheduleFrame(_)).Times(1);
 }
 
 TEST_F(CreateDisplayTest, createDisplaySetsCurrentStateForUniqueId) {
@@ -159,7 +159,7 @@ TEST_F(CreateDisplayTest, createDisplaySetsCurrentStateForUniqueId) {
     // Cleanup conditions
 
     // Creating the display commits a display transaction.
-    EXPECT_CALL(*mFlinger.scheduler(), scheduleFrame()).Times(1);
+    EXPECT_CALL(*mFlinger.scheduler(), scheduleFrame(_)).Times(1);
 }
 
 // Requesting 0 tells SF not to do anything, i.e., default to refresh as physical displays

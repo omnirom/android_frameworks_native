@@ -33,19 +33,19 @@ cc_library_shared {
     ],
 
     aidl: {
-       local_include_dirs: ["include"],
-       include_dirs: [
-           "hardware/interfaces/vibrator/aidl/android/hardware/vibrator",
-       ],
-       export_aidl_headers: true
+        local_include_dirs: ["include"],
+        include_dirs: [
+            "hardware/interfaces/vibrator/aidl/android/hardware/vibrator",
+        ],
+        export_aidl_headers: true,
     },
 
     shared_libs: [
-        "libbinder",
+        "libbinder_ndk",
         "libhidlbase",
         "liblog",
         "libutils",
-        "android.hardware.vibrator-V2-cpp",
+        "android.hardware.vibrator-V3-ndk",
         "android.hardware.vibrator@1.0",
         "android.hardware.vibrator@1.1",
         "android.hardware.vibrator@1.2",

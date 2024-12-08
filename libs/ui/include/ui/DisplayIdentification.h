@@ -25,6 +25,7 @@
 
 #include <ui/DeviceProductInfo.h>
 #include <ui/DisplayId.h>
+#include <ui/Size.h>
 
 #define LEGACY_DISPLAY_TYPE_PRIMARY 0
 #define LEGACY_DISPLAY_TYPE_EXTERNAL 1
@@ -33,10 +34,16 @@ namespace android {
 
 using DisplayIdentificationData = std::vector<uint8_t>;
 
+struct DetailedTimingDescriptor {
+    ui::Size pixelSizeCount;
+    ui::Size physicalSizeInMm;
+};
+
 struct DisplayIdentificationInfo {
     PhysicalDisplayId id;
     std::string name;
     std::optional<DeviceProductInfo> deviceProductInfo;
+    std::optional<DetailedTimingDescriptor> preferredDetailedTimingDescriptor;
 };
 
 struct ExtensionBlock {
@@ -68,6 +75,7 @@ struct Edid {
     uint8_t manufactureOrModelYear;
     uint8_t manufactureWeek;
     std::optional<Cea861ExtensionBlock> cea861Block;
+    std::optional<DetailedTimingDescriptor> preferredDetailedTimingDescriptor;
 };
 
 bool isEdid(const DisplayIdentificationData&);

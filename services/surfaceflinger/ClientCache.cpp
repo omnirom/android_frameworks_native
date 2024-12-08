@@ -22,7 +22,7 @@
 #include <cinttypes>
 
 #include <android-base/stringprintf.h>
-#include <gui/TraceUtils.h>
+#include <common/trace.h>
 #include <renderengine/impl/ExternalTexture.h>
 
 #include "ClientCache.h"

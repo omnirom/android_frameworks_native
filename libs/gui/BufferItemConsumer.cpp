@@ -21,8 +21,11 @@
 
 #include <inttypes.h>
 
+#include <com_android_graphics_libgui_flags.h>
 #include <gui/BufferItem.h>
 #include <gui/BufferItemConsumer.h>
+#include <ui/BufferQueueDefs.h>
+#include <ui/GraphicBuffer.h>
 
 #define BI_LOGV(x, ...) ALOGV("[%s] " x, mName.c_str(), ##__VA_ARGS__)
 // #define BI_LOGD(x, ...) ALOGD("[%s] " x, mName.c_str(), ##__VA_ARGS__)
@@ -32,18 +35,37 @@
 
 namespace android {
 
+#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
+BufferItemConsumer::BufferItemConsumer(uint64_t consumerUsage, int bufferCount,
+                                       bool controlledByApp, bool isConsumerSurfaceFlinger)
+      : ConsumerBase(controlledByApp, isConsumerSurfaceFlinger) {
+    initialize(consumerUsage, bufferCount);
+}
+
+BufferItemConsumer::BufferItemConsumer(const sp<IGraphicBufferProducer>& producer,
+                                       const sp<IGraphicBufferConsumer>& consumer,
+                                       uint64_t consumerUsage, int bufferCount,
+                                       bool controlledByApp)
+      : ConsumerBase(producer, consumer, controlledByApp) {
+    initialize(consumerUsage, bufferCount);
+}
+#endif // COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
+
 BufferItemConsumer::BufferItemConsumer(
         const sp<IGraphicBufferConsumer>& consumer, uint64_t consumerUsage,
         int bufferCount, bool controlledByApp) :
     ConsumerBase(consumer, controlledByApp)
 {
+    initialize(consumerUsage, bufferCount);
+}
+
+void BufferItemConsumer::initialize(uint64_t consumerUsage, int bufferCount) {
     status_t err = mConsumer->setConsumerUsageBits(consumerUsage);
-    LOG_ALWAYS_FATAL_IF(err != OK,
-            "Failed to set consumer usage bits to %#" PRIx64, consumerUsage);
+    LOG_ALWAYS_FATAL_IF(err != OK, "Failed to set consumer usage bits to %#" PRIx64, consumerUsage);
     if (bufferCount != DEFAULT_MAX_BUFFERS) {
         err = mConsumer->setMaxAcquiredBufferCount(bufferCount);
-        LOG_ALWAYS_FATAL_IF(err != OK,
-                "Failed to set max acquired buffer count to %d", bufferCount);
+        LOG_ALWAYS_FATAL_IF(err != OK, "Failed to set max acquired buffer count to %d",
+                            bufferCount);
     }
 }
 
@@ -87,17 +109,38 @@ status_t BufferItemConsumer::acquireBuffer(BufferItem *item,
 
 status_t BufferItemConsumer::releaseBuffer(const BufferItem &item,
         const sp<Fence>& releaseFence) {
-    status_t err;
+    Mutex::Autolock _l(mMutex);
+    return releaseBufferSlotLocked(item.mSlot, item.mGraphicBuffer, releaseFence);
+}
 
+#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_PLATFORM_API_IMPROVEMENTS)
+status_t BufferItemConsumer::releaseBuffer(const sp<GraphicBuffer>& buffer,
+                                           const sp<Fence>& releaseFence) {
     Mutex::Autolock _l(mMutex);
 
-    err = addReleaseFenceLocked(item.mSlot, item.mGraphicBuffer, releaseFence);
+    if (buffer == nullptr) {
+        return BAD_VALUE;
+    }
+
+    int slotIndex = getSlotForBufferLocked(buffer);
+    if (slotIndex == INVALID_BUFFER_SLOT) {
+        return BAD_VALUE;
+    }
+
+    return releaseBufferSlotLocked(slotIndex, buffer, releaseFence);
+}
+#endif // COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_PLATFORM_API_IMPROVEMENTS)
+
+status_t BufferItemConsumer::releaseBufferSlotLocked(int slotIndex, const sp<GraphicBuffer>& buffer,
+                                                     const sp<Fence>& releaseFence) {
+    status_t err;
+
+    err = addReleaseFenceLocked(slotIndex, buffer, releaseFence);
     if (err != OK) {
         BI_LOGE("Failed to addReleaseFenceLocked");
     }
 
-    err = releaseBufferLocked(item.mSlot, item.mGraphicBuffer, EGL_NO_DISPLAY,
-            EGL_NO_SYNC_KHR);
+    err = releaseBufferLocked(slotIndex, buffer, EGL_NO_DISPLAY, EGL_NO_SYNC_KHR);
     if (err != OK && err != IGraphicBufferConsumer::STALE_BUFFER_SLOT) {
         BI_LOGE("Failed to release buffer: %s (%d)",
                 strerror(-err), err);

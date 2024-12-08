@@ -25,8 +25,8 @@
 #include <SkString.h>
 #include <SkSurface.h>
 #include <SkTileMode.h>
+#include <common/trace.h>
 #include <log/log.h>
-#include <utils/Trace.h>
 
 namespace android {
 namespace renderengine {
@@ -79,7 +79,7 @@ void BlurFilter::drawBlurRegion(SkCanvas* canvas, const SkRRect& effectRegion,
                                 const uint32_t blurRadius, const float blurAlpha,
                                 const SkRect& blurRect, sk_sp<SkImage> blurredImage,
                                 sk_sp<SkImage> input) {
-    ATRACE_CALL();
+    SFTRACE_CALL();
 
     SkPaint paint;
     paint.setAlphaf(blurAlpha);

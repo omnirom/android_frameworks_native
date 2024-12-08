@@ -20,3 +20,5 @@
 #include <android/hdr_metadata.h>
 #include <android/native_window.h>
 #include <android/native_window_aidl.h>
+#include <cutils/native_handle.h>
+#include <vndk/hardware_buffer.h>

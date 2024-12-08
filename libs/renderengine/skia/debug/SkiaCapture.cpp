@@ -22,9 +22,9 @@
 
 #include <android-base/properties.h>
 #include <android-base/stringprintf.h>
+#include <common/trace.h>
 #include <log/log.h>
 #include <renderengine/RenderEngine.h>
-#include <utils/Trace.h>
 
 #include "CommonPool.h"
 #include "SkCanvas.h"
@@ -48,7 +48,7 @@ SkiaCapture::~SkiaCapture() {
 }
 
 SkCanvas* SkiaCapture::tryCapture(SkSurface* surface) NO_THREAD_SAFETY_ANALYSIS {
-    ATRACE_CALL();
+    SFTRACE_CALL();
 
     // If we are not running yet, set up.
     if (CC_LIKELY(!mCaptureRunning)) {
@@ -86,7 +86,7 @@ SkCanvas* SkiaCapture::tryCapture(SkSurface* surface) NO_THREAD_SAFETY_ANALYSIS 
 }
 
 void SkiaCapture::endCapture() NO_THREAD_SAFETY_ANALYSIS {
-    ATRACE_CALL();
+    SFTRACE_CALL();
     // Don't end anything if we are not running.
     if (CC_LIKELY(!mCaptureRunning)) {
         return;
@@ -102,7 +102,7 @@ void SkiaCapture::endCapture() NO_THREAD_SAFETY_ANALYSIS {
 }
 
 SkCanvas* SkiaCapture::tryOffscreenCapture(SkSurface* surface, OffscreenState* state) {
-    ATRACE_CALL();
+    SFTRACE_CALL();
     // Don't start anything if we are not running.
     if (CC_LIKELY(!mCaptureRunning)) {
         return surface->getCanvas();
@@ -122,7 +122,7 @@ SkCanvas* SkiaCapture::tryOffscreenCapture(SkSurface* surface, OffscreenState* s
 }
 
 uint64_t SkiaCapture::endOffscreenCapture(OffscreenState* state) {
-    ATRACE_CALL();
+    SFTRACE_CALL();
     // Don't end anything if we are not running.
     if (CC_LIKELY(!mCaptureRunning)) {
         return 0;
@@ -151,7 +151,7 @@ uint64_t SkiaCapture::endOffscreenCapture(OffscreenState* state) {
 }
 
 void SkiaCapture::writeToFile() {
-    ATRACE_CALL();
+    SFTRACE_CALL();
     // Pass mMultiPic and mOpenMultiPicStream to a background thread, which will
     // handle the heavyweight serialization work and destroy them.
     // mOpenMultiPicStream is released to a bare pointer because keeping it in
@@ -169,7 +169,7 @@ void SkiaCapture::writeToFile() {
 }
 
 bool SkiaCapture::setupMultiFrameCapture() {
-    ATRACE_CALL();
+    SFTRACE_CALL();
     ALOGD("Set up multi-frame capture, ms = %llu", mTimerInterval.count());
     base::SetProperty(PROPERTY_DEBUG_RENDERENGINE_CAPTURE_FILENAME, "");
 

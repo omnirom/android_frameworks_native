@@ -21,19 +21,17 @@
 
 #include "SkiaGLRenderEngine.h"
 
-#include "compat/SkiaGpuContext.h"
-
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
-#include <GrContextOptions.h>
-#include <GrTypes.h>
 #include <android-base/stringprintf.h>
-#include <gl/GrGLInterface.h>
+#include <common/trace.h>
+#include <include/gpu/ganesh/GrContextOptions.h>
+#include <include/gpu/ganesh/GrTypes.h>
 #include <include/gpu/ganesh/gl/GrGLDirectContext.h>
-#include <gui/TraceUtils.h>
+#include <include/gpu/ganesh/gl/GrGLInterface.h>
+#include <log/log_main.h>
 #include <sync/sync.h>
 #include <ui/DebugUtils.h>
-#include <utils/Trace.h>
 
 #include <cmath>
 #include <cstdint>
@@ -41,7 +39,7 @@
 #include <numeric>
 
 #include "GLExtensions.h"
-#include "log/log_main.h"
+#include "compat/SkiaGpuContext.h"
 
 namespace android {
 namespace renderengine {
@@ -332,7 +330,7 @@ bool SkiaGLRenderEngine::useProtectedContextImpl(GrProtected isProtected) {
 
 void SkiaGLRenderEngine::waitFence(SkiaGpuContext*, base::borrowed_fd fenceFd) {
     if (fenceFd.get() >= 0 && !waitGpuFence(fenceFd)) {
-        ATRACE_NAME("SkiaGLRenderEngine::waitFence");
+        SFTRACE_NAME("SkiaGLRenderEngine::waitFence");
         sync_wait(fenceFd.get(), -1);
     }
 }
@@ -341,19 +339,19 @@ base::unique_fd SkiaGLRenderEngine::flushAndSubmit(SkiaGpuContext* context,
                                                    sk_sp<SkSurface> dstSurface) {
     sk_sp<GrDirectContext> grContext = context->grDirectContext();
     {
-        ATRACE_NAME("flush surface");
+        SFTRACE_NAME("flush surface");
         grContext->flush(dstSurface.get());
     }
     base::unique_fd drawFence = flushGL();
 
     bool requireSync = drawFence.get() < 0;
     if (requireSync) {
-        ATRACE_BEGIN("Submit(sync=true)");
+        SFTRACE_BEGIN("Submit(sync=true)");
     } else {
-        ATRACE_BEGIN("Submit(sync=false)");
+        SFTRACE_BEGIN("Submit(sync=false)");
     }
     bool success = grContext->submit(requireSync ? GrSyncCpu::kYes : GrSyncCpu::kNo);
-    ATRACE_END();
+    SFTRACE_END();
     if (!success) {
         ALOGE("Failed to flush RenderEngine commands");
         // Chances are, something illegal happened (Skia's internal GPU object
@@ -400,7 +398,7 @@ bool SkiaGLRenderEngine::waitGpuFence(base::borrowed_fd fenceFd) {
 }
 
 base::unique_fd SkiaGLRenderEngine::flushGL() {
-    ATRACE_CALL();
+    SFTRACE_CALL();
     if (!GLExtensions::getInstance().hasNativeFenceSync()) {
         return base::unique_fd();
     }

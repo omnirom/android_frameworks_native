@@ -45,49 +45,10 @@ int LayerVector::do_compare(const void* lhs, const void* rhs) const
     const auto& lState = l->getDrawingState();
     const auto& rState = r->getDrawingState();
 
-    const auto ls = lState.layerStack;
-    const auto rs = rState.layerStack;
-    if (ls != rs)
-        return (ls > rs) ? 1 : -1;
-
-    int32_t lz = lState.z;
-    int32_t rz = rState.z;
-    if (lz != rz)
-        return (lz > rz) ? 1 : -1;
-
     if (l->sequence == r->sequence)
         return 0;
 
     return (l->sequence > r->sequence) ? 1 : -1;
-}
-
-void LayerVector::traverseInZOrder(StateSet stateSet, const Visitor& visitor) const {
-    for (size_t i = 0; i < size(); i++) {
-        const auto& layer = (*this)[i];
-        auto& state = layer->getDrawingState();
-        if (state.isRelativeOf) {
-            continue;
-        }
-        layer->traverseInZOrder(stateSet, visitor);
-    }
-}
-
-void LayerVector::traverseInReverseZOrder(StateSet stateSet, const Visitor& visitor) const {
-    for (auto i = static_cast<int64_t>(size()) - 1; i >= 0; i--) {
-        const auto& layer = (*this)[i];
-        auto& state = layer->getDrawingState();
-        if (state.isRelativeOf) {
-            continue;
-        }
-        layer->traverseInReverseZOrder(stateSet, visitor);
-     }
-}
-
-void LayerVector::traverse(const Visitor& visitor) const {
-    for (auto i = static_cast<int64_t>(size()) - 1; i >= 0; i--) {
-        const auto& layer = (*this)[i];
-        layer->traverse(mStateSet, visitor);
-    }
 }
 
 } // namespace android

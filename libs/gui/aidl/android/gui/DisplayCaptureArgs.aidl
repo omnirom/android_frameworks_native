@@ -16,5 +16,18 @@
 
 package android.gui;
 
-parcelable DisplayCaptureArgs cpp_header "gui/DisplayCaptureArgs.h" rust_type "gui_aidl_types_rs::DisplayCaptureArgs";
+import android.gui.CaptureArgs;
+
+// Arguments for screenshotting an entire display
+parcelable DisplayCaptureArgs {
+    CaptureArgs captureArgs;
+
+    // The display that we want to screenshot
+    IBinder displayToken;
+
+    // The width of the render area when we screenshot
+    int width = 0;
+    // The length of the render area when we screenshot
+    int height = 0;
+}
 

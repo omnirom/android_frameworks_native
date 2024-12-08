@@ -53,8 +53,13 @@ public:
 
     const auto& target() const { return mTargeter.target(); }
 
-    bool wouldPresentEarly(Period minFramePeriod) const {
-        return target().wouldPresentEarly(minFramePeriod);
+    bool wouldPresentEarly(Period vsyncPeriod, Period minFramePeriod) const {
+        return target().wouldPresentEarly(vsyncPeriod, minFramePeriod);
+    }
+
+    std::pair<bool /*wouldBackpressure*/, FrameTarget::PresentFence> expectedSignaledPresentFence(
+            Period vsyncPeriod, Period minFramePeriod) const {
+        return target().expectedSignaledPresentFence(vsyncPeriod, minFramePeriod);
     }
 
     struct Frame {
@@ -169,7 +174,6 @@ TEST_F(FrameTargeterTest, inflatesExpectedPresentTime) {
 }
 
 TEST_F(FrameTargeterTest, recallsPastVsync) {
-    SET_FLAG_FOR_TEST(flags::allow_n_vsyncs_in_targeter, false);
     VsyncId vsyncId{111};
     TimePoint frameBeginTime(1000ms);
     constexpr Fps kRefreshRate = 60_Hz;
@@ -177,16 +181,72 @@ TEST_F(FrameTargeterTest, recallsPastVsync) {
     constexpr Duration kFrameDuration = 13ms;
 
     for (int n = 5; n-- > 0;) {
-        Frame frame(this, vsyncId++, frameBeginTime, kFrameDuration, kRefreshRate, kRefreshRate);
-        const auto fence = frame.end();
+        FenceTimePtr fence;
+        {
+            Frame frame(this, vsyncId++, frameBeginTime, kFrameDuration, kRefreshRate,
+                        kRefreshRate);
+            fence = frame.end();
+        }
 
-        EXPECT_EQ(target().pastVsyncTime(kPeriod), frameBeginTime + kFrameDuration - kPeriod);
-        EXPECT_EQ(target().presentFenceForPastVsync(kPeriod), fence);
+        Frame frame(this, vsyncId++, frameBeginTime, kFrameDuration, kRefreshRate, kRefreshRate);
+        const auto [wouldBackpressure, presentFence] =
+                expectedSignaledPresentFence(kPeriod, kPeriod);
+        ASSERT_TRUE(wouldBackpressure);
+        EXPECT_EQ(presentFence.fenceTime, fence);
+    }
+}
+
+TEST_F(FrameTargeterTest, wouldBackpressureAfterTime) {
+    SET_FLAG_FOR_TEST(flags::allow_n_vsyncs_in_targeter, true);
+    VsyncId vsyncId{111};
+    TimePoint frameBeginTime(1000ms);
+    constexpr Fps kRefreshRate = 60_Hz;
+    constexpr Period kPeriod = kRefreshRate.getPeriod();
+    constexpr Duration kFrameDuration = 13ms;
+
+    { Frame frame(this, vsyncId++, frameBeginTime, kFrameDuration, kRefreshRate, kRefreshRate); }
+    {
+        Frame frame(this, vsyncId++, frameBeginTime, kFrameDuration, kRefreshRate, kRefreshRate);
+
+        const auto [wouldBackpressure, presentFence] =
+                expectedSignaledPresentFence(kPeriod, kPeriod);
+        EXPECT_TRUE(wouldBackpressure);
+    }
+    {
+        frameBeginTime += kPeriod;
+        Frame frame(this, vsyncId++, frameBeginTime, kFrameDuration, kRefreshRate, kRefreshRate);
+        const auto [wouldBackpressure, presentFence] =
+                expectedSignaledPresentFence(kPeriod, kPeriod);
+        EXPECT_FALSE(wouldBackpressure);
+    }
+}
+
+TEST_F(FrameTargeterTest, wouldBackpressureAfterTimeLegacy) {
+    SET_FLAG_FOR_TEST(flags::allow_n_vsyncs_in_targeter, false);
+    VsyncId vsyncId{111};
+    TimePoint frameBeginTime(1000ms);
+    constexpr Fps kRefreshRate = 60_Hz;
+    constexpr Period kPeriod = kRefreshRate.getPeriod();
+    constexpr Duration kFrameDuration = 13ms;
+
+    { Frame frame(this, vsyncId++, frameBeginTime, kFrameDuration, kRefreshRate, kRefreshRate); }
+    {
+        Frame frame(this, vsyncId++, frameBeginTime, kFrameDuration, kRefreshRate, kRefreshRate);
+
+        const auto [wouldBackpressure, presentFence] =
+                expectedSignaledPresentFence(kPeriod, kPeriod);
+        EXPECT_TRUE(wouldBackpressure);
+    }
+    {
+        frameBeginTime += kPeriod;
+        Frame frame(this, vsyncId++, frameBeginTime, kFrameDuration, kRefreshRate, kRefreshRate);
+        const auto [wouldBackpressure, presentFence] =
+                expectedSignaledPresentFence(kPeriod, kPeriod);
+        EXPECT_TRUE(wouldBackpressure);
     }
 }
 
 TEST_F(FrameTargeterTest, recallsPastVsyncTwoVsyncsAhead) {
-    SET_FLAG_FOR_TEST(flags::allow_n_vsyncs_in_targeter, false);
     VsyncId vsyncId{222};
     TimePoint frameBeginTime(2000ms);
     constexpr Fps kRefreshRate = 120_Hz;
@@ -194,101 +254,66 @@ TEST_F(FrameTargeterTest, recallsPastVsyncTwoVsyncsAhead) {
     constexpr Duration kFrameDuration = 10ms;
 
     FenceTimePtr previousFence = FenceTime::NO_FENCE;
-
+    FenceTimePtr currentFence = FenceTime::NO_FENCE;
     for (int n = 5; n-- > 0;) {
         Frame frame(this, vsyncId++, frameBeginTime, kFrameDuration, kRefreshRate, kRefreshRate);
-        const auto fence = frame.end();
-
-        EXPECT_EQ(target().pastVsyncTime(kPeriod), frameBeginTime + kFrameDuration - 2 * kPeriod);
-        EXPECT_EQ(target().presentFenceForPastVsync(kPeriod), previousFence);
-
-        previousFence = fence;
+        EXPECT_EQ(expectedSignaledPresentFence(kPeriod, kPeriod).second.fenceTime, previousFence);
+        previousFence = currentFence;
+        currentFence = frame.end();
     }
 }
 
-TEST_F(FrameTargeterTest, recallsPastNVsyncTwoVsyncsAhead) {
+TEST_F(FrameTargeterTest, recallsPastVsyncFiveVsyncsAhead) {
     SET_FLAG_FOR_TEST(flags::allow_n_vsyncs_in_targeter, true);
+
     VsyncId vsyncId{222};
     TimePoint frameBeginTime(2000ms);
     constexpr Fps kRefreshRate = 120_Hz;
     constexpr Period kPeriod = kRefreshRate.getPeriod();
-    constexpr Duration kFrameDuration = 10ms;
+    constexpr Duration kFrameDuration = 40ms;
 
-    FenceTimePtr previousFence = FenceTime::NO_FENCE;
-
+    FenceTimePtr firstFence = FenceTime::NO_FENCE;
     for (int n = 5; n-- > 0;) {
         Frame frame(this, vsyncId++, frameBeginTime, kFrameDuration, kRefreshRate, kRefreshRate);
         const auto fence = frame.end();
-
-        const auto pastVsyncTime = frameBeginTime + kFrameDuration - 2 * kPeriod;
-        EXPECT_EQ(target().pastVsyncTime(kPeriod), pastVsyncTime);
-        EXPECT_EQ(target().presentFenceForPastVsync(kFrameDuration), previousFence);
-
-        frameBeginTime += kPeriod;
-        previousFence = fence;
+        if (firstFence == FenceTime::NO_FENCE) {
+            firstFence = fence;
+        }
     }
+
+    Frame frame(this, vsyncId++, frameBeginTime, kFrameDuration, kRefreshRate, kRefreshRate);
+    EXPECT_EQ(expectedSignaledPresentFence(kPeriod, kPeriod).second.fenceTime, firstFence);
 }
 
 TEST_F(FrameTargeterTest, recallsPastVsyncTwoVsyncsAheadVrr) {
     SET_FLAG_FOR_TEST(flags::vrr_config, true);
-    SET_FLAG_FOR_TEST(flags::allow_n_vsyncs_in_targeter, false);
 
     VsyncId vsyncId{222};
     TimePoint frameBeginTime(2000ms);
     constexpr Fps kRefreshRate = 120_Hz;
-    constexpr Fps kPeakRefreshRate = 240_Hz;
+    constexpr Fps kVsyncRate = 240_Hz;
     constexpr Period kPeriod = kRefreshRate.getPeriod();
+    constexpr Period kVsyncPeriod = kVsyncRate.getPeriod();
     constexpr Duration kFrameDuration = 10ms;
 
     FenceTimePtr previousFence = FenceTime::NO_FENCE;
-
+    FenceTimePtr currentFence = FenceTime::NO_FENCE;
     for (int n = 5; n-- > 0;) {
-        Frame frame(this, vsyncId++, frameBeginTime, kFrameDuration, kRefreshRate,
-                    kPeakRefreshRate);
-        const auto fence = frame.end();
-
-        EXPECT_EQ(target().pastVsyncTime(kPeriod), frameBeginTime + kFrameDuration - 2 * kPeriod);
-        EXPECT_EQ(target().presentFenceForPastVsync(kPeriod), previousFence);
-
-        previousFence = fence;
-    }
-}
-
-TEST_F(FrameTargeterTest, recallsPastNVsyncTwoVsyncsAheadVrr) {
-    SET_FLAG_FOR_TEST(flags::vrr_config, true);
-    SET_FLAG_FOR_TEST(flags::allow_n_vsyncs_in_targeter, true);
-
-    VsyncId vsyncId{222};
-    TimePoint frameBeginTime(2000ms);
-    constexpr Fps kRefreshRate = 120_Hz;
-    constexpr Fps kPeakRefreshRate = 240_Hz;
-    constexpr Period kPeriod = kRefreshRate.getPeriod();
-    constexpr Duration kFrameDuration = 10ms;
-
-    FenceTimePtr previousFence = FenceTime::NO_FENCE;
-
-    for (int n = 5; n-- > 0;) {
-        Frame frame(this, vsyncId++, frameBeginTime, kFrameDuration, kRefreshRate,
-                    kPeakRefreshRate);
-        const auto fence = frame.end();
-
-        const auto pastVsyncTime = frameBeginTime + kFrameDuration - 2 * kPeriod;
-        EXPECT_EQ(target().pastVsyncTime(kPeriod), pastVsyncTime);
-        EXPECT_EQ(target().presentFenceForPastVsync(kFrameDuration), previousFence);
-
-        frameBeginTime += kPeriod;
-        previousFence = fence;
+        Frame frame(this, vsyncId++, frameBeginTime, kFrameDuration, kRefreshRate, kRefreshRate);
+        EXPECT_EQ(expectedSignaledPresentFence(kVsyncPeriod, kPeriod).second.fenceTime,
+                  previousFence);
+        previousFence = currentFence;
+        currentFence = frame.end();
     }
 }
 
 TEST_F(FrameTargeterTest, doesNotDetectEarlyPresentIfNoFence) {
     constexpr Period kPeriod = (60_Hz).getPeriod();
-    EXPECT_EQ(target().presentFenceForPastVsync(kPeriod), FenceTime::NO_FENCE);
-    EXPECT_FALSE(wouldPresentEarly(kPeriod));
+    EXPECT_EQ(expectedSignaledPresentFence(kPeriod, kPeriod).second.fenceTime, FenceTime::NO_FENCE);
+    EXPECT_FALSE(wouldPresentEarly(kPeriod, kPeriod));
 }
 
 TEST_F(FrameTargeterTest, detectsEarlyPresent) {
-    SET_FLAG_FOR_TEST(flags::allow_n_vsyncs_in_targeter, false);
     VsyncId vsyncId{333};
     TimePoint frameBeginTime(3000ms);
     constexpr Fps kRefreshRate = 60_Hz;
@@ -296,20 +321,57 @@ TEST_F(FrameTargeterTest, detectsEarlyPresent) {
 
     // The target is not early while past present fences are pending.
     for (int n = 3; n-- > 0;) {
-        const Frame frame(this, vsyncId++, frameBeginTime, 10ms, kRefreshRate, kRefreshRate);
-        EXPECT_FALSE(wouldPresentEarly(kPeriod));
+        {
+            const Frame frame(this, vsyncId++, frameBeginTime, 10ms, kRefreshRate, kRefreshRate);
+        }
+        EXPECT_FALSE(wouldPresentEarly(kPeriod, kPeriod));
         EXPECT_FALSE(target().earliestPresentTime());
     }
 
     // The target is early if the past present fence was signaled.
-    Frame frame(this, vsyncId++, frameBeginTime, 10ms, kRefreshRate, kRefreshRate);
-    const auto fence = frame.end();
-    fence->signalForTest(frameBeginTime.ns());
+    {
+        Frame frame(this, vsyncId++, frameBeginTime, 10ms, kRefreshRate, kRefreshRate);
+        const auto fence = frame.end();
+        fence->signalForTest(frameBeginTime.ns());
+    }
 
     Frame finalFrame(this, vsyncId++, frameBeginTime, 10ms, kRefreshRate, kRefreshRate);
 
     // `finalFrame` would present early, so it has an earliest present time.
-    EXPECT_TRUE(wouldPresentEarly(kPeriod));
+    EXPECT_TRUE(wouldPresentEarly(kPeriod, kPeriod));
+    ASSERT_NE(std::nullopt, target().earliestPresentTime());
+    EXPECT_EQ(*target().earliestPresentTime(),
+              target().expectedPresentTime() - kPeriod - kHwcMinWorkDuration);
+}
+
+TEST_F(FrameTargeterTest, detectsEarlyPresentAfterLongPeriod) {
+    VsyncId vsyncId{333};
+    TimePoint frameBeginTime(3000ms);
+    constexpr Fps kRefreshRate = 60_Hz;
+    constexpr Period kPeriod = kRefreshRate.getPeriod();
+
+    // The target is not early while past present fences are pending.
+    for (int n = 3; n-- > 0;) {
+        {
+            const Frame frame(this, vsyncId++, frameBeginTime, 10ms, kRefreshRate, kRefreshRate);
+        }
+        EXPECT_FALSE(wouldPresentEarly(kPeriod, kPeriod));
+        EXPECT_FALSE(target().earliestPresentTime());
+    }
+
+    // The target is early if the past present fence was signaled.
+    {
+        Frame frame(this, vsyncId++, frameBeginTime, 10ms, kRefreshRate, kRefreshRate);
+        const auto fence = frame.end();
+        fence->signalForTest(frameBeginTime.ns());
+    }
+
+    frameBeginTime += 10 * kPeriod;
+
+    Frame finalFrame(this, vsyncId++, frameBeginTime, 10ms, kRefreshRate, kRefreshRate);
+
+    // `finalFrame` would present early, so it has an earliest present time.
+    EXPECT_TRUE(wouldPresentEarly(kPeriod, kPeriod));
     ASSERT_NE(std::nullopt, target().earliestPresentTime());
     EXPECT_EQ(*target().earliestPresentTime(),
               target().expectedPresentTime() - kPeriod - kHwcMinWorkDuration);
@@ -318,7 +380,6 @@ TEST_F(FrameTargeterTest, detectsEarlyPresent) {
 // Same as `detectsEarlyPresent`, above, but verifies that we do not set an earliest present time
 // when there is expected present time support.
 TEST_F(FrameTargeterWithExpectedPresentSupportTest, detectsEarlyPresent) {
-    SET_FLAG_FOR_TEST(flags::allow_n_vsyncs_in_targeter, false);
     VsyncId vsyncId{333};
     TimePoint frameBeginTime(3000ms);
     constexpr Fps kRefreshRate = 60_Hz;
@@ -326,26 +387,30 @@ TEST_F(FrameTargeterWithExpectedPresentSupportTest, detectsEarlyPresent) {
 
     // The target is not early while past present fences are pending.
     for (int n = 3; n-- > 0;) {
-        const Frame frame(this, vsyncId++, frameBeginTime, 10ms, kRefreshRate, kRefreshRate);
-        EXPECT_FALSE(wouldPresentEarly(kPeriod));
+        {
+            const Frame frame(this, vsyncId++, frameBeginTime, 10ms, kRefreshRate, kRefreshRate);
+        }
+        EXPECT_FALSE(wouldPresentEarly(kPeriod, kPeriod));
         EXPECT_FALSE(target().earliestPresentTime());
     }
 
     // The target is early if the past present fence was signaled.
-    Frame frame(this, vsyncId++, frameBeginTime, 10ms, kRefreshRate, kRefreshRate);
-    const auto fence = frame.end();
-    fence->signalForTest(frameBeginTime.ns());
+    {
+        Frame frame(this, vsyncId++, frameBeginTime, 10ms, kRefreshRate, kRefreshRate);
+
+        const auto fence = frame.end();
+        fence->signalForTest(frameBeginTime.ns());
+    }
 
     Frame finalFrame(this, vsyncId++, frameBeginTime, 10ms, kRefreshRate, kRefreshRate);
 
     // `finalFrame` would present early, but we have expected present time support, so it has no
     // earliest present time.
-    EXPECT_TRUE(wouldPresentEarly(kPeriod));
+    EXPECT_TRUE(wouldPresentEarly(kPeriod, kPeriod));
     ASSERT_EQ(std::nullopt, target().earliestPresentTime());
 }
 
 TEST_F(FrameTargeterTest, detectsEarlyPresentTwoVsyncsAhead) {
-    SET_FLAG_FOR_TEST(flags::allow_n_vsyncs_in_targeter, false);
     VsyncId vsyncId{444};
     TimePoint frameBeginTime(4000ms);
     constexpr Fps kRefreshRate = 120_Hz;
@@ -353,17 +418,21 @@ TEST_F(FrameTargeterTest, detectsEarlyPresentTwoVsyncsAhead) {
 
     // The target is not early while past present fences are pending.
     for (int n = 3; n-- > 0;) {
-        const Frame frame(this, vsyncId++, frameBeginTime, 10ms, kRefreshRate, kRefreshRate);
-        EXPECT_FALSE(wouldPresentEarly(kPeriod));
+        {
+            const Frame frame(this, vsyncId++, frameBeginTime, 10ms, kRefreshRate, kRefreshRate);
+        }
+        EXPECT_FALSE(wouldPresentEarly(kPeriod, kPeriod));
         EXPECT_FALSE(target().earliestPresentTime());
     }
+    {
+        Frame frame(this, vsyncId++, frameBeginTime, 10ms, kRefreshRate, kRefreshRate);
 
-    Frame frame(this, vsyncId++, frameBeginTime, 10ms, kRefreshRate, kRefreshRate);
-    const auto fence = frame.end();
-    fence->signalForTest(frameBeginTime.ns());
+        const auto fence = frame.end();
+        fence->signalForTest(frameBeginTime.ns());
+    }
 
     // The target is two VSYNCs ahead, so the past present fence is still pending.
-    EXPECT_FALSE(wouldPresentEarly(kPeriod));
+    EXPECT_FALSE(wouldPresentEarly(kPeriod, kPeriod));
     EXPECT_FALSE(target().earliestPresentTime());
 
     { const Frame frame(this, vsyncId++, frameBeginTime, 10ms, kRefreshRate, kRefreshRate); }
@@ -371,66 +440,21 @@ TEST_F(FrameTargeterTest, detectsEarlyPresentTwoVsyncsAhead) {
     Frame finalFrame(this, vsyncId++, frameBeginTime, 10ms, kRefreshRate, kRefreshRate);
 
     // The target is early if the past present fence was signaled.
-    EXPECT_TRUE(wouldPresentEarly(kPeriod));
+    EXPECT_TRUE(wouldPresentEarly(kPeriod, kPeriod));
     ASSERT_NE(std::nullopt, target().earliestPresentTime());
     EXPECT_EQ(*target().earliestPresentTime(),
               target().expectedPresentTime() - kPeriod - kHwcMinWorkDuration);
 }
 
-TEST_F(FrameTargeterTest, detectsEarlyPresentNVsyncsAhead) {
-    SET_FLAG_FOR_TEST(flags::allow_n_vsyncs_in_targeter, true);
-    VsyncId vsyncId{444};
-    TimePoint frameBeginTime(4000ms);
-    Fps refreshRate = 120_Hz;
-    Period period = refreshRate.getPeriod();
-
-    // The target is not early while past present fences are pending.
-    for (int n = 5; n-- > 0;) {
-        const Frame frame(this, vsyncId++, frameBeginTime, 10ms, refreshRate, refreshRate);
-        EXPECT_FALSE(wouldPresentEarly(period));
-        EXPECT_FALSE(target().earliestPresentTime());
-    }
-
-    Frame frame(this, vsyncId++, frameBeginTime, 10ms, refreshRate, refreshRate);
-    auto fence = frame.end();
-    frameBeginTime += period;
-    fence->signalForTest(frameBeginTime.ns());
-
-    // The target is two VSYNCs ahead, so the past present fence is still pending.
-    EXPECT_FALSE(wouldPresentEarly(period));
-    EXPECT_FALSE(target().earliestPresentTime());
-
-    { const Frame frame(this, vsyncId++, frameBeginTime, 10ms, refreshRate, refreshRate); }
-
-    Frame oneEarlyPresentFrame(this, vsyncId++, frameBeginTime, 10ms, refreshRate, refreshRate);
-    // The target is early if the past present fence was signaled.
-    EXPECT_TRUE(wouldPresentEarly(period));
-    ASSERT_NE(std::nullopt, target().earliestPresentTime());
-    EXPECT_EQ(*target().earliestPresentTime(),
-              target().expectedPresentTime() - period - kHwcMinWorkDuration);
-
-    fence = oneEarlyPresentFrame.end();
-    frameBeginTime += period;
-    fence->signalForTest(frameBeginTime.ns());
-
-    // Change rate to track frame more than 2 vsyncs ahead
-    refreshRate = 144_Hz;
-    period = refreshRate.getPeriod();
-    Frame onePresentEarlyFrame(this, vsyncId++, frameBeginTime, 16ms, refreshRate, refreshRate);
-    // The target is not early as last frame as the past frame is tracked for pending.
-    EXPECT_FALSE(wouldPresentEarly(period));
-}
-
 TEST_F(FrameTargeterTest, detectsEarlyPresentThreeVsyncsAhead) {
-    SET_FLAG_FOR_TEST(flags::allow_n_vsyncs_in_targeter, false);
     TimePoint frameBeginTime(5000ms);
     constexpr Fps kRefreshRate = 144_Hz;
     constexpr Period kPeriod = kRefreshRate.getPeriod();
 
-    const Frame frame(this, VsyncId{555}, frameBeginTime, 16ms, kRefreshRate, kRefreshRate);
+    { const Frame frame(this, VsyncId{555}, frameBeginTime, 16ms, kRefreshRate, kRefreshRate); }
 
     // The target is more than two VSYNCs ahead, but present fences are not tracked that far back.
-    EXPECT_TRUE(wouldPresentEarly(kPeriod));
+    EXPECT_TRUE(wouldPresentEarly(kPeriod, kPeriod));
     EXPECT_TRUE(target().earliestPresentTime());
     EXPECT_EQ(*target().earliestPresentTime(),
               target().expectedPresentTime() - kPeriod - kHwcMinWorkDuration);

@@ -43,8 +43,10 @@ public:
     }
 
     T& front() { return (*this)[0]; }
+    const T& front() const { return (*this)[0]; }
 
     T& back() { return (*this)[size() - 1]; }
+    const T& back() const { return (*this)[size() - 1]; }
 
     T& operator[](size_t index) {
         return mBuffer[(static_cast<size_t>(mHead + 1) + index) % mCount];

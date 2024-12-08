@@ -23,4 +23,5 @@ package com.android.server.inputflinger;
 parcelable DeviceInfo {
     int deviceId;
     boolean external;
+    int keyboardType;
 }

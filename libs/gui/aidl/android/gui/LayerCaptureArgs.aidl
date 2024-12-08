@@ -16,4 +16,15 @@
 
 package android.gui;
 
-parcelable LayerCaptureArgs cpp_header "gui/LayerCaptureArgs.h" rust_type "gui_aidl_types_rs::LayerCaptureArgs";
+import android.gui.CaptureArgs;
+
+// Arguments for capturing a layer and/or its children
+parcelable LayerCaptureArgs {
+    CaptureArgs captureArgs;
+
+    // The Layer that we may want to capture. We would also capture its children
+    IBinder layerHandle;
+    // True if we don't actually want to capture the layer and want to capture
+    // its children instead.
+    boolean childrenOnly = false;
+}

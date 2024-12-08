@@ -16,10 +16,10 @@
 
 #include "tracing_perfetto.h"
 
-#include <thread>
-
 #include <android_os.h>
 #include <flag_macros.h>
+#include <thread>
+#include <unistd.h>
 
 #include "gtest/gtest.h"
 #include "perfetto/public/abi/data_source_abi.h"
@@ -45,67 +45,182 @@
 #include "trace_categories.h"
 #include "utils.h"
 
+#include "protos/perfetto/trace/trace.pb.h"
+#include "protos/perfetto/trace/trace_packet.pb.h"
+#include "protos/perfetto/trace/interned_data/interned_data.pb.h"
+
+#include <fstream>
+#include <iterator>
 namespace tracing_perfetto {
 
-using ::perfetto::shlib::test_utils::AllFieldsWithId;
-using ::perfetto::shlib::test_utils::FieldView;
-using ::perfetto::shlib::test_utils::IdFieldView;
-using ::perfetto::shlib::test_utils::MsgField;
-using ::perfetto::shlib::test_utils::PbField;
-using ::perfetto::shlib::test_utils::StringField;
+using ::perfetto::protos::Trace;
+using ::perfetto::protos::TracePacket;
+using ::perfetto::protos::EventCategory;
+using ::perfetto::protos::EventName;
+using ::perfetto::protos::FtraceEvent;
+using ::perfetto::protos::FtraceEventBundle;
+using ::perfetto::protos::InternedData;
+
 using ::perfetto::shlib::test_utils::TracingSession;
-using ::perfetto::shlib::test_utils::VarIntField;
-using ::testing::_;
-using ::testing::ElementsAre;
-using ::testing::UnorderedElementsAre;
 
 const auto PERFETTO_SDK_TRACING = ACONFIG_FLAG(android::os, perfetto_sdk_tracing);
 
+// TODO(b/303199244): Add tests for all the library functions.
 class TracingPerfettoTest : public testing::Test {
  protected:
   void SetUp() override {
-    tracing_perfetto::registerWithPerfetto(true /* test */);
+    tracing_perfetto::registerWithPerfetto(false /* test */);
   }
 };
 
-// TODO(b/303199244): Add tests for all the library functions.
-
-TEST_F_WITH_FLAGS(TracingPerfettoTest, traceInstant,
-                  REQUIRES_FLAGS_ENABLED(PERFETTO_SDK_TRACING)) {
-  TracingSession tracing_session =
-      TracingSession::Builder().set_data_source_name("track_event").Build();
-  tracing_perfetto::traceInstant(TRACE_CATEGORY_INPUT, "");
-
+Trace stopSession(TracingSession& tracing_session) {
+  tracing_session.FlushBlocking(5000);
   tracing_session.StopBlocking();
   std::vector<uint8_t> data = tracing_session.ReadBlocking();
+  std::string data_string(data.begin(), data.end());
+
+  perfetto::protos::Trace trace;
+  trace.ParseFromString(data_string);
+
+  return trace;
+}
+
+void verifyTrackEvent(const Trace& trace, const std::string expected_category,
+                      const std::string& expected_name) {
   bool found = false;
-  for (struct PerfettoPbDecoderField trace_field : FieldView(data)) {
-    ASSERT_THAT(trace_field, PbField(perfetto_protos_Trace_packet_field_number,
-                                     MsgField(_)));
-    IdFieldView track_event(
-        trace_field, perfetto_protos_TracePacket_track_event_field_number);
-    if (track_event.size() == 0) {
-      continue;
+  for (const TracePacket& packet: trace.packet()) {
+    if (packet.has_track_event() && packet.has_interned_data()) {
+
+      const InternedData& interned_data = packet.interned_data();
+      if (interned_data.event_categories_size() > 0) {
+        const EventCategory& event_category = packet.interned_data().event_categories(0);
+        if (event_category.name() == expected_category) {
+          found = true;
+        }
+      }
+
+      if (interned_data.event_names_size() > 0) {
+        const EventName& event_name = packet.interned_data().event_names(0);
+        if (event_name.name() == expected_name) {
+          found &= true;
+        }
+      }
+
+      if (found) {
+        break;
+      }
     }
-    found = true;
-    IdFieldView cat_iid_fields(
-        track_event.front(),
-        perfetto_protos_TrackEvent_category_iids_field_number);
-    ASSERT_THAT(cat_iid_fields, ElementsAre(VarIntField(_)));
-    uint64_t cat_iid = cat_iid_fields.front().value.integer64;
-    EXPECT_THAT(
-        trace_field,
-        AllFieldsWithId(
-            perfetto_protos_TracePacket_interned_data_field_number,
-            ElementsAre(AllFieldsWithId(
-                perfetto_protos_InternedData_event_categories_field_number,
-                ElementsAre(MsgField(UnorderedElementsAre(
-                    PbField(perfetto_protos_EventCategory_iid_field_number,
-                            VarIntField(cat_iid)),
-                    PbField(perfetto_protos_EventCategory_name_field_number,
-                            StringField("input")))))))));
   }
   EXPECT_TRUE(found);
 }
 
+void verifyAtraceEvent(const Trace& trace, const std::string& expected_name) {
+  std::string expected_print_buf = "I|" + std::to_string(gettid()) + "|" + expected_name + "\n";
+
+  bool found = false;
+  for (const TracePacket& packet: trace.packet()) {
+    if (packet.has_ftrace_events()) {
+      const FtraceEventBundle& ftrace_events_bundle = packet.ftrace_events();
+
+      if (ftrace_events_bundle.event_size() > 0) {
+        const FtraceEvent& ftrace_event = ftrace_events_bundle.event(0);
+        if (ftrace_event.has_print() && (ftrace_event.print().buf() == expected_print_buf)) {
+          found = true;
+          break;
+        }
+      }
+    }
+  }
+  EXPECT_TRUE(found);
+}
+
+TEST_F_WITH_FLAGS(TracingPerfettoTest, traceInstantWithPerfetto,
+                  REQUIRES_FLAGS_ENABLED(PERFETTO_SDK_TRACING)) {
+  std::string event_category = "input";
+  std::string event_name = "traceInstantWithPerfetto";
+
+  TracingSession tracing_session =
+      TracingSession::Builder().add_enabled_category(event_category).Build();
+
+  tracing_perfetto::traceInstant(TRACE_CATEGORY_INPUT, event_name.c_str());
+
+  Trace trace = stopSession(tracing_session);
+
+  verifyTrackEvent(trace, event_category, event_name);
+}
+
+TEST_F_WITH_FLAGS(TracingPerfettoTest, traceInstantWithAtrace,
+                  REQUIRES_FLAGS_ENABLED(PERFETTO_SDK_TRACING)) {
+  std::string event_category = "input";
+  std::string event_name = "traceInstantWithAtrace";
+
+  TracingSession tracing_session =
+      TracingSession::Builder().add_atrace_category(event_category).Build();
+
+  tracing_perfetto::traceInstant(TRACE_CATEGORY_INPUT, event_name.c_str());
+
+  Trace trace = stopSession(tracing_session);
+
+  verifyAtraceEvent(trace, event_name);
+}
+
+TEST_F_WITH_FLAGS(TracingPerfettoTest, traceInstantWithPerfettoAndAtrace,
+                  REQUIRES_FLAGS_ENABLED(PERFETTO_SDK_TRACING)) {
+  std::string event_category = "input";
+  std::string event_name = "traceInstantWithPerfettoAndAtrace";
+
+  TracingSession tracing_session =
+      TracingSession::Builder()
+      .add_atrace_category(event_category)
+      .add_enabled_category(event_category).Build();
+
+  tracing_perfetto::traceInstant(TRACE_CATEGORY_INPUT, event_name.c_str());
+
+  Trace trace = stopSession(tracing_session);
+
+  verifyAtraceEvent(trace, event_name);
+}
+
+TEST_F_WITH_FLAGS(TracingPerfettoTest, traceInstantWithPerfettoAndAtraceAndPreferTrackEvent,
+                  REQUIRES_FLAGS_ENABLED(PERFETTO_SDK_TRACING)) {
+  std::string event_category = "input";
+  std::string event_name = "traceInstantWithPerfettoAndAtraceAndPreferTrackEvent";
+
+  TracingSession tracing_session =
+      TracingSession::Builder()
+      .add_atrace_category(event_category)
+      .add_atrace_category_prefer_sdk(event_category)
+      .add_enabled_category(event_category).Build();
+
+  tracing_perfetto::traceInstant(TRACE_CATEGORY_INPUT, event_name.c_str());
+
+  Trace trace = stopSession(tracing_session);
+
+  verifyTrackEvent(trace, event_category, event_name);
+}
+
+TEST_F_WITH_FLAGS(TracingPerfettoTest, traceInstantWithPerfettoAndAtraceConcurrently,
+                  REQUIRES_FLAGS_ENABLED(PERFETTO_SDK_TRACING)) {
+  std::string event_category = "input";
+  std::string event_name = "traceInstantWithPerfettoAndAtraceConcurrently";
+
+  TracingSession perfetto_tracing_session =
+      TracingSession::Builder()
+      .add_atrace_category(event_category)
+      .add_atrace_category_prefer_sdk(event_category)
+      .add_enabled_category(event_category).Build();
+
+  TracingSession atrace_tracing_session =
+      TracingSession::Builder()
+      .add_atrace_category(event_category)
+      .add_enabled_category(event_category).Build();
+
+  tracing_perfetto::traceInstant(TRACE_CATEGORY_INPUT, event_name.c_str());
+
+  Trace atrace_trace = stopSession(atrace_tracing_session);
+  Trace perfetto_trace = stopSession(perfetto_tracing_session);
+
+  verifyAtraceEvent(atrace_trace, event_name);
+  verifyAtraceEvent(perfetto_trace, event_name);
+}
 }  // namespace tracing_perfetto

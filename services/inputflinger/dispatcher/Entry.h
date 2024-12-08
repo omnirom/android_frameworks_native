@@ -32,7 +32,6 @@ namespace android::inputdispatcher {
 
 struct EventEntry {
     enum class Type {
-        CONFIGURATION_CHANGED,
         DEVICE_RESET,
         FOCUS,
         KEY,
@@ -76,11 +75,6 @@ struct EventEntry {
     EventEntry(const EventEntry&) = delete;
     EventEntry& operator=(const EventEntry&) = delete;
     virtual ~EventEntry() = default;
-};
-
-struct ConfigurationChangedEntry : EventEntry {
-    explicit ConfigurationChangedEntry(int32_t id, nsecs_t eventTime);
-    std::string getDescription() const override;
 };
 
 struct DeviceResetEntry : EventEntry {

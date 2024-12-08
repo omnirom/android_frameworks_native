@@ -26,6 +26,11 @@ cc_fuzz {
         "libfakeservicemanager",
         "libcutils",
         "liblog",
+        "libsensor_flags_c_lib",
+    ],
+    shared_libs: [
+        "libaconfig_storage_read_api_cc",
+        "server_configurable_flags",
     ],
     srcs: [
         "fuzzer.cpp",

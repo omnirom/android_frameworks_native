@@ -63,20 +63,6 @@ protected:
     void SetUp() override { mProcessor = std::make_unique<InputProcessor>(mTestListener); }
 };
 
-/**
- * Create a basic configuration change and send it to input processor.
- * Expect that the event is received by the next input stage, unmodified.
- */
-TEST_F(InputProcessorTest, SendToNextStage_NotifyConfigurationChangedArgs) {
-    // Create a basic configuration change and send to processor
-    NotifyConfigurationChangedArgs args(/*sequenceNum=*/1, /*eventTime=*/2);
-
-    mProcessor->notifyConfigurationChanged(args);
-    NotifyConfigurationChangedArgs outArgs;
-    ASSERT_NO_FATAL_FAILURE(mTestListener.assertNotifyConfigurationChangedWasCalled(&outArgs));
-    ASSERT_EQ(args, outArgs);
-}
-
 TEST_F(InputProcessorTest, SendToNextStage_NotifyKeyArgs) {
     // Create a basic key event and send to processor
     NotifyKeyArgs args(/*sequenceNum=*/1, /*eventTime=*/2, /*readTime=*/21, /*deviceId=*/3,

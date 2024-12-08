@@ -55,7 +55,7 @@ class FakeEventHub : public EventHubInterface {
         KeyedVector<int32_t, int32_t> absoluteAxisValue;
         KeyedVector<int32_t, KeyInfo> keysByScanCode;
         KeyedVector<int32_t, KeyInfo> keysByUsageCode;
-        std::unordered_map<int32_t, int32_t> keyRemapping;
+        std::map<int32_t, int32_t> keyRemapping;
         KeyedVector<int32_t, bool> leds;
         // fake mapping which would normally come from keyCharacterMap
         std::unordered_map<int32_t, int32_t> keyCodeMapping;
@@ -112,8 +112,6 @@ public:
     status_t enableDevice(int32_t deviceId) override;
     status_t disableDevice(int32_t deviceId) override;
 
-    void finishDeviceScan();
-
     void addConfigurationProperty(int32_t deviceId, const char* key, const char* value);
     void addConfigurationMap(int32_t deviceId, const PropertyMap* configuration);
 
@@ -131,7 +129,7 @@ public:
     void addKey(int32_t deviceId, int32_t scanCode, int32_t usageCode, int32_t keyCode,
                 uint32_t flags);
     void addKeyCodeMapping(int32_t deviceId, int32_t fromKeyCode, int32_t toKeyCode);
-    void addKeyRemapping(int32_t deviceId, int32_t fromKeyCode, int32_t toKeyCode) const;
+    void setKeyRemapping(int32_t deviceId, const std::map<int32_t, int32_t>& keyRemapping) const;
     void addVirtualKeyDefinition(int32_t deviceId, const VirtualKeyDefinition& definition);
 
     void addSensorAxis(int32_t deviceId, int32_t absCode, InputDeviceSensorType sensorType,
@@ -168,8 +166,8 @@ private:
     InputDeviceIdentifier getDeviceIdentifier(int32_t deviceId) const override;
     int32_t getDeviceControllerNumber(int32_t) const override;
     std::optional<PropertyMap> getConfiguration(int32_t deviceId) const override;
-    status_t getAbsoluteAxisInfo(int32_t deviceId, int axis,
-                                 RawAbsoluteAxisInfo* outAxisInfo) const override;
+    std::optional<RawAbsoluteAxisInfo> getAbsoluteAxisInfo(int32_t deviceId,
+                                                           int axis) const override;
     bool hasRelativeAxis(int32_t deviceId, int axis) const override;
     bool hasInputProperty(int32_t, int) const override;
     bool hasMscEvent(int32_t deviceId, int mscEvent) const override final;
@@ -187,7 +185,7 @@ private:
     std::optional<RawLayoutInfo> getRawLayoutInfo(int32_t deviceId) const override;
     int32_t getKeyCodeState(int32_t deviceId, int32_t keyCode) const override;
     int32_t getSwitchState(int32_t deviceId, int32_t sw) const override;
-    status_t getAbsoluteAxisValue(int32_t deviceId, int32_t axis, int32_t* outValue) const override;
+    std::optional<int32_t> getAbsoluteAxisValue(int32_t deviceId, int32_t axis) const override;
     int32_t getKeyCodeForKeyLocation(int32_t deviceId, int32_t locationKeyCode) const override;
 
     // Return true if the device has non-empty key layout.

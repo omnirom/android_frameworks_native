@@ -1,0 +1,10 @@
+package: "com.android.graphics.libvulkan.flags"
+container: "system"
+
+flag {
+  name: "swapchain_mutable_format_ext"
+  namespace: "core_graphics"
+  description: "Enable the VK_KHR_swapchain_mutable_format vulkan extension"
+  bug: "341978292"
+  is_fixed_read_only: true
+}

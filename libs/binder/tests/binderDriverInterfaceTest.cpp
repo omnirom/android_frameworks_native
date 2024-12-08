@@ -19,11 +19,15 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#include <binder/IBinder.h>
+#include <binder/ProcessState.h>
 #include <gtest/gtest.h>
 #include <linux/android/binder.h>
-#include <binder/IBinder.h>
-#include <sys/mman.h>
 #include <poll.h>
+#include <sys/ioctl.h>
+#include <sys/mman.h>
+
+#include "../binder_module.h"
 
 #define BINDER_DEV_NAME "/dev/binder"
 
@@ -93,8 +97,9 @@ class BinderDriverInterfaceTest : public ::testing::Test {
             ret = ioctl(m_binderFd, cmd, arg);
             EXPECT_EQ(expect_ret, ret);
             if (ret < 0) {
-                if (errno != accept_errno)
+                if (errno != accept_errno) {
                     EXPECT_EQ(expect_errno, errno);
+                }
             }
         }
         void binderTestIoctlErr2(int cmd, void *arg, int expect_errno, int accept_errno) {
@@ -274,12 +279,15 @@ TEST_F(BinderDriverInterfaceTest, Transaction) {
         binderTestIoctl(BINDER_WRITE_READ, &bwr);
     }
     EXPECT_EQ(offsetof(typeof(br), pad), bwr.read_consumed);
-    if (bwr.read_consumed > offsetof(typeof(br), cmd0))
+    if (bwr.read_consumed > offsetof(typeof(br), cmd0)) {
         EXPECT_EQ(BR_NOOP, br.cmd0);
-    if (bwr.read_consumed > offsetof(typeof(br), cmd1))
+    }
+    if (bwr.read_consumed > offsetof(typeof(br), cmd1)) {
         EXPECT_EQ(BR_TRANSACTION_COMPLETE, br.cmd1);
-    if (bwr.read_consumed > offsetof(typeof(br), cmd2))
+    }
+    if (bwr.read_consumed > offsetof(typeof(br), cmd2)) {
         EXPECT_EQ(BR_REPLY, br.cmd2);
+    }
     if (bwr.read_consumed >= offsetof(typeof(br), pad)) {
         EXPECT_EQ(0u, br.arg2.target.ptr);
         EXPECT_EQ(0u, br.arg2.cookie);
@@ -357,6 +365,251 @@ TEST_F(BinderDriverInterfaceTest, RequestDeathNotification) {
     EXPECT_EQ(BR_NOOP, br.cmd0);
     EXPECT_EQ(BR_CLEAR_DEATH_NOTIFICATION_DONE, br.cmd1);
     EXPECT_EQ(cookie, br.arg1);
+    binderTestReadEmpty();
+}
+
+TEST_F(BinderDriverInterfaceTest, RequestFrozenNotification) {
+    if (!android::ProcessState::isDriverFeatureEnabled(
+                android::ProcessState::DriverFeature::FREEZE_NOTIFICATION)) {
+        GTEST_SKIP() << "Skipping test for kernels that support freeze notification";
+        return;
+    }
+    binder_uintptr_t cookie = 1234;
+    struct {
+        uint32_t cmd0;
+        uint32_t arg0;
+        uint32_t cmd1;
+        struct binder_handle_cookie arg1;
+    } __attribute__((packed)) bc1 = {
+            .cmd0 = BC_INCREFS,
+            .arg0 = 0,
+            .cmd1 = BC_REQUEST_FREEZE_NOTIFICATION,
+            .arg1 =
+                    {
+                            .handle = 0,
+                            .cookie = cookie,
+                    },
+    };
+    struct {
+        uint32_t cmd0;
+        // Expecting a BR_FROZEN_BINDER since BC_REQUEST_FREEZE_NOTIFICATION
+        // above should lead to an immediate notification of the current state.
+        uint32_t cmd1;
+        struct binder_frozen_state_info arg1;
+        uint32_t pad[16];
+    } __attribute__((packed)) br1;
+    struct {
+        uint32_t cmd2;
+        binder_uintptr_t arg2;
+        uint32_t cmd3;
+        struct binder_handle_cookie arg3;
+        uint32_t cmd4;
+        uint32_t arg4;
+    } __attribute__((packed)) bc2 = {
+            // Tell kernel that userspace has done handling BR_FROZEN_BINDER.
+            .cmd2 = BC_FREEZE_NOTIFICATION_DONE,
+            .arg2 = cookie,
+            .cmd3 = BC_CLEAR_FREEZE_NOTIFICATION,
+            .arg3 =
+                    {
+                            .handle = 0,
+                            .cookie = cookie,
+                    },
+            .cmd4 = BC_DECREFS,
+            .arg4 = 0,
+    };
+    struct {
+        uint32_t cmd2;
+        uint32_t cmd3;
+        binder_uintptr_t arg3;
+        uint32_t pad[16];
+    } __attribute__((packed)) br2;
+
+    struct binder_write_read bwr1 = binder_write_read();
+    bwr1.write_buffer = (uintptr_t)&bc1;
+    bwr1.write_size = sizeof(bc1);
+    bwr1.read_buffer = (uintptr_t)&br1;
+    bwr1.read_size = sizeof(br1);
+    binderTestIoctl(BINDER_WRITE_READ, &bwr1);
+    EXPECT_EQ(sizeof(bc1), bwr1.write_consumed);
+    EXPECT_EQ(sizeof(br1) - sizeof(br1.pad), bwr1.read_consumed);
+    EXPECT_EQ(BR_NOOP, br1.cmd0);
+    ASSERT_EQ(BR_FROZEN_BINDER, br1.cmd1);
+    EXPECT_FALSE(br1.arg1.is_frozen);
+
+    struct binder_write_read bwr2 = binder_write_read();
+    bwr2.write_buffer = (uintptr_t)&bc2;
+    bwr2.write_size = sizeof(bc2);
+    bwr2.read_buffer = (uintptr_t)&br2;
+    bwr2.read_size = sizeof(br2);
+    binderTestIoctl(BINDER_WRITE_READ, &bwr2);
+    EXPECT_EQ(sizeof(bc2), bwr2.write_consumed);
+    EXPECT_EQ(sizeof(br2) - sizeof(br2.pad), bwr2.read_consumed);
+    EXPECT_EQ(BR_NOOP, br2.cmd2);
+    EXPECT_EQ(BR_CLEAR_FREEZE_NOTIFICATION_DONE, br2.cmd3);
+    EXPECT_EQ(cookie, br2.arg3);
+
+    binderTestReadEmpty();
+}
+
+TEST_F(BinderDriverInterfaceTest, OverwritePendingFrozenNotification) {
+    if (!android::ProcessState::isDriverFeatureEnabled(
+                android::ProcessState::DriverFeature::FREEZE_NOTIFICATION)) {
+        GTEST_SKIP() << "Skipping test for kernels that support freeze notification";
+        return;
+    }
+    binder_uintptr_t cookie = 1234;
+    struct {
+        uint32_t cmd0;
+        uint32_t arg0;
+        uint32_t cmd1;
+        struct binder_handle_cookie arg1;
+        uint32_t cmd2;
+        struct binder_handle_cookie arg2;
+        uint32_t cmd3;
+        uint32_t arg3;
+    } __attribute__((packed)) bc = {
+            .cmd0 = BC_INCREFS,
+            .arg0 = 0,
+            .cmd1 = BC_REQUEST_FREEZE_NOTIFICATION,
+            // This BC_REQUEST_FREEZE_NOTIFICATION should lead to a pending
+            // frozen notification inserted into the queue.
+            .arg1 =
+                    {
+                            .handle = 0,
+                            .cookie = cookie,
+                    },
+            // Send BC_CLEAR_FREEZE_NOTIFICATION before the above frozen
+            // notification has a chance of being sent. The notification should
+            // be overwritten. Userspace is expected to only receive
+            // BR_CLEAR_FREEZE_NOTIFICATION_DONE.
+            .cmd2 = BC_CLEAR_FREEZE_NOTIFICATION,
+            .arg2 =
+                    {
+                            .handle = 0,
+                            .cookie = cookie,
+                    },
+            .cmd3 = BC_DECREFS,
+            .arg3 = 0,
+    };
+    struct {
+        uint32_t cmd0;
+        uint32_t cmd1;
+        binder_uintptr_t arg1;
+        uint32_t pad[16];
+    } __attribute__((packed)) br;
+    struct binder_write_read bwr = binder_write_read();
+
+    bwr.write_buffer = (uintptr_t)&bc;
+    bwr.write_size = sizeof(bc);
+    bwr.read_buffer = (uintptr_t)&br;
+    bwr.read_size = sizeof(br);
+
+    binderTestIoctl(BINDER_WRITE_READ, &bwr);
+    EXPECT_EQ(sizeof(bc), bwr.write_consumed);
+    EXPECT_EQ(sizeof(br) - sizeof(br.pad), bwr.read_consumed);
+    EXPECT_EQ(BR_NOOP, br.cmd0);
+    EXPECT_EQ(BR_CLEAR_FREEZE_NOTIFICATION_DONE, br.cmd1);
+    EXPECT_EQ(cookie, br.arg1);
+    binderTestReadEmpty();
+}
+
+TEST_F(BinderDriverInterfaceTest, ResendFrozenNotification) {
+    if (!android::ProcessState::isDriverFeatureEnabled(
+                android::ProcessState::DriverFeature::FREEZE_NOTIFICATION)) {
+        GTEST_SKIP() << "Skipping test for kernels that support freeze notification";
+        return;
+    }
+    binder_uintptr_t cookie = 1234;
+    struct {
+        uint32_t cmd0;
+        uint32_t arg0;
+        uint32_t cmd1;
+        struct binder_handle_cookie arg1;
+    } __attribute__((packed)) bc1 = {
+            .cmd0 = BC_INCREFS,
+            .arg0 = 0,
+            .cmd1 = BC_REQUEST_FREEZE_NOTIFICATION,
+            .arg1 =
+                    {
+                            .handle = 0,
+                            .cookie = cookie,
+                    },
+    };
+    struct {
+        uint32_t cmd0;
+        uint32_t cmd1;
+        struct binder_frozen_state_info arg1;
+        uint32_t pad[16];
+    } __attribute__((packed)) br1;
+    struct {
+        uint32_t cmd2;
+        struct binder_handle_cookie arg2;
+    } __attribute__((packed)) bc2 = {
+            // Clear the notification before acknowledging the in-flight
+            // BR_FROZEN_BINDER. Kernel should hold off sending
+            // BR_CLEAR_FREEZE_NOTIFICATION_DONE until the acknowledgement
+            // reaches kernel.
+            .cmd2 = BC_CLEAR_FREEZE_NOTIFICATION,
+            .arg2 =
+                    {
+                            .handle = 0,
+                            .cookie = cookie,
+                    },
+    };
+    struct {
+        uint32_t pad[16];
+    } __attribute__((packed)) br2;
+    struct {
+        uint32_t cmd3;
+        binder_uintptr_t arg3;
+        uint32_t cmd4;
+        uint32_t arg4;
+    } __attribute__((packed)) bc3 = {
+            // Send the acknowledgement. Now the kernel should send out
+            // BR_CLEAR_FREEZE_NOTIFICATION_DONE.
+            .cmd3 = BC_FREEZE_NOTIFICATION_DONE,
+            .arg3 = cookie,
+            .cmd4 = BC_DECREFS,
+            .arg4 = 0,
+    };
+    struct {
+        uint32_t cmd2;
+        uint32_t cmd3;
+        binder_uintptr_t arg3;
+        uint32_t pad[16];
+    } __attribute__((packed)) br3;
+
+    struct binder_write_read bwr1 = binder_write_read();
+    bwr1.write_buffer = (uintptr_t)&bc1;
+    bwr1.write_size = sizeof(bc1);
+    bwr1.read_buffer = (uintptr_t)&br1;
+    bwr1.read_size = sizeof(br1);
+    binderTestIoctl(BINDER_WRITE_READ, &bwr1);
+    EXPECT_EQ(sizeof(bc1), bwr1.write_consumed);
+    EXPECT_EQ(sizeof(br1) - sizeof(br1.pad), bwr1.read_consumed);
+    EXPECT_EQ(BR_NOOP, br1.cmd0);
+    ASSERT_EQ(BR_FROZEN_BINDER, br1.cmd1);
+    EXPECT_FALSE(br1.arg1.is_frozen);
+
+    struct binder_write_read bwr2 = binder_write_read();
+    bwr2.write_buffer = (uintptr_t)&bc2;
+    bwr2.write_size = sizeof(bc2);
+    bwr2.read_buffer = (uintptr_t)&br2;
+    bwr2.read_size = sizeof(br2);
+    binderTestIoctlSuccessOrError(BINDER_WRITE_READ, &bwr2, EAGAIN);
+    binderTestReadEmpty();
+
+    struct binder_write_read bwr3 = binder_write_read();
+    bwr3.write_buffer = (uintptr_t)&bc3;
+    bwr3.write_size = sizeof(bc3);
+    bwr3.read_buffer = (uintptr_t)&br3;
+    bwr3.read_size = sizeof(br3);
+    binderTestIoctl(BINDER_WRITE_READ, &bwr3);
+    EXPECT_EQ(sizeof(bc3), bwr3.write_consumed);
+    EXPECT_EQ(sizeof(br3) - sizeof(br3.pad), bwr3.read_consumed);
+    EXPECT_EQ(BR_CLEAR_FREEZE_NOTIFICATION_DONE, br3.cmd3);
+    EXPECT_EQ(cookie, br3.arg3);
     binderTestReadEmpty();
 }
 

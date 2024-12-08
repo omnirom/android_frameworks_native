@@ -148,12 +148,6 @@ bool FakePointerController::isPointerShown() {
     return mIsPointerShown;
 }
 
-std::optional<FloatRect> FakePointerController::getBounds() const {
-    if (!mEnabled) return std::nullopt;
-
-    return mHaveBounds ? std::make_optional<FloatRect>(mMinX, mMinY, mMaxX, mMaxY) : std::nullopt;
-}
-
 void FakePointerController::move(float deltaX, float deltaY) {
     if (!mEnabled) return;
 

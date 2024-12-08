@@ -16,29 +16,266 @@
 
 #define LOG_TAG "VirtualInputDevice"
 
+#include <android-base/logging.h>
 #include <android/input.h>
 #include <android/keycodes.h>
+#include <android_companion_virtualdevice_flags.h>
 #include <fcntl.h>
 #include <input/Input.h>
 #include <input/VirtualInputDevice.h>
 #include <linux/uinput.h>
-#include <math.h>
-#include <utils/Log.h>
 
-#include <map>
 #include <string>
 
 using android::base::unique_fd;
+
+namespace {
 
 /**
  * Log debug messages about native virtual input devices.
  * Enable this via "adb shell setprop log.tag.VirtualInputDevice DEBUG"
  */
-static bool isDebug() {
+bool isDebug() {
     return __android_log_is_loggable(ANDROID_LOG_DEBUG, LOG_TAG, ANDROID_LOG_INFO);
 }
 
+unique_fd invalidFd() {
+    return unique_fd(-1);
+}
+
+} // namespace
+
 namespace android {
+
+namespace vd_flags = android::companion::virtualdevice::flags;
+
+/** Creates a new uinput device and assigns a file descriptor. */
+unique_fd openUinput(const char* readableName, int32_t vendorId, int32_t productId,
+                     const char* phys, DeviceType deviceType, int32_t screenHeight,
+                     int32_t screenWidth) {
+    unique_fd fd(TEMP_FAILURE_RETRY(::open("/dev/uinput", O_WRONLY | O_NONBLOCK)));
+    if (fd < 0) {
+        ALOGE("Error creating uinput device: %s", strerror(errno));
+        return invalidFd();
+    }
+
+    ioctl(fd, UI_SET_PHYS, phys);
+
+    ioctl(fd, UI_SET_EVBIT, EV_KEY);
+    ioctl(fd, UI_SET_EVBIT, EV_SYN);
+    switch (deviceType) {
+        case DeviceType::DPAD:
+            for (const auto& [_, keyCode] : VirtualDpad::DPAD_KEY_CODE_MAPPING) {
+                ioctl(fd, UI_SET_KEYBIT, keyCode);
+            }
+            break;
+        case DeviceType::KEYBOARD:
+            for (const auto& [_, keyCode] : VirtualKeyboard::KEY_CODE_MAPPING) {
+                ioctl(fd, UI_SET_KEYBIT, keyCode);
+            }
+            break;
+        case DeviceType::MOUSE:
+            ioctl(fd, UI_SET_EVBIT, EV_REL);
+            ioctl(fd, UI_SET_KEYBIT, BTN_LEFT);
+            ioctl(fd, UI_SET_KEYBIT, BTN_RIGHT);
+            ioctl(fd, UI_SET_KEYBIT, BTN_MIDDLE);
+            ioctl(fd, UI_SET_KEYBIT, BTN_BACK);
+            ioctl(fd, UI_SET_KEYBIT, BTN_FORWARD);
+            ioctl(fd, UI_SET_RELBIT, REL_X);
+            ioctl(fd, UI_SET_RELBIT, REL_Y);
+            ioctl(fd, UI_SET_RELBIT, REL_WHEEL);
+            ioctl(fd, UI_SET_RELBIT, REL_HWHEEL);
+            if (vd_flags::high_resolution_scroll()) {
+                ioctl(fd, UI_SET_RELBIT, REL_WHEEL_HI_RES);
+                ioctl(fd, UI_SET_RELBIT, REL_HWHEEL_HI_RES);
+            }
+            break;
+        case DeviceType::TOUCHSCREEN:
+            ioctl(fd, UI_SET_EVBIT, EV_ABS);
+            ioctl(fd, UI_SET_KEYBIT, BTN_TOUCH);
+            ioctl(fd, UI_SET_ABSBIT, ABS_MT_SLOT);
+            ioctl(fd, UI_SET_ABSBIT, ABS_MT_POSITION_X);
+            ioctl(fd, UI_SET_ABSBIT, ABS_MT_POSITION_Y);
+            ioctl(fd, UI_SET_ABSBIT, ABS_MT_TRACKING_ID);
+            ioctl(fd, UI_SET_ABSBIT, ABS_MT_TOOL_TYPE);
+            ioctl(fd, UI_SET_ABSBIT, ABS_MT_TOUCH_MAJOR);
+            ioctl(fd, UI_SET_ABSBIT, ABS_MT_PRESSURE);
+            ioctl(fd, UI_SET_PROPBIT, INPUT_PROP_DIRECT);
+            break;
+        case DeviceType::STYLUS:
+            ioctl(fd, UI_SET_EVBIT, EV_ABS);
+            ioctl(fd, UI_SET_KEYBIT, BTN_TOUCH);
+            ioctl(fd, UI_SET_KEYBIT, BTN_STYLUS);
+            ioctl(fd, UI_SET_KEYBIT, BTN_STYLUS2);
+            ioctl(fd, UI_SET_KEYBIT, BTN_TOOL_PEN);
+            ioctl(fd, UI_SET_KEYBIT, BTN_TOOL_RUBBER);
+            ioctl(fd, UI_SET_ABSBIT, ABS_X);
+            ioctl(fd, UI_SET_ABSBIT, ABS_Y);
+            ioctl(fd, UI_SET_ABSBIT, ABS_TILT_X);
+            ioctl(fd, UI_SET_ABSBIT, ABS_TILT_Y);
+            ioctl(fd, UI_SET_ABSBIT, ABS_PRESSURE);
+            ioctl(fd, UI_SET_PROPBIT, INPUT_PROP_DIRECT);
+            break;
+        case DeviceType::ROTARY_ENCODER:
+            ioctl(fd, UI_SET_EVBIT, EV_REL);
+            ioctl(fd, UI_SET_RELBIT, REL_WHEEL);
+            if (vd_flags::high_resolution_scroll()) {
+                ioctl(fd, UI_SET_RELBIT, REL_WHEEL_HI_RES);
+            }
+            break;
+        default:
+            ALOGE("Invalid input device type %d", static_cast<int32_t>(deviceType));
+            return invalidFd();
+    }
+
+    int version;
+    if (ioctl(fd, UI_GET_VERSION, &version) == 0 && version >= 5) {
+        uinput_setup setup;
+        memset(&setup, 0, sizeof(setup));
+        std::strncpy(setup.name, readableName, UINPUT_MAX_NAME_SIZE);
+        setup.id.version = 1;
+        setup.id.bustype = BUS_VIRTUAL;
+        setup.id.vendor = vendorId;
+        setup.id.product = productId;
+        if (deviceType == DeviceType::TOUCHSCREEN) {
+            uinput_abs_setup xAbsSetup;
+            xAbsSetup.code = ABS_MT_POSITION_X;
+            xAbsSetup.absinfo.maximum = screenWidth - 1;
+            xAbsSetup.absinfo.minimum = 0;
+            if (ioctl(fd, UI_ABS_SETUP, &xAbsSetup) != 0) {
+                ALOGE("Error creating touchscreen uinput x axis: %s", strerror(errno));
+                return invalidFd();
+            }
+            uinput_abs_setup yAbsSetup;
+            yAbsSetup.code = ABS_MT_POSITION_Y;
+            yAbsSetup.absinfo.maximum = screenHeight - 1;
+            yAbsSetup.absinfo.minimum = 0;
+            if (ioctl(fd, UI_ABS_SETUP, &yAbsSetup) != 0) {
+                ALOGE("Error creating touchscreen uinput y axis: %s", strerror(errno));
+                return invalidFd();
+            }
+            uinput_abs_setup majorAbsSetup;
+            majorAbsSetup.code = ABS_MT_TOUCH_MAJOR;
+            majorAbsSetup.absinfo.maximum = screenWidth - 1;
+            majorAbsSetup.absinfo.minimum = 0;
+            if (ioctl(fd, UI_ABS_SETUP, &majorAbsSetup) != 0) {
+                ALOGE("Error creating touchscreen uinput major axis: %s", strerror(errno));
+                return invalidFd();
+            }
+            uinput_abs_setup pressureAbsSetup;
+            pressureAbsSetup.code = ABS_MT_PRESSURE;
+            pressureAbsSetup.absinfo.maximum = 255;
+            pressureAbsSetup.absinfo.minimum = 0;
+            if (ioctl(fd, UI_ABS_SETUP, &pressureAbsSetup) != 0) {
+                ALOGE("Error creating touchscreen uinput pressure axis: %s", strerror(errno));
+                return invalidFd();
+            }
+            uinput_abs_setup slotAbsSetup;
+            slotAbsSetup.code = ABS_MT_SLOT;
+            slotAbsSetup.absinfo.maximum = MAX_POINTERS - 1;
+            slotAbsSetup.absinfo.minimum = 0;
+            if (ioctl(fd, UI_ABS_SETUP, &slotAbsSetup) != 0) {
+                ALOGE("Error creating touchscreen uinput slots: %s", strerror(errno));
+                return invalidFd();
+            }
+            uinput_abs_setup trackingIdAbsSetup;
+            trackingIdAbsSetup.code = ABS_MT_TRACKING_ID;
+            trackingIdAbsSetup.absinfo.maximum = MAX_POINTERS - 1;
+            trackingIdAbsSetup.absinfo.minimum = 0;
+            if (ioctl(fd, UI_ABS_SETUP, &trackingIdAbsSetup) != 0) {
+                ALOGE("Error creating touchscreen uinput tracking ids: %s", strerror(errno));
+                return invalidFd();
+            }
+        } else if (deviceType == DeviceType::STYLUS) {
+            uinput_abs_setup xAbsSetup;
+            xAbsSetup.code = ABS_X;
+            xAbsSetup.absinfo.maximum = screenWidth - 1;
+            xAbsSetup.absinfo.minimum = 0;
+            if (ioctl(fd, UI_ABS_SETUP, &xAbsSetup) != 0) {
+                ALOGE("Error creating stylus uinput x axis: %s", strerror(errno));
+                return invalidFd();
+            }
+            uinput_abs_setup yAbsSetup;
+            yAbsSetup.code = ABS_Y;
+            yAbsSetup.absinfo.maximum = screenHeight - 1;
+            yAbsSetup.absinfo.minimum = 0;
+            if (ioctl(fd, UI_ABS_SETUP, &yAbsSetup) != 0) {
+                ALOGE("Error creating stylus uinput y axis: %s", strerror(errno));
+                return invalidFd();
+            }
+            uinput_abs_setup tiltXAbsSetup;
+            tiltXAbsSetup.code = ABS_TILT_X;
+            tiltXAbsSetup.absinfo.maximum = 90;
+            tiltXAbsSetup.absinfo.minimum = -90;
+            if (ioctl(fd, UI_ABS_SETUP, &tiltXAbsSetup) != 0) {
+                ALOGE("Error creating stylus uinput tilt x axis: %s", strerror(errno));
+                return invalidFd();
+            }
+            uinput_abs_setup tiltYAbsSetup;
+            tiltYAbsSetup.code = ABS_TILT_Y;
+            tiltYAbsSetup.absinfo.maximum = 90;
+            tiltYAbsSetup.absinfo.minimum = -90;
+            if (ioctl(fd, UI_ABS_SETUP, &tiltYAbsSetup) != 0) {
+                ALOGE("Error creating stylus uinput tilt y axis: %s", strerror(errno));
+                return invalidFd();
+            }
+            uinput_abs_setup pressureAbsSetup;
+            pressureAbsSetup.code = ABS_PRESSURE;
+            pressureAbsSetup.absinfo.maximum = 255;
+            pressureAbsSetup.absinfo.minimum = 0;
+            if (ioctl(fd, UI_ABS_SETUP, &pressureAbsSetup) != 0) {
+                ALOGE("Error creating touchscreen uinput pressure axis: %s", strerror(errno));
+                return invalidFd();
+            }
+        }
+        if (ioctl(fd, UI_DEV_SETUP, &setup) != 0) {
+            ALOGE("Error creating uinput device: %s", strerror(errno));
+            return invalidFd();
+        }
+    } else {
+        // UI_DEV_SETUP was not introduced until version 5. Try setting up manually.
+        ALOGI("Falling back to version %d manual setup", version);
+        uinput_user_dev fallback;
+        memset(&fallback, 0, sizeof(fallback));
+        std::strncpy(fallback.name, readableName, UINPUT_MAX_NAME_SIZE);
+        fallback.id.version = 1;
+        fallback.id.bustype = BUS_VIRTUAL;
+        fallback.id.vendor = vendorId;
+        fallback.id.product = productId;
+        if (deviceType == DeviceType::TOUCHSCREEN) {
+            fallback.absmin[ABS_MT_POSITION_X] = 0;
+            fallback.absmax[ABS_MT_POSITION_X] = screenWidth - 1;
+            fallback.absmin[ABS_MT_POSITION_Y] = 0;
+            fallback.absmax[ABS_MT_POSITION_Y] = screenHeight - 1;
+            fallback.absmin[ABS_MT_TOUCH_MAJOR] = 0;
+            fallback.absmax[ABS_MT_TOUCH_MAJOR] = screenWidth - 1;
+            fallback.absmin[ABS_MT_PRESSURE] = 0;
+            fallback.absmax[ABS_MT_PRESSURE] = 255;
+        } else if (deviceType == DeviceType::STYLUS) {
+            fallback.absmin[ABS_X] = 0;
+            fallback.absmax[ABS_X] = screenWidth - 1;
+            fallback.absmin[ABS_Y] = 0;
+            fallback.absmax[ABS_Y] = screenHeight - 1;
+            fallback.absmin[ABS_TILT_X] = -90;
+            fallback.absmax[ABS_TILT_X] = 90;
+            fallback.absmin[ABS_TILT_Y] = -90;
+            fallback.absmax[ABS_TILT_Y] = 90;
+            fallback.absmin[ABS_PRESSURE] = 0;
+            fallback.absmax[ABS_PRESSURE] = 255;
+        }
+        if (TEMP_FAILURE_RETRY(write(fd, &fallback, sizeof(fallback))) != sizeof(fallback)) {
+            ALOGE("Error creating uinput device: %s", strerror(errno));
+            return invalidFd();
+        }
+    }
+
+    if (ioctl(fd, UI_DEV_CREATE) != 0) {
+        ALOGE("Error creating uinput device: %s", strerror(errno));
+        return invalidFd();
+    }
+
+    return fd;
+}
 
 VirtualInputDevice::VirtualInputDevice(unique_fd fd) : mFd(std::move(fd)) {}
 
@@ -253,7 +490,10 @@ const std::map<int, int> VirtualMouse::BUTTON_CODE_MAPPING = {
         // clang-format on
 };
 
-VirtualMouse::VirtualMouse(unique_fd fd) : VirtualInputDevice(std::move(fd)) {}
+VirtualMouse::VirtualMouse(unique_fd fd)
+      : VirtualInputDevice(std::move(fd)),
+        mAccumulatedHighResScrollX(0),
+        mAccumulatedHighResScrollY(0) {}
 
 VirtualMouse::~VirtualMouse() {}
 
@@ -272,9 +512,47 @@ bool VirtualMouse::writeRelativeEvent(float relativeX, float relativeY,
 
 bool VirtualMouse::writeScrollEvent(float xAxisMovement, float yAxisMovement,
                                     std::chrono::nanoseconds eventTime) {
-    return writeInputEvent(EV_REL, REL_HWHEEL, xAxisMovement, eventTime) &&
-            writeInputEvent(EV_REL, REL_WHEEL, yAxisMovement, eventTime) &&
-            writeInputEvent(EV_SYN, SYN_REPORT, 0, eventTime);
+    if (!vd_flags::high_resolution_scroll()) {
+        return writeInputEvent(EV_REL, REL_HWHEEL, static_cast<int32_t>(xAxisMovement),
+                               eventTime) &&
+                writeInputEvent(EV_REL, REL_WHEEL, static_cast<int32_t>(yAxisMovement),
+                                eventTime) &&
+                writeInputEvent(EV_SYN, SYN_REPORT, 0, eventTime);
+    }
+
+    const auto highResScrollX =
+            static_cast<int32_t>(xAxisMovement * kEvdevHighResScrollUnitsPerDetent);
+    const auto highResScrollY =
+            static_cast<int32_t>(yAxisMovement * kEvdevHighResScrollUnitsPerDetent);
+    bool highResScrollResult =
+            writeInputEvent(EV_REL, REL_HWHEEL_HI_RES, highResScrollX, eventTime) &&
+            writeInputEvent(EV_REL, REL_WHEEL_HI_RES, highResScrollY, eventTime);
+    if (!highResScrollResult) {
+        return false;
+    }
+
+    // According to evdev spec, a high-resolution mouse needs to emit REL_WHEEL / REL_HWHEEL events
+    // in addition to high-res scroll events. Regular scroll events can approximate high-res scroll
+    // events, so we send a regular scroll event when the accumulated scroll motion reaches a detent
+    // (single mouse wheel click).
+    mAccumulatedHighResScrollX += highResScrollX;
+    mAccumulatedHighResScrollY += highResScrollY;
+    const int32_t scrollX = mAccumulatedHighResScrollX / kEvdevHighResScrollUnitsPerDetent;
+    const int32_t scrollY = mAccumulatedHighResScrollY / kEvdevHighResScrollUnitsPerDetent;
+    if (scrollX != 0) {
+        if (!writeInputEvent(EV_REL, REL_HWHEEL, scrollX, eventTime)) {
+            return false;
+        }
+        mAccumulatedHighResScrollX %= kEvdevHighResScrollUnitsPerDetent;
+    }
+    if (scrollY != 0) {
+        if (!writeInputEvent(EV_REL, REL_WHEEL, scrollY, eventTime)) {
+            return false;
+        }
+        mAccumulatedHighResScrollY %= kEvdevHighResScrollUnitsPerDetent;
+    }
+
+    return writeInputEvent(EV_SYN, SYN_REPORT, 0, eventTime);
 }
 
 // --- VirtualTouchscreen ---
@@ -507,6 +785,41 @@ bool VirtualStylus::handleStylusUp(uint16_t tool, std::chrono::nanoseconds event
     }
     mIsStylusDown = false;
     return true;
+}
+
+// --- VirtualRotaryEncoder ---
+VirtualRotaryEncoder::VirtualRotaryEncoder(unique_fd fd)
+      : VirtualInputDevice(std::move(fd)), mAccumulatedHighResScrollAmount(0) {}
+
+VirtualRotaryEncoder::~VirtualRotaryEncoder() {}
+
+bool VirtualRotaryEncoder::writeScrollEvent(float scrollAmount,
+                                            std::chrono::nanoseconds eventTime) {
+    if (!vd_flags::high_resolution_scroll()) {
+        return writeInputEvent(EV_REL, REL_WHEEL, static_cast<int32_t>(scrollAmount), eventTime) &&
+                writeInputEvent(EV_SYN, SYN_REPORT, 0, eventTime);
+    }
+
+    const auto highResScrollAmount =
+            static_cast<int32_t>(scrollAmount * kEvdevHighResScrollUnitsPerDetent);
+    if (!writeInputEvent(EV_REL, REL_WHEEL_HI_RES, highResScrollAmount, eventTime)) {
+        return false;
+    }
+
+    // According to evdev spec, a high-resolution scroll device needs to emit REL_WHEEL / REL_HWHEEL
+    // events in addition to high-res scroll events. Regular scroll events can approximate high-res
+    // scroll events, so we send a regular scroll event when the accumulated scroll motion reaches a
+    // detent (single wheel click).
+    mAccumulatedHighResScrollAmount += highResScrollAmount;
+    const int32_t scroll = mAccumulatedHighResScrollAmount / kEvdevHighResScrollUnitsPerDetent;
+    if (scroll != 0) {
+        if (!writeInputEvent(EV_REL, REL_WHEEL, scroll, eventTime)) {
+            return false;
+        }
+        mAccumulatedHighResScrollAmount %= kEvdevHighResScrollUnitsPerDetent;
+    }
+
+    return writeInputEvent(EV_SYN, SYN_REPORT, 0, eventTime);
 }
 
 } // namespace android

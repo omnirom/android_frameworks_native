@@ -32,7 +32,8 @@ struct CancelationOptions {
         CANCEL_POINTER_EVENTS = 1,
         CANCEL_NON_POINTER_EVENTS = 2,
         CANCEL_FALLBACK_EVENTS = 3,
-        ftl_last = CANCEL_FALLBACK_EVENTS,
+        CANCEL_HOVER_EVENTS = 4,
+        ftl_last = CANCEL_HOVER_EVENTS
     };
 
     // The criterion to use to determine which events should be canceled.

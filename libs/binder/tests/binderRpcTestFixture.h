@@ -35,6 +35,12 @@ public:
     struct SessionInfo {
         sp<RpcSession> session;
         sp<IBinder> root;
+// Trusty defines its own socket APIs in trusty_ipc.h but doesn't include
+// sockaddr types.
+#ifndef __TRUSTY__
+        sockaddr_storage addr;
+        socklen_t addrLen;
+#endif
     };
 
     // client session objects associated with other process

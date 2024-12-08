@@ -17,6 +17,7 @@
 #include "tracing_perfetto.h"
 
 #include <cutils/trace.h>
+#include <cstdarg>
 
 #include "perfetto/public/te_category_macros.h"
 #include "trace_categories.h"
@@ -28,116 +29,172 @@ void registerWithPerfetto(bool test) {
   internal::registerWithPerfetto(test);
 }
 
-Result traceBegin(uint64_t category, const char* name) {
+void traceBegin(uint64_t category, const char* name) {
   struct PerfettoTeCategory* perfettoTeCategory =
       internal::toPerfettoCategory(category);
-  if (perfettoTeCategory != nullptr) {
-    return internal::perfettoTraceBegin(*perfettoTeCategory, name);
-  } else {
+
+  if (internal::shouldPreferAtrace(perfettoTeCategory, category)) {
     atrace_begin(category, name);
-    return Result::SUCCESS;
+  } else if (internal::isPerfettoCategoryEnabled(perfettoTeCategory)) {
+    internal::perfettoTraceBegin(*perfettoTeCategory, name);
   }
 }
 
-Result traceEnd(uint64_t category) {
+void traceFormatBegin(uint64_t category, const char* fmt, ...) {
   struct PerfettoTeCategory* perfettoTeCategory =
       internal::toPerfettoCategory(category);
-  if (perfettoTeCategory != nullptr) {
-    return internal::perfettoTraceEnd(*perfettoTeCategory);
-  } else {
+  const bool preferAtrace = internal::shouldPreferAtrace(perfettoTeCategory, category);
+  const bool preferPerfetto = internal::isPerfettoCategoryEnabled(perfettoTeCategory);
+  if (CC_LIKELY(!(preferAtrace || preferPerfetto))) {
+    return;
+  }
+
+  const int BUFFER_SIZE = 256;
+  va_list ap;
+  char buf[BUFFER_SIZE];
+
+  va_start(ap, fmt);
+  vsnprintf(buf, BUFFER_SIZE, fmt, ap);
+  va_end(ap);
+
+
+  if (preferAtrace) {
+    atrace_begin(category, buf);
+  } else if (preferPerfetto) {
+    internal::perfettoTraceBegin(*perfettoTeCategory, buf);
+  }
+}
+
+void traceEnd(uint64_t category) {
+  struct PerfettoTeCategory* perfettoTeCategory =
+      internal::toPerfettoCategory(category);
+
+  if (internal::shouldPreferAtrace(perfettoTeCategory, category)) {
     atrace_end(category);
-    return Result::SUCCESS;
+  } else if (internal::isPerfettoCategoryEnabled(perfettoTeCategory)) {
+    internal::perfettoTraceEnd(*perfettoTeCategory);
   }
 }
 
-Result traceAsyncBegin(uint64_t category, const char* name, int32_t cookie) {
+void traceAsyncBegin(uint64_t category, const char* name, int32_t cookie) {
   struct PerfettoTeCategory* perfettoTeCategory =
       internal::toPerfettoCategory(category);
-  if (perfettoTeCategory != nullptr) {
-    return internal::perfettoTraceAsyncBegin(*perfettoTeCategory, name, cookie);
-  } else {
+
+  if (internal::shouldPreferAtrace(perfettoTeCategory, category)) {
     atrace_async_begin(category, name, cookie);
-    return Result::SUCCESS;
+  } else if (internal::isPerfettoCategoryEnabled(perfettoTeCategory)) {
+    internal::perfettoTraceAsyncBegin(*perfettoTeCategory, name, cookie);
   }
 }
 
-Result traceAsyncEnd(uint64_t category, const char* name, int32_t cookie) {
+void traceAsyncEnd(uint64_t category, const char* name, int32_t cookie) {
   struct PerfettoTeCategory* perfettoTeCategory =
       internal::toPerfettoCategory(category);
-  if (perfettoTeCategory != nullptr) {
-    return internal::perfettoTraceAsyncEnd(*perfettoTeCategory, name, cookie);
-  } else {
+
+  if (internal::shouldPreferAtrace(perfettoTeCategory, category)) {
     atrace_async_end(category, name, cookie);
-    return Result::SUCCESS;
+  } else if (internal::isPerfettoCategoryEnabled(perfettoTeCategory)) {
+    internal::perfettoTraceAsyncEnd(*perfettoTeCategory, name, cookie);
   }
 }
 
-Result traceAsyncBeginForTrack(uint64_t category, const char* name,
+void traceAsyncBeginForTrack(uint64_t category, const char* name,
                                const char* trackName, int32_t cookie) {
   struct PerfettoTeCategory* perfettoTeCategory =
       internal::toPerfettoCategory(category);
-  if (perfettoTeCategory != nullptr) {
-    return internal::perfettoTraceAsyncBeginForTrack(*perfettoTeCategory, name, trackName, cookie);
-  } else {
+
+  if (internal::shouldPreferAtrace(perfettoTeCategory, category)) {
     atrace_async_for_track_begin(category, trackName, name, cookie);
-    return Result::SUCCESS;
+  } else if (internal::isPerfettoCategoryEnabled(perfettoTeCategory)) {
+    internal::perfettoTraceAsyncBeginForTrack(*perfettoTeCategory, name, trackName, cookie);
   }
 }
 
-Result traceAsyncEndForTrack(uint64_t category, const char* trackName,
+void traceAsyncEndForTrack(uint64_t category, const char* trackName,
                              int32_t cookie) {
   struct PerfettoTeCategory* perfettoTeCategory =
       internal::toPerfettoCategory(category);
-  if (perfettoTeCategory != nullptr) {
-    return internal::perfettoTraceAsyncEndForTrack(*perfettoTeCategory, trackName, cookie);
-  } else {
+
+  if (internal::shouldPreferAtrace(perfettoTeCategory, category)) {
     atrace_async_for_track_end(category, trackName, cookie);
-    return Result::SUCCESS;
+  } else if (internal::isPerfettoCategoryEnabled(perfettoTeCategory)) {
+    internal::perfettoTraceAsyncEndForTrack(*perfettoTeCategory, trackName, cookie);
   }
 }
 
-Result traceInstant(uint64_t category, const char* name) {
+void traceInstant(uint64_t category, const char* name) {
   struct PerfettoTeCategory* perfettoTeCategory =
       internal::toPerfettoCategory(category);
-  if (perfettoTeCategory != nullptr) {
-    return internal::perfettoTraceInstant(*perfettoTeCategory, name);
-  } else {
+
+  if (internal::shouldPreferAtrace(perfettoTeCategory, category)) {
     atrace_instant(category, name);
-    return Result::SUCCESS;
+  } else if (internal::isPerfettoCategoryEnabled(perfettoTeCategory)) {
+    internal::perfettoTraceInstant(*perfettoTeCategory, name);
   }
 }
 
-Result traceInstantForTrack(uint64_t category, const char* trackName,
+void traceFormatInstant(uint64_t category, const char* fmt, ...) {
+  struct PerfettoTeCategory* perfettoTeCategory =
+      internal::toPerfettoCategory(category);
+  const bool preferAtrace = internal::shouldPreferAtrace(perfettoTeCategory, category);
+  const bool preferPerfetto = internal::isPerfettoCategoryEnabled(perfettoTeCategory);
+  if (CC_LIKELY(!(preferAtrace || preferPerfetto))) {
+    return;
+  }
+
+  const int BUFFER_SIZE = 256;
+  va_list ap;
+  char buf[BUFFER_SIZE];
+
+  va_start(ap, fmt);
+  vsnprintf(buf, BUFFER_SIZE, fmt, ap);
+  va_end(ap);
+
+  if (preferAtrace) {
+    atrace_instant(category, buf);
+  } else if (preferPerfetto) {
+    internal::perfettoTraceInstant(*perfettoTeCategory, buf);
+  }
+}
+
+void traceInstantForTrack(uint64_t category, const char* trackName,
                             const char* name) {
   struct PerfettoTeCategory* perfettoTeCategory =
       internal::toPerfettoCategory(category);
-  if (perfettoTeCategory != nullptr) {
-    return internal::perfettoTraceInstantForTrack(*perfettoTeCategory, trackName, name);
-  } else {
+
+  if (internal::shouldPreferAtrace(perfettoTeCategory, category)) {
     atrace_instant_for_track(category, trackName, name);
-    return Result::SUCCESS;
+  } else if (internal::isPerfettoCategoryEnabled(perfettoTeCategory)) {
+    internal::perfettoTraceInstantForTrack(*perfettoTeCategory, trackName, name);
   }
 }
 
-Result traceCounter(uint64_t category, const char* name, int64_t value) {
+void traceCounter(uint64_t category, const char* name, int64_t value) {
   struct PerfettoTeCategory* perfettoTeCategory =
       internal::toPerfettoCategory(category);
-  if (perfettoTeCategory != nullptr) {
-    return internal::perfettoTraceCounter(*perfettoTeCategory, name, value);
-  } else {
+
+  if (internal::shouldPreferAtrace(perfettoTeCategory, category)) {
     atrace_int64(category, name, value);
-    return Result::SUCCESS;
+  } else if (internal::isPerfettoCategoryEnabled(perfettoTeCategory)) {
+    internal::perfettoTraceCounter(*perfettoTeCategory, name, value);
+  }
+}
+
+void traceCounter32(uint64_t category, const char* name, int32_t value) {
+  struct PerfettoTeCategory* perfettoTeCategory = internal::toPerfettoCategory(category);
+  if (internal::shouldPreferAtrace(perfettoTeCategory, category)) {
+    atrace_int(category, name, value);
+  } else if (internal::isPerfettoCategoryEnabled(perfettoTeCategory)) {
+    internal::perfettoTraceCounter(*perfettoTeCategory, name,
+                                          static_cast<int64_t>(value));
   }
 }
 
 bool isTagEnabled(uint64_t category) {
   struct PerfettoTeCategory* perfettoTeCategory =
       internal::toPerfettoCategory(category);
-  if (perfettoTeCategory != nullptr) {
-    return true;
-  } else {
-    return (atrace_get_enabled_tags() & category) != 0;
-  }
+  return internal::isPerfettoCategoryEnabled(perfettoTeCategory)
+      || atrace_is_tag_enabled(category);
 }
 
 }  // namespace tracing_perfetto

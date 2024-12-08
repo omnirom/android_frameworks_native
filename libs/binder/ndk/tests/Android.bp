@@ -34,6 +34,11 @@ cc_defaults {
     cflags: [
         "-O0",
         "-g",
+        "-Wall",
+        "-Wextra",
+        "-Wextra-semi",
+        "-Werror",
+        "-Winconsistent-missing-override",
     ],
 }
 

@@ -19,7 +19,6 @@
 
 #include <stdint.h>
 
-#include "include/trace_result.h"
 #include "perfetto/public/te_category_macros.h"
 
 namespace tracing_perfetto {
@@ -32,31 +31,33 @@ struct PerfettoTeCategory* toPerfettoCategory(uint64_t category);
 
 void registerWithPerfetto(bool test = false);
 
-Result perfettoTraceBegin(const struct PerfettoTeCategory& category, const char* name);
+void perfettoTraceBegin(const struct PerfettoTeCategory& category, const char* name);
 
-Result perfettoTraceEnd(const struct PerfettoTeCategory& category);
+void perfettoTraceEnd(const struct PerfettoTeCategory& category);
 
-Result perfettoTraceAsyncBegin(const struct PerfettoTeCategory& category, const char* name,
+void perfettoTraceAsyncBegin(const struct PerfettoTeCategory& category, const char* name,
                                uint64_t cookie);
 
-Result perfettoTraceAsyncEnd(const struct PerfettoTeCategory& category, const char* name,
+void perfettoTraceAsyncEnd(const struct PerfettoTeCategory& category, const char* name,
                              uint64_t cookie);
 
-Result perfettoTraceAsyncBeginForTrack(const struct PerfettoTeCategory& category, const char* name,
+void perfettoTraceAsyncBeginForTrack(const struct PerfettoTeCategory& category, const char* name,
                                        const char* trackName, uint64_t cookie);
 
-Result perfettoTraceAsyncEndForTrack(const struct PerfettoTeCategory& category,
+void perfettoTraceAsyncEndForTrack(const struct PerfettoTeCategory& category,
                                      const char* trackName, uint64_t cookie);
 
-Result perfettoTraceInstant(const struct PerfettoTeCategory& category, const char* name);
+void perfettoTraceInstant(const struct PerfettoTeCategory& category, const char* name);
 
-Result perfettoTraceInstantForTrack(const struct PerfettoTeCategory& category,
+void perfettoTraceInstantForTrack(const struct PerfettoTeCategory& category,
                                     const char* trackName, const char* name);
 
-Result perfettoTraceCounter(const struct PerfettoTeCategory& category, const char* name,
+void perfettoTraceCounter(const struct PerfettoTeCategory& category, const char* name,
                             int64_t value);
 
-uint64_t getDefaultCategories();
+bool isPerfettoCategoryEnabled(PerfettoTeCategory *perfettoTeCategory);
+
+bool shouldPreferAtrace(PerfettoTeCategory *perfettoTeCategory, uint64_t category);
 
 }  // namespace internal
 

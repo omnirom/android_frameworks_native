@@ -21,9 +21,8 @@
 
 #include "VsyncModulator.h"
 
-#include <android-base/properties.h>
+#include <common/trace.h>
 #include <log/log.h>
-#include <utils/Trace.h>
 
 #include <chrono>
 #include <cinttypes>
@@ -37,8 +36,7 @@ const std::chrono::nanoseconds VsyncModulator::MIN_EARLY_TRANSACTION_TIME = 1ms;
 
 VsyncModulator::VsyncModulator(const VsyncConfigSet& config, Now now)
       : mVsyncConfigSet(config),
-        mNow(now),
-        mTraceDetailedInfo(base::GetBoolProperty("debug.sf.vsync_trace_detailed_info", false)) {}
+        mNow(now) {}
 
 VsyncConfig VsyncModulator::setVsyncConfigSet(const VsyncConfigSet& config) {
     std::lock_guard<std::mutex> lock(mMutex);
@@ -69,10 +67,6 @@ VsyncModulator::VsyncConfigOpt VsyncModulator::setTransactionSchedule(Transactio
         case Schedule::Late:
             // No change to mEarlyWakeup for non-explicit states.
             break;
-    }
-
-    if (mTraceDetailedInfo) {
-        ATRACE_INT("mEarlyWakeup", static_cast<int>(mEarlyWakeupRequests.size()));
     }
 
     if (mEarlyWakeupRequests.empty() && schedule == Schedule::EarlyEnd) {
@@ -167,15 +161,19 @@ VsyncConfig VsyncModulator::updateVsyncConfigLocked() {
     const VsyncConfig& offsets = getNextVsyncConfig();
     mVsyncConfig = offsets;
 
-    if (mTraceDetailedInfo) {
-        const bool isEarly = &offsets == &mVsyncConfigSet.early;
-        const bool isEarlyGpu = &offsets == &mVsyncConfigSet.earlyGpu;
-        const bool isLate = &offsets == &mVsyncConfigSet.late;
+    // Trace config type
+    SFTRACE_INT("Vsync-Early",  &mVsyncConfig == &mVsyncConfigSet.early);
+    SFTRACE_INT("Vsync-EarlyGpu", &mVsyncConfig == &mVsyncConfigSet.earlyGpu);
+    SFTRACE_INT("Vsync-Late", &mVsyncConfig == &mVsyncConfigSet.late);
 
-        ATRACE_INT("Vsync-EarlyOffsetsOn", isEarly);
-        ATRACE_INT("Vsync-EarlyGpuOffsetsOn", isEarlyGpu);
-        ATRACE_INT("Vsync-LateOffsetsOn", isLate);
-    }
+    // Trace early vsync conditions
+    SFTRACE_INT("EarlyWakeupRequests",
+                                 static_cast<int>(mEarlyWakeupRequests.size()));
+    SFTRACE_INT("EarlyTransactionFrames", mEarlyTransactionFrames);
+    SFTRACE_INT("RefreshRateChangePending", mRefreshRateChangePending);
+
+    // Trace early gpu conditions
+    SFTRACE_INT("EarlyGpuFrames", mEarlyGpuFrames);
 
     return offsets;
 }
@@ -183,7 +181,6 @@ VsyncConfig VsyncModulator::updateVsyncConfigLocked() {
 void VsyncModulator::binderDied(const wp<IBinder>& who) {
     std::lock_guard<std::mutex> lock(mMutex);
     mEarlyWakeupRequests.erase(who);
-
     static_cast<void>(updateVsyncConfigLocked());
 }
 

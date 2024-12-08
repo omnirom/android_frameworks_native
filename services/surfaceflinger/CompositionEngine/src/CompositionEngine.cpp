@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+#include <common/trace.h>
 #include <compositionengine/CompositionRefreshArgs.h>
 #include <compositionengine/LayerFE.h>
 #include <compositionengine/LayerFECompositionState.h>
@@ -23,7 +24,6 @@
 #include <ui/DisplayMap.h>
 
 #include <renderengine/RenderEngine.h>
-#include <utils/Trace.h>
 
 // TODO(b/129481165): remove the #pragma below and fix conversion issues
 #pragma clang diagnostic push
@@ -128,7 +128,7 @@ void offloadOutputs(Outputs& outputs) {
 } // namespace
 
 void CompositionEngine::present(CompositionRefreshArgs& args) {
-    ATRACE_CALL();
+    SFTRACE_CALL();
     ALOGV(__FUNCTION__);
 
     preComposition(args);
@@ -155,7 +155,7 @@ void CompositionEngine::present(CompositionRefreshArgs& args) {
     }
 
     {
-        ATRACE_NAME("Waiting on HWC");
+        SFTRACE_NAME("Waiting on HWC");
         for (auto& future : presentFutures) {
             // TODO(b/185536303): Call ftl::Future::wait() once it exists, since
             // we do not need the return value of get().
@@ -177,7 +177,7 @@ void CompositionEngine::updateCursorAsync(CompositionRefreshArgs& args) {
 }
 
 void CompositionEngine::preComposition(CompositionRefreshArgs& args) {
-    ATRACE_CALL();
+    SFTRACE_CALL();
     ALOGV(__FUNCTION__);
 
     bool needsAnotherUpdate = false;
@@ -199,7 +199,7 @@ void CompositionEngine::preComposition(CompositionRefreshArgs& args) {
 // promises for buffer releases are fulfilled at the end of composition.
 void CompositionEngine::postComposition(CompositionRefreshArgs& args) {
     if (FlagManager::getInstance().ce_fence_promise()) {
-        ATRACE_CALL();
+        SFTRACE_CALL();
         ALOGV(__FUNCTION__);
 
         for (auto& layerFE : args.layers) {

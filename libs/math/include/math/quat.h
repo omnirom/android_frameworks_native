@@ -187,6 +187,8 @@ constexpr inline quatd operator"" _kd(unsigned long long v) {  // NOLINT
 // ----------------------------------------------------------------------------------------
 }  // namespace android
 
+TVECHELPERS_STD_HASH(android::details::TQuaternion);
+
 #pragma clang diagnostic pop
 
 #undef PURE

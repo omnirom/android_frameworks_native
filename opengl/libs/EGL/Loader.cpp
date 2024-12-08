@@ -270,7 +270,7 @@ void* Loader::open(egl_connection_t* cnx) {
         hnd = attempt_to_load_updated_driver(cnx);
 
         // If updated driver apk is set but fail to load, abort here.
-        LOG_ALWAYS_FATAL_IF(android::GraphicsEnv::getInstance().getDriverNamespace(),
+        LOG_ALWAYS_FATAL_IF(android::GraphicsEnv::getInstance().getDriverNamespace() && !hnd,
                             "couldn't find an OpenGL ES implementation from %s",
                             android::GraphicsEnv::getInstance().getDriverPath().c_str());
     }

@@ -706,7 +706,7 @@ TEST_F(PowerAdvisorTest, setGpuFenceTime_UnsingaledGpuFenceFrameUsingPreviousFra
     testGpuScenario(config, res);
     EXPECT_EQ(res.gpuDurationNanos, 0L);
     EXPECT_EQ(res.cpuDurationNanos, 0L);
-    EXPECT_GE(res.durationNanos, toNanos(30ms + getErrorMargin()));
+    EXPECT_GE(res.durationNanos, toNanos(29ms + getErrorMargin()));
     EXPECT_LE(res.durationNanos, toNanos(31ms + getErrorMargin()));
 }
 

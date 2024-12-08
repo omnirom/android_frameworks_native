@@ -18,7 +18,7 @@
 
 #include <include/android/GrAHardwareBufferUtils.h>
 #include <include/core/SkColorSpace.h>
-#include <include/gpu/GrDirectContext.h>
+#include <include/gpu/ganesh/GrDirectContext.h>
 
 #include <android/hardware_buffer.h>
 #include <ui/GraphicTypes.h>

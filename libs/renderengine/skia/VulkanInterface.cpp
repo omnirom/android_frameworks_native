@@ -32,21 +32,8 @@ namespace android {
 namespace renderengine {
 namespace skia {
 
-GrVkBackendContext VulkanInterface::getGaneshBackendContext() {
-    GrVkBackendContext backendContext;
-    backendContext.fInstance = mInstance;
-    backendContext.fPhysicalDevice = mPhysicalDevice;
-    backendContext.fDevice = mDevice;
-    backendContext.fQueue = mQueue;
-    backendContext.fGraphicsQueueIndex = mQueueIndex;
-    backendContext.fMaxAPIVersion = mApiVersion;
-    backendContext.fVkExtensions = &mGrExtensions;
-    backendContext.fDeviceFeatures2 = mPhysicalDeviceFeatures2;
-    backendContext.fGetProc = mGrGetProc;
-    backendContext.fProtectedContext = mIsProtected ? Protected::kYes : Protected::kNo;
-    backendContext.fDeviceLostContext = this; // VulkanInterface is long-lived
-    backendContext.fDeviceLostProc = onVkDeviceFault;
-    return backendContext;
+VulkanBackendContext VulkanInterface::getGaneshBackendContext() {
+    return this->getGraphiteBackendContext();
 };
 
 VulkanBackendContext VulkanInterface::getGraphiteBackendContext() {
@@ -57,7 +44,7 @@ VulkanBackendContext VulkanInterface::getGraphiteBackendContext() {
     backendContext.fQueue = mQueue;
     backendContext.fGraphicsQueueIndex = mQueueIndex;
     backendContext.fMaxAPIVersion = mApiVersion;
-    backendContext.fVkExtensions = &mGrExtensions;
+    backendContext.fVkExtensions = &mVulkanExtensions;
     backendContext.fDeviceFeatures2 = mPhysicalDeviceFeatures2;
     backendContext.fGetProc = mGrGetProc;
     backendContext.fProtectedContext = mIsProtected ? Protected::kYes : Protected::kNo;
@@ -429,11 +416,11 @@ void VulkanInterface::init(bool protectedContent) {
         mDeviceExtensionNames.push_back(devExt.extensionName);
     }
 
-    mGrExtensions.init(sGetProc, instance, physicalDevice, enabledInstanceExtensionNames.size(),
-                       enabledInstanceExtensionNames.data(), enabledDeviceExtensionNames.size(),
-                       enabledDeviceExtensionNames.data());
+    mVulkanExtensions.init(sGetProc, instance, physicalDevice, enabledInstanceExtensionNames.size(),
+                           enabledInstanceExtensionNames.data(), enabledDeviceExtensionNames.size(),
+                           enabledDeviceExtensionNames.data());
 
-    if (!mGrExtensions.hasExtension(VK_KHR_EXTERNAL_SEMAPHORE_FD_EXTENSION_NAME, 1)) {
+    if (!mVulkanExtensions.hasExtension(VK_KHR_EXTERNAL_SEMAPHORE_FD_EXTENSION_NAME, 1)) {
         BAIL("Vulkan driver doesn't support external semaphore fd");
     }
 
@@ -458,7 +445,7 @@ void VulkanInterface::init(bool protectedContent) {
         tailPnext = &mProtectedMemoryFeatures->pNext;
     }
 
-    if (mGrExtensions.hasExtension(VK_EXT_DEVICE_FAULT_EXTENSION_NAME, 1)) {
+    if (mVulkanExtensions.hasExtension(VK_EXT_DEVICE_FAULT_EXTENSION_NAME, 1)) {
         mDeviceFaultFeatures = new VkPhysicalDeviceFaultFeaturesEXT;
         mDeviceFaultFeatures->sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FAULT_FEATURES_EXT;
         mDeviceFaultFeatures->pNext = nullptr;
@@ -484,7 +471,7 @@ void VulkanInterface::init(bool protectedContent) {
             queuePriority,
     };
 
-    if (mGrExtensions.hasExtension(VK_EXT_GLOBAL_PRIORITY_EXTENSION_NAME, 2)) {
+    if (mVulkanExtensions.hasExtension(VK_EXT_GLOBAL_PRIORITY_EXTENSION_NAME, 2)) {
         queueNextPtr = &queuePriorityCreateInfo;
     }
 
@@ -606,7 +593,7 @@ void VulkanInterface::teardown() {
     mQueue = VK_NULL_HANDLE;          // Implicitly destroyed by destroying mDevice.
     mQueueIndex = 0;
     mApiVersion = 0;
-    mGrExtensions = skgpu::VulkanExtensions();
+    mVulkanExtensions = skgpu::VulkanExtensions();
     mGrGetProc = nullptr;
     mIsProtected = false;
     mIsRealtimePriority = false;

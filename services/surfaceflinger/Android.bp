@@ -48,6 +48,7 @@ cc_defaults {
         "libsurfaceflinger_common_deps",
         "surfaceflinger_defaults",
         "surfaceflinger_qcom_ext_defaults",
+        "libsurfaceflinger_proto_deps",
     ],
     cflags: [
         "-DLOG_TAG=\"SurfaceFlinger\"",
@@ -86,7 +87,7 @@ cc_defaults {
         "libui",
         "libutils",
         "libSurfaceFlingerProp",
-        "libaconfig_storage_read_api_cc"
+        "libaconfig_storage_read_api_cc",
     ],
     static_libs: [
         "iinputflinger_aidl_lib_static",
@@ -94,7 +95,6 @@ cc_defaults {
         "libcompositionengine",
         "libframetimeline",
         "libgui_aidl_static",
-        "liblayers_proto",
         "libperfetto_client_experimental",
         "librenderengine",
         "libscheduler",
@@ -188,6 +188,7 @@ filegroup {
         "FrameTracker.cpp",
         "HdrLayerInfoReporter.cpp",
         "HdrSdrRatioOverlay.cpp",
+        "Jank/JankTracker.cpp",
         "WindowInfosListenerInvoker.cpp",
         "Layer.cpp",
         "LayerFE.cpp",

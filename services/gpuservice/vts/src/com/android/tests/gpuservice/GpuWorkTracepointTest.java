@@ -19,7 +19,7 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.fail;
 import static org.junit.Assume.assumeTrue;
 
-import android.platform.test.annotations.RestrictedBuildTest;
+import android.platform.test.annotations.RequiresDevice;
 
 import com.android.tradefed.testtype.DeviceJUnit4ClassRunner;
 import com.android.tradefed.testtype.junit4.BaseHostJUnit4Test;
@@ -63,7 +63,7 @@ public class GpuWorkTracepointTest extends BaseHostJUnit4Test {
     }
 
     @VsrTest(requirements={"VSR-3.3-004"})
-    @RestrictedBuildTest
+    @RequiresDevice
     @Test
     public void testGpuWorkPeriodTracepointFormat() throws Exception {
         CommandResult commandResult = getDevice().executeShellV2Command(

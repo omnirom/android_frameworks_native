@@ -66,7 +66,6 @@ public:
     void assertFilterInputEventWasCalled(const NotifyKeyArgs& args);
     void assertFilterInputEventWasCalled(const NotifyMotionArgs& args, vec2 point);
     void assertFilterInputEventWasNotCalled();
-    void assertNotifyConfigurationChangedWasCalled(nsecs_t when);
     void assertNotifySwitchWasCalled(const NotifySwitchArgs& args);
     void assertOnPointerDownEquals(const sp<IBinder>& touchedToken);
     void assertOnPointerDownWasNotCalled();
@@ -121,7 +120,6 @@ public:
 private:
     std::mutex mLock;
     std::unique_ptr<InputEvent> mFilteredEvent GUARDED_BY(mLock);
-    std::optional<nsecs_t> mConfigurationChangedTime GUARDED_BY(mLock);
     sp<IBinder> mOnPointerDownToken GUARDED_BY(mLock);
     std::optional<NotifySwitchArgs> mLastNotifySwitch GUARDED_BY(mLock);
 
@@ -173,7 +171,6 @@ private:
                                                            std::condition_variable& condition)
             REQUIRES(mLock);
 
-    void notifyConfigurationChanged(nsecs_t when) override;
     void notifyWindowUnresponsive(const sp<IBinder>& connectionToken, std::optional<gui::Pid> pid,
                                   const std::string&) override;
     void notifyWindowResponsive(const sp<IBinder>& connectionToken,

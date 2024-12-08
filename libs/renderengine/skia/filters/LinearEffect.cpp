@@ -19,9 +19,9 @@
 #define ATRACE_TAG ATRACE_TAG_GRAPHICS
 
 #include <SkString.h>
+#include <common/trace.h>
 #include <log/log.h>
 #include <shaders/shaders.h>
-#include <utils/Trace.h>
 
 #include <math/mat4.h>
 
@@ -30,7 +30,7 @@ namespace renderengine {
 namespace skia {
 
 sk_sp<SkRuntimeEffect> buildRuntimeEffect(const shaders::LinearEffect& linearEffect) {
-    ATRACE_CALL();
+    SFTRACE_CALL();
     SkString shaderString = SkString(shaders::buildLinearEffectSkSL(linearEffect));
 
     auto [shader, error] = SkRuntimeEffect::MakeForShader(shaderString);
@@ -45,7 +45,7 @@ sk_sp<SkShader> createLinearEffectShader(
         sk_sp<SkRuntimeEffect> runtimeEffect, const mat4& colorTransform, float maxDisplayLuminance,
         float currentDisplayLuminanceNits, float maxLuminance, AHardwareBuffer* buffer,
         aidl::android::hardware::graphics::composer3::RenderIntent renderIntent) {
-    ATRACE_CALL();
+    SFTRACE_CALL();
     SkRuntimeShaderBuilder effectBuilder(runtimeEffect);
 
     effectBuilder.child("child") = shader;

@@ -244,7 +244,7 @@ void TransactionTracing::addEntry(const std::vector<CommittedUpdates>& committed
                 static_cast<int32_t>(update.createdLayers.size()));
 
         for (const auto& args : update.createdLayers) {
-            entryProto.mutable_added_layers()->Add(std::move(mProtoParser.toProto(args)));
+            entryProto.mutable_added_layers()->Add(mProtoParser.toProto(args));
         }
 
         entryProto.mutable_destroyed_layers()->Reserve(
@@ -276,7 +276,7 @@ void TransactionTracing::addEntry(const std::vector<CommittedUpdates>& committed
                     static_cast<int32_t>(update.displayInfos.size()));
             for (auto& [layerStack, displayInfo] : update.displayInfos) {
                 entryProto.mutable_displays()->Add(
-                        std::move(mProtoParser.toProto(displayInfo, layerStack.id)));
+                        mProtoParser.toProto(displayInfo, layerStack.id));
             }
         }
 

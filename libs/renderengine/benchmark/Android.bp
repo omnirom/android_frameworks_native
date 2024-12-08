@@ -57,6 +57,7 @@ cc_benchmark {
         "libui",
         "libutils",
         "server_configurable_flags",
+        "libtracing_perfetto",
     ],
 
     data: ["resources/*"],

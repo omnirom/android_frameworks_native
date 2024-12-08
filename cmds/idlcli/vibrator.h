@@ -49,7 +49,7 @@ inline ndk::ScopedAStatus NullptrStatus() {
 template <typename I>
 inline auto getService(std::string name) {
     const auto instance = std::string() + I::descriptor + "/" + name;
-    auto vibBinder = ndk::SpAIBinder(AServiceManager_getService(instance.c_str()));
+    auto vibBinder = ndk::SpAIBinder(AServiceManager_checkService(instance.c_str()));
     return I::fromBinder(vibBinder);
 }
 

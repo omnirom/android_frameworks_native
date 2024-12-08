@@ -19,13 +19,13 @@
 #include <include/core/SkImageInfo.h>
 #include <include/core/SkSurface.h>
 #include <include/core/SkTraceMemoryDump.h>
-#include <include/gpu/GrDirectContext.h>
-#include <include/gpu/GrTypes.h>
+#include <include/gpu/ganesh/GrDirectContext.h>
+#include <include/gpu/ganesh/GrTypes.h>
 #include <include/gpu/ganesh/SkSurfaceGanesh.h>
 #include <include/gpu/ganesh/gl/GrGLDirectContext.h>
+#include <include/gpu/ganesh/gl/GrGLInterface.h>
 #include <include/gpu/ganesh/vk/GrVkDirectContext.h>
-#include <include/gpu/gl/GrGLInterface.h>
-#include <include/gpu/vk/GrVkBackendContext.h>
+#include <include/gpu/vk/VulkanBackendContext.h>
 
 #include "../AutoBackendTexture.h"
 #include "GaneshBackendTexture.h"
@@ -56,10 +56,10 @@ std::unique_ptr<SkiaGpuContext> SkiaGpuContext::MakeGL_Ganesh(
 }
 
 std::unique_ptr<SkiaGpuContext> SkiaGpuContext::MakeVulkan_Ganesh(
-        const GrVkBackendContext& grVkBackendContext,
+        const skgpu::VulkanBackendContext& vkBackendContext,
         GrContextOptions::PersistentCache& skSLCacheMonitor) {
     return std::make_unique<GaneshGpuContext>(
-            GrDirectContexts::MakeVulkan(grVkBackendContext, ganeshOptions(skSLCacheMonitor)));
+            GrDirectContexts::MakeVulkan(vkBackendContext, ganeshOptions(skSLCacheMonitor)));
 }
 
 GaneshGpuContext::GaneshGpuContext(sk_sp<GrDirectContext> grContext) : mGrContext(grContext) {

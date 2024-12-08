@@ -62,12 +62,12 @@ perfetto::protos::TransactionState TransactionProtoParser::toProto(const Transac
 
     proto.mutable_layer_changes()->Reserve(static_cast<int32_t>(t.states.size()));
     for (auto& layerState : t.states) {
-        proto.mutable_layer_changes()->Add(std::move(toProto(layerState)));
+        proto.mutable_layer_changes()->Add(toProto(layerState));
     }
 
     proto.mutable_display_changes()->Reserve(static_cast<int32_t>(t.displays.size()));
     for (auto& displayState : t.displays) {
-        proto.mutable_display_changes()->Add(std::move(toProto(displayState)));
+        proto.mutable_display_changes()->Add(toProto(displayState));
     }
 
     proto.mutable_merged_transaction_ids()->Reserve(

@@ -162,7 +162,10 @@ bool LayerTraceGenerator::generate(const perfetto::protos::TransactionTraceFile&
 
         auto layersProto =
                 LayerProtoFromSnapshotGenerator(snapshotBuilder, displayInfos, {}, traceFlags)
-                        .generate(hierarchyBuilder.getHierarchy());
+                        .with(hierarchyBuilder.getHierarchy())
+                        .withOffscreenLayers(hierarchyBuilder.getOffscreenHierarchy())
+                        .generate();
+
         auto displayProtos = LayerProtoHelper::writeDisplayInfoToProto(displayInfos);
         if (!onlyLastEntry || (i == traceFile.entry_size() - 1)) {
             perfetto::protos::LayersSnapshotProto snapshotProto{};

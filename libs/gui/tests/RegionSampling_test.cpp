@@ -19,7 +19,7 @@
 
 #include <android/gui/BnRegionSamplingListener.h>
 #include <binder/ProcessState.h>
-#include <gui/AidlStatusUtil.h>
+#include <gui/AidlUtil.h>
 #include <gui/DisplayEventReceiver.h>
 #include <gui/ISurfaceComposer.h>
 #include <gui/Surface.h>

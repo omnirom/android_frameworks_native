@@ -44,7 +44,7 @@
 
 #include "gpuwork/gpuWork.h"
 
-#define ONE_MS_IN_NS (10000000)
+#define MSEC_PER_NSEC (1000LU * 1000LU)
 
 namespace android {
 namespace gpuwork {
@@ -118,6 +118,9 @@ GpuWork::~GpuWork() {
 }
 
 void GpuWork::initialize() {
+    // Workaround b/347947040 by allowing time for statsd / bpf setup.
+    std::this_thread::sleep_for(std::chrono::seconds(30));
+
     // Make sure BPF programs are loaded.
     bpf::waitForProgsLoaded();
 
@@ -382,10 +385,11 @@ AStatsManager_PullAtomCallbackReturn GpuWork::pullWorkAtoms(AStatsEventList* dat
     ALOGI("pullWorkAtoms: after random selection: uids.size() == %zu", uids.size());
 
     auto now = std::chrono::steady_clock::now();
-    long long duration =
-            std::chrono::duration_cast<std::chrono::seconds>(now - mPreviousMapClearTimePoint)
-                    .count();
-    if (duration > std::numeric_limits<int32_t>::max() || duration < 0) {
+    int32_t duration =
+            static_cast<int32_t>(
+                std::chrono::duration_cast<std::chrono::seconds>(now - mPreviousMapClearTimePoint)
+                    .count());
+    if (duration < 0) {
         // This is essentially impossible. If it does somehow happen, give up,
         // but still clear the map.
         clearMap();
@@ -401,13 +405,14 @@ AStatsManager_PullAtomCallbackReturn GpuWork::pullWorkAtoms(AStatsEventList* dat
             }
             const UidTrackingInfo& info = it->second;
 
-            uint64_t total_active_duration_ms = info.total_active_duration_ns / ONE_MS_IN_NS;
-            uint64_t total_inactive_duration_ms = info.total_inactive_duration_ns / ONE_MS_IN_NS;
+            int32_t total_active_duration_ms =
+                static_cast<int32_t>(info.total_active_duration_ns / MSEC_PER_NSEC);
+            int32_t total_inactive_duration_ms =
+                static_cast<int32_t>(info.total_inactive_duration_ns / MSEC_PER_NSEC);
 
             // Skip this atom if any numbers are out of range. |duration| is
             // already checked above.
-            if (total_active_duration_ms > std::numeric_limits<int32_t>::max() ||
-                total_inactive_duration_ms > std::numeric_limits<int32_t>::max()) {
+            if (total_active_duration_ms < 0 || total_inactive_duration_ms < 0) {
                 continue;
             }
 
@@ -418,11 +423,11 @@ AStatsManager_PullAtomCallbackReturn GpuWork::pullWorkAtoms(AStatsEventList* dat
                                           // gpu_id
                                           bitcast_int32(gpuId),
                                           // time_duration_seconds
-                                          static_cast<int32_t>(duration),
+                                          duration,
                                           // total_active_duration_millis
-                                          static_cast<int32_t>(total_active_duration_ms),
+                                          total_active_duration_ms,
                                           // total_inactive_duration_millis
-                                          static_cast<int32_t>(total_inactive_duration_ms));
+                                          total_inactive_duration_ms);
         }
     }
     clearMap();

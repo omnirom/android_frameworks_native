@@ -24,9 +24,4 @@ package {
 bpf {
     name: "gpuMem.o",
     srcs: ["gpuMem.c"],
-    btf: true,
-    cflags: [
-        "-Wall",
-        "-Werror",
-    ],
 }

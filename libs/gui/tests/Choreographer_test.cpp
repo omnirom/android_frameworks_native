@@ -52,25 +52,23 @@ TEST_F(ChoreographerTest, InputCallbackBeforeAnimation) {
     sp<Looper> looper = Looper::prepare(0);
     Choreographer* choreographer = Choreographer::getForThread();
     VsyncCallback animationCb;
-    VsyncCallback inputCb;
-
     choreographer->postFrameCallbackDelayed(nullptr, nullptr, vsyncCallback, &animationCb, 0,
                                             CALLBACK_ANIMATION);
+    VsyncCallback inputCb;
     choreographer->postFrameCallbackDelayed(nullptr, nullptr, vsyncCallback, &inputCb, 0,
                                             CALLBACK_INPUT);
-
-    nsecs_t startTime = systemTime(SYSTEM_TIME_MONOTONIC);
-    nsecs_t currTime;
-    int pollResult;
+    auto startTime = std::chrono::system_clock::now();
     do {
-        pollResult = looper->pollOnce(16);
-        currTime = systemTime(SYSTEM_TIME_MONOTONIC);
-    } while (!(inputCb.callbackReceived() && animationCb.callbackReceived()) &&
-             (pollResult != Looper::POLL_TIMEOUT && pollResult != Looper::POLL_ERROR) &&
-             (currTime - startTime < 3000));
-
-    ASSERT_TRUE(inputCb.callbackReceived()) << "did not receive input callback";
-    ASSERT_TRUE(animationCb.callbackReceived()) << "did not receive animation callback";
+        static constexpr int32_t timeoutMs = 1000;
+        int pollResult = looper->pollOnce(timeoutMs);
+        ASSERT_TRUE((pollResult != Looper::POLL_TIMEOUT) && (pollResult != Looper::POLL_ERROR))
+                << "Failed to poll looper. Poll result = " << pollResult;
+        auto elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::system_clock::now() - startTime);
+        ASSERT_LE(elapsedMs.count(), timeoutMs)
+                << "Timed out waiting for callbacks. inputCb=" << inputCb.callbackReceived()
+                << " animationCb=" << animationCb.callbackReceived();
+    } while (!(inputCb.callbackReceived() && animationCb.callbackReceived()));
 
     ASSERT_EQ(inputCb.frameTime, animationCb.frameTime)
             << android::base::StringPrintf("input and animation callback frame times don't match. "

@@ -27,10 +27,10 @@
 #include <utility>
 
 #include <android/native_window.h>
+#include <common/trace.h>
 #include <cutils/compiler.h>
 #include <cutils/trace.h>
 #include <ftl/enum.h>
-#include <gui/TraceUtils.h>
 #include <system/window.h>
 
 #undef LOG_TAG
@@ -259,7 +259,7 @@ std::optional<nsecs_t> LayerInfo::calculateAverageFrameTime() const {
     }
 
     if (smallDirtyCount > 0) {
-        ATRACE_FORMAT_INSTANT("small dirty = %" PRIu32, smallDirtyCount);
+        SFTRACE_FORMAT_INSTANT("small dirty = %" PRIu32, smallDirtyCount);
     }
 
     if (numDeltas == 0) {
@@ -272,7 +272,7 @@ std::optional<nsecs_t> LayerInfo::calculateAverageFrameTime() const {
 
 std::optional<Fps> LayerInfo::calculateRefreshRateIfPossible(const RefreshRateSelector& selector,
                                                              nsecs_t now) {
-    ATRACE_CALL();
+    SFTRACE_CALL();
     static constexpr float MARGIN = 1.0f; // 1Hz
     if (!hasEnoughDataForHeuristic()) {
         ALOGV("Not enough data");
@@ -307,7 +307,7 @@ std::optional<Fps> LayerInfo::calculateRefreshRateIfPossible(const RefreshRateSe
 
 LayerInfo::RefreshRateVotes LayerInfo::getRefreshRateVote(const RefreshRateSelector& selector,
                                                           nsecs_t now) {
-    ATRACE_CALL();
+    SFTRACE_CALL();
     LayerInfo::RefreshRateVotes votes;
 
     if (mLayerVote.type != LayerHistory::LayerVoteType::Heuristic) {
@@ -315,8 +315,8 @@ LayerInfo::RefreshRateVotes LayerInfo::getRefreshRateVote(const RefreshRateSelec
             const auto voteType = mLayerVote.type == LayerHistory::LayerVoteType::NoVote
                     ? LayerHistory::LayerVoteType::NoVote
                     : LayerHistory::LayerVoteType::ExplicitCategory;
-            ATRACE_FORMAT_INSTANT("Vote %s (category=%s)", ftl::enum_string(voteType).c_str(),
-                                  ftl::enum_string(mLayerVote.category).c_str());
+            SFTRACE_FORMAT_INSTANT("Vote %s (category=%s)", ftl::enum_string(voteType).c_str(),
+                                   ftl::enum_string(mLayerVote.category).c_str());
             ALOGV("%s voted %s with category: %s", mName.c_str(),
                   ftl::enum_string(voteType).c_str(),
                   ftl::enum_string(mLayerVote.category).c_str());
@@ -326,7 +326,7 @@ LayerInfo::RefreshRateVotes LayerInfo::getRefreshRateVote(const RefreshRateSelec
 
         if (mLayerVote.fps.isValid() ||
             mLayerVote.type != LayerHistory::LayerVoteType::ExplicitDefault) {
-            ATRACE_FORMAT_INSTANT("Vote %s", ftl::enum_string(mLayerVote.type).c_str());
+            SFTRACE_FORMAT_INSTANT("Vote %s", ftl::enum_string(mLayerVote.type).c_str());
             ALOGV("%s voted %d", mName.c_str(), static_cast<int>(mLayerVote.type));
             votes.push_back({mLayerVote.type, mLayerVote.fps, mLayerVote.seamlessness,
                              FrameRateCategory::Default, mLayerVote.categorySmoothSwitchOnly});
@@ -336,7 +336,7 @@ LayerInfo::RefreshRateVotes LayerInfo::getRefreshRateVote(const RefreshRateSelec
     }
 
     if (isAnimating(now)) {
-        ATRACE_FORMAT_INSTANT("animating");
+        SFTRACE_FORMAT_INSTANT("animating");
         ALOGV("%s is animating", mName.c_str());
         mLastRefreshRate.animating = true;
         votes.push_back({LayerHistory::LayerVoteType::Max, Fps()});
@@ -345,7 +345,7 @@ LayerInfo::RefreshRateVotes LayerInfo::getRefreshRateVote(const RefreshRateSelec
 
     // Vote for max refresh rate whenever we're front-buffered.
     if (FlagManager::getInstance().vrr_config() && isFrontBuffered()) {
-        ATRACE_FORMAT_INSTANT("front buffered");
+        SFTRACE_FORMAT_INSTANT("front buffered");
         ALOGV("%s is front-buffered", mName.c_str());
         votes.push_back({LayerHistory::LayerVoteType::Max, Fps()});
         return votes;
@@ -354,7 +354,7 @@ LayerInfo::RefreshRateVotes LayerInfo::getRefreshRateVote(const RefreshRateSelec
     const LayerInfo::Frequent frequent = isFrequent(now);
     mIsFrequencyConclusive = frequent.isConclusive;
     if (!frequent.isFrequent) {
-        ATRACE_FORMAT_INSTANT("infrequent");
+        SFTRACE_FORMAT_INSTANT("infrequent");
         ALOGV("%s is infrequent", mName.c_str());
         mLastRefreshRate.infrequent = true;
         mLastSmallDirtyCount = 0;
@@ -365,14 +365,14 @@ LayerInfo::RefreshRateVotes LayerInfo::getRefreshRateVote(const RefreshRateSelec
     }
 
     if (frequent.clearHistory) {
-        ATRACE_FORMAT_INSTANT("frequent.clearHistory");
+        SFTRACE_FORMAT_INSTANT("frequent.clearHistory");
         ALOGV("%s frequent.clearHistory", mName.c_str());
         clearHistory(now);
     }
 
     // Return no vote if the recent frames are small dirty.
     if (frequent.isSmallDirty && !mLastRefreshRate.reported.isValid()) {
-        ATRACE_FORMAT_INSTANT("NoVote (small dirty)");
+        SFTRACE_FORMAT_INSTANT("NoVote (small dirty)");
         ALOGV("%s is small dirty", mName.c_str());
         votes.push_back({LayerHistory::LayerVoteType::NoVote, Fps()});
         return votes;
@@ -380,13 +380,13 @@ LayerInfo::RefreshRateVotes LayerInfo::getRefreshRateVote(const RefreshRateSelec
 
     auto refreshRate = calculateRefreshRateIfPossible(selector, now);
     if (refreshRate.has_value()) {
-        ATRACE_FORMAT_INSTANT("calculated (%s)", to_string(*refreshRate).c_str());
+        SFTRACE_FORMAT_INSTANT("calculated (%s)", to_string(*refreshRate).c_str());
         ALOGV("%s calculated refresh rate: %s", mName.c_str(), to_string(*refreshRate).c_str());
         votes.push_back({LayerHistory::LayerVoteType::Heuristic, refreshRate.value()});
         return votes;
     }
 
-    ATRACE_FORMAT_INSTANT("Max (can't resolve refresh rate)");
+    SFTRACE_FORMAT_INSTANT("Max (can't resolve refresh rate)");
     ALOGV("%s Max (can't resolve refresh rate)", mName.c_str());
     votes.push_back({LayerHistory::LayerVoteType::Max, Fps()});
     return votes;
@@ -452,7 +452,7 @@ Fps LayerInfo::RefreshRateHistory::add(Fps refreshRate, nsecs_t now,
             mHeuristicTraceTagData = makeHeuristicTraceTagData();
         }
 
-        ATRACE_INT(mHeuristicTraceTagData->average.c_str(), refreshRate.getIntValue());
+        SFTRACE_INT(mHeuristicTraceTagData->average.c_str(), refreshRate.getIntValue());
     }
 
     return selectRefreshRate(selector);
@@ -486,9 +486,9 @@ Fps LayerInfo::RefreshRateHistory::selectRefreshRate(const RefreshRateSelector& 
             mHeuristicTraceTagData = makeHeuristicTraceTagData();
         }
 
-        ATRACE_INT(mHeuristicTraceTagData->max.c_str(), max->refreshRate.getIntValue());
-        ATRACE_INT(mHeuristicTraceTagData->min.c_str(), min->refreshRate.getIntValue());
-        ATRACE_INT(mHeuristicTraceTagData->consistent.c_str(), consistent);
+        SFTRACE_INT(mHeuristicTraceTagData->max.c_str(), max->refreshRate.getIntValue());
+        SFTRACE_INT(mHeuristicTraceTagData->min.c_str(), min->refreshRate.getIntValue());
+        SFTRACE_INT(mHeuristicTraceTagData->consistent.c_str(), consistent);
     }
 
     return consistent ? maxClosestRate : Fps();
@@ -592,6 +592,11 @@ bool LayerInfo::FrameRate::isVoteValidForMrr(bool isVrrDevice) const {
     }
 
     if (category == FrameRateCategory::Default) {
+        return true;
+    }
+
+    if (category == FrameRateCategory::NoPreference && vote.rate.isValid() &&
+        vote.type == FrameRateCompatibility::ExactOrMultiple) {
         return true;
     }
 

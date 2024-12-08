@@ -125,4 +125,6 @@ typedef details::TVec4<bool> bool4;
 // ----------------------------------------------------------------------------------------
 }  // namespace android
 
+TVECHELPERS_STD_HASH(android::details::TVec4);
+
 #pragma clang diagnostic pop

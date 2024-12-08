@@ -373,5 +373,7 @@ typedef details::TMat22<float> mat2f;
 // ----------------------------------------------------------------------------------------
 }  // namespace android
 
+TVECHELPERS_STD_HASH(android::details::TMat22);
+
 #undef PURE
 #undef CONSTEXPR

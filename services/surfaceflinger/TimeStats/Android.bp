@@ -20,10 +20,12 @@ cc_defaults {
         "libtimestats_atoms_proto",
         "libui",
         "libutils",
+        "libtracing_perfetto",
     ],
 
     static_libs: [
         "libtimestats_proto",
+        "libsurfaceflinger_common",
     ],
 
     export_static_lib_headers: [

@@ -389,6 +389,7 @@ enum class InputDeviceConfigurationFileType : int32_t {
     CONFIGURATION = 0,     /* .idc file */
     KEY_LAYOUT = 1,        /* .kl file */
     KEY_CHARACTER_MAP = 2, /* .kcm file */
+    ftl_last = KEY_CHARACTER_MAP,
 };
 
 /*

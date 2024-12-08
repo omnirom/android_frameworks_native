@@ -65,10 +65,10 @@ private:
         void onEventProcessingComplete(nsecs_t processingTimestamp);
 
         InputTracer& tracer;
-        std::vector<const TracedEvent> events;
+        std::vector<TracedEvent> events;
         bool isEventProcessingComplete{false};
         // A queue to hold dispatch args from being traced until event processing is complete.
-        std::vector<const WindowDispatchArgs> pendingDispatchArgs;
+        std::vector<WindowDispatchArgs> pendingDispatchArgs;
         // The metadata should not be modified after event processing is complete.
         TracedEventMetadata metadata{};
     };

@@ -1333,7 +1333,7 @@ mod tests {
         let vec = Vec::<u8>::deserialize(parcel.borrowed_ref()).unwrap();
         assert_eq!(vec, [-128i8 as u8, 127, 42, -117i8 as u8]);
 
-        let u16s = [u16::max_value(), 12_345, 42, 117];
+        let u16s = [u16::MAX, 12_345, 42, 117];
 
         // SAFETY: start is less than the current size of the parcel data buffer, because we haven't
         // made it any shorter since we got the position.
@@ -1348,7 +1348,7 @@ mod tests {
         }
 
         assert_eq!(parcel.read::<u32>().unwrap(), 4); // 4 items
-        assert_eq!(parcel.read::<u32>().unwrap(), 0xffff); // u16::max_value()
+        assert_eq!(parcel.read::<u32>().unwrap(), 0xffff); // u16::MAX
         assert_eq!(parcel.read::<u32>().unwrap(), 12345); // 12,345
         assert_eq!(parcel.read::<u32>().unwrap(), 42); // 42
         assert_eq!(parcel.read::<u32>().unwrap(), 117); // 117
@@ -1361,9 +1361,9 @@ mod tests {
 
         let vec = Vec::<u16>::deserialize(parcel.borrowed_ref()).unwrap();
 
-        assert_eq!(vec, [u16::max_value(), 12_345, 42, 117]);
+        assert_eq!(vec, [u16::MAX, 12_345, 42, 117]);
 
-        let i16s = [i16::max_value(), i16::min_value(), 42, -117];
+        let i16s = [i16::MAX, i16::MIN, 42, -117];
 
         // SAFETY: start is less than the current size of the parcel data buffer, because we haven't
         // made it any shorter since we got the position.
@@ -1378,8 +1378,8 @@ mod tests {
         }
 
         assert_eq!(parcel.read::<u32>().unwrap(), 4); // 4 items
-        assert_eq!(parcel.read::<u32>().unwrap(), 0x7fff); // i16::max_value()
-        assert_eq!(parcel.read::<u32>().unwrap(), 0x8000); // i16::min_value()
+        assert_eq!(parcel.read::<u32>().unwrap(), 0x7fff); // i16::MAX
+        assert_eq!(parcel.read::<u32>().unwrap(), 0x8000); // i16::MIN
         assert_eq!(parcel.read::<u32>().unwrap(), 42); // 42
         assert_eq!(parcel.read::<u32>().unwrap(), 0xff8b); // -117
 
@@ -1391,9 +1391,9 @@ mod tests {
 
         let vec = Vec::<i16>::deserialize(parcel.borrowed_ref()).unwrap();
 
-        assert_eq!(vec, [i16::max_value(), i16::min_value(), 42, -117]);
+        assert_eq!(vec, [i16::MAX, i16::MIN, 42, -117]);
 
-        let u32s = [u32::max_value(), 12_345, 42, 117];
+        let u32s = [u32::MAX, 12_345, 42, 117];
 
         // SAFETY: start is less than the current size of the parcel data buffer, because we haven't
         // made it any shorter since we got the position.
@@ -1408,7 +1408,7 @@ mod tests {
         }
 
         assert_eq!(parcel.read::<u32>().unwrap(), 4); // 4 items
-        assert_eq!(parcel.read::<u32>().unwrap(), 0xffffffff); // u32::max_value()
+        assert_eq!(parcel.read::<u32>().unwrap(), 0xffffffff); // u32::MAX
         assert_eq!(parcel.read::<u32>().unwrap(), 12345); // 12,345
         assert_eq!(parcel.read::<u32>().unwrap(), 42); // 42
         assert_eq!(parcel.read::<u32>().unwrap(), 117); // 117
@@ -1421,9 +1421,9 @@ mod tests {
 
         let vec = Vec::<u32>::deserialize(parcel.borrowed_ref()).unwrap();
 
-        assert_eq!(vec, [u32::max_value(), 12_345, 42, 117]);
+        assert_eq!(vec, [u32::MAX, 12_345, 42, 117]);
 
-        let i32s = [i32::max_value(), i32::min_value(), 42, -117];
+        let i32s = [i32::MAX, i32::MIN, 42, -117];
 
         // SAFETY: start is less than the current size of the parcel data buffer, because we haven't
         // made it any shorter since we got the position.
@@ -1438,8 +1438,8 @@ mod tests {
         }
 
         assert_eq!(parcel.read::<u32>().unwrap(), 4); // 4 items
-        assert_eq!(parcel.read::<u32>().unwrap(), 0x7fffffff); // i32::max_value()
-        assert_eq!(parcel.read::<u32>().unwrap(), 0x80000000); // i32::min_value()
+        assert_eq!(parcel.read::<u32>().unwrap(), 0x7fffffff); // i32::MAX
+        assert_eq!(parcel.read::<u32>().unwrap(), 0x80000000); // i32::MIN
         assert_eq!(parcel.read::<u32>().unwrap(), 42); // 42
         assert_eq!(parcel.read::<u32>().unwrap(), 0xffffff8b); // -117
 
@@ -1451,9 +1451,9 @@ mod tests {
 
         let vec = Vec::<i32>::deserialize(parcel.borrowed_ref()).unwrap();
 
-        assert_eq!(vec, [i32::max_value(), i32::min_value(), 42, -117]);
+        assert_eq!(vec, [i32::MAX, i32::MIN, 42, -117]);
 
-        let u64s = [u64::max_value(), 12_345, 42, 117];
+        let u64s = [u64::MAX, 12_345, 42, 117];
 
         // SAFETY: start is less than the current size of the parcel data buffer, because we haven't
         // made it any shorter since we got the position.
@@ -1469,9 +1469,9 @@ mod tests {
 
         let vec = Vec::<u64>::deserialize(parcel.borrowed_ref()).unwrap();
 
-        assert_eq!(vec, [u64::max_value(), 12_345, 42, 117]);
+        assert_eq!(vec, [u64::MAX, 12_345, 42, 117]);
 
-        let i64s = [i64::max_value(), i64::min_value(), 42, -117];
+        let i64s = [i64::MAX, i64::MIN, 42, -117];
 
         // SAFETY: start is less than the current size of the parcel data buffer, because we haven't
         // made it any shorter since we got the position.
@@ -1487,9 +1487,9 @@ mod tests {
 
         let vec = Vec::<i64>::deserialize(parcel.borrowed_ref()).unwrap();
 
-        assert_eq!(vec, [i64::max_value(), i64::min_value(), 42, -117]);
+        assert_eq!(vec, [i64::MAX, i64::MIN, 42, -117]);
 
-        let f32s = [std::f32::NAN, std::f32::INFINITY, 1.23456789, std::f32::EPSILON];
+        let f32s = [f32::NAN, f32::INFINITY, 1.23456789, f32::EPSILON];
 
         // SAFETY: start is less than the current size of the parcel data buffer, because we haven't
         // made it any shorter since we got the position.
@@ -1509,7 +1509,7 @@ mod tests {
         assert!(vec[0].is_nan());
         assert_eq!(vec[1..], f32s[1..]);
 
-        let f64s = [std::f64::NAN, std::f64::INFINITY, 1.234567890123456789, std::f64::EPSILON];
+        let f64s = [f64::NAN, f64::INFINITY, 1.234567890123456789, f64::EPSILON];
 
         // SAFETY: start is less than the current size of the parcel data buffer, because we haven't
         // made it any shorter since we got the position.

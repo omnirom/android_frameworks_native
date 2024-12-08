@@ -20,6 +20,7 @@
 
 #include <android-base/properties.h>
 #include <common/FlagManager.h>
+#include <gui/AidlUtil.h>
 #include <private/android_filesystem_config.h>
 #include "LayerTransactionTest.h"
 #include "utils/TransactionUtils.h"
@@ -350,7 +351,7 @@ TEST_F(MirrorLayerTest, OffscreenMirrorScreenshot) {
         // Capture just the mirror layer and child.
         LayerCaptureArgs captureArgs;
         captureArgs.layerHandle = mirrorParent->getHandle();
-        captureArgs.sourceCrop = childBounds;
+        captureArgs.captureArgs.sourceCrop = gui::aidl_utils::toARect(childBounds);
         std::unique_ptr<ScreenCapture> shot;
         ScreenCapture::captureLayers(&shot, captureArgs);
         shot->expectSize(childBounds.width(), childBounds.height());

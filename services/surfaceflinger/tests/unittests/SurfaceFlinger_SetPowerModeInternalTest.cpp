@@ -271,7 +271,7 @@ struct DisplayPowerCase {
     }
 
     static void setupRepaintEverythingCallExpectations(DisplayTransactionTest* test) {
-        EXPECT_CALL(*test->mFlinger.scheduler(), scheduleFrame()).Times(1);
+        EXPECT_CALL(*test->mFlinger.scheduler(), scheduleFrame(_)).Times(1);
     }
 
     static void setupComposerCallExpectations(DisplayTransactionTest* test, PowerMode mode) {

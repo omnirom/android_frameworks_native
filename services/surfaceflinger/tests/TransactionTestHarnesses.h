@@ -16,6 +16,7 @@
 #ifndef ANDROID_TRANSACTION_TEST_HARNESSES
 #define ANDROID_TRANSACTION_TEST_HARNESSES
 
+#include <com_android_graphics_libgui_flags.h>
 #include <common/FlagManager.h>
 #include <ui/DisplayState.h>
 
@@ -51,6 +52,16 @@ public:
                 const ui::Size& resolution = displayMode.resolution;
 
                 sp<IBinder> vDisplay;
+
+#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
+                sp<BufferItemConsumer> itemConsumer = sp<BufferItemConsumer>::make(
+                        // Sample usage bits from screenrecord
+                        GRALLOC_USAGE_HW_VIDEO_ENCODER | GRALLOC_USAGE_SW_READ_OFTEN);
+                sp<BufferListener> listener = sp<BufferListener>::make(this);
+                itemConsumer->setFrameAvailableListener(listener);
+                itemConsumer->setName(String8("Virtual disp consumer"));
+                itemConsumer->setDefaultBufferSize(resolution.getWidth(), resolution.getHeight());
+#else
                 sp<IGraphicBufferProducer> producer;
                 sp<IGraphicBufferConsumer> consumer;
                 sp<BufferItemConsumer> itemConsumer;
@@ -65,6 +76,7 @@ public:
                                                                     GRALLOC_USAGE_SW_READ_OFTEN);
                 sp<BufferListener> listener = sp<BufferListener>::make(this);
                 itemConsumer->setFrameAvailableListener(listener);
+#endif // COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
 
                 static const std::string kDisplayName("VirtualDisplay");
                 vDisplay = SurfaceComposerClient::createVirtualDisplay(kDisplayName,
@@ -76,7 +88,12 @@ public:
                         SurfaceComposerClient::getDefault()->mirrorDisplay(displayId);
 
                 SurfaceComposerClient::Transaction t;
+#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
+                t.setDisplaySurface(vDisplay,
+                                    itemConsumer->getSurface()->getIGraphicBufferProducer());
+#else
                 t.setDisplaySurface(vDisplay, producer);
+#endif // COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
                 t.setDisplayProjection(vDisplay, displayState.orientation,
                                        Rect(displayState.layerStackSpaceRect), Rect(resolution));
                 if (FlagManager::getInstance().ce_fence_promise()) {

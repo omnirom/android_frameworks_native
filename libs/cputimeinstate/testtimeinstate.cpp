@@ -41,7 +41,7 @@ static constexpr uint64_t NSEC_PER_SEC = 1000000000;
 static constexpr uint64_t NSEC_PER_YEAR = NSEC_PER_SEC * 60 * 60 * 24 * 365;
 
 // Declare busy loop variable globally to prevent removal during optimization
-static long sum __attribute__((used)) = 0;
+static volatile long sum __attribute__((used)) = 1;
 
 using std::vector;
 
@@ -579,8 +579,8 @@ uint64_t timeNanos() {
 
 // Keeps CPU busy with some number crunching
 void useCpu() {
-    sum = 0;
-    for (int i = 0; i < 100000; i++) {
+    sum = 1;
+    for (int i = 1; i < 100000; i++) {
         sum *= i;
     }
 }

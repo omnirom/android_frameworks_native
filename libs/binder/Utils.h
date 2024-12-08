@@ -18,6 +18,7 @@
 
 #include <stddef.h>
 #include <sys/uio.h>
+#include <chrono>
 #include <cstdint>
 #include <optional>
 
@@ -56,6 +57,19 @@
             return value;                       \
         }                                       \
     } while (0)
+
+#define LIBBINDER_PRAGMA(arg) _Pragma(#arg)
+#if defined(__clang__)
+#define LIBBINDER_PRAGMA_FOR_COMPILER(arg) LIBBINDER_PRAGMA(clang arg)
+#elif defined(__GNUC__)
+#define LIBBINDER_PRAGMA_FOR_COMPILER(arg) LIBBINDER_PRAGMA(GCC arg)
+#else
+#define LIBBINDER_PRAGMA_FOR_COMPILER(arg)
+#endif
+#define LIBBINDER_IGNORE(warning_flag)             \
+    LIBBINDER_PRAGMA_FOR_COMPILER(diagnostic push) \
+    LIBBINDER_PRAGMA_FOR_COMPILER(diagnostic ignored warning_flag)
+#define LIBBINDER_IGNORE_END() LIBBINDER_PRAGMA_FOR_COMPILER(diagnostic pop)
 
 namespace android {
 
@@ -113,5 +127,11 @@ struct Span {
 // Hex values are printed in order, e.g. 0xDEAD will result in 'adde' because
 // Android is little-endian.
 LIBBINDER_INTERNAL_EXPORTED std::string HexString(const void* bytes, size_t len);
+
+// Converts any std::chrono duration to the number of milliseconds
+template <class Rep, class Period>
+uint64_t to_ms(std::chrono::duration<Rep, Period> duration) {
+    return std::chrono::duration_cast<std::chrono::milliseconds>(duration).count();
+}
 
 }   // namespace android

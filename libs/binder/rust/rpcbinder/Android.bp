@@ -32,6 +32,7 @@ rust_library {
     apex_available: [
         "//apex_available:platform",
         "com.android.compos",
+        "com.android.microfuchsia",
         "com.android.uwb",
         "com.android.virt",
     ],
@@ -60,6 +61,7 @@ rust_library {
     apex_available: [
         "//apex_available:platform",
         "com.android.compos",
+        "com.android.microfuchsia",
         "com.android.uwb",
         "com.android.virt",
     ],
@@ -93,6 +95,7 @@ rust_bindgen {
     apex_available: [
         "//apex_available:platform",
         "com.android.compos",
+        "com.android.microfuchsia",
         "com.android.uwb",
         "com.android.virt",
     ],

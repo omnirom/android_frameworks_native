@@ -105,7 +105,6 @@ private:
     std::atomic<TimePoint> mLastTransactionCommitTime = TimePoint();
 
     const Now mNow;
-    const bool mTraceDetailedInfo;
 };
 
 } // namespace android::scheduler

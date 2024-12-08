@@ -10,6 +10,14 @@ flag {
 } # bq_setframerate
 
 flag {
+  name: "bq_consumer_attach_callback"
+  namespace: "core_graphics"
+  description: "Controls IProducerListener to have consumer side attach callback"
+  bug: "353202582"
+  is_fixed_read_only: true
+} # bq_consumer_attach_callback
+
+flag {
   name: "frametimestamps_previousrelease"
   namespace: "core_graphics"
   description: "Controls a fence fixup for timestamp apis"
@@ -35,3 +43,75 @@ flag {
     purpose: PURPOSE_BUGFIX
   }
 } # trace_frame_rate_override
+
+flag {
+  name: "wb_consumer_base_owns_bq"
+  namespace: "core_graphics"
+  description: "ConsumerBase-based classes now own their own bufferqueue"
+  bug: "340933754"
+  is_fixed_read_only: true
+} # wb_consumer_base_owns_bq
+
+flag {
+  name: "wb_platform_api_improvements"
+  namespace: "core_graphics"
+  description: "Simple improvements to Surface and ConsumerBase classes"
+  bug: "340933794"
+  is_fixed_read_only: true
+} # wb_platform_api_improvements
+
+flag {
+    name: "wb_stream_splitter"
+    namespace: "core_graphics"
+    description: "Removes IGBP/IGBCs from Camera3StreamSplitter as part of BufferQueue refactors"
+    bug: "340933206"
+    is_fixed_read_only: true
+} # wb_stream_splitter
+
+flag {
+  name: "edge_extension_shader"
+  namespace: "windowing_frontend"
+  description: "Enable edge extension via shader"
+  bug: "322036393"
+  is_fixed_read_only: true
+} # edge_extension_shader
+
+flag {
+  name: "buffer_release_channel"
+  namespace: "window_surfaces"
+  description: "Enable BufferReleaseChannel to optimize buffer releases"
+  bug: "294133380"
+  is_fixed_read_only: true
+} # buffer_release_channel
+
+flag {
+  name: "wb_ring_buffer"
+  namespace: "core_graphics"
+  description: "Remove slot dependency in the Ring Buffer Consumer."
+  bug: "342197847"
+  is_fixed_read_only: true
+} # wb_ring_buffer
+
+flag {
+  name: "wb_camera3_and_processors"
+  namespace: "core_graphics"
+  description: "Remove usage of IGBPs in the *Processor and Camera3*"
+  bug: "342199002"
+  is_fixed_read_only: true
+} # wb_camera3_and_processors
+
+flag {
+  name: "wb_libcameraservice"
+  namespace: "core_graphics"
+  description: "Remove usage of IGBPs in the libcameraservice."
+  bug: "342197849"
+  is_fixed_read_only: true
+} # wb_libcameraservice
+
+flag {
+  name: "bq_producer_throttles_only_async_mode"
+  namespace: "core_graphics"
+  description: "BufferQueueProducer only CPU throttle on queueBuffer() in async mode."
+  bug: "359252619"
+  is_fixed_read_only: true
+} # bq_producer_throttles_only_async_mode

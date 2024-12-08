@@ -301,7 +301,8 @@ TEST_P(BinderRpc, CannotSendRegularBinderOverSocketBinder) {
 
     auto proc = createRpcTestSocketServerProcess({});
 
-    sp<IBinder> someRealBinder = IInterface::asBinder(defaultServiceManager());
+    sp<IBinder> someRealBinder = defaultServiceManager()->getService(String16("activity"));
+    ASSERT_NE(someRealBinder, nullptr);
     sp<IBinder> outBinder;
     EXPECT_EQ(INVALID_OPERATION,
               proc.rootIface->repeatBinder(someRealBinder, &outBinder).transactionError());
@@ -322,6 +323,22 @@ TEST_P(BinderRpc, CannotSendSocketBinderOverRegularBinder) {
 }
 
 // END TESTS FOR LIMITATIONS OF SOCKET BINDER
+
+class TestFrozenStateChangeCallback : public IBinder::FrozenStateChangeCallback {
+public:
+    virtual void onStateChanged(const wp<IBinder>&, State) {}
+};
+
+TEST_P(BinderRpc, RpcBinderShouldFailOnFrozenStateCallbacks) {
+    auto proc = createRpcTestSocketServerProcess({});
+
+    sp<IBinder> a;
+    sp<TestFrozenStateChangeCallback> callback = sp<TestFrozenStateChangeCallback>::make();
+    EXPECT_OK(proc.rootIface->alwaysGiveMeTheSameBinder(&a));
+    EXPECT_DEATH_IF_SUPPORTED(
+            { std::ignore = a->addFrozenStateChangeCallback(callback); },
+            "addFrozenStateChangeCallback\\(\\) is not supported for RPC Binder.");
+}
 
 TEST_P(BinderRpc, RepeatRootObject) {
     auto proc = createRpcTestSocketServerProcess({});

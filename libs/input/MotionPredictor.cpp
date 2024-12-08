@@ -72,9 +72,13 @@ float normalizeRange(float x, float min, float max) {
 
 // --- JerkTracker ---
 
-JerkTracker::JerkTracker(bool normalizedDt) : mNormalizedDt(normalizedDt) {}
+JerkTracker::JerkTracker(bool normalizedDt, float alpha)
+      : mNormalizedDt(normalizedDt), mAlpha(alpha) {}
 
 void JerkTracker::pushSample(int64_t timestamp, float xPos, float yPos) {
+    // If we previously had full samples, we have a previous jerk calculation
+    // to do weighted smoothing.
+    const bool applySmoothing = mTimestamps.size() == mTimestamps.capacity();
     mTimestamps.pushBack(timestamp);
     const int numSamples = mTimestamps.size();
 
@@ -115,6 +119,16 @@ void JerkTracker::pushSample(int64_t timestamp, float xPos, float yPos) {
         }
     }
 
+    if (numSamples == static_cast<int>(mTimestamps.capacity())) {
+        float newJerkMagnitude = std::hypot(newXDerivatives[3], newYDerivatives[3]);
+        ALOGD_IF(isDebug(), "raw jerk: %f", newJerkMagnitude);
+        if (applySmoothing) {
+            mJerkMagnitude = mJerkMagnitude + (mAlpha * (newJerkMagnitude - mJerkMagnitude));
+        } else {
+            mJerkMagnitude = newJerkMagnitude;
+        }
+    }
+
     std::swap(newXDerivatives, mXDerivatives);
     std::swap(newYDerivatives, mYDerivatives);
 }
@@ -125,7 +139,7 @@ void JerkTracker::reset() {
 
 std::optional<float> JerkTracker::jerkMagnitude() const {
     if (mTimestamps.size() == mTimestamps.capacity()) {
-        return std::hypot(mXDerivatives[3], mYDerivatives[3]);
+        return mJerkMagnitude;
     }
     return std::nullopt;
 }
@@ -138,6 +152,24 @@ MotionPredictor::MotionPredictor(nsecs_t predictionTimestampOffsetNanos,
       : mPredictionTimestampOffsetNanos(predictionTimestampOffsetNanos),
         mCheckMotionPredictionEnabled(std::move(checkMotionPredictionEnabled)),
         mReportAtomFunction(reportAtomFunction) {}
+
+void MotionPredictor::initializeObjects() {
+    mModel = TfLiteMotionPredictorModel::create();
+    LOG_ALWAYS_FATAL_IF(!mModel);
+
+    // mJerkTracker assumes normalized dt = 1 between recorded samples because
+    // the underlying mModel input also assumes fixed-interval samples.
+    // Normalized dt as 1 is also used to correspond with the similar Jank
+    // implementation from the JetPack MotionPredictor implementation.
+    mJerkTracker = std::make_unique<JerkTracker>(/*normalizedDt=*/true, mModel->config().jerkAlpha);
+
+    mBuffers = std::make_unique<TfLiteMotionPredictorBuffers>(mModel->inputLength());
+
+    mMetricsManager =
+            std::make_unique<MotionPredictorMetricsManager>(mModel->config().predictionInterval,
+                                                            mModel->outputLength(),
+                                                            mReportAtomFunction);
+}
 
 android::base::Result<void> MotionPredictor::record(const MotionEvent& event) {
     if (mLastEvent && mLastEvent->getDeviceId() != event.getDeviceId()) {
@@ -155,28 +187,18 @@ android::base::Result<void> MotionPredictor::record(const MotionEvent& event) {
         return {};
     }
 
-    // Initialise the model now that it's likely to be used.
     if (!mModel) {
-        mModel = TfLiteMotionPredictorModel::create();
-        LOG_ALWAYS_FATAL_IF(!mModel);
-    }
-
-    if (!mBuffers) {
-        mBuffers = std::make_unique<TfLiteMotionPredictorBuffers>(mModel->inputLength());
+        initializeObjects();
     }
 
     // Pass input event to the MetricsManager.
-    if (!mMetricsManager) {
-        mMetricsManager.emplace(mModel->config().predictionInterval, mModel->outputLength(),
-                                mReportAtomFunction);
-    }
     mMetricsManager->onRecord(event);
 
     const int32_t action = event.getActionMasked();
     if (action == AMOTION_EVENT_ACTION_UP || action == AMOTION_EVENT_ACTION_CANCEL) {
         ALOGD_IF(isDebug(), "End of event stream");
         mBuffers->reset();
-        mJerkTracker.reset();
+        mJerkTracker->reset();
         mLastEvent.reset();
         return {};
     } else if (action != AMOTION_EVENT_ACTION_DOWN && action != AMOTION_EVENT_ACTION_MOVE) {
@@ -211,9 +233,9 @@ android::base::Result<void> MotionPredictor::record(const MotionEvent& event) {
                                                                           0, i),
                                      .orientation = event.getHistoricalOrientation(0, i),
                              });
-        mJerkTracker.pushSample(event.getHistoricalEventTime(i),
-                                coords->getAxisValue(AMOTION_EVENT_AXIS_X),
-                                coords->getAxisValue(AMOTION_EVENT_AXIS_Y));
+        mJerkTracker->pushSample(event.getHistoricalEventTime(i),
+                                 coords->getAxisValue(AMOTION_EVENT_AXIS_X),
+                                 coords->getAxisValue(AMOTION_EVENT_AXIS_Y));
     }
 
     if (!mLastEvent) {
@@ -261,7 +283,7 @@ std::unique_ptr<MotionEvent> MotionPredictor::predict(nsecs_t timestamp) {
     int64_t predictionTime = mBuffers->lastTimestamp();
     const int64_t futureTime = timestamp + mPredictionTimestampOffsetNanos;
 
-    const float jerkMagnitude = mJerkTracker.jerkMagnitude().value_or(0);
+    const float jerkMagnitude = mJerkTracker->jerkMagnitude().value_or(0);
     const float fractionKept =
             1 - normalizeRange(jerkMagnitude, mModel->config().lowJerk, mModel->config().highJerk);
     // float to ensure proper division below.
@@ -323,7 +345,7 @@ std::unique_ptr<MotionEvent> MotionPredictor::predict(nsecs_t timestamp) {
                                    event.getRawTransform(), event.getDownTime(), predictionTime,
                                    event.getPointerCount(), event.getPointerProperties(), &coords);
         } else {
-            prediction->addSample(predictionTime, &coords);
+            prediction->addSample(predictionTime, &coords, prediction->getId());
         }
 
         axisFrom = axisTo;

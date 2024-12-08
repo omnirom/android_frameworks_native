@@ -42,6 +42,8 @@
 
 #include <system/window.h>
 
+#include <com_android_graphics_libgui_flags.h>
+
 namespace android {
 
 // Macros for include BufferQueueCore information in log messages
@@ -370,79 +372,94 @@ status_t BufferQueueConsumer::attachBuffer(int* outSlot,
         return BAD_VALUE;
     }
 
-    std::lock_guard<std::mutex> lock(mCore->mMutex);
+    sp<IProducerListener> listener;
+    {
+        std::lock_guard<std::mutex> lock(mCore->mMutex);
 
-    if (mCore->mSharedBufferMode) {
-        BQ_LOGE("attachBuffer: cannot attach a buffer in shared buffer mode");
-        return BAD_VALUE;
-    }
-
-    // Make sure we don't have too many acquired buffers
-    int numAcquiredBuffers = 0;
-    for (int s : mCore->mActiveBuffers) {
-        if (mSlots[s].mBufferState.isAcquired()) {
-            ++numAcquiredBuffers;
+        if (mCore->mSharedBufferMode) {
+            BQ_LOGE("attachBuffer: cannot attach a buffer in shared buffer mode");
+            return BAD_VALUE;
         }
+
+        // Make sure we don't have too many acquired buffers
+        int numAcquiredBuffers = 0;
+        for (int s : mCore->mActiveBuffers) {
+            if (mSlots[s].mBufferState.isAcquired()) {
+                ++numAcquiredBuffers;
+            }
+        }
+
+        if (numAcquiredBuffers >= mCore->mMaxAcquiredBufferCount + 1) {
+            BQ_LOGE("attachBuffer: max acquired buffer count reached: %d "
+                    "(max %d)", numAcquiredBuffers,
+                    mCore->mMaxAcquiredBufferCount);
+            return INVALID_OPERATION;
+        }
+
+        if (buffer->getGenerationNumber() != mCore->mGenerationNumber) {
+            BQ_LOGE("attachBuffer: generation number mismatch [buffer %u] "
+                    "[queue %u]", buffer->getGenerationNumber(),
+                    mCore->mGenerationNumber);
+            return BAD_VALUE;
+        }
+
+        // Find a free slot to put the buffer into
+        int found = BufferQueueCore::INVALID_BUFFER_SLOT;
+        if (!mCore->mFreeSlots.empty()) {
+            auto slot = mCore->mFreeSlots.begin();
+            found = *slot;
+            mCore->mFreeSlots.erase(slot);
+        } else if (!mCore->mFreeBuffers.empty()) {
+            found = mCore->mFreeBuffers.front();
+            mCore->mFreeBuffers.remove(found);
+        }
+        if (found == BufferQueueCore::INVALID_BUFFER_SLOT) {
+            BQ_LOGE("attachBuffer: could not find free buffer slot");
+            return NO_MEMORY;
+        }
+
+#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(BQ_CONSUMER_ATTACH_CALLBACK)
+        if (mCore->mBufferAttachedCbEnabled) {
+            listener = mCore->mConnectedProducerListener;
+        }
+#endif
+
+        mCore->mActiveBuffers.insert(found);
+        *outSlot = found;
+        ATRACE_BUFFER_INDEX(*outSlot);
+        BQ_LOGV("attachBuffer: returning slot %d", *outSlot);
+
+        mSlots[*outSlot].mGraphicBuffer = buffer;
+        mSlots[*outSlot].mBufferState.attachConsumer();
+        mSlots[*outSlot].mNeedsReallocation = true;
+        mSlots[*outSlot].mFence = Fence::NO_FENCE;
+        mSlots[*outSlot].mFrameNumber = 0;
+
+        // mAcquireCalled tells BufferQueue that it doesn't need to send a valid
+        // GraphicBuffer pointer on the next acquireBuffer call, which decreases
+        // Binder traffic by not un/flattening the GraphicBuffer. However, it
+        // requires that the consumer maintain a cached copy of the slot <--> buffer
+        // mappings, which is why the consumer doesn't need the valid pointer on
+        // acquire.
+        //
+        // The StreamSplitter is one of the primary users of the attach/detach
+        // logic, and while it is running, all buffers it acquires are immediately
+        // detached, and all buffers it eventually releases are ones that were
+        // attached (as opposed to having been obtained from acquireBuffer), so it
+        // doesn't make sense to maintain the slot/buffer mappings, which would
+        // become invalid for every buffer during detach/attach. By setting this to
+        // false, the valid GraphicBuffer pointer will always be sent with acquire
+        // for attached buffers.
+        mSlots[*outSlot].mAcquireCalled = false;
+
+        VALIDATE_CONSISTENCY();
     }
 
-    if (numAcquiredBuffers >= mCore->mMaxAcquiredBufferCount + 1) {
-        BQ_LOGE("attachBuffer: max acquired buffer count reached: %d "
-                "(max %d)", numAcquiredBuffers,
-                mCore->mMaxAcquiredBufferCount);
-        return INVALID_OPERATION;
+#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(BQ_CONSUMER_ATTACH_CALLBACK)
+    if (listener != nullptr) {
+        listener->onBufferAttached();
     }
-
-    if (buffer->getGenerationNumber() != mCore->mGenerationNumber) {
-        BQ_LOGE("attachBuffer: generation number mismatch [buffer %u] "
-                "[queue %u]", buffer->getGenerationNumber(),
-                mCore->mGenerationNumber);
-        return BAD_VALUE;
-    }
-
-    // Find a free slot to put the buffer into
-    int found = BufferQueueCore::INVALID_BUFFER_SLOT;
-    if (!mCore->mFreeSlots.empty()) {
-        auto slot = mCore->mFreeSlots.begin();
-        found = *slot;
-        mCore->mFreeSlots.erase(slot);
-    } else if (!mCore->mFreeBuffers.empty()) {
-        found = mCore->mFreeBuffers.front();
-        mCore->mFreeBuffers.remove(found);
-    }
-    if (found == BufferQueueCore::INVALID_BUFFER_SLOT) {
-        BQ_LOGE("attachBuffer: could not find free buffer slot");
-        return NO_MEMORY;
-    }
-
-    mCore->mActiveBuffers.insert(found);
-    *outSlot = found;
-    ATRACE_BUFFER_INDEX(*outSlot);
-    BQ_LOGV("attachBuffer: returning slot %d", *outSlot);
-
-    mSlots[*outSlot].mGraphicBuffer = buffer;
-    mSlots[*outSlot].mBufferState.attachConsumer();
-    mSlots[*outSlot].mNeedsReallocation = true;
-    mSlots[*outSlot].mFence = Fence::NO_FENCE;
-    mSlots[*outSlot].mFrameNumber = 0;
-
-    // mAcquireCalled tells BufferQueue that it doesn't need to send a valid
-    // GraphicBuffer pointer on the next acquireBuffer call, which decreases
-    // Binder traffic by not un/flattening the GraphicBuffer. However, it
-    // requires that the consumer maintain a cached copy of the slot <--> buffer
-    // mappings, which is why the consumer doesn't need the valid pointer on
-    // acquire.
-    //
-    // The StreamSplitter is one of the primary users of the attach/detach
-    // logic, and while it is running, all buffers it acquires are immediately
-    // detached, and all buffers it eventually releases are ones that were
-    // attached (as opposed to having been obtained from acquireBuffer), so it
-    // doesn't make sense to maintain the slot/buffer mappings, which would
-    // become invalid for every buffer during detach/attach. By setting this to
-    // false, the valid GraphicBuffer pointer will always be sent with acquire
-    // for attached buffers.
-    mSlots[*outSlot].mAcquireCalled = false;
-
-    VALIDATE_CONSISTENCY();
+#endif
 
     return NO_ERROR;
 }

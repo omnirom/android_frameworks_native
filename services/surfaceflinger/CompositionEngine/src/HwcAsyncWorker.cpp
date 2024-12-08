@@ -24,6 +24,7 @@
 
 #include <android-base/thread_annotations.h>
 #include <cutils/sched_policy.h>
+#include <ftl/fake_guard.h>
 
 namespace android::compositionengine::impl {
 
@@ -60,7 +61,7 @@ void HwcAsyncWorker::run() {
     std::unique_lock<std::mutex> lock(mMutex);
     android::base::ScopedLockAssertion assumeLock(mMutex);
     while (!mDone) {
-        mCv.wait(lock);
+        mCv.wait(lock, [this]() FTL_FAKE_GUARD(mMutex) { return mTaskRequested || mDone; });
         if (mTaskRequested && mTask.valid()) {
             mTask();
             mTaskRequested = false;

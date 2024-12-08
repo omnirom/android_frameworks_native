@@ -19,18 +19,18 @@
 #include "GaussianBlurFilter.h"
 #include <SkBlendMode.h>
 #include <SkCanvas.h>
+#include <SkImageFilters.h>
 #include <SkPaint.h>
 #include <SkRRect.h>
 #include <SkRuntimeEffect.h>
-#include <SkImageFilters.h>
 #include <SkSize.h>
 #include <SkString.h>
 #include <SkSurface.h>
 #include <SkTileMode.h>
+#include <common/trace.h>
 #include <include/gpu/ganesh/SkSurfaceGanesh.h>
-#include "include/gpu/GpuTypes.h" // from Skia
 #include <log/log.h>
-#include <utils/Trace.h>
+#include "include/gpu/GpuTypes.h" // from Skia
 
 namespace android {
 namespace renderengine {

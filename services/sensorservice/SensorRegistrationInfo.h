@@ -38,10 +38,11 @@ public:
         mActivated = false;
     }
 
-    SensorRegistrationInfo(int32_t handle, const String8 &packageName,
-                           int64_t samplingRateNs, int64_t maxReportLatencyNs, bool activate) {
+    SensorRegistrationInfo(int32_t handle, const String8& packageName, int64_t samplingRateNs,
+                           int64_t maxReportLatencyNs, bool activate, status_t registerStatus) {
         mSensorHandle = handle;
         mPackageName = packageName;
+        mRegisteredStatus = registerStatus;
 
         mSamplingRateUs = static_cast<int64_t>(samplingRateNs/1000);
         mMaxReportLatencyUs = static_cast<int64_t>(maxReportLatencyNs/1000);
@@ -60,27 +61,42 @@ public:
        return (info.mSensorHandle == INT32_MIN && info.mRealtimeSec == 0);
     }
 
-    // Dumpable interface
-    virtual std::string dump() const override {
+    std::string dump(SensorService* sensorService) const {
         struct tm* timeinfo = localtime(&mRealtimeSec);
         const int8_t hour = static_cast<int8_t>(timeinfo->tm_hour);
         const int8_t min = static_cast<int8_t>(timeinfo->tm_min);
         const int8_t sec = static_cast<int8_t>(timeinfo->tm_sec);
 
         std::ostringstream ss;
-        ss << std::setfill('0') << std::setw(2) << static_cast<int>(hour) << ":"
-           << std::setw(2) << static_cast<int>(min) << ":"
-           << std::setw(2) << static_cast<int>(sec)
-           << (mActivated ? " +" : " -")
-           << " 0x" << std::hex << std::setw(8) << mSensorHandle << std::dec
-           << std::setfill(' ') << " pid=" << std::setw(5) << mPid
-           << " uid=" << std::setw(5) << mUid << " package=" << mPackageName;
-        if (mActivated) {
-           ss  << " samplingPeriod=" << mSamplingRateUs << "us"
-               << " batchingPeriod=" << mMaxReportLatencyUs << "us";
-        };
+        ss << std::setfill('0') << std::setw(2) << static_cast<int>(hour) << ":" << std::setw(2)
+           << static_cast<int>(min) << ":" << std::setw(2) << static_cast<int>(sec)
+           << (mActivated ? " +" : " -") << " 0x" << std::hex << std::setw(8) << mSensorHandle;
+        ss << std::dec << std::setfill(' ') << " pid=" << std::setw(5) << mPid
+           << " uid=" << std::setw(5) << mUid;
+
+        std::string samplingRate =
+            mActivated ? std::to_string(mSamplingRateUs) : "  N/A  ";
+        std::string batchingInterval =
+            mActivated ? std::to_string(mMaxReportLatencyUs) : "  N/A  ";
+        ss << " samplingPeriod=" << std::setfill(' ') << std::setw(8)
+           << samplingRate << "us" << " batchingPeriod=" << std::setfill(' ')
+           << std::setw(8) << batchingInterval << "us"
+           << " result=" << statusToString(mRegisteredStatus)
+           << " (sensor, package): (" << std::setfill(' ') << std::left
+           << std::setw(27);
+
+        if (sensorService != nullptr) {
+          ss << sensorService->getSensorName(mSensorHandle);
+        } else {
+          ss << "null";
+        }
+        ss << ", " << mPackageName << ")";
+
         return ss.str();
     }
+
+    // Dumpable interface
+    virtual std::string dump() const override { return dump(static_cast<SensorService*>(nullptr)); }
 
     /**
      * Dump debugging information as android.service.SensorRegistrationInfoProto protobuf message
@@ -110,6 +126,7 @@ private:
     int64_t mMaxReportLatencyUs;
     bool mActivated;
     time_t mRealtimeSec;
+    status_t mRegisteredStatus;
 };
 
 } // namespace android;

@@ -20,6 +20,8 @@
 
 #include <android/binder_auto_utils.h>
 
+#include "../../Utils.h"
+
 using ::android::sp;
 using ::android::wp;
 
@@ -157,10 +159,9 @@ binder_status_t IFoo::addService(const char* instance) {
 }
 
 sp<IFoo> IFoo::getService(const char* instance, AIBinder** outBinder) {
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+    LIBBINDER_IGNORE("-Wdeprecated-declarations")
     AIBinder* binder = AServiceManager_getService(instance);  // maybe nullptr
-#pragma clang diagnostic pop
+    LIBBINDER_IGNORE_END()
     if (binder == nullptr) {
         return nullptr;
     }

@@ -108,6 +108,10 @@ APerformanceHintSession* APerformanceHint_createSessionInternal(APerformanceHint
                                         const int32_t* threadIds, size_t size,
                                         int64_t initialTargetWorkDurationNanos, SessionTag tag);
 
+/**
+ * Forces FMQ to be enabled or disabled, for testing only.
+ */
+void APerformanceHint_setUseFMQForTesting(bool enabled);
 
 __END_DECLS
 

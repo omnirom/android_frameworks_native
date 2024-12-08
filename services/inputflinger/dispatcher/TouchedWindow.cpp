@@ -36,6 +36,13 @@ bool hasPointerId(const std::vector<PointerProperties>& pointers, int32_t pointe
                         }) != pointers.end();
 }
 
+bool hasPointerId(const std::vector<TouchedWindow::HoveringPointer>& pointers, int32_t pointerId) {
+    return std::find_if(pointers.begin(), pointers.end(),
+                        [&pointerId](const TouchedWindow::HoveringPointer& pointer) {
+                            return pointer.properties.id == pointerId;
+                        }) != pointers.end();
+}
+
 } // namespace
 
 bool TouchedWindow::hasHoveringPointers() const {
@@ -78,16 +85,18 @@ bool TouchedWindow::hasHoveringPointer(DeviceId deviceId, int32_t pointerId) con
     return hasPointerId(state.hoveringPointers, pointerId);
 }
 
-void TouchedWindow::addHoveringPointer(DeviceId deviceId, const PointerProperties& pointer) {
-    std::vector<PointerProperties>& hoveringPointers = mDeviceStates[deviceId].hoveringPointers;
+void TouchedWindow::addHoveringPointer(DeviceId deviceId, const PointerProperties& properties,
+                                       float x, float y) {
+    std::vector<HoveringPointer>& hoveringPointers = mDeviceStates[deviceId].hoveringPointers;
     const size_t initialSize = hoveringPointers.size();
-    std::erase_if(hoveringPointers, [&pointer](const PointerProperties& properties) {
-        return properties.id == pointer.id;
+    std::erase_if(hoveringPointers, [&properties](const HoveringPointer& pointer) {
+        return pointer.properties.id == properties.id;
     });
     if (hoveringPointers.size() != initialSize) {
-        LOG(ERROR) << __func__ << ": " << pointer << ", device " << deviceId << " was in " << *this;
+        LOG(ERROR) << __func__ << ": " << properties << ", device " << deviceId << " was in "
+                   << *this;
     }
-    hoveringPointers.push_back(pointer);
+    hoveringPointers.push_back({properties, x, y});
 }
 
 Result<void> TouchedWindow::addTouchingPointers(DeviceId deviceId,
@@ -173,8 +182,8 @@ bool TouchedWindow::hasActiveStylus() const {
                 return true;
             }
         }
-        for (const PointerProperties& properties : state.hoveringPointers) {
-            if (properties.toolType == ToolType::STYLUS) {
+        for (const HoveringPointer& pointer : state.hoveringPointers) {
+            if (pointer.properties.toolType == ToolType::STYLUS) {
                 return true;
             }
         }
@@ -270,13 +279,29 @@ void TouchedWindow::removeHoveringPointer(DeviceId deviceId, int32_t pointerId) 
     }
     DeviceState& state = stateIt->second;
 
-    std::erase_if(state.hoveringPointers, [&pointerId](const PointerProperties& properties) {
-        return properties.id == pointerId;
+    std::erase_if(state.hoveringPointers, [&pointerId](const HoveringPointer& pointer) {
+        return pointer.properties.id == pointerId;
     });
 
     if (!state.hasPointers()) {
         mDeviceStates.erase(stateIt);
     }
+}
+
+std::vector<DeviceId> TouchedWindow::eraseHoveringPointersIf(
+        std::function<bool(const PointerProperties&, float /*x*/, float /*y*/)> condition) {
+    std::vector<DeviceId> erasedDevices;
+    for (auto& [deviceId, state] : mDeviceStates) {
+        std::erase_if(state.hoveringPointers, [&](const HoveringPointer& pointer) {
+            if (condition(pointer.properties, pointer.x, pointer.y)) {
+                erasedDevices.push_back(deviceId);
+                return true;
+            }
+            return false;
+        });
+    }
+
+    return erasedDevices;
 }
 
 void TouchedWindow::removeAllHoveringPointersForDevice(DeviceId deviceId) {
@@ -309,6 +334,11 @@ std::string TouchedWindow::dump() const {
     out += StringPrintf("name='%s', targetFlags=%s, mDeviceStates=%s\n",
                         windowHandle->getName().c_str(), targetFlags.string().c_str(),
                         deviceStates.c_str());
+    return out;
+}
+
+std::ostream& operator<<(std::ostream& out, const TouchedWindow::HoveringPointer& pointer) {
+    out << pointer.properties << " at (" << pointer.x << ", " << pointer.y << ")";
     return out;
 }
 

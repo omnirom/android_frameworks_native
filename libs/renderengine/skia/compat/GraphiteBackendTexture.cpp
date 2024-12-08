@@ -28,16 +28,16 @@
 #include "skia/ColorSpaces.h"
 
 #include <android/hardware_buffer.h>
+#include <common/trace.h>
 #include <inttypes.h>
 #include <log/log_main.h>
-#include <utils/Trace.h>
 
 namespace android::renderengine::skia {
 
 GraphiteBackendTexture::GraphiteBackendTexture(std::shared_ptr<skgpu::graphite::Recorder> recorder,
                                                AHardwareBuffer* buffer, bool isOutputBuffer)
       : SkiaBackendTexture(buffer, isOutputBuffer), mRecorder(std::move(recorder)) {
-    ATRACE_CALL();
+    SFTRACE_CALL();
     AHardwareBuffer_Desc desc;
     AHardwareBuffer_describe(buffer, &desc);
     const bool createProtectedImage = 0 != (desc.usage & AHARDWAREBUFFER_USAGE_PROTECTED_CONTENT);

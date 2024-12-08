@@ -124,7 +124,7 @@ fn on_transact(
         bindings::Transaction_TEST_BYTE => {
             assert_eq!(parcel.read::<i8>()?, 0);
             assert_eq!(parcel.read::<i8>()?, 1);
-            assert_eq!(parcel.read::<i8>()?, i8::max_value());
+            assert_eq!(parcel.read::<i8>()?, i8::MAX);
             // SAFETY: Just reading an extern constant.
             assert_eq!(parcel.read::<Vec<i8>>()?, unsafe { bindings::TESTDATA_I8 });
             // SAFETY: Just reading an extern constant.
@@ -133,7 +133,7 @@ fn on_transact(
 
             reply.write(&0i8)?;
             reply.write(&1i8)?;
-            reply.write(&i8::max_value())?;
+            reply.write(&i8::MAX)?;
             // SAFETY: Just reading an extern constant.
             reply.write(&unsafe { bindings::TESTDATA_I8 }[..])?;
             // SAFETY: Just reading an extern constant.
@@ -143,14 +143,14 @@ fn on_transact(
         bindings::Transaction_TEST_U16 => {
             assert_eq!(parcel.read::<u16>()?, 0);
             assert_eq!(parcel.read::<u16>()?, 1);
-            assert_eq!(parcel.read::<u16>()?, u16::max_value());
+            assert_eq!(parcel.read::<u16>()?, u16::MAX);
             // SAFETY: Just reading an extern constant.
             assert_eq!(parcel.read::<Vec<u16>>()?, unsafe { bindings::TESTDATA_CHARS });
             assert_eq!(parcel.read::<Option<Vec<u16>>>()?, None);
 
             reply.write(&0u16)?;
             reply.write(&1u16)?;
-            reply.write(&u16::max_value())?;
+            reply.write(&u16::MAX)?;
             // SAFETY: Just reading an extern constant.
             reply.write(&unsafe { bindings::TESTDATA_CHARS }[..])?;
             reply.write(&(None as Option<Vec<u16>>))?;
@@ -158,14 +158,14 @@ fn on_transact(
         bindings::Transaction_TEST_I32 => {
             assert_eq!(parcel.read::<i32>()?, 0);
             assert_eq!(parcel.read::<i32>()?, 1);
-            assert_eq!(parcel.read::<i32>()?, i32::max_value());
+            assert_eq!(parcel.read::<i32>()?, i32::MAX);
             // SAFETY: Just reading an extern constant.
             assert_eq!(parcel.read::<Vec<i32>>()?, unsafe { bindings::TESTDATA_I32 });
             assert_eq!(parcel.read::<Option<Vec<i32>>>()?, None);
 
             reply.write(&0i32)?;
             reply.write(&1i32)?;
-            reply.write(&i32::max_value())?;
+            reply.write(&i32::MAX)?;
             // SAFETY: Just reading an extern constant.
             reply.write(&unsafe { bindings::TESTDATA_I32 }[..])?;
             reply.write(&(None as Option<Vec<i32>>))?;
@@ -173,14 +173,14 @@ fn on_transact(
         bindings::Transaction_TEST_I64 => {
             assert_eq!(parcel.read::<i64>()?, 0);
             assert_eq!(parcel.read::<i64>()?, 1);
-            assert_eq!(parcel.read::<i64>()?, i64::max_value());
+            assert_eq!(parcel.read::<i64>()?, i64::MAX);
             // SAFETY: Just reading an extern constant.
             assert_eq!(parcel.read::<Vec<i64>>()?, unsafe { bindings::TESTDATA_I64 });
             assert_eq!(parcel.read::<Option<Vec<i64>>>()?, None);
 
             reply.write(&0i64)?;
             reply.write(&1i64)?;
-            reply.write(&i64::max_value())?;
+            reply.write(&i64::MAX)?;
             // SAFETY: Just reading an extern constant.
             reply.write(&unsafe { bindings::TESTDATA_I64 }[..])?;
             reply.write(&(None as Option<Vec<i64>>))?;
@@ -188,14 +188,14 @@ fn on_transact(
         bindings::Transaction_TEST_U64 => {
             assert_eq!(parcel.read::<u64>()?, 0);
             assert_eq!(parcel.read::<u64>()?, 1);
-            assert_eq!(parcel.read::<u64>()?, u64::max_value());
+            assert_eq!(parcel.read::<u64>()?, u64::MAX);
             // SAFETY: Just reading an extern constant.
             assert_eq!(parcel.read::<Vec<u64>>()?, unsafe { bindings::TESTDATA_U64 });
             assert_eq!(parcel.read::<Option<Vec<u64>>>()?, None);
 
             reply.write(&0u64)?;
             reply.write(&1u64)?;
-            reply.write(&u64::max_value())?;
+            reply.write(&u64::MAX)?;
             // SAFETY: Just reading an extern constant.
             reply.write(&unsafe { bindings::TESTDATA_U64 }[..])?;
             reply.write(&(None as Option<Vec<u64>>))?;

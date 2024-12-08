@@ -64,17 +64,6 @@ DisplayTransactionTest::~DisplayTransactionTest() {
 
 void DisplayTransactionTest::injectMockScheduler(PhysicalDisplayId displayId) {
     LOG_ALWAYS_FATAL_IF(mFlinger.scheduler());
-
-    EXPECT_CALL(*mEventThread, registerDisplayEventConnection(_));
-    EXPECT_CALL(*mEventThread, createEventConnection(_, _))
-            .WillOnce(Return(
-                    sp<EventThreadConnection>::make(mEventThread, mock::EventThread::kCallingUid)));
-
-    EXPECT_CALL(*mSFEventThread, registerDisplayEventConnection(_));
-    EXPECT_CALL(*mSFEventThread, createEventConnection(_, _))
-            .WillOnce(Return(sp<EventThreadConnection>::make(mSFEventThread,
-                                                             mock::EventThread::kCallingUid)));
-
     mFlinger.setupScheduler(std::make_unique<mock::VsyncController>(),
                             std::make_shared<mock::VSyncTracker>(),
                             std::unique_ptr<EventThread>(mEventThread),

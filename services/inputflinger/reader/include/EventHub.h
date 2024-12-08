@@ -21,6 +21,7 @@
 #include <filesystem>
 #include <functional>
 #include <map>
+#include <optional>
 #include <ostream>
 #include <string>
 #include <unordered_map>
@@ -70,18 +71,14 @@ struct RawEvent {
 
 /* Describes an absolute axis. */
 struct RawAbsoluteAxisInfo {
-    bool valid{false}; // true if the information is valid, false otherwise
-
     int32_t minValue{};   // minimum value
     int32_t maxValue{};   // maximum value
     int32_t flat{};       // center flat position, eg. flat == 8 means center is between -8 and 8
     int32_t fuzz{};       // error tolerance, eg. fuzz == 4 means value is +/- 4 due to noise
     int32_t resolution{}; // resolution in units per mm or radians per mm
-
-    inline void clear() { *this = RawAbsoluteAxisInfo(); }
 };
 
-std::ostream& operator<<(std::ostream& out, const RawAbsoluteAxisInfo& info);
+std::ostream& operator<<(std::ostream& out, const std::optional<RawAbsoluteAxisInfo>& info);
 
 /*
  * Input device classes.
@@ -257,9 +254,6 @@ public:
         DEVICE_ADDED = 0x10000000,
         // Sent when a device is removed.
         DEVICE_REMOVED = 0x20000000,
-        // Sent when all added/removed devices from the most recent scan have been reported.
-        // This event is always sent at least once.
-        FINISHED_DEVICE_SCAN = 0x30000000,
 
         FIRST_SYNTHETIC_EVENT = DEVICE_ADDED,
     };
@@ -278,8 +272,8 @@ public:
      */
     virtual std::optional<PropertyMap> getConfiguration(int32_t deviceId) const = 0;
 
-    virtual status_t getAbsoluteAxisInfo(int32_t deviceId, int axis,
-                                         RawAbsoluteAxisInfo* outAxisInfo) const = 0;
+    virtual std::optional<RawAbsoluteAxisInfo> getAbsoluteAxisInfo(int32_t deviceId,
+                                                                   int axis) const = 0;
 
     virtual bool hasRelativeAxis(int32_t deviceId, int axis) const = 0;
 
@@ -287,8 +281,8 @@ public:
 
     virtual bool hasMscEvent(int32_t deviceId, int mscEvent) const = 0;
 
-    virtual void addKeyRemapping(int32_t deviceId, int32_t fromKeyCode,
-                                 int32_t toKeyCode) const = 0;
+    virtual void setKeyRemapping(int32_t deviceId,
+                                 const std::map<int32_t, int32_t>& keyRemapping) const = 0;
 
     virtual status_t mapKey(int32_t deviceId, int32_t scanCode, int32_t usageCode,
                             int32_t metaState, int32_t* outKeycode, int32_t* outMetaState,
@@ -339,8 +333,7 @@ public:
     virtual int32_t getScanCodeState(int32_t deviceId, int32_t scanCode) const = 0;
     virtual int32_t getKeyCodeState(int32_t deviceId, int32_t keyCode) const = 0;
     virtual int32_t getSwitchState(int32_t deviceId, int32_t sw) const = 0;
-    virtual status_t getAbsoluteAxisValue(int32_t deviceId, int32_t axis,
-                                          int32_t* outValue) const = 0;
+    virtual std::optional<int32_t> getAbsoluteAxisValue(int32_t deviceId, int32_t axis) const = 0;
     /* Query Multi-Touch slot values for an axis. Returns error or an 1 indexed array of size
      * (slotCount + 1). The value at the 0 index is set to queried axis. */
     virtual base::Result<std::vector<int32_t>> getMtSlotValues(int32_t deviceId, int32_t axis,
@@ -511,8 +504,8 @@ public:
 
     std::optional<PropertyMap> getConfiguration(int32_t deviceId) const override final;
 
-    status_t getAbsoluteAxisInfo(int32_t deviceId, int axis,
-                                 RawAbsoluteAxisInfo* outAxisInfo) const override final;
+    std::optional<RawAbsoluteAxisInfo> getAbsoluteAxisInfo(int32_t deviceId,
+                                                           int axis) const override final;
 
     bool hasRelativeAxis(int32_t deviceId, int axis) const override final;
 
@@ -520,8 +513,8 @@ public:
 
     bool hasMscEvent(int32_t deviceId, int mscEvent) const override final;
 
-    void addKeyRemapping(int32_t deviceId, int32_t fromKeyCode,
-                         int32_t toKeyCode) const override final;
+    void setKeyRemapping(int32_t deviceId,
+                         const std::map<int32_t, int32_t>& keyRemapping) const override final;
 
     status_t mapKey(int32_t deviceId, int32_t scanCode, int32_t usageCode, int32_t metaState,
                     int32_t* outKeycode, int32_t* outMetaState,
@@ -559,8 +552,8 @@ public:
     int32_t getSwitchState(int32_t deviceId, int32_t sw) const override final;
     int32_t getKeyCodeForKeyLocation(int32_t deviceId,
                                      int32_t locationKeyCode) const override final;
-    status_t getAbsoluteAxisValue(int32_t deviceId, int32_t axis,
-                                  int32_t* outValue) const override final;
+    std::optional<int32_t> getAbsoluteAxisValue(int32_t deviceId,
+                                                int32_t axis) const override final;
     base::Result<std::vector<int32_t>> getMtSlotValues(int32_t deviceId, int32_t axis,
                                                        size_t slotCount) const override final;
 
@@ -793,7 +786,6 @@ private:
     std::vector<std::unique_ptr<Device>> mOpeningDevices;
     std::vector<std::unique_ptr<Device>> mClosingDevices;
 
-    bool mNeedToSendFinishedDeviceScan;
     bool mNeedToReopenDevices;
     bool mNeedToScanDevices;
     std::vector<std::string> mExcludedDevices;

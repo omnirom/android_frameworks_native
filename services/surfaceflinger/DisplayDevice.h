@@ -203,8 +203,6 @@ public:
     void updateHdrSdrRatioOverlayRatio(float currentHdrSdrRatio);
     bool isHdrSdrRatioOverlayEnabled() const { return mHdrSdrRatioOverlay != nullptr; }
 
-    nsecs_t getVsyncPeriodFromHWC() const;
-
     Fps getAdjustedRefreshRate() const { return mAdjustedRefreshRate; }
 
     // Round the requested refresh rate to match a divisor of the pacesetter

@@ -19,11 +19,11 @@
 #define ATRACE_TAG ATRACE_TAG_GRAPHICS
 
 #include <android-base/stringprintf.h>
+#include <common/trace.h>
 #include <log/log.h>
 #include <timestatsatomsproto/TimeStatsAtomsProtoHeader.h>
 #include <utils/String8.h>
 #include <utils/Timers.h>
-#include <utils/Trace.h>
 
 #include <algorithm>
 #include <chrono>
@@ -271,7 +271,7 @@ bool TimeStats::onPullAtom(const int atomId, std::vector<uint8_t>* pulledData) {
 }
 
 void TimeStats::parseArgs(bool asProto, const Vector<String16>& args, std::string& result) {
-    ATRACE_CALL();
+    SFTRACE_CALL();
 
     std::unordered_map<std::string, int32_t> argsMap;
     for (size_t index = 0; index < args.size(); ++index) {
@@ -304,7 +304,7 @@ void TimeStats::parseArgs(bool asProto, const Vector<String16>& args, std::strin
 }
 
 std::string TimeStats::miniDump() {
-    ATRACE_CALL();
+    SFTRACE_CALL();
 
     std::string result = "TimeStats miniDump:\n";
     std::lock_guard<std::mutex> lock(mMutex);
@@ -318,7 +318,7 @@ std::string TimeStats::miniDump() {
 void TimeStats::incrementTotalFrames() {
     if (!mEnabled.load()) return;
 
-    ATRACE_CALL();
+    SFTRACE_CALL();
 
     std::lock_guard<std::mutex> lock(mMutex);
     mTimeStats.totalFramesLegacy++;
@@ -327,7 +327,7 @@ void TimeStats::incrementTotalFrames() {
 void TimeStats::incrementMissedFrames() {
     if (!mEnabled.load()) return;
 
-    ATRACE_CALL();
+    SFTRACE_CALL();
 
     std::lock_guard<std::mutex> lock(mMutex);
     mTimeStats.missedFramesLegacy++;
@@ -338,7 +338,7 @@ void TimeStats::pushCompositionStrategyState(const TimeStats::ClientCompositionR
         return;
     }
 
-    ATRACE_CALL();
+    SFTRACE_CALL();
 
     std::lock_guard<std::mutex> lock(mMutex);
     if (record.changed) mTimeStats.compositionStrategyChangesLegacy++;
@@ -351,7 +351,7 @@ void TimeStats::pushCompositionStrategyState(const TimeStats::ClientCompositionR
 void TimeStats::incrementRefreshRateSwitches() {
     if (!mEnabled.load()) return;
 
-    ATRACE_CALL();
+    SFTRACE_CALL();
 
     std::lock_guard<std::mutex> lock(mMutex);
     mTimeStats.refreshRateSwitchesLegacy++;
@@ -445,7 +445,7 @@ void TimeStats::flushAvailableRecordsToStatsLocked(int32_t layerId, Fps displayR
                                                    std::optional<Fps> renderRate,
                                                    SetFrameRateVote frameRateVote,
                                                    GameMode gameMode) {
-    ATRACE_CALL();
+    SFTRACE_CALL();
     ALOGV("[%d]-flushAvailableRecordsToStatsLocked", layerId);
 
     LayerRecord& layerRecord = mTimeStatsTracker[layerId];
@@ -568,7 +568,7 @@ void TimeStats::setPostTime(int32_t layerId, uint64_t frameNumber, const std::st
                             uid_t uid, nsecs_t postTime, GameMode gameMode) {
     if (!mEnabled.load()) return;
 
-    ATRACE_CALL();
+    SFTRACE_CALL();
     ALOGV("[%d]-[%" PRIu64 "]-[%s]-PostTime[%" PRId64 "]", layerId, frameNumber, layerName.c_str(),
           postTime);
 
@@ -612,7 +612,7 @@ void TimeStats::setPostTime(int32_t layerId, uint64_t frameNumber, const std::st
 void TimeStats::setLatchTime(int32_t layerId, uint64_t frameNumber, nsecs_t latchTime) {
     if (!mEnabled.load()) return;
 
-    ATRACE_CALL();
+    SFTRACE_CALL();
     ALOGV("[%d]-[%" PRIu64 "]-LatchTime[%" PRId64 "]", layerId, frameNumber, latchTime);
 
     std::lock_guard<std::mutex> lock(mMutex);
@@ -630,7 +630,7 @@ void TimeStats::setLatchTime(int32_t layerId, uint64_t frameNumber, nsecs_t latc
 void TimeStats::incrementLatchSkipped(int32_t layerId, LatchSkipReason reason) {
     if (!mEnabled.load()) return;
 
-    ATRACE_CALL();
+    SFTRACE_CALL();
     ALOGV("[%d]-LatchSkipped-Reason[%d]", layerId,
           static_cast<std::underlying_type<LatchSkipReason>::type>(reason));
 
@@ -648,7 +648,7 @@ void TimeStats::incrementLatchSkipped(int32_t layerId, LatchSkipReason reason) {
 void TimeStats::incrementBadDesiredPresent(int32_t layerId) {
     if (!mEnabled.load()) return;
 
-    ATRACE_CALL();
+    SFTRACE_CALL();
     ALOGV("[%d]-BadDesiredPresent", layerId);
 
     std::lock_guard<std::mutex> lock(mMutex);
@@ -660,7 +660,7 @@ void TimeStats::incrementBadDesiredPresent(int32_t layerId) {
 void TimeStats::setDesiredTime(int32_t layerId, uint64_t frameNumber, nsecs_t desiredTime) {
     if (!mEnabled.load()) return;
 
-    ATRACE_CALL();
+    SFTRACE_CALL();
     ALOGV("[%d]-[%" PRIu64 "]-DesiredTime[%" PRId64 "]", layerId, frameNumber, desiredTime);
 
     std::lock_guard<std::mutex> lock(mMutex);
@@ -678,7 +678,7 @@ void TimeStats::setDesiredTime(int32_t layerId, uint64_t frameNumber, nsecs_t de
 void TimeStats::setAcquireTime(int32_t layerId, uint64_t frameNumber, nsecs_t acquireTime) {
     if (!mEnabled.load()) return;
 
-    ATRACE_CALL();
+    SFTRACE_CALL();
     ALOGV("[%d]-[%" PRIu64 "]-AcquireTime[%" PRId64 "]", layerId, frameNumber, acquireTime);
 
     std::lock_guard<std::mutex> lock(mMutex);
@@ -697,7 +697,7 @@ void TimeStats::setAcquireFence(int32_t layerId, uint64_t frameNumber,
                                 const std::shared_ptr<FenceTime>& acquireFence) {
     if (!mEnabled.load()) return;
 
-    ATRACE_CALL();
+    SFTRACE_CALL();
     ALOGV("[%d]-[%" PRIu64 "]-AcquireFenceTime[%" PRId64 "]", layerId, frameNumber,
           acquireFence->getSignalTime());
 
@@ -718,7 +718,7 @@ void TimeStats::setPresentTime(int32_t layerId, uint64_t frameNumber, nsecs_t pr
                                SetFrameRateVote frameRateVote, GameMode gameMode) {
     if (!mEnabled.load()) return;
 
-    ATRACE_CALL();
+    SFTRACE_CALL();
     ALOGV("[%d]-[%" PRIu64 "]-PresentTime[%" PRId64 "]", layerId, frameNumber, presentTime);
 
     std::lock_guard<std::mutex> lock(mMutex);
@@ -744,7 +744,7 @@ void TimeStats::setPresentFence(int32_t layerId, uint64_t frameNumber,
                                 SetFrameRateVote frameRateVote, GameMode gameMode) {
     if (!mEnabled.load()) return;
 
-    ATRACE_CALL();
+    SFTRACE_CALL();
     ALOGV("[%d]-[%" PRIu64 "]-PresentFenceTime[%" PRId64 "]", layerId, frameNumber,
           presentFence->getSignalTime());
 
@@ -805,7 +805,7 @@ static void updateJankPayload(T& t, int32_t reasons) {
 void TimeStats::incrementJankyFrames(const JankyFramesInfo& info) {
     if (!mEnabled.load()) return;
 
-    ATRACE_CALL();
+    SFTRACE_CALL();
     std::lock_guard<std::mutex> lock(mMutex);
 
     // Only update layer stats if we're already tracking the layer in TimeStats.
@@ -861,7 +861,7 @@ void TimeStats::incrementJankyFrames(const JankyFramesInfo& info) {
 }
 
 void TimeStats::onDestroy(int32_t layerId) {
-    ATRACE_CALL();
+    SFTRACE_CALL();
     ALOGV("[%d]-onDestroy", layerId);
     std::lock_guard<std::mutex> lock(mMutex);
     mTimeStatsTracker.erase(layerId);
@@ -870,7 +870,7 @@ void TimeStats::onDestroy(int32_t layerId) {
 void TimeStats::removeTimeRecord(int32_t layerId, uint64_t frameNumber) {
     if (!mEnabled.load()) return;
 
-    ATRACE_CALL();
+    SFTRACE_CALL();
     ALOGV("[%d]-[%" PRIu64 "]-removeTimeRecord", layerId, frameNumber);
 
     std::lock_guard<std::mutex> lock(mMutex);
@@ -935,7 +935,7 @@ void TimeStats::recordRefreshRate(uint32_t fps, nsecs_t duration) {
 }
 
 void TimeStats::flushAvailableGlobalRecordsToStatsLocked() {
-    ATRACE_CALL();
+    SFTRACE_CALL();
 
     while (!mGlobalRecord.presentFences.empty()) {
         const nsecs_t curPresentTime = mGlobalRecord.presentFences.front()->getSignalTime();
@@ -992,7 +992,7 @@ void TimeStats::flushAvailableGlobalRecordsToStatsLocked() {
 void TimeStats::setPresentFenceGlobal(const std::shared_ptr<FenceTime>& presentFence) {
     if (!mEnabled.load()) return;
 
-    ATRACE_CALL();
+    SFTRACE_CALL();
     std::lock_guard<std::mutex> lock(mMutex);
     if (presentFence == nullptr || !presentFence->isValid()) {
         mGlobalRecord.prevPresentTime = 0;
@@ -1022,7 +1022,7 @@ void TimeStats::setPresentFenceGlobal(const std::shared_ptr<FenceTime>& presentF
 void TimeStats::enable() {
     if (mEnabled.load()) return;
 
-    ATRACE_CALL();
+    SFTRACE_CALL();
 
     std::lock_guard<std::mutex> lock(mMutex);
     mEnabled.store(true);
@@ -1034,7 +1034,7 @@ void TimeStats::enable() {
 void TimeStats::disable() {
     if (!mEnabled.load()) return;
 
-    ATRACE_CALL();
+    SFTRACE_CALL();
 
     std::lock_guard<std::mutex> lock(mMutex);
     flushPowerTimeLocked();
@@ -1051,7 +1051,7 @@ void TimeStats::clearAll() {
 }
 
 void TimeStats::clearGlobalLocked() {
-    ATRACE_CALL();
+    SFTRACE_CALL();
 
     mTimeStats.statsStartLegacy = (mEnabled.load() ? static_cast<int64_t>(std::time(0)) : 0);
     mTimeStats.statsEndLegacy = 0;
@@ -1078,7 +1078,7 @@ void TimeStats::clearGlobalLocked() {
 }
 
 void TimeStats::clearLayersLocked() {
-    ATRACE_CALL();
+    SFTRACE_CALL();
 
     mTimeStatsTracker.clear();
 
@@ -1093,7 +1093,7 @@ bool TimeStats::isEnabled() {
 }
 
 void TimeStats::dump(bool asProto, std::optional<uint32_t> maxLayers, std::string& result) {
-    ATRACE_CALL();
+    SFTRACE_CALL();
 
     std::lock_guard<std::mutex> lock(mMutex);
     if (mTimeStats.statsStartLegacy == 0) {

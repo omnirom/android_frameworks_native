@@ -72,6 +72,6 @@ typedef int32_t PixelFormat;
 
 uint32_t bytesPerPixel(PixelFormat format);
 
-}; // namespace android
+} // namespace android
 
 #endif // UI_PIXELFORMAT_H

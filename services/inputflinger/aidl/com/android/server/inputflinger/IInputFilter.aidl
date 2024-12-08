@@ -54,5 +54,7 @@ interface IInputFilter {
 
     /** Notifies when configuration changes */
     void notifyConfigurationChanged(in InputFilterConfiguration config);
+
+    String dumpFilter();
 }
 

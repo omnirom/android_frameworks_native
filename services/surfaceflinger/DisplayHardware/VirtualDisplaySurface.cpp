@@ -22,6 +22,7 @@
 
 #include <cinttypes>
 
+#include <com_android_graphics_libgui_flags.h>
 #include <ftl/enum.h>
 #include <ftl/flags.h>
 #include <gui/BufferItem.h>
@@ -51,7 +52,11 @@ VirtualDisplaySurface::VirtualDisplaySurface(HWComposer& hwc, VirtualDisplayId d
                                              const sp<IGraphicBufferProducer>& bqProducer,
                                              const sp<IGraphicBufferConsumer>& bqConsumer,
                                              const std::string& name, bool secure)
+#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
+      : ConsumerBase(bqProducer, bqConsumer),
+#else
       : ConsumerBase(bqConsumer),
+#endif // COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
         mHwc(hwc),
         mDisplayId(displayId),
         mDisplayName(name),

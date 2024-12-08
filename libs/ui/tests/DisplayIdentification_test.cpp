@@ -194,6 +194,10 @@ TEST(DisplayIdentificationTest, parseEdid) {
     EXPECT_EQ(21, edid->manufactureOrModelYear);
     EXPECT_EQ(0, edid->manufactureWeek);
     EXPECT_FALSE(edid->cea861Block);
+    EXPECT_EQ(1280, edid->preferredDetailedTimingDescriptor->pixelSizeCount.width);
+    EXPECT_EQ(800, edid->preferredDetailedTimingDescriptor->pixelSizeCount.height);
+    EXPECT_EQ(261, edid->preferredDetailedTimingDescriptor->physicalSizeInMm.width);
+    EXPECT_EQ(163, edid->preferredDetailedTimingDescriptor->physicalSizeInMm.height);
 
     edid = parseEdid(getExternalEdid());
     ASSERT_TRUE(edid);
@@ -206,6 +210,10 @@ TEST(DisplayIdentificationTest, parseEdid) {
     EXPECT_EQ(22, edid->manufactureOrModelYear);
     EXPECT_EQ(2, edid->manufactureWeek);
     EXPECT_FALSE(edid->cea861Block);
+    EXPECT_EQ(1280, edid->preferredDetailedTimingDescriptor->pixelSizeCount.width);
+    EXPECT_EQ(800, edid->preferredDetailedTimingDescriptor->pixelSizeCount.height);
+    EXPECT_EQ(641, edid->preferredDetailedTimingDescriptor->physicalSizeInMm.width);
+    EXPECT_EQ(400, edid->preferredDetailedTimingDescriptor->physicalSizeInMm.height);
 
     edid = parseEdid(getExternalEedid());
     ASSERT_TRUE(edid);
@@ -224,6 +232,10 @@ TEST(DisplayIdentificationTest, parseEdid) {
     EXPECT_EQ(0, physicalAddress.b);
     EXPECT_EQ(0, physicalAddress.c);
     EXPECT_EQ(0, physicalAddress.d);
+    EXPECT_EQ(1366, edid->preferredDetailedTimingDescriptor->pixelSizeCount.width);
+    EXPECT_EQ(768, edid->preferredDetailedTimingDescriptor->pixelSizeCount.height);
+    EXPECT_EQ(160, edid->preferredDetailedTimingDescriptor->physicalSizeInMm.width);
+    EXPECT_EQ(90, edid->preferredDetailedTimingDescriptor->physicalSizeInMm.height);
 
     edid = parseEdid(getPanasonicTvEdid());
     ASSERT_TRUE(edid);
@@ -242,6 +254,10 @@ TEST(DisplayIdentificationTest, parseEdid) {
     EXPECT_EQ(0, physicalAddress.b);
     EXPECT_EQ(0, physicalAddress.c);
     EXPECT_EQ(0, physicalAddress.d);
+    EXPECT_EQ(1920, edid->preferredDetailedTimingDescriptor->pixelSizeCount.width);
+    EXPECT_EQ(1080, edid->preferredDetailedTimingDescriptor->pixelSizeCount.height);
+    EXPECT_EQ(698, edid->preferredDetailedTimingDescriptor->physicalSizeInMm.width);
+    EXPECT_EQ(392, edid->preferredDetailedTimingDescriptor->physicalSizeInMm.height);
 
     edid = parseEdid(getHisenseTvEdid());
     ASSERT_TRUE(edid);
@@ -260,6 +276,10 @@ TEST(DisplayIdentificationTest, parseEdid) {
     EXPECT_EQ(2, physicalAddress.b);
     EXPECT_EQ(3, physicalAddress.c);
     EXPECT_EQ(4, physicalAddress.d);
+    EXPECT_EQ(1920, edid->preferredDetailedTimingDescriptor->pixelSizeCount.width);
+    EXPECT_EQ(1080, edid->preferredDetailedTimingDescriptor->pixelSizeCount.height);
+    EXPECT_EQ(575, edid->preferredDetailedTimingDescriptor->physicalSizeInMm.width);
+    EXPECT_EQ(323, edid->preferredDetailedTimingDescriptor->physicalSizeInMm.height);
 
     edid = parseEdid(getCtlDisplayEdid());
     ASSERT_TRUE(edid);
@@ -273,6 +293,10 @@ TEST(DisplayIdentificationTest, parseEdid) {
     EXPECT_EQ(0xff, edid->manufactureWeek);
     ASSERT_TRUE(edid->cea861Block);
     EXPECT_FALSE(edid->cea861Block->hdmiVendorDataBlock);
+    EXPECT_EQ(1360, edid->preferredDetailedTimingDescriptor->pixelSizeCount.width);
+    EXPECT_EQ(768, edid->preferredDetailedTimingDescriptor->pixelSizeCount.height);
+    EXPECT_EQ(521, edid->preferredDetailedTimingDescriptor->physicalSizeInMm.width);
+    EXPECT_EQ(293, edid->preferredDetailedTimingDescriptor->physicalSizeInMm.height);
 }
 
 TEST(DisplayIdentificationTest, parseInvalidEdid) {

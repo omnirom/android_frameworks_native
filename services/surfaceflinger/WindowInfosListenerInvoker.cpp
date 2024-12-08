@@ -17,8 +17,8 @@
 #include <android/gui/BnWindowInfosPublisher.h>
 #include <android/gui/IWindowInfosPublisher.h>
 #include <android/gui/WindowInfosListenerInfo.h>
+#include <common/trace.h>
 #include <gui/ISurfaceComposer.h>
-#include <gui/TraceUtils.h>
 #include <gui/WindowInfosUpdate.h>
 #include <scheduler/Time.h>
 
@@ -42,7 +42,7 @@ void WindowInfosListenerInvoker::addWindowInfosListener(sp<IWindowInfosListener>
 
     BackgroundExecutor::getInstance().sendCallbacks(
             {[this, listener = std::move(listener), listenerId]() {
-                ATRACE_NAME("WindowInfosListenerInvoker::addWindowInfosListener");
+                SFTRACE_NAME("WindowInfosListenerInvoker::addWindowInfosListener");
                 sp<IBinder> asBinder = IInterface::asBinder(listener);
                 asBinder->linkToDeath(sp<DeathRecipient>::fromExisting(this));
                 mWindowInfosListeners.try_emplace(asBinder,
@@ -53,7 +53,7 @@ void WindowInfosListenerInvoker::addWindowInfosListener(sp<IWindowInfosListener>
 void WindowInfosListenerInvoker::removeWindowInfosListener(
         const sp<IWindowInfosListener>& listener) {
     BackgroundExecutor::getInstance().sendCallbacks({[this, listener]() {
-        ATRACE_NAME("WindowInfosListenerInvoker::removeWindowInfosListener");
+        SFTRACE_NAME("WindowInfosListenerInvoker::removeWindowInfosListener");
         sp<IBinder> asBinder = IInterface::asBinder(listener);
         asBinder->unlinkToDeath(sp<DeathRecipient>::fromExisting(this));
         eraseListenerAndAckMessages(asBinder);
@@ -62,7 +62,7 @@ void WindowInfosListenerInvoker::removeWindowInfosListener(
 
 void WindowInfosListenerInvoker::binderDied(const wp<IBinder>& who) {
     BackgroundExecutor::getInstance().sendCallbacks({[this, who]() {
-        ATRACE_NAME("WindowInfosListenerInvoker::binderDied");
+        SFTRACE_NAME("WindowInfosListenerInvoker::binderDied");
         eraseListenerAndAckMessages(who);
     }});
 }
@@ -146,7 +146,7 @@ void WindowInfosListenerInvoker::windowInfosChanged(
 WindowInfosListenerInvoker::DebugInfo WindowInfosListenerInvoker::getDebugInfo() {
     DebugInfo result;
     BackgroundExecutor::getInstance().sendCallbacks({[&, this]() {
-        ATRACE_NAME("WindowInfosListenerInvoker::getDebugInfo");
+        SFTRACE_NAME("WindowInfosListenerInvoker::getDebugInfo");
         updateMaxSendDelay();
         result = mDebugInfo;
         result.pendingMessageCount = mUnackedState.size();
@@ -169,7 +169,7 @@ void WindowInfosListenerInvoker::updateMaxSendDelay() {
 binder::Status WindowInfosListenerInvoker::ackWindowInfosReceived(int64_t vsyncId,
                                                                   int64_t listenerId) {
     BackgroundExecutor::getInstance().sendCallbacks({[this, vsyncId, listenerId]() {
-        ATRACE_NAME("WindowInfosListenerInvoker::ackWindowInfosReceived");
+        SFTRACE_NAME("WindowInfosListenerInvoker::ackWindowInfosReceived");
         auto it = mUnackedState.find(vsyncId);
         if (it == mUnackedState.end()) {
             return;

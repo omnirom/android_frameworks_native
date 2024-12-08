@@ -25,8 +25,8 @@
 
 #include "compat/SkiaBackendTexture.h"
 
+#include <common/trace.h>
 #include <log/log_main.h>
-#include <utils/Trace.h>
 
 namespace android {
 namespace renderengine {
@@ -63,7 +63,7 @@ void AutoBackendTexture::releaseImageProc(SkImages::ReleaseContext releaseContex
 }
 
 sk_sp<SkImage> AutoBackendTexture::makeImage(ui::Dataspace dataspace, SkAlphaType alphaType) {
-    ATRACE_CALL();
+    SFTRACE_CALL();
 
     sk_sp<SkImage> image = mBackendTexture->makeImage(alphaType, dataspace, releaseImageProc, this);
     // The following ref will be counteracted by releaseProc, when SkImage is discarded.
@@ -75,7 +75,7 @@ sk_sp<SkImage> AutoBackendTexture::makeImage(ui::Dataspace dataspace, SkAlphaTyp
 }
 
 sk_sp<SkSurface> AutoBackendTexture::getOrCreateSurface(ui::Dataspace dataspace) {
-    ATRACE_CALL();
+    SFTRACE_CALL();
     LOG_ALWAYS_FATAL_IF(!mBackendTexture->isOutputBuffer(),
                         "You can't generate an SkSurface for a read-only texture");
     if (!mSurface.get() || mDataspace != dataspace) {

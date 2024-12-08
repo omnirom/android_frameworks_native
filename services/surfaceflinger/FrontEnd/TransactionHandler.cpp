@@ -19,9 +19,9 @@
 #define LOG_TAG "SurfaceFlinger"
 #define ATRACE_TAG ATRACE_TAG_GRAPHICS
 
+#include <common/trace.h>
 #include <cutils/trace.h>
 #include <utils/Log.h>
-#include <utils/Trace.h>
 #include "FrontEnd/LayerLog.h"
 
 #include "TransactionHandler.h"
@@ -31,7 +31,7 @@ namespace android::surfaceflinger::frontend {
 void TransactionHandler::queueTransaction(TransactionState&& state) {
     mLocklessTransactionQueue.push(std::move(state));
     mPendingTransactionCount.fetch_add(1);
-    ATRACE_INT("TransactionQueue", static_cast<int>(mPendingTransactionCount.load()));
+    SFTRACE_INT("TransactionQueue", static_cast<int>(mPendingTransactionCount.load()));
 }
 
 void TransactionHandler::collectTransactions() {
@@ -71,7 +71,7 @@ std::vector<TransactionState> TransactionHandler::flushTransactions() {
     applyUnsignaledBufferTransaction(transactions, flushState);
 
     mPendingTransactionCount.fetch_sub(transactions.size());
-    ATRACE_INT("TransactionQueue", static_cast<int>(mPendingTransactionCount.load()));
+    SFTRACE_INT("TransactionQueue", static_cast<int>(mPendingTransactionCount.load()));
     return transactions;
 }
 
@@ -83,7 +83,7 @@ void TransactionHandler::applyUnsignaledBufferTransaction(
 
     // only apply an unsignaled buffer transaction if it's the first one
     if (!transactions.empty()) {
-        ATRACE_NAME("fence unsignaled");
+        SFTRACE_NAME("fence unsignaled");
         return;
     }
 

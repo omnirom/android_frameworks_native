@@ -32,10 +32,23 @@ pub struct StreamConfig {
     pub stride: u32,
 }
 
+impl From<StreamConfig> for HardwareBufferDescription {
+    fn from(config: StreamConfig) -> Self {
+        HardwareBufferDescription::new(
+            config.width,
+            config.height,
+            config.layers,
+            config.format,
+            config.usage,
+            config.stride,
+        )
+    }
+}
+
 impl StreamConfig {
     /// Tries to create a new HardwareBuffer from settings in a [StreamConfig].
     pub fn create_hardware_buffer(&self) -> Option<HardwareBuffer> {
-        HardwareBuffer::new(self.width, self.height, self.layers, self.format, self.usage)
+        HardwareBuffer::new(&(*self).into())
     }
 }
 
@@ -59,9 +72,10 @@ mod test {
         assert!(maybe_buffer.is_some());
 
         let buffer = maybe_buffer.unwrap();
-        assert_eq!(config.width, buffer.width());
-        assert_eq!(config.height, buffer.height());
-        assert_eq!(config.format, buffer.format());
-        assert_eq!(config.usage, buffer.usage());
+        let description = buffer.description();
+        assert_eq!(config.width, description.width());
+        assert_eq!(config.height, description.height());
+        assert_eq!(config.format, description.format());
+        assert_eq!(config.usage, description.usage());
     }
 }

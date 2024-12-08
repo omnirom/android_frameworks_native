@@ -317,19 +317,8 @@ bool KeyCharacterMap::getEvents(int32_t deviceId, const char16_t* chars, size_t 
     return true;
 }
 
-void KeyCharacterMap::addKeyRemapping(int32_t fromKeyCode, int32_t toKeyCode) {
-    if (fromKeyCode == toKeyCode) {
-        mKeyRemapping.erase(fromKeyCode);
-#if DEBUG_MAPPING
-        ALOGD("addKeyRemapping: Cleared remapping forKeyCode=%d ~ Result Successful.", fromKeyCode);
-#endif
-        return;
-    }
-    mKeyRemapping.insert_or_assign(fromKeyCode, toKeyCode);
-#if DEBUG_MAPPING
-    ALOGD("addKeyRemapping: fromKeyCode=%d, toKeyCode=%d ~ Result Successful.", fromKeyCode,
-          toKeyCode);
-#endif
+void KeyCharacterMap::setKeyRemapping(const std::map<int32_t, int32_t>& keyRemapping) {
+    mKeyRemapping = keyRemapping;
 }
 
 status_t KeyCharacterMap::mapKey(int32_t scanCode, int32_t usageCode, int32_t* outKeyCode) const {

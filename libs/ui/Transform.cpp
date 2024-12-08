@@ -110,10 +110,12 @@ const vec3& Transform::operator [] (size_t i) const {
     return mMatrix[i];
 }
 
+// x translate
 float Transform::tx() const {
     return mMatrix[2][0];
 }
 
+// y translate
 float Transform::ty() const {
     return mMatrix[2][1];
 }
@@ -167,11 +169,15 @@ void Transform::set(float tx, float ty) {
     }
 }
 
-void Transform::set(float a, float b, float c, float d) {
+// x and y are the coordinates in the destination (i.e. the screen)
+// s and t are the coordinates in the source (i.e. the texture)
+// d means derivative
+// dsdx means ds/dx derivative of s with respect to x, etc.
+void Transform::set(float dsdx, float dtdy, float dtdx, float dsdy) {
     mat33& M(mMatrix);
-    M[0][0] = a;    M[1][0] = b;
-    M[0][1] = c;    M[1][1] = d;
-    M[0][2] = 0;    M[1][2] = 0;
+    M[0][0] = dsdx;    M[1][0] = dtdy;
+    M[0][1] = dtdx;    M[1][1] = dsdy;
+    M[0][2] = 0;       M[1][2] = 0;
     mType = UNKNOWN_TYPE;
 }
 

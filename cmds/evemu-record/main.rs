@@ -50,8 +50,10 @@ enum TimestampBase {
     /// The first event received from the device.
     FirstEvent,
 
-    /// The time when the system booted.
-    Boot,
+    /// The Unix epoch (00:00:00 UTC on 1st January 1970), so that all timestamps are Unix
+    /// timestamps. This makes the events in the recording easier to match up with those from other
+    /// log sources.
+    Epoch,
 }
 
 fn get_choice(max: u32) -> u32 {
@@ -188,7 +190,7 @@ fn print_events(
         //
         // [0]: https://gitlab.freedesktop.org/libevdev/evemu/-/commit/eba96a4d2be7260b5843e65c4b99c8b06a1f4c9d
         TimestampBase::FirstEvent => event.time - TimeVal::new(0, 1),
-        TimestampBase::Boot => TimeVal::new(0, 0),
+        TimestampBase::Epoch => TimeVal::new(0, 0),
     };
     print_event(output, &event.offset_time_by(start_time))?;
     loop {

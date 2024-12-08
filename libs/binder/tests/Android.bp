@@ -42,10 +42,37 @@ cc_test {
     defaults: ["binder_test_defaults"],
     header_libs: ["libbinder_headers"],
     srcs: ["binderDriverInterfaceTest.cpp"],
+    shared_libs: [
+        "libbinder",
+    ],
     test_suites: [
-        "device-tests",
+        "general-tests",
         "vts",
     ],
+}
+
+cc_test {
+    name: "binderCacheUnitTest",
+    target: {
+        darwin: {
+            enabled: false,
+        },
+    },
+    srcs: [
+        "binderCacheUnitTest.cpp",
+    ],
+    shared_libs: [
+        "liblog",
+        "libbinder",
+        "libcutils",
+        "libutils",
+    ],
+    static_libs: [
+        "libfakeservicemanager",
+    ],
+    defaults: ["libbinder_client_cache_flag"],
+    test_suites: ["general-tests"],
+    require_root: true,
 }
 
 // unit test only, which can run on host and doesn't use /dev/binder
@@ -127,13 +154,14 @@ cc_test {
         "libbase",
         "libbinder",
         "liblog",
+        "libprocessgroup",
         "libutils",
     ],
     static_libs: [
         "libgmock",
     ],
     test_suites: [
-        "device-tests",
+        "general-tests",
         "vts",
     ],
     require_root: true,
@@ -235,6 +263,16 @@ cc_defaults {
         "binder_test_defaults",
     ],
 
+    compile_multilib: "both",
+    multilib: {
+        lib32: {
+            suffix: "32",
+        },
+        lib64: {
+            suffix: "64",
+        },
+    },
+
     static_libs: [
         "libbinder_test_utils",
         "libbinder_tls_static",
@@ -267,7 +305,6 @@ cc_defaults {
     defaults: [
         "binderRpcTest_common_defaults",
     ],
-    compile_multilib: "first",
 
     srcs: [
         "binderRpcTest.cpp",
@@ -692,7 +729,7 @@ cc_test {
         "libutils",
     ],
     test_suites: [
-        "device-tests",
+        "general-tests",
         "vts",
     ],
     require_root: true,
@@ -749,7 +786,7 @@ cc_test {
     ],
 
     test_suites: [
-        "device-tests",
+        "general-tests",
         "vts",
     ],
     require_root: true,
@@ -875,6 +912,7 @@ cc_defaults {
             enabled: false,
         },
     },
+    corpus: ["corpus/*"],
     fuzz_config: {
         cc: [
             "smoreland@google.com",

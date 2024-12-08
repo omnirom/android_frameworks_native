@@ -103,16 +103,12 @@ protected:
         setupAxis(ABS_MT_DISTANCE, /*valid=*/false, /*min=*/0, /*max=*/0, /*resolution=*/0);
         setupAxis(ABS_MT_TOOL_TYPE, /*valid=*/false, /*min=*/0, /*max=*/0, /*resolution=*/0);
 
-        EXPECT_CALL(mMockEventHub, getAbsoluteAxisValue(EVENTHUB_ID, ABS_MT_SLOT, testing::_))
-                .WillRepeatedly([](int32_t eventHubId, int32_t, int32_t* outValue) {
-                    *outValue = 0;
-                    return OK;
-                });
+        EXPECT_CALL(mMockEventHub, getAbsoluteAxisValue(EVENTHUB_ID, ABS_MT_SLOT))
+                .WillRepeatedly(Return(0));
         EXPECT_CALL(mMockEventHub, getMtSlotValues(EVENTHUB_ID, testing::_, testing::_))
                 .WillRepeatedly([]() -> base::Result<std::vector<int32_t>> {
                     return base::ResultError("Axis not supported", NAME_NOT_FOUND);
                 });
-        createDevice();
         mMapper = createInputMapper<TouchpadInputMapper>(*mDeviceContext, mReaderConfiguration);
     }
 };
@@ -174,6 +170,24 @@ TEST_F(TouchpadInputMapperTest, HoverAndLeftButtonPress) {
     args += process(EV_KEY, BTN_TOOL_FINGER, 0);
     args += process(EV_SYN, SYN_REPORT, 0);
     ASSERT_THAT(args, testing::IsEmpty());
+}
+
+TEST_F(TouchpadInputMapperTest, TouchpadHardwareState) {
+    mReaderConfiguration.shouldNotifyTouchpadHardwareState = true;
+    std::list<NotifyArgs> args =
+            mMapper->reconfigure(ARBITRARY_TIME, mReaderConfiguration,
+                                 InputReaderConfiguration::Change::TOUCHPAD_SETTINGS);
+
+    args += process(EV_ABS, ABS_MT_TRACKING_ID, 1);
+    args += process(EV_KEY, BTN_TOUCH, 1);
+    setScanCodeState(KeyState::DOWN, {BTN_TOOL_FINGER});
+    args += process(EV_KEY, BTN_TOOL_FINGER, 1);
+    args += process(EV_ABS, ABS_MT_POSITION_X, 50);
+    args += process(EV_ABS, ABS_MT_POSITION_Y, 50);
+    args += process(EV_ABS, ABS_MT_PRESSURE, 1);
+    args += process(EV_SYN, SYN_REPORT, 0);
+
+    mFakePolicy->assertTouchpadHardwareStateNotified();
 }
 
 } // namespace android

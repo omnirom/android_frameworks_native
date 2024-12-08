@@ -16,9 +16,9 @@
 
 #pragma once
 
-#include <GrDirectContext.h>
 #include <SkImage.h>
 #include <SkSurface.h>
+#include <include/gpu/ganesh/GrDirectContext.h>
 #include <sys/types.h>
 #include <ui/GraphicTypes.h>
 

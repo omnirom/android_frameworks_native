@@ -43,9 +43,6 @@ public:
     InputDispatcherPolicyInterface() = default;
     virtual ~InputDispatcherPolicyInterface() = default;
 
-    /* Notifies the system that a configuration change has occurred. */
-    virtual void notifyConfigurationChanged(nsecs_t when) = 0;
-
     /* Notifies the system that an application does not have a focused window.
      */
     virtual void notifyNoFocusedWindowAnr(

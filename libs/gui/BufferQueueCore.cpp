@@ -96,6 +96,7 @@ BufferQueueCore::BufferQueueCore()
         mLinkedToDeath(),
         mConnectedProducerListener(),
         mBufferReleasedCbEnabled(false),
+        mBufferAttachedCbEnabled(false),
         mSlots(),
         mQueue(),
         mFreeSlots(),

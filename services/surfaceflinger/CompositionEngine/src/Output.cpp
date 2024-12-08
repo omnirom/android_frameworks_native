@@ -17,6 +17,7 @@
 #include <SurfaceFlingerProperties.sysprop.h>
 #include <android-base/stringprintf.h>
 #include <common/FlagManager.h>
+#include <common/trace.h>
 #include <compositionengine/CompositionEngine.h>
 #include <compositionengine/CompositionRefreshArgs.h>
 #include <compositionengine/DisplayColorProfile.h>
@@ -32,7 +33,6 @@
 #include <compositionengine/impl/planner/Planner.h>
 #include <ftl/algorithm.h>
 #include <ftl/future.h>
-#include <gui/TraceUtils.h>
 #include <scheduler/FrameTargeter.h>
 #include <scheduler/Time.h>
 
@@ -54,7 +54,6 @@
 #include <android-base/properties.h>
 #include <ui/DebugUtils.h>
 #include <ui/HdrCapabilities.h>
-#include <utils/Trace.h>
 
 #include "TracedOrdinal.h"
 
@@ -425,7 +424,7 @@ void Output::setReleasedLayers(Output::ReleasedLayers&& layers) {
 
 void Output::prepare(const compositionengine::CompositionRefreshArgs& refreshArgs,
                      LayerFESet& geomSnapshots) {
-    ATRACE_CALL();
+    SFTRACE_CALL();
     ALOGV(__FUNCTION__);
 
     rebuildLayerStacks(refreshArgs, geomSnapshots);
@@ -454,8 +453,8 @@ ftl::Future<std::monostate> Output::present(
                 })
                 .value();
     };
-    ATRACE_FORMAT("%s for %s%s", __func__, mNamePlusId.c_str(),
-                  stringifyExpectedPresentTime().c_str());
+    SFTRACE_FORMAT("%s for %s%s", __func__, mNamePlusId.c_str(),
+                   stringifyExpectedPresentTime().c_str());
     ALOGV(__FUNCTION__);
 
     updateColorProfile(refreshArgs);
@@ -519,7 +518,7 @@ void Output::rebuildLayerStacks(const compositionengine::CompositionRefreshArgs&
     if (!outputState.isEnabled || CC_LIKELY(!refreshArgs.updatingOutputGeometryThisFrame)) {
         return;
     }
-    ATRACE_CALL();
+    SFTRACE_CALL();
     ALOGV(__FUNCTION__);
 
     // Process the layers to determine visibility and coverage
@@ -805,7 +804,7 @@ void Output::setReleasedLayers(const compositionengine::CompositionRefreshArgs&)
 }
 
 void Output::updateCompositionState(const compositionengine::CompositionRefreshArgs& refreshArgs) {
-    ATRACE_CALL();
+    SFTRACE_CALL();
     ALOGV(__FUNCTION__);
 
     if (!getState().isEnabled) {
@@ -832,14 +831,14 @@ void Output::planComposition() {
         return;
     }
 
-    ATRACE_CALL();
+    SFTRACE_CALL();
     ALOGV(__FUNCTION__);
 
     mPlanner->plan(getOutputLayersOrderedByZ());
 }
 
 void Output::writeCompositionState(const compositionengine::CompositionRefreshArgs& refreshArgs) {
-    ATRACE_CALL();
+    SFTRACE_CALL();
     ALOGV(__FUNCTION__);
 
     if (!getState().isEnabled) {
@@ -1095,7 +1094,7 @@ void Output::beginFrame() {
 }
 
 void Output::prepareFrame() {
-    ATRACE_CALL();
+    SFTRACE_CALL();
     ALOGV(__FUNCTION__);
 
     auto& outputState = editState();
@@ -1116,10 +1115,10 @@ void Output::prepareFrame() {
 }
 
 ftl::Future<std::monostate> Output::presentFrameAndReleaseLayersAsync(bool flushEvenWhenDisabled) {
-    return ftl::Future<bool>(std::move(mHwComposerAsyncWorker->send([this, flushEvenWhenDisabled]() {
+    return ftl::Future<bool>(mHwComposerAsyncWorker->send([this, flushEvenWhenDisabled]() {
                presentFrameAndReleaseLayers(flushEvenWhenDisabled);
                return true;
-           })))
+           }))
             .then([](bool) { return std::monostate{}; });
 }
 
@@ -1130,7 +1129,7 @@ std::future<bool> Output::chooseCompositionStrategyAsync(
 }
 
 GpuCompositionResult Output::prepareFrameAsync() {
-    ATRACE_CALL();
+    SFTRACE_CALL();
     ALOGV(__FUNCTION__);
     auto& state = editState();
     const auto& previousChanges = state.previousDeviceRequestedChanges;
@@ -1160,7 +1159,7 @@ GpuCompositionResult Output::prepareFrameAsync() {
     state.strategyPrediction = predictionSucceeded ? CompositionStrategyPredictionState::SUCCESS
                                                    : CompositionStrategyPredictionState::FAIL;
     if (!predictionSucceeded) {
-        ATRACE_NAME("CompositionStrategyPredictionMiss");
+        SFTRACE_NAME("CompositionStrategyPredictionMiss");
         resetCompositionStrategy();
         if (chooseCompositionSuccess) {
             applyCompositionStrategy(changes);
@@ -1169,7 +1168,7 @@ GpuCompositionResult Output::prepareFrameAsync() {
         // Track the dequeued buffer to reuse so we don't need to dequeue another one.
         compositionResult.buffer = buffer;
     } else {
-        ATRACE_NAME("CompositionStrategyPredictionHit");
+        SFTRACE_NAME("CompositionStrategyPredictionHit");
     }
     state.previousDeviceRequestedChanges = std::move(changes);
     state.previousDeviceRequestedSuccess = chooseCompositionSuccess;
@@ -1201,7 +1200,7 @@ void Output::devOptRepaintFlash(const compositionengine::CompositionRefreshArgs&
 }
 
 void Output::finishFrame(GpuCompositionResult&& result) {
-    ATRACE_CALL();
+    SFTRACE_CALL();
     ALOGV(__FUNCTION__);
     const auto& outputState = getState();
     if (!outputState.isEnabled) {
@@ -1290,7 +1289,7 @@ bool Output::dequeueRenderBuffer(base::unique_fd* bufferFence,
 std::optional<base::unique_fd> Output::composeSurfaces(
         const Region& debugRegion, std::shared_ptr<renderengine::ExternalTexture> tex,
         base::unique_fd& fd) {
-    ATRACE_CALL();
+    SFTRACE_CALL();
     ALOGV(__FUNCTION__);
 
     const auto& outputState = getState();
@@ -1331,13 +1330,13 @@ std::optional<base::unique_fd> Output::composeSurfaces(
         if (mClientCompositionRequestCache->exists(tex->getBuffer()->getId(),
                                                    clientCompositionDisplay,
                                                    clientCompositionLayers)) {
-            ATRACE_NAME("ClientCompositionCacheHit");
+            SFTRACE_NAME("ClientCompositionCacheHit");
             outputCompositionState.reusedClientComposition = true;
             setExpensiveRenderingExpected(false);
             // b/239944175 pass the fence associated with the buffer.
             return base::unique_fd(std::move(fd));
         }
-        ATRACE_NAME("ClientCompositionCacheMiss");
+        SFTRACE_NAME("ClientCompositionCacheMiss");
         mClientCompositionRequestCache->add(tex->getBuffer()->getId(), clientCompositionDisplay,
                                             clientCompositionLayers);
     }
@@ -1584,7 +1583,7 @@ bool Output::isPowerHintSessionGpuReportingEnabled() {
 }
 
 void Output::presentFrameAndReleaseLayers(bool flushEvenWhenDisabled) {
-    ATRACE_FORMAT("%s for %s", __func__, mNamePlusId.c_str());
+    SFTRACE_FORMAT("%s for %s", __func__, mNamePlusId.c_str());
     ALOGV(__FUNCTION__);
 
     if (!getState().isEnabled) {

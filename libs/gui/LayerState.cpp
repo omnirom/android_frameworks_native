@@ -17,7 +17,6 @@
 #define LOG_TAG "LayerState"
 
 #include <cinttypes>
-#include <cmath>
 
 #include <android/gui/ISurfaceComposerClient.h>
 #include <android/native_window.h>
@@ -177,6 +176,7 @@ status_t layer_state_t::write(Parcel& output) const
     }
 
     SAFE_PARCEL(output.write, stretchEffect);
+    SAFE_PARCEL(output.writeParcelable, edgeExtensionParameters);
     SAFE_PARCEL(output.write, bufferCrop);
     SAFE_PARCEL(output.write, destinationFrame);
     SAFE_PARCEL(output.writeInt32, static_cast<uint32_t>(trustedOverlay));
@@ -193,6 +193,13 @@ status_t layer_state_t::write(Parcel& output) const
     SAFE_PARCEL(output.writeFloat, currentHdrSdrRatio);
     SAFE_PARCEL(output.writeFloat, desiredHdrSdrRatio);
     SAFE_PARCEL(output.writeInt32, static_cast<int32_t>(cachingHint));
+
+    const bool hasBufferReleaseChannel = (bufferReleaseChannel != nullptr);
+    SAFE_PARCEL(output.writeBool, hasBufferReleaseChannel);
+    if (hasBufferReleaseChannel) {
+        SAFE_PARCEL(output.writeParcelable, *bufferReleaseChannel);
+    }
+
     return NO_ERROR;
 }
 
@@ -306,6 +313,7 @@ status_t layer_state_t::read(const Parcel& input)
     }
 
     SAFE_PARCEL(input.read, stretchEffect);
+    SAFE_PARCEL(input.readParcelable, &edgeExtensionParameters);
     SAFE_PARCEL(input.read, bufferCrop);
     SAFE_PARCEL(input.read, destinationFrame);
     uint32_t trustedOverlayInt;
@@ -336,6 +344,13 @@ status_t layer_state_t::read(const Parcel& input)
     int32_t tmpInt32;
     SAFE_PARCEL(input.readInt32, &tmpInt32);
     cachingHint = static_cast<gui::CachingHint>(tmpInt32);
+
+    bool hasBufferReleaseChannel;
+    SAFE_PARCEL(input.readBool, &hasBufferReleaseChannel);
+    if (hasBufferReleaseChannel) {
+        bufferReleaseChannel = std::make_shared<gui::BufferReleaseChannel::ProducerEndpoint>();
+        SAFE_PARCEL(input.readParcelable, bufferReleaseChannel.get());
+    }
 
     return NO_ERROR;
 }
@@ -682,6 +697,10 @@ void layer_state_t::merge(const layer_state_t& other) {
         what |= eStretchChanged;
         stretchEffect = other.stretchEffect;
     }
+    if (other.what & eEdgeExtensionChanged) {
+        what |= eEdgeExtensionChanged;
+        edgeExtensionParameters = other.edgeExtensionParameters;
+    }
     if (other.what & eBufferCropChanged) {
         what |= eBufferCropChanged;
         bufferCrop = other.bufferCrop;
@@ -711,6 +730,10 @@ void layer_state_t::merge(const layer_state_t& other) {
     }
     if (other.what & eFlushJankData) {
         what |= eFlushJankData;
+    }
+    if (other.what & eBufferReleaseChannelChanged) {
+        what |= eBufferReleaseChannelChanged;
+        bufferReleaseChannel = other.bufferReleaseChannel;
     }
     if ((other.what & what) != other.what) {
         ALOGE("Unmerged SurfaceComposer Transaction properties. LayerState::merge needs updating? "
@@ -783,6 +806,7 @@ uint64_t layer_state_t::diff(const layer_state_t& other) const {
     CHECK_DIFF(diff, eAutoRefreshChanged, other, autoRefresh);
     CHECK_DIFF(diff, eTrustedOverlayChanged, other, trustedOverlay);
     CHECK_DIFF(diff, eStretchChanged, other, stretchEffect);
+    CHECK_DIFF(diff, eEdgeExtensionChanged, other, edgeExtensionParameters);
     CHECK_DIFF(diff, eBufferCropChanged, other, bufferCrop);
     CHECK_DIFF(diff, eDestinationFrameChanged, other, destinationFrame);
     if (other.what & eProducerDisconnect) diff |= eProducerDisconnect;
@@ -790,6 +814,7 @@ uint64_t layer_state_t::diff(const layer_state_t& other) const {
     CHECK_DIFF(diff, eColorChanged, other, color.rgb);
     CHECK_DIFF(diff, eColorSpaceAgnosticChanged, other, colorSpaceAgnostic);
     CHECK_DIFF(diff, eDimmingEnabledChanged, other, dimmingEnabled);
+    if (other.what & eBufferReleaseChannelChanged) diff |= eBufferReleaseChannelChanged;
     return diff;
 }
 
@@ -866,88 +891,6 @@ status_t InputWindowCommands::read(const Parcel& input) {
 }
 
 // ----------------------------------------------------------------------------
-
-namespace gui {
-
-status_t CaptureArgs::writeToParcel(Parcel* output) const {
-    SAFE_PARCEL(output->writeInt32, static_cast<int32_t>(pixelFormat));
-    SAFE_PARCEL(output->write, sourceCrop);
-    SAFE_PARCEL(output->writeFloat, frameScaleX);
-    SAFE_PARCEL(output->writeFloat, frameScaleY);
-    SAFE_PARCEL(output->writeBool, captureSecureLayers);
-    SAFE_PARCEL(output->writeInt32, uid);
-    SAFE_PARCEL(output->writeInt32, static_cast<int32_t>(dataspace));
-    SAFE_PARCEL(output->writeBool, allowProtected);
-    SAFE_PARCEL(output->writeBool, grayscale);
-    SAFE_PARCEL(output->writeInt32, excludeHandles.size());
-    for (auto& excludeHandle : excludeHandles) {
-        SAFE_PARCEL(output->writeStrongBinder, excludeHandle);
-    }
-    SAFE_PARCEL(output->writeBool, hintForSeamlessTransition);
-    return NO_ERROR;
-}
-
-status_t CaptureArgs::readFromParcel(const Parcel* input) {
-    int32_t value = 0;
-    SAFE_PARCEL(input->readInt32, &value);
-    pixelFormat = static_cast<ui::PixelFormat>(value);
-    SAFE_PARCEL(input->read, sourceCrop);
-    SAFE_PARCEL(input->readFloat, &frameScaleX);
-    SAFE_PARCEL(input->readFloat, &frameScaleY);
-    SAFE_PARCEL(input->readBool, &captureSecureLayers);
-    SAFE_PARCEL(input->readInt32, &uid);
-    SAFE_PARCEL(input->readInt32, &value);
-    dataspace = static_cast<ui::Dataspace>(value);
-    SAFE_PARCEL(input->readBool, &allowProtected);
-    SAFE_PARCEL(input->readBool, &grayscale);
-    int32_t numExcludeHandles = 0;
-    SAFE_PARCEL_READ_SIZE(input->readInt32, &numExcludeHandles, input->dataSize());
-    excludeHandles.reserve(numExcludeHandles);
-    for (int i = 0; i < numExcludeHandles; i++) {
-        sp<IBinder> binder;
-        SAFE_PARCEL(input->readStrongBinder, &binder);
-        excludeHandles.emplace(binder);
-    }
-    SAFE_PARCEL(input->readBool, &hintForSeamlessTransition);
-    return NO_ERROR;
-}
-
-status_t DisplayCaptureArgs::writeToParcel(Parcel* output) const {
-    SAFE_PARCEL(CaptureArgs::writeToParcel, output);
-
-    SAFE_PARCEL(output->writeStrongBinder, displayToken);
-    SAFE_PARCEL(output->writeUint32, width);
-    SAFE_PARCEL(output->writeUint32, height);
-    return NO_ERROR;
-}
-
-status_t DisplayCaptureArgs::readFromParcel(const Parcel* input) {
-    SAFE_PARCEL(CaptureArgs::readFromParcel, input);
-
-    SAFE_PARCEL(input->readStrongBinder, &displayToken);
-    SAFE_PARCEL(input->readUint32, &width);
-    SAFE_PARCEL(input->readUint32, &height);
-    return NO_ERROR;
-}
-
-status_t LayerCaptureArgs::writeToParcel(Parcel* output) const {
-    SAFE_PARCEL(CaptureArgs::writeToParcel, output);
-
-    SAFE_PARCEL(output->writeStrongBinder, layerHandle);
-    SAFE_PARCEL(output->writeBool, childrenOnly);
-    return NO_ERROR;
-}
-
-status_t LayerCaptureArgs::readFromParcel(const Parcel* input) {
-    SAFE_PARCEL(CaptureArgs::readFromParcel, input);
-
-    SAFE_PARCEL(input->readStrongBinder, &layerHandle);
-
-    SAFE_PARCEL(input->readBool, &childrenOnly);
-    return NO_ERROR;
-}
-
-}; // namespace gui
 
 ReleaseCallbackId BufferData::generateReleaseCallbackId() const {
     uint64_t bufferId;

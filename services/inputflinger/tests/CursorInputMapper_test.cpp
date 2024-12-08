@@ -17,11 +17,13 @@
 #include "CursorInputMapper.h"
 
 #include <list>
+#include <optional>
 #include <string>
 #include <tuple>
 #include <variant>
 
 #include <android-base/logging.h>
+#include <android_companion_virtualdevice_flags.h>
 #include <com_android_input_flags.h>
 #include <gtest/gtest.h>
 #include <input/DisplayViewport.h>
@@ -92,41 +94,10 @@ DisplayViewport createSecondaryViewport() {
     return v;
 }
 
-/**
- * A fake InputDeviceContext that allows the associated viewport to be specified for the mapper.
- *
- * This is currently necessary because InputMapperUnitTest doesn't register the mappers it creates
- * with the InputDevice object, meaning that InputDevice::isIgnored becomes true, and the input
- * device doesn't set its associated viewport when it's configured.
- *
- * TODO(b/319217713): work out a way to avoid this fake.
- */
-class ViewportFakingInputDeviceContext : public InputDeviceContext {
-public:
-    ViewportFakingInputDeviceContext(InputDevice& device, int32_t eventHubId,
-                                     std::optional<DisplayViewport> viewport)
-          : InputDeviceContext(device, eventHubId), mAssociatedViewport(viewport) {}
-
-    ViewportFakingInputDeviceContext(InputDevice& device, int32_t eventHubId,
-                                     ui::Rotation orientation)
-          : ViewportFakingInputDeviceContext(device, eventHubId,
-                                             createPrimaryViewport(orientation)) {}
-
-    std::optional<DisplayViewport> getAssociatedViewport() const override {
-        return mAssociatedViewport;
-    }
-
-    void setViewport(const std::optional<DisplayViewport>& viewport) {
-        mAssociatedViewport = viewport;
-    }
-
-private:
-    std::optional<DisplayViewport> mAssociatedViewport;
-};
-
 } // namespace
 
 namespace input_flags = com::android::input::flags;
+namespace vd_flags = android::companion::virtualdevice::flags;
 
 /**
  * Unit tests for CursorInputMapper.
@@ -151,13 +122,16 @@ protected:
                 .WillRepeatedly(Return(false));
         EXPECT_CALL(mMockEventHub, hasRelativeAxis(EVENTHUB_ID, REL_HWHEEL))
                 .WillRepeatedly(Return(false));
+        EXPECT_CALL(mMockEventHub, hasRelativeAxis(EVENTHUB_ID, REL_WHEEL_HI_RES))
+                .WillRepeatedly(Return(false));
+        EXPECT_CALL(mMockEventHub, hasRelativeAxis(EVENTHUB_ID, REL_HWHEEL_HI_RES))
+                .WillRepeatedly(Return(false));
 
         mFakePolicy->setDefaultPointerDisplayId(DISPLAY_ID);
         mFakePolicy->addDisplayViewport(createPrimaryViewport(ui::Rotation::Rotation0));
     }
 
     void createMapper() {
-        createDevice();
         mMapper = createInputMapper<CursorInputMapper>(*mDeviceContext, mReaderConfiguration);
     }
 
@@ -194,6 +168,7 @@ class CursorInputMapperUnitTest : public CursorInputMapperUnitTestBase {
 protected:
     void SetUp() override {
         input_flags::enable_new_mouse_pointer_ballistics(false);
+        vd_flags::high_resolution_scroll(false);
         CursorInputMapperUnitTestBase::SetUp();
     }
 };
@@ -535,9 +510,9 @@ TEST_F(CursorInputMapperUnitTest, ProcessShouldNotRotateMotionsWhenOrientationAw
     // need to be rotated.
     mPropertyMap.addProperty("cursor.mode", "navigation");
     mPropertyMap.addProperty("cursor.orientationAware", "1");
-    createDevice();
-    ViewportFakingInputDeviceContext deviceContext(*mDevice, EVENTHUB_ID, ui::Rotation::Rotation90);
-    mMapper = createInputMapper<CursorInputMapper>(deviceContext, mReaderConfiguration);
+    EXPECT_CALL((*mDevice), getAssociatedViewport)
+            .WillRepeatedly(Return(createPrimaryViewport(ui::Rotation::Rotation90)));
+    mMapper = createInputMapper<CursorInputMapper>(*mDeviceContext, mReaderConfiguration);
 
     ASSERT_NO_FATAL_FAILURE(testMotionRotation( 0,  1,  0,  1));
     ASSERT_NO_FATAL_FAILURE(testMotionRotation( 1,  1,  1,  1));
@@ -553,9 +528,9 @@ TEST_F(CursorInputMapperUnitTest, ProcessShouldRotateMotionsWhenNotOrientationAw
     // Since InputReader works in the un-rotated coordinate space, only devices that are not
     // orientation-aware are affected by display rotation.
     mPropertyMap.addProperty("cursor.mode", "navigation");
-    createDevice();
-    ViewportFakingInputDeviceContext deviceContext(*mDevice, EVENTHUB_ID, ui::Rotation::Rotation0);
-    mMapper = createInputMapper<CursorInputMapper>(deviceContext, mReaderConfiguration);
+    EXPECT_CALL((*mDevice), getAssociatedViewport)
+            .WillRepeatedly(Return(createPrimaryViewport(ui::Rotation::Rotation0)));
+    mMapper = createInputMapper<CursorInputMapper>(*mDeviceContext, mReaderConfiguration);
 
     ASSERT_NO_FATAL_FAILURE(testMotionRotation( 0,  1,  0,  1));
     ASSERT_NO_FATAL_FAILURE(testMotionRotation( 1,  1,  1,  1));
@@ -566,7 +541,8 @@ TEST_F(CursorInputMapperUnitTest, ProcessShouldRotateMotionsWhenNotOrientationAw
     ASSERT_NO_FATAL_FAILURE(testMotionRotation(-1,  0, -1,  0));
     ASSERT_NO_FATAL_FAILURE(testMotionRotation(-1,  1, -1,  1));
 
-    deviceContext.setViewport(createPrimaryViewport(ui::Rotation::Rotation90));
+    EXPECT_CALL((*mDevice), getAssociatedViewport)
+            .WillRepeatedly(Return(createPrimaryViewport(ui::Rotation::Rotation90)));
     std::list<NotifyArgs> args =
             mMapper->reconfigure(ARBITRARY_TIME, mReaderConfiguration,
                                  InputReaderConfiguration::Change::DISPLAY_INFO);
@@ -579,7 +555,8 @@ TEST_F(CursorInputMapperUnitTest, ProcessShouldRotateMotionsWhenNotOrientationAw
     ASSERT_NO_FATAL_FAILURE(testMotionRotation(-1,  0,  0, -1));
     ASSERT_NO_FATAL_FAILURE(testMotionRotation(-1,  1, -1, -1));
 
-    deviceContext.setViewport(createPrimaryViewport(ui::Rotation::Rotation180));
+    EXPECT_CALL((*mDevice), getAssociatedViewport)
+            .WillRepeatedly(Return(createPrimaryViewport(ui::Rotation::Rotation180)));
     args = mMapper->reconfigure(ARBITRARY_TIME, mReaderConfiguration,
                                 InputReaderConfiguration::Change::DISPLAY_INFO);
     ASSERT_NO_FATAL_FAILURE(testMotionRotation( 0,  1,  0, -1));
@@ -591,7 +568,8 @@ TEST_F(CursorInputMapperUnitTest, ProcessShouldRotateMotionsWhenNotOrientationAw
     ASSERT_NO_FATAL_FAILURE(testMotionRotation(-1,  0,  1,  0));
     ASSERT_NO_FATAL_FAILURE(testMotionRotation(-1,  1,  1, -1));
 
-    deviceContext.setViewport(createPrimaryViewport(ui::Rotation::Rotation270));
+    EXPECT_CALL((*mDevice), getAssociatedViewport)
+            .WillRepeatedly(Return(createPrimaryViewport(ui::Rotation::Rotation270)));
     args = mMapper->reconfigure(ARBITRARY_TIME, mReaderConfiguration,
                                 InputReaderConfiguration::Change::DISPLAY_INFO);
     ASSERT_NO_FATAL_FAILURE(testMotionRotation( 0,  1,  1,  0));
@@ -645,9 +623,8 @@ TEST_F(CursorInputMapperUnitTest, ConfigureDisplayIdWithAssociatedViewport) {
     mReaderConfiguration.setDisplayViewports({primaryViewport, secondaryViewport});
     // Set up the secondary display as the display on which the pointer should be shown.
     // The InputDevice is not associated with any display.
-    createDevice();
-    ViewportFakingInputDeviceContext deviceContext(*mDevice, EVENTHUB_ID, secondaryViewport);
-    mMapper = createInputMapper<CursorInputMapper>(deviceContext, mReaderConfiguration);
+    EXPECT_CALL((*mDevice), getAssociatedViewport).WillRepeatedly(Return(secondaryViewport));
+    mMapper = createInputMapper<CursorInputMapper>(*mDeviceContext, mReaderConfiguration);
 
     std::list<NotifyArgs> args;
     // Ensure input events are generated for the secondary display.
@@ -666,10 +643,9 @@ TEST_F(CursorInputMapperUnitTest,
     DisplayViewport secondaryViewport = createSecondaryViewport();
     mReaderConfiguration.setDisplayViewports({primaryViewport, secondaryViewport});
     // Set up the primary display as the display on which the pointer should be shown.
-    createDevice();
     // Associate the InputDevice with the secondary display.
-    ViewportFakingInputDeviceContext deviceContext(*mDevice, EVENTHUB_ID, secondaryViewport);
-    mMapper = createInputMapper<CursorInputMapper>(deviceContext, mReaderConfiguration);
+    EXPECT_CALL((*mDevice), getAssociatedViewport).WillRepeatedly(Return(secondaryViewport));
+    mMapper = createInputMapper<CursorInputMapper>(*mDeviceContext, mReaderConfiguration);
 
     // With PointerChoreographer enabled, there could be a PointerController for the associated
     // display even if it is different from the pointer display. So the mapper should generate an
@@ -840,6 +816,72 @@ TEST_F(CursorInputMapperUnitTest, ProcessWhenModeIsPointerShouldKeepZeroCoords) 
                               WithOrientation(0.0f), WithDistance(0.0f)))));
 }
 
+TEST_F(CursorInputMapperUnitTest, ProcessRegularScroll) {
+    createMapper();
+
+    std::list<NotifyArgs> args;
+    args += process(ARBITRARY_TIME, EV_REL, REL_WHEEL, 1);
+    args += process(ARBITRARY_TIME, EV_REL, REL_HWHEEL, 1);
+    args += process(ARBITRARY_TIME, EV_SYN, SYN_REPORT, 0);
+
+    EXPECT_THAT(args,
+                ElementsAre(VariantWith<NotifyMotionArgs>(
+                                    AllOf(WithSource(AINPUT_SOURCE_MOUSE),
+                                          WithMotionAction(AMOTION_EVENT_ACTION_HOVER_MOVE))),
+                            VariantWith<NotifyMotionArgs>(
+                                    AllOf(WithSource(AINPUT_SOURCE_MOUSE),
+                                          WithMotionAction(AMOTION_EVENT_ACTION_SCROLL),
+                                          WithScroll(1.0f, 1.0f)))));
+}
+
+TEST_F(CursorInputMapperUnitTest, ProcessHighResScroll) {
+    vd_flags::high_resolution_scroll(true);
+    EXPECT_CALL(mMockEventHub, hasRelativeAxis(EVENTHUB_ID, REL_WHEEL_HI_RES))
+            .WillRepeatedly(Return(true));
+    EXPECT_CALL(mMockEventHub, hasRelativeAxis(EVENTHUB_ID, REL_HWHEEL_HI_RES))
+            .WillRepeatedly(Return(true));
+    createMapper();
+
+    std::list<NotifyArgs> args;
+    args += process(ARBITRARY_TIME, EV_REL, REL_WHEEL_HI_RES, 60);
+    args += process(ARBITRARY_TIME, EV_REL, REL_HWHEEL_HI_RES, 60);
+    args += process(ARBITRARY_TIME, EV_SYN, SYN_REPORT, 0);
+
+    EXPECT_THAT(args,
+                ElementsAre(VariantWith<NotifyMotionArgs>(
+                                    AllOf(WithSource(AINPUT_SOURCE_MOUSE),
+                                          WithMotionAction(AMOTION_EVENT_ACTION_HOVER_MOVE))),
+                            VariantWith<NotifyMotionArgs>(
+                                    AllOf(WithSource(AINPUT_SOURCE_MOUSE),
+                                          WithMotionAction(AMOTION_EVENT_ACTION_SCROLL),
+                                          WithScroll(0.5f, 0.5f)))));
+}
+
+TEST_F(CursorInputMapperUnitTest, HighResScrollIgnoresRegularScroll) {
+    vd_flags::high_resolution_scroll(true);
+    EXPECT_CALL(mMockEventHub, hasRelativeAxis(EVENTHUB_ID, REL_WHEEL_HI_RES))
+            .WillRepeatedly(Return(true));
+    EXPECT_CALL(mMockEventHub, hasRelativeAxis(EVENTHUB_ID, REL_HWHEEL_HI_RES))
+            .WillRepeatedly(Return(true));
+    createMapper();
+
+    std::list<NotifyArgs> args;
+    args += process(ARBITRARY_TIME, EV_REL, REL_WHEEL_HI_RES, 60);
+    args += process(ARBITRARY_TIME, EV_REL, REL_HWHEEL_HI_RES, 60);
+    args += process(ARBITRARY_TIME, EV_REL, REL_WHEEL, 1);
+    args += process(ARBITRARY_TIME, EV_REL, REL_HWHEEL, 1);
+    args += process(ARBITRARY_TIME, EV_SYN, SYN_REPORT, 0);
+
+    EXPECT_THAT(args,
+                ElementsAre(VariantWith<NotifyMotionArgs>(
+                                    AllOf(WithSource(AINPUT_SOURCE_MOUSE),
+                                          WithMotionAction(AMOTION_EVENT_ACTION_HOVER_MOVE))),
+                            VariantWith<NotifyMotionArgs>(
+                                    AllOf(WithSource(AINPUT_SOURCE_MOUSE),
+                                          WithMotionAction(AMOTION_EVENT_ACTION_SCROLL),
+                                          WithScroll(0.5f, 0.5f)))));
+}
+
 /**
  * When Pointer Capture is enabled, we expect to report unprocessed relative movements, so any
  * pointer acceleration or speed processing should not be applied.
@@ -959,9 +1001,8 @@ TEST_F(CursorInputMapperUnitTestWithNewBallistics, ConfigureAccelerationWithAsso
     mPropertyMap.addProperty("cursor.mode", "pointer");
     DisplayViewport primaryViewport = createPrimaryViewport(ui::Rotation::Rotation0);
     mReaderConfiguration.setDisplayViewports({primaryViewport});
-    createDevice();
-    ViewportFakingInputDeviceContext deviceContext(*mDevice, EVENTHUB_ID, primaryViewport);
-    mMapper = createInputMapper<CursorInputMapper>(deviceContext, mReaderConfiguration);
+    EXPECT_CALL((*mDevice), getAssociatedViewport).WillRepeatedly(Return(primaryViewport));
+    mMapper = createInputMapper<CursorInputMapper>(*mDeviceContext, mReaderConfiguration);
 
     std::list<NotifyArgs> args;
 
@@ -997,12 +1038,10 @@ TEST_F(CursorInputMapperUnitTestWithNewBallistics, ConfigureAccelerationOnDispla
     mReaderConfiguration.setDisplayViewports({primaryViewport});
     // Disable acceleration for the display.
     mReaderConfiguration.displaysWithMousePointerAccelerationDisabled.emplace(DISPLAY_ID);
-    createDevice();
 
     // Don't associate the device with the display yet.
-    ViewportFakingInputDeviceContext deviceContext(*mDevice, EVENTHUB_ID,
-                                                   /*viewport=*/std::nullopt);
-    mMapper = createInputMapper<CursorInputMapper>(deviceContext, mReaderConfiguration);
+    EXPECT_CALL((*mDevice), getAssociatedViewport).WillRepeatedly(Return(std::nullopt));
+    mMapper = createInputMapper<CursorInputMapper>(*mDeviceContext, mReaderConfiguration);
 
     std::list<NotifyArgs> args;
 
@@ -1016,7 +1055,7 @@ TEST_F(CursorInputMapperUnitTestWithNewBallistics, ConfigureAccelerationOnDispla
     ASSERT_GT(coords.getAxisValue(AMOTION_EVENT_AXIS_RELATIVE_Y), 20.f);
 
     // Now associate the device with the display, and verify that acceleration is disabled.
-    deviceContext.setViewport(primaryViewport);
+    EXPECT_CALL((*mDevice), getAssociatedViewport).WillRepeatedly(Return(primaryViewport));
     args += mMapper->reconfigure(ARBITRARY_TIME, mReaderConfiguration,
                                  InputReaderConfiguration::Change::DISPLAY_INFO);
     args.clear();
@@ -1028,6 +1067,72 @@ TEST_F(CursorInputMapperUnitTestWithNewBallistics, ConfigureAccelerationOnDispla
                 ElementsAre(VariantWith<NotifyMotionArgs>(
                         AllOf(WithMotionAction(HOVER_MOVE), WithDisplayId(DISPLAY_ID),
                               WithRelativeMotion(10, 20)))));
+}
+
+TEST_F(CursorInputMapperUnitTestWithNewBallistics, ProcessRegularScroll) {
+    createMapper();
+
+    std::list<NotifyArgs> args;
+    args += process(ARBITRARY_TIME, EV_REL, REL_WHEEL, 1);
+    args += process(ARBITRARY_TIME, EV_REL, REL_HWHEEL, 1);
+    args += process(ARBITRARY_TIME, EV_SYN, SYN_REPORT, 0);
+
+    EXPECT_THAT(args,
+                ElementsAre(VariantWith<NotifyMotionArgs>(
+                                    AllOf(WithSource(AINPUT_SOURCE_MOUSE),
+                                          WithMotionAction(AMOTION_EVENT_ACTION_HOVER_MOVE))),
+                            VariantWith<NotifyMotionArgs>(
+                                    AllOf(WithSource(AINPUT_SOURCE_MOUSE),
+                                          WithMotionAction(AMOTION_EVENT_ACTION_SCROLL),
+                                          WithScroll(1.0f, 1.0f)))));
+}
+
+TEST_F(CursorInputMapperUnitTestWithNewBallistics, ProcessHighResScroll) {
+    vd_flags::high_resolution_scroll(true);
+    EXPECT_CALL(mMockEventHub, hasRelativeAxis(EVENTHUB_ID, REL_WHEEL_HI_RES))
+            .WillRepeatedly(Return(true));
+    EXPECT_CALL(mMockEventHub, hasRelativeAxis(EVENTHUB_ID, REL_HWHEEL_HI_RES))
+            .WillRepeatedly(Return(true));
+    createMapper();
+
+    std::list<NotifyArgs> args;
+    args += process(ARBITRARY_TIME, EV_REL, REL_WHEEL_HI_RES, 60);
+    args += process(ARBITRARY_TIME, EV_REL, REL_HWHEEL_HI_RES, 60);
+    args += process(ARBITRARY_TIME, EV_SYN, SYN_REPORT, 0);
+
+    EXPECT_THAT(args,
+                ElementsAre(VariantWith<NotifyMotionArgs>(
+                                    AllOf(WithSource(AINPUT_SOURCE_MOUSE),
+                                          WithMotionAction(AMOTION_EVENT_ACTION_HOVER_MOVE))),
+                            VariantWith<NotifyMotionArgs>(
+                                    AllOf(WithSource(AINPUT_SOURCE_MOUSE),
+                                          WithMotionAction(AMOTION_EVENT_ACTION_SCROLL),
+                                          WithScroll(0.5f, 0.5f)))));
+}
+
+TEST_F(CursorInputMapperUnitTestWithNewBallistics, HighResScrollIgnoresRegularScroll) {
+    vd_flags::high_resolution_scroll(true);
+    EXPECT_CALL(mMockEventHub, hasRelativeAxis(EVENTHUB_ID, REL_WHEEL_HI_RES))
+            .WillRepeatedly(Return(true));
+    EXPECT_CALL(mMockEventHub, hasRelativeAxis(EVENTHUB_ID, REL_HWHEEL_HI_RES))
+            .WillRepeatedly(Return(true));
+    createMapper();
+
+    std::list<NotifyArgs> args;
+    args += process(ARBITRARY_TIME, EV_REL, REL_WHEEL_HI_RES, 60);
+    args += process(ARBITRARY_TIME, EV_REL, REL_HWHEEL_HI_RES, 60);
+    args += process(ARBITRARY_TIME, EV_REL, REL_WHEEL, 1);
+    args += process(ARBITRARY_TIME, EV_REL, REL_HWHEEL, 1);
+    args += process(ARBITRARY_TIME, EV_SYN, SYN_REPORT, 0);
+
+    EXPECT_THAT(args,
+                ElementsAre(VariantWith<NotifyMotionArgs>(
+                                    AllOf(WithSource(AINPUT_SOURCE_MOUSE),
+                                          WithMotionAction(AMOTION_EVENT_ACTION_HOVER_MOVE))),
+                            VariantWith<NotifyMotionArgs>(
+                                    AllOf(WithSource(AINPUT_SOURCE_MOUSE),
+                                          WithMotionAction(AMOTION_EVENT_ACTION_SCROLL),
+                                          WithScroll(0.5f, 0.5f)))));
 }
 
 namespace {

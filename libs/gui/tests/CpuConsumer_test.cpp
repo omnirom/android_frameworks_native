@@ -66,13 +66,10 @@ protected:
                 test_info->name(),
                 params.width, params.height,
                 params.maxLockedBuffers, params.format);
-        sp<IGraphicBufferProducer> producer;
-        sp<IGraphicBufferConsumer> consumer;
-        BufferQueue::createBufferQueue(&producer, &consumer);
-        mCC = new CpuConsumer(consumer, params.maxLockedBuffers);
+        mCC = new CpuConsumer(params.maxLockedBuffers);
         String8 name("CpuConsumer_Under_Test");
         mCC->setName(name);
-        mSTC = new Surface(producer);
+        mSTC = mCC->getSurface();
         mANW = mSTC;
     }
 

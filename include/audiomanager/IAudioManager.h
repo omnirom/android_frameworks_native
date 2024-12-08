@@ -27,7 +27,7 @@
 namespace android {
 
 // ----------------------------------------------------------------------------
-
+// TODO(b/309532236) replace this class with AIDL generated parcelable
 class IAudioManager : public IInterface
 {
 public:
@@ -43,6 +43,7 @@ public:
         RELEASE_RECORDER                      = IBinder::FIRST_CALL_TRANSACTION + 6,
         PLAYER_SESSION_ID                     = IBinder::FIRST_CALL_TRANSACTION + 7,
         PORT_EVENT                            = IBinder::FIRST_CALL_TRANSACTION + 8,
+        PERMISSION_UPDATE_BARRIER             = IBinder::FIRST_CALL_TRANSACTION + 9,
     };
 
     DECLARE_META_INTERFACE(AudioManager)
@@ -63,6 +64,7 @@ public:
     /*oneway*/ virtual status_t playerSessionId(audio_unique_id_t piid, audio_session_t sessionId) = 0;
     /*oneway*/ virtual status_t portEvent(audio_port_handle_t portId, player_state_t event,
                 const std::unique_ptr<os::PersistableBundle>& extras) = 0;
+    virtual status_t permissionUpdateBarrier() = 0;
 };
 
 // ----------------------------------------------------------------------------

@@ -18,6 +18,7 @@
 
 #include <android/gui/CachingHint.h>
 #include <android/gui/DisplayBrightness.h>
+#include <android/gui/DisplayCaptureArgs.h>
 #include <android/gui/FrameTimelineInfo.h>
 #include <android/gui/IDisplayEventConnection.h>
 #include <android/gui/IFpsListener.h>
@@ -27,6 +28,7 @@
 #include <android/gui/ITunnelModeEnabledListener.h>
 #include <android/gui/IWindowInfosListener.h>
 #include <android/gui/IWindowInfosPublisher.h>
+#include <android/gui/LayerCaptureArgs.h>
 #include <binder/IBinder.h>
 #include <binder/IInterface.h>
 #include <gui/ITransactionCompletedListener.h>
@@ -69,13 +71,6 @@ using gui::IDisplayEventConnection;
 using gui::IRegionSamplingListener;
 using gui::IScreenCaptureListener;
 using gui::SpHash;
-
-namespace gui {
-
-struct DisplayCaptureArgs;
-struct LayerCaptureArgs;
-
-} // namespace gui
 
 namespace ui {
 

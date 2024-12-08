@@ -25,9 +25,6 @@
 
 namespace android {
 
-class CursorButtonAccumulator;
-class CursorScrollAccumulator;
-
 /* Keeps track of cursor movements. */
 class CursorMotionAccumulator {
 public:

@@ -21,8 +21,8 @@
 #include <functional>
 #include <string>
 
+#include <common/trace.h>
 #include <cutils/compiler.h>
-#include <utils/Trace.h>
 
 namespace android {
 
@@ -79,7 +79,7 @@ public:
 
 private:
     void trace() {
-        if (CC_LIKELY(!ATRACE_ENABLED())) {
+        if (CC_LIKELY(!SFTRACE_ENABLED())) {
             return;
         }
 
@@ -88,13 +88,13 @@ private:
         }
 
         if (!signbit(mData)) {
-            ATRACE_INT64(mName.c_str(), to_int64(mData));
+            SFTRACE_INT64(mName.c_str(), to_int64(mData));
             if (mHasGoneNegative) {
-                ATRACE_INT64(mNameNegative.c_str(), 0);
+                SFTRACE_INT64(mNameNegative.c_str(), 0);
             }
         } else {
-            ATRACE_INT64(mNameNegative.c_str(), -to_int64(mData));
-            ATRACE_INT64(mName.c_str(), 0);
+            SFTRACE_INT64(mNameNegative.c_str(), -to_int64(mData));
+            SFTRACE_INT64(mName.c_str(), 0);
         }
     }
 

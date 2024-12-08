@@ -234,7 +234,7 @@ class SmallVector final : details::ArrayTraits<T>, details::ArrayComparators<Sma
   }
 
   // Extracts the elements as std::vector.
-  std::vector<T> promote() && {
+  std::vector<std::remove_const_t<T>> promote() && {
     if (dynamic()) {
       return std::get<Dynamic>(std::move(vector_)).promote();
     } else {
@@ -290,11 +290,11 @@ template <typename T>
 class SmallVector<T, 0> final : details::ArrayTraits<T>,
                                 details::ArrayComparators<SmallVector>,
                                 details::ArrayIterators<SmallVector<T, 0>, T>,
-                                std::vector<T> {
+                                std::vector<std::remove_const_t<T>> {
   using details::ArrayTraits<T>::replace_at;
 
   using Iter = details::ArrayIterators<SmallVector, T>;
-  using Impl = std::vector<T>;
+  using Impl = std::vector<std::remove_const_t<T>>;
 
   friend Iter;
 
@@ -394,12 +394,12 @@ class SmallVector<T, 0> final : details::ArrayTraits<T>,
     pop_back();
   }
 
-  std::vector<T> promote() && { return std::move(*this); }
+  std::vector<std::remove_const_t<T>> promote() && { return std::move(*this); }
 
  private:
   template <typename U, std::size_t M>
   static Impl convert(SmallVector<U, M>&& other) {
-    if constexpr (std::is_constructible_v<Impl, std::vector<U>&&>) {
+    if constexpr (std::is_constructible_v<Impl, std::vector<std::remove_const_t<U>>&&>) {
       return std::move(other).promote();
     } else {
       SmallVector vector(other.size());

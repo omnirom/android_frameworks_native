@@ -16,17 +16,22 @@
 
 //! The rust component of libinput.
 
+mod data_store;
 mod input;
 mod input_verifier;
+mod keyboard_classification_config;
 mod keyboard_classifier;
 
+pub use data_store::{DataStore, DefaultFileReaderWriter};
 pub use input::{
-    DeviceClass, DeviceId, InputDevice, ModifierState, MotionAction, MotionFlags, Source,
+    DeviceClass, DeviceId, InputDevice, KeyboardType, ModifierState, MotionAction, MotionFlags,
+    Source,
 };
 pub use input_verifier::InputVerifier;
 pub use keyboard_classifier::KeyboardClassifier;
 
 #[cxx::bridge(namespace = "android::input")]
+#[allow(clippy::needless_maybe_sized)]
 #[allow(unsafe_op_in_unsafe_fn)]
 mod ffi {
     #[namespace = "android"]
@@ -148,7 +153,14 @@ fn reset_device(verifier: &mut InputVerifier, device_id: i32) {
 }
 
 fn create_keyboard_classifier() -> Box<KeyboardClassifier> {
-    Box::new(KeyboardClassifier::new())
+    // Future design: Make this data store singleton by passing it to C++ side and making it global
+    // and pass by reference to components that need to store persistent data.
+    //
+    // Currently only used by rust keyboard classifier so keeping it here.
+    let data_store = DataStore::new(Box::new(DefaultFileReaderWriter::new(
+        "/data/system/inputflinger-data.json".to_string(),
+    )));
+    Box::new(KeyboardClassifier::new(data_store))
 }
 
 fn notify_keyboard_changed(

@@ -25,14 +25,13 @@
 // Include llndk-versioning.h only for vendor build as it is not available for NDK headers.
 #if defined(__ANDROID_VENDOR__)
 #include <android/llndk-versioning.h>
-#else  // __ANDROID_VENDOR__
-#if defined(API_LEVEL_AT_LEAST)
-// Redefine API_LEVEL_AT_LEAST here to replace the version to __ANDROID_API_FUTURE__ as a workaround
-#undef API_LEVEL_AT_LEAST
-#endif
-// TODO(b/322384429) switch this __ANDROID_API_FUTURE__ to sdk_api_level when V is finalized
+#elif !defined(API_LEVEL_AT_LEAST)
+#if defined(__BIONIC__)
 #define API_LEVEL_AT_LEAST(sdk_api_level, vendor_api_level) \
-    (__builtin_available(android __ANDROID_API_FUTURE__, *))
+    (__builtin_available(android sdk_api_level, *))
+#else
+#define API_LEVEL_AT_LEAST(sdk_api_level, vendor_api_level) (true)
+#endif  // __BIONIC__
 #endif  // __ANDROID_VENDOR__
 
 namespace aidl::android::os {
@@ -267,7 +266,7 @@ class PersistableBundle {
         }
     }
 
-    bool getBoolean(const std::string& key, bool* _Nonnull val) {
+    bool getBoolean(const std::string& key, bool* _Nonnull val) const {
         if API_LEVEL_AT_LEAST(__ANDROID_API_V__, 202404) {
             return APersistableBundle_getBoolean(mPBundle, key.c_str(), val);
         } else {
@@ -275,7 +274,7 @@ class PersistableBundle {
         }
     }
 
-    bool getInt(const std::string& key, int32_t* _Nonnull val) {
+    bool getInt(const std::string& key, int32_t* _Nonnull val) const {
         if API_LEVEL_AT_LEAST(__ANDROID_API_V__, 202404) {
             return APersistableBundle_getInt(mPBundle, key.c_str(), val);
         } else {
@@ -283,7 +282,7 @@ class PersistableBundle {
         }
     }
 
-    bool getLong(const std::string& key, int64_t* _Nonnull val) {
+    bool getLong(const std::string& key, int64_t* _Nonnull val) const {
         if API_LEVEL_AT_LEAST(__ANDROID_API_V__, 202404) {
             return APersistableBundle_getLong(mPBundle, key.c_str(), val);
         } else {
@@ -291,7 +290,7 @@ class PersistableBundle {
         }
     }
 
-    bool getDouble(const std::string& key, double* _Nonnull val) {
+    bool getDouble(const std::string& key, double* _Nonnull val) const {
         if API_LEVEL_AT_LEAST(__ANDROID_API_V__, 202404) {
             return APersistableBundle_getDouble(mPBundle, key.c_str(), val);
         } else {
@@ -303,7 +302,7 @@ class PersistableBundle {
         return (char*)malloc(bufferSizeBytes);
     }
 
-    bool getString(const std::string& key, std::string* _Nonnull val) {
+    bool getString(const std::string& key, std::string* _Nonnull val) const {
         if API_LEVEL_AT_LEAST(__ANDROID_API_V__, 202404) {
             char* outString = nullptr;
             bool ret = APersistableBundle_getString(mPBundle, key.c_str(), &outString,
@@ -321,7 +320,7 @@ class PersistableBundle {
     bool getVecInternal(int32_t (*_Nonnull getVec)(const APersistableBundle* _Nonnull,
                                                    const char* _Nonnull, T* _Nullable, int32_t),
                         const APersistableBundle* _Nonnull pBundle, const char* _Nonnull key,
-                        std::vector<T>* _Nonnull vec) {
+                        std::vector<T>* _Nonnull vec) const {
         if API_LEVEL_AT_LEAST(__ANDROID_API_V__, 202404) {
             int32_t bytes = 0;
             // call first with nullptr to get required size in bytes
@@ -343,28 +342,28 @@ class PersistableBundle {
         return false;
     }
 
-    bool getBooleanVector(const std::string& key, std::vector<bool>* _Nonnull vec) {
+    bool getBooleanVector(const std::string& key, std::vector<bool>* _Nonnull vec) const {
         if API_LEVEL_AT_LEAST(__ANDROID_API_V__, 202404) {
             return getVecInternal<bool>(&APersistableBundle_getBooleanVector, mPBundle, key.c_str(),
                                         vec);
         }
         return false;
     }
-    bool getIntVector(const std::string& key, std::vector<int32_t>* _Nonnull vec) {
+    bool getIntVector(const std::string& key, std::vector<int32_t>* _Nonnull vec) const {
         if API_LEVEL_AT_LEAST(__ANDROID_API_V__, 202404) {
             return getVecInternal<int32_t>(&APersistableBundle_getIntVector, mPBundle, key.c_str(),
                                            vec);
         }
         return false;
     }
-    bool getLongVector(const std::string& key, std::vector<int64_t>* _Nonnull vec) {
+    bool getLongVector(const std::string& key, std::vector<int64_t>* _Nonnull vec) const {
         if API_LEVEL_AT_LEAST(__ANDROID_API_V__, 202404) {
             return getVecInternal<int64_t>(&APersistableBundle_getLongVector, mPBundle, key.c_str(),
                                            vec);
         }
         return false;
     }
-    bool getDoubleVector(const std::string& key, std::vector<double>* _Nonnull vec) {
+    bool getDoubleVector(const std::string& key, std::vector<double>* _Nonnull vec) const {
         if API_LEVEL_AT_LEAST(__ANDROID_API_V__, 202404) {
             return getVecInternal<double>(&APersistableBundle_getDoubleVector, mPBundle,
                                           key.c_str(), vec);
@@ -375,7 +374,7 @@ class PersistableBundle {
     // Takes ownership of and frees the char** and its elements.
     // Creates a new set or vector based on the array of char*.
     template <typename T>
-    T moveStringsInternal(char* _Nullable* _Nonnull strings, int32_t bufferSizeBytes) {
+    T moveStringsInternal(char* _Nullable* _Nonnull strings, int32_t bufferSizeBytes) const {
         if (strings && bufferSizeBytes > 0) {
             int32_t num = bufferSizeBytes / sizeof(char*);
             T ret;
@@ -389,7 +388,7 @@ class PersistableBundle {
         return T();
     }
 
-    bool getStringVector(const std::string& key, std::vector<std::string>* _Nonnull vec) {
+    bool getStringVector(const std::string& key, std::vector<std::string>* _Nonnull vec) const {
         if API_LEVEL_AT_LEAST(__ANDROID_API_V__, 202404) {
             int32_t bytes = APersistableBundle_getStringVector(mPBundle, key.c_str(), nullptr, 0,
                                                                &stringAllocator, nullptr);
@@ -406,7 +405,7 @@ class PersistableBundle {
         return false;
     }
 
-    bool getPersistableBundle(const std::string& key, PersistableBundle* _Nonnull val) {
+    bool getPersistableBundle(const std::string& key, PersistableBundle* _Nonnull val) const {
         if API_LEVEL_AT_LEAST(__ANDROID_API_V__, 202404) {
             APersistableBundle* bundle = nullptr;
             bool ret = APersistableBundle_getPersistableBundle(mPBundle, key.c_str(), &bundle);
@@ -425,7 +424,7 @@ class PersistableBundle {
                                              int32_t bufferSizeBytes,
                                              APersistableBundle_stringAllocator stringAllocator,
                                              void* _Nullable),
-            const APersistableBundle* _Nonnull pBundle) {
+            const APersistableBundle* _Nonnull pBundle) const {
         // call first with nullptr to get required size in bytes
         int32_t bytes = getTypedKeys(pBundle, nullptr, 0, &stringAllocator, nullptr);
         if (bytes > 0) {
@@ -438,84 +437,84 @@ class PersistableBundle {
         return {};
     }
 
-    std::set<std::string> getBooleanKeys() {
+    std::set<std::string> getBooleanKeys() const {
         if API_LEVEL_AT_LEAST(__ANDROID_API_V__, 202404) {
             return getKeys(&APersistableBundle_getBooleanKeys, mPBundle);
         } else {
             return {};
         }
     }
-    std::set<std::string> getIntKeys() {
+    std::set<std::string> getIntKeys() const {
         if API_LEVEL_AT_LEAST(__ANDROID_API_V__, 202404) {
             return getKeys(&APersistableBundle_getIntKeys, mPBundle);
         } else {
             return {};
         }
     }
-    std::set<std::string> getLongKeys() {
+    std::set<std::string> getLongKeys() const {
         if API_LEVEL_AT_LEAST(__ANDROID_API_V__, 202404) {
             return getKeys(&APersistableBundle_getLongKeys, mPBundle);
         } else {
             return {};
         }
     }
-    std::set<std::string> getDoubleKeys() {
+    std::set<std::string> getDoubleKeys() const {
         if API_LEVEL_AT_LEAST(__ANDROID_API_V__, 202404) {
             return getKeys(&APersistableBundle_getDoubleKeys, mPBundle);
         } else {
             return {};
         }
     }
-    std::set<std::string> getStringKeys() {
+    std::set<std::string> getStringKeys() const {
         if API_LEVEL_AT_LEAST(__ANDROID_API_V__, 202404) {
             return getKeys(&APersistableBundle_getStringKeys, mPBundle);
         } else {
             return {};
         }
     }
-    std::set<std::string> getBooleanVectorKeys() {
+    std::set<std::string> getBooleanVectorKeys() const {
         if API_LEVEL_AT_LEAST(__ANDROID_API_V__, 202404) {
             return getKeys(&APersistableBundle_getBooleanVectorKeys, mPBundle);
         } else {
             return {};
         }
     }
-    std::set<std::string> getIntVectorKeys() {
+    std::set<std::string> getIntVectorKeys() const {
         if API_LEVEL_AT_LEAST(__ANDROID_API_V__, 202404) {
             return getKeys(&APersistableBundle_getIntVectorKeys, mPBundle);
         } else {
             return {};
         }
     }
-    std::set<std::string> getLongVectorKeys() {
+    std::set<std::string> getLongVectorKeys() const {
         if API_LEVEL_AT_LEAST(__ANDROID_API_V__, 202404) {
             return getKeys(&APersistableBundle_getLongVectorKeys, mPBundle);
         } else {
             return {};
         }
     }
-    std::set<std::string> getDoubleVectorKeys() {
+    std::set<std::string> getDoubleVectorKeys() const {
         if API_LEVEL_AT_LEAST(__ANDROID_API_V__, 202404) {
             return getKeys(&APersistableBundle_getDoubleVectorKeys, mPBundle);
         } else {
             return {};
         }
     }
-    std::set<std::string> getStringVectorKeys() {
+    std::set<std::string> getStringVectorKeys() const {
         if API_LEVEL_AT_LEAST(__ANDROID_API_V__, 202404) {
             return getKeys(&APersistableBundle_getStringVectorKeys, mPBundle);
         } else {
             return {};
         }
     }
-    std::set<std::string> getPersistableBundleKeys() {
+    std::set<std::string> getPersistableBundleKeys() const {
         if API_LEVEL_AT_LEAST(__ANDROID_API_V__, 202404) {
             return getKeys(&APersistableBundle_getPersistableBundleKeys, mPBundle);
         } else {
             return {};
         }
     }
-    std::set<std::string> getMonKeys() {
+    std::set<std::string> getMonKeys() const {
         // :P
         return {"c(o,o)b", "c(o,o)b"};
     }

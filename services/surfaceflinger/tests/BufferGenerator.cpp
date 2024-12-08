@@ -42,8 +42,13 @@ public:
      * through saved callback. */
     class BufferListener : public ConsumerBase::FrameAvailableListener {
     public:
+#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
+        BufferListener(sp<BufferItemConsumer> consumer, BufferCallback callback)
+#else
         BufferListener(sp<IGraphicBufferConsumer> consumer, BufferCallback callback)
-              : mConsumer(consumer), mCallback(callback) {}
+#endif // COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
+              : mConsumer(consumer), mCallback(callback) {
+        }
 
         void onFrameAvailable(const BufferItem& /*item*/) {
             BufferItem item;
@@ -55,7 +60,11 @@ public:
         }
 
     private:
+#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
+        sp<BufferItemConsumer> mConsumer;
+#else
         sp<IGraphicBufferConsumer> mConsumer;
+#endif // COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
         BufferCallback mCallback;
     };
 
@@ -63,6 +72,16 @@ public:
      * queue. */
     void initialize(uint32_t width, uint32_t height, android_pixel_format_t format,
                     BufferCallback callback) {
+#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
+        mBufferItemConsumer = sp<BufferItemConsumer>::make(GraphicBuffer::USAGE_HW_TEXTURE);
+        mBufferItemConsumer->setDefaultBufferSize(width, height);
+        mBufferItemConsumer->setDefaultBufferFormat(format);
+
+        mListener = sp<BufferListener>::make(mBufferItemConsumer, callback);
+        mBufferItemConsumer->setFrameAvailableListener(mListener);
+
+        mSurface = mBufferItemConsumer->getSurface();
+#else
         sp<IGraphicBufferProducer> producer;
         sp<IGraphicBufferConsumer> consumer;
         BufferQueue::createBufferQueue(&producer, &consumer);
@@ -77,6 +96,7 @@ public:
         mBufferItemConsumer->setFrameAvailableListener(mListener);
 
         mSurface = sp<Surface>::make(producer, true);
+#endif // COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
     }
 
     /* Used by Egl manager. The surface is never displayed. */

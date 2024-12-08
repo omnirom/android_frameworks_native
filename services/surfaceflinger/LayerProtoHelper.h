@@ -62,7 +62,7 @@ public:
             const renderengine::ExternalTexture& buffer,
             std::function<perfetto::protos::ActiveBufferProto*()> getActiveBufferProto);
     static void writeToProto(
-            const gui::WindowInfo& inputInfo, const wp<Layer>& touchableRegionBounds,
+            const gui::WindowInfo& inputInfo,
             std::function<perfetto::protos::InputWindowInfoProto*()> getInputWindowInfoProto);
     static void writeToProto(const mat4 matrix,
                              perfetto::protos::ColorTransformProto* colorTransformProto);
@@ -88,7 +88,12 @@ public:
             mLegacyLayers(legacyLayers),
             mDisplayInfos(displayInfos),
             mTraceFlags(traceFlags) {}
-    perfetto::protos::LayersProto generate(const frontend::LayerHierarchy& root);
+    LayerProtoFromSnapshotGenerator& with(const frontend::LayerHierarchy& root);
+    // Creates a fake root and adds all offscreen layers from the passed in hierarchy to the fake
+    // root
+    LayerProtoFromSnapshotGenerator& withOffscreenLayers(
+            const frontend::LayerHierarchy& offscreenRoot);
+    perfetto::protos::LayersProto generate() { return mLayersProto; };
 
 private:
     void writeHierarchyToProto(const frontend::LayerHierarchy& root,
@@ -101,6 +106,8 @@ private:
     const frontend::DisplayInfos& mDisplayInfos;
     uint32_t mTraceFlags;
     perfetto::protos::LayersProto mLayersProto;
+    std::unordered_set<uint32_t> mVisitedLayers;
+
     // winscope expects all the layers, so provide a snapshot even if it not currently drawing
     std::unordered_map<frontend::LayerHierarchy::TraversalPath, frontend::LayerSnapshot,
                        frontend::LayerHierarchy::TraversalPathHash>

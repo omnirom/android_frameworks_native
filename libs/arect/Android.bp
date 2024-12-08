@@ -40,6 +40,7 @@ ndk_headers {
 
 cc_library_headers {
     name: "libarect_headers",
+    host_supported: true,
     vendor_available: true,
     min_sdk_version: "29",
     // TODO(b/153609531): remove when no longer needed.

@@ -15,11 +15,11 @@
  */
 
 #pragma once
+
 #include <atomic>
 #include <optional>
 
-template <typename T>
-// Single consumer multi producer stack. We can understand the two operations independently to see
+// Single consumer multi producer queue. We can understand the two operations independently to see
 // why they are without race condition.
 //
 // push is responsible for maintaining a linked list stored in mPush, and called from multiple
@@ -36,33 +36,27 @@ template <typename T>
 // then store the list and pop one element.
 //
 // If we already had something in the pop list we just pop directly.
+template <typename T>
 class LocklessQueue {
 public:
-    class Entry {
-    public:
-        T mValue;
-        std::atomic<Entry*> mNext;
-        Entry(T value) : mValue(value) {}
-    };
-    std::atomic<Entry*> mPush = nullptr;
-    std::atomic<Entry*> mPop = nullptr;
     bool isEmpty() { return (mPush.load() == nullptr) && (mPop.load() == nullptr); }
 
     void push(T value) {
-        Entry* entry = new Entry(value);
+        Entry* entry = new Entry(std::move(value));
         Entry* previousHead = mPush.load(/*std::memory_order_relaxed*/);
         do {
             entry->mNext = previousHead;
         } while (!mPush.compare_exchange_weak(previousHead, entry)); /*std::memory_order_release*/
     }
+
     std::optional<T> pop() {
         Entry* popped = mPop.load(/*std::memory_order_acquire*/);
         if (popped) {
             // Single consumer so this is fine
             mPop.store(popped->mNext /* , std::memory_order_release */);
-            auto value = popped->mValue;
+            auto value = std::move(popped->mValue);
             delete popped;
-            return std::move(value);
+            return value;
         } else {
             Entry* grabbedList = mPush.exchange(nullptr /* , std::memory_order_acquire */);
             if (!grabbedList) return std::nullopt;
@@ -74,9 +68,19 @@ public:
                 grabbedList = next;
             }
             mPop.store(popped /* , std::memory_order_release */);
-            auto value = grabbedList->mValue;
+            auto value = std::move(grabbedList->mValue);
             delete grabbedList;
-            return std::move(value);
+            return value;
         }
     }
+
+private:
+    class Entry {
+    public:
+        T mValue;
+        std::atomic<Entry*> mNext;
+        Entry(T value) : mValue(value) {}
+    };
+    std::atomic<Entry*> mPush = nullptr;
+    std::atomic<Entry*> mPop = nullptr;
 };

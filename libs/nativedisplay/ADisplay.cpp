@@ -129,7 +129,7 @@ int ADisplay_acquirePhysicalDisplays(ADisplay*** outDisplays) {
     std::vector<DisplayConfigImpl> modesPerDisplay[size];
     ui::DisplayConnectionType displayConnectionTypes[size];
     int numModes = 0;
-    for (int i = 0; i < size; ++i) {
+    for (size_t i = 0; i < size; ++i) {
         ui::StaticDisplayInfo staticInfo;
         if (const status_t status =
                     SurfaceComposerClient::getStaticDisplayInfo(ids[i].value, &staticInfo);
@@ -151,7 +151,7 @@ int ADisplay_acquirePhysicalDisplays(ADisplay*** outDisplays) {
 
         numModes += modes.size();
         modesPerDisplay[i].reserve(modes.size());
-        for (int j = 0; j < modes.size(); ++j) {
+        for (size_t j = 0; j < modes.size(); ++j) {
             const ui::DisplayMode& mode = modes[j];
             modesPerDisplay[i].emplace_back(
                     DisplayConfigImpl{static_cast<size_t>(mode.id), mode.resolution.getWidth(),
@@ -224,7 +224,7 @@ float ADisplay_getMaxSupportedFps(ADisplay* display) {
     CHECK_NOT_NULL(display);
     DisplayImpl* impl = reinterpret_cast<DisplayImpl*>(display);
     float maxFps = 0.0;
-    for (int i = 0; i < impl->numConfigs; ++i) {
+    for (size_t i = 0; i < impl->numConfigs; ++i) {
         maxFps = std::max(maxFps, impl->configs[i].fps);
     }
     return maxFps;
@@ -261,7 +261,7 @@ int ADisplay_getCurrentConfig(ADisplay* display, ADisplayConfig** outConfig) {
 
     for (size_t i = 0; i < impl->numConfigs; i++) {
         auto* config = impl->configs + i;
-        if (config->id == info.activeDisplayModeId) {
+        if (info.activeDisplayModeId >= 0 && config->id == (size_t)info.activeDisplayModeId) {
             *outConfig = reinterpret_cast<ADisplayConfig*>(config);
             return OK;
         }

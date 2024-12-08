@@ -21,7 +21,7 @@
 
 #include <private/android_filesystem_config.h>
 
-#include <gui/AidlStatusUtil.h>
+#include <gui/AidlUtil.h>
 #include <gui/SchedulingPolicy.h>
 
 #include "Client.h"

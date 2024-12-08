@@ -16,7 +16,7 @@
 
 #define LOG_TAG "VibratorHalWrapperHidlV1_1Test"
 
-#include <android/hardware/vibrator/IVibrator.h>
+#include <aidl/android/hardware/vibrator/IVibrator.h>
 
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
@@ -26,13 +26,14 @@
 #include <vibratorservice/VibratorCallbackScheduler.h>
 #include <vibratorservice/VibratorHalWrapper.h>
 
+#include "test_mocks.h"
 #include "test_utils.h"
 
 namespace V1_0 = android::hardware::vibrator::V1_0;
 namespace V1_1 = android::hardware::vibrator::V1_1;
 
-using android::hardware::vibrator::Effect;
-using android::hardware::vibrator::EffectStrength;
+using aidl::android::hardware::vibrator::Effect;
+using aidl::android::hardware::vibrator::EffectStrength;
 
 using namespace android;
 using namespace std::chrono_literals;

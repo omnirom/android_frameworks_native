@@ -26,6 +26,7 @@
 #include <vector>
 
 #include <EventHub.h>
+#include <InputDevice.h>
 #include <InputReaderBase.h>
 #include <InputReaderContext.h>
 #include <NotifyArgs.h>
@@ -59,7 +60,7 @@ public:
     MOCK_METHOD(void, requestTimeoutAtTime, (nsecs_t when), (override));
     int32_t bumpGeneration() override { return ++mGeneration; }
 
-    MOCK_METHOD(void, getExternalStylusDevices, (std::vector<InputDeviceInfo> & outDevices),
+    MOCK_METHOD(void, getExternalStylusDevices, (std::vector<InputDeviceInfo>& outDevices),
                 (override));
     MOCK_METHOD(std::list<NotifyArgs>, dispatchExternalStylusState, (const StylusState& outState),
                 (override));
@@ -91,12 +92,13 @@ public:
     MOCK_METHOD(InputDeviceIdentifier, getDeviceIdentifier, (int32_t deviceId), (const));
     MOCK_METHOD(int32_t, getDeviceControllerNumber, (int32_t deviceId), (const));
     MOCK_METHOD(std::optional<PropertyMap>, getConfiguration, (int32_t deviceId), (const));
-    MOCK_METHOD(status_t, getAbsoluteAxisInfo,
-                (int32_t deviceId, int axis, RawAbsoluteAxisInfo* outAxisInfo), (const));
+    MOCK_METHOD(std::optional<RawAbsoluteAxisInfo>, getAbsoluteAxisInfo,
+                (int32_t deviceId, int axis), (const));
     MOCK_METHOD(bool, hasRelativeAxis, (int32_t deviceId, int axis), (const));
     MOCK_METHOD(bool, hasInputProperty, (int32_t deviceId, int property), (const));
     MOCK_METHOD(bool, hasMscEvent, (int32_t deviceId, int mscEvent), (const));
-    MOCK_METHOD(void, addKeyRemapping, (int32_t deviceId, int fromKeyCode, int toKeyCode), (const));
+    MOCK_METHOD(void, setKeyRemapping,
+                (int32_t deviceId, (const std::map<int32_t, int32_t>& keyRemapping)), (const));
     MOCK_METHOD(status_t, mapKey,
                 (int32_t deviceId, int scanCode, int usageCode, int32_t metaState,
                  int32_t* outKeycode, int32_t* outMetaState, uint32_t* outFlags),
@@ -131,7 +133,7 @@ public:
     MOCK_METHOD(int32_t, getKeyCodeState, (int32_t deviceId, int32_t keyCode), (const, override));
     MOCK_METHOD(int32_t, getSwitchState, (int32_t deviceId, int32_t sw), (const, override));
 
-    MOCK_METHOD(status_t, getAbsoluteAxisValue, (int32_t deviceId, int32_t axis, int32_t* outValue),
+    MOCK_METHOD(std::optional<int32_t>, getAbsoluteAxisValue, (int32_t deviceId, int32_t axis),
                 (const, override));
     MOCK_METHOD(base::Result<std::vector<int32_t>>, getMtSlotValues,
                 (int32_t deviceId, int32_t axis, size_t slotCount), (const, override));
@@ -172,7 +174,7 @@ public:
     MOCK_METHOD(void, requestReopenDevices, (), (override));
     MOCK_METHOD(void, wake, (), (override));
 
-    MOCK_METHOD(void, dump, (std::string & dump), (const, override));
+    MOCK_METHOD(void, dump, (std::string& dump), (const, override));
     MOCK_METHOD(void, monitor, (), (const, override));
     MOCK_METHOD(bool, isDeviceEnabled, (int32_t deviceId), (const, override));
     MOCK_METHOD(status_t, enableDevice, (int32_t deviceId), (override));
@@ -187,6 +189,77 @@ public:
     MOCK_METHOD(void, notifyPointerDisplayIdChanged,
                 (ui::LogicalDisplayId displayId, const FloatPoint& position), (override));
     MOCK_METHOD(bool, isInputMethodConnectionActive, (), (override));
+    MOCK_METHOD(void, notifyMouseCursorFadedOnTyping, (), (override));
 };
 
+class MockInputDevice : public InputDevice {
+public:
+    MockInputDevice(InputReaderContext* context, int32_t id, int32_t generation,
+                    const InputDeviceIdentifier& identifier)
+          : InputDevice(context, id, generation, identifier) {}
+
+    MOCK_METHOD(uint32_t, getSources, (), (const, override));
+    MOCK_METHOD(std::optional<DisplayViewport>, getAssociatedViewport, (), (const));
+    MOCK_METHOD(bool, isEnabled, (), ());
+
+    MOCK_METHOD(void, dump, (std::string& dump, const std::string& eventHubDevStr), ());
+    MOCK_METHOD(void, addEmptyEventHubDevice, (int32_t eventHubId), ());
+    MOCK_METHOD(std::list<NotifyArgs>, addEventHubDevice,
+                (nsecs_t when, int32_t eventHubId, const InputReaderConfiguration& readerConfig),
+                ());
+    MOCK_METHOD(void, removeEventHubDevice, (int32_t eventHubId), ());
+    MOCK_METHOD(std::list<NotifyArgs>, configure,
+                (nsecs_t when, const InputReaderConfiguration& readerConfig,
+                 ConfigurationChanges changes),
+                ());
+    MOCK_METHOD(std::list<NotifyArgs>, reset, (nsecs_t when), ());
+    MOCK_METHOD(std::list<NotifyArgs>, process, (const RawEvent* rawEvents, size_t count), ());
+    MOCK_METHOD(std::list<NotifyArgs>, timeoutExpired, (nsecs_t when), ());
+    MOCK_METHOD(std::list<NotifyArgs>, updateExternalStylusState, (const StylusState& state), ());
+
+    MOCK_METHOD(InputDeviceInfo, getDeviceInfo, (), ());
+    MOCK_METHOD(int32_t, getKeyCodeState, (uint32_t sourceMask, int32_t keyCode), ());
+    MOCK_METHOD(int32_t, getScanCodeState, (uint32_t sourceMask, int32_t scanCode), ());
+    MOCK_METHOD(int32_t, getSwitchState, (uint32_t sourceMask, int32_t switchCode), ());
+    MOCK_METHOD(int32_t, getKeyCodeForKeyLocation, (int32_t locationKeyCode), (const));
+    MOCK_METHOD(bool, markSupportedKeyCodes,
+                (uint32_t sourceMask, const std::vector<int32_t>& keyCodes, uint8_t* outFlags), ());
+    MOCK_METHOD(std::list<NotifyArgs>, vibrate,
+                (const VibrationSequence& sequence, ssize_t repeat, int32_t token), ());
+    MOCK_METHOD(std::list<NotifyArgs>, cancelVibrate, (int32_t token), ());
+    MOCK_METHOD(bool, isVibrating, (), ());
+    MOCK_METHOD(std::vector<int32_t>, getVibratorIds, (), ());
+    MOCK_METHOD(std::list<NotifyArgs>, cancelTouch, (nsecs_t when, nsecs_t readTime), ());
+    MOCK_METHOD(bool, enableSensor,
+                (InputDeviceSensorType sensorType, std::chrono::microseconds samplingPeriod,
+                 std::chrono::microseconds maxBatchReportLatency),
+                ());
+
+    MOCK_METHOD(void, disableSensor, (InputDeviceSensorType sensorType), ());
+    MOCK_METHOD(void, flushSensor, (InputDeviceSensorType sensorType), ());
+
+    MOCK_METHOD(std::optional<int32_t>, getBatteryEventHubId, (), (const));
+
+    MOCK_METHOD(bool, setLightColor, (int32_t lightId, int32_t color), ());
+    MOCK_METHOD(bool, setLightPlayerId, (int32_t lightId, int32_t playerId), ());
+    MOCK_METHOD(std::optional<int32_t>, getLightColor, (int32_t lightId), ());
+    MOCK_METHOD(std::optional<int32_t>, getLightPlayerId, (int32_t lightId), ());
+
+    MOCK_METHOD(int32_t, getMetaState, (), ());
+    MOCK_METHOD(void, updateMetaState, (int32_t keyCode), ());
+
+    MOCK_METHOD(void, setKeyboardType, (KeyboardType keyboardType), ());
+
+    MOCK_METHOD(void, bumpGeneration, (), ());
+
+    MOCK_METHOD(const PropertyMap&, getConfiguration, (), (const, override));
+
+    MOCK_METHOD(NotifyDeviceResetArgs, notifyReset, (nsecs_t when), ());
+
+    MOCK_METHOD(std::optional<ui::LogicalDisplayId>, getAssociatedDisplayId, (), ());
+
+    MOCK_METHOD(void, updateLedState, (bool reset), ());
+
+    MOCK_METHOD(size_t, getMapperCount, (), ());
+};
 } // namespace android

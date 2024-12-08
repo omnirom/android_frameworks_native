@@ -57,7 +57,7 @@ MessageQueue::MessageQueue(ICompositor& compositor, sp<Handler> handler)
         mHandler(std::move(handler)) {}
 
 void MessageQueue::vsyncCallback(nsecs_t vsyncTime, nsecs_t targetWakeupTime, nsecs_t readyTime) {
-    ATRACE_CALL();
+    SFTRACE_CALL();
     // Trace VSYNC-sf
     mVsync.value = (mVsync.value + 1) % 2;
 
@@ -136,7 +136,7 @@ void MessageQueue::destroyVsync() {
 }
 
 void MessageQueue::setDuration(std::chrono::nanoseconds workDuration) {
-    ATRACE_CALL();
+    SFTRACE_CALL();
     std::lock_guard lock(mVsync.mutex);
     mVsync.workDuration = workDuration;
     mVsync.scheduledFrameTimeOpt =
@@ -188,12 +188,13 @@ void MessageQueue::scheduleConfigure() {
     postMessage(sp<ConfigureHandler>::make(mCompositor));
 }
 
-void MessageQueue::scheduleFrame() {
-    ATRACE_CALL();
+void MessageQueue::scheduleFrame(Duration workDurationSlack) {
+    SFTRACE_CALL();
 
     std::lock_guard lock(mVsync.mutex);
+    const auto workDuration = Duration(mVsync.workDuration.get() - workDurationSlack);
     mVsync.scheduledFrameTimeOpt =
-            mVsync.registration->schedule({.workDuration = mVsync.workDuration.get().count(),
+            mVsync.registration->schedule({.workDuration = workDuration.ns(),
                                            .readyDuration = 0,
                                            .lastVsync = mVsync.lastCallbackTime.ns()});
 }

@@ -133,7 +133,7 @@ void MultiTouchInputMapper::syncTouch(nsecs_t when, RawState* outState) {
 
         bool isHovering = mTouchButtonAccumulator.getToolType() != ToolType::MOUSE &&
                 (mTouchButtonAccumulator.isHovering() ||
-                 (mRawPointerAxes.pressure.valid && inSlot.getPressure() <= 0));
+                 (mRawPointerAxes.pressure && inSlot.getPressure() <= 0));
         outPointer.isHovering = isHovering;
 
         // Assign pointer id using tracking id if available.
@@ -189,21 +189,27 @@ std::list<NotifyArgs> MultiTouchInputMapper::reconfigure(nsecs_t when,
 void MultiTouchInputMapper::configureRawPointerAxes() {
     TouchInputMapper::configureRawPointerAxes();
 
-    getAbsoluteAxisInfo(ABS_MT_POSITION_X, &mRawPointerAxes.x);
-    getAbsoluteAxisInfo(ABS_MT_POSITION_Y, &mRawPointerAxes.y);
-    getAbsoluteAxisInfo(ABS_MT_TOUCH_MAJOR, &mRawPointerAxes.touchMajor);
-    getAbsoluteAxisInfo(ABS_MT_TOUCH_MINOR, &mRawPointerAxes.touchMinor);
-    getAbsoluteAxisInfo(ABS_MT_WIDTH_MAJOR, &mRawPointerAxes.toolMajor);
-    getAbsoluteAxisInfo(ABS_MT_WIDTH_MINOR, &mRawPointerAxes.toolMinor);
-    getAbsoluteAxisInfo(ABS_MT_ORIENTATION, &mRawPointerAxes.orientation);
-    getAbsoluteAxisInfo(ABS_MT_PRESSURE, &mRawPointerAxes.pressure);
-    getAbsoluteAxisInfo(ABS_MT_DISTANCE, &mRawPointerAxes.distance);
-    getAbsoluteAxisInfo(ABS_MT_TRACKING_ID, &mRawPointerAxes.trackingId);
-    getAbsoluteAxisInfo(ABS_MT_SLOT, &mRawPointerAxes.slot);
+    // TODO(b/351870641): Investigate why we are sometime not getting valid axis infos for the x/y
+    //   axes, even though those axes are required to be supported.
+    if (const auto xInfo = getAbsoluteAxisInfo(ABS_MT_POSITION_X); xInfo.has_value()) {
+        mRawPointerAxes.x = *xInfo;
+    }
+    if (const auto yInfo = getAbsoluteAxisInfo(ABS_MT_POSITION_Y); yInfo.has_value()) {
+        mRawPointerAxes.y = *yInfo;
+    }
+    mRawPointerAxes.touchMajor = getAbsoluteAxisInfo(ABS_MT_TOUCH_MAJOR);
+    mRawPointerAxes.touchMinor = getAbsoluteAxisInfo(ABS_MT_TOUCH_MINOR);
+    mRawPointerAxes.toolMajor = getAbsoluteAxisInfo(ABS_MT_WIDTH_MAJOR);
+    mRawPointerAxes.toolMinor = getAbsoluteAxisInfo(ABS_MT_WIDTH_MINOR);
+    mRawPointerAxes.orientation = getAbsoluteAxisInfo(ABS_MT_ORIENTATION);
+    mRawPointerAxes.pressure = getAbsoluteAxisInfo(ABS_MT_PRESSURE);
+    mRawPointerAxes.distance = getAbsoluteAxisInfo(ABS_MT_DISTANCE);
+    mRawPointerAxes.trackingId = getAbsoluteAxisInfo(ABS_MT_TRACKING_ID);
+    mRawPointerAxes.slot = getAbsoluteAxisInfo(ABS_MT_SLOT);
 
-    if (mRawPointerAxes.trackingId.valid && mRawPointerAxes.slot.valid &&
-        mRawPointerAxes.slot.minValue == 0 && mRawPointerAxes.slot.maxValue > 0) {
-        size_t slotCount = mRawPointerAxes.slot.maxValue + 1;
+    if (mRawPointerAxes.trackingId && mRawPointerAxes.slot && mRawPointerAxes.slot->minValue == 0 &&
+        mRawPointerAxes.slot->maxValue > 0) {
+        size_t slotCount = mRawPointerAxes.slot->maxValue + 1;
         if (slotCount > MAX_SLOTS) {
             ALOGW("MultiTouch Device %s reported %zu slots but the framework "
                   "only supports a maximum of %zu slots at this time.",

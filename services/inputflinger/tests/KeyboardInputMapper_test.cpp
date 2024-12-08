@@ -55,7 +55,6 @@ protected:
 
     void SetUp() override {
         InputMapperUnitTest::SetUp();
-        createDevice();
 
         // set key-codes expected in tests
         for (const auto& [scanCode, outKeycode] : mKeyCodeMap) {
@@ -66,50 +65,12 @@ protected:
         mFakePolicy = sp<FakeInputReaderPolicy>::make();
         EXPECT_CALL(mMockInputReaderContext, getPolicy).WillRepeatedly(Return(mFakePolicy.get()));
 
+        ON_CALL((*mDevice), getSources).WillByDefault(Return(AINPUT_SOURCE_KEYBOARD));
+
         mMapper = createInputMapper<KeyboardInputMapper>(*mDeviceContext, mReaderConfiguration,
                                                          AINPUT_SOURCE_KEYBOARD);
     }
-
-    void testTouchpadTapStateForKeys(const std::vector<int32_t>& keyCodes,
-                                     const bool expectPrevent) {
-        if (expectPrevent) {
-            EXPECT_CALL(mMockInputReaderContext, setPreventingTouchpadTaps(true))
-                    .Times(keyCodes.size());
-        }
-        for (int32_t keyCode : keyCodes) {
-            process(EV_KEY, keyCode, 1);
-            process(EV_SYN, SYN_REPORT, 0);
-            process(EV_KEY, keyCode, 0);
-            process(EV_SYN, SYN_REPORT, 0);
-        }
-    }
 };
-
-/**
- * Touchpad tap should not be disabled if there is no active Input Method Connection
- */
-TEST_F(KeyboardInputMapperUnitTest, KeystrokesWithoutIMeConnectionDontDisableTouchpadTap) {
-    testTouchpadTapStateForKeys({KEY_0, KEY_A, KEY_LEFTCTRL}, /* expectPrevent= */ false);
-}
-
-/**
- * Touchpad tap should be disabled if there is a active Input Method Connection
- */
-TEST_F(KeyboardInputMapperUnitTest, AlphanumericKeystrokesWithIMeConnectionDisableTouchpadTap) {
-    mFakePolicy->setIsInputMethodConnectionActive(true);
-    testTouchpadTapStateForKeys({KEY_0, KEY_A}, /* expectPrevent= */ true);
-}
-
-/**
- * Touchpad tap should not be disabled by meta keys even if Input Method Connection is active
- */
-TEST_F(KeyboardInputMapperUnitTest, MetaKeystrokesWithIMeConnectionDontDisableTouchpadTap) {
-    mFakePolicy->setIsInputMethodConnectionActive(true);
-    std::vector<int32_t> metaKeys{KEY_LEFTALT,   KEY_RIGHTALT, KEY_LEFTSHIFT, KEY_RIGHTSHIFT,
-                                  KEY_FN,        KEY_LEFTCTRL, KEY_RIGHTCTRL, KEY_LEFTMETA,
-                                  KEY_RIGHTMETA, KEY_CAPSLOCK, KEY_NUMLOCK,   KEY_SCROLLLOCK};
-    testTouchpadTapStateForKeys(metaKeys, /* expectPrevent= */ false);
-}
 
 TEST_F(KeyboardInputMapperUnitTest, KeyPressTimestampRecorded) {
     nsecs_t when = ARBITRARY_TIME;

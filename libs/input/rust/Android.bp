@@ -24,6 +24,8 @@ rust_defaults {
         "liblogger",
         "liblog_rust",
         "inputconstants-rust",
+        "libserde",
+        "libserde_json",
     ],
     whole_static_libs: [
         "libinput_from_rust_to_cpp",

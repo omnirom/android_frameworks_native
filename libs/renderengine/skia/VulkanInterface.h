@@ -16,17 +16,13 @@
 
 #pragma once
 
-#include <include/gpu/vk/GrVkBackendContext.h>
+#include <include/gpu/vk/VulkanBackendContext.h>
 #include <include/gpu/vk/VulkanExtensions.h>
 #include <include/gpu/vk/VulkanTypes.h>
 
 #include <vulkan/vulkan.h>
 
 using namespace skgpu;
-
-namespace skgpu {
-struct VulkanBackendContext;
-} // namespace skgpu
 
 namespace android {
 namespace renderengine {
@@ -48,7 +44,8 @@ public:
     bool takeOwnership();
     void teardown();
 
-    GrVkBackendContext getGaneshBackendContext();
+    // TODO(b/309785258) Combine these into one now that they are the same implementation.
+    VulkanBackendContext getGaneshBackendContext();
     VulkanBackendContext getGraphiteBackendContext();
     VkSemaphore createExportableSemaphore();
     VkSemaphore importSemaphoreFromSyncFd(int syncFd);
@@ -86,7 +83,7 @@ private:
     VkQueue mQueue = VK_NULL_HANDLE;
     int mQueueIndex = 0;
     uint32_t mApiVersion = 0;
-    skgpu::VulkanExtensions mGrExtensions;
+    skgpu::VulkanExtensions mVulkanExtensions;
     VkPhysicalDeviceFeatures2* mPhysicalDeviceFeatures2 = nullptr;
     VkPhysicalDeviceSamplerYcbcrConversionFeatures* mSamplerYcbcrConversionFeatures = nullptr;
     VkPhysicalDeviceProtectedMemoryFeatures* mProtectedMemoryFeatures = nullptr;

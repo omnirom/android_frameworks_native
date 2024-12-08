@@ -68,15 +68,6 @@ EventEntry::EventEntry(int32_t id, Type type, nsecs_t eventTime, uint32_t policy
         injectionState(nullptr),
         dispatchInProgress(false) {}
 
-// --- ConfigurationChangedEntry ---
-
-ConfigurationChangedEntry::ConfigurationChangedEntry(int32_t id, nsecs_t eventTime)
-      : EventEntry(id, Type::CONFIGURATION_CHANGED, eventTime, 0) {}
-
-std::string ConfigurationChangedEntry::getDescription() const {
-    return StringPrintf("ConfigurationChangedEvent(), policyFlags=0x%08x", policyFlags);
-}
-
 // --- DeviceResetEntry ---
 
 DeviceResetEntry::DeviceResetEntry(int32_t id, nsecs_t eventTime, int32_t deviceId)

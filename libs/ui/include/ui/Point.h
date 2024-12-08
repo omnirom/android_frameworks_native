@@ -83,6 +83,6 @@ public:
 
 ANDROID_BASIC_TYPES_TRAITS(Point)
 
-}; // namespace android
+} // namespace android
 
 #endif // ANDROID_UI_POINT

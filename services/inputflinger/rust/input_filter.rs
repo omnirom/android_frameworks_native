@@ -35,11 +35,15 @@ use input::ModifierState;
 use log::{error, info};
 use std::sync::{Arc, Mutex, RwLock};
 
+/// Virtual keyboard device ID
+pub const VIRTUAL_KEYBOARD_DEVICE_ID: i32 = -1;
+
 /// Interface for all the sub input filters
 pub trait Filter {
     fn notify_key(&mut self, event: &KeyEvent);
     fn notify_devices_changed(&mut self, device_infos: &[DeviceInfo]);
     fn destroy(&mut self);
+    fn dump(&mut self, dump_str: String) -> String;
 }
 
 struct InputFilterState {
@@ -119,17 +123,29 @@ impl IInputFilter for InputFilter {
                     self.input_filter_thread.clone(),
                 ));
                 state.enabled = true;
-                info!("Slow keys filter is installed");
+                info!(
+                    "Slow keys filter is installed, threshold = {:?}ns",
+                    config.slowKeysThresholdNs
+                );
             }
             if config.bounceKeysThresholdNs > 0 {
                 first_filter =
                     Box::new(BounceKeysFilter::new(first_filter, config.bounceKeysThresholdNs));
                 state.enabled = true;
-                info!("Bounce keys filter is installed");
+                info!(
+                    "Bounce keys filter is installed, threshold = {:?}ns",
+                    config.bounceKeysThresholdNs
+                );
             }
             state.first_filter = first_filter;
         }
         Result::Ok(())
+    }
+
+    fn dumpFilter(&self) -> binder::Result<String> {
+        let first_filter = &mut self.state.lock().unwrap().first_filter;
+        let dump_str = first_filter.dump(String::new());
+        Result::Ok(dump_str)
     }
 }
 
@@ -157,6 +173,11 @@ impl Filter for BaseFilter {
 
     fn destroy(&mut self) {
         // do nothing
+    }
+
+    fn dump(&mut self, dump_str: String) -> String {
+        // do nothing
+        dump_str
     }
 }
 
@@ -214,6 +235,7 @@ mod tests {
         InputFilterConfiguration::InputFilterConfiguration, KeyEvent::KeyEvent,
         KeyEventAction::KeyEventAction,
     };
+    use input::KeyboardType;
     use std::sync::{Arc, RwLock};
 
     #[test]
@@ -256,7 +278,11 @@ mod tests {
             Arc::new(RwLock::new(Strong::new(Box::new(test_callbacks)))),
         );
         assert!(input_filter
-            .notifyInputDevicesChanged(&[DeviceInfo { deviceId: 0, external: true }])
+            .notifyInputDevicesChanged(&[DeviceInfo {
+                deviceId: 0,
+                external: true,
+                keyboardType: KeyboardType::None as i32
+            }])
             .is_ok());
         assert!(test_filter.is_device_changed_called());
     }
@@ -388,6 +414,10 @@ pub mod test_filter {
         }
         fn destroy(&mut self) {
             self.inner().is_destroy_called = true;
+        }
+        fn dump(&mut self, dump_str: String) -> String {
+            // do nothing
+            dump_str
         }
     }
 }

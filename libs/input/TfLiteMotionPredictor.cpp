@@ -283,6 +283,7 @@ std::unique_ptr<TfLiteMotionPredictorModel> TfLiteMotionPredictorModel::create()
             .distanceNoiseFloor = parseXMLFloat(*configRoot, "distance-noise-floor"),
             .lowJerk = parseXMLFloat(*configRoot, "low-jerk"),
             .highJerk = parseXMLFloat(*configRoot, "high-jerk"),
+            .jerkAlpha = parseXMLFloat(*configRoot, "jerk-alpha"),
     };
 
     return std::unique_ptr<TfLiteMotionPredictorModel>(

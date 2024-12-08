@@ -14,8 +14,10 @@
  * limitations under the License.
  */
 
-#define LOG_TAG "InputTransport"
+#define LOG_TAG "InputConsumerNoResampling"
 #define ATRACE_TAG ATRACE_TAG_INPUT
+
+#include <chrono>
 
 #include <inttypes.h>
 
@@ -31,11 +33,11 @@
 #include <input/PrintTools.h>
 #include <input/TraceTools.h>
 
-namespace input_flags = com::android::input::flags;
-
 namespace android {
 
 namespace {
+
+using std::chrono::nanoseconds;
 
 /**
  * Log debug messages relating to the consumer end of the transport channel.
@@ -114,7 +116,7 @@ void addSample(MotionEvent& event, const InputMessage& msg) {
 
     // TODO(b/329770983): figure out if it's safe to combine events with mismatching metaState
     event.setMetaState(event.getMetaState() | msg.body.motion.metaState);
-    event.addSample(msg.body.motion.eventTime, pointerCoords.data());
+    event.addSample(msg.body.motion.eventTime, pointerCoords.data(), msg.body.motion.eventId);
 }
 
 std::unique_ptr<TouchModeEvent> createTouchModeEvent(const InputMessage& msg) {
@@ -168,17 +170,24 @@ InputMessage createTimelineMessage(int32_t inputEventId, nsecs_t gpuCompletedTim
     return msg;
 }
 
+bool isPointerEvent(const MotionEvent& motionEvent) {
+    return (motionEvent.getSource() & AINPUT_SOURCE_CLASS_POINTER) == AINPUT_SOURCE_CLASS_POINTER;
+}
 } // namespace
 
 using android::base::Result;
-using android::base::StringPrintf;
 
 // --- InputConsumerNoResampling ---
 
 InputConsumerNoResampling::InputConsumerNoResampling(const std::shared_ptr<InputChannel>& channel,
                                                      sp<Looper> looper,
-                                                     InputConsumerCallbacks& callbacks)
-      : mChannel(channel), mLooper(looper), mCallbacks(callbacks), mFdEvents(0) {
+                                                     InputConsumerCallbacks& callbacks,
+                                                     std::unique_ptr<Resampler> resampler)
+      : mChannel{channel},
+        mLooper{looper},
+        mCallbacks{callbacks},
+        mResampler{std::move(resampler)},
+        mFdEvents(0) {
     LOG_ALWAYS_FATAL_IF(mLooper == nullptr);
     mCallback = sp<LooperEventCallback>::make(
             std::bind(&InputConsumerNoResampling::handleReceiveCallback, this,
@@ -190,7 +199,7 @@ InputConsumerNoResampling::InputConsumerNoResampling(const std::shared_ptr<Input
 
 InputConsumerNoResampling::~InputConsumerNoResampling() {
     ensureCalledOnLooperThread(__func__);
-    consumeBatchedInputEvents(std::nullopt);
+    consumeBatchedInputEvents(/*requestedFrameTime=*/std::nullopt);
     while (!mOutboundQueue.empty()) {
         processOutboundEvents();
         // This is our last chance to ack the events. If we don't ack them here, we will get an ANR,
@@ -216,8 +225,7 @@ int InputConsumerNoResampling::handleReceiveCallback(int events) {
 
     int handledEvents = 0;
     if (events & ALOOPER_EVENT_INPUT) {
-        std::vector<InputMessage> messages = readAllMessages();
-        handleMessages(std::move(messages));
+        handleMessages(readAllMessages());
         handledEvents |= ALOOPER_EVENT_INPUT;
     }
 
@@ -325,10 +333,8 @@ void InputConsumerNoResampling::handleMessages(std::vector<InputMessage>&& messa
                 // add it to batch
                 mBatches[deviceId].emplace(msg);
             } else {
-                // consume all pending batches for this event immediately
-                // TODO(b/329776327): figure out if this could be smarter by limiting the
-                // consumption only to the current device.
-                consumeBatchedInputEvents(std::nullopt);
+                // consume all pending batches for this device immediately
+                consumeBatchedInputEvents(deviceId, /*requestedFrameTime=*/std::nullopt);
                 handleMessage(msg);
             }
         } else {
@@ -362,36 +368,36 @@ void InputConsumerNoResampling::handleMessages(std::vector<InputMessage>&& messa
 std::vector<InputMessage> InputConsumerNoResampling::readAllMessages() {
     std::vector<InputMessage> messages;
     while (true) {
-        InputMessage msg;
-        status_t result = mChannel->receiveMessage(&msg);
-        switch (result) {
-            case OK: {
-                const auto [_, inserted] =
-                        mConsumeTimes.emplace(msg.header.seq, systemTime(SYSTEM_TIME_MONOTONIC));
-                LOG_ALWAYS_FATAL_IF(!inserted, "Already have a consume time for seq=%" PRIu32,
-                                    msg.header.seq);
+        android::base::Result<InputMessage> result = mChannel->receiveMessage();
+        if (result.ok()) {
+            const InputMessage& msg = *result;
+            const auto [_, inserted] =
+                    mConsumeTimes.emplace(msg.header.seq, systemTime(SYSTEM_TIME_MONOTONIC));
+            LOG_ALWAYS_FATAL_IF(!inserted, "Already have a consume time for seq=%" PRIu32,
+                                msg.header.seq);
 
-                // Trace the event processing timeline - event was just read from the socket
-                // TODO(b/329777420): distinguish between multiple instances of InputConsumer
-                // in the same process.
-                ATRACE_ASYNC_BEGIN("InputConsumer processing", /*cookie=*/msg.header.seq);
-                messages.push_back(msg);
-                break;
-            }
-            case WOULD_BLOCK: {
-                return messages;
-            }
-            case DEAD_OBJECT: {
-                LOG(FATAL) << "Got a dead object for " << mChannel->getName();
-                break;
-            }
-            case BAD_VALUE: {
-                LOG(FATAL) << "Got a bad value for " << mChannel->getName();
-                break;
-            }
-            default: {
-                LOG(FATAL) << "Unexpected error: " << result;
-                break;
+            // Trace the event processing timeline - event was just read from the socket
+            // TODO(b/329777420): distinguish between multiple instances of InputConsumer
+            // in the same process.
+            ATRACE_ASYNC_BEGIN("InputConsumer processing", /*cookie=*/msg.header.seq);
+            messages.push_back(msg);
+        } else { // !result.ok()
+            switch (result.error().code()) {
+                case WOULD_BLOCK: {
+                    return messages;
+                }
+                case DEAD_OBJECT: {
+                    LOG(FATAL) << "Got a dead object for " << mChannel->getName();
+                    break;
+                }
+                case BAD_VALUE: {
+                    LOG(FATAL) << "Got a bad value for " << mChannel->getName();
+                    break;
+                }
+                default: {
+                    LOG(FATAL) << "Unexpected error: " << result.error().message();
+                    break;
+                }
             }
         }
     }
@@ -445,49 +451,79 @@ void InputConsumerNoResampling::handleMessage(const InputMessage& msg) const {
     }
 }
 
+std::pair<std::unique_ptr<MotionEvent>, std::optional<uint32_t>>
+InputConsumerNoResampling::createBatchedMotionEvent(const nsecs_t requestedFrameTime,
+                                                    std::queue<InputMessage>& messages) {
+    std::unique_ptr<MotionEvent> motionEvent;
+    std::optional<uint32_t> firstSeqForBatch;
+    const nanoseconds resampleLatency =
+            (mResampler != nullptr) ? mResampler->getResampleLatency() : nanoseconds{0};
+    const nanoseconds adjustedFrameTime = nanoseconds{requestedFrameTime} - resampleLatency;
+
+    while (!messages.empty() &&
+           (messages.front().body.motion.eventTime <= adjustedFrameTime.count())) {
+        if (motionEvent == nullptr) {
+            motionEvent = createMotionEvent(messages.front());
+            firstSeqForBatch = messages.front().header.seq;
+            const auto [_, inserted] = mBatchedSequenceNumbers.insert({*firstSeqForBatch, {}});
+            LOG_IF(FATAL, !inserted)
+                    << "The sequence " << messages.front().header.seq << " was already present!";
+        } else {
+            addSample(*motionEvent, messages.front());
+            mBatchedSequenceNumbers[*firstSeqForBatch].push_back(messages.front().header.seq);
+        }
+        messages.pop();
+    }
+    // Check if resampling should be performed.
+    if (motionEvent != nullptr && isPointerEvent(*motionEvent) && mResampler != nullptr) {
+        InputMessage* futureSample = nullptr;
+        if (!messages.empty()) {
+            futureSample = &messages.front();
+        }
+        mResampler->resampleMotionEvent(nanoseconds{requestedFrameTime}, *motionEvent,
+                                        futureSample);
+    }
+    return std::make_pair(std::move(motionEvent), firstSeqForBatch);
+}
+
 bool InputConsumerNoResampling::consumeBatchedInputEvents(
-        std::optional<nsecs_t> requestedFrameTime) {
+        std::optional<DeviceId> deviceId, std::optional<nsecs_t> requestedFrameTime) {
     ensureCalledOnLooperThread(__func__);
     // When batching is not enabled, we want to consume all events. That's equivalent to having an
-    // infinite frameTime.
-    const nsecs_t frameTime = requestedFrameTime.value_or(std::numeric_limits<nsecs_t>::max());
+    // infinite requestedFrameTime.
+    requestedFrameTime = requestedFrameTime.value_or(std::numeric_limits<nsecs_t>::max());
     bool producedEvents = false;
-    for (auto& [deviceId, messages] : mBatches) {
-        std::unique_ptr<MotionEvent> motion;
-        std::optional<uint32_t> firstSeqForBatch;
-        std::vector<uint32_t> sequences;
-        while (!messages.empty()) {
-            const InputMessage& msg = messages.front();
-            if (msg.body.motion.eventTime > frameTime) {
-                break;
-            }
-            if (motion == nullptr) {
-                motion = createMotionEvent(msg);
-                firstSeqForBatch = msg.header.seq;
-                const auto [_, inserted] = mBatchedSequenceNumbers.insert({*firstSeqForBatch, {}});
-                if (!inserted) {
-                    LOG(FATAL) << "The sequence " << msg.header.seq << " was already present!";
-                }
-            } else {
-                addSample(*motion, msg);
-                mBatchedSequenceNumbers[*firstSeqForBatch].push_back(msg.header.seq);
-            }
-            messages.pop();
-        }
+
+    for (auto deviceIdIter = (deviceId.has_value()) ? (mBatches.find(*deviceId))
+                                                    : (mBatches.begin());
+         deviceIdIter != mBatches.cend(); ++deviceIdIter) {
+        std::queue<InputMessage>& messages = deviceIdIter->second;
+        auto [motion, firstSeqForBatch] = createBatchedMotionEvent(*requestedFrameTime, messages);
         if (motion != nullptr) {
             LOG_ALWAYS_FATAL_IF(!firstSeqForBatch.has_value());
             mCallbacks.onMotionEvent(std::move(motion), *firstSeqForBatch);
             producedEvents = true;
         } else {
-            // This is OK, it just means that the frameTime is too old (all events that we have
-            // pending are in the future of the frametime). Maybe print a
-            // warning? If there are multiple devices active though, this might be normal and can
-            // just be ignored, unless none of them resulted in any consumption (in that case, this
-            // function would already return "false" so we could just leave it up to the caller).
+            // This is OK, it just means that the requestedFrameTime is too old (all events that we
+            // have pending are in the future of the requestedFrameTime). Maybe print a warning? If
+            // there are multiple devices active though, this might be normal and can just be
+            // ignored, unless none of them resulted in any consumption (in that case, this function
+            // would already return "false" so we could just leave it up to the caller).
+        }
+
+        if (deviceId.has_value()) {
+            // We already consumed events for this device. Break here to prevent iterating over the
+            // other devices.
+            break;
         }
     }
     std::erase_if(mBatches, [](const auto& pair) { return pair.second.empty(); });
     return producedEvents;
+}
+
+bool InputConsumerNoResampling::consumeBatchedInputEvents(
+        std::optional<nsecs_t> requestedFrameTime) {
+    return consumeBatchedInputEvents(/*deviceId=*/std::nullopt, requestedFrameTime);
 }
 
 void InputConsumerNoResampling::ensureCalledOnLooperThread(const char* func) const {

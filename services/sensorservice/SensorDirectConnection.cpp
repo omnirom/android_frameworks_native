@@ -26,12 +26,17 @@ namespace android {
 
 using util::ProtoOutputStream;
 
-SensorService::SensorDirectConnection::SensorDirectConnection(const sp<SensorService>& service,
-        uid_t uid, const sensors_direct_mem_t *mem, int32_t halChannelHandle,
-        const String16& opPackageName, int deviceId)
-        : mService(service), mUid(uid), mMem(*mem),
+SensorService::SensorDirectConnection::SensorDirectConnection(
+        const sp<SensorService>& service, uid_t uid, pid_t pid, const sensors_direct_mem_t* mem,
+        int32_t halChannelHandle, const String16& opPackageName, int deviceId)
+      : mService(service),
+        mUid(uid),
+        mPid(pid),
+        mMem(*mem),
         mHalChannelHandle(halChannelHandle),
-        mOpPackageName(opPackageName), mDeviceId(deviceId), mDestroyed(false) {
+        mOpPackageName(opPackageName),
+        mDeviceId(deviceId),
+        mDestroyed(false) {
     mUserId = multiuser_get_user_id(mUid);
     ALOGD_IF(DEBUG_CONNECTIONS, "Created SensorDirectConnection");
 }
@@ -62,10 +67,21 @@ void SensorService::SensorDirectConnection::onFirstRef() {
 
 void SensorService::SensorDirectConnection::dump(String8& result) const {
     Mutex::Autolock _l(mConnectionLock);
-    result.appendFormat("\tPackage %s, HAL channel handle %d, total sensor activated %zu\n",
-            String8(mOpPackageName).c_str(), getHalChannelHandle(), mActivated.size());
-    for (auto &i : mActivated) {
-        result.appendFormat("\t\tSensor %#08x, rate %d\n", i.first, i.second);
+    result.appendFormat("\t%s | HAL channel handle %d | uid %d | pid %d\n",
+                        String8(mOpPackageName).c_str(), getHalChannelHandle(), mUid, mPid);
+    result.appendFormat("\tActivated sensor count: %zu\n", mActivated.size());
+    dumpSensorInfoWithLock(result, mActivated);
+
+    result.appendFormat("\tBackup sensor (opened but UID idle) count: %zu\n",
+                        mActivatedBackup.size());
+    dumpSensorInfoWithLock(result, mActivatedBackup);
+}
+
+void SensorService::SensorDirectConnection::dumpSensorInfoWithLock(
+        String8& result, std::unordered_map<int, int> sensors) const {
+    for (auto& i : sensors) {
+        result.appendFormat("\t\t%s 0x%08x | rate %d\n", mService->getSensorName(i.first).c_str(),
+                            i.first, i.second);
     }
 }
 

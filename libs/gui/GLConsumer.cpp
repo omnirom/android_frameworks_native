@@ -101,6 +101,34 @@ static bool hasEglProtectedContent() {
     return hasIt;
 }
 
+#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
+GLConsumer::GLConsumer(uint32_t tex, uint32_t texTarget, bool useFenceSync, bool isControlledByApp)
+      : ConsumerBase(isControlledByApp, /* isConsumerSurfaceFlinger */ false),
+        mCurrentCrop(Rect::EMPTY_RECT),
+        mCurrentTransform(0),
+        mCurrentScalingMode(NATIVE_WINDOW_SCALING_MODE_FREEZE),
+        mCurrentFence(Fence::NO_FENCE),
+        mCurrentTimestamp(0),
+        mCurrentDataSpace(HAL_DATASPACE_UNKNOWN),
+        mCurrentFrameNumber(0),
+        mDefaultWidth(1),
+        mDefaultHeight(1),
+        mFilteringEnabled(true),
+        mTexName(tex),
+        mUseFenceSync(useFenceSync),
+        mTexTarget(texTarget),
+        mEglDisplay(EGL_NO_DISPLAY),
+        mEglContext(EGL_NO_CONTEXT),
+        mCurrentTexture(BufferQueue::INVALID_BUFFER_SLOT),
+        mAttached(true) {
+    GLC_LOGV("GLConsumer");
+
+    memcpy(mCurrentTransformMatrix, mtxIdentity.asArray(), sizeof(mCurrentTransformMatrix));
+
+    mConsumer->setConsumerUsageBits(DEFAULT_USAGE_FLAGS);
+}
+#endif // COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
+
 GLConsumer::GLConsumer(const sp<IGraphicBufferConsumer>& bq, uint32_t tex,
         uint32_t texTarget, bool useFenceSync, bool isControlledByApp) :
     ConsumerBase(bq, isControlledByApp),
@@ -130,27 +158,54 @@ GLConsumer::GLConsumer(const sp<IGraphicBufferConsumer>& bq, uint32_t tex,
     mConsumer->setConsumerUsageBits(DEFAULT_USAGE_FLAGS);
 }
 
-GLConsumer::GLConsumer(const sp<IGraphicBufferConsumer>& bq, uint32_t texTarget,
-        bool useFenceSync, bool isControlledByApp) :
-    ConsumerBase(bq, isControlledByApp),
-    mCurrentCrop(Rect::EMPTY_RECT),
-    mCurrentTransform(0),
-    mCurrentScalingMode(NATIVE_WINDOW_SCALING_MODE_FREEZE),
-    mCurrentFence(Fence::NO_FENCE),
-    mCurrentTimestamp(0),
-    mCurrentDataSpace(HAL_DATASPACE_UNKNOWN),
-    mCurrentFrameNumber(0),
-    mDefaultWidth(1),
-    mDefaultHeight(1),
-    mFilteringEnabled(true),
-    mTexName(0),
-    mUseFenceSync(useFenceSync),
-    mTexTarget(texTarget),
-    mEglDisplay(EGL_NO_DISPLAY),
-    mEglContext(EGL_NO_CONTEXT),
-    mCurrentTexture(BufferQueue::INVALID_BUFFER_SLOT),
-    mAttached(false)
-{
+#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
+GLConsumer::GLConsumer(uint32_t texTarget, bool useFenceSync, bool isControlledByApp)
+      : ConsumerBase(isControlledByApp, /* isConsumerSurfaceFlinger */ false),
+        mCurrentCrop(Rect::EMPTY_RECT),
+        mCurrentTransform(0),
+        mCurrentScalingMode(NATIVE_WINDOW_SCALING_MODE_FREEZE),
+        mCurrentFence(Fence::NO_FENCE),
+        mCurrentTimestamp(0),
+        mCurrentDataSpace(HAL_DATASPACE_UNKNOWN),
+        mCurrentFrameNumber(0),
+        mDefaultWidth(1),
+        mDefaultHeight(1),
+        mFilteringEnabled(true),
+        mTexName(0),
+        mUseFenceSync(useFenceSync),
+        mTexTarget(texTarget),
+        mEglDisplay(EGL_NO_DISPLAY),
+        mEglContext(EGL_NO_CONTEXT),
+        mCurrentTexture(BufferQueue::INVALID_BUFFER_SLOT),
+        mAttached(false) {
+    GLC_LOGV("GLConsumer");
+
+    memcpy(mCurrentTransformMatrix, mtxIdentity.asArray(), sizeof(mCurrentTransformMatrix));
+
+    mConsumer->setConsumerUsageBits(DEFAULT_USAGE_FLAGS);
+}
+#endif // COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
+
+GLConsumer::GLConsumer(const sp<IGraphicBufferConsumer>& bq, uint32_t texTarget, bool useFenceSync,
+                       bool isControlledByApp)
+      : ConsumerBase(bq, isControlledByApp),
+        mCurrentCrop(Rect::EMPTY_RECT),
+        mCurrentTransform(0),
+        mCurrentScalingMode(NATIVE_WINDOW_SCALING_MODE_FREEZE),
+        mCurrentFence(Fence::NO_FENCE),
+        mCurrentTimestamp(0),
+        mCurrentDataSpace(HAL_DATASPACE_UNKNOWN),
+        mCurrentFrameNumber(0),
+        mDefaultWidth(1),
+        mDefaultHeight(1),
+        mFilteringEnabled(true),
+        mTexName(0),
+        mUseFenceSync(useFenceSync),
+        mTexTarget(texTarget),
+        mEglDisplay(EGL_NO_DISPLAY),
+        mEglContext(EGL_NO_CONTEXT),
+        mCurrentTexture(BufferQueue::INVALID_BUFFER_SLOT),
+        mAttached(false) {
     GLC_LOGV("GLConsumer");
 
     memcpy(mCurrentTransformMatrix, mtxIdentity.asArray(),

@@ -33,6 +33,7 @@
 #include <utils/Thread.h>
 
 #include "InputDevice.h"
+#include "include/gestures.h"
 
 using android::base::StringPrintf;
 
@@ -180,6 +181,9 @@ void InputReader::loopOnce() {
         }
 
         if (oldGeneration != mGeneration) {
+            // Reset global meta state because it depends on connected input devices.
+            updateGlobalMetaStateLocked();
+
             inputDevicesChanged = true;
             inputDevices = getInputDevicesLocked();
             mPendingArgs.emplace_back(
@@ -246,9 +250,6 @@ std::list<NotifyArgs> InputReader::processEventsLocked(const RawEvent* rawEvents
                     break;
                 case EventHubInterface::DEVICE_REMOVED:
                     removeDeviceLocked(rawEvent->when, rawEvent->deviceId);
-                    break;
-                case EventHubInterface::FINISHED_DEVICE_SCAN:
-                    handleConfigurationChangedLocked(rawEvent->when);
                     break;
                 default:
                     ALOG_ASSERT(false); // can't happen
@@ -412,14 +413,6 @@ std::list<NotifyArgs> InputReader::timeoutExpiredLocked(nsecs_t when) {
 
 int32_t InputReader::nextInputDeviceIdLocked() {
     return ++mNextInputDeviceId;
-}
-
-void InputReader::handleConfigurationChangedLocked(nsecs_t when) {
-    // Reset global meta state because it depends on the list of all configured devices.
-    updateGlobalMetaStateLocked();
-
-    // Enqueue configuration changed.
-    mPendingArgs.emplace_back(NotifyConfigurationChangedArgs{mContext.getNextId(), when});
 }
 
 void InputReader::refreshConfigurationLocked(ConfigurationChanges changes) {
@@ -632,15 +625,6 @@ bool InputReader::markSupportedKeyCodesLocked(int32_t deviceId, uint32_t sourceM
     return result;
 }
 
-void InputReader::addKeyRemapping(int32_t deviceId, int32_t fromKeyCode, int32_t toKeyCode) const {
-    std::scoped_lock _l(mLock);
-
-    InputDevice* device = findInputDeviceLocked(deviceId);
-    if (device != nullptr) {
-        device->addKeyRemapping(fromKeyCode, toKeyCode);
-    }
-}
-
 int32_t InputReader::getKeyCodeForKeyLocation(int32_t deviceId, int32_t locationKeyCode) const {
     std::scoped_lock _l(mLock);
 
@@ -825,6 +809,18 @@ std::vector<InputDeviceSensorInfo> InputReader::getSensors(int32_t deviceId) {
     return device->getDeviceInfo().getSensors();
 }
 
+std::optional<HardwareProperties> InputReader::getTouchpadHardwareProperties(int32_t deviceId) {
+    std::scoped_lock _l(mLock);
+
+    InputDevice* device = findInputDeviceLocked(deviceId);
+
+    if (device == nullptr) {
+        return {};
+    }
+
+    return device->getTouchpadHardwareProperties();
+}
+
 bool InputReader::setLightColor(int32_t deviceId, int32_t lightId, int32_t color) {
     std::scoped_lock _l(mLock);
 
@@ -905,6 +901,12 @@ void InputReader::sysfsNodeChanged(const std::string& sysfsNodePath) {
 DeviceId InputReader::getLastUsedInputDeviceId() {
     std::scoped_lock _l(mLock);
     return mLastUsedDeviceId;
+}
+
+void InputReader::notifyMouseCursorFadedOnTyping() {
+    std::scoped_lock _l(mLock);
+    // disable touchpad taps when cursor has faded due to typing
+    mPreventingTouchpadTaps = true;
 }
 
 void InputReader::dump(std::string& dump) {

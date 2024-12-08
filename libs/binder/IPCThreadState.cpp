@@ -22,10 +22,7 @@
 #include <binder/BpBinder.h>
 #include <binder/TextOutput.h>
 
-#include <cutils/sched_policy.h>
 #include <utils/CallStack.h>
-#include <utils/Log.h>
-#include <utils/SystemClock.h>
 
 #include <atomic>
 #include <errno.h>
@@ -38,6 +35,7 @@
 #include <sys/resource.h>
 #include <unistd.h>
 
+#include "Utils.h"
 #include "binder_module.h"
 
 #if LOG_NDEBUG
@@ -65,6 +63,8 @@
 
 namespace android {
 
+using namespace std::chrono_literals;
+
 // Static const and functions will be optimized out if not used,
 // when LOG_NDEBUG and references in IF_LOG_COMMANDS() are optimized out.
 static const char* kReturnStrings[] = {
@@ -89,26 +89,33 @@ static const char* kReturnStrings[] = {
         "BR_FROZEN_REPLY",
         "BR_ONEWAY_SPAM_SUSPECT",
         "BR_TRANSACTION_PENDING_FROZEN",
+        "BR_FROZEN_BINDER",
+        "BR_CLEAR_FREEZE_NOTIFICATION_DONE",
 };
 
-static const char *kCommandStrings[] = {
-    "BC_TRANSACTION",
-    "BC_REPLY",
-    "BC_ACQUIRE_RESULT",
-    "BC_FREE_BUFFER",
-    "BC_INCREFS",
-    "BC_ACQUIRE",
-    "BC_RELEASE",
-    "BC_DECREFS",
-    "BC_INCREFS_DONE",
-    "BC_ACQUIRE_DONE",
-    "BC_ATTEMPT_ACQUIRE",
-    "BC_REGISTER_LOOPER",
-    "BC_ENTER_LOOPER",
-    "BC_EXIT_LOOPER",
-    "BC_REQUEST_DEATH_NOTIFICATION",
-    "BC_CLEAR_DEATH_NOTIFICATION",
-    "BC_DEAD_BINDER_DONE"
+static const char* kCommandStrings[] = {
+        "BC_TRANSACTION",
+        "BC_REPLY",
+        "BC_ACQUIRE_RESULT",
+        "BC_FREE_BUFFER",
+        "BC_INCREFS",
+        "BC_ACQUIRE",
+        "BC_RELEASE",
+        "BC_DECREFS",
+        "BC_INCREFS_DONE",
+        "BC_ACQUIRE_DONE",
+        "BC_ATTEMPT_ACQUIRE",
+        "BC_REGISTER_LOOPER",
+        "BC_ENTER_LOOPER",
+        "BC_EXIT_LOOPER",
+        "BC_REQUEST_DEATH_NOTIFICATION",
+        "BC_CLEAR_DEATH_NOTIFICATION",
+        "BC_DEAD_BINDER_DONE",
+        "BC_TRANSACTION_SG",
+        "BC_REPLY_SG",
+        "BC_REQUEST_FREEZE_NOTIFICATION",
+        "BC_CLEAR_FREEZE_NOTIFICATION",
+        "BC_FREEZE_NOTIFICATION_DONE",
 };
 
 static const int64_t kWorkSourcePropagatedBitIndex = 32;
@@ -203,6 +210,18 @@ static const void* printReturnCommand(std::ostream& out, const void* _cmd) {
             out << ": death cookie " << (void*)(uint64_t)c;
         } break;
 
+        case BR_FROZEN_BINDER: {
+            const int32_t c = *cmd++;
+            const int32_t h = *cmd++;
+            const int32_t isFrozen = *cmd++;
+            out << ": freeze cookie " << (void*)(uint64_t)c << " isFrozen: " << isFrozen;
+        } break;
+
+        case BR_CLEAR_FREEZE_NOTIFICATION_DONE: {
+            const int32_t c = *cmd++;
+            out << ": freeze cookie " << (void*)(uint64_t)c;
+        } break;
+
         default:
             // no details to show for: BR_OK, BR_DEAD_REPLY,
             // BR_TRANSACTION_COMPLETE, BR_FINISHED
@@ -211,6 +230,15 @@ static const void* printReturnCommand(std::ostream& out, const void* _cmd) {
 
     out << "\n";
     return cmd;
+}
+
+static void printReturnCommandParcel(std::ostream& out, const Parcel& parcel) {
+    const void* cmds = parcel.data();
+    out << "\t" << HexDump(cmds, parcel.dataSize()) << "\n";
+    IF_LOG_COMMANDS() {
+        const void* end = parcel.data() + parcel.dataSize();
+        while (cmds < end) cmds = printReturnCommand(out, cmds);
+    }
 }
 
 static const void* printCommand(std::ostream& out, const void* _cmd) {
@@ -270,9 +298,21 @@ static const void* printCommand(std::ostream& out, const void* _cmd) {
             out << ": handle=" << h << " (death cookie " << (void*)(uint64_t)c << ")";
         } break;
 
+        case BC_REQUEST_FREEZE_NOTIFICATION:
+        case BC_CLEAR_FREEZE_NOTIFICATION: {
+            const int32_t h = *cmd++;
+            const int32_t c = *cmd++;
+            out << ": handle=" << h << " (freeze cookie " << (void*)(uint64_t)c << ")";
+        } break;
+
         case BC_DEAD_BINDER_DONE: {
             const int32_t c = *cmd++;
             out << ": death cookie " << (void*)(uint64_t)c;
+        } break;
+
+        case BC_FREEZE_NOTIFICATION_DONE: {
+            const int32_t c = *cmd++;
+            out << ": freeze cookie " << (void*)(uint64_t)c;
         } break;
 
         default:
@@ -285,7 +325,9 @@ static const void* printCommand(std::ostream& out, const void* _cmd) {
     return cmd;
 }
 
+LIBBINDER_IGNORE("-Wzero-as-null-pointer-constant")
 static pthread_mutex_t gTLSMutex = PTHREAD_MUTEX_INITIALIZER;
+LIBBINDER_IGNORE_END()
 static std::atomic<bool> gHaveTLS(false);
 static pthread_key_t gTLS = 0;
 static std::atomic<bool> gShutdown = false;
@@ -613,16 +655,19 @@ bool IPCThreadState::flushIfNeeded()
 
 void IPCThreadState::blockUntilThreadAvailable()
 {
-    pthread_mutex_lock(&mProcess->mThreadCountLock);
-    mProcess->mWaitingForThreads++;
-    while (mProcess->mExecutingThreadsCount >= mProcess->mMaxThreads) {
-        ALOGW("Waiting for thread to be free. mExecutingThreadsCount=%lu mMaxThreads=%lu\n",
-                static_cast<unsigned long>(mProcess->mExecutingThreadsCount),
-                static_cast<unsigned long>(mProcess->mMaxThreads));
-        pthread_cond_wait(&mProcess->mThreadCountDecrement, &mProcess->mThreadCountLock);
-    }
-    mProcess->mWaitingForThreads--;
-    pthread_mutex_unlock(&mProcess->mThreadCountLock);
+    std::unique_lock lock_guard_(mProcess->mOnThreadAvailableLock);
+    mProcess->mOnThreadAvailableWaiting++;
+    mProcess->mOnThreadAvailableCondVar.wait(lock_guard_, [&] {
+        size_t max = mProcess->mMaxThreads;
+        size_t cur = mProcess->mExecutingThreadsCount;
+        if (cur < max) {
+            return true;
+        }
+        ALOGW("Waiting for thread to be free. mExecutingThreadsCount=%zu mMaxThreads=%zu\n", cur,
+              max);
+        return false;
+    });
+    mProcess->mOnThreadAvailableWaiting--;
 }
 
 status_t IPCThreadState::getAndExecuteCommand()
@@ -642,34 +687,35 @@ status_t IPCThreadState::getAndExecuteCommand()
             ALOGI("%s", message.c_str());
         }
 
-        pthread_mutex_lock(&mProcess->mThreadCountLock);
-        mProcess->mExecutingThreadsCount++;
-        if (mProcess->mExecutingThreadsCount >= mProcess->mMaxThreads &&
-                mProcess->mStarvationStartTimeMs == 0) {
-            mProcess->mStarvationStartTimeMs = uptimeMillis();
+        size_t newThreadsCount = mProcess->mExecutingThreadsCount.fetch_add(1) + 1;
+        if (newThreadsCount >= mProcess->mMaxThreads) {
+            auto expected = ProcessState::never();
+            mProcess->mStarvationStartTime
+                    .compare_exchange_strong(expected, std::chrono::steady_clock::now());
         }
-        pthread_mutex_unlock(&mProcess->mThreadCountLock);
 
         result = executeCommand(cmd);
 
-        pthread_mutex_lock(&mProcess->mThreadCountLock);
-        mProcess->mExecutingThreadsCount--;
-        if (mProcess->mExecutingThreadsCount < mProcess->mMaxThreads &&
-                mProcess->mStarvationStartTimeMs != 0) {
-            int64_t starvationTimeMs = uptimeMillis() - mProcess->mStarvationStartTimeMs;
-            if (starvationTimeMs > 100) {
-                ALOGE("binder thread pool (%zu threads) starved for %" PRId64 " ms",
-                      mProcess->mMaxThreads, starvationTimeMs);
+        size_t maxThreads = mProcess->mMaxThreads;
+        newThreadsCount = mProcess->mExecutingThreadsCount.fetch_sub(1) - 1;
+        if (newThreadsCount < maxThreads) {
+            auto starvationStartTime =
+                    mProcess->mStarvationStartTime.exchange(ProcessState::never());
+            if (starvationStartTime != ProcessState::never()) {
+                auto starvationTime = std::chrono::steady_clock::now() - starvationStartTime;
+                if (starvationTime > 100ms) {
+                    ALOGE("binder thread pool (%zu threads) starved for %" PRId64 " ms", maxThreads,
+                          to_ms(starvationTime));
+                }
             }
-            mProcess->mStarvationStartTimeMs = 0;
         }
 
         // Cond broadcast can be expensive, so don't send it every time a binder
         // call is processed. b/168806193
-        if (mProcess->mWaitingForThreads > 0) {
-            pthread_cond_broadcast(&mProcess->mThreadCountDecrement);
+        if (mProcess->mOnThreadAvailableWaiting > 0) {
+            std::lock_guard lock_guard_(mProcess->mOnThreadAvailableLock);
+            mProcess->mOnThreadAvailableCondVar.notify_all();
         }
-        pthread_mutex_unlock(&mProcess->mThreadCountLock);
     }
 
     return result;
@@ -727,10 +773,9 @@ void IPCThreadState::processPostWriteDerefs()
 
 void IPCThreadState::joinThreadPool(bool isMain)
 {
-    LOG_THREADPOOL("**** THREAD %p (PID %d) IS JOINING THE THREAD POOL\n", (void*)pthread_self(), getpid());
-    pthread_mutex_lock(&mProcess->mThreadCountLock);
+    LOG_THREADPOOL("**** THREAD %p (PID %d) IS JOINING THE THREAD POOL\n", (void*)pthread_self(),
+                   getpid());
     mProcess->mCurrentThreads++;
-    pthread_mutex_unlock(&mProcess->mThreadCountLock);
     mOut.writeInt32(isMain ? BC_ENTER_LOOPER : BC_REGISTER_LOOPER);
 
     mIsLooper = true;
@@ -758,13 +803,11 @@ void IPCThreadState::joinThreadPool(bool isMain)
     mOut.writeInt32(BC_EXIT_LOOPER);
     mIsLooper = false;
     talkWithDriver(false);
-    pthread_mutex_lock(&mProcess->mThreadCountLock);
-    LOG_ALWAYS_FATAL_IF(mProcess->mCurrentThreads == 0,
-                        "Threadpool thread count = 0. Thread cannot exist and exit in empty "
-                        "threadpool\n"
+    size_t oldCount = mProcess->mCurrentThreads.fetch_sub(1);
+    LOG_ALWAYS_FATAL_IF(oldCount == 0,
+                        "Threadpool thread count underflowed. Thread cannot exist and exit in "
+                        "empty threadpool\n"
                         "Misconfiguration. Increase threadpool max threads configuration\n");
-    mProcess->mCurrentThreads--;
-    pthread_mutex_unlock(&mProcess->mThreadCountLock);
 }
 
 status_t IPCThreadState::setupPolling(int* fd)
@@ -776,9 +819,7 @@ status_t IPCThreadState::setupPolling(int* fd)
     mOut.writeInt32(BC_ENTER_LOOPER);
     flushCommands();
     *fd = mProcess->mDriverFD;
-    pthread_mutex_lock(&mProcess->mThreadCountLock);
     mProcess->mCurrentThreads++;
-    pthread_mutex_unlock(&mProcess->mThreadCountLock);
     return 0;
 }
 
@@ -949,6 +990,33 @@ status_t IPCThreadState::clearDeathNotification(int32_t handle, BpBinder* proxy)
     mOut.writeInt32(BC_CLEAR_DEATH_NOTIFICATION);
     mOut.writeInt32((int32_t)handle);
     mOut.writePointer((uintptr_t)proxy);
+    return NO_ERROR;
+}
+
+status_t IPCThreadState::addFrozenStateChangeCallback(int32_t handle, BpBinder* proxy) {
+    static bool isSupported =
+            ProcessState::isDriverFeatureEnabled(ProcessState::DriverFeature::FREEZE_NOTIFICATION);
+    if (!isSupported) {
+        return INVALID_OPERATION;
+    }
+    proxy->getWeakRefs()->incWeak(proxy);
+    mOut.writeInt32(BC_REQUEST_FREEZE_NOTIFICATION);
+    mOut.writeInt32((int32_t)handle);
+    mOut.writePointer((uintptr_t)proxy);
+    flushCommands();
+    return NO_ERROR;
+}
+
+status_t IPCThreadState::removeFrozenStateChangeCallback(int32_t handle, BpBinder* proxy) {
+    static bool isSupported =
+            ProcessState::isDriverFeatureEnabled(ProcessState::DriverFeature::FREEZE_NOTIFICATION);
+    if (!isSupported) {
+        return INVALID_OPERATION;
+    }
+    mOut.writeInt32(BC_CLEAR_FREEZE_NOTIFICATION);
+    mOut.writeInt32((int32_t)handle);
+    mOut.writePointer((uintptr_t)proxy);
+    flushCommands();
     return NO_ERROR;
 }
 
@@ -1176,13 +1244,15 @@ status_t IPCThreadState::talkWithDriver(bool doReceive)
 
     if (err >= NO_ERROR) {
         if (bwr.write_consumed > 0) {
-            if (bwr.write_consumed < mOut.dataSize())
+            if (bwr.write_consumed < mOut.dataSize()) {
+                std::ostringstream logStream;
+                printReturnCommandParcel(logStream, mIn);
                 LOG_ALWAYS_FATAL("Driver did not consume write buffer. "
-                                 "err: %s consumed: %zu of %zu",
-                                 statusToString(err).c_str(),
-                                 (size_t)bwr.write_consumed,
-                                 mOut.dataSize());
-            else {
+                                 "err: %s consumed: %zu of %zu.\n"
+                                 "Return command: %s",
+                                 statusToString(err).c_str(), (size_t)bwr.write_consumed,
+                                 mOut.dataSize(), logStream.str().c_str());
+            } else {
                 mOut.setDataSize(0);
                 processPostWriteDerefs();
             }
@@ -1193,14 +1263,8 @@ status_t IPCThreadState::talkWithDriver(bool doReceive)
         }
         IF_LOG_COMMANDS() {
             std::ostringstream logStream;
-            logStream << "Remaining data size: " << mOut.dataSize() << "\n";
-            logStream << "Received commands from driver: ";
-            const void* cmds = mIn.data();
-            const void* end = mIn.data() + mIn.dataSize();
-            logStream << "\t" << HexDump(cmds, mIn.dataSize()) << "\n";
-            while (cmds < end) cmds = printReturnCommand(logStream, cmds);
-            std::string message = logStream.str();
-            ALOGI("%s", message.c_str());
+            printReturnCommandParcel(logStream, mIn);
+            ALOGI("%s", logStream.str().c_str());
         }
         return NO_ERROR;
     }
@@ -1483,6 +1547,26 @@ status_t IPCThreadState::executeCommand(int32_t cmd)
     case BR_CLEAR_DEATH_NOTIFICATION_DONE:
         {
             BpBinder *proxy = (BpBinder*)mIn.readPointer();
+            proxy->getWeakRefs()->decWeak(proxy);
+        } break;
+
+        case BR_FROZEN_BINDER: {
+            const struct binder_frozen_state_info* data =
+                    reinterpret_cast<const struct binder_frozen_state_info*>(
+                            mIn.readInplace(sizeof(struct binder_frozen_state_info)));
+            if (data == nullptr) {
+                result = UNKNOWN_ERROR;
+                break;
+            }
+            BpBinder* proxy = (BpBinder*)data->cookie;
+            bool isFrozen = mIn.readInt32() > 0;
+            proxy->getPrivateAccessor().onFrozenStateChanged(data->is_frozen);
+            mOut.writeInt32(BC_FREEZE_NOTIFICATION_DONE);
+            mOut.writePointer(data->cookie);
+        } break;
+
+        case BR_CLEAR_FREEZE_NOTIFICATION_DONE: {
+            BpBinder* proxy = (BpBinder*)mIn.readPointer();
             proxy->getWeakRefs()->decWeak(proxy);
         } break;
 

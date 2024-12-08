@@ -37,23 +37,23 @@ pub extern "C" fn hello() -> bool {
 /// BufferPublishers are required to adhere to the following, based on the
 /// reactive streams specification:
 /// * The total number of on_next´s signalled by a Publisher to a Subscriber
-/// MUST be less than or equal to the total number of elements requested by that
-/// Subscriber´s Subscription at all times.
+///   MUST be less than or equal to the total number of elements requested by that
+///   Subscriber´s Subscription at all times.
 /// * A Publisher MAY signal fewer on_next than requested and terminate the
-/// Subscription by calling on_complete or on_error.
+///   Subscription by calling on_complete or on_error.
 /// * on_subscribe, on_next, on_error and on_complete signaled to a Subscriber
-/// MUST be signaled serially.
+///   MUST be signaled serially.
 /// * If a Publisher fails it MUST signal an on_error.
 /// * If a Publisher terminates successfully (finite stream) it MUST signal an
-/// on_complete.
+///   on_complete.
 /// * If a Publisher signals either on_error or on_complete on a Subscriber,
-/// that Subscriber’s Subscription MUST be considered cancelled.
+///   that Subscriber’s Subscription MUST be considered cancelled.
 /// * Once a terminal state has been signaled (on_error, on_complete) it is
-/// REQUIRED that no further signals occur.
+///   REQUIRED that no further signals occur.
 /// * If a Subscription is cancelled its Subscriber MUST eventually stop being
-///  signaled.
+///   signaled.
 /// * A Publisher MAY support multiple Subscribers and decides whether each
-/// Subscription is unicast or multicast.
+///   Subscription is unicast or multicast.
 pub trait BufferPublisher {
     /// Returns the StreamConfig of buffers that publisher creates.
     fn get_publisher_stream_config(&self) -> StreamConfig;
@@ -69,25 +69,25 @@ pub trait BufferPublisher {
 /// BufferSubcribers are required to adhere to the following, based on the
 /// reactive streams specification:
 /// * The total number of on_next´s signalled by a Publisher to a Subscriber
-/// MUST be less than or equal to the total number of elements requested by that
-/// Subscriber´s Subscription at all times.
+///   MUST be less than or equal to the total number of elements requested by that
+///   Subscriber´s Subscription at all times.
 /// * A Publisher MAY signal fewer on_next than requested and terminate the
-/// Subscription by calling on_complete or on_error.
+///   Subscription by calling on_complete or on_error.
 /// * on_subscribe, on_next, on_error and on_complete signaled to a Subscriber
-/// MUST be signaled serially.
+///   MUST be signaled serially.
 /// * If a Publisher fails it MUST signal an on_error.
 /// * If a Publisher terminates successfully (finite stream) it MUST signal an
-/// on_complete.
+///   on_complete.
 /// * If a Publisher signals either on_error or on_complete on a Subscriber,
-/// that Subscriber’s Subscription MUST be considered cancelled.
+///   that Subscriber’s Subscription MUST be considered cancelled.
 /// * Once a terminal state has been signaled (on_error, on_complete) it is
-/// REQUIRED that no further signals occur.
+///   REQUIRED that no further signals occur.
 /// * If a Subscription is cancelled its Subscriber MUST eventually stop being
-/// signaled.
+///   signaled.
 /// * Publisher.subscribe MAY be called as many times as wanted but MUST be
-/// with a different Subscriber each time.
+///   with a different Subscriber each time.
 /// * A Publisher MAY support multiple Subscribers and decides whether each
-/// Subscription is unicast or multicast.
+///   Subscription is unicast or multicast.
 pub trait BufferSubscriber {
     /// The StreamConfig of buffers that this subscriber expects.
     fn get_subscriber_stream_config(&self) -> StreamConfig;
@@ -111,39 +111,39 @@ pub trait BufferSubscriber {
 /// BufferSubcriptions are required to adhere to the following, based on the
 /// reactive streams specification:
 /// * Subscription.request and Subscription.cancel MUST only be called inside
-/// of its Subscriber context.
+///   of its Subscriber context.
 /// * The Subscription MUST allow the Subscriber to call Subscription.request
-/// synchronously from within on_next or on_subscribe.
+///   synchronously from within on_next or on_subscribe.
 /// * Subscription.request MUST place an upper bound on possible synchronous
-/// recursion between Publisher and Subscriber.
+///   recursion between Publisher and Subscriber.
 /// * Subscription.request SHOULD respect the responsivity of its caller by
-/// returning in a timely manner.
+///   returning in a timely manner.
 /// * Subscription.cancel MUST respect the responsivity of its caller by
-/// returning in a timely manner, MUST be idempotent and MUST be thread-safe.
+///   returning in a timely manner, MUST be idempotent and MUST be thread-safe.
 /// * After the Subscription is cancelled, additional
-/// Subscription.request(n: u64) MUST be NOPs.
+///   Subscription.request(n: u64) MUST be NOPs.
 /// * After the Subscription is cancelled, additional Subscription.cancel()
-/// MUST be NOPs.
+///   MUST be NOPs.
 /// * While the Subscription is not cancelled, Subscription.request(n: u64)
-/// MUST register the given number of additional elements to be produced to the
-/// respective subscriber.
+///   MUST register the given number of additional elements to be produced to the
+///   respective subscriber.
 /// * While the Subscription is not cancelled, Subscription.request(n: u64)
-/// MUST signal on_error if the argument is <= 0. The cause message SHOULD
-/// explain that non-positive request signals are illegal.
+///   MUST signal on_error if the argument is <= 0. The cause message SHOULD
+///   explain that non-positive request signals are illegal.
 /// * While the Subscription is not cancelled, Subscription.request(n: u64)
-/// MAY synchronously call on_next on this (or other) subscriber(s).
+///   MAY synchronously call on_next on this (or other) subscriber(s).
 /// * While the Subscription is not cancelled, Subscription.request(n: u64)
-/// MAY synchronously call on_complete or on_error on this (or other)
-/// subscriber(s).
+///   MAY synchronously call on_complete or on_error on this (or other)
+///   subscriber(s).
 /// * While the Subscription is not cancelled, Subscription.cancel() MUST
-/// request the Publisher to eventually stop signaling its Subscriber. The
-/// operation is NOT REQUIRED to affect the Subscription immediately.
+///   request the Publisher to eventually stop signaling its Subscriber. The
+///   operation is NOT REQUIRED to affect the Subscription immediately.
 /// * While the Subscription is not cancelled, Subscription.cancel() MUST
-/// request the Publisher to eventually drop any references to the corresponding
-/// subscriber.
+///   request the Publisher to eventually drop any references to the corresponding
+///   subscriber.
 /// * While the Subscription is not cancelled, calling Subscription.cancel MAY
-/// cause the Publisher, if stateful, to transition into the shut-down state if
-/// no other Subscription exists at this point.
+///   cause the Publisher, if stateful, to transition into the shut-down state if
+///   no other Subscription exists at this point.
 /// * Calling Subscription.cancel MUST return normally.
 /// * Calling Subscription.request MUST return normally.
 pub trait BufferSubscription: Send + Sync + 'static {

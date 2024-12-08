@@ -22,6 +22,7 @@
 #include <vector>
 
 #include <android-base/thread_annotations.h>
+#include <scheduler/FrameTime.h>
 #include <scheduler/TimeKeeper.h>
 #include <ui/DisplayId.h>
 
@@ -77,7 +78,7 @@ public:
 
     void setRenderRate(Fps, bool applyImmediately) final EXCLUDES(mMutex);
 
-    void onFrameBegin(TimePoint expectedPresentTime, TimePoint lastConfirmedPresentTime) final
+    void onFrameBegin(TimePoint expectedPresentTime, FrameTime lastSignaledFrameTime) final
             EXCLUDES(mMutex);
     void onFrameMissed(TimePoint expectedPresentTime) final EXCLUDES(mMutex);
 
@@ -103,8 +104,15 @@ private:
         void freeze(TimePoint lastVsync);
         std::optional<TimePoint> validUntil() const { return mValidUntil; }
         bool isVSyncInPhase(Model, nsecs_t vsync, Fps frameRate);
-        void shiftVsyncSequence(Duration phase);
+        void shiftVsyncSequence(Duration phase, Period minFramePeriod);
         void setRenderRate(std::optional<Fps> renderRateOpt) { mRenderRateOpt = renderRateOpt; }
+
+        enum class VsyncOnTimeline {
+            Unique,  // Within timeline, not shared with next timeline.
+            Shared,  // Within timeline, shared with next timeline.
+            Outside, // Outside of the timeline.
+        };
+        VsyncOnTimeline isWithin(TimePoint vsync);
 
     private:
         nsecs_t snapToVsyncAlignedWithRenderRate(Model model, nsecs_t vsync);
@@ -119,7 +127,7 @@ private:
 
     VSyncPredictor(VSyncPredictor const&) = delete;
     VSyncPredictor& operator=(VSyncPredictor const&) = delete;
-    void clearTimestamps() REQUIRES(mMutex);
+    void clearTimestamps(bool clearTimelines) REQUIRES(mMutex);
 
     const std::unique_ptr<Clock> mClock;
     const PhysicalDisplayId mId;

@@ -93,8 +93,8 @@ os::HapticScale ExternalVibration::externalVibrationScaleToHapticScale(
                   externalVibrationScale.scaleLevel);
     }
 
-    return {/*level=*/scaleLevel, /*adaptiveScaleFactor=*/
-                      externalVibrationScale.adaptiveHapticsScale};
+    return os::HapticScale(scaleLevel, externalVibrationScale.scaleFactor,
+                           externalVibrationScale.adaptiveHapticsScale);
 }
 
 } // namespace os

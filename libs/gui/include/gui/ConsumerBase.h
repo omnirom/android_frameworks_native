@@ -17,17 +17,16 @@
 #ifndef ANDROID_GUI_CONSUMERBASE_H
 #define ANDROID_GUI_CONSUMERBASE_H
 
+#include <com_android_graphics_libgui_flags.h>
 #include <gui/BufferQueueDefs.h>
 #include <gui/IConsumerListener.h>
 #include <gui/IGraphicBufferConsumer.h>
+#include <gui/IGraphicBufferProducer.h>
 #include <gui/OccupancyTracker.h>
-
 #include <ui/PixelFormat.h>
-
 #include <utils/String8.h>
 #include <utils/Vector.h>
 #include <utils/threads.h>
-
 
 namespace android {
 // ----------------------------------------------------------------------------
@@ -76,12 +75,28 @@ public:
     void dumpState(String8& result) const;
     void dumpState(String8& result, const char* prefix) const;
 
+#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
+    // Returns a Surface that can be used as the producer for this consumer.
+    sp<Surface> getSurface() const;
+
+    // DEPRECATED, DO NOT USE. Returns the underlying IGraphicBufferConsumer
+    // that backs this ConsumerBase.
+    sp<IGraphicBufferConsumer> getIGraphicBufferConsumer() const
+            __attribute((deprecated("DO NOT USE: Temporary hack for refactoring")));
+#endif // COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
+
     // setFrameAvailableListener sets the listener object that will be notified
     // when a new frame becomes available.
     void setFrameAvailableListener(const wp<FrameAvailableListener>& listener);
 
     // See IGraphicBufferConsumer::detachBuffer
-    status_t detachBuffer(int slot);
+    status_t detachBuffer(int slot) __attribute((
+            deprecated("Please use the GraphicBuffer variant--slots are deprecated.")));
+
+#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_PLATFORM_API_IMPROVEMENTS)
+    // See IGraphicBufferConsumer::detachBuffer
+    status_t detachBuffer(const sp<GraphicBuffer>& buffer);
+#endif // COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_PLATFORM_API_IMPROVEMENTS)
 
     // See IGraphicBufferConsumer::setDefaultBufferSize
     status_t setDefaultBufferSize(uint32_t width, uint32_t height);
@@ -98,8 +113,17 @@ public:
     // See IGraphicBufferConsumer::setTransformHint
     status_t setTransformHint(uint32_t hint);
 
+#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
+    // See IGraphicBufferConsumer::setMaxBufferCount
+    status_t setMaxBufferCount(int bufferCount);
+#endif // COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
+
     // See IGraphicBufferConsumer::setMaxAcquiredBufferCount
     status_t setMaxAcquiredBufferCount(int maxAcquiredBuffers);
+
+#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
+    status_t setConsumerIsProtected(bool isProtected);
+#endif // COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
 
     // See IGraphicBufferConsumer::getSidebandStream
     sp<NativeHandle> getSidebandStream() const;
@@ -115,12 +139,24 @@ private:
     ConsumerBase(const ConsumerBase&);
     void operator=(const ConsumerBase&);
 
+    void initialize(bool controlledByApp);
+
 protected:
     // ConsumerBase constructs a new ConsumerBase object to consume image
     // buffers from the given IGraphicBufferConsumer.
     // The controlledByApp flag indicates that this consumer is under the application's
     // control.
+#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
+    explicit ConsumerBase(bool controlledByApp = false, bool consumerIsSurfaceFlinger = false);
+    explicit ConsumerBase(const sp<IGraphicBufferProducer>& producer,
+                          const sp<IGraphicBufferConsumer>& consumer, bool controlledByApp = false);
+
+    explicit ConsumerBase(const sp<IGraphicBufferConsumer>& consumer, bool controlledByApp = false)
+            __attribute((deprecated("ConsumerBase should own its own producer, and constructing it "
+                                    "without one is fragile! This method is going away soon.")));
+#else
     explicit ConsumerBase(const sp<IGraphicBufferConsumer>& consumer, bool controlledByApp = false);
+#endif // COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
 
     // onLastStrongRef gets called by RefBase just before the dtor of the most
     // derived class.  It is used to clean up the buffers so that ConsumerBase
@@ -149,6 +185,10 @@ protected:
     virtual void onFrameDetached(const uint64_t bufferId) override;
     virtual void onBuffersReleased() override;
     virtual void onSidebandStreamChanged() override;
+
+    virtual int getSlotForBufferLocked(const sp<GraphicBuffer>& buffer);
+
+    virtual status_t detachBufferLocked(int slotIndex);
 
     // freeBufferLocked frees up the given buffer slot.  If the slot has been
     // initialized this will release the reference to the GraphicBuffer in that
@@ -264,9 +304,15 @@ protected:
     Mutex mFrameAvailableMutex;
     wp<FrameAvailableListener> mFrameAvailableListener;
 
-    // The ConsumerBase has-a BufferQueue and is responsible for creating this object
-    // if none is supplied
+    // The ConsumerBase has-a BufferQueue and is responsible for creating these
+    // objects if not supplied.
     sp<IGraphicBufferConsumer> mConsumer;
+
+#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
+    // This Surface wraps the IGraphicBufferConsumer created for this
+    // ConsumerBase.
+    sp<Surface> mSurface;
+#endif // COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
 
     // The final release fence of the most recent buffer released by
     // releaseBufferLocked.

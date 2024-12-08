@@ -480,8 +480,8 @@ TEST_F(SurfaceTextureGLTest, DisconnectStressTest) {
     };
 
     sp<DisconnectWaiter> dw(new DisconnectWaiter());
-    mConsumer->consumerConnect(dw, false);
-
+    sp<IGraphicBufferConsumer> consumer = mST->getIGraphicBufferConsumer();
+    consumer->consumerConnect(dw, false);
 
     sp<Thread> pt(new ProducerThread(mANW));
     pt->run("ProducerThread");

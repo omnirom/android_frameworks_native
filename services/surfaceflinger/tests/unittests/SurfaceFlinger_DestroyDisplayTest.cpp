@@ -38,7 +38,7 @@ TEST_F(DestroyDisplayTest, destroyDisplayClearsCurrentStateForDisplay) {
     // Call Expectations
 
     // Destroying the display commits a display transaction.
-    EXPECT_CALL(*mFlinger.scheduler(), scheduleFrame()).Times(1);
+    EXPECT_CALL(*mFlinger.scheduler(), scheduleFrame(_)).Times(1);
 
     // --------------------------------------------------------------------
     // Invocation

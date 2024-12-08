@@ -43,12 +43,6 @@ enum class Tag : uint32_t {
 
 } // Anonymous namespace
 
-namespace { // Anonymous
-
-constexpr int32_t kSerializedCallbackTypeOnCompelteWithJankData = 2;
-
-} // Anonymous namespace
-
 status_t FrameEventHistoryStats::writeToParcel(Parcel* output) const {
     status_t err = output->writeUint64(frameNumber);
     if (err != NO_ERROR) return err;
@@ -119,23 +113,6 @@ status_t FrameEventHistoryStats::readFromParcel(const Parcel* input) {
     return err;
 }
 
-JankData::JankData()
-      : frameVsyncId(FrameTimelineInfo::INVALID_VSYNC_ID), jankType(JankType::None) {}
-
-status_t JankData::writeToParcel(Parcel* output) const {
-    SAFE_PARCEL(output->writeInt64, frameVsyncId);
-    SAFE_PARCEL(output->writeInt32, jankType);
-    SAFE_PARCEL(output->writeInt64, frameIntervalNs);
-    return NO_ERROR;
-}
-
-status_t JankData::readFromParcel(const Parcel* input) {
-    SAFE_PARCEL(input->readInt64, &frameVsyncId);
-    SAFE_PARCEL(input->readInt32, &jankType);
-    SAFE_PARCEL(input->readInt64, &frameIntervalNs);
-    return NO_ERROR;
-}
-
 status_t SurfaceStats::writeToParcel(Parcel* output) const {
     SAFE_PARCEL(output->writeStrongBinder, surfaceControl);
     if (const auto* acquireFence = std::get_if<sp<Fence>>(&acquireTimeOrFence)) {
@@ -160,10 +137,6 @@ status_t SurfaceStats::writeToParcel(Parcel* output) const {
 
     SAFE_PARCEL(output->writeUint32, currentMaxAcquiredBufferCount);
     SAFE_PARCEL(output->writeParcelable, eventStats);
-    SAFE_PARCEL(output->writeInt32, static_cast<int32_t>(jankData.size()));
-    for (const auto& data : jankData) {
-        SAFE_PARCEL(output->writeParcelable, data);
-    }
     SAFE_PARCEL(output->writeParcelable, previousReleaseCallbackId);
     return NO_ERROR;
 }
@@ -200,13 +173,6 @@ status_t SurfaceStats::readFromParcel(const Parcel* input) {
     SAFE_PARCEL(input->readUint32, &currentMaxAcquiredBufferCount);
     SAFE_PARCEL(input->readParcelable, &eventStats);
 
-    int32_t jankData_size = 0;
-    SAFE_PARCEL_READ_SIZE(input->readInt32, &jankData_size, input->dataSize());
-    for (int i = 0; i < jankData_size; i++) {
-        JankData data;
-        SAFE_PARCEL(input->readParcelable, &data);
-        jankData.push_back(data);
-    }
     SAFE_PARCEL(input->readParcelable, &previousReleaseCallbackId);
     return NO_ERROR;
 }
@@ -371,11 +337,7 @@ ListenerCallbacks ListenerCallbacks::filter(CallbackId::Type type) const {
 
 status_t CallbackId::writeToParcel(Parcel* output) const {
     SAFE_PARCEL(output->writeInt64, id);
-    if (type == Type::ON_COMPLETE && includeJankData) {
-        SAFE_PARCEL(output->writeInt32, kSerializedCallbackTypeOnCompelteWithJankData);
-    } else {
-        SAFE_PARCEL(output->writeInt32, static_cast<int32_t>(type));
-    }
+    SAFE_PARCEL(output->writeInt32, static_cast<int32_t>(type));
     return NO_ERROR;
 }
 
@@ -383,13 +345,7 @@ status_t CallbackId::readFromParcel(const Parcel* input) {
     SAFE_PARCEL(input->readInt64, &id);
     int32_t typeAsInt;
     SAFE_PARCEL(input->readInt32, &typeAsInt);
-    if (typeAsInt == kSerializedCallbackTypeOnCompelteWithJankData) {
-        type = Type::ON_COMPLETE;
-        includeJankData = true;
-    } else {
-        type = static_cast<CallbackId::Type>(typeAsInt);
-        includeJankData = false;
-    }
+    type = static_cast<CallbackId::Type>(typeAsInt);
     return NO_ERROR;
 }
 

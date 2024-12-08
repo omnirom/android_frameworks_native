@@ -133,8 +133,8 @@ protected:
         mDispatcher->setFocusedWindow(request);
     }
 
-    void tapAndExpect(const std::vector<const sp<FakeWindowHandle>>& windows,
-                      Level inboundTraceLevel, Level dispatchTraceLevel, InputTraceSession& s) {
+    void tapAndExpect(const std::vector<sp<FakeWindowHandle>>& windows, Level inboundTraceLevel,
+                      Level dispatchTraceLevel, InputTraceSession& s) {
         const auto down = MotionArgsBuilder(ACTION_DOWN, AINPUT_SOURCE_TOUCHSCREEN)
                                   .pointer(PointerBuilder(0, ToolType::FINGER).x(100).y(110))
                                   .build();
@@ -156,7 +156,7 @@ protected:
         }
     }
 
-    void keypressAndExpect(const std::vector<const sp<FakeWindowHandle>>& windows,
+    void keypressAndExpect(const std::vector<sp<FakeWindowHandle>>& windows,
                            Level inboundTraceLevel, Level dispatchTraceLevel,
                            InputTraceSession& s) {
         const auto down = KeyArgsBuilder(ACTION_DOWN, AINPUT_SOURCE_KEYBOARD).build();

@@ -143,6 +143,22 @@ status_t IBinder::getExtension(sp<IBinder>* out) {
     return reply.readNullableStrongBinder(out);
 }
 
+status_t IBinder::addFrozenStateChangeCallback(const wp<FrozenStateChangeCallback>& callback) {
+    BpBinder* proxy = this->remoteBinder();
+    if (proxy != nullptr) {
+        return proxy->addFrozenStateChangeCallback(callback);
+    }
+    return INVALID_OPERATION;
+}
+
+status_t IBinder::removeFrozenStateChangeCallback(const wp<FrozenStateChangeCallback>& callback) {
+    BpBinder* proxy = this->remoteBinder();
+    if (proxy != nullptr) {
+        return proxy->removeFrozenStateChangeCallback(callback);
+    }
+    return INVALID_OPERATION;
+}
+
 status_t IBinder::getDebugPid(pid_t* out) {
     BBinder* local = this->localBinder();
     if (local != nullptr) {

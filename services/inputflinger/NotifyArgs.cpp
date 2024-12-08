@@ -35,11 +35,6 @@ NotifyInputDevicesChangedArgs::NotifyInputDevicesChangedArgs(int32_t id,
                                                              std::vector<InputDeviceInfo> infos)
       : id(id), inputDeviceInfos(std::move(infos)) {}
 
-// --- NotifyConfigurationChangedArgs ---
-
-NotifyConfigurationChangedArgs::NotifyConfigurationChangedArgs(int32_t id, nsecs_t eventTime)
-      : id(id), eventTime(eventTime) {}
-
 // --- NotifyKeyArgs ---
 
 NotifyKeyArgs::NotifyKeyArgs(int32_t id, nsecs_t eventTime, nsecs_t readTime, int32_t deviceId,
@@ -198,7 +193,6 @@ Visitor(V...) -> Visitor<V...>;
 const char* toString(const NotifyArgs& args) {
     Visitor toStringVisitor{
             [&](const NotifyInputDevicesChangedArgs&) { return "NotifyInputDevicesChangedArgs"; },
-            [&](const NotifyConfigurationChangedArgs&) { return "NotifyConfigurationChangedArgs"; },
             [&](const NotifyKeyArgs&) { return "NotifyKeyArgs"; },
             [&](const NotifyMotionArgs&) { return "NotifyMotionArgs"; },
             [&](const NotifySensorArgs&) { return "NotifySensorArgs"; },

@@ -22,14 +22,13 @@
 
 namespace android::mock {
 
-inline gui::DisplayModeSpecs createDisplayModeSpecs(DisplayModeId defaultMode,
-                                                    bool allowGroupSwitching, float minFps,
-                                                    float maxFps) {
+inline gui::DisplayModeSpecs createDisplayModeSpecs(DisplayModeId defaultMode, Fps maxFps,
+                                                    bool allowGroupSwitching = false) {
     gui::DisplayModeSpecs specs;
     specs.defaultMode = ftl::to_underlying(defaultMode);
     specs.allowGroupSwitching = allowGroupSwitching;
-    specs.primaryRanges.physical.min = minFps;
-    specs.primaryRanges.physical.max = maxFps;
+    specs.primaryRanges.physical.min = 0.f;
+    specs.primaryRanges.physical.max = maxFps.getValue();
     specs.primaryRanges.render = specs.primaryRanges.physical;
     specs.appRequestRanges = specs.primaryRanges;
     return specs;

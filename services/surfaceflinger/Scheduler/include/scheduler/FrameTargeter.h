@@ -26,6 +26,7 @@
 #include <ui/FenceTime.h>
 
 #include <scheduler/Features.h>
+#include <scheduler/FrameTime.h>
 #include <scheduler/Time.h>
 #include <scheduler/VsyncId.h>
 #include <scheduler/interface/CompositeResult.h>
@@ -54,31 +55,20 @@ public:
 
     std::optional<TimePoint> earliestPresentTime() const { return mEarliestPresentTime; }
 
-    // The time of the VSYNC that preceded this frame. See `presentFenceForPastVsync` for details.
-    TimePoint pastVsyncTime(Period minFramePeriod) const;
-
-    // The present fence for the frame that had targeted the most recent VSYNC before this frame.
-    // If the target VSYNC for any given frame is more than `vsyncPeriod` in the future, then the
-    // VSYNC of at least one previous frame has not yet passed. In other words, this is NOT the
-    // `presentFenceForPreviousFrame` if running N VSYNCs ahead, but the one that should have been
-    // signaled by now (unless that frame missed).
-    FenceTimePtr presentFenceForPastVsync(Period minFramePeriod) const;
-
-    // Equivalent to `presentFenceForPastVsync` unless running N VSYNCs ahead.
-    const FenceTimePtr& presentFenceForPreviousFrame() const {
-        return mPresentFences.front().fenceTime;
-    }
+    // Equivalent to `expectedSignaledPresentFence` unless running N VSYNCs ahead.
+    const FenceTimePtr& presentFenceForPreviousFrame() const;
 
     bool isFramePending() const { return mFramePending; }
+    bool wouldBackpressureHwc() const { return mWouldBackpressureHwc; }
     bool didMissFrame() const { return mFrameMissed; }
     bool didMissHwcFrame() const { return mHwcFrameMissed && !mGpuFrameMissed; }
-    TimePoint lastSignaledFrameTime() const { return mLastSignaledFrameTime; };
+    FrameTime lastSignaledFrameTime() const { return mLastSignaledFrameTime; }
 
 protected:
     explicit FrameTarget(const std::string& displayLabel);
     ~FrameTarget() = default;
 
-    bool wouldPresentEarly(Period minFramePeriod) const;
+    bool wouldPresentEarly(Period vsyncPeriod, Period minFramePeriod) const;
 
     // Equivalent to `pastVsyncTime` unless running N VSYNCs ahead.
     TimePoint previousFrameVsyncTime(Period minFramePeriod) const {
@@ -87,8 +77,7 @@ protected:
 
     void addFence(sp<Fence> presentFence, FenceTimePtr presentFenceTime,
                   TimePoint expectedPresentTime) {
-        mFenceWithFenceTimes.next() = {std::move(presentFence), presentFenceTime,
-                                       expectedPresentTime};
+        mPresentFences.next() = {std::move(presentFence), presentFenceTime, expectedPresentTime};
     }
 
     VsyncId mVsyncId;
@@ -100,16 +89,25 @@ protected:
     TracedOrdinal<bool> mFrameMissed;
     TracedOrdinal<bool> mHwcFrameMissed;
     TracedOrdinal<bool> mGpuFrameMissed;
+    bool mWouldBackpressureHwc = false;
 
-    struct FenceWithFenceTime {
+    struct PresentFence {
         sp<Fence> fence = Fence::NO_FENCE;
         FenceTimePtr fenceTime = FenceTime::NO_FENCE;
         TimePoint expectedPresentTime = TimePoint();
     };
-    std::array<FenceWithFenceTime, 2> mPresentFences;
-    utils::RingBuffer<FenceWithFenceTime, 5> mFenceWithFenceTimes;
 
-    TimePoint mLastSignaledFrameTime;
+    // The present fence for the frame that had targeted the most recent VSYNC before this frame.
+    // If the target VSYNC for any given frame is more than `vsyncPeriod` in the future, then the
+    // VSYNC of at least one previous frame has not yet passed. In other words, this is NOT the
+    // `presentFenceForPreviousFrame` if running N VSYNCs ahead, but the one that should have been
+    // signaled by now (unless that frame missed).
+    std::pair<bool /* wouldBackpressure */, PresentFence> expectedSignaledPresentFence(
+            Period vsyncPeriod, Period minFramePeriod) const;
+    std::array<PresentFence, 2> mPresentFencesLegacy;
+    utils::RingBuffer<PresentFence, 5> mPresentFences;
+
+    FrameTime mLastSignaledFrameTime;
 
 private:
     friend class FrameTargeterTestBase;
@@ -118,18 +116,6 @@ private:
     inline bool targetsVsyncsAhead(Period minFramePeriod) const {
         static_assert(N > 1);
         return expectedFrameDuration() > (N - 1) * minFramePeriod;
-    }
-
-    const FenceTimePtr pastVsyncTimePtr() const {
-        auto pastFenceTimePtr = FenceTime::NO_FENCE;
-        for (size_t i = 0; i < mFenceWithFenceTimes.size(); i++) {
-            const auto& [_, fenceTimePtr, expectedPresentTime] = mFenceWithFenceTimes[i];
-            if (expectedPresentTime > mFrameBeginTime) {
-                return pastFenceTimePtr;
-            }
-            pastFenceTimePtr = fenceTimePtr;
-        }
-        return pastFenceTimePtr;
     }
 };
 
@@ -153,7 +139,7 @@ public:
 
     void beginFrame(const BeginFrameArgs&, const IVsyncSource&);
 
-    std::optional<TimePoint> computeEarliestPresentTime(Period minFramePeriod,
+    std::optional<TimePoint> computeEarliestPresentTime(Period vsyncPeriod, Period minFramePeriod,
                                                         Duration hwcMinWorkDuration);
 
     // TODO(b/241285191): Merge with FrameTargeter::endFrame.

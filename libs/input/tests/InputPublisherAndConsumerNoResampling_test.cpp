@@ -52,7 +52,7 @@ struct PublishMotionArgs {
     const int32_t action;
     const nsecs_t downTime;
     const uint32_t seq;
-    const int32_t eventId;
+    int32_t eventId;
     const int32_t deviceId = 1;
     const uint32_t source = AINPUT_SOURCE_TOUCHSCREEN;
     const ui::LogicalDisplayId displayId = ui::LogicalDisplayId::DEFAULT;
@@ -291,6 +291,7 @@ protected:
     void publishAndConsumeKeyEvent();
     void publishAndConsumeMotionStream();
     void publishAndConsumeMotionDown(nsecs_t downTime);
+    void publishAndConsumeSinglePointerMultipleSamples(const size_t nSamples);
     void publishAndConsumeBatchedMotionMove(nsecs_t downTime);
     void publishAndConsumeFocusEvent();
     void publishAndConsumeCaptureEvent();
@@ -298,6 +299,7 @@ protected:
     void publishAndConsumeTouchModeEvent();
     void publishAndConsumeMotionEvent(int32_t action, nsecs_t downTime,
                                       const std::vector<Pointer>& pointers);
+
     void TearDown() override {
         // Destroy the consumer, flushing any of the pending ack's.
         sendMessage(LooperMessage::DESTROY_CONSUMER);
@@ -362,7 +364,7 @@ private:
         if (!mConsumer->probablyHasInput()) {
             ADD_FAILURE() << "should deterministically have input because there is a batch";
         }
-        mConsumer->consumeBatchedInputEvents(std::nullopt);
+        mConsumer->consumeBatchedInputEvents(/*frameTime=*/std::nullopt);
     };
     void onFocusEvent(std::unique_ptr<FocusEvent> event, uint32_t seq) override {
         mFocusEvents.push(std::move(event));
@@ -394,8 +396,9 @@ void InputPublisherAndConsumerNoResamplingTest::handleMessage(const Message& mes
             break;
         }
         case LooperMessage::CREATE_CONSUMER: {
-            mConsumer = std::make_unique<InputConsumerNoResampling>(std::move(mClientChannel),
-                                                                    mLooper, *this);
+            mConsumer =
+                    std::make_unique<InputConsumerNoResampling>(std::move(mClientChannel), mLooper,
+                                                                *this, /*resampler=*/nullptr);
             break;
         }
         case LooperMessage::DESTROY_CONSUMER: {
@@ -517,6 +520,123 @@ void InputPublisherAndConsumerNoResamplingTest::publishAndConsumeMotionStream() 
 void InputPublisherAndConsumerNoResamplingTest::publishAndConsumeMotionDown(nsecs_t downTime) {
     publishAndConsumeMotionEvent(AMOTION_EVENT_ACTION_DOWN, downTime,
                                  {Pointer{.id = 0, .x = 20, .y = 30}});
+}
+
+/*
+ * Decompose a potential multi-sampled MotionEvent into multiple MotionEvents
+ * with a single sample.
+ */
+std::vector<MotionEvent> splitBatchedMotionEvent(const MotionEvent& batchedMotionEvent) {
+    std::vector<MotionEvent> singleMotionEvents;
+    const size_t batchSize = batchedMotionEvent.getHistorySize() + 1;
+    for (size_t i = 0; i < batchSize; ++i) {
+        MotionEvent singleMotionEvent;
+        singleMotionEvent
+                .initialize(batchedMotionEvent.getId(), batchedMotionEvent.getDeviceId(),
+                            batchedMotionEvent.getSource(), batchedMotionEvent.getDisplayId(),
+                            batchedMotionEvent.getHmac(), batchedMotionEvent.getAction(),
+                            batchedMotionEvent.getActionButton(), batchedMotionEvent.getFlags(),
+                            batchedMotionEvent.getEdgeFlags(), batchedMotionEvent.getMetaState(),
+                            batchedMotionEvent.getButtonState(),
+                            batchedMotionEvent.getClassification(),
+                            batchedMotionEvent.getTransform(), batchedMotionEvent.getXPrecision(),
+                            batchedMotionEvent.getYPrecision(),
+                            batchedMotionEvent.getRawXCursorPosition(),
+                            batchedMotionEvent.getRawYCursorPosition(),
+                            batchedMotionEvent.getRawTransform(), batchedMotionEvent.getDownTime(),
+                            batchedMotionEvent.getHistoricalEventTime(/*historicalIndex=*/i),
+                            batchedMotionEvent.getPointerCount(),
+                            batchedMotionEvent.getPointerProperties(),
+                            (batchedMotionEvent.getSamplePointerCoords() + i));
+        singleMotionEvents.push_back(singleMotionEvent);
+    }
+    return singleMotionEvents;
+}
+
+/*
+ * Simulates a single pointer touching the screen and leaving it there for a period of time.
+ * Publishes a DOWN event and consumes it right away. Then, publishes a sequence of MOVE
+ * samples for the same pointer, and waits until it has been consumed. Splits batched MotionEvents
+ * into individual samples. Checks the consumed MotionEvents against the published ones.
+ * This test is non-deterministic because it depends on the timing of arrival of events to the
+ * socket.
+ *
+ * @param nSamples The number of MOVE samples to publish before attempting consumption.
+ */
+void InputPublisherAndConsumerNoResamplingTest::publishAndConsumeSinglePointerMultipleSamples(
+        const size_t nSamples) {
+    const nsecs_t downTime = systemTime(SYSTEM_TIME_MONOTONIC);
+    const Pointer pointer(0, 20, 30);
+
+    const PublishMotionArgs argsDown(AMOTION_EVENT_ACTION_DOWN, downTime, {pointer}, mSeq);
+    const nsecs_t publishTimeOfDown = systemTime(SYSTEM_TIME_MONOTONIC);
+    publishMotionEvent(*mPublisher, argsDown);
+
+    // Consume the DOWN event.
+    ASSERT_TRUE(mMotionEvents.popWithTimeout(TIMEOUT).has_value());
+
+    verifyFinishedSignal(*mPublisher, mSeq, publishTimeOfDown);
+
+    std::vector<nsecs_t> publishTimes;
+    std::vector<PublishMotionArgs> argsMoves;
+    std::queue<uint32_t> publishedSequenceNumbers;
+
+    // Block Looper to increase the chance of batching events
+    {
+        std::scoped_lock l(mLock);
+        mLooperMayProceed = false;
+    }
+    sendMessage(LooperMessage::BLOCK_LOOPER);
+    {
+        std::unique_lock l(mLock);
+        mNotifyLooperWaiting.wait(l, [this] { return mLooperIsBlocked; });
+    }
+
+    uint32_t firstSampleId;
+    for (size_t i = 0; i < nSamples; ++i) {
+        publishedSequenceNumbers.push(++mSeq);
+        PublishMotionArgs argsMove(AMOTION_EVENT_ACTION_MOVE, downTime, {pointer}, mSeq);
+        // A batched MotionEvent only has a single event id, currently determined when the
+        // MotionEvent is initialized. Therefore, to pass the eventId comparisons inside
+        // verifyArgsEqualToEvent, we need to override the event id of the published args to match
+        // the event id of the first sample inside the MotionEvent.
+        if (i == 0) {
+            firstSampleId = argsMove.eventId;
+        }
+        argsMove.eventId = firstSampleId;
+        publishTimes.push_back(systemTime(SYSTEM_TIME_MONOTONIC));
+        argsMoves.push_back(argsMove);
+        publishMotionEvent(*mPublisher, argsMove);
+    }
+
+    std::vector<MotionEvent> singleSampledMotionEvents;
+
+    // Unblock Looper
+    {
+        std::scoped_lock l(mLock);
+        mLooperMayProceed = true;
+    }
+    mNotifyLooperMayProceed.notify_all();
+
+    // We have no control over the socket behavior, so the consumer can receive
+    // the motion as a batched event, or as a sequence of multiple single-sample MotionEvents (or a
+    // mix of those)
+    while (singleSampledMotionEvents.size() != nSamples) {
+        const std::optional<std::unique_ptr<MotionEvent>> batchedMotionEvent =
+                mMotionEvents.popWithTimeout(TIMEOUT);
+        // The events received by these calls are never null
+        std::vector<MotionEvent> splitMotionEvents = splitBatchedMotionEvent(**batchedMotionEvent);
+        singleSampledMotionEvents.insert(singleSampledMotionEvents.end(), splitMotionEvents.begin(),
+                                         splitMotionEvents.end());
+    }
+
+    // Consumer can choose to finish events in any order. For simplicity,
+    // we verify the events in sequence (since that is how the test is implemented).
+    for (size_t i = 0; i < nSamples; ++i) {
+        verifyArgsEqualToEvent(argsMoves[i], singleSampledMotionEvents[i]);
+        verifyFinishedSignal(*mPublisher, publishedSequenceNumbers.front(), publishTimes[i]);
+        publishedSequenceNumbers.pop();
+    }
 }
 
 void InputPublisherAndConsumerNoResamplingTest::publishAndConsumeBatchedMotionMove(
@@ -812,6 +932,10 @@ TEST_F(InputPublisherAndConsumerNoResamplingTest, PublishMultipleEvents_EndToEnd
                                   Pointer{.id = 2, .x = 200, .y = 300}});
     ASSERT_NO_FATAL_FAILURE(publishAndConsumeKeyEvent());
     ASSERT_NO_FATAL_FAILURE(publishAndConsumeTouchModeEvent());
+}
+
+TEST_F(InputPublisherAndConsumerNoResamplingTest, PublishAndConsumeSinglePointer) {
+    publishAndConsumeSinglePointerMultipleSamples(3);
 }
 
 } // namespace android

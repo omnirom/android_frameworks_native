@@ -16,9 +16,9 @@
 
 #define LOG_TAG "VibratorHalController"
 
+#include <aidl/android/hardware/vibrator/IVibrator.h>
+#include <android/binder_manager.h>
 #include <android/hardware/vibrator/1.3/IVibrator.h>
-#include <android/hardware/vibrator/IVibrator.h>
-#include <binder/IServiceManager.h>
 #include <hardware/vibrator.h>
 
 #include <utils/Log.h>
@@ -27,10 +27,10 @@
 #include <vibratorservice/VibratorHalController.h>
 #include <vibratorservice/VibratorHalWrapper.h>
 
-using android::hardware::vibrator::CompositeEffect;
-using android::hardware::vibrator::CompositePrimitive;
-using android::hardware::vibrator::Effect;
-using android::hardware::vibrator::EffectStrength;
+using aidl::android::hardware::vibrator::CompositeEffect;
+using aidl::android::hardware::vibrator::CompositePrimitive;
+using aidl::android::hardware::vibrator::Effect;
+using aidl::android::hardware::vibrator::EffectStrength;
 
 using std::chrono::milliseconds;
 
@@ -38,7 +38,7 @@ namespace V1_0 = android::hardware::vibrator::V1_0;
 namespace V1_1 = android::hardware::vibrator::V1_1;
 namespace V1_2 = android::hardware::vibrator::V1_2;
 namespace V1_3 = android::hardware::vibrator::V1_3;
-namespace Aidl = android::hardware::vibrator;
+namespace Aidl = aidl::android::hardware::vibrator;
 
 namespace android {
 
@@ -53,10 +53,14 @@ std::shared_ptr<HalWrapper> connectHal(std::shared_ptr<CallbackScheduler> schedu
         return nullptr;
     }
 
-    sp<Aidl::IVibrator> aidlHal = waitForVintfService<Aidl::IVibrator>();
-    if (aidlHal) {
-        ALOGV("Successfully connected to Vibrator HAL AIDL service.");
-        return std::make_shared<AidlHalWrapper>(std::move(scheduler), aidlHal);
+    auto serviceName = std::string(Aidl::IVibrator::descriptor) + "/default";
+    if (AServiceManager_isDeclared(serviceName.c_str())) {
+        std::shared_ptr<Aidl::IVibrator> hal = Aidl::IVibrator::fromBinder(
+                ndk::SpAIBinder(AServiceManager_waitForService(serviceName.c_str())));
+        if (hal) {
+            ALOGV("Successfully connected to Vibrator HAL AIDL service.");
+            return std::make_shared<AidlHalWrapper>(std::move(scheduler), std::move(hal));
+        }
     }
 
     sp<V1_0::IVibrator> halV1_0 = V1_0::IVibrator::getService();

@@ -28,14 +28,10 @@ cc_fuzz {
     ],
     static_libs: [
         "libbase",
-        "libcgrouprc",
-        "libcgrouprc_format",
         "libcutils",
         "libgralloctypes",
         "libhidlbase",
         "liblog",
-        "libprocessgroup",
-        "libjsoncpp",
         "libutils",
     ],
 

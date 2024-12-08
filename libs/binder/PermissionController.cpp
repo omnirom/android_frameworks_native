@@ -19,9 +19,9 @@
 #include <binder/Binder.h>
 #include <binder/IServiceManager.h>
 
-#include <utils/SystemClock.h>
-
 namespace android {
+
+using namespace std::chrono_literals;
 
 PermissionController::PermissionController()
 {
@@ -30,16 +30,16 @@ PermissionController::PermissionController()
 sp<IPermissionController> PermissionController::getService()
 {
     std::lock_guard<Mutex> scoped_lock(mLock);
-    int64_t startTime = 0;
+    auto startTime = std::chrono::steady_clock::now().min();
     sp<IPermissionController> service = mService;
     while (service == nullptr || !IInterface::asBinder(service)->isBinderAlive()) {
         sp<IBinder> binder = defaultServiceManager()->checkService(String16("permission"));
         if (binder == nullptr) {
             // Wait for the activity service to come back...
-            if (startTime == 0) {
-                startTime = uptimeMillis();
+            if (startTime == startTime.min()) {
+                startTime = std::chrono::steady_clock::now();
                 ALOGI("Waiting for permission service");
-            } else if ((uptimeMillis() - startTime) > 10000) {
+            } else if (std::chrono::steady_clock::now() - startTime > 10s) {
                 ALOGW("Waiting too long for permission service, giving up");
                 service = nullptr;
                 break;

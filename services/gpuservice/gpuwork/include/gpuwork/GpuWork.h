@@ -125,7 +125,7 @@ private:
     static constexpr size_t kNumGpusHardLimit = 32;
 
     // The minimum GPU time needed to actually log stats for a UID.
-    static constexpr uint64_t kMinGpuTimeNanoseconds = 30U * 1000000000U; // 30 seconds.
+    static constexpr uint64_t kMinGpuTimeNanoseconds = 10LLU * 1000000000LLU; // 10 seconds.
 
     // The previous time point at which |mGpuWorkMap| was cleared.
     std::chrono::steady_clock::time_point mPreviousMapClearTimePoint GUARDED_BY(mMutex);

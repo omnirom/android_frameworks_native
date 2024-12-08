@@ -25,6 +25,9 @@ enum {
     ON_BUFFER_RELEASED = IBinder::FIRST_CALL_TRANSACTION,
     NEEDS_RELEASE_NOTIFY,
     ON_BUFFERS_DISCARDED,
+    ON_BUFFER_DETACHED,
+    ON_BUFFER_ATTACHED,
+    NEEDS_ATTACH_NOTIFY,
 };
 
 class BpProducerListener : public BpInterface<IProducerListener>
@@ -64,6 +67,38 @@ public:
         data.writeInt32Vector(discardedSlots);
         remote()->transact(ON_BUFFERS_DISCARDED, data, &reply, IBinder::FLAG_ONEWAY);
     }
+
+#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(BQ_CONSUMER_ATTACH_CALLBACK)
+    virtual void onBufferDetached(int slot) {
+        Parcel data, reply;
+        data.writeInterfaceToken(IProducerListener::getInterfaceDescriptor());
+        data.writeInt32(slot);
+        remote()->transact(ON_BUFFER_DETACHED, data, &reply, IBinder::FLAG_ONEWAY);
+    }
+
+    virtual void onBufferAttached() {
+        Parcel data, reply;
+        data.writeInterfaceToken(IProducerListener::getInterfaceDescriptor());
+        remote()->transact(ON_BUFFER_ATTACHED, data, &reply, IBinder::FLAG_ONEWAY);
+    }
+
+    virtual bool needsAttachNotify() {
+        bool result;
+        Parcel data, reply;
+        data.writeInterfaceToken(IProducerListener::getInterfaceDescriptor());
+        status_t err = remote()->transact(NEEDS_ATTACH_NOTIFY, data, &reply);
+        if (err != NO_ERROR) {
+            ALOGE("IProducerListener: binder call \'needsAttachNotify\' failed");
+            return true;
+        }
+        err = reply.readBool(&result);
+        if (err != NO_ERROR) {
+            ALOGE("IProducerListener: malformed binder reply");
+            return true;
+        }
+        return result;
+    }
+#endif
 };
 
 // Out-of-line virtual method definition to trigger vtable emission in this
@@ -115,6 +150,27 @@ status_t BnProducerListener::onTransact(uint32_t code, const Parcel& data,
             onBuffersDiscarded(discardedSlots);
             return NO_ERROR;
         }
+#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(BQ_CONSUMER_ATTACH_CALLBACK)
+        case ON_BUFFER_DETACHED: {
+            CHECK_INTERFACE(IProducerListener, data, reply);
+            int slot;
+            status_t result = data.readInt32(&slot);
+            if (result != NO_ERROR) {
+                ALOGE("ON_BUFFER_DETACHED failed to read slot: %d", result);
+                return result;
+            }
+            onBufferDetached(slot);
+            return NO_ERROR;
+        }
+        case ON_BUFFER_ATTACHED:
+            CHECK_INTERFACE(IProducerListener, data, reply);
+            onBufferAttached();
+            return NO_ERROR;
+        case NEEDS_ATTACH_NOTIFY:
+            CHECK_INTERFACE(IProducerListener, data, reply);
+            reply->writeBool(needsAttachNotify());
+            return NO_ERROR;
+#endif
     }
     return BBinder::onTransact(code, data, reply, flags);
 }
@@ -127,5 +183,11 @@ bool BnProducerListener::needsReleaseNotify() {
 
 void BnProducerListener::onBuffersDiscarded(const std::vector<int32_t>& /*discardedSlots*/) {
 }
+
+#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(BQ_CONSUMER_ATTACH_CALLBACK)
+bool BnProducerListener::needsAttachNotify() {
+    return true;
+}
+#endif
 
 } // namespace android

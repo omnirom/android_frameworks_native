@@ -414,20 +414,6 @@ protected:
 };
 
 /**
- * Create a basic configuration change and send it to input processor.
- * Expect that the event is received by the next input stage, unmodified.
- */
-TEST_F(UnwantedInteractionBlockerTest, ConfigurationChangedIsPassedToNextListener) {
-    // Create a basic configuration change and send to blocker
-    NotifyConfigurationChangedArgs args(/*sequenceNum=*/1, /*eventTime=*/2);
-
-    mBlocker->notifyConfigurationChanged(args);
-    NotifyConfigurationChangedArgs outArgs;
-    ASSERT_NO_FATAL_FAILURE(mTestListener.assertNotifyConfigurationChangedWasCalled(&outArgs));
-    ASSERT_EQ(args, outArgs);
-}
-
-/**
  * Keys are not handled in 'UnwantedInteractionBlocker' and should be passed
  * to next stage unmodified.
  */

@@ -48,7 +48,7 @@ TEST_F(HotplugTest, schedulesConfigureToProcessHotplugEvents) {
 
 TEST_F(HotplugTest, schedulesFrameToCommitDisplayTransaction) {
     EXPECT_CALL(*mFlinger.scheduler(), scheduleConfigure()).Times(1);
-    EXPECT_CALL(*mFlinger.scheduler(), scheduleFrame()).Times(1);
+    EXPECT_CALL(*mFlinger.scheduler(), scheduleFrame(_)).Times(1);
 
     constexpr HWDisplayId displayId1 = 456;
     mFlinger.onComposerHalHotplugEvent(displayId1, DisplayHotplugEvent::DISCONNECTED);
@@ -73,7 +73,7 @@ TEST_F(HotplugTest, ignoresDuplicateDisconnection) {
             .WillOnce(Return(Error::NONE));
 
     // A single commit should be scheduled for both configure calls.
-    EXPECT_CALL(*mFlinger.scheduler(), scheduleFrame()).Times(1);
+    EXPECT_CALL(*mFlinger.scheduler(), scheduleFrame(_)).Times(1);
 
     ExternalDisplay::injectPendingHotplugEvent(this, Connection::CONNECTED);
     mFlinger.configure();
@@ -116,7 +116,7 @@ TEST_F(HotplugTest, rejectsHotplugIfFailedToLoadDisplayModes) {
                 setVsyncEnabled(ExternalDisplay::HWC_DISPLAY_ID, IComposerClient::Vsync::DISABLE))
             .WillOnce(Return(Error::NONE));
 
-    EXPECT_CALL(*mFlinger.scheduler(), scheduleFrame()).Times(1);
+    EXPECT_CALL(*mFlinger.scheduler(), scheduleFrame(_)).Times(1);
 
     ExternalDisplay::injectPendingHotplugEvent(this, Connection::CONNECTED);
     mFlinger.configure();

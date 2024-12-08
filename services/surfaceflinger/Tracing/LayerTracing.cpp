@@ -24,10 +24,10 @@
 #include "Tracing/tools/LayerTraceGenerator.h"
 #include "TransactionTracing.h"
 
+#include <common/trace.h>
 #include <log/log.h>
 #include <perfetto/tracing.h>
 #include <utils/Timers.h>
-#include <utils/Trace.h>
 
 namespace android {
 
@@ -134,7 +134,7 @@ void LayerTracing::onStop(Mode mode) {
 
 void LayerTracing::addProtoSnapshotToOstream(perfetto::protos::LayersSnapshotProto&& snapshot,
                                              Mode mode) {
-    ATRACE_CALL();
+    SFTRACE_CALL();
     if (mOutStream) {
         writeSnapshotToStream(std::move(snapshot));
     } else {

@@ -17,6 +17,7 @@
 #undef LOG_TAG
 #define LOG_TAG "TransactionApplicationTest"
 
+#include <binder/Binder.h>
 #include <common/test/FlagUtils.h>
 #include <compositionengine/Display.h>
 #include <compositionengine/mock/DisplaySurface.h>
@@ -26,10 +27,10 @@
 #include <gui/SurfaceComposerClient.h>
 #include <gui/fake/BufferData.h>
 #include <log/log.h>
+#include <renderengine/mock/RenderEngine.h>
 #include <ui/MockFence.h>
 #include <utils/String8.h>
 #include <vector>
-#include <binder/Binder.h>
 
 #include "FrontEnd/TransactionHandler.h"
 #include "TestableSurfaceFlinger.h"
@@ -55,6 +56,7 @@ public:
 
         mFlinger.setupComposer(std::make_unique<Hwc2::mock::Composer>());
         mFlinger.setupMockScheduler();
+        mFlinger.setupRenderEngine(std::unique_ptr<renderengine::RenderEngine>(mRenderEngine));
         mFlinger.flinger()->addTransactionReadyFilters();
     }
 
@@ -65,6 +67,7 @@ public:
     }
 
     TestableSurfaceFlinger mFlinger;
+    renderengine::mock::RenderEngine* mRenderEngine = new renderengine::mock::RenderEngine();
 
     struct TransactionInfo {
         Vector<ComposerState> states;
@@ -102,7 +105,7 @@ public:
 
     void NotPlacedOnTransactionQueue(uint32_t flags) {
         ASSERT_TRUE(mFlinger.getTransactionQueue().isEmpty());
-        EXPECT_CALL(*mFlinger.scheduler(), scheduleFrame()).Times(1);
+        EXPECT_CALL(*mFlinger.scheduler(), scheduleFrame(_)).Times(1);
         TransactionInfo transaction;
         setupSingle(transaction, flags,
                     /*desiredPresentTime*/ systemTime(), /*isAutoTimestamp*/ true,
@@ -126,7 +129,7 @@ public:
 
     void PlaceOnTransactionQueue(uint32_t flags) {
         ASSERT_TRUE(mFlinger.getTransactionQueue().isEmpty());
-        EXPECT_CALL(*mFlinger.scheduler(), scheduleFrame()).Times(1);
+        EXPECT_CALL(*mFlinger.scheduler(), scheduleFrame(_)).Times(1);
 
         // first check will see desired present time has not passed,
         // but afterwards it will look like the desired present time has passed
@@ -152,7 +155,7 @@ public:
     void BlockedByPriorTransaction(uint32_t flags) {
         ASSERT_TRUE(mFlinger.getTransactionQueue().isEmpty());
         nsecs_t time = systemTime();
-        EXPECT_CALL(*mFlinger.scheduler(), scheduleFrame()).Times(2);
+        EXPECT_CALL(*mFlinger.scheduler(), scheduleFrame(_)).Times(2);
 
         // transaction that should go on the pending thread
         TransactionInfo transactionA;
@@ -214,7 +217,7 @@ public:
 
 TEST_F(TransactionApplicationTest, AddToPendingQueue) {
     ASSERT_TRUE(mFlinger.getTransactionQueue().isEmpty());
-    EXPECT_CALL(*mFlinger.scheduler(), scheduleFrame()).Times(1);
+    EXPECT_CALL(*mFlinger.scheduler(), scheduleFrame(_)).Times(1);
 
     TransactionInfo transactionA; // transaction to go on pending queue
     setupSingle(transactionA, /*flags*/ 0, /*desiredPresentTime*/ s2ns(1), false,
@@ -235,7 +238,7 @@ TEST_F(TransactionApplicationTest, AddToPendingQueue) {
 
 TEST_F(TransactionApplicationTest, Flush_RemovesFromQueue) {
     ASSERT_TRUE(mFlinger.getTransactionQueue().isEmpty());
-    EXPECT_CALL(*mFlinger.scheduler(), scheduleFrame()).Times(1);
+    EXPECT_CALL(*mFlinger.scheduler(), scheduleFrame(_)).Times(1);
 
     TransactionInfo transactionA; // transaction to go on pending queue
     setupSingle(transactionA, /*flags*/ 0, /*desiredPresentTime*/ s2ns(1), false,
@@ -323,15 +326,17 @@ TEST_F(TransactionApplicationTest, ApplyTokensUseDifferentQueues) {
     transaction1.states[0].state.bufferData =
             std::make_shared<fake::BufferData>(/* bufferId */ 1, /* width */ 1, /* height */ 1,
                                                /* pixelFormat */ 0, /* outUsage */ 0);
+    mFlinger.addLayer(1);
+    bool out;
+    mFlinger.updateLayerSnapshots(VsyncId{1}, 0, /* transactionsFlushed */ true, out);
     transaction1.states[0].externalTexture =
             std::make_shared<FakeExternalTexture>(*transaction1.states[0].state.bufferData);
-    transaction1.states[0].state.surface =
-            sp<Layer>::make(LayerCreationArgs(mFlinger.flinger(), nullptr, "TestLayer", 0, {}))
-                    ->getHandle();
+    transaction1.states[0].state.surface = mFlinger.getLegacyLayer(1)->getHandle();
     auto fence = sp<mock::MockFence>::make();
     EXPECT_CALL(*fence, getStatus()).WillRepeatedly(Return(Fence::Status::Unsignaled));
     transaction1.states[0].state.bufferData->acquireFence = std::move(fence);
     transaction1.states[0].state.bufferData->flags = BufferData::BufferDataChange::fenceChanged;
+    transaction1.states[0].layerId = 1;
     transaction1.isAutoTimestamp = true;
 
     // Transaction 2 should be ready to be applied.
@@ -361,8 +366,7 @@ public:
         }
         mFlinger.getPendingTransactionQueue().clear();
         mFlinger.commitTransactionsLocked(eTransactionMask);
-        mFlinger.mutableCurrentState().layersSortedByZ.clear();
-        mFlinger.mutableDrawingState().layersSortedByZ.clear();
+        mFlinger.destroyAllLayerHandles();
     }
 
     static sp<Fence> fence(Fence::Status status) {
@@ -371,8 +375,7 @@ public:
         return fence;
     }
 
-    ComposerState createComposerState(int layerId, sp<Fence> fence, uint64_t what,
-                                      std::optional<sp<IBinder>> layerHandle = std::nullopt) {
+    ComposerState createComposerState(int layerId, sp<Fence> fence, uint64_t what) {
         ComposerState state;
         state.state.bufferData =
                 std::make_shared<fake::BufferData>(/* bufferId */ 123L, /* width */ 1,
@@ -380,9 +383,6 @@ public:
                                                    /* outUsage */ 0);
         state.state.bufferData->acquireFence = std::move(fence);
         state.state.layerId = layerId;
-        state.state.surface = layerHandle.value_or(
-                sp<Layer>::make(LayerCreationArgs(mFlinger.flinger(), nullptr, "TestLayer", 0, {}))
-                        ->getHandle());
         state.state.bufferData->flags = BufferData::BufferDataChange::fenceChanged;
 
         state.state.what = what;
@@ -418,6 +418,19 @@ public:
                               size_t expectedTransactionsPending) {
         EXPECT_TRUE(mFlinger.getTransactionQueue().isEmpty());
         EXPECT_EQ(0u, mFlinger.getPendingTransactionQueue().size());
+        std::unordered_set<uint32_t> createdLayers;
+        for (auto transaction : transactions) {
+            for (auto& state : transaction.states) {
+                auto layerId = static_cast<uint32_t>(state.state.layerId);
+                if (createdLayers.find(layerId) == createdLayers.end()) {
+                    mFlinger.addLayer(layerId);
+                    createdLayers.insert(layerId);
+                }
+            }
+        }
+        bool unused;
+        bool mustComposite = mFlinger.updateLayerSnapshots(VsyncId{1}, /*frameTimeNs=*/0,
+                                                           /*transactionsFlushed=*/true, unused);
 
         for (auto transaction : transactions) {
             std::vector<ResolvedComposerState> resolvedStates;
@@ -427,6 +440,9 @@ public:
                 resolvedState.state = std::move(state.state);
                 resolvedState.externalTexture =
                         std::make_shared<FakeExternalTexture>(*resolvedState.state.bufferData);
+                resolvedState.layerId = static_cast<uint32_t>(state.state.layerId);
+                resolvedState.state.surface =
+                        mFlinger.getLegacyLayer(resolvedState.layerId)->getHandle();
                 resolvedStates.emplace_back(resolvedState);
             }
 
@@ -458,9 +474,8 @@ public:
 TEST_F(LatchUnsignaledAutoSingleLayerTest, Flush_RemovesSingleSignaledFromTheQueue) {
     const sp<IBinder> kApplyToken =
             IInterface::asBinder(TransactionCompletedListener::getIInstance());
-    const auto kLayerId = 1;
+    const auto kLayerId = 10;
     const auto kExpectedTransactionsPending = 0u;
-
     const auto signaledTransaction =
             createTransactionInfo(kApplyToken,
                                   {createComposerState(kLayerId, fence(Fence::Status::Signaled),
@@ -773,7 +788,7 @@ public:
 TEST_F(LatchUnsignaledDisabledTest, Flush_RemovesSignaledFromTheQueue) {
     const sp<IBinder> kApplyToken =
             IInterface::asBinder(TransactionCompletedListener::getIInstance());
-    const auto kLayerId = 1;
+    const auto kLayerId = 10;
     const auto kExpectedTransactionsPending = 0u;
 
     const auto signaledTransaction =

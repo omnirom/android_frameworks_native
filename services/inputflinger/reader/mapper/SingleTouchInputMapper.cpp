@@ -44,7 +44,7 @@ void SingleTouchInputMapper::syncTouch(nsecs_t when, RawState* outState) {
 
         bool isHovering = mTouchButtonAccumulator.getToolType() != ToolType::MOUSE &&
                 (mTouchButtonAccumulator.isHovering() ||
-                 (mRawPointerAxes.pressure.valid &&
+                 (mRawPointerAxes.pressure &&
                   mSingleTouchMotionAccumulator.getAbsolutePressure() <= 0));
         outState->rawPointerData.markIdBit(0, isHovering);
 
@@ -72,13 +72,19 @@ void SingleTouchInputMapper::syncTouch(nsecs_t when, RawState* outState) {
 void SingleTouchInputMapper::configureRawPointerAxes() {
     TouchInputMapper::configureRawPointerAxes();
 
-    getAbsoluteAxisInfo(ABS_X, &mRawPointerAxes.x);
-    getAbsoluteAxisInfo(ABS_Y, &mRawPointerAxes.y);
-    getAbsoluteAxisInfo(ABS_PRESSURE, &mRawPointerAxes.pressure);
-    getAbsoluteAxisInfo(ABS_TOOL_WIDTH, &mRawPointerAxes.toolMajor);
-    getAbsoluteAxisInfo(ABS_DISTANCE, &mRawPointerAxes.distance);
-    getAbsoluteAxisInfo(ABS_TILT_X, &mRawPointerAxes.tiltX);
-    getAbsoluteAxisInfo(ABS_TILT_Y, &mRawPointerAxes.tiltY);
+    // TODO(b/351870641): Investigate why we are sometime not getting valid axis infos for the x/y
+    //   axes, even though those axes are required to be supported.
+    if (const auto xInfo = getAbsoluteAxisInfo(ABS_X); xInfo.has_value()) {
+        mRawPointerAxes.x = *xInfo;
+    }
+    if (const auto yInfo = getAbsoluteAxisInfo(ABS_Y); yInfo.has_value()) {
+        mRawPointerAxes.y = *yInfo;
+    }
+    mRawPointerAxes.pressure = getAbsoluteAxisInfo(ABS_PRESSURE);
+    mRawPointerAxes.toolMajor = getAbsoluteAxisInfo(ABS_TOOL_WIDTH);
+    mRawPointerAxes.distance = getAbsoluteAxisInfo(ABS_DISTANCE);
+    mRawPointerAxes.tiltX = getAbsoluteAxisInfo(ABS_TILT_X);
+    mRawPointerAxes.tiltY = getAbsoluteAxisInfo(ABS_TILT_Y);
 }
 
 bool SingleTouchInputMapper::hasStylus() const {

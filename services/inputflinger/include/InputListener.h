@@ -38,7 +38,6 @@ public:
     virtual ~InputListenerInterface() { }
 
     virtual void notifyInputDevicesChanged(const NotifyInputDevicesChangedArgs& args) = 0;
-    virtual void notifyConfigurationChanged(const NotifyConfigurationChangedArgs& args) = 0;
     virtual void notifyKey(const NotifyKeyArgs& args) = 0;
     virtual void notifyMotion(const NotifyMotionArgs& args) = 0;
     virtual void notifySwitch(const NotifySwitchArgs& args) = 0;
@@ -60,7 +59,6 @@ public:
     explicit QueuedInputListener(InputListenerInterface& innerListener);
 
     virtual void notifyInputDevicesChanged(const NotifyInputDevicesChangedArgs& args) override;
-    virtual void notifyConfigurationChanged(const NotifyConfigurationChangedArgs& args) override;
     virtual void notifyKey(const NotifyKeyArgs& args) override;
     virtual void notifyMotion(const NotifyMotionArgs& args) override;
     virtual void notifySwitch(const NotifySwitchArgs& args) override;
@@ -84,7 +82,6 @@ public:
     explicit TracedInputListener(const char* name, InputListenerInterface& innerListener);
 
     virtual void notifyInputDevicesChanged(const NotifyInputDevicesChangedArgs& args) override;
-    virtual void notifyConfigurationChanged(const NotifyConfigurationChangedArgs& args) override;
     virtual void notifyKey(const NotifyKeyArgs& args) override;
     virtual void notifyMotion(const NotifyMotionArgs& args) override;
     virtual void notifySwitch(const NotifySwitchArgs& args) override;

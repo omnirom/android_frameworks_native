@@ -916,42 +916,72 @@ EGLContext eglCreateContextImpl(EGLDisplay dpy, EGLConfig config, EGLContext sha
             egl_context_t* const c = get_context(share_list);
             share_list = c->context;
         }
+
+        bool skip_telemetry = false;
+
+        auto findAttribute = [](const EGLint* attrib_ptr, GLint attribute, GLint* value) {
+            while (attrib_ptr && *attrib_ptr != EGL_NONE) {
+                GLint attr = *attrib_ptr++;
+                GLint val = *attrib_ptr++;
+                if (attr == attribute) {
+                    if (value) {
+                        *value = val;
+                    }
+                    return true;
+                }
+            }
+            return false;
+        };
+
+        std::vector<EGLint> replacement_attrib_list;
+        GLint telemetry_value;
+        if (findAttribute(attrib_list, EGL_TELEMETRY_HINT_ANDROID, &telemetry_value)) {
+            skip_telemetry = (telemetry_value == android::GpuStatsInfo::SKIP_TELEMETRY);
+
+            // We need to remove EGL_TELEMETRY_HINT_ANDROID or the underlying drivers will
+            // complain about an unexpected attribute
+            const EGLint* attrib_ptr = attrib_list;
+            while (attrib_ptr && *attrib_ptr != EGL_NONE) {
+                GLint attr = *attrib_ptr++;
+                GLint val = *attrib_ptr++;
+                if (attr != EGL_TELEMETRY_HINT_ANDROID) {
+                    replacement_attrib_list.push_back(attr);
+                    replacement_attrib_list.push_back(val);
+                }
+            }
+            replacement_attrib_list.push_back(EGL_NONE);
+            attrib_list = replacement_attrib_list.data();
+        }
         // b/111083885 - If we are presenting EGL 1.4 interface to apps
         // error out on robust access attributes that are invalid
         // in EGL 1.4 as the driver may be fine with them but dEQP expects
         // tests to fail according to spec.
         if (attrib_list && (cnx->driverVersion < EGL_MAKE_VERSION(1, 5, 0))) {
-            const EGLint* attrib_ptr = attrib_list;
-            while (*attrib_ptr != EGL_NONE) {
-                GLint attr = *attrib_ptr++;
-                GLint value = *attrib_ptr++;
-                if (attr == EGL_CONTEXT_OPENGL_RESET_NOTIFICATION_STRATEGY_KHR) {
-                    // We are GL ES context with EGL 1.4, this is an invalid
-                    // attribute
-                    return setError(EGL_BAD_ATTRIBUTE, EGL_NO_CONTEXT);
-                }
-            };
+            if (findAttribute(attrib_list, EGL_CONTEXT_OPENGL_RESET_NOTIFICATION_STRATEGY_KHR,
+                              nullptr)) {
+                // We are GL ES context with EGL 1.4, this is an invalid attribute
+                return setError(EGL_BAD_ATTRIBUTE, EGL_NO_CONTEXT);
+            }
         }
         EGLContext context =
                 cnx->egl.eglCreateContext(dp->disp.dpy, config, share_list, attrib_list);
         if (context != EGL_NO_CONTEXT) {
             // figure out if it's a GLESv1 or GLESv2
             int version = egl_connection_t::GLESv1_INDEX;
-            if (attrib_list) {
-                while (*attrib_list != EGL_NONE) {
-                    GLint attr = *attrib_list++;
-                    GLint value = *attrib_list++;
-                    if (attr == EGL_CONTEXT_CLIENT_VERSION && (value == 2 || value == 3)) {
-                        version = egl_connection_t::GLESv2_INDEX;
-                    }
-                };
+            GLint version_value;
+            if (findAttribute(attrib_list, EGL_CONTEXT_CLIENT_VERSION, &version_value)) {
+                if (version_value == 2 || version_value == 3) {
+                    version = egl_connection_t::GLESv2_INDEX;
+                }
             }
             if (version == egl_connection_t::GLESv1_INDEX) {
                 android::GraphicsEnv::getInstance().setTargetStats(
                         android::GpuStatsInfo::Stats::GLES_1_IN_USE);
             }
-            android::GraphicsEnv::getInstance().setTargetStats(
-                    android::GpuStatsInfo::Stats::CREATED_GLES_CONTEXT);
+            if (!skip_telemetry) {
+                android::GraphicsEnv::getInstance().setTargetStats(
+                        android::GpuStatsInfo::Stats::CREATED_GLES_CONTEXT);
+            }
             egl_context_t* c = new egl_context_t(dpy, context, config, cnx, version);
             return c;
         }
@@ -1324,7 +1354,7 @@ private:
     std::mutex mMutex;
 };
 
-EGLBoolean eglSwapBuffersWithDamageKHRImpl(EGLDisplay dpy, EGLSurface draw, EGLint* rects,
+EGLBoolean eglSwapBuffersWithDamageKHRImpl(EGLDisplay dpy, EGLSurface draw, const EGLint* rects,
                                            EGLint n_rects) {
     const egl_display_t* dp = validate_display(dpy);
     if (!dp) return EGL_FALSE;

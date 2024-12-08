@@ -35,6 +35,7 @@
 #pragma clang diagnostic ignored "-Wextra"
 
 #include <gui/BufferQueue.h>
+#include <ui/EdgeExtensionEffect.h>
 #include <ui/GraphicBuffer.h>
 #include <ui/GraphicTypes.h>
 #include <ui/StretchEffect.h>
@@ -133,12 +134,16 @@ struct LayerFECompositionState {
     // The bounds of the layer in layer local coordinates
     FloatRect geomLayerBounds;
 
+    // The crop to apply to the layer in layer local coordinates
+    FloatRect geomLayerCrop;
+
     ShadowSettings shadowSettings;
 
     // List of regions that require blur
     std::vector<BlurRegion> blurRegions;
 
     StretchEffect stretchEffect;
+    EdgeExtensionEffect edgeExtensionEffect;
 
     /*
      * Geometry state

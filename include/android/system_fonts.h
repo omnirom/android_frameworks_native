@@ -31,27 +31,27 @@
  *
  * \code{.cpp}
  *   ASystemFontIterator* iterator = ASystemFontIterator_open();
- *   ASystemFont* font = NULL;
+ *   AFont* font = NULL;
  *
  *   while ((font = ASystemFontIterator_next(iterator)) != nullptr) {
  *       // Look if the font is your desired one.
- *       if (ASystemFont_getWeight(font) == 400 && !ASystemFont_isItalic(font)
- *           && ASystemFont_getLocale(font) == NULL) {
+ *       if (AFont_getWeight(font) == 400 && !AFont_isItalic(font)
+ *           && AFont_getLocale(font) == NULL) {
  *           break;
  *       }
- *       ASystemFont_close(font);
+ *       AFont_close(font);
  *   }
  *   ASystemFontIterator_close(iterator);
  *
- *   int fd = open(ASystemFont_getFontFilePath(font), O_RDONLY);
- *   int collectionIndex = ASystemFont_getCollectionINdex(font);
+ *   int fd = open(AFont_getFontFilePath(font), O_RDONLY | O_CLOEXEC);
+ *   int collectionIndex = AFont_getCollectionIndex(font);
  *   std::vector<std::pair<uint32_t, float>> variationSettings;
- *   for (size_t i = 0; i < ASystemFont_getAxisCount(font); ++i) {
+ *   for (size_t i = 0; i < AFont_getAxisCount(font); ++i) {
  *       variationSettings.push_back(std::make_pair(
- *           ASystemFont_getAxisTag(font, i),
- *           ASystemFont_getAxisValue(font, i)));
+ *           AFont_getAxisTag(font, i),
+ *           AFont_getAxisValue(font, i)));
  *   }
- *   ASystemFont_close(font);
+ *   AFont_close(font);
  *
  *   // Use this font for your text rendering engine.
  *
@@ -99,7 +99,7 @@ typedef struct ASystemFontIterator ASystemFontIterator;
 /**
  * Create a system font iterator.
  *
- * Use ASystemFont_close() to close the iterator.
+ * Use ASystemFontIterator_close() to close the iterator.
  *
  * Available since API level 29.
  *
@@ -123,7 +123,7 @@ void ASystemFontIterator_close(ASystemFontIterator* _Nullable iterator) __INTROD
  *
  * \param iterator an iterator for the system fonts. Passing NULL is not allowed.
  * \return a font. If no more font is available, returns nullptr. You need to release the returned
- *         font by ASystemFont_close when it is no longer needed.
+ *         font with AFont_close() when it is no longer needed.
  */
 AFont* _Nullable ASystemFontIterator_next(ASystemFontIterator* _Nonnull iterator) __INTRODUCED_IN(29);
 

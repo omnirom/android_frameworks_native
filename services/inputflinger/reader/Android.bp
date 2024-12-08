@@ -78,6 +78,7 @@ cc_defaults {
     name: "libinputreader_defaults",
     srcs: [":libinputreader_sources"],
     shared_libs: [
+        "android.companion.virtualdevice.flags-aconfig-cc",
         "libbase",
         "libcap",
         "libcrypto",

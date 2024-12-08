@@ -102,6 +102,9 @@ struct DisplaySettings {
         Local,
     };
     TonemapStrategy tonemapStrategy = TonemapStrategy::Libtonemap;
+
+    // For now, meaningful primarily when the TonemappingStrategy is Local
+    float targetHdrSdrRatio = 1.f;
 };
 
 static inline bool operator==(const DisplaySettings& lhs, const DisplaySettings& rhs) {

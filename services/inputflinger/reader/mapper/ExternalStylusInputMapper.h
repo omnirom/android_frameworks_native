@@ -16,6 +16,8 @@
 
 #pragma once
 
+#include <optional>
+
 #include "InputMapper.h"
 
 #include "SingleTouchMotionAccumulator.h"
@@ -43,7 +45,7 @@ public:
 
 private:
     SingleTouchMotionAccumulator mSingleTouchMotionAccumulator;
-    RawAbsoluteAxisInfo mRawPressureAxis;
+    std::optional<RawAbsoluteAxisInfo> mRawPressureAxis;
     TouchButtonAccumulator mTouchButtonAccumulator;
 
     StylusState mStylusState;

@@ -20,9 +20,10 @@
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
 #include <GLES2/gl2.h>
-#include <GrDirectContext.h>
 #include <SkSurface.h>
 #include <android-base/thread_annotations.h>
+#include <include/gpu/ganesh/GrContextOptions.h>
+#include <include/gpu/ganesh/GrDirectContext.h>
 #include <renderengine/ExternalTexture.h>
 #include <renderengine/RenderEngine.h>
 #include <sys/types.h>
@@ -32,7 +33,6 @@
 
 #include "AutoBackendTexture.h"
 #include "EGL/egl.h"
-#include "GrContextOptions.h"
 #include "SkImageInfo.h"
 #include "SkiaRenderEngine.h"
 #include "android-base/macros.h"

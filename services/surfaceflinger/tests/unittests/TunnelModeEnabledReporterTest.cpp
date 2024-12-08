@@ -127,13 +127,11 @@ TEST_F(TunnelModeEnabledReporterTest, callsNewListenerWithFreshInformation) {
     sp<NativeHandle> stream =
             NativeHandle::create(reinterpret_cast<native_handle_t*>(DEFAULT_SIDEBAND_STREAM),
                                  false);
-    layer->setSidebandStream(stream, FrameTimelineInfo{}, 20);
-    mFlinger.mutableCurrentState().layersSortedByZ.add(layer);
+    layer->setSidebandStream(stream, FrameTimelineInfo{}, 20, gui::GameMode::Unsupported);
     mTunnelModeEnabledReporter->updateTunnelModeStatus();
     mTunnelModeEnabledReporter->addListener(mTunnelModeEnabledListener);
     EXPECT_EQ(true, mTunnelModeEnabledListener->mTunnelModeEnabled);
     mTunnelModeEnabledReporter->removeListener(mTunnelModeEnabledListener);
-    mFlinger.mutableCurrentState().layersSortedByZ.remove(layer);
     layer = nullptr;
 
     mTunnelModeEnabledReporter->updateTunnelModeStatus();
@@ -151,14 +149,12 @@ TEST_F(TunnelModeEnabledReporterTest, layerWithSidebandStreamTriggersUpdate) {
     sp<NativeHandle> stream =
             NativeHandle::create(reinterpret_cast<native_handle_t*>(DEFAULT_SIDEBAND_STREAM),
                                  false);
-    layerWithSidebandStream->setSidebandStream(stream, FrameTimelineInfo{}, 20);
+    layerWithSidebandStream->setSidebandStream(stream, FrameTimelineInfo{}, 20,
+                                               gui::GameMode::Unsupported);
 
-    mFlinger.mutableCurrentState().layersSortedByZ.add(simpleLayer);
-    mFlinger.mutableCurrentState().layersSortedByZ.add(layerWithSidebandStream);
     mTunnelModeEnabledReporter->updateTunnelModeStatus();
     EXPECT_EQ(true, mTunnelModeEnabledListener->mTunnelModeEnabled);
 
-    mFlinger.mutableCurrentState().layersSortedByZ.remove(layerWithSidebandStream);
     layerWithSidebandStream = nullptr;
     mTunnelModeEnabledReporter->updateTunnelModeStatus();
     EXPECT_EQ(false, mTunnelModeEnabledListener->mTunnelModeEnabled);

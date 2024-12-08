@@ -111,7 +111,9 @@ void fillRandomParcel(Parcel* p, FuzzedDataProvider&& provider, RandomParcelOpti
                     } else {
                         binder = getRandomBinder(&provider);
                     }
-                    CHECK(OK == p->writeStrongBinder(binder));
+
+                    // may fail if mixing kernel binder and RPC binder
+                    (void) p->writeStrongBinder(binder);
                 },
         });
 

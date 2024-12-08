@@ -590,5 +590,7 @@ typedef details::TMat44<float> mat4f;
 // ----------------------------------------------------------------------------------------
 }  // namespace android
 
+TVECHELPERS_STD_HASH(android::details::TMat44);
+
 #undef PURE
 #undef CONSTEXPR

@@ -35,6 +35,49 @@ namespace android {
 
 static const mat4 mtxIdentity;
 
+#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
+SurfaceTexture::SurfaceTexture(uint32_t tex, uint32_t texTarget, bool useFenceSync,
+                               bool isControlledByApp)
+      : ConsumerBase(isControlledByApp),
+        mCurrentCrop(Rect::EMPTY_RECT),
+        mCurrentTransform(0),
+        mCurrentScalingMode(NATIVE_WINDOW_SCALING_MODE_FREEZE),
+        mCurrentFence(Fence::NO_FENCE),
+        mCurrentTimestamp(0),
+        mCurrentDataSpace(HAL_DATASPACE_UNKNOWN),
+        mCurrentFrameNumber(0),
+        mDefaultWidth(1),
+        mDefaultHeight(1),
+        mFilteringEnabled(true),
+        mTexName(tex),
+        mUseFenceSync(useFenceSync),
+        mTexTarget(texTarget),
+        mCurrentTexture(BufferQueue::INVALID_BUFFER_SLOT),
+        mOpMode(OpMode::attachedToGL) {
+    initialize();
+}
+
+SurfaceTexture::SurfaceTexture(uint32_t texTarget, bool useFenceSync, bool isControlledByApp)
+      : ConsumerBase(isControlledByApp),
+        mCurrentCrop(Rect::EMPTY_RECT),
+        mCurrentTransform(0),
+        mCurrentScalingMode(NATIVE_WINDOW_SCALING_MODE_FREEZE),
+        mCurrentFence(Fence::NO_FENCE),
+        mCurrentTimestamp(0),
+        mCurrentDataSpace(HAL_DATASPACE_UNKNOWN),
+        mCurrentFrameNumber(0),
+        mDefaultWidth(1),
+        mDefaultHeight(1),
+        mFilteringEnabled(true),
+        mTexName(0),
+        mUseFenceSync(useFenceSync),
+        mTexTarget(texTarget),
+        mCurrentTexture(BufferQueue::INVALID_BUFFER_SLOT),
+        mOpMode(OpMode::detached) {
+    initialize();
+}
+#endif // COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
+
 SurfaceTexture::SurfaceTexture(const sp<IGraphicBufferConsumer>& bq, uint32_t tex,
                                uint32_t texTarget, bool useFenceSync, bool isControlledByApp)
       : ConsumerBase(bq, isControlledByApp),
@@ -53,11 +96,7 @@ SurfaceTexture::SurfaceTexture(const sp<IGraphicBufferConsumer>& bq, uint32_t te
         mTexTarget(texTarget),
         mCurrentTexture(BufferQueue::INVALID_BUFFER_SLOT),
         mOpMode(OpMode::attachedToGL) {
-    SFT_LOGV("SurfaceTexture");
-
-    memcpy(mCurrentTransformMatrix, mtxIdentity.asArray(), sizeof(mCurrentTransformMatrix));
-
-    mConsumer->setConsumerUsageBits(DEFAULT_USAGE_FLAGS);
+    initialize();
 }
 
 SurfaceTexture::SurfaceTexture(const sp<IGraphicBufferConsumer>& bq, uint32_t texTarget,
@@ -78,11 +117,7 @@ SurfaceTexture::SurfaceTexture(const sp<IGraphicBufferConsumer>& bq, uint32_t te
         mTexTarget(texTarget),
         mCurrentTexture(BufferQueue::INVALID_BUFFER_SLOT),
         mOpMode(OpMode::detached) {
-    SFT_LOGV("SurfaceTexture");
-
-    memcpy(mCurrentTransformMatrix, mtxIdentity.asArray(), sizeof(mCurrentTransformMatrix));
-
-    mConsumer->setConsumerUsageBits(DEFAULT_USAGE_FLAGS);
+    initialize();
 }
 
 status_t SurfaceTexture::setDefaultBufferSize(uint32_t w, uint32_t h) {
@@ -530,5 +565,13 @@ void SurfaceTexture::onSetFrameRate(float frameRate, int8_t compatibility,
     }
 }
 #endif
+
+void SurfaceTexture::initialize() {
+    SFT_LOGV("SurfaceTexture");
+
+    memcpy(mCurrentTransformMatrix, mtxIdentity.asArray(), sizeof(mCurrentTransformMatrix));
+
+    mConsumer->setConsumerUsageBits(DEFAULT_USAGE_FLAGS);
+}
 
 } // namespace android

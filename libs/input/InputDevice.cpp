@@ -20,6 +20,7 @@
 #include <unistd.h>
 #include <ctype.h>
 
+#include <android-base/logging.h>
 #include <android-base/properties.h>
 #include <android-base/stringprintf.h>
 #include <ftl/enum.h>
@@ -30,6 +31,9 @@ using android::base::GetProperty;
 using android::base::StringPrintf;
 
 namespace android {
+
+// Set to true to log detailed debugging messages about IDC file probing.
+static constexpr bool DEBUG_PROBE = false;
 
 static const char* CONFIGURATION_FILE_DIR[] = {
         "idc/",
@@ -114,15 +118,18 @@ std::string getInputDeviceConfigurationFilePathByName(
     for (const auto& prefix : pathPrefixes) {
         path = prefix;
         appendInputDeviceConfigurationFileRelativePath(path, name, type);
-#if DEBUG_PROBE
-        ALOGD("Probing for system provided input device configuration file: path='%s'",
-              path.c_str());
-#endif
         if (!access(path.c_str(), R_OK)) {
-#if DEBUG_PROBE
-            ALOGD("Found");
-#endif
+            LOG_IF(INFO, DEBUG_PROBE)
+                    << "Found system-provided input device configuration file at " << path;
             return path;
+        } else if (errno != ENOENT) {
+            LOG(WARNING) << "Couldn't find a system-provided input device configuration file at "
+                         << path << " due to error " << errno << " (" << strerror(errno)
+                         << "); there may be an IDC file there that cannot be loaded.";
+        } else {
+            LOG_IF(ERROR, DEBUG_PROBE)
+                    << "Didn't find system-provided input device configuration file at " << path
+                    << ": " << strerror(errno);
         }
     }
 
@@ -135,21 +142,22 @@ std::string getInputDeviceConfigurationFilePathByName(
     }
     path += "/system/devices/";
     appendInputDeviceConfigurationFileRelativePath(path, name, type);
-#if DEBUG_PROBE
-    ALOGD("Probing for system user input device configuration file: path='%s'", path.c_str());
-#endif
     if (!access(path.c_str(), R_OK)) {
-#if DEBUG_PROBE
-        ALOGD("Found");
-#endif
+        LOG_IF(INFO, DEBUG_PROBE) << "Found system user input device configuration file at "
+                                  << path;
         return path;
+    } else if (errno != ENOENT) {
+        LOG(WARNING) << "Couldn't find a system user input device configuration file at " << path
+                     << " due to error " << errno << " (" << strerror(errno)
+                     << "); there may be an IDC file there that cannot be loaded.";
+    } else {
+        LOG_IF(ERROR, DEBUG_PROBE) << "Didn't find system user input device configuration file at "
+                                   << path << ": " << strerror(errno);
     }
 
     // Not found.
-#if DEBUG_PROBE
-    ALOGD("Probe failed to find input device configuration file: name='%s', type=%d",
-            name.c_str(), type);
-#endif
+    LOG_IF(INFO, DEBUG_PROBE) << "Probe failed to find input device configuration file with name '"
+                              << name << "' and type " << ftl::enum_string(type);
     return "";
 }
 

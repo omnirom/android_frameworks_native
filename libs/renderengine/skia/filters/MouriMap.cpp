@@ -35,7 +35,7 @@ const SkString kCrosstalkAndChunk16x16(R"(
         float maximum = 0.0;
         for (int y = 0; y < 16; y++) {
             for (int x = 0; x < 16; x++) {
-                float3 linear = toLinearSrgb(bitmap.eval(xy * 16 + vec2(x, y)).rgb) * hdrSdrRatio;
+                float3 linear = toLinearSrgb(bitmap.eval((xy - 0.5) * 16 + 0.5 + vec2(x, y)).rgb) * hdrSdrRatio;
                 float maxRGB = max(linear.r, max(linear.g, linear.b));
                 maximum = max(maximum, log2(max(maxRGB, 1.0)));
             }
@@ -49,7 +49,7 @@ const SkString kChunk8x8(R"(
         float maximum = 0.0;
         for (int y = 0; y < 8; y++) {
             for (int x = 0; x < 8; x++) {
-                maximum = max(maximum, bitmap.eval(xy * 8 + vec2(x, y)).r);
+                maximum = max(maximum, bitmap.eval((xy - 0.5) * 8 + 0.5 + vec2(x, y)).r);
             }
         }
         return float4(float3(maximum), 1.0);
@@ -67,7 +67,7 @@ const SkString kBlur(R"(
         float result = 0.0;
         for (int y = -2; y <= 2; y++) {
             for (int x = -2; x <= 2; x++) {
-            result += C[y + 2] * C[x + 2] * bitmap.eval(xy + vec2(x, y)).r;
+                result += C[y + 2] * C[x + 2] * bitmap.eval(xy + vec2(x, y)).r;
             }
         }
         return float4(float3(exp2(result)), 1.0);
@@ -78,19 +78,21 @@ const SkString kTonemap(R"(
     uniform shader lux;
     uniform float scaleFactor;
     uniform float hdrSdrRatio;
+    uniform float targetHdrSdrRatio;
     vec4 main(vec2 xy) {
         float localMax = lux.eval(xy * scaleFactor).r;
         float4 rgba = image.eval(xy);
         float3 linear = toLinearSrgb(rgba.rgb) * hdrSdrRatio;
 
-        if (localMax <= 1.0) {
-            return float4(fromLinearSrgb(linear), 1.0);
+        if (localMax <= targetHdrSdrRatio) {
+            return float4(fromLinearSrgb(linear), rgba.a);
         }
 
         float maxRGB = max(linear.r, max(linear.g, linear.b));
         localMax = max(localMax, maxRGB);
-        float gain = (1 + maxRGB / (localMax * localMax)) / (1 + maxRGB);
-        return float4(fromLinearSrgb(linear * gain), 1.0);
+        float gain = (1 + maxRGB * (targetHdrSdrRatio / (localMax * localMax)))
+                / (1 + maxRGB / targetHdrSdrRatio);
+        return float4(fromLinearSrgb(linear * gain), rgba.a);
     }
 )");
 
@@ -114,10 +116,10 @@ MouriMap::MouriMap()
         mTonemap(makeEffect(kTonemap)) {}
 
 sk_sp<SkShader> MouriMap::mouriMap(SkiaGpuContext* context, sk_sp<SkShader> input,
-                                   float hdrSdrRatio) {
+                                   float hdrSdrRatio, float targetHdrSdrRatio) {
     auto downchunked = downchunk(context, input, hdrSdrRatio);
     auto localLux = blur(context, downchunked.get());
-    return tonemap(input, localLux.get(), hdrSdrRatio);
+    return tonemap(input, localLux.get(), hdrSdrRatio, targetHdrSdrRatio);
 }
 
 sk_sp<SkImage> MouriMap::downchunk(SkiaGpuContext* context, sk_sp<SkShader> input,
@@ -166,8 +168,8 @@ sk_sp<SkImage> MouriMap::blur(SkiaGpuContext* context, SkImage* input) const {
     LOG_ALWAYS_FATAL_IF(!blurSurface, "%s: Failed to create surface!", __func__);
     return makeImage(blurSurface.get(), blurBuilder);
 }
-sk_sp<SkShader> MouriMap::tonemap(sk_sp<SkShader> input, SkImage* localLux,
-                                  float hdrSdrRatio) const {
+sk_sp<SkShader> MouriMap::tonemap(sk_sp<SkShader> input, SkImage* localLux, float hdrSdrRatio,
+                                  float targetHdrSdrRatio) const {
     static constexpr float kScaleFactor = 1.0f / 128.0f;
     SkRuntimeShaderBuilder tonemapBuilder(mTonemap);
     tonemapBuilder.child("image") = input;
@@ -176,6 +178,7 @@ sk_sp<SkShader> MouriMap::tonemap(sk_sp<SkShader> input, SkImage* localLux,
                                     SkSamplingOptions(SkFilterMode::kLinear, SkMipmapMode::kNone));
     tonemapBuilder.uniform("scaleFactor") = kScaleFactor;
     tonemapBuilder.uniform("hdrSdrRatio") = hdrSdrRatio;
+    tonemapBuilder.uniform("targetHdrSdrRatio") = targetHdrSdrRatio;
     return tonemapBuilder.makeShader();
 }
 } // namespace skia

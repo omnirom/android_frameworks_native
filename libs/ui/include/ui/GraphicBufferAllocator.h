@@ -137,6 +137,6 @@ protected:
 };
 
 // ---------------------------------------------------------------------------
-}; // namespace android
+} // namespace android
 
 #endif // ANDROID_BUFFER_ALLOCATOR_H

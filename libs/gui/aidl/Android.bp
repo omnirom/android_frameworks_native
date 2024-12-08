@@ -28,9 +28,6 @@ filegroup {
         ":libgui_extra_unstructured_aidl_files",
 
         "android/gui/BitTube.aidl",
-        "android/gui/CaptureArgs.aidl",
-        "android/gui/DisplayCaptureArgs.aidl",
-        "android/gui/LayerCaptureArgs.aidl",
         "android/gui/LayerMetadata.aidl",
         "android/gui/ParcelableVsyncEventData.aidl",
         "android/gui/ScreenCaptureResults.aidl",

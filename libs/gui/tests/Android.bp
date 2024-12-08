@@ -12,6 +12,34 @@ package {
     default_applicable_licenses: ["frameworks_native_license"],
 }
 
+aidl_interface {
+    name: "libgui_test_server_aidl",
+    unstable: true,
+    srcs: ["testserver/aidl/**/*.aidl"],
+    local_include_dir: "testserver/aidl",
+    include_dirs: [
+        "frameworks/native/aidl/gui",
+    ],
+    backend: {
+        cpp: {
+            enabled: true,
+            additional_shared_libraries: [
+                "libgui",
+                "libui",
+            ],
+        },
+        java: {
+            enabled: false,
+        },
+        ndk: {
+            enabled: false,
+        },
+        rust: {
+            enabled: false,
+        },
+    },
+}
+
 cc_test {
     name: "libgui_test",
     test_suites: ["device-tests"],
@@ -25,34 +53,41 @@ cc_test {
         "-Wthread-safety",
         "-DCOM_ANDROID_GRAPHICS_LIBGUI_FLAGS_BQ_SETFRAMERATE=true",
         "-DCOM_ANDROID_GRAPHICS_LIBGUI_FLAGS_BQ_EXTENDEDALLOCATE=true",
+        "-DCOM_ANDROID_GRAPHICS_LIBGUI_FLAGS_WB_CONSUMER_BASE_OWNS_BQ=true",
+        "-DCOM_ANDROID_GRAPHICS_LIBGUI_FLAGS_WB_PLATFORM_API_IMPROVEMENTS=true",
     ],
 
     srcs: [
-        "LibGuiMain.cpp", // Custom gtest entrypoint
         "BLASTBufferQueue_test.cpp",
         "BufferItemConsumer_test.cpp",
         "BufferQueue_test.cpp",
+        "BufferReleaseChannel_test.cpp",
         "Choreographer_test.cpp",
         "CompositorTiming_test.cpp",
         "CpuConsumer_test.cpp",
-        "EndToEndNativeInputTest.cpp",
-        "FrameRateUtilsTest.cpp",
-        "DisplayInfo_test.cpp",
         "DisplayedContentSampling_test.cpp",
+        "DisplayInfo_test.cpp",
+        "EndToEndNativeInputTest.cpp",
         "FillBuffer.cpp",
+        "FrameRateUtilsTest.cpp",
         "GLTest.cpp",
         "IGraphicBufferProducer_test.cpp",
+        "LibGuiMain.cpp", // Custom gtest entrypoint
         "Malicious.cpp",
         "MultiTextureConsumer_test.cpp",
         "RegionSampling_test.cpp",
         "StreamSplitter_test.cpp",
+        "Surface_test.cpp",
         "SurfaceTextureClient_test.cpp",
         "SurfaceTextureFBO_test.cpp",
+        "SurfaceTextureGL_test.cpp",
         "SurfaceTextureGLThreadToGL_test.cpp",
         "SurfaceTextureGLToGL_test.cpp",
-        "SurfaceTextureGL_test.cpp",
         "SurfaceTextureMultiContextGL_test.cpp",
-        "Surface_test.cpp",
+        "TestServer_test.cpp",
+        "testserver/TestServer.cpp",
+        "testserver/TestServerClient.cpp",
+        "testserver/TestServerHost.cpp",
         "TextureRenderer.cpp",
         "VsyncEventData_test.cpp",
         "WindowInfo_test.cpp",
@@ -63,8 +98,15 @@ cc_test {
         "android.hardware.configstore-utils",
         "libSurfaceFlingerProp",
         "libGLESv1_CM",
+        "libgui_test_server_aidl-cpp",
         "libinput",
         "libnativedisplay",
+    ],
+
+    // This needs to get copied over for the test since it's not part of the
+    // platform.
+    data_libs: [
+        "libgui_test_server_aidl-cpp",
     ],
 
     static_libs: [

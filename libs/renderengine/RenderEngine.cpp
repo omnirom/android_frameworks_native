@@ -21,6 +21,7 @@
 #include "skia/GraphiteVkRenderEngine.h"
 #include "skia/SkiaGLRenderEngine.h"
 #include "threaded/RenderEngineThreaded.h"
+#include "ui/GraphicTypes.h"
 
 #include <com_android_graphics_surfaceflinger_flags.h>
 #include <cutils/properties.h>
@@ -101,17 +102,34 @@ ftl::Future<FenceResult> RenderEngine::drawLayers(const DisplaySettings& display
                                                   base::unique_fd&& bufferFence) {
     const auto resultPromise = std::make_shared<std::promise<FenceResult>>();
     std::future<FenceResult> resultFuture = resultPromise->get_future();
-    updateProtectedContext(layers, buffer);
+    updateProtectedContext(layers, {buffer.get()});
     drawLayersInternal(std::move(resultPromise), display, layers, buffer, std::move(bufferFence));
     return resultFuture;
 }
 
+ftl::Future<FenceResult> RenderEngine::drawGainmap(
+        const std::shared_ptr<ExternalTexture>& sdr, base::borrowed_fd&& sdrFence,
+        const std::shared_ptr<ExternalTexture>& hdr, base::borrowed_fd&& hdrFence,
+        float hdrSdrRatio, ui::Dataspace dataspace,
+        const std::shared_ptr<ExternalTexture>& gainmap) {
+    const auto resultPromise = std::make_shared<std::promise<FenceResult>>();
+    std::future<FenceResult> resultFuture = resultPromise->get_future();
+    updateProtectedContext({}, {sdr.get(), hdr.get(), gainmap.get()});
+    drawGainmapInternal(std::move(resultPromise), sdr, std::move(sdrFence), hdr,
+                        std::move(hdrFence), hdrSdrRatio, dataspace, gainmap);
+    return resultFuture;
+}
+
 void RenderEngine::updateProtectedContext(const std::vector<LayerSettings>& layers,
-                                          const std::shared_ptr<ExternalTexture>& buffer) {
+                                          vector<const ExternalTexture*> buffers) {
     const bool needsProtectedContext =
-            (buffer && (buffer->getUsage() & GRALLOC_USAGE_PROTECTED)) ||
-            std::any_of(layers.begin(), layers.end(), [](const LayerSettings& layer) {
-                const std::shared_ptr<ExternalTexture>& buffer = layer.source.buffer.buffer;
+            std::any_of(layers.begin(), layers.end(),
+                        [](const LayerSettings& layer) {
+                            const std::shared_ptr<ExternalTexture>& buffer =
+                                    layer.source.buffer.buffer;
+                            return buffer && (buffer->getUsage() & GRALLOC_USAGE_PROTECTED);
+                        }) ||
+            std::any_of(buffers.begin(), buffers.end(), [](const ExternalTexture* buffer) {
                 return buffer && (buffer->getUsage() & GRALLOC_USAGE_PROTECTED);
             });
     useProtectedContext(needsProtectedContext);

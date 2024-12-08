@@ -20,11 +20,7 @@ bpf {
     name: "gpuWork.o",
     srcs: ["gpuWork.c"],
     cflags: [
-        "-Wall",
-        "-Werror",
-        "-Wformat",
         "-Wthread-safety",
-        "-Wunused",
         "-Wunreachable-code",
     ],
 }

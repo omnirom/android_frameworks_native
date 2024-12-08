@@ -21,9 +21,9 @@
 
 #include <include/gpu/ganesh/vk/GrVkBackendSemaphore.h>
 
+#include <common/trace.h>
 #include <log/log_main.h>
 #include <sync/sync.h>
-#include <utils/Trace.h>
 
 namespace android::renderengine::skia {
 
@@ -78,7 +78,7 @@ base::unique_fd GaneshVkRenderEngine::flushAndSubmit(SkiaGpuContext* context,
                                                      sk_sp<SkSurface> dstSurface) {
     sk_sp<GrDirectContext> grContext = context->grDirectContext();
     {
-        ATRACE_NAME("flush surface");
+        SFTRACE_NAME("flush surface");
         // TODO: Investigate feasibility of combining this "surface flush" into the "context flush"
         // below.
         context->grDirectContext()->flush(dstSurface.get());

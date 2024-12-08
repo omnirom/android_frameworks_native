@@ -371,8 +371,8 @@ void MotionEventTest::initializeEventWithHistory(MotionEvent* event) {
                       mTransform, 2.0f, 2.1f, AMOTION_EVENT_INVALID_CURSOR_POSITION,
                       AMOTION_EVENT_INVALID_CURSOR_POSITION, mRawTransform, ARBITRARY_DOWN_TIME,
                       ARBITRARY_EVENT_TIME, 2, mPointerProperties, mSamples[0].pointerCoords);
-    event->addSample(ARBITRARY_EVENT_TIME + 1, mSamples[1].pointerCoords);
-    event->addSample(ARBITRARY_EVENT_TIME + 2, mSamples[2].pointerCoords);
+    event->addSample(ARBITRARY_EVENT_TIME + 1, mSamples[1].pointerCoords, event->getId());
+    event->addSample(ARBITRARY_EVENT_TIME + 2, mSamples[2].pointerCoords, event->getId());
 }
 
 void MotionEventTest::assertEqualsEventWithHistory(const MotionEvent* event) {
@@ -589,6 +589,22 @@ TEST_F(MotionEventTest, CopyFrom_DoNotKeepHistory) {
     ASSERT_EQ(event.getEventTime(), copy.getEventTime());
 
     ASSERT_EQ(event.getX(0), copy.getX(0));
+}
+
+TEST_F(MotionEventTest, CheckEventIdWithHistoryIsIncremented) {
+    MotionEvent event;
+    constexpr int32_t ARBITRARY_ID = 42;
+    event.initialize(ARBITRARY_ID, 2, AINPUT_SOURCE_TOUCHSCREEN, DISPLAY_ID, INVALID_HMAC,
+                     AMOTION_EVENT_ACTION_MOVE, 0, 0, AMOTION_EVENT_EDGE_FLAG_NONE, AMETA_NONE,
+                     AMOTION_EVENT_BUTTON_PRIMARY, MotionClassification::NONE, mTransform, 0, 0,
+                     AMOTION_EVENT_INVALID_CURSOR_POSITION, AMOTION_EVENT_INVALID_CURSOR_POSITION,
+                     mRawTransform, ARBITRARY_DOWN_TIME, ARBITRARY_EVENT_TIME, 2,
+                     mPointerProperties, mSamples[0].pointerCoords);
+    ASSERT_EQ(event.getId(), ARBITRARY_ID);
+    event.addSample(ARBITRARY_EVENT_TIME + 1, mSamples[1].pointerCoords, ARBITRARY_ID + 1);
+    ASSERT_EQ(event.getId(), ARBITRARY_ID + 1);
+    event.addSample(ARBITRARY_EVENT_TIME + 2, mSamples[2].pointerCoords, ARBITRARY_ID + 2);
+    ASSERT_EQ(event.getId(), ARBITRARY_ID + 2);
 }
 
 TEST_F(MotionEventTest, SplitPointerDown) {

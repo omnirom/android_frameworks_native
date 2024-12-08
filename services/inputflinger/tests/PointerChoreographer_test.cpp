@@ -196,7 +196,6 @@ private:
 TEST_F(PointerChoreographerTest, ForwardsArgsToInnerListener) {
     const std::vector<NotifyArgs>
             allArgs{NotifyInputDevicesChangedArgs{},
-                    NotifyConfigurationChangedArgs{},
                     KeyArgsBuilder(AKEY_EVENT_ACTION_DOWN, AINPUT_SOURCE_KEYBOARD).build(),
                     MotionArgsBuilder(AMOTION_EVENT_ACTION_DOWN, AINPUT_SOURCE_TOUCHSCREEN)
                             .pointer(FIRST_TOUCH_POINTER)
@@ -213,9 +212,6 @@ TEST_F(PointerChoreographerTest, ForwardsArgsToInnerListener) {
                 std::visit(Visitor{
                                    [&](const NotifyInputDevicesChangedArgs& args) {
                                        mTestListener.assertNotifyInputDevicesChangedWasCalled();
-                                   },
-                                   [&](const NotifyConfigurationChangedArgs& args) {
-                                       mTestListener.assertNotifyConfigurationChangedWasCalled();
                                    },
                                    [&](const NotifyKeyArgs& args) {
                                        mTestListener.assertNotifyKeyWasCalled();
@@ -830,15 +826,20 @@ TEST_F(PointerChoreographerTest, TouchSetsSpots) {
     pc->assertSpotCount(DISPLAY_ID, 0);
 }
 
+/**
+ * In this test, we simulate the complete event of the stylus approaching and clicking on the
+ * screen, and then leaving the screen. We should ensure that spots are displayed correctly.
+ */
 TEST_F(PointerChoreographerTest, TouchSetsSpotsForStylusEvent) {
     mChoreographer.setShowTouchesEnabled(true);
+    mChoreographer.setStylusPointerIconEnabled(false);
     mChoreographer.notifyInputDevicesChanged(
             {/*id=*/0,
              {generateTestDeviceInfo(DEVICE_ID, AINPUT_SOURCE_TOUCHSCREEN | AINPUT_SOURCE_STYLUS,
                                      DISPLAY_ID)}});
 
-    // Emit down event with stylus properties.
-    mChoreographer.notifyMotion(MotionArgsBuilder(AMOTION_EVENT_ACTION_DOWN,
+    // First, the stylus begin to approach the screen.
+    mChoreographer.notifyMotion(MotionArgsBuilder(AMOTION_EVENT_ACTION_HOVER_ENTER,
                                                   AINPUT_SOURCE_TOUCHSCREEN | AINPUT_SOURCE_STYLUS)
                                         .pointer(STYLUS_POINTER)
                                         .deviceId(DEVICE_ID)
@@ -846,6 +847,72 @@ TEST_F(PointerChoreographerTest, TouchSetsSpotsForStylusEvent) {
                                         .build());
     auto pc = assertPointerControllerCreated(ControllerType::TOUCH);
     pc->assertSpotCount(DISPLAY_ID, 1);
+
+    mChoreographer.notifyMotion(MotionArgsBuilder(AMOTION_EVENT_ACTION_HOVER_MOVE,
+                                                  AINPUT_SOURCE_TOUCHSCREEN | AINPUT_SOURCE_STYLUS)
+                                        .pointer(STYLUS_POINTER)
+                                        .deviceId(DEVICE_ID)
+                                        .displayId(DISPLAY_ID)
+                                        .build());
+    pc->assertSpotCount(DISPLAY_ID, 1);
+
+    mChoreographer.notifyMotion(MotionArgsBuilder(AMOTION_EVENT_ACTION_HOVER_EXIT,
+                                                  AINPUT_SOURCE_TOUCHSCREEN | AINPUT_SOURCE_STYLUS)
+                                        .pointer(STYLUS_POINTER)
+                                        .deviceId(DEVICE_ID)
+                                        .displayId(DISPLAY_ID)
+                                        .build());
+    pc->assertSpotCount(DISPLAY_ID, 0);
+
+    // Now, use stylus touch the screen.
+    mChoreographer.notifyMotion(MotionArgsBuilder(AMOTION_EVENT_ACTION_DOWN,
+                                                  AINPUT_SOURCE_TOUCHSCREEN | AINPUT_SOURCE_STYLUS)
+                                        .pointer(STYLUS_POINTER)
+                                        .deviceId(DEVICE_ID)
+                                        .displayId(DISPLAY_ID)
+                                        .build());
+    pc->assertSpotCount(DISPLAY_ID, 1);
+
+    mChoreographer.notifyMotion(MotionArgsBuilder(AMOTION_EVENT_ACTION_MOVE,
+                                                  AINPUT_SOURCE_TOUCHSCREEN | AINPUT_SOURCE_STYLUS)
+                                        .pointer(STYLUS_POINTER)
+                                        .deviceId(DEVICE_ID)
+                                        .displayId(DISPLAY_ID)
+                                        .build());
+    pc->assertSpotCount(DISPLAY_ID, 1);
+
+    mChoreographer.notifyMotion(MotionArgsBuilder(AMOTION_EVENT_ACTION_UP,
+                                                  AINPUT_SOURCE_TOUCHSCREEN | AINPUT_SOURCE_STYLUS)
+                                        .pointer(STYLUS_POINTER)
+                                        .deviceId(DEVICE_ID)
+                                        .displayId(DISPLAY_ID)
+                                        .build());
+    pc->assertSpotCount(DISPLAY_ID, 0);
+
+    // Then, the stylus start leave from the screen.
+    mChoreographer.notifyMotion(MotionArgsBuilder(AMOTION_EVENT_ACTION_HOVER_ENTER,
+                                                  AINPUT_SOURCE_TOUCHSCREEN | AINPUT_SOURCE_STYLUS)
+                                        .pointer(STYLUS_POINTER)
+                                        .deviceId(DEVICE_ID)
+                                        .displayId(DISPLAY_ID)
+                                        .build());
+    pc->assertSpotCount(DISPLAY_ID, 1);
+
+    mChoreographer.notifyMotion(MotionArgsBuilder(AMOTION_EVENT_ACTION_HOVER_MOVE,
+                                                  AINPUT_SOURCE_TOUCHSCREEN | AINPUT_SOURCE_STYLUS)
+                                        .pointer(STYLUS_POINTER)
+                                        .deviceId(DEVICE_ID)
+                                        .displayId(DISPLAY_ID)
+                                        .build());
+    pc->assertSpotCount(DISPLAY_ID, 1);
+
+    mChoreographer.notifyMotion(MotionArgsBuilder(AMOTION_EVENT_ACTION_HOVER_EXIT,
+                                                  AINPUT_SOURCE_TOUCHSCREEN | AINPUT_SOURCE_STYLUS)
+                                        .pointer(STYLUS_POINTER)
+                                        .deviceId(DEVICE_ID)
+                                        .displayId(DISPLAY_ID)
+                                        .build());
+    pc->assertSpotCount(DISPLAY_ID, 0);
 }
 
 TEST_F(PointerChoreographerTest, TouchSetsSpotsForTwoDisplays) {
@@ -909,6 +976,36 @@ TEST_F(PointerChoreographerTest, WhenTouchDeviceIsResetClearsSpots) {
     // Reset the device and ensure the touch pointer controller was removed.
     mChoreographer.notifyDeviceReset(NotifyDeviceResetArgs(/*id=*/1, /*eventTime=*/0, DEVICE_ID));
     assertPointerControllerRemoved(pc);
+}
+
+/**
+ * When both "show touches" and "stylus hover icons" are enabled, if the app doesn't specify an
+ * icon for the hovering stylus, fall back to using the spot hover icon.
+ */
+TEST_F(PointerChoreographerTest, ShowTouchesOverridesUnspecifiedStylusIcon) {
+    mChoreographer.setShowTouchesEnabled(true);
+    mChoreographer.setStylusPointerIconEnabled(true);
+    mChoreographer.notifyInputDevicesChanged(
+            {/*id=*/0,
+             {generateTestDeviceInfo(DEVICE_ID, AINPUT_SOURCE_TOUCHSCREEN | AINPUT_SOURCE_STYLUS,
+                                     DISPLAY_ID)}});
+
+    mChoreographer.notifyMotion(MotionArgsBuilder(AMOTION_EVENT_ACTION_HOVER_ENTER,
+                                                  AINPUT_SOURCE_TOUCHSCREEN | AINPUT_SOURCE_STYLUS)
+                                        .pointer(STYLUS_POINTER)
+                                        .deviceId(DEVICE_ID)
+                                        .displayId(DISPLAY_ID)
+                                        .build());
+    auto pc = assertPointerControllerCreated(ControllerType::STYLUS);
+
+    mChoreographer.setPointerIcon(PointerIconStyle::TYPE_NOT_SPECIFIED, DISPLAY_ID, DEVICE_ID);
+    pc->assertPointerIconSet(PointerIconStyle::TYPE_SPOT_HOVER);
+
+    mChoreographer.setPointerIcon(PointerIconStyle::TYPE_ARROW, DISPLAY_ID, DEVICE_ID);
+    pc->assertPointerIconSet(PointerIconStyle::TYPE_ARROW);
+
+    mChoreographer.setPointerIcon(PointerIconStyle::TYPE_NOT_SPECIFIED, DISPLAY_ID, DEVICE_ID);
+    pc->assertPointerIconSet(PointerIconStyle::TYPE_SPOT_HOVER);
 }
 
 using StylusFixtureParam =
@@ -2294,7 +2391,13 @@ TEST_F(PointerChoreographerTest, MouseAndDrawingTabletReportMouseEvents) {
     assertPointerControllerRemoved(pc);
 }
 
-class PointerVisibilityOnKeyPressTest : public PointerChoreographerTest {
+using PointerVisibilityAndTouchpadTapStateOnKeyPressTestFixtureParam =
+        std::tuple<std::string_view /*name*/, uint32_t /*source*/>;
+
+class PointerVisibilityAndTouchpadTapStateOnKeyPressTestFixture
+      : public PointerChoreographerTest,
+        public testing::WithParamInterface<
+                PointerVisibilityAndTouchpadTapStateOnKeyPressTestFixtureParam> {
 protected:
     const std::unordered_map<int32_t, int32_t>
             mMetaKeyStates{{AKEYCODE_ALT_LEFT, AMETA_ALT_LEFT_ON},
@@ -2358,14 +2461,27 @@ protected:
     }
 };
 
-TEST_F(PointerVisibilityOnKeyPressTest, KeystrokesWithoutImeConnectionDoesNotHidePointer) {
+INSTANTIATE_TEST_SUITE_P(
+        PointerChoreographerTest, PointerVisibilityAndTouchpadTapStateOnKeyPressTestFixture,
+        testing::Values(std::make_tuple("Mouse", AINPUT_SOURCE_MOUSE),
+                        std::make_tuple("Touchpad", AINPUT_SOURCE_MOUSE | AINPUT_SOURCE_TOUCHPAD)),
+        [](const testing::TestParamInfo<
+                PointerVisibilityAndTouchpadTapStateOnKeyPressTestFixtureParam>& p) {
+            return std::string{std::get<0>(p.param)};
+        });
+
+TEST_P(PointerVisibilityAndTouchpadTapStateOnKeyPressTestFixture,
+       KeystrokesWithoutImeConnectionDoesNotHidePointerOrDisablesTouchpadTap) {
+    const auto& [_, source] = GetParam();
     mChoreographer.setDisplayViewports(createViewports({DISPLAY_ID}));
 
     // Mouse connected
     mChoreographer.notifyInputDevicesChanged(
-            {/*id=*/0, {generateTestDeviceInfo(DEVICE_ID, AINPUT_SOURCE_MOUSE, DISPLAY_ID)}});
+            {/*id=*/0, {generateTestDeviceInfo(DEVICE_ID, source, DISPLAY_ID)}});
     auto pc = assertPointerControllerCreated(ControllerType::MOUSE);
     ASSERT_TRUE(pc->isPointerShown());
+
+    EXPECT_CALL(mMockPolicy, notifyMouseCursorFadedOnTyping).Times(0);
 
     notifyKey(ui::LogicalDisplayId::INVALID, AKEYCODE_0);
     notifyKey(ui::LogicalDisplayId::INVALID, AKEYCODE_A);
@@ -2374,16 +2490,19 @@ TEST_F(PointerVisibilityOnKeyPressTest, KeystrokesWithoutImeConnectionDoesNotHid
     ASSERT_TRUE(pc->isPointerShown());
 }
 
-TEST_F(PointerVisibilityOnKeyPressTest, AlphanumericKeystrokesWithImeConnectionHidePointer) {
+TEST_P(PointerVisibilityAndTouchpadTapStateOnKeyPressTestFixture,
+       AlphanumericKeystrokesWithImeConnectionHidePointerAndDisablesTouchpadTap) {
+    const auto& [_, source] = GetParam();
     mChoreographer.setDisplayViewports(createViewports({DISPLAY_ID}));
 
     // Mouse connected
     mChoreographer.notifyInputDevicesChanged(
-            {/*id=*/0, {generateTestDeviceInfo(DEVICE_ID, AINPUT_SOURCE_MOUSE, DISPLAY_ID)}});
+            {/*id=*/0, {generateTestDeviceInfo(DEVICE_ID, source, DISPLAY_ID)}});
     auto pc = assertPointerControllerCreated(ControllerType::MOUSE);
     ASSERT_TRUE(pc->isPointerShown());
 
     EXPECT_CALL(mMockPolicy, isInputMethodConnectionActive).WillRepeatedly(testing::Return(true));
+    EXPECT_CALL(mMockPolicy, notifyMouseCursorFadedOnTyping).Times(2);
 
     notifyKey(DISPLAY_ID, AKEYCODE_0);
     ASSERT_FALSE(pc->isPointerShown());
@@ -2394,17 +2513,19 @@ TEST_F(PointerVisibilityOnKeyPressTest, AlphanumericKeystrokesWithImeConnectionH
     ASSERT_FALSE(pc->isPointerShown());
 }
 
-TEST_F(PointerVisibilityOnKeyPressTest, MetaKeystrokesDoNotHidePointer) {
+TEST_P(PointerVisibilityAndTouchpadTapStateOnKeyPressTestFixture,
+       MetaKeystrokesDoNotHidePointerOrDisablesTouchpadTap) {
+    const auto& [_, source] = GetParam();
     mChoreographer.setDisplayViewports(createViewports({DISPLAY_ID}));
 
     // Mouse connected
     mChoreographer.notifyInputDevicesChanged(
-            {/*id=*/0,
-             {generateTestDeviceInfo(SECOND_DEVICE_ID, AINPUT_SOURCE_MOUSE, DISPLAY_ID)}});
+            {/*id=*/0, {generateTestDeviceInfo(SECOND_DEVICE_ID, source, DISPLAY_ID)}});
     auto pc = assertPointerControllerCreated(ControllerType::MOUSE);
     ASSERT_TRUE(pc->isPointerShown());
 
     EXPECT_CALL(mMockPolicy, isInputMethodConnectionActive).WillRepeatedly(testing::Return(true));
+    EXPECT_CALL(mMockPolicy, notifyMouseCursorFadedOnTyping).Times(0);
 
     const std::vector<int32_t> metaKeyCodes{AKEYCODE_ALT_LEFT,   AKEYCODE_ALT_RIGHT,
                                             AKEYCODE_SHIFT_LEFT, AKEYCODE_SHIFT_RIGHT,
@@ -2420,14 +2541,16 @@ TEST_F(PointerVisibilityOnKeyPressTest, MetaKeystrokesDoNotHidePointer) {
     ASSERT_TRUE(pc->isPointerShown());
 }
 
-TEST_F(PointerVisibilityOnKeyPressTest, KeystrokesWithoutTargetHidePointerOnlyOnFocusedDisplay) {
+TEST_P(PointerVisibilityAndTouchpadTapStateOnKeyPressTestFixture,
+       KeystrokesWithoutTargetHidePointerOnlyOnFocusedDisplayAndDisablesTouchpadTap) {
+    const auto& [_, source] = GetParam();
     mChoreographer.setDisplayViewports(createViewports({DISPLAY_ID, ANOTHER_DISPLAY_ID}));
     mChoreographer.setFocusedDisplay(DISPLAY_ID);
 
     // Mouse connected
     mChoreographer.notifyInputDevicesChanged(
             {/*id=*/0,
-             {generateTestDeviceInfo(DEVICE_ID, AINPUT_SOURCE_MOUSE, DISPLAY_ID),
+             {generateTestDeviceInfo(DEVICE_ID, source, DISPLAY_ID),
               generateTestDeviceInfo(SECOND_DEVICE_ID, AINPUT_SOURCE_MOUSE, ANOTHER_DISPLAY_ID)}});
     auto pc1 = assertPointerControllerCreated(ControllerType::MOUSE);
     auto pc2 = assertPointerControllerCreated(ControllerType::MOUSE);
@@ -2435,6 +2558,7 @@ TEST_F(PointerVisibilityOnKeyPressTest, KeystrokesWithoutTargetHidePointerOnlyOn
     ASSERT_TRUE(pc2->isPointerShown());
 
     EXPECT_CALL(mMockPolicy, isInputMethodConnectionActive).WillRepeatedly(testing::Return(true));
+    EXPECT_CALL(mMockPolicy, notifyMouseCursorFadedOnTyping).Times(2);
 
     notifyKey(ui::LogicalDisplayId::INVALID, AKEYCODE_0);
     ASSERT_FALSE(pc1->isPointerShown());
@@ -2446,16 +2570,19 @@ TEST_F(PointerVisibilityOnKeyPressTest, KeystrokesWithoutTargetHidePointerOnlyOn
     ASSERT_TRUE(pc2->isPointerShown());
 }
 
-TEST_F(PointerVisibilityOnKeyPressTest, TestMetaKeyCombinations) {
+TEST_P(PointerVisibilityAndTouchpadTapStateOnKeyPressTestFixture, TestMetaKeyCombinations) {
+    const auto& [_, source] = GetParam();
     mChoreographer.setDisplayViewports(createViewports({DISPLAY_ID}));
 
     // Mouse connected
     mChoreographer.notifyInputDevicesChanged(
-            {/*id=*/0, {generateTestDeviceInfo(DEVICE_ID, AINPUT_SOURCE_MOUSE, DISPLAY_ID)}});
+            {/*id=*/0, {generateTestDeviceInfo(DEVICE_ID, source, DISPLAY_ID)}});
     auto pc = assertPointerControllerCreated(ControllerType::MOUSE);
+
     EXPECT_CALL(mMockPolicy, isInputMethodConnectionActive).WillRepeatedly(testing::Return(true));
 
-    // meta key combinations that should hide pointer
+    // meta key combinations that should hide pointer and disable touchpad taps
+    EXPECT_CALL(mMockPolicy, notifyMouseCursorFadedOnTyping).Times(5);
     metaKeyCombinationHidesPointer(*pc, AKEYCODE_A, AKEYCODE_SHIFT_LEFT);
     metaKeyCombinationHidesPointer(*pc, AKEYCODE_A, AKEYCODE_SHIFT_RIGHT);
     metaKeyCombinationHidesPointer(*pc, AKEYCODE_A, AKEYCODE_CAPS_LOCK);
@@ -2463,6 +2590,7 @@ TEST_F(PointerVisibilityOnKeyPressTest, TestMetaKeyCombinations) {
     metaKeyCombinationHidesPointer(*pc, AKEYCODE_A, AKEYCODE_SCROLL_LOCK);
 
     // meta key combinations that should not hide pointer
+    EXPECT_CALL(mMockPolicy, notifyMouseCursorFadedOnTyping).Times(0);
     metaKeyCombinationDoesNotHidePointer(*pc, AKEYCODE_A, AKEYCODE_ALT_LEFT);
     metaKeyCombinationDoesNotHidePointer(*pc, AKEYCODE_A, AKEYCODE_ALT_RIGHT);
     metaKeyCombinationDoesNotHidePointer(*pc, AKEYCODE_A, AKEYCODE_CTRL_LEFT);

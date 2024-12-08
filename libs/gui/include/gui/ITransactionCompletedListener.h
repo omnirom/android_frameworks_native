@@ -16,8 +16,6 @@
 
 #pragma once
 
-#include "JankInfo.h"
-
 #include <binder/IInterface.h>
 #include <binder/Parcel.h>
 #include <binder/Parcelable.h>
@@ -40,15 +38,10 @@ class ListenerCallbacks;
 class CallbackId : public Parcelable {
 public:
     int64_t id;
-    enum class Type : int32_t {
-        ON_COMPLETE = 0,
-        ON_COMMIT = 1,
-        /*reserved for serialization = 2*/
-    } type;
-    bool includeJankData; // Only respected for ON_COMPLETE callbacks.
+    enum class Type : int32_t { ON_COMPLETE = 0, ON_COMMIT = 1 } type;
 
     CallbackId() {}
-    CallbackId(int64_t id, Type type) : id(id), type(type), includeJankData(false) {}
+    CallbackId(int64_t id, Type type) : id(id), type(type) {}
     status_t writeToParcel(Parcel* output) const override;
     status_t readFromParcel(const Parcel* input) override;
 
@@ -113,29 +106,6 @@ public:
     nsecs_t dequeueReadyTime;
 };
 
-/**
- * Jank information representing SurfaceFlinger's jank classification about frames for a specific
- * surface.
- */
-class JankData : public Parcelable {
-public:
-    status_t writeToParcel(Parcel* output) const override;
-    status_t readFromParcel(const Parcel* input) override;
-
-    JankData();
-    JankData(int64_t frameVsyncId, int32_t jankType, nsecs_t frameIntervalNs)
-          : frameVsyncId(frameVsyncId), jankType(jankType), frameIntervalNs(frameIntervalNs) {}
-
-    // Identifier for the frame submitted with Transaction.setFrameTimelineVsyncId
-    int64_t frameVsyncId;
-
-    // Bitmask of janks that occurred
-    int32_t jankType;
-
-    // Expected duration of the frame
-    nsecs_t frameIntervalNs;
-};
-
 class SurfaceStats : public Parcelable {
 public:
     status_t writeToParcel(Parcel* output) const override;
@@ -145,14 +115,13 @@ public:
     SurfaceStats(const sp<IBinder>& sc, std::variant<nsecs_t, sp<Fence>> acquireTimeOrFence,
                  const sp<Fence>& prevReleaseFence, std::optional<uint32_t> hint,
                  uint32_t currentMaxAcquiredBuffersCount, FrameEventHistoryStats frameEventStats,
-                 std::vector<JankData> jankData, ReleaseCallbackId previousReleaseCallbackId)
+                 ReleaseCallbackId previousReleaseCallbackId)
           : surfaceControl(sc),
             acquireTimeOrFence(std::move(acquireTimeOrFence)),
             previousReleaseFence(prevReleaseFence),
             transformHint(hint),
             currentMaxAcquiredBufferCount(currentMaxAcquiredBuffersCount),
             eventStats(frameEventStats),
-            jankData(std::move(jankData)),
             previousReleaseCallbackId(previousReleaseCallbackId) {}
 
     sp<IBinder> surfaceControl;
@@ -161,7 +130,6 @@ public:
     std::optional<uint32_t> transformHint = 0;
     uint32_t currentMaxAcquiredBufferCount = 0;
     FrameEventHistoryStats eventStats;
-    std::vector<JankData> jankData;
     ReleaseCallbackId previousReleaseCallbackId;
 };
 

@@ -240,8 +240,9 @@ const KeyLayoutMap::Key* KeyLayoutMap::getKey(int32_t scanCode, int32_t usageCod
 
 std::vector<int32_t> KeyLayoutMap::findScanCodesForKey(int32_t keyCode) const {
     std::vector<int32_t> scanCodes;
+    // b/354333072: Only consider keys without FUNCTION flag
     for (const auto& [scanCode, key] : mKeysByScanCode) {
-        if (keyCode == key.keyCode) {
+        if (keyCode == key.keyCode && !(key.flags & POLICY_FLAG_FUNCTION)) {
             scanCodes.push_back(scanCode);
         }
     }

@@ -20,6 +20,10 @@
 #include <android/os/IClientCallback.h>
 #include <android/os/IServiceCallback.h>
 
+#if !defined(VENDORSERVICEMANAGER) && !defined(__ANDROID_RECOVERY__)
+#include "perfetto/public/te_category_macros.h"
+#endif // !defined(VENDORSERVICEMANAGER) && !defined(__ANDROID_RECOVERY__)
+
 #include "Access.h"
 
 namespace android {
@@ -29,6 +33,11 @@ using os::IClientCallback;
 using os::IServiceCallback;
 using os::ServiceDebugInfo;
 
+#if !defined(VENDORSERVICEMANAGER) && !defined(__ANDROID_RECOVERY__)
+#define PERFETTO_SM_CATEGORIES(C) C(servicemanager, "servicemanager", "Service Manager category")
+PERFETTO_TE_CATEGORIES_DECLARE(PERFETTO_SM_CATEGORIES);
+#endif // !defined(VENDORSERVICEMANAGER) && !defined(__ANDROID_RECOVERY__)
+
 class ServiceManager : public os::BnServiceManager, public IBinder::DeathRecipient {
 public:
     ServiceManager(std::unique_ptr<Access>&& access);
@@ -36,7 +45,8 @@ public:
 
     // getService will try to start any services it cannot find
     binder::Status getService(const std::string& name, sp<IBinder>* outBinder) override;
-    binder::Status checkService(const std::string& name, sp<IBinder>* outBinder) override;
+    binder::Status getService2(const std::string& name, os::Service* outService) override;
+    binder::Status checkService(const std::string& name, os::Service* outService) override;
     binder::Status addService(const std::string& name, const sp<IBinder>& binder,
                               bool allowIsolated, int32_t dumpPriority) override;
     binder::Status listServices(int32_t dumpPriority, std::vector<std::string>* outList) override;
@@ -103,7 +113,12 @@ private:
     // this updates the iterator to the next location
     void removeClientCallback(const wp<IBinder>& who, ClientCallbackMap::iterator* it);
 
-    sp<IBinder> tryGetService(const std::string& name, bool startIfNotFound);
+    os::Service tryGetService(const std::string& name, bool startIfNotFound);
+    sp<IBinder> tryGetBinder(const std::string& name, bool startIfNotFound);
+    binder::Status canAddService(const Access::CallingContext& ctx, const std::string& name,
+                                 std::optional<std::string>* accessor);
+    binder::Status canFindService(const Access::CallingContext& ctx, const std::string& name,
+                                  std::optional<std::string>* accessor);
 
     ServiceMap mNameToService;
     ServiceCallbackMap mNameToRegistrationCallback;

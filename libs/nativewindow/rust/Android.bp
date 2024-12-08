@@ -29,6 +29,8 @@ rust_bindgen {
         "--bitfield-enum=AHardwareBuffer_UsageFlags",
 
         "--allowlist-file=.*/nativewindow/include/.*\\.h",
+        "--allowlist-file=.*/include/cutils/.*\\.h",
+        "--allowlist-file=.*/include_outside_system/cutils/.*\\.h",
         "--blocklist-type",
         "AParcel",
         "--raw-line",
@@ -39,6 +41,7 @@ rust_bindgen {
     ],
     shared_libs: [
         "libbinder_ndk",
+        "libcutils",
         "libnativewindow",
     ],
     rustlibs: [
@@ -66,6 +69,7 @@ rust_library {
     srcs: [":libnativewindow_bindgen_internal"],
     shared_libs: [
         "libbinder_ndk",
+        "libcutils",
         "libnativewindow",
     ],
     rustlibs: [

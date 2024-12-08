@@ -17,13 +17,15 @@
 #ifndef ANDROID_GUI_BUFFERITEMCONSUMER_H
 #define ANDROID_GUI_BUFFERITEMCONSUMER_H
 
-#include <gui/ConsumerBase.h>
+#include <com_android_graphics_libgui_flags.h>
 #include <gui/BufferQueue.h>
+#include <gui/ConsumerBase.h>
 
 #define ANDROID_GRAPHICS_BUFFERITEMCONSUMER_JNI_ID "mBufferItemConsumer"
 
 namespace android {
 
+class GraphicBuffer;
 class String8;
 
 /**
@@ -51,9 +53,17 @@ class BufferItemConsumer: public ConsumerBase
     // access at the same time.
     // controlledByApp tells whether this consumer is controlled by the
     // application.
+#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
+    BufferItemConsumer(uint64_t consumerUsage, int bufferCount = DEFAULT_MAX_BUFFERS,
+                       bool controlledByApp = false, bool isConsumerSurfaceFlinger = false);
+    BufferItemConsumer(const sp<IGraphicBufferConsumer>& consumer, uint64_t consumerUsage,
+                       int bufferCount = DEFAULT_MAX_BUFFERS, bool controlledByApp = false)
+            __attribute((deprecated("Prefer ctors that create their own surface and consumer.")));
+#else
     BufferItemConsumer(const sp<IGraphicBufferConsumer>& consumer,
             uint64_t consumerUsage, int bufferCount = DEFAULT_MAX_BUFFERS,
             bool controlledByApp = false);
+#endif // COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
 
     ~BufferItemConsumer() override;
 
@@ -85,7 +95,25 @@ class BufferItemConsumer: public ConsumerBase
     status_t releaseBuffer(const BufferItem &item,
             const sp<Fence>& releaseFence = Fence::NO_FENCE);
 
-   private:
+#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_PLATFORM_API_IMPROVEMENTS)
+    status_t releaseBuffer(const sp<GraphicBuffer>& buffer,
+                           const sp<Fence>& releaseFence = Fence::NO_FENCE);
+#endif // COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_PLATFORM_API_IMPROVEMENTS)
+
+protected:
+#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
+    // This should only be used by BLASTBufferQueue:
+    BufferItemConsumer(const sp<IGraphicBufferProducer>& producer,
+                       const sp<IGraphicBufferConsumer>& consumer, uint64_t consumerUsage,
+                       int bufferCount = DEFAULT_MAX_BUFFERS, bool controlledByApp = false);
+#endif // COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
+
+private:
+    void initialize(uint64_t consumerUsage, int bufferCount);
+
+    status_t releaseBufferSlotLocked(int slotIndex, const sp<GraphicBuffer>& buffer,
+                                     const sp<Fence>& releaseFence);
+
     void freeBufferLocked(int slotIndex) override;
 
     // mBufferFreedListener is the listener object that will be called when

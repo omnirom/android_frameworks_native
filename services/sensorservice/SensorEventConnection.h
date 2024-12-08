@@ -199,7 +199,8 @@ private:
     // valid mapping for sensors that require a permission in order to reduce the lookup time.
     std::unordered_map<int32_t, int32_t> mHandleToAppOp;
     // Mapping of sensor handles to its rate before being capped by the mic toggle.
-    std::unordered_map<int, nsecs_t> mMicSamplingPeriodBackup;
+    std::unordered_map<int, nsecs_t> mMicSamplingPeriodBackup
+        GUARDED_BY(mConnectionLock);
     userid_t mUserId;
 
     std::optional<bool> mIsRateCappedBasedOnPermission;

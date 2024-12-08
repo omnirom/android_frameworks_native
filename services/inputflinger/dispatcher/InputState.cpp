@@ -638,6 +638,8 @@ bool InputState::shouldCancelMotion(const MotionMemento& memento,
             return memento.source & AINPUT_SOURCE_CLASS_POINTER;
         case CancelationOptions::Mode::CANCEL_NON_POINTER_EVENTS:
             return !(memento.source & AINPUT_SOURCE_CLASS_POINTER);
+        case CancelationOptions::Mode::CANCEL_HOVER_EVENTS:
+            return memento.hovering;
         default:
             return false;
     }
@@ -647,7 +649,9 @@ std::ostream& operator<<(std::ostream& out, const InputState& state) {
     if (!state.mMotionMementos.empty()) {
         out << "mMotionMementos: ";
         for (const InputState::MotionMemento& memento : state.mMotionMementos) {
-            out << "{deviceId= " << memento.deviceId << ", hovering=" << memento.hovering << "}, ";
+            out << "{deviceId=" << memento.deviceId
+                << ", hovering=" << std::to_string(memento.hovering)
+                << ", downTime=" << memento.downTime << "}, ";
         }
     }
     return out;

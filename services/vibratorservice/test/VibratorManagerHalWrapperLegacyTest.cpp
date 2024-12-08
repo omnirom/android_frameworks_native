@@ -23,10 +23,12 @@
 
 #include <vibratorservice/VibratorManagerHalWrapper.h>
 
-using android::hardware::vibrator::CompositeEffect;
-using android::hardware::vibrator::CompositePrimitive;
-using android::hardware::vibrator::Effect;
-using android::hardware::vibrator::EffectStrength;
+#include "test_mocks.h"
+
+using aidl::android::hardware::vibrator::CompositeEffect;
+using aidl::android::hardware::vibrator::CompositePrimitive;
+using aidl::android::hardware::vibrator::Effect;
+using aidl::android::hardware::vibrator::EffectStrength;
 
 using std::chrono::milliseconds;
 
@@ -35,27 +37,16 @@ using namespace testing;
 
 // -------------------------------------------------------------------------------------------------
 
-class MockHalController : public vibrator::HalController {
-public:
-    MockHalController() = default;
-    virtual ~MockHalController() = default;
-
-    MOCK_METHOD(bool, init, (), (override));
-    MOCK_METHOD(void, tryReconnect, (), (override));
-};
-
-// -------------------------------------------------------------------------------------------------
-
 class VibratorManagerHalWrapperLegacyTest : public Test {
 public:
     void SetUp() override {
-        mMockController = std::make_shared<StrictMock<MockHalController>>();
+        mMockController = std::make_shared<StrictMock<vibrator::MockHalController>>();
         mWrapper = std::make_unique<vibrator::LegacyManagerHalWrapper>(mMockController);
         ASSERT_NE(mWrapper, nullptr);
     }
 
 protected:
-    std::shared_ptr<StrictMock<MockHalController>> mMockController = nullptr;
+    std::shared_ptr<StrictMock<vibrator::MockHalController>> mMockController = nullptr;
     std::unique_ptr<vibrator::ManagerHalWrapper> mWrapper = nullptr;
 };
 

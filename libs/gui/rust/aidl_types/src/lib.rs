@@ -42,10 +42,7 @@ macro_rules! stub_unstructured_parcelable {
 }
 
 stub_unstructured_parcelable!(BitTube);
-stub_unstructured_parcelable!(CaptureArgs);
-stub_unstructured_parcelable!(DisplayCaptureArgs);
 stub_unstructured_parcelable!(DisplayInfo);
-stub_unstructured_parcelable!(LayerCaptureArgs);
 stub_unstructured_parcelable!(LayerDebugInfo);
 stub_unstructured_parcelable!(LayerMetadata);
 stub_unstructured_parcelable!(ParcelableVsyncEventData);

@@ -33,7 +33,7 @@ uint32_t ExternalStylusInputMapper::getSources() const {
 
 void ExternalStylusInputMapper::populateDeviceInfo(InputDeviceInfo& info) {
     InputMapper::populateDeviceInfo(info);
-    if (mRawPressureAxis.valid) {
+    if (mRawPressureAxis || mTouchButtonAccumulator.hasButtonTouch()) {
         info.addMotionRange(AMOTION_EVENT_AXIS_PRESSURE, AINPUT_SOURCE_STYLUS, 0.0f, 1.0f, 0.0f,
                             0.0f, 0.0f);
     }
@@ -50,7 +50,7 @@ void ExternalStylusInputMapper::dump(std::string& dump) {
 std::list<NotifyArgs> ExternalStylusInputMapper::reconfigure(nsecs_t when,
                                                              const InputReaderConfiguration& config,
                                                              ConfigurationChanges changes) {
-    getAbsoluteAxisInfo(ABS_PRESSURE, &mRawPressureAxis);
+    mRawPressureAxis = getAbsoluteAxisInfo(ABS_PRESSURE);
     mTouchButtonAccumulator.configure();
     return {};
 }
@@ -82,10 +82,10 @@ std::list<NotifyArgs> ExternalStylusInputMapper::sync(nsecs_t when) {
         mStylusState.toolType = ToolType::STYLUS;
     }
 
-    if (mRawPressureAxis.valid) {
+    if (mRawPressureAxis) {
         auto rawPressure = static_cast<float>(mSingleTouchMotionAccumulator.getAbsolutePressure());
-        mStylusState.pressure = (rawPressure - mRawPressureAxis.minValue) /
-                static_cast<float>(mRawPressureAxis.maxValue - mRawPressureAxis.minValue);
+        mStylusState.pressure = (rawPressure - mRawPressureAxis->minValue) /
+                static_cast<float>(mRawPressureAxis->maxValue - mRawPressureAxis->minValue);
     } else if (mTouchButtonAccumulator.hasButtonTouch()) {
         mStylusState.pressure = mTouchButtonAccumulator.isHovering() ? 0.0f : 1.0f;
     }

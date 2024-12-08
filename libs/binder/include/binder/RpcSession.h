@@ -220,6 +220,12 @@ public:
     // internal only
     LIBBINDER_EXPORTED const std::unique_ptr<RpcState>& state() { return mRpcBinderState; }
 
+    /**
+     * Sets the session-specific root object. This is the object that will be used to attach
+     * the IAccessor binder to the RpcSession when a binder is set up via accessor.
+     */
+    LIBBINDER_EXPORTED void setSessionSpecificRoot(const sp<IBinder>& sessionSpecificRoot);
+
 private:
     friend sp<RpcSession>;
     friend RpcServer;

@@ -867,6 +867,6 @@ class BnGraphicBufferProducer : public IGraphicBufferProducer {
 #endif
 
 // ----------------------------------------------------------------------------
-}; // namespace android
+} // namespace android
 
 #endif // ANDROID_GUI_IGRAPHICBUFFERPRODUCER_H

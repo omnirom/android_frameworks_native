@@ -43,13 +43,6 @@ protected:
     virtual void SetUp() override { SetUpWithBus(0); }
     virtual void SetUpWithBus(int bus);
 
-    /**
-     * Initializes mDevice and mDeviceContext. When this happens, mDevice takes a copy of
-     * mPropertyMap, so tests that need to set configuration properties should do so before calling
-     * this. Others will most likely want to call it in their SetUp method.
-     */
-    void createDevice();
-
     void setupAxis(int axis, bool valid, int32_t min, int32_t max, int32_t resolution);
 
     void expectScanCodes(bool present, std::set<int> scanCodes);
@@ -58,6 +51,8 @@ protected:
 
     void setKeyCodeState(KeyState state, std::set<int> keyCodes);
 
+    void setSwitchState(int32_t state, std::set<int32_t> switchCodes);
+
     std::list<NotifyArgs> process(int32_t type, int32_t code, int32_t value);
     std::list<NotifyArgs> process(nsecs_t when, int32_t type, int32_t code, int32_t value);
 
@@ -65,7 +60,7 @@ protected:
     MockEventHubInterface mMockEventHub;
     sp<FakeInputReaderPolicy> mFakePolicy;
     MockInputReaderContext mMockInputReaderContext;
-    std::unique_ptr<InputDevice> mDevice;
+    std::unique_ptr<MockInputDevice> mDevice;
 
     std::unique_ptr<InputDeviceContext> mDeviceContext;
     InputReaderConfiguration mReaderConfiguration;
@@ -121,11 +116,12 @@ protected:
     T& constructAndAddMapper(Args... args) {
         // ensure a device entry exists for this eventHubId
         mDevice->addEmptyEventHubDevice(EVENTHUB_ID);
-        // configure the empty device
-        configureDevice(/*changes=*/{});
 
-        return mDevice->constructAndAddMapper<T>(EVENTHUB_ID, mFakePolicy->getReaderConfiguration(),
-                                                 args...);
+        auto& mapper =
+                mDevice->constructAndAddMapper<T>(EVENTHUB_ID,
+                                                  mFakePolicy->getReaderConfiguration(), args...);
+        configureDevice(/*changes=*/{});
+        return mapper;
     }
 
     void setDisplayInfoAndReconfigure(ui::LogicalDisplayId displayId, int32_t width, int32_t height,

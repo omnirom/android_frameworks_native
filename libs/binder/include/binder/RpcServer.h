@@ -85,9 +85,12 @@ public:
 
     /**
      * Creates an RPC server binding to the given CID at the given port.
+     *
+     * Set |port| to VMADDR_PORT_ANY to pick an ephemeral port. In this case, |assignedPort|
+     * will be set to the picked port number, if it is not null.
      */
-    [[nodiscard]] LIBBINDER_EXPORTED status_t setupVsockServer(unsigned int bindCid,
-                                                               unsigned int port);
+    [[nodiscard]] LIBBINDER_EXPORTED status_t setupVsockServer(unsigned bindCid, unsigned port,
+                                                               unsigned* assignedPort = nullptr);
 
     /**
      * Creates an RPC server at the current port using IPv4.

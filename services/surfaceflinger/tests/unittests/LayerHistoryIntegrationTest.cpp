@@ -38,6 +38,7 @@
 namespace android::scheduler {
 
 using android::mock::createDisplayMode;
+using android::mock::createVrrDisplayMode;
 using namespace com::android::graphics::surfaceflinger;
 
 class LayerHistoryIntegrationTest : public surfaceflinger::frontend::LayerSnapshotTestBase {
@@ -53,6 +54,8 @@ protected:
     static constexpr Fps HI_FPS = 90_Hz;
     static constexpr auto HI_FPS_PERIOD = HI_FPS.getPeriodNsecs();
 
+    static constexpr auto kVrrModeId = DisplayModeId(2);
+
     LayerHistoryIntegrationTest() : LayerSnapshotTestBase() {
         mFlinger.resetScheduler(mScheduler);
         mLifecycleManager = {};
@@ -67,6 +70,13 @@ protected:
     void setBufferWithPresentTime(sp<Layer>& layer, nsecs_t time) {
         uint32_t sequence = static_cast<uint32_t>(layer->sequence);
         setBuffer(sequence);
+        layer->setDesiredPresentTime(time, false /*autotimestamp*/);
+        updateLayerSnapshotsAndLayerHistory(time);
+    }
+
+    void setFrontBufferWithPresentTime(sp<Layer>& layer, nsecs_t time) {
+        uint32_t sequence = static_cast<uint32_t>(layer->sequence);
+        setFrontBuffer(sequence);
         layer->setDesiredPresentTime(time, false /*autotimestamp*/);
         updateLayerSnapshotsAndLayerHistory(time);
     }
@@ -135,6 +145,21 @@ protected:
         return layer;
     }
 
+    auto createLegacyAndFrontedEndLayerWithUid(uint32_t sequence, gui::Uid uid) {
+        std::string layerName = "test layer:" + std::to_string(sequence);
+        auto args = LayerCreationArgs{mFlinger.flinger(),
+                                      nullptr,
+                                      layerName,
+                                      0,
+                                      {},
+                                      std::make_optional<uint32_t>(sequence)};
+        args.ownerUid = uid.val();
+        const auto layer = sp<Layer>::make(args);
+        mFlinger.injectLegacyLayer(layer);
+        createRootLayerWithUid(sequence, uid);
+        return layer;
+    }
+
     auto destroyLayer(sp<Layer>& layer) {
         uint32_t sequence = static_cast<uint32_t>(layer->sequence);
         mFlinger.releaseLegacyLayer(sequence);
@@ -157,12 +182,13 @@ protected:
         ASSERT_EQ(desiredRefreshRate, summary[0].desiredRefreshRate);
     }
 
-    std::shared_ptr<RefreshRateSelector> mSelector =
-            std::make_shared<RefreshRateSelector>(makeModes(createDisplayMode(DisplayModeId(0),
-                                                                              LO_FPS),
-                                                            createDisplayMode(DisplayModeId(1),
-                                                                              HI_FPS)),
-                                                  DisplayModeId(0));
+    std::shared_ptr<RefreshRateSelector> mSelector = std::make_shared<RefreshRateSelector>(
+            makeModes(createDisplayMode(DisplayModeId(0), LO_FPS),
+                      createDisplayMode(DisplayModeId(1), HI_FPS),
+                      createVrrDisplayMode(kVrrModeId, HI_FPS,
+                                           hal::VrrConfig{.minFrameIntervalNs =
+                                                                  HI_FPS.getPeriodNsecs()})),
+            DisplayModeId(0));
 
     mock::SchedulerCallback mSchedulerCallback;
     TestableSurfaceFlinger mFlinger;
@@ -214,6 +240,146 @@ TEST_F(LayerHistoryIntegrationTest, singleLayerMinVoteDefaultCompatibility) {
     EXPECT_EQ(1u, activeLayerCount());
 }
 
+TEST_F(LayerHistoryIntegrationTest, oneLayer) {
+    createLegacyAndFrontedEndLayer(1);
+    nsecs_t time = systemTime();
+    updateLayerSnapshotsAndLayerHistory(time);
+
+    EXPECT_EQ(1u, layerCount());
+    EXPECT_EQ(0u, activeLayerCount());
+
+    // No layers returned if no layers are active.
+    EXPECT_TRUE(summarizeLayerHistory(time).empty());
+    EXPECT_EQ(0u, activeLayerCount());
+
+    // Max returned if active layers have insufficient history.
+    for (size_t i = 0; i < PRESENT_TIME_HISTORY_SIZE - 1; i++) {
+        setBuffer(1);
+        updateLayerSnapshotsAndLayerHistory(time);
+        ASSERT_EQ(1u, summarizeLayerHistory(time).size());
+        EXPECT_EQ(LayerHistory::LayerVoteType::Max, summarizeLayerHistory(time)[0].vote);
+        EXPECT_EQ(1u, activeLayerCount());
+        time += LO_FPS_PERIOD;
+    }
+
+    // Max is returned since we have enough history but there is no timestamp votes.
+    for (size_t i = 0; i < 10; i++) {
+        setBuffer(1);
+        updateLayerSnapshotsAndLayerHistory(time);
+        ASSERT_EQ(1u, summarizeLayerHistory(time).size());
+        EXPECT_EQ(LayerHistory::LayerVoteType::Max, summarizeLayerHistory(time)[0].vote);
+        EXPECT_EQ(1u, activeLayerCount());
+        time += LO_FPS_PERIOD;
+    }
+}
+
+TEST_F(LayerHistoryIntegrationTest, gameFrameRateOverrideMapping) {
+    SET_FLAG_FOR_TEST(flags::game_default_frame_rate, true);
+
+    history().updateGameDefaultFrameRateOverride(FrameRateOverride({0, 60.0f}));
+
+    auto overridePair = history().getGameFrameRateOverride(0);
+    EXPECT_EQ(0_Hz, overridePair.first);
+    EXPECT_EQ(60_Hz, overridePair.second);
+
+    history().updateGameModeFrameRateOverride(FrameRateOverride({0, 40.0f}));
+    history().updateGameModeFrameRateOverride(FrameRateOverride({1, 120.0f}));
+
+    overridePair = history().getGameFrameRateOverride(0);
+    EXPECT_EQ(40_Hz, overridePair.first);
+    EXPECT_EQ(60_Hz, overridePair.second);
+
+    overridePair = history().getGameFrameRateOverride(1);
+    EXPECT_EQ(120_Hz, overridePair.first);
+    EXPECT_EQ(0_Hz, overridePair.second);
+
+    history().updateGameDefaultFrameRateOverride(FrameRateOverride({0, 0.0f}));
+    history().updateGameModeFrameRateOverride(FrameRateOverride({1, 0.0f}));
+
+    overridePair = history().getGameFrameRateOverride(0);
+    EXPECT_EQ(40_Hz, overridePair.first);
+    EXPECT_EQ(0_Hz, overridePair.second);
+
+    overridePair = history().getGameFrameRateOverride(1);
+    EXPECT_EQ(0_Hz, overridePair.first);
+    EXPECT_EQ(0_Hz, overridePair.second);
+}
+
+TEST_F(LayerHistoryIntegrationTest, oneLayerGameFrameRateOverride) {
+    SET_FLAG_FOR_TEST(flags::game_default_frame_rate, true);
+
+    const uid_t uid = 0;
+    const Fps gameDefaultFrameRate = Fps::fromValue(30.0f);
+    const Fps gameModeFrameRate = Fps::fromValue(60.0f);
+
+    auto layer = createLegacyAndFrontedEndLayerWithUid(1, gui::Uid(uid));
+    showLayer(1);
+
+    nsecs_t time = systemTime();
+    updateLayerSnapshotsAndLayerHistory(time);
+
+    EXPECT_EQ(1u, layerCount());
+    EXPECT_EQ(0u, activeLayerCount());
+
+    // update game default frame rate override
+    history().updateGameDefaultFrameRateOverride(
+            FrameRateOverride({uid, gameDefaultFrameRate.getValue()}));
+
+    LayerHistory::Summary summary;
+    scheduler::LayerProps layerProps = {
+            .visible = true,
+            .bounds = {0, 0, 100, 100},
+            .transform = {},
+            .setFrameRateVote = {},
+            .frameRateSelectionPriority = Layer::PRIORITY_UNSET,
+            .isSmallDirty = false,
+            .isFrontBuffered = false,
+    };
+
+    for (size_t i = 0; i < PRESENT_TIME_HISTORY_SIZE; i++) {
+        setBufferWithPresentTime(layer, time);
+        time += gameDefaultFrameRate.getPeriodNsecs();
+        summary = summarizeLayerHistory(time);
+    }
+
+    ASSERT_EQ(1u, summary.size());
+    ASSERT_EQ(LayerHistory::LayerVoteType::ExplicitDefault, summary[0].vote);
+    ASSERT_EQ(30.0_Hz, summary[0].desiredRefreshRate);
+
+    // test against setFrameRate vote
+    setFrameRate(1,
+                 Layer::FrameRate(Fps::fromValue(120.0f), Layer::FrameRateCompatibility::Default));
+    updateLayerSnapshotsAndLayerHistory(time);
+
+    const Fps setFrameRate = Fps::fromValue(120.0f);
+    layerProps.setFrameRateVote =
+            Layer::FrameRate(setFrameRate, Layer::FrameRateCompatibility::Default);
+
+    for (size_t i = 0; i < PRESENT_TIME_HISTORY_SIZE; i++) {
+        setBufferWithPresentTime(layer, time);
+        time += setFrameRate.getPeriodNsecs();
+        summary = summarizeLayerHistory(time);
+    }
+
+    ASSERT_EQ(1u, summary.size());
+    ASSERT_EQ(LayerHistory::LayerVoteType::ExplicitDefault, summary[0].vote);
+    ASSERT_EQ(120.0_Hz, summary[0].desiredRefreshRate);
+
+    // update game mode frame rate override
+    history().updateGameModeFrameRateOverride(
+            FrameRateOverride({uid, gameModeFrameRate.getValue()}));
+
+    for (size_t i = 0; i < PRESENT_TIME_HISTORY_SIZE; i++) {
+        setBufferWithPresentTime(layer, time);
+        time += gameModeFrameRate.getPeriodNsecs();
+        summary = summarizeLayerHistory(time);
+    }
+
+    ASSERT_EQ(1u, summary.size());
+    ASSERT_EQ(LayerHistory::LayerVoteType::ExplicitDefault, summary[0].vote);
+    ASSERT_EQ(60.0_Hz, summary[0].desiredRefreshRate);
+}
+
 TEST_F(LayerHistoryIntegrationTest, oneInvisibleLayer) {
     createLegacyAndFrontedEndLayer(1);
     nsecs_t time = systemTime();
@@ -236,6 +402,110 @@ TEST_F(LayerHistoryIntegrationTest, oneInvisibleLayer) {
     summary = summarizeLayerHistory(time);
     EXPECT_TRUE(summarizeLayerHistory(time).empty());
     EXPECT_EQ(0u, activeLayerCount());
+}
+
+TEST_F(LayerHistoryIntegrationTest, explicitTimestamp) {
+    auto layer = createLegacyAndFrontedEndLayer(1);
+    showLayer(1);
+    nsecs_t time = systemTime();
+    updateLayerSnapshotsAndLayerHistory(time);
+
+    EXPECT_EQ(1u, layerCount());
+    EXPECT_EQ(0u, activeLayerCount());
+
+    for (size_t i = 0; i < PRESENT_TIME_HISTORY_SIZE; i++) {
+        setBufferWithPresentTime(layer, time);
+        time += LO_FPS_PERIOD;
+    }
+
+    ASSERT_EQ(1u, summarizeLayerHistory(time).size());
+    EXPECT_EQ(LayerHistory::LayerVoteType::Heuristic, summarizeLayerHistory(time)[0].vote);
+    EXPECT_EQ(LO_FPS, summarizeLayerHistory(time)[0].desiredRefreshRate);
+    EXPECT_EQ(1u, activeLayerCount());
+    EXPECT_EQ(1, frequentLayerCount(time));
+}
+
+TEST_F(LayerHistoryIntegrationTest, oneLayerNoVote) {
+    auto layer = createLegacyAndFrontedEndLayer(1);
+    showLayer(1);
+    nsecs_t time = systemTime();
+    updateLayerSnapshotsAndLayerHistory(time);
+
+    setDefaultLayerVote(layer.get(), LayerHistory::LayerVoteType::NoVote);
+
+    EXPECT_EQ(1u, layerCount());
+    EXPECT_EQ(0u, activeLayerCount());
+
+    for (size_t i = 0; i < PRESENT_TIME_HISTORY_SIZE; i++) {
+        setBufferWithPresentTime(layer, time);
+        time += HI_FPS_PERIOD;
+    }
+
+    ASSERT_TRUE(summarizeLayerHistory(time).empty());
+    EXPECT_EQ(1u, activeLayerCount());
+    EXPECT_EQ(1, frequentLayerCount(time));
+
+    // layer became inactive
+    time += MAX_ACTIVE_LAYER_PERIOD_NS.count();
+    ASSERT_TRUE(summarizeLayerHistory(time).empty());
+    EXPECT_EQ(0u, activeLayerCount());
+    EXPECT_EQ(0, frequentLayerCount(time));
+}
+
+TEST_F(LayerHistoryIntegrationTest, oneLayerMinVote) {
+    auto layer = createLegacyAndFrontedEndLayer(1);
+    showLayer(1);
+    nsecs_t time = systemTime();
+    updateLayerSnapshotsAndLayerHistory(time);
+
+    setDefaultLayerVote(layer.get(), LayerHistory::LayerVoteType::Min);
+
+    EXPECT_EQ(1u, layerCount());
+    EXPECT_EQ(0u, activeLayerCount());
+
+    for (size_t i = 0; i < PRESENT_TIME_HISTORY_SIZE; i++) {
+        setBufferWithPresentTime(layer, time);
+        time += HI_FPS_PERIOD;
+    }
+
+    ASSERT_EQ(1u, summarizeLayerHistory(time).size());
+    EXPECT_EQ(LayerHistory::LayerVoteType::Min, summarizeLayerHistory(time)[0].vote);
+    EXPECT_EQ(1u, activeLayerCount());
+    EXPECT_EQ(1, frequentLayerCount(time));
+
+    // layer became inactive
+    time += MAX_ACTIVE_LAYER_PERIOD_NS.count();
+    ASSERT_TRUE(summarizeLayerHistory(time).empty());
+    EXPECT_EQ(0u, activeLayerCount());
+    EXPECT_EQ(0, frequentLayerCount(time));
+}
+
+TEST_F(LayerHistoryIntegrationTest, oneLayerMaxVote) {
+    auto layer = createLegacyAndFrontedEndLayer(1);
+    showLayer(1);
+    nsecs_t time = systemTime();
+    updateLayerSnapshotsAndLayerHistory(time);
+
+    setDefaultLayerVote(layer.get(), LayerHistory::LayerVoteType::Max);
+
+    EXPECT_EQ(1u, layerCount());
+    EXPECT_EQ(0u, activeLayerCount());
+
+    for (size_t i = 0; i < PRESENT_TIME_HISTORY_SIZE; i++) {
+        setBufferWithPresentTime(layer, time);
+        time += LO_FPS_PERIOD;
+    }
+
+    ASSERT_EQ(1u, summarizeLayerHistory(time).size());
+    EXPECT_EQ(LayerHistory::LayerVoteType::Max, summarizeLayerHistory(time)[0].vote);
+    EXPECT_EQ(1u, activeLayerCount());
+    EXPECT_EQ(1, frequentLayerCount(time));
+
+    // layer became inactive
+    time += MAX_ACTIVE_LAYER_PERIOD_NS.count();
+    ASSERT_TRUE(summarizeLayerHistory(time).empty());
+    EXPECT_EQ(0u, activeLayerCount());
+    EXPECT_EQ(0, frequentLayerCount(time));
 }
 
 TEST_F(LayerHistoryIntegrationTest, oneLayerExplicitVote) {
@@ -273,6 +543,335 @@ TEST_F(LayerHistoryIntegrationTest, oneLayerExplicitExactVote) {
     EXPECT_EQ(1, frequentLayerCount(time));
 }
 
+TEST_F(LayerHistoryIntegrationTest, oneLayerExplicitExactVote2) {
+    auto layer = createLegacyAndFrontedEndLayer(1);
+    setFrameRate(1, 73.4f, ANATIVEWINDOW_FRAME_RATE_COMPATIBILITY_FIXED_SOURCE,
+                 ANATIVEWINDOW_CHANGE_FRAME_RATE_ONLY_IF_SEAMLESS);
+
+    EXPECT_EQ(1u, layerCount());
+    EXPECT_EQ(0u, activeLayerCount());
+
+    nsecs_t time = systemTime();
+    updateLayerSnapshotsAndLayerHistory(time);
+
+    for (size_t i = 0; i < PRESENT_TIME_HISTORY_SIZE; i++) {
+        setBufferWithPresentTime(layer, time);
+        time += HI_FPS_PERIOD;
+    }
+
+    ASSERT_EQ(1u, summarizeLayerHistory(time).size());
+    EXPECT_EQ(LayerHistory::LayerVoteType::ExplicitExactOrMultiple,
+              summarizeLayerHistory(time)[0].vote);
+    EXPECT_EQ(73.4_Hz, summarizeLayerHistory(time)[0].desiredRefreshRate);
+    EXPECT_EQ(1u, activeLayerCount());
+    EXPECT_EQ(1, frequentLayerCount(time));
+
+    // layer became infrequent, but the vote stays
+    setDefaultLayerVote(layer.get(), LayerHistory::LayerVoteType::Heuristic);
+    time += MAX_ACTIVE_LAYER_PERIOD_NS.count();
+    ASSERT_EQ(1u, summarizeLayerHistory(time).size());
+    EXPECT_EQ(LayerHistory::LayerVoteType::ExplicitExactOrMultiple,
+              summarizeLayerHistory(time)[0].vote);
+    EXPECT_EQ(73.4_Hz, summarizeLayerHistory(time)[0].desiredRefreshRate);
+    EXPECT_EQ(1u, activeLayerCount());
+    EXPECT_EQ(0, frequentLayerCount(time));
+}
+
+TEST_F(LayerHistoryIntegrationTest, oneLayerExplicitGte_vrr) {
+    // Set the test to be on a vrr mode.
+    SET_FLAG_FOR_TEST(flags::vrr_config, true);
+    mSelector->setActiveMode(kVrrModeId, HI_FPS);
+
+    auto layer = createLegacyAndFrontedEndLayer(1);
+    showLayer(1);
+    setFrameRate(1, (33_Hz).getValue(), ANATIVEWINDOW_FRAME_RATE_GTE,
+                 ANATIVEWINDOW_CHANGE_FRAME_RATE_ONLY_IF_SEAMLESS);
+    setFrameRateCategory(1, 0);
+
+    EXPECT_EQ(1u, layerCount());
+    EXPECT_EQ(0u, activeLayerCount());
+
+    nsecs_t time = systemTime();
+    for (size_t i = 0; i < PRESENT_TIME_HISTORY_SIZE; i++) {
+        setBufferWithPresentTime(layer, time);
+        time += HI_FPS_PERIOD;
+    }
+
+    ASSERT_EQ(1u, summarizeLayerHistory(time).size());
+    EXPECT_EQ(1u, activeLayerCount());
+    EXPECT_EQ(1, frequentLayerCount(time));
+    EXPECT_EQ(LayerHistory::LayerVoteType::ExplicitGte, summarizeLayerHistory(time)[0].vote);
+    EXPECT_EQ(33_Hz, summarizeLayerHistory(time)[0].desiredRefreshRate);
+    EXPECT_EQ(FrameRateCategory::Default, summarizeLayerHistory(time)[0].frameRateCategory);
+
+    // layer became inactive, but the vote stays
+    setDefaultLayerVote(layer.get(), LayerHistory::LayerVoteType::Heuristic);
+    time += MAX_ACTIVE_LAYER_PERIOD_NS.count();
+    ASSERT_EQ(1u, summarizeLayerHistory(time).size());
+    EXPECT_EQ(1u, activeLayerCount());
+    EXPECT_EQ(0, frequentLayerCount(time));
+    EXPECT_EQ(LayerHistory::LayerVoteType::ExplicitGte, summarizeLayerHistory(time)[0].vote);
+    EXPECT_EQ(33_Hz, summarizeLayerHistory(time)[0].desiredRefreshRate);
+    EXPECT_EQ(FrameRateCategory::Default, summarizeLayerHistory(time)[0].frameRateCategory);
+}
+
+// Test for MRR device with VRR features enabled.
+TEST_F(LayerHistoryIntegrationTest, oneLayerExplicitGte_nonVrr) {
+    SET_FLAG_FOR_TEST(flags::frame_rate_category_mrr, true);
+    // The vrr_config flag is explicitly not set false because this test for an MRR device
+    // should still work in a VRR-capable world.
+
+    auto layer = createLegacyAndFrontedEndLayer(1);
+    showLayer(1);
+    setFrameRate(1, (33_Hz).getValue(), ANATIVEWINDOW_FRAME_RATE_GTE,
+                 ANATIVEWINDOW_CHANGE_FRAME_RATE_ONLY_IF_SEAMLESS);
+    setFrameRateCategory(1, 0);
+
+    EXPECT_EQ(1u, layerCount());
+    EXPECT_EQ(0u, activeLayerCount());
+
+    nsecs_t time = systemTime();
+    for (size_t i = 0; i < PRESENT_TIME_HISTORY_SIZE; i++) {
+        setBufferWithPresentTime(layer, time);
+        time += HI_FPS_PERIOD;
+    }
+
+    ASSERT_EQ(1u, summarizeLayerHistory(time).size());
+    EXPECT_EQ(1u, activeLayerCount());
+    EXPECT_EQ(1, frequentLayerCount(time));
+    EXPECT_EQ(LayerHistory::LayerVoteType::Max, summarizeLayerHistory(time)[0].vote);
+    EXPECT_EQ(0_Hz, summarizeLayerHistory(time)[0].desiredRefreshRate);
+    EXPECT_EQ(FrameRateCategory::Default, summarizeLayerHistory(time)[0].frameRateCategory);
+
+    // layer became infrequent, but the vote stays
+    setDefaultLayerVote(layer.get(), LayerHistory::LayerVoteType::Heuristic);
+    time += MAX_ACTIVE_LAYER_PERIOD_NS.count();
+    ASSERT_EQ(1u, summarizeLayerHistory(time).size());
+    EXPECT_EQ(1u, activeLayerCount());
+    EXPECT_EQ(0, frequentLayerCount(time));
+    EXPECT_EQ(LayerHistory::LayerVoteType::Max, summarizeLayerHistory(time)[0].vote);
+    EXPECT_EQ(0_Hz, summarizeLayerHistory(time)[0].desiredRefreshRate);
+    EXPECT_EQ(FrameRateCategory::Default, summarizeLayerHistory(time)[0].frameRateCategory);
+}
+
+TEST_F(LayerHistoryIntegrationTest, oneLayerExplicitVoteWithCategory_vrrFeatureOff) {
+    SET_FLAG_FOR_TEST(flags::frame_rate_category_mrr, false);
+
+    auto layer = createLegacyAndFrontedEndLayer(1);
+    showLayer(1);
+    setFrameRate(1, (73.4_Hz).getValue(), ANATIVEWINDOW_FRAME_RATE_COMPATIBILITY_DEFAULT,
+                 ANATIVEWINDOW_CHANGE_FRAME_RATE_ONLY_IF_SEAMLESS);
+    setFrameRateCategory(1, ANATIVEWINDOW_FRAME_RATE_CATEGORY_HIGH);
+
+    // Set default to Min so it is obvious that the vote reset triggered.
+    setDefaultLayerVote(layer.get(), LayerHistory::LayerVoteType::Min);
+
+    EXPECT_EQ(1u, layerCount());
+    EXPECT_EQ(0u, activeLayerCount());
+
+    nsecs_t time = systemTime();
+    for (size_t i = 0; i < PRESENT_TIME_HISTORY_SIZE; i++) {
+        setBufferWithPresentTime(layer, time);
+        time += HI_FPS_PERIOD;
+    }
+
+    // There is only 1 LayerRequirement due to the disabled flag frame_rate_category_mrr.
+    ASSERT_EQ(1u, summarizeLayerHistory(time).size());
+    EXPECT_EQ(1u, activeLayerCount());
+    EXPECT_EQ(1, frequentLayerCount(time));
+    EXPECT_EQ(LayerHistory::LayerVoteType::Min, summarizeLayerHistory(time)[0].vote);
+    EXPECT_EQ(0_Hz, summarizeLayerHistory(time)[0].desiredRefreshRate);
+    EXPECT_EQ(FrameRateCategory::Default, summarizeLayerHistory(time)[0].frameRateCategory);
+}
+
+// This test case should be the same as oneLayerNoVote except instead of layer vote is NoVote,
+// the category is NoPreference.
+TEST_F(LayerHistoryIntegrationTest, oneLayerCategoryNoPreference) {
+    SET_FLAG_FOR_TEST(flags::frame_rate_category_mrr, true);
+
+    auto layer = createLegacyAndFrontedEndLayer(1);
+    showLayer(1);
+    setFrameRate(1, (0_Hz).getValue(), ANATIVEWINDOW_FRAME_RATE_COMPATIBILITY_DEFAULT,
+                 ANATIVEWINDOW_CHANGE_FRAME_RATE_ONLY_IF_SEAMLESS);
+    setFrameRateCategory(1, ANATIVEWINDOW_FRAME_RATE_CATEGORY_NO_PREFERENCE);
+
+    EXPECT_EQ(1u, layerCount());
+    EXPECT_EQ(0u, activeLayerCount());
+
+    nsecs_t time = systemTime();
+    for (size_t i = 0; i < PRESENT_TIME_HISTORY_SIZE; i++) {
+        setBufferWithPresentTime(layer, time);
+        time += HI_FPS_PERIOD;
+    }
+
+    EXPECT_EQ(1u, summarizeLayerHistory(time).size());
+    EXPECT_EQ(1u, activeLayerCount());
+    EXPECT_EQ(1, frequentLayerCount(time));
+
+    // layer became infrequent
+    time += MAX_ACTIVE_LAYER_PERIOD_NS.count();
+    EXPECT_EQ(1u, summarizeLayerHistory(time).size());
+    EXPECT_EQ(1u, activeLayerCount());
+    EXPECT_EQ(0, frequentLayerCount(time));
+}
+
+TEST_F(LayerHistoryIntegrationTest, oneLayerExplicitVoteWithCategory) {
+    SET_FLAG_FOR_TEST(flags::frame_rate_category_mrr, true);
+
+    auto layer = createLegacyAndFrontedEndLayer(1);
+    showLayer(1);
+    setFrameRate(1, (73.4_Hz).getValue(), ANATIVEWINDOW_FRAME_RATE_COMPATIBILITY_DEFAULT,
+                 ANATIVEWINDOW_CHANGE_FRAME_RATE_ONLY_IF_SEAMLESS);
+    setFrameRateCategory(1, ANATIVEWINDOW_FRAME_RATE_CATEGORY_HIGH);
+
+    EXPECT_EQ(1u, layerCount());
+    EXPECT_EQ(0u, activeLayerCount());
+
+    nsecs_t time = systemTime();
+    for (size_t i = 0; i < PRESENT_TIME_HISTORY_SIZE; i++) {
+        setBufferWithPresentTime(layer, time);
+        time += HI_FPS_PERIOD;
+    }
+
+    // There are 2 LayerRequirement's due to the frame rate category.
+    ASSERT_EQ(2u, summarizeLayerHistory(time).size());
+    EXPECT_EQ(1u, activeLayerCount());
+    EXPECT_EQ(1, frequentLayerCount(time));
+    // First LayerRequirement is the layer's category specification
+    EXPECT_EQ(LayerHistory::LayerVoteType::ExplicitCategory, summarizeLayerHistory(time)[0].vote);
+    EXPECT_EQ(0_Hz, summarizeLayerHistory(time)[0].desiredRefreshRate);
+    EXPECT_EQ(FrameRateCategory::High, summarizeLayerHistory(time)[0].frameRateCategory);
+
+    // Second LayerRequirement is the frame rate specification
+    EXPECT_EQ(LayerHistory::LayerVoteType::ExplicitDefault, summarizeLayerHistory(time)[1].vote);
+    EXPECT_EQ(73.4_Hz, summarizeLayerHistory(time)[1].desiredRefreshRate);
+    EXPECT_EQ(FrameRateCategory::Default, summarizeLayerHistory(time)[1].frameRateCategory);
+
+    // layer became infrequent, but the vote stays
+    setDefaultLayerVote(layer.get(), LayerHistory::LayerVoteType::Heuristic);
+    time += MAX_ACTIVE_LAYER_PERIOD_NS.count();
+    ASSERT_EQ(2u, summarizeLayerHistory(time).size());
+    EXPECT_EQ(1u, activeLayerCount());
+    EXPECT_EQ(0, frequentLayerCount(time));
+    EXPECT_EQ(LayerHistory::LayerVoteType::ExplicitCategory, summarizeLayerHistory(time)[0].vote);
+    EXPECT_EQ(0_Hz, summarizeLayerHistory(time)[0].desiredRefreshRate);
+    EXPECT_EQ(FrameRateCategory::High, summarizeLayerHistory(time)[0].frameRateCategory);
+}
+
+TEST_F(LayerHistoryIntegrationTest, oneLayerExplicitVoteWithCategoryNotVisibleDoesNotVote) {
+    SET_FLAG_FOR_TEST(flags::misc1, true);
+
+    auto layer = createLegacyAndFrontedEndLayer(1);
+    hideLayer(1);
+    setFrameRate(1, (12.34_Hz).getValue(), ANATIVEWINDOW_FRAME_RATE_COMPATIBILITY_DEFAULT,
+                 ANATIVEWINDOW_CHANGE_FRAME_RATE_ONLY_IF_SEAMLESS);
+    setFrameRateCategory(1, ANATIVEWINDOW_FRAME_RATE_CATEGORY_HIGH);
+
+    EXPECT_EQ(1u, layerCount());
+    EXPECT_EQ(0u, activeLayerCount());
+
+    nsecs_t time = systemTime();
+    for (size_t i = 0; i < PRESENT_TIME_HISTORY_SIZE; i++) {
+        setBufferWithPresentTime(layer, time);
+        time += HI_FPS_PERIOD;
+    }
+
+    // Layer is not visible, so the layer is moved to inactive, infrequent, and it will not have
+    // votes to consider for refresh rate selection.
+    ASSERT_EQ(0u, summarizeLayerHistory(time).size());
+    EXPECT_EQ(0u, activeLayerCount());
+    EXPECT_EQ(0, frequentLayerCount(time));
+}
+
+TEST_F(LayerHistoryIntegrationTest, invisibleExplicitLayer) {
+    SET_FLAG_FOR_TEST(flags::misc1, false);
+
+    auto explicitVisiblelayer = createLegacyAndFrontedEndLayer(1);
+    showLayer(1);
+    setFrameRate(1, (60_Hz).getValue(), ANATIVEWINDOW_FRAME_RATE_COMPATIBILITY_FIXED_SOURCE, 0);
+
+    auto explicitInvisiblelayer = createLegacyAndFrontedEndLayer(2);
+    hideLayer(2);
+    setFrameRate(2, (90_Hz).getValue(), ANATIVEWINDOW_FRAME_RATE_COMPATIBILITY_FIXED_SOURCE, 0);
+
+    nsecs_t time = systemTime();
+
+    // Post a buffer to the layers to make them active
+    setBuffer(1);
+    setBuffer(2);
+    updateLayerSnapshotsAndLayerHistory(time);
+
+    EXPECT_EQ(2u, layerCount());
+    ASSERT_EQ(1u, summarizeLayerHistory(time).size());
+    EXPECT_EQ(LayerHistory::LayerVoteType::ExplicitExactOrMultiple,
+              summarizeLayerHistory(time)[0].vote);
+    EXPECT_EQ(60_Hz, summarizeLayerHistory(time)[0].desiredRefreshRate);
+    EXPECT_EQ(2u, activeLayerCount());
+    EXPECT_EQ(2, frequentLayerCount(time));
+}
+
+TEST_F(LayerHistoryIntegrationTest, invisibleExplicitLayerDoesNotVote) {
+    SET_FLAG_FOR_TEST(flags::misc1, true);
+
+    auto explicitVisiblelayer = createLegacyAndFrontedEndLayer(1);
+    showLayer(1);
+    setFrameRate(1, (60_Hz).getValue(), ANATIVEWINDOW_FRAME_RATE_COMPATIBILITY_FIXED_SOURCE, 0);
+
+    auto explicitInvisiblelayer = createLegacyAndFrontedEndLayer(2);
+    hideLayer(2);
+    setFrameRate(2, (90_Hz).getValue(), ANATIVEWINDOW_FRAME_RATE_COMPATIBILITY_FIXED_SOURCE, 0);
+
+    nsecs_t time = systemTime();
+
+    // Post a buffer to the layers to make them active
+    setBuffer(1);
+    setBuffer(2);
+    updateLayerSnapshotsAndLayerHistory(time);
+
+    EXPECT_EQ(2u, layerCount());
+    ASSERT_EQ(1u, summarizeLayerHistory(time).size());
+    EXPECT_EQ(LayerHistory::LayerVoteType::ExplicitExactOrMultiple,
+              summarizeLayerHistory(time)[0].vote);
+    EXPECT_EQ(60_Hz, summarizeLayerHistory(time)[0].desiredRefreshRate);
+    EXPECT_EQ(1u, activeLayerCount());
+    EXPECT_EQ(1, frequentLayerCount(time));
+}
+
+TEST_F(LayerHistoryIntegrationTest, frontBufferedLayerVotesMax) {
+    SET_FLAG_FOR_TEST(flags::vrr_config, true);
+
+    auto layer = createLegacyAndFrontedEndLayer(1);
+    setFrontBuffer(1);
+    showLayer(1);
+
+    nsecs_t time = systemTime();
+
+    EXPECT_EQ(1u, layerCount());
+    EXPECT_EQ(0u, activeLayerCount());
+    EXPECT_EQ(0, frequentLayerCount(time));
+    EXPECT_EQ(0, animatingLayerCount(time));
+
+    // layer is active but infrequent.
+    for (size_t i = 0; i < PRESENT_TIME_HISTORY_SIZE; i++) {
+        setFrontBufferWithPresentTime(layer, time);
+        time += MAX_FREQUENT_LAYER_PERIOD_NS.count();
+    }
+
+    ASSERT_EQ(1u, summarizeLayerHistory(time).size());
+    EXPECT_EQ(LayerHistory::LayerVoteType::Max, summarizeLayerHistory(time)[0].vote);
+    EXPECT_EQ(1u, activeLayerCount());
+    EXPECT_EQ(0, frequentLayerCount(time));
+    EXPECT_EQ(0, animatingLayerCount(time));
+
+    // Layer still active due to front buffering, but it's infrequent.
+    time += MAX_ACTIVE_LAYER_PERIOD_NS.count();
+    ASSERT_EQ(1u, summarizeLayerHistory(time).size());
+    EXPECT_EQ(LayerHistory::LayerVoteType::Max, summarizeLayerHistory(time)[0].vote);
+    EXPECT_EQ(1u, activeLayerCount());
+    EXPECT_EQ(0, frequentLayerCount(time));
+    EXPECT_EQ(0, animatingLayerCount(time));
+}
+
 TEST_F(LayerHistoryIntegrationTest, oneLayerExplicitCategory) {
     SET_FLAG_FOR_TEST(flags::frame_rate_category_mrr, true);
 
@@ -291,6 +890,49 @@ TEST_F(LayerHistoryIntegrationTest, oneLayerExplicitCategory) {
     EXPECT_EQ(LayerHistory::LayerVoteType::ExplicitCategory, summarizeLayerHistory(time)[0].vote);
     EXPECT_EQ(0_Hz, summarizeLayerHistory(time)[0].desiredRefreshRate);
     EXPECT_EQ(FrameRateCategory::High, summarizeLayerHistory(time)[0].frameRateCategory);
+}
+
+TEST_F(LayerHistoryIntegrationTest, oneLayerExplicitVoteWithFixedSourceAndNoPreferenceCategory) {
+    SET_FLAG_FOR_TEST(flags::frame_rate_category_mrr, false);
+
+    auto layer = createLegacyAndFrontedEndLayer(1);
+    setFrameRate(1, (45.6_Hz).getValue(), ANATIVEWINDOW_FRAME_RATE_COMPATIBILITY_FIXED_SOURCE,
+                 ANATIVEWINDOW_CHANGE_FRAME_RATE_ONLY_IF_SEAMLESS);
+    setFrameRateCategory(1, ANATIVEWINDOW_FRAME_RATE_CATEGORY_NO_PREFERENCE);
+
+    EXPECT_EQ(1u, layerCount());
+    EXPECT_EQ(0u, activeLayerCount());
+
+    nsecs_t time = systemTime();
+    updateLayerSnapshotsAndLayerHistory(time);
+    for (size_t i = 0; i < PRESENT_TIME_HISTORY_SIZE; i++) {
+        setBufferWithPresentTime(layer, time);
+        time += HI_FPS_PERIOD;
+    }
+
+    // There are 2 LayerRequirement's due to the frame rate category.
+    ASSERT_EQ(2u, summarizeLayerHistory(time).size());
+    EXPECT_EQ(1u, activeLayerCount());
+    EXPECT_EQ(1, frequentLayerCount(time));
+    // First LayerRequirement is the layer's category specification
+    EXPECT_EQ(LayerHistory::LayerVoteType::ExplicitCategory, summarizeLayerHistory(time)[0].vote);
+    EXPECT_EQ(0_Hz, summarizeLayerHistory(time)[0].desiredRefreshRate);
+    EXPECT_EQ(FrameRateCategory::NoPreference, summarizeLayerHistory(time)[0].frameRateCategory);
+
+    // Second LayerRequirement is the frame rate specification
+    EXPECT_EQ(LayerHistory::LayerVoteType::ExplicitExactOrMultiple,
+              summarizeLayerHistory(time)[1].vote);
+    EXPECT_EQ(45.6_Hz, summarizeLayerHistory(time)[1].desiredRefreshRate);
+    EXPECT_EQ(FrameRateCategory::Default, summarizeLayerHistory(time)[1].frameRateCategory);
+
+    // layer became infrequent, but the vote stays
+    time += MAX_ACTIVE_LAYER_PERIOD_NS.count();
+    ASSERT_EQ(2u, summarizeLayerHistory(time).size());
+    EXPECT_EQ(1u, activeLayerCount());
+    EXPECT_EQ(0, frequentLayerCount(time));
+    EXPECT_EQ(LayerHistory::LayerVoteType::ExplicitCategory, summarizeLayerHistory(time)[0].vote);
+    EXPECT_EQ(0_Hz, summarizeLayerHistory(time)[0].desiredRefreshRate);
+    EXPECT_EQ(FrameRateCategory::NoPreference, summarizeLayerHistory(time)[0].frameRateCategory);
 }
 
 TEST_F(LayerHistoryIntegrationTest, multipleLayers) {
@@ -805,7 +1447,15 @@ TEST_F(LayerHistoryIntegrationTest, smallDirtyLayer) {
 
     // layer is active but infrequent.
     for (size_t i = 0; i < PRESENT_TIME_HISTORY_SIZE; i++) {
-        auto props = layer->getLayerProps();
+        scheduler::LayerProps props = {
+                .visible = false,
+                .bounds = {0, 0, 100, 100},
+                .transform = {},
+                .setFrameRateVote = {},
+                .frameRateSelectionPriority = Layer::PRIORITY_UNSET,
+                .isSmallDirty = false,
+                .isFrontBuffered = false,
+        };
         if (i % 3 == 0) {
             props.isSmallDirty = false;
         } else {
@@ -838,8 +1488,15 @@ TEST_F(LayerHistoryIntegrationTest, DISABLED_smallDirtyInMultiLayer) {
 
     // uiLayer is updating small dirty.
     for (size_t i = 0; i < PRESENT_TIME_HISTORY_SIZE + FREQUENT_LAYER_WINDOW_SIZE + 1; i++) {
-        auto props = uiLayer->getLayerProps();
-        props.isSmallDirty = true;
+        scheduler::LayerProps props = {
+                .visible = false,
+                .bounds = {0, 0, 100, 100},
+                .transform = {},
+                .setFrameRateVote = {},
+                .frameRateSelectionPriority = Layer::PRIORITY_UNSET,
+                .isSmallDirty = true,
+                .isFrontBuffered = false,
+        };
         setBuffer(1);
         uiLayer->setDesiredPresentTime(0, false /*autotimestamp*/);
         updateLayerSnapshotsAndLayerHistory(time);

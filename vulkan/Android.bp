@@ -26,6 +26,8 @@ package {
 
 cc_library_headers {
     name: "hwvulkan_headers",
+    host_supported: true, // Used for verification in Berberis.
+    native_bridge_supported: true, // Used for verification in Berberis.
     vendor_available: true,
     header_libs: [
         "libcutils_headers",

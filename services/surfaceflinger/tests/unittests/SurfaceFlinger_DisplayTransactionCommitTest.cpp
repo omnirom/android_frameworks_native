@@ -265,6 +265,13 @@ TEST_F(DisplayTransactionCommitTest, processesHotplugConnectExternalDisplay) {
     processesHotplugConnectCommon<SimpleExternalDisplayCase>();
 }
 
+TEST_F(DisplayTransactionCommitTest, processesHotplugConnectNonSecureExternalDisplay) {
+    // Inject a primary display.
+    PrimaryDisplayVariant::injectHwcDisplay(this);
+
+    processesHotplugConnectCommon<SimpleExternalDisplayNonSecureCase>();
+}
+
 TEST_F(DisplayTransactionCommitTest, ignoresHotplugConnectIfPrimaryAndExternalAlreadyConnected) {
     // Inject both a primary and external display.
     PrimaryDisplayVariant::injectHwcDisplay(this);
@@ -273,11 +280,27 @@ TEST_F(DisplayTransactionCommitTest, ignoresHotplugConnectIfPrimaryAndExternalAl
     // TODO: This is an unnecessary call.
     EXPECT_CALL(*mComposer,
                 getDisplayIdentificationData(TertiaryDisplayVariant::HWC_DISPLAY_ID, _, _))
-            .WillOnce(DoAll(SetArgPointee<1>(TertiaryDisplay::PORT),
-                            SetArgPointee<2>(TertiaryDisplay::GET_IDENTIFICATION_DATA()),
+            .WillOnce(DoAll(SetArgPointee<1>(TertiaryDisplay<kSecure>::PORT),
+                            SetArgPointee<2>(TertiaryDisplay<kSecure>::GET_IDENTIFICATION_DATA()),
                             Return(Error::NONE)));
 
     ignoresHotplugConnectCommon<SimpleTertiaryDisplayCase>();
+}
+
+TEST_F(DisplayTransactionCommitTest,
+       ignoresHotplugConnectNonSecureIfPrimaryAndExternalAlreadyConnected) {
+    // Inject both a primary and external display.
+    PrimaryDisplayVariant::injectHwcDisplay(this);
+    ExternalDisplayVariant::injectHwcDisplay(this);
+
+    // TODO: This is an unnecessary call.
+    EXPECT_CALL(*mComposer,
+                getDisplayIdentificationData(TertiaryDisplayVariant::HWC_DISPLAY_ID, _, _))
+            .WillOnce(DoAll(SetArgPointee<1>(TertiaryDisplay<kSecure>::PORT),
+                            SetArgPointee<2>(TertiaryDisplay<kSecure>::GET_IDENTIFICATION_DATA()),
+                            Return(Error::NONE)));
+
+    ignoresHotplugConnectCommon<SimpleTertiaryDisplayNonSecureCase>();
 }
 
 TEST_F(DisplayTransactionCommitTest, processesHotplugDisconnectPrimaryDisplay) {
@@ -287,6 +310,10 @@ TEST_F(DisplayTransactionCommitTest, processesHotplugDisconnectPrimaryDisplay) {
 
 TEST_F(DisplayTransactionCommitTest, processesHotplugDisconnectExternalDisplay) {
     processesHotplugDisconnectCommon<SimpleExternalDisplayCase>();
+}
+
+TEST_F(DisplayTransactionCommitTest, processesHotplugDisconnectNonSecureExternalDisplay) {
+    processesHotplugDisconnectCommon<SimpleExternalDisplayNonSecureCase>();
 }
 
 TEST_F(DisplayTransactionCommitTest, processesHotplugConnectThenDisconnectPrimary) {

@@ -139,13 +139,11 @@ void MultiTouchMotionAccumulator::populateCurrentSlot(
     if (!mUsingSlotsProtocol) {
         return;
     }
-    int32_t initialSlot;
-    if (const auto status = deviceContext.getAbsoluteAxisValue(ABS_MT_SLOT, &initialSlot);
-        status == OK) {
-        mCurrentSlot = initialSlot;
+    if (const std::optional<int32_t> initialSlot = deviceContext.getAbsoluteAxisValue(ABS_MT_SLOT);
+        initialSlot.has_value()) {
+        mCurrentSlot = initialSlot.value();
     } else {
-        ALOGE("Could not retrieve current multi-touch slot index. status=%s",
-              statusToString(status).c_str());
+        ALOGE("Could not retrieve current multi-touch slot index");
     }
 }
 

@@ -498,9 +498,7 @@ constexpr uint32_t GRALLOC_USAGE_PHYSICAL_DISPLAY =
 constexpr int PHYSICAL_DISPLAY_FLAGS = 0x1;
 
 template <typename PhysicalDisplay, int width, int height,
-          Secure secure = (PhysicalDisplay::CONNECTION_TYPE == ui::DisplayConnectionType::Internal)
-                  ? Secure::TRUE
-                  : Secure::FALSE>
+          Secure secure = (PhysicalDisplay::SECURE) ? Secure::TRUE : Secure::FALSE>
 struct PhysicalDisplayVariant
       : DisplayVariant<PhysicalDisplayIdType<PhysicalDisplay>, width, height, Async::FALSE, secure,
                        PhysicalDisplay::PRIMARY, GRALLOC_USAGE_PHYSICAL_DISPLAY,
@@ -515,16 +513,18 @@ template <bool hasIdentificationData>
 struct PrimaryDisplay {
     static constexpr auto CONNECTION_TYPE = ui::DisplayConnectionType::Internal;
     static constexpr Primary PRIMARY = Primary::TRUE;
+    static constexpr bool SECURE = true;
     static constexpr uint8_t PORT = 255;
     static constexpr HWDisplayId HWC_DISPLAY_ID = 1001;
     static constexpr bool HAS_IDENTIFICATION_DATA = hasIdentificationData;
     static constexpr auto GET_IDENTIFICATION_DATA = getInternalEdid;
 };
 
-template <ui::DisplayConnectionType connectionType, bool hasIdentificationData>
+template <ui::DisplayConnectionType connectionType, bool hasIdentificationData, bool secure>
 struct SecondaryDisplay {
     static constexpr auto CONNECTION_TYPE = connectionType;
     static constexpr Primary PRIMARY = Primary::FALSE;
+    static constexpr bool SECURE = secure;
     static constexpr uint8_t PORT = 254;
     static constexpr HWDisplayId HWC_DISPLAY_ID = 1002;
     static constexpr bool HAS_IDENTIFICATION_DATA = hasIdentificationData;
@@ -533,9 +533,14 @@ struct SecondaryDisplay {
                                                                   : getExternalEdid;
 };
 
+constexpr bool kSecure = true;
+constexpr bool kNonSecure = false;
+
+template <bool secure>
 struct TertiaryDisplay {
     static constexpr auto CONNECTION_TYPE = ui::DisplayConnectionType::External;
     static constexpr Primary PRIMARY = Primary::FALSE;
+    static constexpr bool SECURE = secure;
     static constexpr uint8_t PORT = 253;
     static constexpr HWDisplayId HWC_DISPLAY_ID = 1003;
     static constexpr auto GET_IDENTIFICATION_DATA = getExternalEdid;
@@ -545,14 +550,26 @@ using PrimaryDisplayVariant = PhysicalDisplayVariant<PrimaryDisplay<false>, 3840
 
 using InnerDisplayVariant = PhysicalDisplayVariant<PrimaryDisplay<true>, 1840, 2208>;
 using OuterDisplayVariant =
-        PhysicalDisplayVariant<SecondaryDisplay<ui::DisplayConnectionType::Internal, true>, 1080,
-                               2092>;
+        PhysicalDisplayVariant<SecondaryDisplay<ui::DisplayConnectionType::Internal,
+                                                /*hasIdentificationData=*/true, kSecure>,
+                               1080, 2092>;
+using OuterDisplayNonSecureVariant =
+        PhysicalDisplayVariant<SecondaryDisplay<ui::DisplayConnectionType::Internal,
+                                                /*hasIdentificationData=*/true, kNonSecure>,
+                               1080, 2092>;
 
 using ExternalDisplayVariant =
-        PhysicalDisplayVariant<SecondaryDisplay<ui::DisplayConnectionType::External, false>, 1920,
-                               1280>;
+        PhysicalDisplayVariant<SecondaryDisplay<ui::DisplayConnectionType::External,
+                                                /*hasIdentificationData=*/false, kSecure>,
+                               1920, 1280>;
+using ExternalDisplayNonSecureVariant =
+        PhysicalDisplayVariant<SecondaryDisplay<ui::DisplayConnectionType::External,
+                                                /*hasIdentificationData=*/false, kNonSecure>,
+                               1920, 1280>;
 
-using TertiaryDisplayVariant = PhysicalDisplayVariant<TertiaryDisplay, 1600, 1200>;
+using TertiaryDisplayVariant = PhysicalDisplayVariant<TertiaryDisplay<kSecure>, 1600, 1200>;
+using TertiaryDisplayNonSecureVariant =
+        PhysicalDisplayVariant<TertiaryDisplay<kNonSecure>, 1600, 1200>;
 
 // A virtual display not supported by the HWC.
 constexpr uint32_t GRALLOC_USAGE_NONHWC_VIRTUAL_DISPLAY = 0;
@@ -750,10 +767,18 @@ using SimpleExternalDisplayCase =
         Case<ExternalDisplayVariant, WideColorNotSupportedVariant<ExternalDisplayVariant>,
              HdrNotSupportedVariant<ExternalDisplayVariant>,
              NoPerFrameMetadataSupportVariant<ExternalDisplayVariant>>;
+using SimpleExternalDisplayNonSecureCase =
+        Case<ExternalDisplayVariant, WideColorNotSupportedVariant<ExternalDisplayNonSecureVariant>,
+             HdrNotSupportedVariant<ExternalDisplayNonSecureVariant>,
+             NoPerFrameMetadataSupportVariant<ExternalDisplayNonSecureVariant>>;
 using SimpleTertiaryDisplayCase =
         Case<TertiaryDisplayVariant, WideColorNotSupportedVariant<TertiaryDisplayVariant>,
              HdrNotSupportedVariant<TertiaryDisplayVariant>,
              NoPerFrameMetadataSupportVariant<TertiaryDisplayVariant>>;
+using SimpleTertiaryDisplayNonSecureCase =
+        Case<TertiaryDisplayVariant, WideColorNotSupportedVariant<TertiaryDisplayNonSecureVariant>,
+             HdrNotSupportedVariant<TertiaryDisplayNonSecureVariant>,
+             NoPerFrameMetadataSupportVariant<TertiaryDisplayNonSecureVariant>>;
 
 using NonHwcVirtualDisplayCase =
         Case<NonHwcVirtualDisplayVariant<1024, 768, Secure::FALSE>,

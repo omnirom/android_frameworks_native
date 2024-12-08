@@ -22,7 +22,9 @@
 #include "Display/DisplaySnapshot.h"
 #include "DisplayHardware/HWComposer.h"
 
+#include <android-base/properties.h>
 #include <common/FlagManager.h>
+#include <common/trace.h>
 #include <ftl/concat.h>
 #include <ftl/expected.h>
 #include <log/log.h>
@@ -83,7 +85,7 @@ auto DisplayModeController::setDesiredMode(PhysicalDisplayId displayId,
             FTL_EXPECT(mDisplays.get(displayId).ok_or(DesiredModeAction::None)).get();
 
     {
-        ATRACE_NAME(displayPtr->concatId(__func__).c_str());
+        SFTRACE_NAME(displayPtr->concatId(__func__).c_str());
         ALOGD("%s %s", displayPtr->concatId(__func__).c_str(), to_string(desiredMode).c_str());
 
         std::scoped_lock lock(displayPtr->desiredModeLock);
@@ -204,7 +206,7 @@ bool DisplayModeController::initiateModeChange(PhysicalDisplayId displayId,
         return false;
     }
 
-    ATRACE_INT(displayPtr->pendingModeFpsTrace.c_str(), mode.getVsyncRate().getIntValue());
+    SFTRACE_INT(displayPtr->pendingModeFpsTrace.c_str(), mode.getVsyncRate().getIntValue());
     return true;
 }
 
@@ -227,14 +229,73 @@ void DisplayModeController::setActiveModeLocked(PhysicalDisplayId displayId, Dis
                                                 Fps vsyncRate, Fps renderFps) {
     const auto& displayPtr = FTL_TRY(mDisplays.get(displayId).ok_or(ftl::Unit())).get();
 
-    ATRACE_INT(displayPtr->activeModeFpsTrace.c_str(), vsyncRate.getIntValue());
-    ATRACE_INT(displayPtr->renderRateFpsTrace.c_str(), renderFps.getIntValue());
+    SFTRACE_INT(displayPtr->activeModeFpsTrace.c_str(), vsyncRate.getIntValue());
+    SFTRACE_INT(displayPtr->renderRateFpsTrace.c_str(), renderFps.getIntValue());
 
     displayPtr->selectorPtr->setActiveMode(modeId, renderFps);
 
     if (mActiveModeListener) {
         mActiveModeListener(displayId, vsyncRate, renderFps);
     }
+}
+
+void DisplayModeController::updateKernelIdleTimer(PhysicalDisplayId displayId) {
+    std::lock_guard lock(mDisplayLock);
+    const auto& displayPtr = FTL_TRY(mDisplays.get(displayId).ok_or(ftl::Unit())).get();
+
+    const auto controllerOpt = displayPtr->selectorPtr->kernelIdleTimerController();
+    if (!controllerOpt) return;
+
+    using KernelIdleTimerAction = scheduler::RefreshRateSelector::KernelIdleTimerAction;
+
+    switch (displayPtr->selectorPtr->getIdleTimerAction()) {
+        case KernelIdleTimerAction::TurnOff:
+            if (displayPtr->isKernelIdleTimerEnabled) {
+                SFTRACE_INT("KernelIdleTimer", 0);
+                updateKernelIdleTimer(displayId, std::chrono::milliseconds::zero(), *controllerOpt);
+                displayPtr->isKernelIdleTimerEnabled = false;
+            }
+            break;
+        case KernelIdleTimerAction::TurnOn:
+            if (!displayPtr->isKernelIdleTimerEnabled) {
+                SFTRACE_INT("KernelIdleTimer", 1);
+                const auto timeout = displayPtr->selectorPtr->getIdleTimerTimeout();
+                updateKernelIdleTimer(displayId, timeout, *controllerOpt);
+                displayPtr->isKernelIdleTimerEnabled = true;
+            }
+            break;
+    }
+}
+
+void DisplayModeController::updateKernelIdleTimer(PhysicalDisplayId displayId,
+                                                  std::chrono::milliseconds timeout,
+                                                  KernelIdleTimerController controller) {
+    switch (controller) {
+        case KernelIdleTimerController::HwcApi:
+            mComposerPtr->setIdleTimerEnabled(displayId, timeout);
+            break;
+
+        case KernelIdleTimerController::Sysprop:
+            using namespace std::string_literals;
+            base::SetProperty("graphics.display.kernel_idle_timer.enabled"s,
+                              timeout > std::chrono::milliseconds::zero() ? "true"s : "false"s);
+            break;
+    }
+}
+
+auto DisplayModeController::getKernelIdleTimerState(PhysicalDisplayId displayId) const
+        -> KernelIdleTimerState {
+    std::lock_guard lock(mDisplayLock);
+    const auto& displayPtr =
+            FTL_EXPECT(mDisplays.get(displayId).ok_or(KernelIdleTimerState())).get();
+
+    const auto desiredModeIdOpt =
+            (std::scoped_lock(displayPtr->desiredModeLock), displayPtr->desiredModeOpt)
+                    .transform([](const display::DisplayModeRequest& request) {
+                        return request.mode.modePtr->getId();
+                    });
+
+    return {desiredModeIdOpt, displayPtr->isKernelIdleTimerEnabled};
 }
 
 } // namespace android::display

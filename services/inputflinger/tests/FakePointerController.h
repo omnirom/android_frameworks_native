@@ -65,7 +65,6 @@ public:
 
 private:
     std::string dump() override { return ""; }
-    std::optional<FloatRect> getBounds() const override;
     void move(float deltaX, float deltaY) override;
     void unfade(Transition) override;
     void setPresentation(Presentation) override {}

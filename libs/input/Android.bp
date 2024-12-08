@@ -30,6 +30,7 @@ filegroup {
         "android/os/InputEventInjectionResult.aidl",
         "android/os/InputEventInjectionSync.aidl",
         "android/os/InputConfig.aidl",
+        "android/os/MotionEventFlag.aidl",
         "android/os/PointerIconType.aidl",
     ],
 }
@@ -231,6 +232,7 @@ cc_library {
         "MotionPredictorMetricsManager.cpp",
         "PrintTools.cpp",
         "PropertyMap.cpp",
+        "Resampler.cpp",
         "TfLiteMotionPredictor.cpp",
         "TouchVideoFrame.cpp",
         "VelocityControl.cpp",
@@ -257,6 +259,7 @@ cc_library {
     ],
 
     shared_libs: [
+        "android.companion.virtualdevice.flags-aconfig-cc",
         "libbase",
         "libbinder",
         "libbinder_ndk",

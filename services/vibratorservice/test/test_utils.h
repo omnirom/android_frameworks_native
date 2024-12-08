@@ -17,7 +17,7 @@
 #ifndef VIBRATORSERVICE_UNITTEST_UTIL_H_
 #define VIBRATORSERVICE_UNITTEST_UTIL_H_
 
-#include <android/hardware/vibrator/IVibrator.h>
+#include <aidl/android/hardware/vibrator/IVibrator.h>
 
 #include <vibratorservice/VibratorHalWrapper.h>
 
@@ -25,24 +25,12 @@ namespace android {
 
 namespace vibrator {
 
-using ::android::hardware::vibrator::ActivePwle;
-using ::android::hardware::vibrator::Braking;
-using ::android::hardware::vibrator::BrakingPwle;
-using ::android::hardware::vibrator::CompositeEffect;
-using ::android::hardware::vibrator::CompositePrimitive;
-using ::android::hardware::vibrator::PrimitivePwle;
-
-// -------------------------------------------------------------------------------------------------
-
-class MockCallbackScheduler : public vibrator::CallbackScheduler {
-public:
-    MOCK_METHOD(void, schedule, (std::function<void()> callback, std::chrono::milliseconds delay),
-                (override));
-};
-
-ACTION(TriggerSchedulerCallback) {
-    arg0();
-}
+using aidl::android::hardware::vibrator::ActivePwle;
+using aidl::android::hardware::vibrator::Braking;
+using aidl::android::hardware::vibrator::BrakingPwle;
+using aidl::android::hardware::vibrator::CompositeEffect;
+using aidl::android::hardware::vibrator::CompositePrimitive;
+using aidl::android::hardware::vibrator::PrimitivePwle;
 
 // -------------------------------------------------------------------------------------------------
 

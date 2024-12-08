@@ -1040,25 +1040,30 @@ static int validate_path(const std::string& dir, const std::string& path, int ma
         LOG(ERROR) << "Invalid directory " << dir;
         return -1;
     }
-    if (path.find("..") != std::string::npos) {
-        LOG(ERROR) << "Invalid path " << path;
-        return -1;
-    }
 
     if (path.compare(0, dir.size(), dir) != 0) {
         // Common case, path isn't under directory
         return -1;
     }
 
-    // Count number of subdirectories
-    auto pos = path.find('/', dir.size());
+    // Count number of subdirectories and invalidate ".." subdirectories
+    auto last = dir.size();
+    auto pos = path.find('/', last);
     int count = 0;
     while (pos != std::string::npos) {
-        auto next = path.find('/', pos + 1);
-        if (next > pos + 1) {
+        if (pos > last + 1) {
             count++;
         }
-        pos = next;
+        if (path.substr(last, pos - last) == "..") {
+            LOG(ERROR) << "Invalid path " << path;
+            return -1;
+        }
+        last = pos + 1;
+        pos = path.find('/', last);
+    }
+    if (path.substr(last, path.size() - last) == "..") {
+        LOG(ERROR) << "Invalid path " << path;
+        return -1;
     }
 
     if (count > maxSubdirs) {

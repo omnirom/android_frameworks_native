@@ -92,15 +92,15 @@ public:
     }
 
 private:
-    std::vector<const LayerState> copyLayers(const std::vector<const LayerState*>& layers) {
-        std::vector<const LayerState> copiedLayers;
+    std::vector<LayerState> copyLayers(const std::vector<const LayerState*>& layers) {
+        std::vector<LayerState> copiedLayers;
         copiedLayers.reserve(layers.size());
         std::transform(layers.cbegin(), layers.cend(), std::back_inserter(copiedLayers),
                        [](const LayerState* layerState) { return *layerState; });
         return copiedLayers;
     }
 
-    std::vector<const LayerState> mLayers;
+    std::vector<LayerState> mLayers;
 
     // TODO(b/180976743): Tune kMaxDifferingFields
     constexpr static int kMaxDifferingFields = 6;

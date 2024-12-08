@@ -48,9 +48,6 @@ static void dumpEvents(const std::vector<RawEvent>& events) {
                 case EventHubInterface::DEVICE_REMOVED:
                     ALOGI("Device removed: %i", event.deviceId);
                     break;
-                case EventHubInterface::FINISHED_DEVICE_SCAN:
-                    ALOGI("Finished device scan.");
-                    break;
             }
         } else {
             ALOGI("Device %" PRId32 " : time = %" PRId64 ", type %i, code %i, value %i",
@@ -145,15 +142,13 @@ void EventHubTest::consumeInitialDeviceAddedEvents() {
     // None of the existing system devices should be changing while this test is run.
     // Check that the returned device ids are unique for all of the existing devices.
     EXPECT_EQ(existingDevices.size(), events.size() - 1);
-    // The last event should be "finished device scan"
-    EXPECT_EQ(EventHubInterface::FINISHED_DEVICE_SCAN, events[events.size() - 1].type);
 }
 
 int32_t EventHubTest::waitForDeviceCreation() {
     // Wait a little longer than usual, to ensure input device has time to be created
     std::vector<RawEvent> events = getEvents(2);
-    if (events.size() != 2) {
-        ADD_FAILURE() << "Instead of 2 events, received " << events.size();
+    if (events.size() != 1) {
+        ADD_FAILURE() << "Instead of 1 event, received " << events.size();
         return 0; // this value is unused
     }
     const RawEvent& deviceAddedEvent = events[0];
@@ -161,21 +156,15 @@ int32_t EventHubTest::waitForDeviceCreation() {
     InputDeviceIdentifier identifier = mEventHub->getDeviceIdentifier(deviceAddedEvent.deviceId);
     const int32_t deviceId = deviceAddedEvent.deviceId;
     EXPECT_EQ(identifier.name, mKeyboard->getName());
-    const RawEvent& finishedDeviceScanEvent = events[1];
-    EXPECT_EQ(static_cast<int32_t>(EventHubInterface::FINISHED_DEVICE_SCAN),
-              finishedDeviceScanEvent.type);
     return deviceId;
 }
 
 void EventHubTest::waitForDeviceClose(int32_t deviceId) {
     std::vector<RawEvent> events = getEvents(2);
-    ASSERT_EQ(2U, events.size());
+    ASSERT_EQ(1U, events.size());
     const RawEvent& deviceRemovedEvent = events[0];
     EXPECT_EQ(static_cast<int32_t>(EventHubInterface::DEVICE_REMOVED), deviceRemovedEvent.type);
     EXPECT_EQ(deviceId, deviceRemovedEvent.deviceId);
-    const RawEvent& finishedDeviceScanEvent = events[1];
-    EXPECT_EQ(static_cast<int32_t>(EventHubInterface::FINISHED_DEVICE_SCAN),
-              finishedDeviceScanEvent.type);
 }
 
 void EventHubTest::assertNoMoreEvents() {

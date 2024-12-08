@@ -24,6 +24,7 @@
 
 #define ATRACE_TAG ATRACE_TAG_GRAPHICS
 
+#include <common/trace.h>
 #include <compositionengine/CompositionEngine.h>
 #include <compositionengine/Display.h>
 #include <compositionengine/DisplayColorProfile.h>
@@ -198,19 +199,6 @@ hal::PowerMode DisplayDevice::getPowerMode() const {
 
 bool DisplayDevice::isPoweredOn() const {
     return mPowerMode != hal::PowerMode::OFF;
-}
-
-nsecs_t DisplayDevice::getVsyncPeriodFromHWC() const {
-    const auto physicalId = getPhysicalId();
-    if (!mHwComposer.isConnected(physicalId)) {
-        return 0;
-    }
-
-    if (const auto vsyncPeriodOpt = mHwComposer.getDisplayVsyncPeriod(physicalId).value_opt()) {
-        return *vsyncPeriodOpt;
-    }
-
-    return refreshRateSelector().getActiveMode().modePtr->getVsyncRate().getPeriodNsecs();
 }
 
 ui::Dataspace DisplayDevice::getCompositionDataSpace() const {
@@ -398,7 +386,7 @@ void DisplayDevice::enableHdrSdrRatioOverlay(bool enable) {
 }
 
 void DisplayDevice::updateHdrSdrRatioOverlayRatio(float currentHdrSdrRatio) {
-    ATRACE_CALL();
+    SFTRACE_CALL();
     mHdrSdrRatio = currentHdrSdrRatio;
     if (mHdrSdrRatioOverlay) {
         mHdrSdrRatioOverlay->changeHdrSdrRatio(currentHdrSdrRatio);
@@ -440,7 +428,7 @@ void DisplayDevice::enableRefreshRateOverlay(bool enable, bool setByHwc, Fps ref
 }
 
 void DisplayDevice::updateRefreshRateOverlayRate(Fps refreshRate, Fps renderFps, bool setByHwc) {
-    ATRACE_CALL();
+    SFTRACE_CALL();
     if (mRefreshRateOverlay) {
         if (!mRefreshRateOverlay->isSetByHwc() || setByHwc) {
             if (mRefreshRateSelector->isVrrDevice() && !mRefreshRateOverlay->isSetByHwc()) {

@@ -1262,6 +1262,91 @@ TEST_F(BufferQueueTest, TestConsumerDetachProducerListener) {
     ASSERT_TRUE(result == WOULD_BLOCK || result == TIMED_OUT || result == INVALID_OPERATION);
 }
 
+#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(BQ_CONSUMER_ATTACH_CALLBACK)
+struct BufferAttachedListener : public BnProducerListener {
+public:
+    BufferAttachedListener(bool enable) : mEnabled(enable), mAttached(0) {}
+    virtual ~BufferAttachedListener() = default;
+
+    virtual void onBufferReleased() {}
+    virtual bool needsReleaseNotify() { return true; }
+    virtual void onBufferAttached() {
+        ++mAttached;
+    }
+    virtual bool needsAttachNotify() { return mEnabled; }
+
+    int getNumAttached() const { return mAttached; }
+private:
+    const bool mEnabled;
+    int mAttached;
+};
+
+TEST_F(BufferQueueTest, TestConsumerAttachProducerListener) {
+    createBufferQueue();
+    sp<MockConsumer> mc1(new MockConsumer);
+    ASSERT_EQ(OK, mConsumer->consumerConnect(mc1, true));
+    IGraphicBufferProducer::QueueBufferOutput output;
+    // Do not enable attach callback.
+    sp<BufferAttachedListener> pl1(new BufferAttachedListener(false));
+    ASSERT_EQ(OK, mProducer->connect(pl1, NATIVE_WINDOW_API_CPU, true, &output));
+    ASSERT_EQ(OK, mProducer->setDequeueTimeout(0));
+    ASSERT_EQ(OK, mConsumer->setMaxAcquiredBufferCount(1));
+
+    sp<Fence> fence = Fence::NO_FENCE;
+    sp<GraphicBuffer> buffer = nullptr;
+
+    int slot;
+    status_t result = OK;
+
+    ASSERT_EQ(OK, mProducer->setMaxDequeuedBufferCount(1));
+
+    result = mProducer->dequeueBuffer(&slot, &fence, 0, 0, 0,
+                                      GRALLOC_USAGE_SW_READ_RARELY, nullptr, nullptr);
+    ASSERT_EQ(IGraphicBufferProducer::BUFFER_NEEDS_REALLOCATION, result);
+    ASSERT_EQ(OK, mProducer->requestBuffer(slot, &buffer));
+    ASSERT_EQ(OK, mProducer->detachBuffer(slot));
+
+    // Check # of attach is zero.
+    ASSERT_EQ(0, pl1->getNumAttached());
+
+    // Attach a buffer and check the callback was not called.
+    ASSERT_EQ(OK, mConsumer->attachBuffer(&slot, buffer));
+    ASSERT_EQ(0, pl1->getNumAttached());
+
+    mProducer = nullptr;
+    mConsumer = nullptr;
+    createBufferQueue();
+
+    sp<MockConsumer> mc2(new MockConsumer);
+    ASSERT_EQ(OK, mConsumer->consumerConnect(mc2, true));
+    // Enable attach callback.
+    sp<BufferAttachedListener> pl2(new BufferAttachedListener(true));
+    ASSERT_EQ(OK, mProducer->connect(pl2, NATIVE_WINDOW_API_CPU, true, &output));
+    ASSERT_EQ(OK, mProducer->setDequeueTimeout(0));
+    ASSERT_EQ(OK, mConsumer->setMaxAcquiredBufferCount(1));
+
+    fence = Fence::NO_FENCE;
+    buffer = nullptr;
+
+    result = OK;
+
+    ASSERT_EQ(OK, mProducer->setMaxDequeuedBufferCount(1));
+
+    result = mProducer->dequeueBuffer(&slot, &fence, 0, 0, 0,
+                                      GRALLOC_USAGE_SW_READ_RARELY, nullptr, nullptr);
+    ASSERT_EQ(IGraphicBufferProducer::BUFFER_NEEDS_REALLOCATION, result);
+    ASSERT_EQ(OK, mProducer->requestBuffer(slot, &buffer));
+    ASSERT_EQ(OK, mProducer->detachBuffer(slot));
+
+    // Check # of attach is zero.
+    ASSERT_EQ(0, pl2->getNumAttached());
+
+    // Attach a buffer and check the callback was called.
+    ASSERT_EQ(OK, mConsumer->attachBuffer(&slot, buffer));
+    ASSERT_EQ(1, pl2->getNumAttached());
+}
+#endif
+
 TEST_F(BufferQueueTest, TestStaleBufferHandleSentAfterDisconnect) {
     createBufferQueue();
     sp<MockConsumer> mc(new MockConsumer);
@@ -1345,19 +1430,15 @@ TEST_F(BufferQueueTest, TestBqSetFrameRateFlagBuildTimeIsSet) {
 }
 
 struct BufferItemConsumerSetFrameRateListener : public BufferItemConsumer {
-    BufferItemConsumerSetFrameRateListener(const sp<IGraphicBufferConsumer>& consumer)
-          : BufferItemConsumer(consumer, GRALLOC_USAGE_SW_READ_OFTEN, 1) {}
+    BufferItemConsumerSetFrameRateListener() : BufferItemConsumer(GRALLOC_USAGE_SW_READ_OFTEN, 1) {}
 
     MOCK_METHOD(void, onSetFrameRate, (float, int8_t, int8_t), (override));
 };
 
 TEST_F(BufferQueueTest, TestSetFrameRate) {
-    sp<IGraphicBufferProducer> producer;
-    sp<IGraphicBufferConsumer> consumer;
-    BufferQueue::createBufferQueue(&producer, &consumer);
-
     sp<BufferItemConsumerSetFrameRateListener> bufferConsumer =
-            sp<BufferItemConsumerSetFrameRateListener>::make(consumer);
+            sp<BufferItemConsumerSetFrameRateListener>::make();
+    sp<IGraphicBufferProducer> producer = bufferConsumer->getSurface()->getIGraphicBufferProducer();
 
     EXPECT_CALL(*bufferConsumer, onSetFrameRate(12.34f, 1, 0)).Times(1);
     producer->setFrameRate(12.34f, 1, 0);
@@ -1408,14 +1489,10 @@ struct OneshotOnDequeuedListener final : public BufferItemConsumer::FrameAvailab
 
 // See b/270004534
 TEST(BufferQueueThreading, TestProducerDequeueConsumerDestroy) {
-    sp<IGraphicBufferProducer> producer;
-    sp<IGraphicBufferConsumer> consumer;
-    BufferQueue::createBufferQueue(&producer, &consumer);
-
     sp<BufferItemConsumer> bufferConsumer =
-            sp<BufferItemConsumer>::make(consumer, GRALLOC_USAGE_SW_READ_OFTEN, 2);
+            sp<BufferItemConsumer>::make(GRALLOC_USAGE_SW_READ_OFTEN, 2);
     ASSERT_NE(nullptr, bufferConsumer.get());
-    sp<Surface> surface = sp<Surface>::make(producer);
+    sp<Surface> surface = bufferConsumer->getSurface();
     native_window_set_buffers_format(surface.get(), PIXEL_FORMAT_RGBA_8888);
     native_window_set_buffers_dimensions(surface.get(), 100, 100);
 
@@ -1446,14 +1523,10 @@ TEST(BufferQueueThreading, TestProducerDequeueConsumerDestroy) {
 }
 
 TEST_F(BufferQueueTest, TestAdditionalOptions) {
-    sp<IGraphicBufferProducer> producer;
-    sp<IGraphicBufferConsumer> consumer;
-    BufferQueue::createBufferQueue(&producer, &consumer);
-
     sp<BufferItemConsumer> bufferConsumer =
-            sp<BufferItemConsumer>::make(consumer, GRALLOC_USAGE_SW_READ_OFTEN, 2);
+            sp<BufferItemConsumer>::make(GRALLOC_USAGE_SW_READ_OFTEN, 2);
     ASSERT_NE(nullptr, bufferConsumer.get());
-    sp<Surface> surface = sp<Surface>::make(producer);
+    sp<Surface> surface = bufferConsumer->getSurface();
     native_window_set_buffers_format(surface.get(), PIXEL_FORMAT_RGBA_8888);
     native_window_set_buffers_dimensions(surface.get(), 100, 100);
 

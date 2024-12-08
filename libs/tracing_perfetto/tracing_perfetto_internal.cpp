@@ -44,13 +44,13 @@
   C(rro, "rro", "RRO category")                                  \
   C(thermal, "thermal", "Thermal category")
 
-#include "tracing_perfetto_internal.h"
-
-#include <inttypes.h>
-
+#include <atomic>
 #include <mutex>
 
 #include <android_os.h>
+#include <android-base/properties.h>
+#include <cutils/trace.h>
+#include <inttypes.h>
 
 #include "perfetto/public/compiler.h"
 #include "perfetto/public/producer.h"
@@ -58,19 +58,42 @@
 #include "perfetto/public/te_macros.h"
 #include "perfetto/public/track_event.h"
 #include "trace_categories.h"
-#include "trace_result.h"
+#include "tracing_perfetto_internal.h"
+
+#ifdef __BIONIC__
+#define _REALLY_INCLUDE_SYS__SYSTEM_PROPERTIES_H_
+#include <sys/_system_properties.h>
+#endif
 
 namespace tracing_perfetto {
 
 namespace internal {
 
 namespace {
-
 PERFETTO_TE_CATEGORIES_DECLARE(FRAMEWORK_CATEGORIES);
 
 PERFETTO_TE_CATEGORIES_DEFINE(FRAMEWORK_CATEGORIES);
 
-std::atomic_bool is_perfetto_registered = false;
+static constexpr char kPreferFlagProperty[] = "debug.atrace.prefer_sdk";
+static std::atomic<const prop_info*> prefer_property_info = nullptr;
+static std::atomic_uint32_t last_prefer_seq_num = 0;
+static std::atomic_uint64_t prefer_flags = 0;
+
+static const prop_info* system_property_find(const char* name [[maybe_unused]]) {
+  #ifdef __BIONIC__
+  return __system_property_find(name);
+  #endif
+
+  return nullptr;
+}
+
+static uint32_t system_property_serial(const prop_info* pi [[maybe_unused]]) {
+  #ifdef __BIONIC__
+  return __system_property_serial(pi);
+  #endif
+
+  return last_prefer_seq_num;
+}
 
 struct PerfettoTeCategory* toCategory(uint64_t inCategory) {
   switch (inCategory) {
@@ -137,8 +160,60 @@ struct PerfettoTeCategory* toCategory(uint64_t inCategory) {
 
 }  // namespace
 
-bool isPerfettoRegistered() {
-  return is_perfetto_registered;
+bool isPerfettoCategoryEnabled(PerfettoTeCategory* category) {
+  return category != nullptr;
+}
+
+/**
+ * Updates the cached |prefer_flags|.
+ *
+ * We cache the prefer_flags because reading it on every trace event is expensive.
+ * The cache is invalidated when a sys_prop sequence number changes.
+ */
+void updatePreferFlags() {
+  if (!prefer_property_info.load(std::memory_order_acquire)) {
+    auto* new_prefer_property_info = system_property_find(kPreferFlagProperty);
+    prefer_flags.store(android::base::GetIntProperty(kPreferFlagProperty, 0),
+                       std::memory_order_relaxed);
+
+    if (!new_prefer_property_info) {
+      // This should never happen. If it does, we fail gracefully and end up reading the property
+      // traced event.
+      return;
+    }
+
+    last_prefer_seq_num = system_property_serial(new_prefer_property_info);
+    prefer_property_info.store(new_prefer_property_info, std::memory_order_release);
+  }
+
+  uint32_t prefer_seq_num =  system_property_serial(prefer_property_info);
+  if (prefer_seq_num != last_prefer_seq_num.load(std::memory_order_acquire)) {
+    prefer_flags.store(android::base::GetIntProperty(kPreferFlagProperty, 0),
+                       std::memory_order_relaxed);
+    last_prefer_seq_num.store(prefer_seq_num, std::memory_order_release);
+  }
+}
+
+bool shouldPreferAtrace(PerfettoTeCategory *perfettoCategory, uint64_t atraceCategory) {
+  // There are 3 cases:
+  // 1. Atrace is not enabled.
+  if (!atrace_is_tag_enabled(atraceCategory)) {
+    return false;
+  }
+
+  // 2. Atrace is enabled but perfetto is not enabled.
+  if (!isPerfettoCategoryEnabled(perfettoCategory)) {
+    return true;
+  }
+
+  // Update prefer_flags before checking it below
+  updatePreferFlags();
+
+  // 3. Atrace and perfetto are enabled.
+  // Even though this category is enabled for track events, the config mandates that we downgrade
+  // it to atrace if the same atrace category is currently enabled. This prevents missing the
+  // event from a concurrent session that needs the same category in atrace.
+  return (atraceCategory & prefer_flags.load(std::memory_order_relaxed)) == 0;
 }
 
 struct PerfettoTeCategory* toPerfettoCategory(uint64_t category) {
@@ -148,7 +223,7 @@ struct PerfettoTeCategory* toPerfettoCategory(uint64_t category) {
   }
 
   bool enabled = PERFETTO_UNLIKELY(PERFETTO_ATOMIC_LOAD_EXPLICIT(
-      (*perfettoCategory).enabled, PERFETTO_MEMORY_ORDER_RELAXED));
+       (*perfettoCategory).enabled, PERFETTO_MEMORY_ORDER_RELAXED));
   return enabled ? perfettoCategory : nullptr;
 }
 
@@ -164,70 +239,57 @@ void registerWithPerfetto(bool test) {
     PerfettoProducerInit(args);
     PerfettoTeInit();
     PERFETTO_TE_REGISTER_CATEGORIES(FRAMEWORK_CATEGORIES);
-    is_perfetto_registered = true;
   });
 }
 
-Result perfettoTraceBegin(const struct PerfettoTeCategory& category, const char* name) {
+void perfettoTraceBegin(const struct PerfettoTeCategory& category, const char* name) {
   PERFETTO_TE(category, PERFETTO_TE_SLICE_BEGIN(name));
-  return Result::SUCCESS;
 }
 
-Result perfettoTraceEnd(const struct PerfettoTeCategory& category) {
+void perfettoTraceEnd(const struct PerfettoTeCategory& category) {
   PERFETTO_TE(category, PERFETTO_TE_SLICE_END());
-  return Result::SUCCESS;
 }
 
-Result perfettoTraceAsyncBeginForTrack(const struct PerfettoTeCategory& category, const char* name,
+void perfettoTraceAsyncBeginForTrack(const struct PerfettoTeCategory& category, const char* name,
                                        const char* trackName, uint64_t cookie) {
   PERFETTO_TE(
       category, PERFETTO_TE_SLICE_BEGIN(name),
       PERFETTO_TE_NAMED_TRACK(trackName, cookie, PerfettoTeProcessTrackUuid()));
-  return Result::SUCCESS;
 }
 
-Result perfettoTraceAsyncEndForTrack(const struct PerfettoTeCategory& category,
+void perfettoTraceAsyncEndForTrack(const struct PerfettoTeCategory& category,
                                      const char* trackName, uint64_t cookie) {
   PERFETTO_TE(
       category, PERFETTO_TE_SLICE_END(),
       PERFETTO_TE_NAMED_TRACK(trackName, cookie, PerfettoTeProcessTrackUuid()));
-  return Result::SUCCESS;
 }
 
-Result perfettoTraceAsyncBegin(const struct PerfettoTeCategory& category, const char* name,
+void perfettoTraceAsyncBegin(const struct PerfettoTeCategory& category, const char* name,
                                uint64_t cookie) {
-  return perfettoTraceAsyncBeginForTrack(category, name, name, cookie);
+  perfettoTraceAsyncBeginForTrack(category, name, name, cookie);
 }
 
-Result perfettoTraceAsyncEnd(const struct PerfettoTeCategory& category, const char* name,
+void perfettoTraceAsyncEnd(const struct PerfettoTeCategory& category, const char* name,
                              uint64_t cookie) {
-  return perfettoTraceAsyncEndForTrack(category, name, cookie);
+  perfettoTraceAsyncEndForTrack(category, name, cookie);
 }
 
-Result perfettoTraceInstant(const struct PerfettoTeCategory& category, const char* name) {
+void perfettoTraceInstant(const struct PerfettoTeCategory& category, const char* name) {
   PERFETTO_TE(category, PERFETTO_TE_INSTANT(name));
-  return Result::SUCCESS;
 }
 
-Result perfettoTraceInstantForTrack(const struct PerfettoTeCategory& category,
+void perfettoTraceInstantForTrack(const struct PerfettoTeCategory& category,
                                     const char* trackName, const char* name) {
   PERFETTO_TE(
       category, PERFETTO_TE_INSTANT(name),
       PERFETTO_TE_NAMED_TRACK(trackName, 1, PerfettoTeProcessTrackUuid()));
-  return Result::SUCCESS;
 }
 
-Result perfettoTraceCounter(const struct PerfettoTeCategory& category,
+void perfettoTraceCounter(const struct PerfettoTeCategory& category,
                             [[maybe_unused]] const char* name, int64_t value) {
   PERFETTO_TE(category, PERFETTO_TE_COUNTER(),
               PERFETTO_TE_INT_COUNTER(value));
-  return Result::SUCCESS;
 }
-
-uint64_t getDefaultCategories() {
-  return TRACE_CATEGORIES;
-}
-
 }  // namespace internal
 
 }  // namespace tracing_perfetto

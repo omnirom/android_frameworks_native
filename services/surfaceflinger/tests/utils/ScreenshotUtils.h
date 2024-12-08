@@ -15,7 +15,7 @@
  */
 #pragma once
 
-#include <gui/AidlStatusUtil.h>
+#include <gui/AidlUtil.h>
 #include <gui/SyncScreenCaptureListener.h>
 #include <private/gui/ComposerServiceAIDL.h>
 #include <ui/FenceResult.h>
@@ -39,7 +39,7 @@ public:
         const auto sf = ComposerServiceAIDL::getComposerService();
         SurfaceComposerClient::Transaction().apply(true);
 
-        captureArgs.dataspace = ui::Dataspace::V0_SRGB;
+        captureArgs.captureArgs.dataspace = static_cast<int32_t>(ui::Dataspace::V0_SRGB);
         const sp<SyncScreenCaptureListener> captureListener = sp<SyncScreenCaptureListener>::make();
         binder::Status status = sf->captureDisplay(captureArgs, captureListener);
         status_t err = statusTFromBinderStatus(status);
@@ -77,7 +77,7 @@ public:
         const auto sf = ComposerServiceAIDL::getComposerService();
         SurfaceComposerClient::Transaction().apply(true);
 
-        captureArgs.dataspace = ui::Dataspace::V0_SRGB;
+        captureArgs.captureArgs.dataspace = static_cast<int32_t>(ui::Dataspace::V0_SRGB);
         const sp<SyncScreenCaptureListener> captureListener = sp<SyncScreenCaptureListener>::make();
         binder::Status status = sf->captureLayers(captureArgs, captureListener);
         status_t err = statusTFromBinderStatus(status);

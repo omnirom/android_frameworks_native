@@ -250,6 +250,10 @@ void InputManager::dump(std::string& dump) {
         mCollector->dump(dump);
         dump += '\n';
     }
+    if (ENABLE_INPUT_FILTER_RUST) {
+        mInputFilter->dump(dump);
+        dump += '\n';
+    }
     mDispatcher->dump(dump);
     dump += '\n';
 }

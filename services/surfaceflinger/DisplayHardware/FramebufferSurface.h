@@ -20,6 +20,7 @@
 #include <stdint.h>
 #include <sys/types.h>
 
+#include <com_android_graphics_libgui_flags.h>
 #include <compositionengine/DisplaySurface.h>
 #include <gui/BufferQueue.h>
 #include <gui/ConsumerBase.h>
@@ -40,9 +41,16 @@ class HWComposer;
 
 class FramebufferSurface : public ConsumerBase, public compositionengine::DisplaySurface {
 public:
+#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
+    FramebufferSurface(HWComposer& hwc, PhysicalDisplayId displayId,
+                       const sp<IGraphicBufferProducer>& producer,
+                       const sp<IGraphicBufferConsumer>& consumer, const ui::Size& size,
+                       const ui::Size& maxSize);
+#else
     FramebufferSurface(HWComposer& hwc, PhysicalDisplayId displayId,
                        const sp<IGraphicBufferConsumer>& consumer, const ui::Size& size,
                        const ui::Size& maxSize);
+#endif // COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
 
     virtual status_t beginFrame(bool mustRecompose);
     virtual status_t prepareFrame(CompositionType compositionType);

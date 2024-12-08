@@ -121,5 +121,11 @@ String16 Surface::readMaybeEmptyString16(const Parcel* parcel) {
     return str.value_or(String16());
 }
 
+std::string Surface::toString() const {
+    std::stringstream out;
+    out << name;
+    return out.str();
+}
+
 } // namespace view
 } // namespace android

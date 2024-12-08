@@ -18,12 +18,13 @@
 //! Slow keys is an accessibility feature to aid users who have physical disabilities, that allows
 //! the user to specify the duration for which one must press-and-hold a key before the system
 //! accepts the keypress.
-use crate::input_filter::Filter;
+use crate::input_filter::{Filter, VIRTUAL_KEYBOARD_DEVICE_ID};
 use crate::input_filter_thread::{InputFilterThread, ThreadCallback};
 use android_hardware_input_common::aidl::android::hardware::input::common::Source::Source;
 use com_android_server_inputflinger::aidl::com::android::server::inputflinger::{
     DeviceInfo::DeviceInfo, KeyEvent::KeyEvent, KeyEventAction::KeyEventAction,
 };
+use input::KeyboardType;
 use log::debug;
 use std::collections::HashSet;
 use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
@@ -41,7 +42,7 @@ struct OngoingKeyDown {
 struct SlowKeysFilterInner {
     next: Box<dyn Filter + Send + Sync>,
     slow_key_threshold_ns: i64,
-    external_devices: HashSet<i32>,
+    supported_devices: HashSet<i32>,
     // This tracks KeyEvents that are blocked by Slow keys filter and will be passed through if the
     // press duration exceeds the slow keys threshold.
     pending_down_events: Vec<KeyEvent>,
@@ -65,7 +66,7 @@ impl SlowKeysFilter {
         let filter = Self(Arc::new(RwLock::new(SlowKeysFilterInner {
             next,
             slow_key_threshold_ns,
-            external_devices: HashSet::new(),
+            supported_devices: HashSet::new(),
             pending_down_events: Vec::new(),
             ongoing_down_events: Vec::new(),
             input_filter_thread: input_filter_thread.clone(),
@@ -98,8 +99,8 @@ impl Filter for SlowKeysFilter {
         {
             // acquire write lock
             let mut slow_filter = self.write_inner();
-            if !(slow_filter.external_devices.contains(&event.deviceId)
-                && event.source == Source::KEYBOARD)
+            if !(slow_filter.supported_devices.contains(&event.deviceId)
+                && event.source.0 & Source::KEYBOARD.0 != 0)
             {
                 slow_filter.next.notify_key(event);
                 return;
@@ -164,10 +165,17 @@ impl Filter for SlowKeysFilter {
         slow_filter
             .ongoing_down_events
             .retain(|event| device_infos.iter().any(|x| event.device_id == x.deviceId));
-        slow_filter.external_devices.clear();
+        slow_filter.supported_devices.clear();
         for device_info in device_infos {
-            if device_info.external {
-                slow_filter.external_devices.insert(device_info.deviceId);
+            if device_info.deviceId == VIRTUAL_KEYBOARD_DEVICE_ID {
+                continue;
+            }
+            if device_info.keyboardType == KeyboardType::None as i32 {
+                continue;
+            }
+            // Support Alphabetic keyboards and Non-alphabetic external keyboards
+            if device_info.external || device_info.keyboardType == KeyboardType::Alphabetic as i32 {
+                slow_filter.supported_devices.insert(device_info.deviceId);
             }
         }
         slow_filter.next.notify_devices_changed(device_infos);
@@ -177,6 +185,16 @@ impl Filter for SlowKeysFilter {
         let mut slow_filter = self.write_inner();
         slow_filter.input_filter_thread.unregister_thread_callback(Box::new(self.clone()));
         slow_filter.next.destroy();
+    }
+
+    fn dump(&mut self, dump_str: String) -> String {
+        let mut slow_filter = self.write_inner();
+        let mut result = "Slow Keys filter: \n".to_string();
+        result += &format!("\tthreshold = {:?}ns\n", slow_filter.slow_key_threshold_ns);
+        result += &format!("\tongoing_down_events = {:?}\n", slow_filter.ongoing_down_events);
+        result += &format!("\tpending_down_events = {:?}\n", slow_filter.pending_down_events);
+        result += &format!("\tsupported_devices = {:?}\n", slow_filter.supported_devices);
+        slow_filter.next.dump(dump_str + &result)
     }
 }
 
@@ -217,6 +235,7 @@ mod tests {
     use com_android_server_inputflinger::aidl::com::android::server::inputflinger::{
         DeviceInfo::DeviceInfo, KeyEvent::KeyEvent, KeyEventAction::KeyEventAction,
     };
+    use input::KeyboardType;
     use nix::{sys::time::TimeValLike, time::clock_gettime, time::ClockId};
     use std::sync::{Arc, RwLock};
     use std::time::Duration;
@@ -240,7 +259,7 @@ mod tests {
     static SLOW_KEYS_THRESHOLD_NS: i64 = 100 * 1000000; // 100 ms
 
     #[test]
-    fn test_is_notify_key_for_internal_keyboard_not_blocked() {
+    fn test_is_notify_key_for_internal_non_alphabetic_keyboard_not_blocked() {
         let test_callbacks = TestCallbacks::new();
         let test_thread = get_thread(test_callbacks.clone());
         let next = TestFilter::new();
@@ -249,6 +268,7 @@ mod tests {
             test_thread.clone(),
             1, /* device_id */
             SLOW_KEYS_THRESHOLD_NS,
+            KeyboardType::NonAlphabetic,
         );
 
         let event = KeyEvent { action: KeyEventAction::DOWN, ..BASE_KEY_EVENT };
@@ -266,12 +286,122 @@ mod tests {
             test_thread.clone(),
             1, /* device_id */
             SLOW_KEYS_THRESHOLD_NS,
+            KeyboardType::NonAlphabetic,
         );
 
         let event =
             KeyEvent { action: KeyEventAction::DOWN, source: Source::STYLUS, ..BASE_KEY_EVENT };
         filter.notify_key(&event);
         assert_eq!(next.last_event().unwrap(), event);
+    }
+
+    #[test]
+    fn test_notify_key_for_tv_remote_when_key_pressed_for_threshold_time() {
+        let test_callbacks = TestCallbacks::new();
+        let test_thread = get_thread(test_callbacks.clone());
+        let next = TestFilter::new();
+        let mut filter = setup_filter_with_external_device(
+            Box::new(next.clone()),
+            test_thread.clone(),
+            1, /* device_id */
+            SLOW_KEYS_THRESHOLD_NS,
+            KeyboardType::NonAlphabetic,
+        );
+        let down_time = clock_gettime(ClockId::CLOCK_MONOTONIC).unwrap().num_nanoseconds();
+        let source = Source(Source::KEYBOARD.0 | Source::DPAD.0);
+        filter.notify_key(&KeyEvent {
+            action: KeyEventAction::DOWN,
+            downTime: down_time,
+            eventTime: down_time,
+            source,
+            ..BASE_KEY_EVENT
+        });
+        assert!(next.last_event().is_none());
+
+        std::thread::sleep(Duration::from_nanos(2 * SLOW_KEYS_THRESHOLD_NS as u64));
+        assert_eq!(
+            next.last_event().unwrap(),
+            KeyEvent {
+                action: KeyEventAction::DOWN,
+                downTime: down_time + SLOW_KEYS_THRESHOLD_NS,
+                eventTime: down_time + SLOW_KEYS_THRESHOLD_NS,
+                source,
+                policyFlags: POLICY_FLAG_DISABLE_KEY_REPEAT,
+                ..BASE_KEY_EVENT
+            }
+        );
+
+        let up_time = clock_gettime(ClockId::CLOCK_MONOTONIC).unwrap().num_nanoseconds();
+        filter.notify_key(&KeyEvent {
+            action: KeyEventAction::UP,
+            downTime: down_time,
+            eventTime: up_time,
+            source,
+            ..BASE_KEY_EVENT
+        });
+
+        assert_eq!(
+            next.last_event().unwrap(),
+            KeyEvent {
+                action: KeyEventAction::UP,
+                downTime: down_time + SLOW_KEYS_THRESHOLD_NS,
+                eventTime: up_time,
+                source,
+                ..BASE_KEY_EVENT
+            }
+        );
+    }
+
+    #[test]
+    fn test_notify_key_for_internal_alphabetic_keyboard_when_key_pressed_for_threshold_time() {
+        let test_callbacks = TestCallbacks::new();
+        let test_thread = get_thread(test_callbacks.clone());
+        let next = TestFilter::new();
+        let mut filter = setup_filter_with_internal_device(
+            Box::new(next.clone()),
+            test_thread.clone(),
+            1, /* device_id */
+            SLOW_KEYS_THRESHOLD_NS,
+            KeyboardType::Alphabetic,
+        );
+        let down_time = clock_gettime(ClockId::CLOCK_MONOTONIC).unwrap().num_nanoseconds();
+        filter.notify_key(&KeyEvent {
+            action: KeyEventAction::DOWN,
+            downTime: down_time,
+            eventTime: down_time,
+            ..BASE_KEY_EVENT
+        });
+        assert!(next.last_event().is_none());
+
+        std::thread::sleep(Duration::from_nanos(2 * SLOW_KEYS_THRESHOLD_NS as u64));
+        assert_eq!(
+            next.last_event().unwrap(),
+            KeyEvent {
+                action: KeyEventAction::DOWN,
+                downTime: down_time + SLOW_KEYS_THRESHOLD_NS,
+                eventTime: down_time + SLOW_KEYS_THRESHOLD_NS,
+                policyFlags: POLICY_FLAG_DISABLE_KEY_REPEAT,
+                ..BASE_KEY_EVENT
+            }
+        );
+
+        let up_time = clock_gettime(ClockId::CLOCK_MONOTONIC).unwrap().num_nanoseconds();
+        filter.notify_key(&KeyEvent {
+            action: KeyEventAction::UP,
+            downTime: down_time,
+            eventTime: up_time,
+            ..BASE_KEY_EVENT
+        });
+
+        assert_eq!(
+            next.last_event().unwrap(),
+            KeyEvent {
+                action: KeyEventAction::UP,
+                downTime: down_time + SLOW_KEYS_THRESHOLD_NS,
+                eventTime: up_time,
+                ..BASE_KEY_EVENT
+            }
+        );
     }
 
     #[test]
@@ -284,6 +414,7 @@ mod tests {
             test_thread.clone(),
             1, /* device_id */
             SLOW_KEYS_THRESHOLD_NS,
+            KeyboardType::Alphabetic,
         );
         let down_time = clock_gettime(ClockId::CLOCK_MONOTONIC).unwrap().num_nanoseconds();
         filter.notify_key(&KeyEvent {
@@ -335,6 +466,7 @@ mod tests {
             test_thread.clone(),
             1, /* device_id */
             SLOW_KEYS_THRESHOLD_NS,
+            KeyboardType::Alphabetic,
         );
         let mut now = clock_gettime(ClockId::CLOCK_MONOTONIC).unwrap().num_nanoseconds();
         filter.notify_key(&KeyEvent {
@@ -367,6 +499,7 @@ mod tests {
             test_thread.clone(),
             1, /* device_id */
             SLOW_KEYS_THRESHOLD_NS,
+            KeyboardType::Alphabetic,
         );
 
         let now = clock_gettime(ClockId::CLOCK_MONOTONIC).unwrap().num_nanoseconds();
@@ -388,11 +521,16 @@ mod tests {
         test_thread: InputFilterThread,
         device_id: i32,
         threshold: i64,
+        keyboard_type: KeyboardType,
     ) -> SlowKeysFilter {
         setup_filter_with_devices(
             next,
             test_thread,
-            &[DeviceInfo { deviceId: device_id, external: true }],
+            &[DeviceInfo {
+                deviceId: device_id,
+                external: true,
+                keyboardType: keyboard_type as i32,
+            }],
             threshold,
         )
     }
@@ -402,11 +540,16 @@ mod tests {
         test_thread: InputFilterThread,
         device_id: i32,
         threshold: i64,
+        keyboard_type: KeyboardType,
     ) -> SlowKeysFilter {
         setup_filter_with_devices(
             next,
             test_thread,
-            &[DeviceInfo { deviceId: device_id, external: false }],
+            &[DeviceInfo {
+                deviceId: device_id,
+                external: false,
+                keyboardType: keyboard_type as i32,
+            }],
             threshold,
         )
     }

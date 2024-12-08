@@ -682,14 +682,14 @@ status_t SensorService::dump(int fd, const Vector<String16>& args) {
                     mSensorPrivacyPolicy->isSensorPrivacyEnabled() ? "enabled" : "disabled");
 
             const auto& activeConnections = connLock.getActiveConnections();
-            result.appendFormat("%zd active connections\n", activeConnections.size());
+            result.appendFormat("%zd open event connections\n", activeConnections.size());
             for (size_t i=0 ; i < activeConnections.size() ; i++) {
                 result.appendFormat("Connection Number: %zu \n", i);
                 activeConnections[i]->dump(result);
             }
 
             const auto& directConnections = connLock.getDirectConnections();
-            result.appendFormat("%zd direct connections\n", directConnections.size());
+            result.appendFormat("%zd open direct connections\n", directConnections.size());
             for (size_t i = 0 ; i < directConnections.size() ; i++) {
                 result.appendFormat("Direct connection %zu:\n", i);
                 directConnections[i]->dump(result);
@@ -708,7 +708,7 @@ status_t SensorService::dump(int fd, const Vector<String16>& args) {
                         SENSOR_REGISTRATIONS_BUF_SIZE;
                     continue;
                 }
-                result.appendFormat("%s\n", reg_info.dump().c_str());
+                result.appendFormat("%s\n", reg_info.dump(this).c_str());
                 currentIndex = (currentIndex - 1 + SENSOR_REGISTRATIONS_BUF_SIZE) %
                         SENSOR_REGISTRATIONS_BUF_SIZE;
             } while(startIndex != currentIndex);
@@ -1583,7 +1583,11 @@ sp<ISensorEventConnection> SensorService::createSensorEventConnection(const Stri
     // Only 4 modes supported for a SensorEventConnection ... NORMAL, DATA_INJECTION,
     // REPLAY_DATA_INJECTION and HAL_BYPASS_REPLAY_DATA_INJECTION
     if (requestedMode != NORMAL && !isInjectionMode(requestedMode)) {
-        return nullptr;
+      ALOGE(
+          "Failed to create sensor event connection: invalid request mode. "
+          "requestMode: %d",
+          requestedMode);
+      return nullptr;
     }
     resetTargetSdkVersionCache(opPackageName);
 
@@ -1591,8 +1595,19 @@ sp<ISensorEventConnection> SensorService::createSensorEventConnection(const Stri
     // To create a client in DATA_INJECTION mode to inject data, SensorService should already be
     // operating in DI mode.
     if (requestedMode == DATA_INJECTION) {
-        if (mCurrentOperatingMode != DATA_INJECTION) return nullptr;
-        if (!isAllowListedPackage(packageName)) return nullptr;
+      if (mCurrentOperatingMode != DATA_INJECTION) {
+        ALOGE(
+            "Failed to create sensor event connection: sensor service not in "
+            "DI mode when creating a client in DATA_INJECTION mode");
+        return nullptr;
+      }
+      if (!isAllowListedPackage(packageName)) {
+        ALOGE(
+            "Failed to create sensor event connection: package %s not in "
+            "allowed list for DATA_INJECTION mode",
+            packageName.c_str());
+        return nullptr;
+      }
     }
 
     uid_t uid = IPCThreadState::self()->getCallingUid();
@@ -1729,7 +1744,10 @@ sp<ISensorEventConnection> SensorService::createSensorDirectConnection(
         ALOGE("SensorDevice::registerDirectChannel returns %d", channelHandle);
     } else {
         mem.handle = clone;
-        conn = new SensorDirectConnection(this, uid, &mem, channelHandle, opPackageName, deviceId);
+        IPCThreadState* thread = IPCThreadState::self();
+        pid_t pid = (thread != nullptr) ? thread->getCallingPid() : -1;
+        conn = new SensorDirectConnection(this, uid, pid, &mem, channelHandle, opPackageName,
+                                          deviceId);
     }
 
     if (conn == nullptr) {
@@ -2149,17 +2167,17 @@ status_t SensorService::enable(const sp<SensorEventConnection>& connection,
                 sensor->getSensor().getRequiredAppOp() >= 0) {
             connection->mHandleToAppOp[handle] = sensor->getSensor().getRequiredAppOp();
         }
-
-        mLastNSensorRegistrations.editItemAt(mNextSensorRegIndex) =
-                SensorRegistrationInfo(handle, connection->getPackageName(),
-                                       samplingPeriodNs, maxBatchReportLatencyNs, true);
-        mNextSensorRegIndex = (mNextSensorRegIndex + 1) % SENSOR_REGISTRATIONS_BUF_SIZE;
     }
 
     if (err != NO_ERROR) {
         // batch/activate has failed, reset our state.
         cleanupWithoutDisableLocked(connection, handle);
     }
+
+    mLastNSensorRegistrations.editItemAt(mNextSensorRegIndex) =
+            SensorRegistrationInfo(handle, connection->getPackageName(), samplingPeriodNs,
+                                   maxBatchReportLatencyNs, /*activate=*/ true, err);
+    mNextSensorRegIndex = (mNextSensorRegIndex + 1) % SENSOR_REGISTRATIONS_BUF_SIZE;
     return err;
 }
 
@@ -2172,13 +2190,10 @@ status_t SensorService::disable(const sp<SensorEventConnection>& connection, int
     if (err == NO_ERROR) {
         std::shared_ptr<SensorInterface> sensor = getSensorInterfaceFromHandle(handle);
         err = sensor != nullptr ? sensor->activate(connection.get(), false) : status_t(BAD_VALUE);
-
     }
-    if (err == NO_ERROR) {
-        mLastNSensorRegistrations.editItemAt(mNextSensorRegIndex) =
-                SensorRegistrationInfo(handle, connection->getPackageName(), 0, 0, false);
-        mNextSensorRegIndex = (mNextSensorRegIndex + 1) % SENSOR_REGISTRATIONS_BUF_SIZE;
-    }
+    mLastNSensorRegistrations.editItemAt(mNextSensorRegIndex) =
+            SensorRegistrationInfo(handle, connection->getPackageName(), 0, 0, /*activate=*/ false, err);
+    mNextSensorRegIndex = (mNextSensorRegIndex + 1) % SENSOR_REGISTRATIONS_BUF_SIZE;
     return err;
 }
 

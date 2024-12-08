@@ -225,6 +225,8 @@ class BpCInterface : public INTERFACE {
 
     SpAIBinder asBinder() override final;
 
+    const SpAIBinder& asBinderReference() { return mBinder; }
+
     bool isRemote() override final { return AIBinder_isRemote(mBinder.get()); }
 
     binder_status_t dump(int fd, const char** args, uint32_t numArgs) override {

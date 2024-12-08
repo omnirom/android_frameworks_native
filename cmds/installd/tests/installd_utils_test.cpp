@@ -101,6 +101,9 @@ TEST_F(UtilsTest, IsValidApkPath_Internal) {
     EXPECT_EQ(0, validate_apk_path(path2))
             << path2 << " should be allowed as a valid path";
 
+    const char* path3 = TEST_APP_DIR "..example..com../example.apk";
+    EXPECT_EQ(0, validate_apk_path(path3)) << path3 << " should be allowed as a valid path";
+
     const char *badint1 = TEST_APP_DIR "../example.apk";
     EXPECT_EQ(-1, validate_apk_path(badint1))
             << badint1 << " should be rejected as a invalid path";

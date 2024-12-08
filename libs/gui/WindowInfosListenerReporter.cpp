@@ -15,7 +15,7 @@
  */
 
 #include <android/gui/ISurfaceComposer.h>
-#include <gui/AidlStatusUtil.h>
+#include <gui/AidlUtil.h>
 #include <gui/WindowInfosListenerReporter.h>
 #include "gui/WindowInfosUpdate.h"
 

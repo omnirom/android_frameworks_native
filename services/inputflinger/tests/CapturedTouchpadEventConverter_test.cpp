@@ -20,6 +20,7 @@
 #include <memory>
 
 #include <EventHub.h>
+#include <com_android_input_flags.h>
 #include <gtest/gtest.h>
 #include <linux/input-event-codes.h>
 #include <linux/input.h>
@@ -32,9 +33,14 @@
 #include "TestEventMatchers.h"
 #include "TestInputListener.h"
 
+namespace input_flags = com::android::input::flags;
+
 namespace android {
 
 using testing::AllOf;
+using testing::Each;
+using testing::ElementsAre;
+using testing::VariantWith;
 
 class CapturedTouchpadEventConverterTest : public testing::Test {
 public:
@@ -44,6 +50,8 @@ public:
             mReader(mFakeEventHub, mFakePolicy, mFakeListener),
             mDevice(newDevice()),
             mDeviceContext(*mDevice, EVENTHUB_ID) {
+        input_flags::include_relative_axis_values_for_captured_touchpads(true);
+
         const size_t slotCount = 8;
         mFakeEventHub->addAbsoluteAxis(EVENTHUB_ID, ABS_MT_SLOT, 0, slotCount - 1, 0, 0, 0);
         mAccumulator.configure(mDeviceContext, slotCount, /*usingSlotsProtocol=*/true);
@@ -123,7 +131,7 @@ protected:
 
 TEST_F(CapturedTouchpadEventConverterTest, MotionRanges_allAxesPresent_populatedCorrectly) {
     mFakeEventHub->addAbsoluteAxis(EVENTHUB_ID, ABS_MT_POSITION_X, 0, 4000, 0, 0, 45);
-    mFakeEventHub->addAbsoluteAxis(EVENTHUB_ID, ABS_MT_POSITION_Y, 0, 2500, 0, 0, 40);
+    mFakeEventHub->addAbsoluteAxis(EVENTHUB_ID, ABS_MT_POSITION_Y, -500, 2000, 0, 0, 40);
     mFakeEventHub->addAbsoluteAxis(EVENTHUB_ID, ABS_MT_TOUCH_MAJOR, 0, 1100, 0, 0, 35);
     mFakeEventHub->addAbsoluteAxis(EVENTHUB_ID, ABS_MT_TOUCH_MINOR, 0, 1000, 0, 0, 30);
     mFakeEventHub->addAbsoluteAxis(EVENTHUB_ID, ABS_MT_WIDTH_MAJOR, 0, 900, 0, 0, 25);
@@ -147,8 +155,8 @@ TEST_F(CapturedTouchpadEventConverterTest, MotionRanges_allAxesPresent_populated
     const InputDeviceInfo::MotionRange* posY =
             info.getMotionRange(AMOTION_EVENT_AXIS_Y, AINPUT_SOURCE_TOUCHPAD);
     ASSERT_NE(nullptr, posY);
-    EXPECT_NEAR(0, posY->min, EPSILON);
-    EXPECT_NEAR(2500, posY->max, EPSILON);
+    EXPECT_NEAR(-500, posY->min, EPSILON);
+    EXPECT_NEAR(2000, posY->max, EPSILON);
     EXPECT_NEAR(40, posY->resolution, EPSILON);
 
     const InputDeviceInfo::MotionRange* touchMajor =
@@ -179,8 +187,22 @@ TEST_F(CapturedTouchpadEventConverterTest, MotionRanges_allAxesPresent_populated
     EXPECT_NEAR(800, toolMinor->max, EPSILON);
     EXPECT_NEAR(20, toolMinor->resolution, EPSILON);
 
-    // ...except orientation and pressure, which get scaled, and size, which is generated from other
-    // values.
+    // ...except for the relative motion axes, derived from the corresponding absolute ones:
+    const InputDeviceInfo::MotionRange* relX =
+            info.getMotionRange(AMOTION_EVENT_AXIS_RELATIVE_X, AINPUT_SOURCE_TOUCHPAD);
+    ASSERT_NE(nullptr, relX);
+    EXPECT_NEAR(-4000, relX->min, EPSILON);
+    EXPECT_NEAR(4000, relX->max, EPSILON);
+    EXPECT_NEAR(45, relX->resolution, EPSILON);
+
+    const InputDeviceInfo::MotionRange* relY =
+            info.getMotionRange(AMOTION_EVENT_AXIS_RELATIVE_Y, AINPUT_SOURCE_TOUCHPAD);
+    ASSERT_NE(nullptr, relY);
+    EXPECT_NEAR(-2500, relY->min, EPSILON);
+    EXPECT_NEAR(2500, relY->max, EPSILON);
+    EXPECT_NEAR(40, relY->resolution, EPSILON);
+
+    // ...orientation and pressure, which get scaled:
     const InputDeviceInfo::MotionRange* orientation =
             info.getMotionRange(AMOTION_EVENT_AXIS_ORIENTATION, AINPUT_SOURCE_TOUCHPAD);
     ASSERT_NE(nullptr, orientation);
@@ -195,6 +217,7 @@ TEST_F(CapturedTouchpadEventConverterTest, MotionRanges_allAxesPresent_populated
     EXPECT_NEAR(1, pressure->max, EPSILON);
     EXPECT_NEAR(0, pressure->resolution, EPSILON);
 
+    // ... and size, which is generated from other values.
     const InputDeviceInfo::MotionRange* size =
             info.getMotionRange(AMOTION_EVENT_AXIS_SIZE, AINPUT_SOURCE_TOUCHPAD);
     ASSERT_NE(nullptr, size);
@@ -216,7 +239,9 @@ TEST_F(CapturedTouchpadEventConverterTest, MotionRanges_bareMinimumAxesPresent_p
     // present, since it's generated from axes that aren't provided by this device).
     EXPECT_NE(nullptr, info.getMotionRange(AMOTION_EVENT_AXIS_X, AINPUT_SOURCE_TOUCHPAD));
     EXPECT_NE(nullptr, info.getMotionRange(AMOTION_EVENT_AXIS_Y, AINPUT_SOURCE_TOUCHPAD));
-    EXPECT_EQ(2u, info.getMotionRanges().size());
+    EXPECT_NE(nullptr, info.getMotionRange(AMOTION_EVENT_AXIS_RELATIVE_X, AINPUT_SOURCE_TOUCHPAD));
+    EXPECT_NE(nullptr, info.getMotionRange(AMOTION_EVENT_AXIS_RELATIVE_Y, AINPUT_SOURCE_TOUCHPAD));
+    EXPECT_EQ(4u, info.getMotionRanges().size());
 }
 
 TEST_F(CapturedTouchpadEventConverterTest, OneFinger_motionReportedCorrectly) {
@@ -232,28 +257,31 @@ TEST_F(CapturedTouchpadEventConverterTest, OneFinger_motionReportedCorrectly) {
 
     EXPECT_THAT(processSyncAndExpectSingleMotionArg(conv),
                 AllOf(WithMotionAction(AMOTION_EVENT_ACTION_DOWN), WithPointerCount(1u),
-                      WithCoords(50, 100), WithToolType(ToolType::FINGER)));
+                      WithCoords(50, 100), WithRelativeMotion(0, 0),
+                      WithToolType(ToolType::FINGER)));
 
     processAxis(conv, EV_ABS, ABS_MT_POSITION_X, 52);
     processAxis(conv, EV_ABS, ABS_MT_POSITION_Y, 99);
 
     EXPECT_THAT(processSyncAndExpectSingleMotionArg(conv),
                 AllOf(WithMotionAction(AMOTION_EVENT_ACTION_MOVE), WithPointerCount(1u),
-                      WithCoords(52, 99), WithToolType(ToolType::FINGER)));
+                      WithCoords(52, 99), WithRelativeMotion(2, -1),
+                      WithToolType(ToolType::FINGER)));
 
     processAxis(conv, EV_ABS, ABS_MT_TRACKING_ID, -1);
     processAxis(conv, EV_KEY, BTN_TOUCH, 0);
     processAxis(conv, EV_KEY, BTN_TOOL_FINGER, 0);
 
     std::list<NotifyArgs> args = processSync(conv);
-    ASSERT_EQ(2u, args.size());
-    EXPECT_THAT(std::get<NotifyMotionArgs>(args.front()),
-                AllOf(WithMotionAction(AMOTION_EVENT_ACTION_MOVE), WithPointerCount(1u),
-                      WithCoords(52, 99), WithToolType(ToolType::FINGER)));
-    args.pop_front();
-    EXPECT_THAT(std::get<NotifyMotionArgs>(args.front()),
-                AllOf(WithMotionAction(AMOTION_EVENT_ACTION_UP), WithPointerCount(1u),
-                      WithCoords(52, 99), WithToolType(ToolType::FINGER)));
+    EXPECT_THAT(args,
+                ElementsAre(VariantWith<NotifyMotionArgs>(
+                                    WithMotionAction(AMOTION_EVENT_ACTION_MOVE)),
+                            VariantWith<NotifyMotionArgs>(
+                                    WithMotionAction(AMOTION_EVENT_ACTION_UP))));
+    EXPECT_THAT(args,
+                Each(VariantWith<NotifyMotionArgs>(
+                        AllOf(WithCoords(52, 99), WithRelativeMotion(0, 0), WithPointerCount(1u),
+                              WithToolType(ToolType::FINGER)))));
 }
 
 TEST_F(CapturedTouchpadEventConverterTest, OneFinger_touchDimensionsPassedThrough) {
@@ -504,13 +532,13 @@ TEST_F(CapturedTouchpadEventConverterTest, PalmTurningIntoFinger_reported) {
 
     EXPECT_THAT(processSyncAndExpectSingleMotionArg(conv),
                 AllOf(WithMotionAction(AMOTION_EVENT_ACTION_DOWN), WithPointerCount(1u),
-                      WithCoords(51, 100)));
+                      WithCoords(51, 100), WithRelativeMotion(0, 0)));
 
     processAxis(conv, EV_ABS, ABS_MT_POSITION_X, 52);
 
     EXPECT_THAT(processSyncAndExpectSingleMotionArg(conv),
                 AllOf(WithMotionAction(AMOTION_EVENT_ACTION_MOVE), WithPointerCount(1u),
-                      WithCoords(52, 100)));
+                      WithCoords(52, 100), WithRelativeMotion(1, 0)));
 }
 
 TEST_F(CapturedTouchpadEventConverterTest, FingerArrivingAfterPalm_onlyFingerReported) {
@@ -550,7 +578,7 @@ TEST_F(CapturedTouchpadEventConverterTest, FingerArrivingAfterPalm_onlyFingerRep
 
     EXPECT_THAT(processSyncAndExpectSingleMotionArg(conv),
                 AllOf(WithMotionAction(AMOTION_EVENT_ACTION_MOVE), WithPointerCount(1u),
-                      WithCoords(98, 148)));
+                      WithCoords(98, 148), WithRelativeMotion(-2, -2)));
 }
 
 TEST_F(CapturedTouchpadEventConverterTest, FingerAndFingerTurningIntoPalm_partiallyCancelled) {
@@ -572,17 +600,17 @@ TEST_F(CapturedTouchpadEventConverterTest, FingerAndFingerTurningIntoPalm_partia
     processAxis(conv, EV_KEY, BTN_TOUCH, 1);
     processAxis(conv, EV_KEY, BTN_TOOL_DOUBLETAP, 1);
 
-    std::list<NotifyArgs> args = processSync(conv);
-    ASSERT_EQ(2u, args.size());
-    EXPECT_THAT(std::get<NotifyMotionArgs>(args.front()),
-                AllOf(WithMotionAction(AMOTION_EVENT_ACTION_DOWN), WithPointerCount(1u),
-                      WithToolType(ToolType::FINGER)));
-    args.pop_front();
-    EXPECT_THAT(std::get<NotifyMotionArgs>(args.front()),
-                AllOf(WithMotionAction(AMOTION_EVENT_ACTION_POINTER_DOWN |
-                                       1 << AMOTION_EVENT_ACTION_POINTER_INDEX_SHIFT),
-                      WithPointerCount(2u), WithPointerToolType(0, ToolType::FINGER),
-                      WithPointerToolType(1, ToolType::FINGER)));
+    EXPECT_THAT(processSync(conv),
+                ElementsAre(VariantWith<NotifyMotionArgs>(
+                                    AllOf(WithMotionAction(AMOTION_EVENT_ACTION_DOWN),
+                                          WithPointerCount(1u), WithToolType(ToolType::FINGER))),
+                            VariantWith<NotifyMotionArgs>(
+                                    AllOf(WithMotionAction(
+                                                  AMOTION_EVENT_ACTION_POINTER_DOWN |
+                                                  1 << AMOTION_EVENT_ACTION_POINTER_INDEX_SHIFT),
+                                          WithPointerCount(2u),
+                                          WithPointerToolType(0, ToolType::FINGER),
+                                          WithPointerToolType(1, ToolType::FINGER)))));
 
     processAxis(conv, EV_ABS, ABS_MT_SLOT, 0);
     processAxis(conv, EV_ABS, ABS_MT_POSITION_X, 51);
@@ -591,15 +619,16 @@ TEST_F(CapturedTouchpadEventConverterTest, FingerAndFingerTurningIntoPalm_partia
     processAxis(conv, EV_ABS, ABS_MT_POSITION_X, 251);
     processAxis(conv, EV_ABS, ABS_MT_TOOL_TYPE, MT_TOOL_PALM);
 
-    args = processSync(conv);
-    ASSERT_EQ(2u, args.size());
-    EXPECT_THAT(std::get<NotifyMotionArgs>(args.front()),
-                AllOf(WithMotionAction(AMOTION_EVENT_ACTION_MOVE), WithPointerCount(2u)));
-    args.pop_front();
-    EXPECT_THAT(std::get<NotifyMotionArgs>(args.front()),
-                AllOf(WithMotionAction(AMOTION_EVENT_ACTION_POINTER_UP |
-                                       1 << AMOTION_EVENT_ACTION_POINTER_INDEX_SHIFT),
-                      WithFlags(AMOTION_EVENT_FLAG_CANCELED), WithPointerCount(2u)));
+    std::list<NotifyArgs> args = processSync(conv);
+    EXPECT_THAT(args,
+                ElementsAre(VariantWith<NotifyMotionArgs>(
+                                    WithMotionAction(AMOTION_EVENT_ACTION_MOVE)),
+                            VariantWith<NotifyMotionArgs>(
+                                    AllOf(WithMotionAction(
+                                                  AMOTION_EVENT_ACTION_POINTER_UP |
+                                                  1 << AMOTION_EVENT_ACTION_POINTER_INDEX_SHIFT),
+                                          WithFlags(AMOTION_EVENT_FLAG_CANCELED)))));
+    EXPECT_THAT(args, Each(VariantWith<NotifyMotionArgs>(WithPointerCount(2u))));
 }
 
 TEST_F(CapturedTouchpadEventConverterTest, FingerAndPalmTurningIntoFinger_reported) {
@@ -632,15 +661,15 @@ TEST_F(CapturedTouchpadEventConverterTest, FingerAndPalmTurningIntoFinger_report
     processAxis(conv, EV_ABS, ABS_MT_POSITION_X, 251);
     processAxis(conv, EV_ABS, ABS_MT_TOOL_TYPE, MT_TOOL_FINGER);
 
-    std::list<NotifyArgs> args = processSync(conv);
-    ASSERT_EQ(2u, args.size());
-    EXPECT_THAT(std::get<NotifyMotionArgs>(args.front()),
-                AllOf(WithMotionAction(AMOTION_EVENT_ACTION_MOVE), WithPointerCount(1u)));
-    args.pop_front();
-    EXPECT_THAT(std::get<NotifyMotionArgs>(args.front()),
-                AllOf(WithMotionAction(AMOTION_EVENT_ACTION_POINTER_DOWN |
-                                       1 << AMOTION_EVENT_ACTION_POINTER_INDEX_SHIFT),
-                      WithPointerCount(2u)));
+    EXPECT_THAT(processSync(conv),
+                ElementsAre(VariantWith<NotifyMotionArgs>(
+                                    AllOf(WithMotionAction(AMOTION_EVENT_ACTION_MOVE),
+                                          WithPointerCount(1u))),
+                            VariantWith<NotifyMotionArgs>(
+                                    AllOf(WithMotionAction(
+                                                  AMOTION_EVENT_ACTION_POINTER_DOWN |
+                                                  1 << AMOTION_EVENT_ACTION_POINTER_INDEX_SHIFT),
+                                          WithPointerCount(2u)))));
 }
 
 TEST_F(CapturedTouchpadEventConverterTest, TwoFingers_motionReportedCorrectly) {
@@ -656,7 +685,8 @@ TEST_F(CapturedTouchpadEventConverterTest, TwoFingers_motionReportedCorrectly) {
 
     EXPECT_THAT(processSyncAndExpectSingleMotionArg(conv),
                 AllOf(WithMotionAction(AMOTION_EVENT_ACTION_DOWN), WithPointerCount(1u),
-                      WithCoords(50, 100), WithToolType(ToolType::FINGER)));
+                      WithCoords(50, 100), WithRelativeMotion(0, 0),
+                      WithToolType(ToolType::FINGER)));
 
     processAxis(conv, EV_ABS, ABS_MT_SLOT, 0);
     processAxis(conv, EV_ABS, ABS_MT_POSITION_X, 52);
@@ -670,18 +700,22 @@ TEST_F(CapturedTouchpadEventConverterTest, TwoFingers_motionReportedCorrectly) {
     processAxis(conv, EV_KEY, BTN_TOOL_FINGER, 0);
     processAxis(conv, EV_KEY, BTN_TOOL_DOUBLETAP, 1);
 
-    std::list<NotifyArgs> args = processSync(conv);
-    ASSERT_EQ(2u, args.size());
-    EXPECT_THAT(std::get<NotifyMotionArgs>(args.front()),
-                AllOf(WithMotionAction(AMOTION_EVENT_ACTION_MOVE), WithPointerCount(1u),
-                      WithCoords(52, 99), WithToolType(ToolType::FINGER)));
-    args.pop_front();
-    EXPECT_THAT(std::get<NotifyMotionArgs>(args.front()),
-                AllOf(WithMotionAction(AMOTION_EVENT_ACTION_POINTER_DOWN |
-                                       1 << AMOTION_EVENT_ACTION_POINTER_INDEX_SHIFT),
-                      WithPointerCount(2u), WithPointerCoords(0, 52, 99),
-                      WithPointerCoords(1, 250, 200), WithPointerToolType(0, ToolType::FINGER),
-                      WithPointerToolType(1, ToolType::FINGER)));
+    EXPECT_THAT(processSync(conv),
+                ElementsAre(VariantWith<NotifyMotionArgs>(
+                                    AllOf(WithMotionAction(AMOTION_EVENT_ACTION_MOVE),
+                                          WithPointerCount(1u), WithCoords(52, 99),
+                                          WithRelativeMotion(2, -1),
+                                          WithToolType(ToolType::FINGER))),
+                            VariantWith<NotifyMotionArgs>(
+                                    AllOf(WithMotionAction(
+                                                  AMOTION_EVENT_ACTION_POINTER_DOWN |
+                                                  1 << AMOTION_EVENT_ACTION_POINTER_INDEX_SHIFT),
+                                          WithPointerCount(2u), WithPointerCoords(0, 52, 99),
+                                          WithPointerRelativeMotion(0, 0, 0),
+                                          WithPointerCoords(1, 250, 200),
+                                          WithPointerRelativeMotion(1, 0, 0),
+                                          WithPointerToolType(0, ToolType::FINGER),
+                                          WithPointerToolType(1, ToolType::FINGER)))));
 
     processAxis(conv, EV_ABS, ABS_MT_SLOT, 0);
     processAxis(conv, EV_ABS, ABS_MT_TRACKING_ID, -1);
@@ -692,34 +726,96 @@ TEST_F(CapturedTouchpadEventConverterTest, TwoFingers_motionReportedCorrectly) {
     processAxis(conv, EV_KEY, BTN_TOOL_FINGER, 1);
     processAxis(conv, EV_KEY, BTN_TOOL_DOUBLETAP, 0);
 
-    args = processSync(conv);
-    ASSERT_EQ(2u, args.size());
-    EXPECT_THAT(std::get<NotifyMotionArgs>(args.front()),
-                AllOf(WithMotionAction(AMOTION_EVENT_ACTION_MOVE), WithPointerCount(2u),
-                      WithPointerCoords(0, 52, 99), WithPointerCoords(1, 255, 202),
-                      WithPointerToolType(1, ToolType::FINGER),
-                      WithPointerToolType(0, ToolType::FINGER)));
-    args.pop_front();
-    EXPECT_THAT(std::get<NotifyMotionArgs>(args.front()),
-                AllOf(WithMotionAction(AMOTION_EVENT_ACTION_POINTER_UP |
-                                       0 << AMOTION_EVENT_ACTION_POINTER_INDEX_SHIFT),
-                      WithPointerCount(2u), WithPointerCoords(0, 52, 99),
-                      WithPointerCoords(1, 255, 202), WithPointerToolType(0, ToolType::FINGER),
-                      WithPointerToolType(1, ToolType::FINGER)));
+    std::list<NotifyArgs> args = processSync(conv);
+    EXPECT_THAT(args,
+                ElementsAre(VariantWith<NotifyMotionArgs>(
+                                    AllOf(WithMotionAction(AMOTION_EVENT_ACTION_MOVE),
+                                          WithPointerRelativeMotion(1, 5, 2))),
+                            VariantWith<NotifyMotionArgs>(
+                                    AllOf(WithMotionAction(
+                                                  AMOTION_EVENT_ACTION_POINTER_UP |
+                                                  0 << AMOTION_EVENT_ACTION_POINTER_INDEX_SHIFT),
+                                          WithPointerRelativeMotion(1, 0, 0)))));
+    EXPECT_THAT(args,
+                Each(VariantWith<NotifyMotionArgs>(
+                        AllOf(WithPointerCount(2u), WithPointerCoords(0, 52, 99),
+                              WithPointerRelativeMotion(0, 0, 0), WithPointerCoords(1, 255, 202),
+                              WithPointerToolType(1, ToolType::FINGER),
+                              WithPointerToolType(0, ToolType::FINGER)))));
 
     processAxis(conv, EV_ABS, ABS_MT_TRACKING_ID, -1);
     processAxis(conv, EV_KEY, BTN_TOOL_FINGER, 0);
     processAxis(conv, EV_KEY, BTN_TOUCH, 0);
 
     args = processSync(conv);
-    ASSERT_EQ(2u, args.size());
-    EXPECT_THAT(std::get<NotifyMotionArgs>(args.front()),
+    EXPECT_THAT(args,
+                ElementsAre(VariantWith<NotifyMotionArgs>(
+                                    WithMotionAction(AMOTION_EVENT_ACTION_MOVE)),
+                            VariantWith<NotifyMotionArgs>(
+                                    WithMotionAction(AMOTION_EVENT_ACTION_UP))));
+    EXPECT_THAT(args,
+                Each(VariantWith<NotifyMotionArgs>(AllOf(WithPointerCount(1u), WithCoords(255, 202),
+                                                         WithRelativeMotion(0, 0),
+                                                         WithToolType(ToolType::FINGER)))));
+}
+
+TEST_F(CapturedTouchpadEventConverterTest, RelativeMotionAxesClearedForNewFingerInSlot) {
+    CapturedTouchpadEventConverter conv = createConverter();
+    // Put down one finger.
+    processAxis(conv, EV_ABS, ABS_MT_SLOT, 0);
+    processAxis(conv, EV_ABS, ABS_MT_TRACKING_ID, 1);
+    processAxis(conv, EV_ABS, ABS_MT_POSITION_X, 50);
+    processAxis(conv, EV_ABS, ABS_MT_POSITION_Y, 100);
+
+    processAxis(conv, EV_KEY, BTN_TOUCH, 1);
+    processAxis(conv, EV_KEY, BTN_TOOL_FINGER, 1);
+
+    EXPECT_THAT(processSyncAndExpectSingleMotionArg(conv),
+                AllOf(WithMotionAction(AMOTION_EVENT_ACTION_DOWN), WithPointerCount(1u),
+                      WithCoords(50, 100), WithRelativeMotion(0, 0)));
+
+    // Move it in negative X and Y directions.
+    processAxis(conv, EV_ABS, ABS_MT_POSITION_X, 47);
+    processAxis(conv, EV_ABS, ABS_MT_POSITION_Y, 97);
+
+    EXPECT_THAT(processSyncAndExpectSingleMotionArg(conv),
+                AllOf(WithMotionAction(AMOTION_EVENT_ACTION_MOVE), WithCoords(47, 97),
+                      WithRelativeMotion(-3, -3)));
+
+    // Lift it.
+    processAxis(conv, EV_ABS, ABS_MT_TRACKING_ID, -1);
+    processAxis(conv, EV_KEY, BTN_TOUCH, 0);
+    processAxis(conv, EV_KEY, BTN_TOOL_FINGER, 0);
+
+    std::list<NotifyArgs> args = processSync(conv);
+    EXPECT_THAT(args,
+                ElementsAre(VariantWith<NotifyMotionArgs>(
+                                    WithMotionAction(AMOTION_EVENT_ACTION_MOVE)),
+                            VariantWith<NotifyMotionArgs>(
+                                    WithMotionAction(AMOTION_EVENT_ACTION_UP))));
+    EXPECT_THAT(args,
+                Each(VariantWith<NotifyMotionArgs>(AllOf(WithCoords(47, 97),
+                                                         WithRelativeMotion(0, 0),
+                                                         WithPointerCount(1u)))));
+
+    // Put down another finger using the same slot. Relative axis values should be cleared.
+    processAxis(conv, EV_ABS, ABS_MT_TRACKING_ID, 2);
+    processAxis(conv, EV_ABS, ABS_MT_POSITION_X, 60);
+    processAxis(conv, EV_ABS, ABS_MT_POSITION_Y, 60);
+
+    processAxis(conv, EV_KEY, BTN_TOUCH, 1);
+    processAxis(conv, EV_KEY, BTN_TOOL_FINGER, 1);
+
+    EXPECT_THAT(processSyncAndExpectSingleMotionArg(conv),
+                AllOf(WithMotionAction(AMOTION_EVENT_ACTION_DOWN), WithPointerCount(1u),
+                      WithCoords(60, 60), WithRelativeMotion(0, 0)));
+
+    processAxis(conv, EV_ABS, ABS_MT_POSITION_X, 64);
+    processAxis(conv, EV_ABS, ABS_MT_POSITION_Y, 58);
+
+    EXPECT_THAT(processSyncAndExpectSingleMotionArg(conv),
                 AllOf(WithMotionAction(AMOTION_EVENT_ACTION_MOVE), WithPointerCount(1u),
-                      WithCoords(255, 202), WithToolType(ToolType::FINGER)));
-    args.pop_front();
-    EXPECT_THAT(std::get<NotifyMotionArgs>(args.front()),
-                AllOf(WithMotionAction(AMOTION_EVENT_ACTION_UP), WithPointerCount(1u),
-                      WithCoords(255, 202), WithToolType(ToolType::FINGER)));
+                      WithCoords(64, 58), WithRelativeMotion(4, -2)));
 }
 
 // Pointer IDs max out at 31, and so must be reused once a touch is lifted to avoid running out.
@@ -737,17 +833,18 @@ TEST_F(CapturedTouchpadEventConverterTest, PointerIdsReusedAfterLift) {
     processAxis(conv, EV_KEY, BTN_TOUCH, 1);
     processAxis(conv, EV_KEY, BTN_TOOL_DOUBLETAP, 1);
 
-    std::list<NotifyArgs> args = processSync(conv);
-    ASSERT_EQ(2u, args.size());
-    EXPECT_THAT(std::get<NotifyMotionArgs>(args.front()),
-                AllOf(WithMotionAction(AMOTION_EVENT_ACTION_DOWN), WithPointerCount(1u),
-                      WithPointerId(/*index=*/0, /*id=*/0)));
-    args.pop_front();
-    EXPECT_THAT(std::get<NotifyMotionArgs>(args.front()),
-                AllOf(WithMotionAction(AMOTION_EVENT_ACTION_POINTER_DOWN |
-                                       1 << AMOTION_EVENT_ACTION_POINTER_INDEX_SHIFT),
-                      WithPointerCount(2u), WithPointerId(/*index=*/0, /*id=*/0),
-                      WithPointerId(/*index=*/1, /*id=*/1)));
+    EXPECT_THAT(processSync(conv),
+                ElementsAre(VariantWith<NotifyMotionArgs>(
+                                    AllOf(WithMotionAction(AMOTION_EVENT_ACTION_DOWN),
+                                          WithPointerCount(1u),
+                                          WithPointerId(/*index=*/0, /*id=*/0))),
+                            VariantWith<NotifyMotionArgs>(
+                                    AllOf(WithMotionAction(
+                                                  AMOTION_EVENT_ACTION_POINTER_DOWN |
+                                                  1 << AMOTION_EVENT_ACTION_POINTER_INDEX_SHIFT),
+                                          WithPointerCount(2u),
+                                          WithPointerId(/*index=*/0, /*id=*/0),
+                                          WithPointerId(/*index=*/1, /*id=*/1)))));
 
     // Lift the finger in slot 0, freeing up pointer ID 0...
     processAxis(conv, EV_ABS, ABS_MT_SLOT, 0);
@@ -758,27 +855,30 @@ TEST_F(CapturedTouchpadEventConverterTest, PointerIdsReusedAfterLift) {
     processAxis(conv, EV_ABS, ABS_MT_TRACKING_ID, 3);
     processAxis(conv, EV_ABS, ABS_MT_POSITION_X, 30);
 
-    args = processSync(conv);
-    ASSERT_EQ(3u, args.size());
+    std::list<NotifyArgs> args = processSync(conv);
     // Slot 1 being present will result in a MOVE event, even though it hasn't actually moved (see
     // comments in CapturedTouchpadEventConverter::sync).
-    EXPECT_THAT(std::get<NotifyMotionArgs>(args.front()),
-                AllOf(WithMotionAction(AMOTION_EVENT_ACTION_MOVE), WithPointerCount(2u),
-                      WithPointerId(/*index=*/0, /*id=*/0), WithPointerId(/*index=*/1, /*id=*/1)));
-    args.pop_front();
-    EXPECT_THAT(std::get<NotifyMotionArgs>(args.front()),
-                AllOf(WithMotionAction(AMOTION_EVENT_ACTION_POINTER_UP |
-                                       0 << AMOTION_EVENT_ACTION_POINTER_INDEX_SHIFT),
-                      WithPointerCount(2u), WithPointerId(/*index=*/0, /*id=*/0),
-                      WithPointerId(/*index=*/1, /*id=*/1)));
-    args.pop_front();
-    // Slot 0 being lifted causes the finger from slot 1 to move up to index 0, but keep its
-    // previous ID. The new finger in slot 2 should take ID 0, which was just freed up.
-    EXPECT_THAT(std::get<NotifyMotionArgs>(args.front()),
-                AllOf(WithMotionAction(AMOTION_EVENT_ACTION_POINTER_DOWN |
-                                       1 << AMOTION_EVENT_ACTION_POINTER_INDEX_SHIFT),
-                      WithPointerCount(2u), WithPointerId(/*index=*/0, /*id=*/1),
-                      WithPointerId(/*index=*/1, /*id=*/0)));
+    EXPECT_THAT(args,
+                ElementsAre(VariantWith<NotifyMotionArgs>(
+                                    AllOf(WithMotionAction(AMOTION_EVENT_ACTION_MOVE),
+                                          WithPointerId(/*index=*/0, /*id=*/0),
+                                          WithPointerId(/*index=*/1, /*id=*/1))),
+                            VariantWith<NotifyMotionArgs>(
+                                    AllOf(WithMotionAction(
+                                                  AMOTION_EVENT_ACTION_POINTER_UP |
+                                                  0 << AMOTION_EVENT_ACTION_POINTER_INDEX_SHIFT),
+                                          WithPointerId(/*index=*/0, /*id=*/0),
+                                          WithPointerId(/*index=*/1, /*id=*/1))),
+                            // Slot 0 being lifted causes the finger from slot 1 to move up to index
+                            // 0, but keep its previous ID. The new finger in slot 2 should take ID
+                            // 0, which was just freed up.
+                            VariantWith<NotifyMotionArgs>(
+                                    AllOf(WithMotionAction(
+                                                  AMOTION_EVENT_ACTION_POINTER_DOWN |
+                                                  1 << AMOTION_EVENT_ACTION_POINTER_INDEX_SHIFT),
+                                          WithPointerId(/*index=*/0, /*id=*/1),
+                                          WithPointerId(/*index=*/1, /*id=*/0)))));
+    EXPECT_THAT(args, Each(VariantWith<NotifyMotionArgs>(WithPointerCount(2u))));
 }
 
 // Motion events without any pointers are invalid, so when a button press is reported in the same
@@ -797,33 +897,30 @@ TEST_F(CapturedTouchpadEventConverterTest,
 
     processAxis(conv, EV_KEY, BTN_LEFT, 1);
 
-    std::list<NotifyArgs> args = processSync(conv);
-    ASSERT_EQ(2u, args.size());
-    EXPECT_THAT(std::get<NotifyMotionArgs>(args.front()),
-                WithMotionAction(AMOTION_EVENT_ACTION_DOWN));
-    args.pop_front();
-    EXPECT_THAT(std::get<NotifyMotionArgs>(args.front()),
-                AllOf(WithMotionAction(AMOTION_EVENT_ACTION_BUTTON_PRESS), WithPointerCount(1u),
-                      WithCoords(50, 100), WithActionButton(AMOTION_EVENT_BUTTON_PRIMARY),
-                      WithButtonState(AMOTION_EVENT_BUTTON_PRIMARY)));
+    EXPECT_THAT(processSync(conv),
+                ElementsAre(VariantWith<NotifyMotionArgs>(
+                                    WithMotionAction(AMOTION_EVENT_ACTION_DOWN)),
+                            VariantWith<NotifyMotionArgs>(
+                                    AllOf(WithMotionAction(AMOTION_EVENT_ACTION_BUTTON_PRESS),
+                                          WithPointerCount(1u), WithCoords(50, 100),
+                                          WithActionButton(AMOTION_EVENT_BUTTON_PRIMARY),
+                                          WithButtonState(AMOTION_EVENT_BUTTON_PRIMARY)))));
 
     processAxis(conv, EV_ABS, ABS_MT_TRACKING_ID, -1);
     processAxis(conv, EV_KEY, BTN_TOUCH, 0);
     processAxis(conv, EV_KEY, BTN_TOOL_FINGER, 0);
 
     processAxis(conv, EV_KEY, BTN_LEFT, 0);
-    args = processSync(conv);
-    ASSERT_EQ(3u, args.size());
-    EXPECT_THAT(std::get<NotifyMotionArgs>(args.front()),
-                WithMotionAction(AMOTION_EVENT_ACTION_MOVE));
-    args.pop_front();
-    EXPECT_THAT(std::get<NotifyMotionArgs>(args.front()),
-                AllOf(WithMotionAction(AMOTION_EVENT_ACTION_BUTTON_RELEASE), WithPointerCount(1u),
-                      WithCoords(50, 100), WithActionButton(AMOTION_EVENT_BUTTON_PRIMARY),
-                      WithButtonState(0)));
-    args.pop_front();
-    EXPECT_THAT(std::get<NotifyMotionArgs>(args.front()),
-                WithMotionAction(AMOTION_EVENT_ACTION_UP));
+    EXPECT_THAT(processSync(conv),
+                ElementsAre(VariantWith<NotifyMotionArgs>(
+                                    WithMotionAction(AMOTION_EVENT_ACTION_MOVE)),
+                            VariantWith<NotifyMotionArgs>(
+                                    AllOf(WithMotionAction(AMOTION_EVENT_ACTION_BUTTON_RELEASE),
+                                          WithPointerCount(1u), WithCoords(50, 100),
+                                          WithActionButton(AMOTION_EVENT_BUTTON_PRIMARY),
+                                          WithButtonState(0))),
+                            VariantWith<NotifyMotionArgs>(
+                                    WithMotionAction(AMOTION_EVENT_ACTION_UP))));
 }
 
 // Some touchpads sometimes report a button press before they report the finger touching the pad. In
@@ -841,15 +938,14 @@ TEST_F(CapturedTouchpadEventConverterTest, ButtonPressedBeforeTouch_ReportedOnce
     processAxis(conv, EV_KEY, BTN_TOUCH, 1);
     processAxis(conv, EV_KEY, BTN_TOOL_FINGER, 1);
 
-    std::list<NotifyArgs> args = processSync(conv);
-    ASSERT_EQ(2u, args.size());
-    EXPECT_THAT(std::get<NotifyMotionArgs>(args.front()),
-                WithMotionAction(AMOTION_EVENT_ACTION_DOWN));
-    args.pop_front();
-    EXPECT_THAT(std::get<NotifyMotionArgs>(args.front()),
-                AllOf(WithMotionAction(AMOTION_EVENT_ACTION_BUTTON_PRESS), WithPointerCount(1u),
-                      WithCoords(50, 100), WithActionButton(AMOTION_EVENT_BUTTON_PRIMARY),
-                      WithButtonState(AMOTION_EVENT_BUTTON_PRIMARY)));
+    EXPECT_THAT(processSync(conv),
+                ElementsAre(VariantWith<NotifyMotionArgs>(
+                                    WithMotionAction(AMOTION_EVENT_ACTION_DOWN)),
+                            VariantWith<NotifyMotionArgs>(
+                                    AllOf(WithMotionAction(AMOTION_EVENT_ACTION_BUTTON_PRESS),
+                                          WithPointerCount(1u), WithCoords(50, 100),
+                                          WithActionButton(AMOTION_EVENT_BUTTON_PRIMARY),
+                                          WithButtonState(AMOTION_EVENT_BUTTON_PRIMARY)))));
 }
 
 // When all fingers are lifted from a touchpad, we should release any buttons that are down, since
@@ -866,29 +962,25 @@ TEST_F(CapturedTouchpadEventConverterTest, ButtonReleasedAfterTouchLifts_Reporte
 
     processAxis(conv, EV_KEY, BTN_LEFT, 1);
 
-    std::list<NotifyArgs> args = processSync(conv);
-    ASSERT_EQ(2u, args.size());
-    EXPECT_THAT(std::get<NotifyMotionArgs>(args.front()),
-                WithMotionAction(AMOTION_EVENT_ACTION_DOWN));
-    args.pop_front();
-    EXPECT_THAT(std::get<NotifyMotionArgs>(args.front()),
-                WithMotionAction(AMOTION_EVENT_ACTION_BUTTON_PRESS));
+    EXPECT_THAT(processSync(conv),
+                ElementsAre(VariantWith<NotifyMotionArgs>(
+                                    WithMotionAction(AMOTION_EVENT_ACTION_DOWN)),
+                            VariantWith<NotifyMotionArgs>(
+                                    WithMotionAction(AMOTION_EVENT_ACTION_BUTTON_PRESS))));
 
     processAxis(conv, EV_ABS, ABS_MT_TRACKING_ID, -1);
     processAxis(conv, EV_KEY, BTN_TOUCH, 0);
     processAxis(conv, EV_KEY, BTN_TOOL_FINGER, 0);
-    args = processSync(conv);
-    ASSERT_EQ(3u, args.size());
-    EXPECT_THAT(std::get<NotifyMotionArgs>(args.front()),
-                WithMotionAction(AMOTION_EVENT_ACTION_MOVE));
-    args.pop_front();
-    EXPECT_THAT(std::get<NotifyMotionArgs>(args.front()),
-                AllOf(WithMotionAction(AMOTION_EVENT_ACTION_BUTTON_RELEASE), WithPointerCount(1u),
-                      WithCoords(50, 100), WithActionButton(AMOTION_EVENT_BUTTON_PRIMARY),
-                      WithButtonState(0)));
-    args.pop_front();
-    EXPECT_THAT(std::get<NotifyMotionArgs>(args.front()),
-                WithMotionAction(AMOTION_EVENT_ACTION_UP));
+    EXPECT_THAT(processSync(conv),
+                ElementsAre(VariantWith<NotifyMotionArgs>(
+                                    WithMotionAction(AMOTION_EVENT_ACTION_MOVE)),
+                            VariantWith<NotifyMotionArgs>(
+                                    AllOf(WithMotionAction(AMOTION_EVENT_ACTION_BUTTON_RELEASE),
+                                          WithPointerCount(1u), WithCoords(50, 100),
+                                          WithActionButton(AMOTION_EVENT_BUTTON_PRIMARY),
+                                          WithButtonState(0))),
+                            VariantWith<NotifyMotionArgs>(
+                                    WithMotionAction(AMOTION_EVENT_ACTION_UP))));
 
     processAxis(conv, EV_KEY, BTN_LEFT, 0);
     ASSERT_EQ(0u, processSync(conv).size());
@@ -908,48 +1000,41 @@ TEST_F(CapturedTouchpadEventConverterTest, MultipleButtonsPressedDuringTouch_Rep
                 WithMotionAction(AMOTION_EVENT_ACTION_DOWN));
 
     processAxis(conv, EV_KEY, BTN_LEFT, 1);
-    std::list<NotifyArgs> args = processSync(conv);
-    ASSERT_EQ(2u, args.size());
-    EXPECT_THAT(std::get<NotifyMotionArgs>(args.front()),
-                WithMotionAction(AMOTION_EVENT_ACTION_MOVE));
-    args.pop_front();
-    EXPECT_THAT(std::get<NotifyMotionArgs>(args.front()),
-                AllOf(WithMotionAction(AMOTION_EVENT_ACTION_BUTTON_PRESS),
-                      WithActionButton(AMOTION_EVENT_BUTTON_PRIMARY),
-                      WithButtonState(AMOTION_EVENT_BUTTON_PRIMARY)));
+    EXPECT_THAT(processSync(conv),
+                ElementsAre(VariantWith<NotifyMotionArgs>(
+                                    WithMotionAction(AMOTION_EVENT_ACTION_MOVE)),
+                            VariantWith<NotifyMotionArgs>(
+                                    AllOf(WithMotionAction(AMOTION_EVENT_ACTION_BUTTON_PRESS),
+                                          WithActionButton(AMOTION_EVENT_BUTTON_PRIMARY),
+                                          WithButtonState(AMOTION_EVENT_BUTTON_PRIMARY)))));
 
     processAxis(conv, EV_KEY, BTN_RIGHT, 1);
-    args = processSync(conv);
-    ASSERT_EQ(2u, args.size());
-    EXPECT_THAT(std::get<NotifyMotionArgs>(args.front()),
-                WithMotionAction(AMOTION_EVENT_ACTION_MOVE));
-    args.pop_front();
-    EXPECT_THAT(std::get<NotifyMotionArgs>(args.front()),
-                AllOf(WithMotionAction(AMOTION_EVENT_ACTION_BUTTON_PRESS),
-                      WithActionButton(AMOTION_EVENT_BUTTON_SECONDARY),
-                      WithButtonState(AMOTION_EVENT_BUTTON_PRIMARY |
-                                      AMOTION_EVENT_BUTTON_SECONDARY)));
+    EXPECT_THAT(processSync(conv),
+                ElementsAre(VariantWith<NotifyMotionArgs>(
+                                    WithMotionAction(AMOTION_EVENT_ACTION_MOVE)),
+                            VariantWith<NotifyMotionArgs>(
+                                    AllOf(WithMotionAction(AMOTION_EVENT_ACTION_BUTTON_PRESS),
+                                          WithActionButton(AMOTION_EVENT_BUTTON_SECONDARY),
+                                          WithButtonState(AMOTION_EVENT_BUTTON_PRIMARY |
+                                                          AMOTION_EVENT_BUTTON_SECONDARY)))));
 
     processAxis(conv, EV_KEY, BTN_LEFT, 0);
-    args = processSync(conv);
-    ASSERT_EQ(2u, args.size());
-    EXPECT_THAT(std::get<NotifyMotionArgs>(args.front()),
-                WithMotionAction(AMOTION_EVENT_ACTION_MOVE));
-    args.pop_front();
-    EXPECT_THAT(std::get<NotifyMotionArgs>(args.front()),
-                AllOf(WithMotionAction(AMOTION_EVENT_ACTION_BUTTON_RELEASE),
-                      WithActionButton(AMOTION_EVENT_BUTTON_PRIMARY),
-                      WithButtonState(AMOTION_EVENT_BUTTON_SECONDARY)));
+    EXPECT_THAT(processSync(conv),
+                ElementsAre(VariantWith<NotifyMotionArgs>(
+                                    WithMotionAction(AMOTION_EVENT_ACTION_MOVE)),
+                            VariantWith<NotifyMotionArgs>(
+                                    AllOf(WithMotionAction(AMOTION_EVENT_ACTION_BUTTON_RELEASE),
+                                          WithActionButton(AMOTION_EVENT_BUTTON_PRIMARY),
+                                          WithButtonState(AMOTION_EVENT_BUTTON_SECONDARY)))));
 
     processAxis(conv, EV_KEY, BTN_RIGHT, 0);
-    args = processSync(conv);
-    ASSERT_EQ(2u, args.size());
-    EXPECT_THAT(std::get<NotifyMotionArgs>(args.front()),
-                WithMotionAction(AMOTION_EVENT_ACTION_MOVE));
-    args.pop_front();
-    EXPECT_THAT(std::get<NotifyMotionArgs>(args.front()),
-                AllOf(WithMotionAction(AMOTION_EVENT_ACTION_BUTTON_RELEASE),
-                      WithActionButton(AMOTION_EVENT_BUTTON_SECONDARY), WithButtonState(0)));
+    EXPECT_THAT(processSync(conv),
+                ElementsAre(VariantWith<NotifyMotionArgs>(
+                                    WithMotionAction(AMOTION_EVENT_ACTION_MOVE)),
+                            VariantWith<NotifyMotionArgs>(
+                                    AllOf(WithMotionAction(AMOTION_EVENT_ACTION_BUTTON_RELEASE),
+                                          WithActionButton(AMOTION_EVENT_BUTTON_SECONDARY),
+                                          WithButtonState(0)))));
 }
 
 } // namespace android

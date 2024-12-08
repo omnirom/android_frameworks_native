@@ -23,7 +23,7 @@
 
 #include <cutils/properties.h>
 #include <gtest/gtest.h>
-#include <gui/AidlStatusUtil.h>
+#include <gui/AidlUtil.h>
 #include <gui/ISurfaceComposer.h>
 #include <gui/SurfaceComposerClient.h>
 #include <private/gui/ComposerService.h>

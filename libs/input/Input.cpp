@@ -580,7 +580,7 @@ void MotionEvent::initialize(int32_t id, int32_t deviceId, uint32_t source,
                               &pointerProperties[pointerCount]);
     mSampleEventTimes.clear();
     mSamplePointerCoords.clear();
-    addSample(eventTime, pointerCoords);
+    addSample(eventTime, pointerCoords, mId);
 }
 
 void MotionEvent::copyFrom(const MotionEvent* other, bool keepHistory) {
@@ -640,9 +640,9 @@ void MotionEvent::splitFrom(const android::MotionEvent& other,
     mSampleEventTimes = other.mSampleEventTimes;
 }
 
-void MotionEvent::addSample(
-        int64_t eventTime,
-        const PointerCoords* pointerCoords) {
+void MotionEvent::addSample(int64_t eventTime, const PointerCoords* pointerCoords,
+                            int32_t eventId) {
+    mId = eventId;
     mSampleEventTimes.push_back(eventTime);
     mSamplePointerCoords.insert(mSamplePointerCoords.end(), &pointerCoords[0],
                                 &pointerCoords[getPointerCount()]);

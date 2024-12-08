@@ -26,6 +26,7 @@ cc_test {
     static_libs: [
         "libflagtest",
         "libgmock",
+        "perfetto_trace_protos",
     ],
     cflags: [
         "-Wall",
@@ -35,6 +36,8 @@ cc_test {
         "android.os.flags-aconfig-cc-host",
         "libbase",
         "libperfetto_c",
+        "liblog",
+        "libprotobuf-cpp-lite",
         "libtracing_perfetto",
     ],
     srcs: [

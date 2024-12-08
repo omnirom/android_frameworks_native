@@ -18,7 +18,7 @@
 #define LOG_TAG "LibSurfaceFlingerUnittests"
 
 #include <gtest/gtest.h>
-#include <gui/AidlStatusUtil.h>
+#include <gui/AidlUtil.h>
 #include <private/gui/ComposerService.h>
 #include <private/gui/ComposerServiceAIDL.h>
 

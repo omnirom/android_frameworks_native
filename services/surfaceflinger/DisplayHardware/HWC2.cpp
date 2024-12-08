@@ -41,6 +41,8 @@ using aidl::android::hardware::graphics::composer3::Color;
 using aidl::android::hardware::graphics::composer3::Composition;
 using AidlCapability = aidl::android::hardware::graphics::composer3::Capability;
 using aidl::android::hardware::graphics::composer3::DisplayCapability;
+using aidl::android::hardware::graphics::composer3::DisplayLuts;
+using aidl::android::hardware::graphics::composer3::Lut;
 using aidl::android::hardware::graphics::composer3::OverlayProperties;
 
 namespace android {
@@ -607,6 +609,19 @@ Error Display::getClientTargetProperty(
     return static_cast<Error>(error);
 }
 
+Error Display::getRequestedLuts(std::vector<DisplayLuts::LayerLut>* outLayerLuts) {
+    std::vector<DisplayLuts::LayerLut> tmpLayerLuts;
+    const auto error = mComposer.getRequestedLuts(mId, &tmpLayerLuts);
+    for (DisplayLuts::LayerLut& layerLut : tmpLayerLuts) {
+        if (layerLut.lut.pfd.get() >= 0) {
+            outLayerLuts->push_back({layerLut.layer,
+                                     Lut{ndk::ScopedFileDescriptor(layerLut.lut.pfd.release()),
+                                         layerLut.lut.lutProperties}});
+        }
+    }
+    return static_cast<Error>(error);
+}
+
 Error Display::getDisplayDecorationSupport(
         std::optional<aidl::android::hardware::graphics::common::DisplayDecorationSupport>*
                 support) {
@@ -660,6 +675,11 @@ void Display::loadDisplayCapabilities() {
         }
     });
 }
+
+void Display::setPhysicalSizeInMm(std::optional<ui::Size> size) {
+    mPhysicalSize = size;
+}
+
 } // namespace impl
 
 // Layer methods
@@ -1034,6 +1054,14 @@ Error Layer::setBlockingRegion(const Region& region) {
     mBlockingRegion = region;
     const auto hwcRects = convertRegionToHwcRects(region);
     const auto intError = mComposer.setLayerBlockingRegion(mDisplay->getId(), mId, hwcRects);
+    return static_cast<Error>(intError);
+}
+
+Error Layer::setLuts(std::vector<Lut>& luts) {
+    if (CC_UNLIKELY(!mDisplay)) {
+        return Error::BAD_DISPLAY;
+    }
+    const auto intError = mComposer.setLayerLuts(mDisplay->getId(), mId, luts);
     return static_cast<Error>(intError);
 }
 

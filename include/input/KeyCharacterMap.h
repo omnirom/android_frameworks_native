@@ -126,9 +126,9 @@ public:
     bool getEvents(int32_t deviceId, const char16_t* chars, size_t numChars,
             Vector<KeyEvent>& outEvents) const;
 
-    /* Maps an Android key code to another Android key code. This mapping is applied after scanCode
-     * and usageCodes are mapped to corresponding Android Keycode */
-    void addKeyRemapping(int32_t fromKeyCode, int32_t toKeyCode);
+    /* Maps some Android key code to another Android key code. This mapping is applied after
+     * scanCode and usageCodes are mapped to corresponding Android Keycode */
+    void setKeyRemapping(const std::map<int32_t, int32_t>& keyRemapping);
 
     /* Maps a scan code and usage code to a key code, in case this key map overrides
      * the mapping in some way. */

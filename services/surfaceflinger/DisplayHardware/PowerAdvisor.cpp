@@ -27,9 +27,9 @@
 #include <optional>
 
 #include <android-base/properties.h>
+#include <common/trace.h>
 #include <utils/Log.h>
 #include <utils/Mutex.h>
-#include <utils/Trace.h>
 
 #include <binder/IServiceManager.h>
 
@@ -74,9 +74,9 @@ std::chrono::milliseconds getUpdateTimeout() {
 
 void traceExpensiveRendering(bool enabled) {
     if (enabled) {
-        ATRACE_ASYNC_BEGIN("ExpensiveRendering", 0);
+        SFTRACE_ASYNC_BEGIN("ExpensiveRendering", 0);
     } else {
-        ATRACE_ASYNC_END("ExpensiveRendering", 0);
+        SFTRACE_ASYNC_END("ExpensiveRendering", 0);
     }
 }
 
@@ -210,8 +210,8 @@ void PowerAdvisor::sendHintSessionHint(SessionHint hint) {
         ALOGV("Power hint session is not enabled, skip sending session hint");
         return;
     }
-    ATRACE_CALL();
-    if (sTraceHintSessionData) ATRACE_INT("Session hint", static_cast<int>(hint));
+    SFTRACE_CALL();
+    if (sTraceHintSessionData) SFTRACE_INT("Session hint", static_cast<int>(hint));
     {
         std::scoped_lock lock(mHintSessionMutex);
         if (!ensurePowerHintSessionRunning()) {
@@ -295,10 +295,10 @@ void PowerAdvisor::updateTargetWorkDuration(Duration targetDuration) {
         ALOGV("Power hint session is not enabled, skipping target update");
         return;
     }
-    ATRACE_CALL();
+    SFTRACE_CALL();
     {
         mTargetDuration = targetDuration;
-        if (sTraceHintSessionData) ATRACE_INT64("Time target", targetDuration.ns());
+        if (sTraceHintSessionData) SFTRACE_INT64("Time target", targetDuration.ns());
         if (targetDuration == mLastTargetDurationSent) return;
         std::scoped_lock lock(mHintSessionMutex);
         if (!ensurePowerHintSessionRunning()) {
@@ -324,7 +324,7 @@ void PowerAdvisor::reportActualWorkDuration() {
         ALOGV("Actual work duration power hint cannot be sent, skipping");
         return;
     }
-    ATRACE_CALL();
+    SFTRACE_CALL();
     std::optional<WorkDuration> actualDuration = estimateWorkDuration();
     if (!actualDuration.has_value() || actualDuration->durationNanos < 0) {
         ALOGV("Failed to send actual work duration, skipping");
@@ -332,16 +332,16 @@ void PowerAdvisor::reportActualWorkDuration() {
     }
     actualDuration->durationNanos += sTargetSafetyMargin.ns();
     if (sTraceHintSessionData) {
-        ATRACE_INT64("Measured duration", actualDuration->durationNanos);
-        ATRACE_INT64("Target error term", actualDuration->durationNanos - mTargetDuration.ns());
-        ATRACE_INT64("Reported duration", actualDuration->durationNanos);
+        SFTRACE_INT64("Measured duration", actualDuration->durationNanos);
+        SFTRACE_INT64("Target error term", actualDuration->durationNanos - mTargetDuration.ns());
+        SFTRACE_INT64("Reported duration", actualDuration->durationNanos);
         if (supportsGpuReporting()) {
-            ATRACE_INT64("Reported cpu duration", actualDuration->cpuDurationNanos);
-            ATRACE_INT64("Reported gpu duration", actualDuration->gpuDurationNanos);
+            SFTRACE_INT64("Reported cpu duration", actualDuration->cpuDurationNanos);
+            SFTRACE_INT64("Reported gpu duration", actualDuration->gpuDurationNanos);
         }
-        ATRACE_INT64("Reported target", mLastTargetDurationSent.ns());
-        ATRACE_INT64("Reported target error term",
-                     actualDuration->durationNanos - mLastTargetDurationSent.ns());
+        SFTRACE_INT64("Reported target", mLastTargetDurationSent.ns());
+        SFTRACE_INT64("Reported target error term",
+                      actualDuration->durationNanos - mLastTargetDurationSent.ns());
     }
 
     ALOGV("Sending actual work duration of: %" PRId64 " with cpu: %" PRId64 " and gpu: %" PRId64
@@ -664,9 +664,9 @@ std::optional<WorkDuration> PowerAdvisor::estimateWorkDuration() {
             .gpuDurationNanos = supportsGpuReporting() ? estimatedGpuDuration.ns() : 0,
     };
     if (sTraceHintSessionData) {
-        ATRACE_INT64("Idle duration", idleDuration.ns());
-        ATRACE_INT64("Total duration", totalDuration.ns());
-        ATRACE_INT64("Flinger duration", flingerDuration.ns());
+        SFTRACE_INT64("Idle duration", idleDuration.ns());
+        SFTRACE_INT64("Total duration", totalDuration.ns());
+        SFTRACE_INT64("Flinger duration", flingerDuration.ns());
     }
     return std::make_optional(duration);
 }

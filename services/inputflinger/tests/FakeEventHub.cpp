@@ -16,6 +16,8 @@
 
 #include "FakeEventHub.h"
 
+#include <optional>
+
 #include <android-base/thread_annotations.h>
 #include <gtest/gtest.h>
 #include <linux/input-event-codes.h>
@@ -86,10 +88,6 @@ status_t FakeEventHub::disableDevice(int32_t deviceId) {
     return device->disable();
 }
 
-void FakeEventHub::finishDeviceScan() {
-    enqueueEvent(ARBITRARY_TIME, READ_TIME, 0, EventHubInterface::FINISHED_DEVICE_SCAN, 0, 0);
-}
-
 void FakeEventHub::addConfigurationProperty(int32_t deviceId, const char* key, const char* value) {
     getDevice(deviceId)->configuration.addProperty(key, value);
 }
@@ -103,7 +101,6 @@ void FakeEventHub::addAbsoluteAxis(int32_t deviceId, int axis, int32_t minValue,
     Device* device = getDevice(deviceId);
 
     RawAbsoluteAxisInfo info;
-    info.valid = true;
     info.minValue = minValue;
     info.maxValue = maxValue;
     info.flat = flat;
@@ -154,9 +151,10 @@ void FakeEventHub::addKeyCodeMapping(int32_t deviceId, int32_t fromKeyCode, int3
     getDevice(deviceId)->keyCodeMapping.insert_or_assign(fromKeyCode, toKeyCode);
 }
 
-void FakeEventHub::addKeyRemapping(int32_t deviceId, int32_t fromKeyCode, int32_t toKeyCode) const {
+void FakeEventHub::setKeyRemapping(int32_t deviceId,
+                                   const std::map<int32_t, int32_t>& keyRemapping) const {
     Device* device = getDevice(deviceId);
-    device->keyRemapping.insert_or_assign(fromKeyCode, toKeyCode);
+    device->keyRemapping = keyRemapping;
 }
 
 void FakeEventHub::addLed(int32_t deviceId, int32_t led, bool initialState) {
@@ -263,18 +261,16 @@ std::optional<PropertyMap> FakeEventHub::getConfiguration(int32_t deviceId) cons
     return device->configuration;
 }
 
-status_t FakeEventHub::getAbsoluteAxisInfo(int32_t deviceId, int axis,
-                                           RawAbsoluteAxisInfo* outAxisInfo) const {
+std::optional<RawAbsoluteAxisInfo> FakeEventHub::getAbsoluteAxisInfo(int32_t deviceId,
+                                                                     int axis) const {
     Device* device = getDevice(deviceId);
     if (device) {
         ssize_t index = device->absoluteAxes.indexOfKey(axis);
         if (index >= 0) {
-            *outAxisInfo = device->absoluteAxes.valueAt(index);
-            return OK;
+            return device->absoluteAxes.valueAt(index);
         }
     }
-    outAxisInfo->clear();
-    return -1;
+    return std::nullopt;
 }
 
 bool FakeEventHub::hasRelativeAxis(int32_t deviceId, int axis) const {
@@ -417,18 +413,15 @@ int32_t FakeEventHub::getSwitchState(int32_t deviceId, int32_t sw) const {
     return AKEY_STATE_UNKNOWN;
 }
 
-status_t FakeEventHub::getAbsoluteAxisValue(int32_t deviceId, int32_t axis,
-                                            int32_t* outValue) const {
+std::optional<int32_t> FakeEventHub::getAbsoluteAxisValue(int32_t deviceId, int32_t axis) const {
     Device* device = getDevice(deviceId);
     if (device) {
         ssize_t index = device->absoluteAxisValue.indexOfKey(axis);
         if (index >= 0) {
-            *outValue = device->absoluteAxisValue.valueAt(index);
-            return OK;
+            return device->absoluteAxisValue.valueAt(index);
         }
     }
-    *outValue = 0;
-    return -1;
+    return std::nullopt;
 }
 
 void FakeEventHub::setMtSlotValues(int32_t deviceId, int32_t axis,

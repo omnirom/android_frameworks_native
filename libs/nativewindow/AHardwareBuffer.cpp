@@ -196,10 +196,10 @@ int AHardwareBuffer_lockAndGetInfo(AHardwareBuffer* buffer, uint64_t usage,
         return BAD_VALUE;
     }
 
-    if (usage & ~(AHARDWAREBUFFER_USAGE_CPU_READ_MASK |
-                  AHARDWAREBUFFER_USAGE_CPU_WRITE_MASK)) {
+    if (usage & ~(AHARDWAREBUFFER_USAGE_CPU_READ_MASK | AHARDWAREBUFFER_USAGE_CPU_WRITE_MASK) ||
+        usage == 0) {
         ALOGE("Invalid usage flags passed to AHardwareBuffer_lock; only "
-                "AHARDWAREBUFFER_USAGE_CPU_* flags are allowed");
+              "AHARDWAREBUFFER_USAGE_CPU_* flags are allowed");
         return BAD_VALUE;
     }
 
@@ -248,10 +248,10 @@ int AHardwareBuffer_lock(AHardwareBuffer* buffer, uint64_t usage,
 
     if (!buffer) return BAD_VALUE;
 
-    if (usage & ~(AHARDWAREBUFFER_USAGE_CPU_READ_MASK |
-                  AHARDWAREBUFFER_USAGE_CPU_WRITE_MASK)) {
+    if (usage & ~(AHARDWAREBUFFER_USAGE_CPU_READ_MASK | AHARDWAREBUFFER_USAGE_CPU_WRITE_MASK) ||
+        usage == 0) {
         ALOGE("Invalid usage flags passed to AHardwareBuffer_lock; only "
-                "AHARDWAREBUFFER_USAGE_CPU_* flags are allowed");
+              "AHARDWAREBUFFER_USAGE_CPU_* flags are allowed");
         return BAD_VALUE;
     }
 
@@ -277,10 +277,10 @@ int AHardwareBuffer_lockPlanes(AHardwareBuffer* buffer, uint64_t usage,
         int32_t fence, const ARect* rect, AHardwareBuffer_Planes* outPlanes) {
     if (!buffer || !outPlanes) return BAD_VALUE;
 
-    if (usage & ~(AHARDWAREBUFFER_USAGE_CPU_READ_MASK |
-                  AHARDWAREBUFFER_USAGE_CPU_WRITE_MASK)) {
+    if (usage & ~(AHARDWAREBUFFER_USAGE_CPU_READ_MASK | AHARDWAREBUFFER_USAGE_CPU_WRITE_MASK) ||
+        usage == 0) {
         ALOGE("Invalid usage flags passed to AHardwareBuffer_lock; only "
-                " AHARDWAREBUFFER_USAGE_CPU_* flags are allowed");
+              " AHARDWAREBUFFER_USAGE_CPU_* flags are allowed");
         return BAD_VALUE;
     }
 

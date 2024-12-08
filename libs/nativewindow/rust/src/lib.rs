@@ -16,7 +16,10 @@
 
 extern crate nativewindow_bindgen as ffi;
 
+mod handle;
 mod surface;
+
+pub use handle::NativeHandle;
 pub use surface::Surface;
 
 pub use ffi::{AHardwareBuffer_Format, AHardwareBuffer_UsageFlags};
@@ -27,10 +30,85 @@ use binder::{
     unstable_api::{status_result, AsNative},
     StatusCode,
 };
-use ffi::{AHardwareBuffer, AHardwareBuffer_readFromParcel, AHardwareBuffer_writeToParcel};
+use ffi::{
+    AHardwareBuffer, AHardwareBuffer_Desc, AHardwareBuffer_readFromParcel,
+    AHardwareBuffer_writeToParcel,
+};
 use std::fmt::{self, Debug, Formatter};
 use std::mem::ManuallyDrop;
 use std::ptr::{self, null_mut, NonNull};
+
+/// Wrapper around a C `AHardwareBuffer_Desc`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct HardwareBufferDescription(AHardwareBuffer_Desc);
+
+impl HardwareBufferDescription {
+    /// Creates a new `HardwareBufferDescription` with the given parameters.
+    pub fn new(
+        width: u32,
+        height: u32,
+        layers: u32,
+        format: AHardwareBuffer_Format::Type,
+        usage: AHardwareBuffer_UsageFlags,
+        stride: u32,
+    ) -> Self {
+        Self(AHardwareBuffer_Desc {
+            width,
+            height,
+            layers,
+            format,
+            usage: usage.0,
+            stride,
+            rfu0: 0,
+            rfu1: 0,
+        })
+    }
+
+    /// Returns the width from the buffer description.
+    pub fn width(&self) -> u32 {
+        self.0.width
+    }
+
+    /// Returns the height from the buffer description.
+    pub fn height(&self) -> u32 {
+        self.0.height
+    }
+
+    /// Returns the number from layers from the buffer description.
+    pub fn layers(&self) -> u32 {
+        self.0.layers
+    }
+
+    /// Returns the format from the buffer description.
+    pub fn format(&self) -> AHardwareBuffer_Format::Type {
+        self.0.format
+    }
+
+    /// Returns the usage bitvector from the buffer description.
+    pub fn usage(&self) -> AHardwareBuffer_UsageFlags {
+        AHardwareBuffer_UsageFlags(self.0.usage)
+    }
+
+    /// Returns the stride from the buffer description.
+    pub fn stride(&self) -> u32 {
+        self.0.stride
+    }
+}
+
+impl Default for HardwareBufferDescription {
+    fn default() -> Self {
+        Self(AHardwareBuffer_Desc {
+            width: 0,
+            height: 0,
+            layers: 0,
+            format: 0,
+            usage: 0,
+            stride: 0,
+            rfu0: 0,
+            rfu1: 0,
+        })
+    }
+}
 
 /// Wrapper around an opaque C `AHardwareBuffer`.
 #[derive(PartialEq, Eq)]
@@ -43,26 +121,9 @@ impl HardwareBuffer {
     /// that the allocation of the given description will never succeed.
     ///
     /// Available since API 29
-    pub fn is_supported(
-        width: u32,
-        height: u32,
-        layers: u32,
-        format: AHardwareBuffer_Format::Type,
-        usage: AHardwareBuffer_UsageFlags,
-        stride: u32,
-    ) -> bool {
-        let buffer_desc = ffi::AHardwareBuffer_Desc {
-            width,
-            height,
-            layers,
-            format,
-            usage: usage.0,
-            stride,
-            rfu0: 0,
-            rfu1: 0,
-        };
-        // SAFETY: *buffer_desc will never be null.
-        let status = unsafe { ffi::AHardwareBuffer_isSupported(&buffer_desc) };
+    pub fn is_supported(buffer_description: &HardwareBufferDescription) -> bool {
+        // SAFETY: The pointer comes from a reference so must be valid.
+        let status = unsafe { ffi::AHardwareBuffer_isSupported(&buffer_description.0) };
 
         status == 1
     }
@@ -74,33 +135,61 @@ impl HardwareBuffer {
     ///
     /// Available since API level 26.
     #[inline]
-    pub fn new(
-        width: u32,
-        height: u32,
-        layers: u32,
-        format: AHardwareBuffer_Format::Type,
-        usage: AHardwareBuffer_UsageFlags,
-    ) -> Option<Self> {
-        let buffer_desc = ffi::AHardwareBuffer_Desc {
-            width,
-            height,
-            layers,
-            format,
-            usage: usage.0,
-            stride: 0,
-            rfu0: 0,
-            rfu1: 0,
-        };
+    pub fn new(buffer_description: &HardwareBufferDescription) -> Option<Self> {
         let mut ptr = ptr::null_mut();
         // SAFETY: The returned pointer is valid until we drop/deallocate it. The function may fail
         // and return a status, but we check it later.
-        let status = unsafe { ffi::AHardwareBuffer_allocate(&buffer_desc, &mut ptr) };
+        let status = unsafe { ffi::AHardwareBuffer_allocate(&buffer_description.0, &mut ptr) };
 
         if status == 0 {
             Some(Self(NonNull::new(ptr).expect("Allocated AHardwareBuffer was null")))
         } else {
             None
         }
+    }
+
+    /// Creates a `HardwareBuffer` from a native handle.
+    ///
+    /// The native handle is cloned, so this doesn't take ownership of the original handle passed
+    /// in.
+    pub fn create_from_handle(
+        handle: &NativeHandle,
+        buffer_description: &HardwareBufferDescription,
+    ) -> Result<Self, StatusCode> {
+        let mut buffer = ptr::null_mut();
+        // SAFETY: The caller guarantees that `handle` is valid, and the buffer pointer is valid
+        // because it comes from a reference. The method we pass means that
+        // `AHardwareBuffer_createFromHandle` will clone the handle rather than taking ownership of
+        // it.
+        let status = unsafe {
+            ffi::AHardwareBuffer_createFromHandle(
+                &buffer_description.0,
+                handle.as_raw().as_ptr(),
+                ffi::CreateFromHandleMethod_AHARDWAREBUFFER_CREATE_FROM_HANDLE_METHOD_CLONE
+                    .try_into()
+                    .unwrap(),
+                &mut buffer,
+            )
+        };
+        status_result(status)?;
+        Ok(Self(NonNull::new(buffer).expect("Allocated AHardwareBuffer was null")))
+    }
+
+    /// Returns a clone of the native handle of the buffer.
+    ///
+    /// Returns `None` if the operation fails for any reason.
+    pub fn cloned_native_handle(&self) -> Option<NativeHandle> {
+        // SAFETY: The AHardwareBuffer pointer we pass is guaranteed to be non-null and valid
+        // because it must have been allocated by `AHardwareBuffer_allocate`,
+        // `AHardwareBuffer_readFromParcel` or the caller of `from_raw` and we have not yet
+        // released it.
+        let native_handle = unsafe { ffi::AHardwareBuffer_getNativeHandle(self.0.as_ptr()) };
+        NonNull::new(native_handle.cast_mut()).and_then(|native_handle| {
+            // SAFETY: `AHardwareBuffer_getNativeHandle` should have returned a valid pointer which
+            // is valid at least as long as the buffer is, and `clone_from_raw` clones it rather
+            // than taking ownership of it so the original `native_handle` isn't stored.
+            unsafe { NativeHandle::clone_from_raw(native_handle) }
+        })
     }
 
     /// Adopts the given raw pointer and wraps it in a Rust HardwareBuffer.
@@ -155,37 +244,8 @@ impl HardwareBuffer {
         out_id
     }
 
-    /// Get the width of this buffer
-    pub fn width(&self) -> u32 {
-        self.description().width
-    }
-
-    /// Get the height of this buffer
-    pub fn height(&self) -> u32 {
-        self.description().height
-    }
-
-    /// Get the number of layers of this buffer
-    pub fn layers(&self) -> u32 {
-        self.description().layers
-    }
-
-    /// Get the format of this buffer
-    pub fn format(&self) -> AHardwareBuffer_Format::Type {
-        self.description().format
-    }
-
-    /// Get the usage bitvector of this buffer
-    pub fn usage(&self) -> AHardwareBuffer_UsageFlags {
-        AHardwareBuffer_UsageFlags(self.description().usage)
-    }
-
-    /// Get the stride of this buffer
-    pub fn stride(&self) -> u32 {
-        self.description().stride
-    }
-
-    fn description(&self) -> ffi::AHardwareBuffer_Desc {
+    /// Returns the description of this buffer.
+    pub fn description(&self) -> HardwareBufferDescription {
         let mut buffer_desc = ffi::AHardwareBuffer_Desc {
             width: 0,
             height: 0,
@@ -198,7 +258,7 @@ impl HardwareBuffer {
         };
         // SAFETY: neither the buffer nor AHardwareBuffer_Desc pointers will be null.
         unsafe { ffi::AHardwareBuffer_describe(self.0.as_ref(), &mut buffer_desc) };
-        buffer_desc
+        HardwareBufferDescription(buffer_desc)
     }
 }
 
@@ -281,19 +341,27 @@ mod test {
 
     #[test]
     fn create_valid_buffer_returns_ok() {
-        let buffer = HardwareBuffer::new(
+        let buffer = HardwareBuffer::new(&HardwareBufferDescription::new(
             512,
             512,
             1,
             AHardwareBuffer_Format::AHARDWAREBUFFER_FORMAT_R8G8B8A8_UNORM,
             AHardwareBuffer_UsageFlags::AHARDWAREBUFFER_USAGE_CPU_READ_OFTEN,
-        );
+            0,
+        ));
         assert!(buffer.is_some());
     }
 
     #[test]
     fn create_invalid_buffer_returns_err() {
-        let buffer = HardwareBuffer::new(512, 512, 1, 0, AHardwareBuffer_UsageFlags(0));
+        let buffer = HardwareBuffer::new(&HardwareBufferDescription::new(
+            512,
+            512,
+            1,
+            0,
+            AHardwareBuffer_UsageFlags(0),
+            0,
+        ));
         assert!(buffer.is_none());
     }
 
@@ -319,39 +387,45 @@ mod test {
         // SAFETY: The pointer must be valid because it was just allocated successfully, and we
         // don't use it after calling this.
         let buffer = unsafe { HardwareBuffer::from_raw(NonNull::new(raw_buffer_ptr).unwrap()) };
-        assert_eq!(buffer.width(), 1024);
+        assert_eq!(buffer.description().width(), 1024);
     }
 
     #[test]
     fn basic_getters() {
-        let buffer = HardwareBuffer::new(
+        let buffer = HardwareBuffer::new(&HardwareBufferDescription::new(
             1024,
             512,
             1,
             AHardwareBuffer_Format::AHARDWAREBUFFER_FORMAT_R8G8B8A8_UNORM,
             AHardwareBuffer_UsageFlags::AHARDWAREBUFFER_USAGE_CPU_READ_OFTEN,
-        )
+            0,
+        ))
         .expect("Buffer with some basic parameters was not created successfully");
 
-        assert_eq!(buffer.width(), 1024);
-        assert_eq!(buffer.height(), 512);
-        assert_eq!(buffer.layers(), 1);
-        assert_eq!(buffer.format(), AHardwareBuffer_Format::AHARDWAREBUFFER_FORMAT_R8G8B8A8_UNORM);
+        let description = buffer.description();
+        assert_eq!(description.width(), 1024);
+        assert_eq!(description.height(), 512);
+        assert_eq!(description.layers(), 1);
         assert_eq!(
-            buffer.usage(),
+            description.format(),
+            AHardwareBuffer_Format::AHARDWAREBUFFER_FORMAT_R8G8B8A8_UNORM
+        );
+        assert_eq!(
+            description.usage(),
             AHardwareBuffer_UsageFlags::AHARDWAREBUFFER_USAGE_CPU_READ_OFTEN
         );
     }
 
     #[test]
     fn id_getter() {
-        let buffer = HardwareBuffer::new(
+        let buffer = HardwareBuffer::new(&HardwareBufferDescription::new(
             1024,
             512,
             1,
             AHardwareBuffer_Format::AHARDWAREBUFFER_FORMAT_R8G8B8A8_UNORM,
             AHardwareBuffer_UsageFlags::AHARDWAREBUFFER_USAGE_CPU_READ_OFTEN,
-        )
+            0,
+        ))
         .expect("Buffer with some basic parameters was not created successfully");
 
         assert_ne!(0, buffer.id());
@@ -359,13 +433,14 @@ mod test {
 
     #[test]
     fn clone() {
-        let buffer = HardwareBuffer::new(
+        let buffer = HardwareBuffer::new(&HardwareBufferDescription::new(
             1024,
             512,
             1,
             AHardwareBuffer_Format::AHARDWAREBUFFER_FORMAT_R8G8B8A8_UNORM,
             AHardwareBuffer_UsageFlags::AHARDWAREBUFFER_USAGE_CPU_READ_OFTEN,
-        )
+            0,
+        ))
         .expect("Buffer with some basic parameters was not created successfully");
         let buffer2 = buffer.clone();
 
@@ -374,13 +449,14 @@ mod test {
 
     #[test]
     fn into_raw() {
-        let buffer = HardwareBuffer::new(
+        let buffer = HardwareBuffer::new(&HardwareBufferDescription::new(
             1024,
             512,
             1,
             AHardwareBuffer_Format::AHARDWAREBUFFER_FORMAT_R8G8B8A8_UNORM,
             AHardwareBuffer_UsageFlags::AHARDWAREBUFFER_USAGE_CPU_READ_OFTEN,
-        )
+            0,
+        ))
         .expect("Buffer with some basic parameters was not created successfully");
         let buffer2 = buffer.clone();
 
@@ -389,5 +465,27 @@ mod test {
         let remade_buffer = unsafe { HardwareBuffer::from_raw(raw_buffer) };
 
         assert_eq!(remade_buffer, buffer2);
+    }
+
+    #[test]
+    fn native_handle_and_back() {
+        let buffer_description = HardwareBufferDescription::new(
+            1024,
+            512,
+            1,
+            AHardwareBuffer_Format::AHARDWAREBUFFER_FORMAT_R8G8B8A8_UNORM,
+            AHardwareBuffer_UsageFlags::AHARDWAREBUFFER_USAGE_CPU_READ_OFTEN,
+            1024,
+        );
+        let buffer = HardwareBuffer::new(&buffer_description)
+            .expect("Buffer with some basic parameters was not created successfully");
+
+        let native_handle =
+            buffer.cloned_native_handle().expect("Failed to get native handle for buffer");
+        let buffer2 = HardwareBuffer::create_from_handle(&native_handle, &buffer_description)
+            .expect("Failed to create buffer from native handle");
+
+        assert_eq!(buffer.description(), buffer_description);
+        assert_eq!(buffer2.description(), buffer_description);
     }
 }

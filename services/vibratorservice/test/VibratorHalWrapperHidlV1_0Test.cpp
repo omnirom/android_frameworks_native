@@ -16,7 +16,8 @@
 
 #define LOG_TAG "VibratorHalWrapperHidlV1_0Test"
 
-#include <android/hardware/vibrator/IVibrator.h>
+#include <aidl/android/hardware/vibrator/IVibrator.h>
+#include <android/persistable_bundle_aidl.h>
 
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
@@ -27,17 +28,21 @@
 #include <vibratorservice/VibratorCallbackScheduler.h>
 #include <vibratorservice/VibratorHalWrapper.h>
 
+#include "test_mocks.h"
 #include "test_utils.h"
 
 namespace V1_0 = android::hardware::vibrator::V1_0;
 
-using android::hardware::vibrator::Braking;
-using android::hardware::vibrator::CompositeEffect;
-using android::hardware::vibrator::CompositePrimitive;
-using android::hardware::vibrator::Effect;
-using android::hardware::vibrator::EffectStrength;
-using android::hardware::vibrator::IVibrator;
-using android::hardware::vibrator::PrimitivePwle;
+using aidl::android::hardware::vibrator::Braking;
+using aidl::android::hardware::vibrator::CompositeEffect;
+using aidl::android::hardware::vibrator::CompositePrimitive;
+using aidl::android::hardware::vibrator::Effect;
+using aidl::android::hardware::vibrator::EffectStrength;
+using aidl::android::hardware::vibrator::IVibrator;
+using aidl::android::hardware::vibrator::PrimitivePwle;
+using aidl::android::hardware::vibrator::PwleV2Primitive;
+using aidl::android::hardware::vibrator::VendorEffect;
+using aidl::android::os::PersistableBundle;
 
 using namespace android;
 using namespace std::chrono_literals;
@@ -215,6 +220,9 @@ TEST_F(VibratorHalWrapperHidlV1_0Test, TestGetInfoDoesNotCacheFailedResult) {
     ASSERT_TRUE(info.frequencyResolution.isUnsupported());
     ASSERT_TRUE(info.qFactor.isUnsupported());
     ASSERT_TRUE(info.maxAmplitudes.isUnsupported());
+    ASSERT_TRUE(info.maxEnvelopeEffectSize.isUnsupported());
+    ASSERT_TRUE(info.minEnvelopeEffectControlPointDuration.isUnsupported());
+    ASSERT_TRUE(info.maxEnvelopeEffectControlPointDuration.isUnsupported());
 }
 
 TEST_F(VibratorHalWrapperHidlV1_0Test, TestGetInfoWithoutAmplitudeControl) {
@@ -248,6 +256,9 @@ TEST_F(VibratorHalWrapperHidlV1_0Test, TestGetInfoCachesResult) {
     ASSERT_TRUE(info.frequencyResolution.isUnsupported());
     ASSERT_TRUE(info.qFactor.isUnsupported());
     ASSERT_TRUE(info.maxAmplitudes.isUnsupported());
+    ASSERT_TRUE(info.maxEnvelopeEffectSize.isUnsupported());
+    ASSERT_TRUE(info.minEnvelopeEffectControlPointDuration.isUnsupported());
+    ASSERT_TRUE(info.maxEnvelopeEffectControlPointDuration.isUnsupported());
 }
 
 TEST_F(VibratorHalWrapperHidlV1_0Test, TestPerformEffect) {
@@ -316,6 +327,22 @@ TEST_F(VibratorHalWrapperHidlV1_0Test, TestPerformEffectUnsupported) {
     ASSERT_EQ(0, *callbackCounter.get());
 }
 
+TEST_F(VibratorHalWrapperHidlV1_0Test, TestPerformVendorEffectUnsupported) {
+    PersistableBundle vendorData; // empty
+    VendorEffect vendorEffect;
+    vendorEffect.vendorData = vendorData;
+    vendorEffect.strength = EffectStrength::LIGHT;
+    vendorEffect.scale = 1.0f;
+
+    std::unique_ptr<int32_t> callbackCounter = std::make_unique<int32_t>();
+    auto callback = vibrator::TestFactory::createCountingCallback(callbackCounter.get());
+
+    ASSERT_TRUE(mWrapper->performVendorEffect(vendorEffect, callback).isUnsupported());
+
+    // No callback is triggered.
+    ASSERT_EQ(0, *callbackCounter.get());
+}
+
 TEST_F(VibratorHalWrapperHidlV1_0Test, TestPerformComposedEffectUnsupported) {
     std::vector<CompositeEffect> emptyEffects, singleEffect, multipleEffects;
     singleEffect.push_back(
@@ -345,6 +372,22 @@ TEST_F(VibratorHalWrapperHidlV1_0Test, TestPerformPwleEffectUnsupported) {
 
     ASSERT_TRUE(mWrapper->performPwleEffect(emptyPrimitives, callback).isUnsupported());
     ASSERT_TRUE(mWrapper->performPwleEffect(multiplePrimitives, callback).isUnsupported());
+
+    // No callback is triggered.
+    ASSERT_EQ(0, *callbackCounter.get());
+}
+
+TEST_F(VibratorHalWrapperHidlV1_0Test, TestComposePwleV2Unsupported) {
+    auto pwleEffect = {
+            PwleV2Primitive(/*amplitude=*/0.2, /*frequency=*/50, /*time=*/100),
+            PwleV2Primitive(/*amplitude=*/0.5, /*frequency=*/150, /*time=*/100),
+            PwleV2Primitive(/*amplitude=*/0.8, /*frequency=*/250, /*time=*/100),
+    };
+
+    std::unique_ptr<int32_t> callbackCounter = std::make_unique<int32_t>();
+    auto callback = vibrator::TestFactory::createCountingCallback(callbackCounter.get());
+
+    ASSERT_TRUE(mWrapper->composePwleV2(pwleEffect, callback).isUnsupported());
 
     // No callback is triggered.
     ASSERT_EQ(0, *callbackCounter.get());

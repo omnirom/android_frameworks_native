@@ -17,8 +17,8 @@
 #ifndef ANDROID_OS_VIBRATORHALCONTROLLER_H
 #define ANDROID_OS_VIBRATORHALCONTROLLER_H
 
+#include <aidl/android/hardware/vibrator/IVibrator.h>
 #include <android-base/thread_annotations.h>
-#include <android/hardware/vibrator/IVibrator.h>
 
 #include <vibratorservice/VibratorCallbackScheduler.h>
 #include <vibratorservice/VibratorHalWrapper.h>

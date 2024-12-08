@@ -18,6 +18,7 @@
 #include <binder/IServiceManager.h>
 #include <binder/LazyServiceRegistrar.h>
 
+#include "../Utils.h"
 #include "ibinder_internal.h"
 #include "status_internal.h"
 
@@ -89,7 +90,9 @@ AIBinder* AServiceManager_getService(const char* instance) {
     }
 
     sp<IServiceManager> sm = defaultServiceManager();
+    LIBBINDER_IGNORE("-Wdeprecated-declarations")
     sp<IBinder> binder = sm->getService(String16(instance));
+    LIBBINDER_IGNORE_END()
 
     sp<AIBinder> ret = ABpBinder::lookupOrCreateFromBinder(binder);
     AIBinder_incStrong(ret.get());

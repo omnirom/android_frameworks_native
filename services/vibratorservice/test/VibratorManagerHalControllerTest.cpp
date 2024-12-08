@@ -24,6 +24,7 @@
 
 #include <vibratorservice/VibratorManagerHalController.h>
 
+#include "test_mocks.h"
 #include "test_utils.h"
 
 using android::vibrator::HalController;
@@ -34,6 +35,8 @@ using namespace testing;
 static constexpr int MAX_ATTEMPTS = 2;
 static const std::vector<int32_t> VIBRATOR_IDS = {1, 2};
 static constexpr int VIBRATOR_ID = 1;
+
+// -------------------------------------------------------------------------------------------------
 
 class MockManagerHalWrapper : public vibrator::ManagerHalWrapper {
 public:
@@ -50,6 +53,8 @@ public:
                 (const std::function<void()>& completionCallback), (override));
     MOCK_METHOD(vibrator::HalResult<void>, cancelSynced, (), (override));
 };
+
+// -------------------------------------------------------------------------------------------------
 
 class VibratorManagerHalControllerTest : public Test {
 public:
@@ -105,6 +110,8 @@ protected:
         }
     }
 };
+
+// -------------------------------------------------------------------------------------------------
 
 TEST_F(VibratorManagerHalControllerTest, TestInit) {
     mController->init();

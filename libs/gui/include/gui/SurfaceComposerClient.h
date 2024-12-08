@@ -35,14 +35,17 @@
 #include <ui/BlurRegion.h>
 #include <ui/ConfigStoreTypes.h>
 #include <ui/DisplayedFrameStats.h>
+#include <ui/EdgeExtensionEffect.h>
 #include <ui/FrameStats.h>
 #include <ui/GraphicTypes.h>
 #include <ui/PixelFormat.h>
 #include <ui/Rotation.h>
 #include <ui/StaticDisplayInfo.h>
 
+#include <android/gui/BnJankListener.h>
 #include <android/gui/ISurfaceComposerClient.h>
 
+#include <gui/BufferReleaseChannel.h>
 #include <gui/CpuConsumer.h>
 #include <gui/ISurfaceComposer.h>
 #include <gui/ITransactionCompletedListener.h>
@@ -337,6 +340,8 @@ public:
     static std::optional<aidl::android::hardware::graphics::common::DisplayDecorationSupport>
     getDisplayDecorationSupport(const sp<IBinder>& displayToken);
 
+    static bool flagEdgeExtensionEffectUseShader();
+
     // ------------------------------------------------------------------------
     // surface creation / destruction
 
@@ -447,7 +452,6 @@ public:
 
         uint64_t mId;
 
-        uint32_t mTransactionNestCount = 0;
         bool mAnimation = false;
         bool mEarlyWakeupStart = false;
         bool mEarlyWakeupEnd = false;
@@ -743,10 +747,25 @@ public:
         Transaction& setStretchEffect(const sp<SurfaceControl>& sc,
                                       const StretchEffect& stretchEffect);
 
+        /**
+         * Provides the edge extension effect configured on a container that the
+         * surface is rendered within.
+         * @param sc target surface the edge extension should be applied to
+         * @param effect the corresponding EdgeExtensionParameters to be applied
+         *    to the surface.
+         * @return The transaction being constructed
+         */
+        Transaction& setEdgeExtensionEffect(const sp<SurfaceControl>& sc,
+                                            const gui::EdgeExtensionParameters& effect);
+
         Transaction& setBufferCrop(const sp<SurfaceControl>& sc, const Rect& bufferCrop);
         Transaction& setDestinationFrame(const sp<SurfaceControl>& sc,
                                          const Rect& destinationFrame);
         Transaction& setDropInputMode(const sp<SurfaceControl>& sc, gui::DropInputMode mode);
+
+        Transaction& setBufferReleaseChannel(
+                const sp<SurfaceControl>& sc,
+                const std::shared_ptr<gui::BufferReleaseChannel::ProducerEndpoint>& channel);
 
         status_t setDisplaySurface(const sp<IBinder>& token,
                 const sp<IGraphicBufferProducer>& bufferProducer);
@@ -864,11 +883,81 @@ public:
 
 // ---------------------------------------------------------------------------
 
-class JankDataListener : public VirtualLightRefBase {
+class JankDataListener;
+
+// Acts as a representative listener to the composer for a single layer and
+// forwards any received jank data to multiple listeners. Will remove itself
+// from the composer only once the last listener is removed.
+class JankDataListenerFanOut : public gui::BnJankListener {
 public:
-    virtual ~JankDataListener() = 0;
-    virtual void onJankDataAvailable(const std::vector<JankData>& jankData) = 0;
+    JankDataListenerFanOut(int32_t layerId) : mLayerId(layerId) {}
+
+    binder::Status onJankData(const std::vector<gui::JankData>& jankData) override;
+
+    static status_t addListener(sp<SurfaceControl> sc, sp<JankDataListener> listener);
+    static status_t removeListener(sp<JankDataListener> listener);
+
+private:
+    std::vector<sp<JankDataListener>> getActiveListeners();
+    bool removeListeners(const std::vector<wp<JankDataListener>>& listeners);
+    int64_t updateAndGetRemovalVSync();
+
+    struct WpJDLHash {
+        std::size_t operator()(const wp<JankDataListener>& listener) const {
+            return std::hash<JankDataListener*>{}(listener.unsafe_get());
+        }
+    };
+
+    std::mutex mMutex;
+    std::unordered_set<wp<JankDataListener>, WpJDLHash> mListeners GUARDED_BY(mMutex);
+    int32_t mLayerId;
+    int64_t mRemoveAfter = -1;
+
+    static std::mutex sFanoutInstanceMutex;
+    static std::unordered_map<int32_t, sp<JankDataListenerFanOut>> sFanoutInstances;
 };
+
+// Base class for client listeners interested in jank classification data from
+// the composer. Subclasses should override onJankDataAvailable and call the add
+// and removal methods to receive jank data.
+class JankDataListener : public virtual RefBase {
+public:
+    JankDataListener() {}
+    virtual ~JankDataListener();
+
+    virtual bool onJankDataAvailable(const std::vector<gui::JankData>& jankData) = 0;
+
+    status_t addListener(sp<SurfaceControl> sc) {
+        if (mLayerId != -1) {
+            removeListener(0);
+            mLayerId = -1;
+        }
+
+        int32_t layerId = sc->getLayerId();
+        status_t status =
+                JankDataListenerFanOut::addListener(std::move(sc),
+                                                    sp<JankDataListener>::fromExisting(this));
+        if (status == OK) {
+            mLayerId = layerId;
+        }
+        return status;
+    }
+
+    status_t removeListener(int64_t afterVsync) {
+        mRemoveAfter = std::max(static_cast<int64_t>(0), afterVsync);
+        return JankDataListenerFanOut::removeListener(sp<JankDataListener>::fromExisting(this));
+    }
+
+    status_t flushJankData();
+
+    friend class JankDataListenerFanOut;
+
+private:
+    int32_t mLayerId = -1;
+    int64_t mRemoveAfter = -1;
+};
+
+// ---------------------------------------------------------------------------
 
 class TransactionCompletedListener : public BnTransactionCompletedListener {
 public:
@@ -904,7 +993,6 @@ protected:
 
     std::unordered_map<CallbackId, CallbackTranslation, CallbackIdHash> mCallbacks
             GUARDED_BY(mMutex);
-    std::multimap<int32_t, sp<JankDataListener>> mJankListeners GUARDED_BY(mMutex);
     std::unordered_map<ReleaseCallbackId, ReleaseBufferCallback, ReleaseBufferCallbackIdHash>
             mReleaseBufferCallbacks GUARDED_BY(mMutex);
 
@@ -927,14 +1015,10 @@ public:
             const std::unordered_set<sp<SurfaceControl>, SurfaceComposerClient::SCHash>&
                     surfaceControls,
             CallbackId::Type callbackType);
-    CallbackId addCallbackFunctionLocked(
-            const TransactionCompletedCallback& callbackFunction,
-            const std::unordered_set<sp<SurfaceControl>, SurfaceComposerClient::SCHash>&
-                    surfaceControls,
-            CallbackId::Type callbackType) REQUIRES(mMutex);
 
-    void addSurfaceControlToCallbacks(SurfaceComposerClient::CallbackInfo& callbackInfo,
-                                      const sp<SurfaceControl>& surfaceControl);
+    void addSurfaceControlToCallbacks(
+            const sp<SurfaceControl>& surfaceControl,
+            const std::unordered_set<CallbackId, CallbackIdHash>& callbackIds);
 
     void addQueueStallListener(std::function<void(const std::string&)> stallListener, void* id);
     void removeQueueStallListener(void *id);
@@ -942,18 +1026,6 @@ public:
     sp<SurfaceComposerClient::PresentationCallbackRAII> addTrustedPresentationCallback(
             TrustedPresentationCallback tpc, int id, void* context);
     void clearTrustedPresentationCallback(int id);
-
-    /*
-     * Adds a jank listener to be informed about SurfaceFlinger's jank classification for a specific
-     * surface. Jank classifications arrive as part of the transaction callbacks about previous
-     * frames submitted to this Surface.
-     */
-    void addJankListener(const sp<JankDataListener>& listener, sp<SurfaceControl> surfaceControl);
-
-    /**
-     * Removes a jank listener previously added to addJankCallback.
-     */
-    void removeJankListener(const sp<JankDataListener>& listener);
 
     void addSurfaceStatsListener(void* context, void* cookie, sp<SurfaceControl> surfaceControl,
                 SurfaceStatsCallback listener);

@@ -20,7 +20,7 @@
 
 #include <android-base/thread_annotations.h>
 #include <android/hardware/graphics/common/1.2/types.h>
-#include <gui/AidlStatusUtil.h>
+#include <gui/AidlUtil.h>
 #include <gui/BufferQueueCore.h>
 #include <gui/BufferQueueProducer.h>
 #include <gui/FrameTimestamps.h>
@@ -186,6 +186,10 @@ public:
         mBlastBufferQueueAdapter->mergeWithNextTransaction(merge, frameNumber);
     }
 
+    void setApplyToken(sp<IBinder> applyToken) {
+        mBlastBufferQueueAdapter->setApplyToken(std::move(applyToken));
+    }
+
 private:
     sp<TestBLASTBufferQueue> mBlastBufferQueueAdapter;
 };
@@ -229,7 +233,8 @@ protected:
                                                  ISurfaceComposerClient::eFXSurfaceBufferState,
                                                  /*parent*/ mRootSurfaceControl->getHandle());
 
-        mCaptureArgs.sourceCrop = Rect(ui::Size(mDisplayWidth, mDisplayHeight));
+        mCaptureArgs.captureArgs.sourceCrop =
+                gui::aidl_utils::toARect(mDisplayWidth, mDisplayHeight);
         mCaptureArgs.layerHandle = mRootSurfaceControl->getHandle();
     }
 
@@ -508,6 +513,69 @@ TEST_F(BLASTBufferQueueTest, TripleBuffering) {
         igbProducer->queueBuffer(slot, input, &qbOutput);
     }
     adapter.waitForCallbacks();
+}
+
+class WaitForCommittedCallback {
+public:
+    WaitForCommittedCallback() = default;
+    ~WaitForCommittedCallback() = default;
+
+    void wait() {
+        std::unique_lock lock(mMutex);
+        cv.wait(lock, [this] { return mCallbackReceived; });
+    }
+
+    void notify() {
+        std::unique_lock lock(mMutex);
+        mCallbackReceived = true;
+        cv.notify_one();
+        mCallbackReceivedTimeStamp = std::chrono::system_clock::now();
+    }
+    auto getCallback() {
+        return [this](void* /* unused context */, nsecs_t /* latchTime */,
+                      const sp<Fence>& /* presentFence */,
+                      const std::vector<SurfaceControlStats>& /* stats */) { notify(); };
+    }
+    std::chrono::time_point<std::chrono::system_clock> mCallbackReceivedTimeStamp;
+
+private:
+    std::mutex mMutex;
+    std::condition_variable cv;
+    bool mCallbackReceived = false;
+};
+
+TEST_F(BLASTBufferQueueTest, setApplyToken) {
+    sp<IBinder> applyToken = sp<BBinder>::make();
+    WaitForCommittedCallback firstTransaction;
+    WaitForCommittedCallback secondTransaction;
+    {
+        BLASTBufferQueueHelper adapter(mSurfaceControl, mDisplayWidth, mDisplayHeight);
+        adapter.setApplyToken(applyToken);
+        sp<IGraphicBufferProducer> igbProducer;
+        setUpProducer(adapter, igbProducer);
+
+        Transaction t;
+        t.addTransactionCommittedCallback(firstTransaction.getCallback(), nullptr);
+        adapter.mergeWithNextTransaction(&t, 1);
+        queueBuffer(igbProducer, 127, 127, 127,
+                    /*presentTimeDelay*/ std::chrono::nanoseconds(500ms).count());
+    }
+    {
+        BLASTBufferQueueHelper adapter(mSurfaceControl, mDisplayWidth, mDisplayHeight);
+        adapter.setApplyToken(applyToken);
+        sp<IGraphicBufferProducer> igbProducer;
+        setUpProducer(adapter, igbProducer);
+
+        Transaction t;
+        t.addTransactionCommittedCallback(secondTransaction.getCallback(), nullptr);
+        adapter.mergeWithNextTransaction(&t, 1);
+        queueBuffer(igbProducer, 127, 127, 127, /*presentTimeDelay*/ 0);
+    }
+
+    firstTransaction.wait();
+    secondTransaction.wait();
+    EXPECT_GT(secondTransaction.mCallbackReceivedTimeStamp,
+              firstTransaction.mCallbackReceivedTimeStamp);
 }
 
 TEST_F(BLASTBufferQueueTest, SetCrop_Item) {
@@ -1269,6 +1337,20 @@ public:
     }
 };
 
+class TestSurfaceListener : public SurfaceListener {
+public:
+    sp<IGraphicBufferProducer> mIgbp;
+    TestSurfaceListener(const sp<IGraphicBufferProducer>& igbp) : mIgbp(igbp) {}
+    void onBufferReleased() override {
+        sp<GraphicBuffer> buffer;
+        sp<Fence> fence;
+        mIgbp->detachNextBuffer(&buffer, &fence);
+    }
+    bool needsReleaseNotify() override { return true; }
+    void onBuffersDiscarded(const std::vector<sp<GraphicBuffer>>& /*buffers*/) override {}
+    void onBufferDetached(int /*slot*/) {}
+};
+
 TEST_F(BLASTBufferQueueTest, CustomProducerListener) {
     BLASTBufferQueueHelper adapter(mSurfaceControl, mDisplayWidth, mDisplayHeight);
     sp<IGraphicBufferProducer> igbProducer = adapter.getIGraphicBufferProducer();
@@ -1327,7 +1409,7 @@ TEST_F(BLASTBufferQueueTest, TransformHint) {
     ASSERT_EQ(ui::Transform::ROT_0, static_cast<ui::Transform::RotationFlags>(transformHint));
 
     ASSERT_EQ(NO_ERROR,
-              surface->connect(NATIVE_WINDOW_API_CPU, new TestProducerListener(igbProducer)));
+              surface->connect(NATIVE_WINDOW_API_CPU, new TestSurfaceListener(igbProducer)));
 
     // After connecting to the surface, we should get the correct hint.
     surface->query(NATIVE_WINDOW_TRANSFORM_HINT, &transformHint);

@@ -33,7 +33,6 @@ cc_binary {
         "libcutils",
         "libz",
         "libbase",
-        "libpdx_default_transport",
         "android.hardware.atrace@1.0",
     ],
 

@@ -20,6 +20,7 @@
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wconversion"
 
+#include <gui/AidlUtil.h>
 #include <private/android_filesystem_config.h>
 #include <ui/DisplayState.h>
 
@@ -65,7 +66,7 @@ protected:
                     .show(mFGSurfaceControl);
         });
 
-        mCaptureArgs.sourceCrop = mDisplayRect;
+        mCaptureArgs.captureArgs.sourceCrop = gui::aidl_utils::toARect(mDisplayRect);
         mCaptureArgs.layerHandle = mRootSurfaceControl->getHandle();
     }
 
@@ -112,7 +113,7 @@ TEST_F(ScreenCaptureTest, SetFlagsSecureEUidSystem) {
             shot->expectColor(Rect(0, 0, 32, 32), Color::BLACK);
         }
 
-        mCaptureArgs.captureSecureLayers = true;
+        mCaptureArgs.captureArgs.captureSecureLayers = true;
         // AID_SYSTEM is allowed to capture secure content.
         ASSERT_EQ(NO_ERROR, ScreenCapture::captureLayers(mCaptureArgs, mCaptureResults));
         ASSERT_TRUE(mCaptureResults.capturedSecureLayers);
@@ -164,7 +165,7 @@ TEST_F(ScreenCaptureTest, CaptureChildSetParentFlagsSecureEUidSystem) {
 
     // Here we pass captureSecureLayers = true and since we are AID_SYSTEM we should be able
     // to receive them...we are expected to take care with the results.
-    mCaptureArgs.captureSecureLayers = true;
+    mCaptureArgs.captureArgs.captureSecureLayers = true;
     ASSERT_EQ(NO_ERROR, ScreenCapture::captureLayers(mCaptureArgs, mCaptureResults));
     ASSERT_TRUE(mCaptureResults.capturedSecureLayers);
     ScreenCapture sc(mCaptureResults.buffer, mCaptureResults.capturedHdrLayers);
@@ -198,8 +199,8 @@ TEST_F(ScreenCaptureTest, CaptureChildRespectsParentSecureFlag) {
             .apply();
     LayerCaptureArgs captureArgs;
     captureArgs.layerHandle = childLayer->getHandle();
-    captureArgs.sourceCrop = size;
-    captureArgs.captureSecureLayers = false;
+    captureArgs.captureArgs.sourceCrop = gui::aidl_utils::toARect(size);
+    captureArgs.captureArgs.captureSecureLayers = false;
     {
         SCOPED_TRACE("parent hidden");
         ASSERT_EQ(NO_ERROR, ScreenCapture::captureLayers(captureArgs, mCaptureResults));
@@ -208,7 +209,7 @@ TEST_F(ScreenCaptureTest, CaptureChildRespectsParentSecureFlag) {
         sc.expectColor(size, Color::BLACK);
     }
 
-    captureArgs.captureSecureLayers = true;
+    captureArgs.captureArgs.captureSecureLayers = true;
     {
         SCOPED_TRACE("capture secure parent not visible");
         ASSERT_EQ(NO_ERROR, ScreenCapture::captureLayers(captureArgs, mCaptureResults));
@@ -218,7 +219,7 @@ TEST_F(ScreenCaptureTest, CaptureChildRespectsParentSecureFlag) {
     }
 
     Transaction().show(parentLayer).apply();
-    captureArgs.captureSecureLayers = false;
+    captureArgs.captureArgs.captureSecureLayers = false;
     {
         SCOPED_TRACE("parent visible");
         ASSERT_EQ(NO_ERROR, ScreenCapture::captureLayers(captureArgs, mCaptureResults));
@@ -227,7 +228,7 @@ TEST_F(ScreenCaptureTest, CaptureChildRespectsParentSecureFlag) {
         sc.expectColor(size, Color::BLACK);
     }
 
-    captureArgs.captureSecureLayers = true;
+    captureArgs.captureArgs.captureSecureLayers = true;
     {
         SCOPED_TRACE("capture secure parent visible");
         ASSERT_EQ(NO_ERROR, ScreenCapture::captureLayers(captureArgs, mCaptureResults));
@@ -259,8 +260,8 @@ TEST_F(ScreenCaptureTest, CaptureOffscreenChildRespectsParentSecureFlag) {
             .apply();
     LayerCaptureArgs captureArgs;
     captureArgs.layerHandle = childLayer->getHandle();
-    captureArgs.sourceCrop = size;
-    captureArgs.captureSecureLayers = false;
+    captureArgs.captureArgs.sourceCrop = gui::aidl_utils::toARect(size);
+    captureArgs.captureArgs.captureSecureLayers = false;
     {
         SCOPED_TRACE("parent hidden");
         ASSERT_EQ(NO_ERROR, ScreenCapture::captureLayers(captureArgs, mCaptureResults));
@@ -269,7 +270,7 @@ TEST_F(ScreenCaptureTest, CaptureOffscreenChildRespectsParentSecureFlag) {
         sc.expectColor(size, Color::BLACK);
     }
 
-    captureArgs.captureSecureLayers = true;
+    captureArgs.captureArgs.captureSecureLayers = true;
     {
         SCOPED_TRACE("capture secure parent not visible");
         ASSERT_EQ(NO_ERROR, ScreenCapture::captureLayers(captureArgs, mCaptureResults));
@@ -279,7 +280,7 @@ TEST_F(ScreenCaptureTest, CaptureOffscreenChildRespectsParentSecureFlag) {
     }
 
     Transaction().show(parentLayer).apply();
-    captureArgs.captureSecureLayers = false;
+    captureArgs.captureArgs.captureSecureLayers = false;
     {
         SCOPED_TRACE("parent visible");
         ASSERT_EQ(NO_ERROR, ScreenCapture::captureLayers(captureArgs, mCaptureResults));
@@ -288,7 +289,7 @@ TEST_F(ScreenCaptureTest, CaptureOffscreenChildRespectsParentSecureFlag) {
         sc.expectColor(size, Color::BLACK);
     }
 
-    captureArgs.captureSecureLayers = true;
+    captureArgs.captureArgs.captureSecureLayers = true;
     {
         SCOPED_TRACE("capture secure parent visible");
         ASSERT_EQ(NO_ERROR, ScreenCapture::captureLayers(captureArgs, mCaptureResults));
@@ -361,14 +362,14 @@ TEST_F(ScreenCaptureTest, CaptureLayerExclude) {
     LayerCaptureArgs captureArgs;
     captureArgs.layerHandle = fgHandle;
     captureArgs.childrenOnly = true;
-    captureArgs.excludeHandles = {child2->getHandle()};
+    captureArgs.captureArgs.excludeHandles = {child2->getHandle()};
     ScreenCapture::captureLayers(&mCapture, captureArgs);
     mCapture->checkPixel(10, 10, 0, 0, 0);
     mCapture->checkPixel(0, 0, 200, 200, 200);
 }
 
 TEST_F(ScreenCaptureTest, CaptureLayerExcludeThroughDisplayArgs) {
-    mCaptureArgs.excludeHandles = {mFGSurfaceControl->getHandle()};
+    mCaptureArgs.captureArgs.excludeHandles = {mFGSurfaceControl->getHandle()};
     ScreenCapture::captureLayers(&mCapture, mCaptureArgs);
     mCapture->expectBGColor(0, 0);
     // Doesn't capture FG layer which is at 64, 64
@@ -401,7 +402,7 @@ TEST_F(ScreenCaptureTest, CaptureLayerExcludeTree) {
     LayerCaptureArgs captureArgs;
     captureArgs.layerHandle = fgHandle;
     captureArgs.childrenOnly = true;
-    captureArgs.excludeHandles = {child2->getHandle()};
+    captureArgs.captureArgs.excludeHandles = {child2->getHandle()};
     ScreenCapture::captureLayers(&mCapture, captureArgs);
     mCapture->checkPixel(10, 10, 0, 0, 0);
     mCapture->checkPixel(0, 0, 200, 200, 200);
@@ -418,7 +419,7 @@ TEST_F(ScreenCaptureTest, CaptureTransparent) {
     // Captures child
     LayerCaptureArgs captureArgs;
     captureArgs.layerHandle = child->getHandle();
-    captureArgs.sourceCrop = {0, 0, 10, 20};
+    captureArgs.captureArgs.sourceCrop = gui::aidl_utils::toARect(10, 20);
     ScreenCapture::captureLayers(&mCapture, captureArgs);
     mCapture->expectColor(Rect(0, 0, 9, 9), {200, 200, 200, 255});
     // Area outside of child's bounds is transparent.
@@ -481,7 +482,7 @@ TEST_F(ScreenCaptureTest, CaptureBoundlessLayerWithSourceCrop) {
 
     LayerCaptureArgs captureArgs;
     captureArgs.layerHandle = child->getHandle();
-    captureArgs.sourceCrop = {0, 0, 10, 10};
+    captureArgs.captureArgs.sourceCrop = gui::aidl_utils::toARect(10, 10);
     ScreenCapture::captureLayers(&mCapture, captureArgs);
 
     mCapture->expectColor(Rect(0, 0, 9, 9), Color::RED);
@@ -623,7 +624,7 @@ TEST_F(ScreenCaptureTest, CaptureCrop) {
     // red area to the right of the blue area
     mCapture->expectColor(Rect(30, 0, 59, 59), Color::RED);
 
-    captureArgs.sourceCrop = {0, 0, 30, 30};
+    captureArgs.captureArgs.sourceCrop = gui::aidl_utils::toARect(30, 30);
     ScreenCapture::captureLayers(&mCapture, captureArgs);
     // Capturing the cropped screen, cropping out the shown red area, should leave only the blue
     // area visible.
@@ -658,8 +659,8 @@ TEST_F(ScreenCaptureTest, CaptureSize) {
     // red area to the right of the blue area
     mCapture->expectColor(Rect(30, 0, 59, 59), Color::RED);
 
-    captureArgs.frameScaleX = 0.5f;
-    captureArgs.frameScaleY = 0.5f;
+    captureArgs.captureArgs.frameScaleX = 0.5f;
+    captureArgs.captureArgs.frameScaleY = 0.5f;
     sleep(1);
 
     ScreenCapture::captureLayers(&mCapture, captureArgs);
@@ -689,8 +690,8 @@ TEST_F(ScreenCaptureTest, CaptureTooLargeLayer) {
 
     LayerCaptureArgs captureArgs;
     captureArgs.layerHandle = redLayer->getHandle();
-    captureArgs.frameScaleX = INT32_MAX / 60;
-    captureArgs.frameScaleY = INT32_MAX / 60;
+    captureArgs.captureArgs.frameScaleX = INT32_MAX / 60;
+    captureArgs.captureArgs.frameScaleY = INT32_MAX / 60;
 
     ScreenCaptureResults captureResults;
     ASSERT_EQ(BAD_VALUE, ScreenCapture::captureLayers(captureArgs, captureResults));
@@ -736,7 +737,7 @@ TEST_F(ScreenCaptureTest, CaptureSecureLayer) {
     mCapture->expectColor(Rect(30, 30, 60, 60), Color::RED);
 
     // Passing flag secure so the blue layer should be screenshot too.
-    args.captureSecureLayers = true;
+    args.captureArgs.captureSecureLayers = true;
     ScreenCapture::captureLayers(&mCapture, args);
     mCapture->expectColor(Rect(0, 0, 30, 30), Color::BLUE);
     mCapture->expectColor(Rect(30, 30, 60, 60), Color::RED);
@@ -780,7 +781,7 @@ TEST_F(ScreenCaptureTest, ScreenshotProtectedBuffer) {
     // Reading color data will expectedly result in crash, only check usage bit
     // b/309965549 Checking that the usage bit is protected does not work for
     // devices that do not support usage protected.
-    mCaptureArgs.allowProtected = true;
+    mCaptureArgs.captureArgs.allowProtected = true;
     ASSERT_EQ(NO_ERROR, ScreenCapture::captureLayers(mCaptureArgs, captureResults));
     // ASSERT_EQ(GRALLOC_USAGE_PROTECTED, GRALLOC_USAGE_PROTECTED &
     // captureResults.buffer->getUsage());
@@ -898,7 +899,7 @@ TEST_F(ScreenCaptureTest, CaptureLayerWithUid) {
 
     // Make screenshot request with current uid set. No layers were created with the current
     // uid so screenshot will be black.
-    captureArgs.uid = fakeUid;
+    captureArgs.captureArgs.uid = fakeUid;
     ScreenCapture::captureLayers(&mCapture, captureArgs);
     mCapture->expectColor(Rect(0, 0, 32, 32), Color::TRANSPARENT);
     mCapture->expectBorder(Rect(0, 0, 32, 32), Color::TRANSPARENT);
@@ -935,7 +936,7 @@ TEST_F(ScreenCaptureTest, CaptureLayerWithUid) {
     mCapture->expectBorder(Rect(128, 128, 160, 160), Color::TRANSPARENT);
 
     // Screenshot from the fakeUid caller with no uid requested allows everything to be screenshot.
-    captureArgs.uid = -1;
+    captureArgs.captureArgs.uid = -1;
     ScreenCapture::captureLayers(&mCapture, captureArgs);
     mCapture->expectColor(Rect(128, 128, 160, 160), Color::RED);
     mCapture->expectBorder(Rect(128, 128, 160, 160), {63, 63, 195, 255});
@@ -955,7 +956,7 @@ TEST_F(ScreenCaptureTest, CaptureWithGrayscale) {
     ScreenCapture::captureLayers(&mCapture, captureArgs);
     mCapture->expectColor(Rect(0, 0, 32, 32), Color::RED);
 
-    captureArgs.grayscale = true;
+    captureArgs.captureArgs.grayscale = true;
 
     const uint8_t tolerance = 1;
 
@@ -1052,7 +1053,7 @@ TEST_F(ScreenCaptureTest, captureOffscreenNullSnapshot) {
 
     LayerCaptureArgs captureArgs;
     captureArgs.layerHandle = mirroredLayer->getHandle();
-    captureArgs.sourceCrop = Rect(0, 0, 1, 1);
+    captureArgs.captureArgs.sourceCrop = gui::aidl_utils::toARect(1, 1);
 
     // Screenshot path should only use the children of the layer hierarchy so
     // that it will not create a new snapshot. A snapshot would otherwise be

@@ -139,9 +139,9 @@ sp<Surface> SurfaceControl::generateSurfaceLocked()
     uint32_t ignore;
     auto flags = mCreateFlags & (ISurfaceComposerClient::eCursorWindow |
                                  ISurfaceComposerClient::eOpaque);
-    mBbqChild = mClient->createSurface(String8("bbq-wrapper"), 0, 0, mFormat,
+    mBbqChild = mClient->createSurface(String8::format("[BBQ] %s", mName.c_str()), 0, 0, mFormat,
                                        flags, mHandle, {}, &ignore);
-    mBbq = sp<BLASTBufferQueue>::make("bbq-adapter", mBbqChild, mWidth, mHeight, mFormat);
+    mBbq = sp<BLASTBufferQueue>::make("[BBQ]" + mName, mBbqChild, mWidth, mHeight, mFormat);
 
     // This surface is always consumed by SurfaceFlinger, so the
     // producerControlledByApp value doesn't matter; using false.

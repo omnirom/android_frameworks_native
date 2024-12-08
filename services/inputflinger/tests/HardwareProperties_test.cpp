@@ -48,24 +48,19 @@ protected:
     static constexpr int32_t EVENTHUB_ID = 1;
 
     void setupValidAxis(int axis, int32_t min, int32_t max, int32_t resolution) {
-        EXPECT_CALL(mMockEventHub, getAbsoluteAxisInfo(EVENTHUB_ID, axis, testing::_))
-                .WillRepeatedly([=](int32_t, int32_t, RawAbsoluteAxisInfo* outAxisInfo) {
-                    outAxisInfo->valid = true;
-                    outAxisInfo->minValue = min;
-                    outAxisInfo->maxValue = max;
-                    outAxisInfo->flat = 0;
-                    outAxisInfo->fuzz = 0;
-                    outAxisInfo->resolution = resolution;
-                    return OK;
-                });
+        EXPECT_CALL(mMockEventHub, getAbsoluteAxisInfo(EVENTHUB_ID, axis))
+                .WillRepeatedly(Return(std::optional<RawAbsoluteAxisInfo>{{
+                        .minValue = min,
+                        .maxValue = max,
+                        .flat = 0,
+                        .fuzz = 0,
+                        .resolution = resolution,
+                }}));
     }
 
     void setupInvalidAxis(int axis) {
-        EXPECT_CALL(mMockEventHub, getAbsoluteAxisInfo(EVENTHUB_ID, axis, testing::_))
-                .WillRepeatedly([=](int32_t, int32_t, RawAbsoluteAxisInfo* outAxisInfo) {
-                    outAxisInfo->valid = false;
-                    return -1;
-                });
+        EXPECT_CALL(mMockEventHub, getAbsoluteAxisInfo(EVENTHUB_ID, axis))
+                .WillRepeatedly(Return(std::nullopt));
     }
 
     void setProperty(int property, bool value) {

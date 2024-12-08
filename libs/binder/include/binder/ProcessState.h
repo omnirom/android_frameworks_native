@@ -23,6 +23,9 @@
 
 #include <pthread.h>
 
+#include <atomic>
+#include <chrono>
+#include <condition_variable>
 #include <mutex>
 
 // ---------------------------------------------------------------------------
@@ -130,6 +133,7 @@ public:
     enum class DriverFeature {
         ONEWAY_SPAM_DETECTION,
         EXTENDED_ERROR,
+        FREEZE_NOTIFICATION,
     };
     // Determine whether a feature is supported by the binder driver.
     LIBBINDER_EXPORTED static bool isDriverFeatureEnabled(const DriverFeature feature);
@@ -162,30 +166,31 @@ private:
     int mDriverFD;
     void* mVMStart;
 
-    // Protects thread count and wait variables below.
-    mutable pthread_mutex_t mThreadCountLock;
-    // Broadcast whenever mWaitingForThreads > 0
-    pthread_cond_t mThreadCountDecrement;
+    mutable std::mutex mOnThreadAvailableLock;
+    std::condition_variable mOnThreadAvailableCondVar;
+    // Number of threads waiting on `mOnThreadAvailableCondVar`.
+    std::atomic_int64_t mOnThreadAvailableWaiting = 0;
+
     // Number of binder threads current executing a command.
-    size_t mExecutingThreadsCount;
-    // Number of threads calling IPCThreadState::blockUntilThreadAvailable()
-    size_t mWaitingForThreads;
+    std::atomic_size_t mExecutingThreadsCount;
     // Maximum number of lazy threads to be started in the threadpool by the kernel.
-    size_t mMaxThreads;
+    std::atomic_size_t mMaxThreads;
     // Current number of threads inside the thread pool.
-    size_t mCurrentThreads;
+    std::atomic_size_t mCurrentThreads;
     // Current number of pooled threads inside the thread pool.
-    size_t mKernelStartedThreads;
+    std::atomic_size_t mKernelStartedThreads;
     // Time when thread pool was emptied
-    int64_t mStarvationStartTimeMs;
+    std::atomic<std::chrono::steady_clock::time_point> mStarvationStartTime;
+
+    static constexpr auto never = &std::chrono::steady_clock::time_point::min;
 
     mutable std::mutex mLock; // protects everything below.
 
     Vector<handle_entry> mHandleToObject;
 
     bool mForked;
-    bool mThreadPoolStarted;
-    volatile int32_t mThreadPoolSeq;
+    std::atomic_bool mThreadPoolStarted;
+    std::atomic_int32_t mThreadPoolSeq;
 
     CallRestriction mCallRestriction;
 };

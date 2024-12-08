@@ -93,6 +93,8 @@ public:
      *                 readyDuration will typically be 0.
      * @lastVsync: The targeted display time. This will be snapped to the closest
      *                 predicted vsync time after lastVsync.
+     * @committedVsyncOpt: The display time that is committed to the callback as the
+     *                 target vsync time.
      *
      * callback will be dispatched at 'workDuration + readyDuration' nanoseconds before a vsync
      * event.
@@ -101,10 +103,11 @@ public:
         nsecs_t workDuration = 0;
         nsecs_t readyDuration = 0;
         nsecs_t lastVsync = 0;
+        std::optional<nsecs_t> committedVsyncOpt;
 
         bool operator==(const ScheduleTiming& other) const {
             return workDuration == other.workDuration && readyDuration == other.readyDuration &&
-                    lastVsync == other.lastVsync;
+                    lastVsync == other.lastVsync && committedVsyncOpt == other.committedVsyncOpt;
         }
 
         bool operator!=(const ScheduleTiming& other) const { return !(*this == other); }

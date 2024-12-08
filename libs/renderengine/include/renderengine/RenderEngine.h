@@ -97,6 +97,7 @@ struct PrimeCacheConfig {
     bool cacheImageDimmedLayers = true;
     bool cacheClippedLayers = true;
     bool cacheShadowLayers = true;
+    bool cacheEdgeExtension = true;
     bool cachePIPImageLayers = true;
     bool cacheTransparentImageDimmedLayers = true;
     bool cacheClippedDimmedImageLayers = true;
@@ -131,6 +132,7 @@ public:
         NONE,
         GAUSSIAN,
         KAWASE,
+        KAWASE_DUAL_FILTER,
     };
 
     static std::unique_ptr<RenderEngine> create(const RenderEngineCreationArgs& args);
@@ -206,6 +208,13 @@ public:
                                                 const std::vector<LayerSettings>& layers,
                                                 const std::shared_ptr<ExternalTexture>& buffer,
                                                 base::unique_fd&& bufferFence);
+
+    virtual ftl::Future<FenceResult> drawGainmap(const std::shared_ptr<ExternalTexture>& sdr,
+                                                 base::borrowed_fd&& sdrFence,
+                                                 const std::shared_ptr<ExternalTexture>& hdr,
+                                                 base::borrowed_fd&& hdrFence, float hdrSdrRatio,
+                                                 ui::Dataspace dataspace,
+                                                 const std::shared_ptr<ExternalTexture>& gainmap);
 
     // Clean-up method that should be called on the main thread after the
     // drawFence returned by drawLayers fires. This method will free up
@@ -284,8 +293,7 @@ protected:
 
     // Update protectedContext mode depending on whether or not any layer has a protected buffer.
     void updateProtectedContext(const std::vector<LayerSettings>&,
-                                const std::shared_ptr<ExternalTexture>&);
-
+                                std::vector<const ExternalTexture*>);
     // Attempt to switch RenderEngine into and out of protectedContext mode
     virtual void useProtectedContext(bool useProtectedContext) = 0;
 
@@ -293,6 +301,13 @@ protected:
             const std::shared_ptr<std::promise<FenceResult>>&& resultPromise,
             const DisplaySettings& display, const std::vector<LayerSettings>& layers,
             const std::shared_ptr<ExternalTexture>& buffer, base::unique_fd&& bufferFence) = 0;
+
+    virtual void drawGainmapInternal(
+            const std::shared_ptr<std::promise<FenceResult>>&& resultPromise,
+            const std::shared_ptr<ExternalTexture>& sdr, base::borrowed_fd&& sdrFence,
+            const std::shared_ptr<ExternalTexture>& hdr, base::borrowed_fd&& hdrFence,
+            float hdrSdrRatio, ui::Dataspace dataspace,
+            const std::shared_ptr<ExternalTexture>& gainmap) = 0;
 };
 
 struct RenderEngineCreationArgs {

@@ -239,7 +239,7 @@ void SetupNewDisplayDeviceInternalTest::setupNewDisplayDeviceInternalTest() {
         ASSERT_TRUE(displayId);
         const auto hwcDisplayId = Case::Display::HWC_DISPLAY_ID_OPT::value;
         ASSERT_TRUE(hwcDisplayId);
-        mFlinger.getHwComposer().allocatePhysicalDisplay(*hwcDisplayId, *displayId);
+        mFlinger.getHwComposer().allocatePhysicalDisplay(*hwcDisplayId, *displayId, std::nullopt);
         DisplayModePtr activeMode = DisplayMode::Builder(Case::Display::HWC_ACTIVE_CONFIG_ID)
                                             .setResolution(Case::Display::RESOLUTION)
                                             .setVsyncPeriod(DEFAULT_VSYNC_PERIOD)

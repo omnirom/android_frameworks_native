@@ -71,8 +71,23 @@ status_t RpcServer::setupUnixDomainServer(const char* path) {
     return setupSocketServer(UnixSocketAddress(path));
 }
 
-status_t RpcServer::setupVsockServer(unsigned int bindCid, unsigned int port) {
-    return setupSocketServer(VsockSocketAddress(bindCid, port));
+status_t RpcServer::setupVsockServer(unsigned bindCid, unsigned port, unsigned* assignedPort) {
+    auto status = setupSocketServer(VsockSocketAddress(bindCid, port));
+    if (status != OK) return status;
+
+    if (assignedPort == nullptr) return OK;
+    sockaddr_vm addr;
+    socklen_t len = sizeof(addr);
+    if (0 != getsockname(mServer.fd.get(), reinterpret_cast<sockaddr*>(&addr), &len)) {
+        status = -errno;
+        ALOGE("setupVsockServer: Failed to getsockname: %s", strerror(-status));
+        return status;
+    }
+
+    LOG_ALWAYS_FATAL_IF(len != sizeof(addr), "Wrong socket type: len %zu vs len %zu",
+                        static_cast<size_t>(len), sizeof(addr));
+    *assignedPort = addr.svm_port;
+    return OK;
 }
 
 status_t RpcServer::setupInetServer(const char* address, unsigned int port,

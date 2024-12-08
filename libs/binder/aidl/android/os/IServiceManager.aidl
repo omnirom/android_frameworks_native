@@ -18,6 +18,7 @@ package android.os;
 
 import android.os.IClientCallback;
 import android.os.IServiceCallback;
+import android.os.Service;
 import android.os.ServiceDebugInfo;
 import android.os.ConnectionInfo;
 
@@ -59,9 +60,23 @@ interface IServiceManager {
      * exists for legacy purposes.
      *
      * Returns null if the service does not exist.
+     *
+     * @deprecated TODO(b/355394904): Use getService2 instead.
      */
     @UnsupportedAppUsage
     @nullable IBinder getService(@utf8InCpp String name);
+
+    /**
+     * Retrieve an existing service called @a name from the
+     * service manager.
+     *
+     * This is the same as checkService (returns immediately) but
+     * exists for legacy purposes.
+     *
+     * Returns an enum Service that can be of different types. The
+     * enum value is null if the service does not exist.
+     */
+    Service getService2(@utf8InCpp String name);
 
     /**
      * Retrieve an existing service called @a name from the service
@@ -69,7 +84,7 @@ interface IServiceManager {
      * exist.
      */
     @UnsupportedAppUsage
-    @nullable IBinder checkService(@utf8InCpp String name);
+    Service checkService(@utf8InCpp String name);
 
     /**
      * Place a new @a service called @a name into the service

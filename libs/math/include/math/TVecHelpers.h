@@ -620,15 +620,10 @@ public:
 }  // namespace details
 }  // namespace android
 
-namespace std {
-    template<template<typename T> class VECTOR, typename T>
-    struct hash<VECTOR<T>> {
-        static constexpr bool IS_VECTOR =
-            std::is_base_of<android::details::TVecUnaryOperators<VECTOR, T>, VECTOR<T>>::value;
-
-        typename std::enable_if<IS_VECTOR, size_t>::type
-        operator()(const VECTOR<T>& v) const {
-            return v.hash();
-        }
-    };
-}
+#define TVECHELPERS_STD_HASH(VECTOR)                  \
+    template <typename T>                             \
+    struct std::hash<VECTOR<T>> {                     \
+        size_t operator()(const VECTOR<T>& v) const { \
+            return v.hash();                          \
+        }                                             \
+    }

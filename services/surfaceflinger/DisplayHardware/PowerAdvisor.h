@@ -300,7 +300,7 @@ private:
     bool mSessionConfigSupported = true;
     bool mFirstConfigSupportCheck = true;
 
-    // Whether we should emit ATRACE_INT data for hint sessions
+    // Whether we should emit SFTRACE_INT data for hint sessions
     static const bool sTraceHintSessionData;
 
     // Default target duration for the hint session

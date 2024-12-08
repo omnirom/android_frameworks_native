@@ -117,9 +117,9 @@ enum {
 };
 
 /**
- * One of the EXCEPTION_* types.
+ * One of the EX_* enumerators.
  *
- * All unrecognized values are coerced into EXCEPTION_TRANSACTION_FAILED.
+ * All unrecognized values are coerced into EX_TRANSACTION_FAILED.
  *
  * These exceptions values are used by the SDK for parcelables. Also see Parcel.java.
  */

@@ -20,8 +20,8 @@
 #define LOG_TAG "RenderEngine"
 #define ATRACE_TAG ATRACE_TAG_GRAPHICS
 
+#include <common/trace.h>
 #include <sys/resource.h>
-#include <utils/Trace.h>
 
 #include <system/thread_defs.h>
 #include <array>
@@ -31,7 +31,7 @@ namespace renderengine {
 namespace skia {
 
 CommonPool::CommonPool() {
-    ATRACE_CALL();
+    SFTRACE_CALL();
 
     CommonPool* pool = this;
     // Create 2 workers

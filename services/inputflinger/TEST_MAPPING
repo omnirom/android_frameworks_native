@@ -149,6 +149,9 @@
     },
     {
       "name": "monkey_test"
+    },
+    {
+      "name": "CtsSurfaceControlTests"
     }
   ],
   "postsubmit": [
@@ -290,11 +293,19 @@
     },
     {
       "name": "monkey_test"
+    },
+    {
+      "name": "CtsInputRootTestCases"
+    }
+  ],
+  "platinum-postsubmit": [
+    {
+      "name": "inputflinger_tests"
     }
   ],
   "staged-platinum-postsubmit": [
     {
-      "name": "inputflinger_tests"
+      "name": "libinput_tests"
     }
   ]
 }

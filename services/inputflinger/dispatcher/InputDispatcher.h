@@ -97,7 +97,6 @@ public:
     status_t stop() override;
 
     void notifyInputDevicesChanged(const NotifyInputDevicesChangedArgs& args) override;
-    void notifyConfigurationChanged(const NotifyConfigurationChangedArgs& args) override;
     void notifyKey(const NotifyKeyArgs& args) override;
     void notifyMotion(const NotifyMotionArgs& args) override;
     void notifySwitch(const NotifySwitchArgs& args) override;
@@ -154,8 +153,8 @@ public:
     // Public to allow tests to verify that a Monitor can get ANR.
     void setMonitorDispatchingTimeoutForTest(std::chrono::nanoseconds timeout);
 
-    void setKeyRepeatConfiguration(std::chrono::nanoseconds timeout,
-                                   std::chrono::nanoseconds delay) override;
+    void setKeyRepeatConfiguration(std::chrono::nanoseconds timeout, std::chrono::nanoseconds delay,
+                                   bool keyRepeatEnabled) override;
 
     bool isPointerInWindow(const sp<IBinder>& token, ui::LogicalDisplayId displayId,
                            DeviceId deviceId, int32_t pointerId) override;
@@ -258,7 +257,8 @@ private:
             int32_t pointerId) const REQUIRES(mLock);
 
     std::vector<sp<android::gui::WindowInfoHandle>> findTouchedSpyWindowsAtLocked(
-            ui::LogicalDisplayId displayId, float x, float y, bool isStylus) const REQUIRES(mLock);
+            ui::LogicalDisplayId displayId, float x, float y, bool isStylus,
+            DeviceId deviceId) const REQUIRES(mLock);
 
     sp<android::gui::WindowInfoHandle> findTouchedForegroundWindowLocked(
             ui::LogicalDisplayId displayId) const REQUIRES(mLock);
@@ -446,8 +446,6 @@ private:
             REQUIRES(mLock);
 
     // Dispatch inbound events.
-    bool dispatchConfigurationChangedLocked(nsecs_t currentTime,
-                                            const ConfigurationChangedEntry& entry) REQUIRES(mLock);
     bool dispatchDeviceResetLocked(nsecs_t currentTime, const DeviceResetEntry& entry)
             REQUIRES(mLock);
     bool dispatchKeyLocked(nsecs_t currentTime, std::shared_ptr<const KeyEntry> entry,
@@ -536,12 +534,11 @@ private:
     void resetNoFocusedWindowTimeoutLocked() REQUIRES(mLock);
 
     ui::LogicalDisplayId getTargetDisplayId(const EventEntry& entry);
-    sp<android::gui::WindowInfoHandle> findFocusedWindowTargetLocked(
-            nsecs_t currentTime, const EventEntry& entry, nsecs_t& nextWakeupTime,
-            android::os::InputEventInjectionResult& outInjectionResult) REQUIRES(mLock);
-    std::vector<InputTarget> findTouchedWindowTargetsLocked(
-            nsecs_t currentTime, const MotionEntry& entry,
-            android::os::InputEventInjectionResult& outInjectionResult) REQUIRES(mLock);
+    base::Result<sp<android::gui::WindowInfoHandle>, android::os::InputEventInjectionResult>
+    findFocusedWindowTargetLocked(nsecs_t currentTime, const EventEntry& entry,
+                                  nsecs_t& nextWakeupTime) REQUIRES(mLock);
+    base::Result<std::vector<InputTarget>, android::os::InputEventInjectionResult>
+    findTouchedWindowTargetsLocked(nsecs_t currentTime, const MotionEntry& entry) REQUIRES(mLock);
     std::vector<Monitor> selectResponsiveMonitorsLocked(
             const std::vector<Monitor>& gestureMonitors) const REQUIRES(mLock);
 
@@ -684,15 +681,20 @@ private:
                                   const std::string& reason) REQUIRES(mLock);
     void updateLastAnrStateLocked(const std::string& windowLabel, const std::string& reason)
             REQUIRES(mLock);
-    std::map<ui::LogicalDisplayId /*displayId*/, InputVerifier> mVerifiersByDisplay;
+    std::map<ui::LogicalDisplayId, InputVerifier> mVerifiersByDisplay;
     // Returns a fallback KeyEntry that should be sent to the connection, if required.
     std::unique_ptr<const KeyEntry> afterKeyEventLockedInterruptable(
             const std::shared_ptr<Connection>& connection, DispatchEntry* dispatchEntry,
             bool handled) REQUIRES(mLock);
 
     // Find touched state and touched window by token.
-    std::tuple<TouchState*, TouchedWindow*, ui::LogicalDisplayId /*displayId*/>
+    std::tuple<TouchState*, TouchedWindow*, ui::LogicalDisplayId>
     findTouchStateWindowAndDisplayLocked(const sp<IBinder>& token) REQUIRES(mLock);
+
+    std::tuple<const TouchState*, const TouchedWindow*, ui::LogicalDisplayId>
+    findTouchStateWindowAndDisplayLocked(const sp<IBinder>& token) const REQUIRES(mLock);
+    bool windowHasTouchingPointersLocked(const sp<android::gui::WindowInfoHandle>& windowHandle,
+                                         DeviceId deviceId) const REQUIRES(mLock);
 
     // Statistics gathering.
     LatencyAggregator mLatencyAggregator GUARDED_BY(mLock);
@@ -707,11 +709,23 @@ private:
 
     sp<InputReporterInterface> mReporter;
 
+    /**
+     * Slip the wallpaper touch if necessary.
+     *
+     * @param targetFlags the target flags
+     * @param oldWindowHandle the old window that the touch slipped out of
+     * @param newWindowHandle the new window that the touch is slipping into
+     * @param state the current touch state. This will be updated if necessary to reflect the new
+     *        windows that are receiving touch.
+     * @param deviceId the device id of the current motion being processed
+     * @param pointerProperties the pointer properties of the current motion being processed
+     * @param targets the current targets to add the walpaper ones to
+     * @param eventTime the new downTime for the wallpaper target
+     */
     void slipWallpaperTouch(ftl::Flags<InputTarget::Flags> targetFlags,
                             const sp<android::gui::WindowInfoHandle>& oldWindowHandle,
                             const sp<android::gui::WindowInfoHandle>& newWindowHandle,
-                            TouchState& state, DeviceId deviceId,
-                            const PointerProperties& pointerProperties,
+                            TouchState& state, const MotionEntry& entry,
                             std::vector<InputTarget>& targets) const REQUIRES(mLock);
     void transferWallpaperTouch(ftl::Flags<InputTarget::Flags> oldTargetFlags,
                                 ftl::Flags<InputTarget::Flags> newTargetFlags,

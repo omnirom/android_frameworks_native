@@ -28,66 +28,6 @@ using gui::ScreenCaptureResults;
 
 namespace test {
 
-TEST(LayerStateTest, ParcellingDisplayCaptureArgs) {
-    DisplayCaptureArgs args;
-    args.pixelFormat = ui::PixelFormat::RGB_565;
-    args.sourceCrop = Rect(0, 0, 500, 200);
-    args.frameScaleX = 2;
-    args.frameScaleY = 4;
-    args.captureSecureLayers = true;
-    args.displayToken = sp<BBinder>::make();
-    args.width = 10;
-    args.height = 20;
-    args.grayscale = true;
-
-    Parcel p;
-    args.writeToParcel(&p);
-    p.setDataPosition(0);
-
-    DisplayCaptureArgs args2;
-    args2.readFromParcel(&p);
-
-    ASSERT_EQ(args.pixelFormat, args2.pixelFormat);
-    ASSERT_EQ(args.sourceCrop, args2.sourceCrop);
-    ASSERT_EQ(args.frameScaleX, args2.frameScaleX);
-    ASSERT_EQ(args.frameScaleY, args2.frameScaleY);
-    ASSERT_EQ(args.captureSecureLayers, args2.captureSecureLayers);
-    ASSERT_EQ(args.displayToken, args2.displayToken);
-    ASSERT_EQ(args.width, args2.width);
-    ASSERT_EQ(args.height, args2.height);
-    ASSERT_EQ(args.grayscale, args2.grayscale);
-}
-
-TEST(LayerStateTest, ParcellingLayerCaptureArgs) {
-    LayerCaptureArgs args;
-    args.pixelFormat = ui::PixelFormat::RGB_565;
-    args.sourceCrop = Rect(0, 0, 500, 200);
-    args.frameScaleX = 2;
-    args.frameScaleY = 4;
-    args.captureSecureLayers = true;
-    args.layerHandle = sp<BBinder>::make();
-    args.excludeHandles = {sp<BBinder>::make(), sp<BBinder>::make()};
-    args.childrenOnly = false;
-    args.grayscale = true;
-
-    Parcel p;
-    args.writeToParcel(&p);
-    p.setDataPosition(0);
-
-    LayerCaptureArgs args2;
-    args2.readFromParcel(&p);
-
-    ASSERT_EQ(args.pixelFormat, args2.pixelFormat);
-    ASSERT_EQ(args.sourceCrop, args2.sourceCrop);
-    ASSERT_EQ(args.frameScaleX, args2.frameScaleX);
-    ASSERT_EQ(args.frameScaleY, args2.frameScaleY);
-    ASSERT_EQ(args.captureSecureLayers, args2.captureSecureLayers);
-    ASSERT_EQ(args.layerHandle, args2.layerHandle);
-    ASSERT_EQ(args.excludeHandles, args2.excludeHandles);
-    ASSERT_EQ(args.childrenOnly, args2.childrenOnly);
-    ASSERT_EQ(args.grayscale, args2.grayscale);
-}
-
 TEST(LayerStateTest, ParcellingScreenCaptureResultsWithFence) {
     ScreenCaptureResults results;
     results.buffer = sp<GraphicBuffer>::make(100u, 200u, PIXEL_FORMAT_RGBA_8888, 1u, 0u);

@@ -22,13 +22,14 @@ use nativewindow::*;
 
 #[inline]
 fn create_720p_buffer() -> HardwareBuffer {
-    HardwareBuffer::new(
+    HardwareBuffer::new(&HardwareBufferDescription::new(
         1280,
         720,
         1,
         AHardwareBuffer_Format::AHARDWAREBUFFER_FORMAT_R8G8B8A8_UNORM,
         AHardwareBuffer_UsageFlags::AHARDWAREBUFFER_USAGE_CPU_READ_OFTEN,
-    )
+        0,
+    ))
     .unwrap()
 }
 
@@ -51,7 +52,7 @@ fn criterion_benchmark(c: &mut Criterion) {
     // underlying call to AHardwareBuffer_describe.
     c.bench_with_input(BenchmarkId::new("desc", "buffer"), &buffer, |b, buffer| {
         b.iter(|| {
-            buffer.width();
+            buffer.description().width();
         })
     });
 }

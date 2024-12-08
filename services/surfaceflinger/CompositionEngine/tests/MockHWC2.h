@@ -33,6 +33,7 @@
 #include "DisplayHardware/HWC2.h"
 
 #include <aidl/android/hardware/graphics/composer3/Composition.h>
+#include <aidl/android/hardware/graphics/composer3/Lut.h>
 
 // TODO(b/129481165): remove the #pragma below and fix conversion issues
 #pragma clang diagnostic pop // ignored "-Wconversion -Wextra"
@@ -77,6 +78,7 @@ public:
                  Error(const std::string&, bool, const std::vector<uint8_t>&));
     MOCK_METHOD1(setBrightness, Error(float));
     MOCK_METHOD1(setBlockingRegion, Error(const android::Region&));
+    MOCK_METHOD(Error, setLuts, (std::vector<aidl::android::hardware::graphics::composer3::Lut>&));
 };
 
 } // namespace mock

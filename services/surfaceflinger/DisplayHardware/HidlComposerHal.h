@@ -351,6 +351,12 @@ public:
                                    Hdr*) override;
     Error setRefreshRateChangedCallbackDebugEnabled(Display, bool) override;
     Error notifyExpectedPresent(Display, nsecs_t, int32_t) override;
+    Error getRequestedLuts(
+            Display,
+            std::vector<aidl::android::hardware::graphics::composer3::DisplayLuts::LayerLut>*)
+            override;
+    Error setLayerLuts(Display, Layer,
+                       std::vector<aidl::android::hardware::graphics::composer3::Lut>&) override;
 
 private:
     class CommandWriter : public CommandWriterBase {

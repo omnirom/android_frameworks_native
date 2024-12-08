@@ -102,6 +102,10 @@ public:
      */
     virtual const String16& getInterfaceDescriptor() const = 0;
 
+    /**
+     * Last known alive status, from last call. May be arbitrarily stale.
+     * May be incorrect if a service returns an incorrect status code.
+     */
     virtual bool            isBinderAlive() const = 0;
     virtual status_t        pingBinder() = 0;
     virtual status_t        dump(int fd, const Vector<String16>& args) = 0;
@@ -198,9 +202,18 @@ public:
         virtual void binderDied(const wp<IBinder>& who) = 0;
     };
 
-    #if defined(__clang__)
-    #pragma clang diagnostic pop
-    #endif
+    class FrozenStateChangeCallback : public virtual RefBase {
+    public:
+        enum class State {
+            FROZEN,
+            UNFROZEN,
+        };
+        virtual void onStateChanged(const wp<IBinder>& who, State state) = 0;
+    };
+
+#if defined(__clang__)
+#pragma clang diagnostic pop
+#endif
 
     /**
      * Register the @a recipient for a notification if this binder
@@ -248,6 +261,48 @@ public:
                                             void* cookie = nullptr,
                                             uint32_t flags = 0,
                                             wp<DeathRecipient>* outRecipient = nullptr) = 0;
+
+    /**
+     * addFrozenStateChangeCallback provides a callback mechanism to notify
+     * about process frozen/unfrozen events. Upon registration and any
+     * subsequent state changes, the callback is invoked with the latest process
+     * frozen state.
+     *
+     * If the listener process (the one using this API) is itself frozen, state
+     * change events might be combined into a single one with the latest state.
+     * (meaning 'frozen, unfrozen' might just be 'unfrozen'). This single event
+     * would then be delivered when the listener process becomes unfrozen.
+     * Similarly, if an event happens before the previous event is consumed,
+     * they might be combined. This means the callback might not be called for
+     * every single state change, so don't rely on this API to count how many
+     * times the state has changed.
+     *
+     * @note When all references to the binder are dropped, the callback is
+     * automatically removed. So, you must hold onto a binder in order to
+     * receive notifications about it.
+     *
+     * @note You will only receive freeze notifications for remote binders, as
+     * local binders by definition can't be frozen without you being frozen as
+     * well. Trying to use this function on a local binder will result in an
+     * INVALID_OPERATION code being returned and nothing happening.
+     *
+     * @note This binder always holds a weak reference to the callback.
+     *
+     * @note You will only receive a weak reference to the binder object. You
+     * should not try to promote this to a strong reference. (Nor should you
+     * need to, as there is nothing useful you can directly do with it now that
+     * it has passed on.)
+     */
+    [[nodiscard]] status_t addFrozenStateChangeCallback(
+            const wp<FrozenStateChangeCallback>& callback);
+
+    /**
+     * Remove a previously registered freeze callback.
+     * The @a callback will no longer be called if this object
+     * changes its frozen state.
+     */
+    [[nodiscard]] status_t removeFrozenStateChangeCallback(
+            const wp<FrozenStateChangeCallback>& callback);
 
     virtual bool            checkSubclass(const void* subclassID) const;
 

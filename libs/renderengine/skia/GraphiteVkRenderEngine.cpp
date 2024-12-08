@@ -23,6 +23,7 @@
 #include <include/gpu/graphite/BackendSemaphore.h>
 #include <include/gpu/graphite/Context.h>
 #include <include/gpu/graphite/Recording.h>
+#include <include/gpu/graphite/vk/VulkanGraphiteTypes.h>
 
 #include <log/log_main.h>
 #include <sync/sync.h>
@@ -77,7 +78,7 @@ void GraphiteVkRenderEngine::waitFence(SkiaGpuContext*, base::borrowed_fd fenceF
     base::unique_fd fenceDup(dupedFd);
     VkSemaphore waitSemaphore =
             getVulkanInterface(isProtected()).importSemaphoreFromSyncFd(fenceDup.release());
-    graphite::BackendSemaphore beSemaphore(waitSemaphore);
+    auto beSemaphore = graphite::BackendSemaphores::MakeVulkan(waitSemaphore);
     mStagedWaitSemaphores.push_back(beSemaphore);
 }
 
@@ -92,7 +93,7 @@ base::unique_fd GraphiteVkRenderEngine::flushAndSubmit(SkiaGpuContext* context, 
     // This "signal" semaphore is called after rendering, but it is cleaned up in the same mechanism
     // as "wait" semaphores from waitFence.
     VkSemaphore vkSignalSemaphore = vulkanInterface.createExportableSemaphore();
-    graphite::BackendSemaphore backendSignalSemaphore(vkSignalSemaphore);
+    auto backendSignalSemaphore = graphite::BackendSemaphores::MakeVulkan(vkSignalSemaphore);
 
     // Collect all Vk semaphores that DestroySemaphoreInfo needs to own and delete after GPU work.
     std::vector<VkSemaphore> vkSemaphoresToCleanUp;
@@ -100,7 +101,8 @@ base::unique_fd GraphiteVkRenderEngine::flushAndSubmit(SkiaGpuContext* context, 
         vkSemaphoresToCleanUp.push_back(vkSignalSemaphore);
     }
     for (auto backendWaitSemaphore : mStagedWaitSemaphores) {
-        vkSemaphoresToCleanUp.push_back(backendWaitSemaphore.getVkSemaphore());
+        vkSemaphoresToCleanUp.push_back(
+            graphite::BackendSemaphores::GetVkSemaphore(backendWaitSemaphore));
     }
 
     DestroySemaphoreInfo* destroySemaphoreInfo = nullptr;

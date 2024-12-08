@@ -14,11 +14,11 @@
  * limitations under the License.
  */
 
+#include <common/trace.h>
 #include <log/log.h>
 #include <renderengine/RenderEngine.h>
 #include <renderengine/impl/ExternalTexture.h>
 #include <ui/GraphicBuffer.h>
-#include <utils/Trace.h>
 
 namespace android::renderengine::impl {
 
@@ -35,7 +35,7 @@ ExternalTexture::~ExternalTexture() {
 }
 
 void ExternalTexture::remapBuffer() {
-    ATRACE_CALL();
+    SFTRACE_CALL();
     {
         auto buf = mBuffer;
         mRenderEngine.unmapExternalTextureBuffer(std::move(buf));

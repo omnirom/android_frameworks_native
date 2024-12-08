@@ -16,18 +16,14 @@
 
 #pragma once
 
-#include <condition_variable>
 #include <deque>
-#include <mutex>
 #include <optional>
-#include <queue>
-#include <thread>
 #include <unordered_map>
-#include <unordered_set>
 
 #include <android-base/thread_annotations.h>
 #include <binder/IBinder.h>
 #include <ftl/future.h>
+#include <gui/BufferReleaseChannel.h>
 #include <gui/ITransactionCompletedListener.h>
 #include <ui/Fence.h>
 #include <ui/FenceResult.h>
@@ -59,12 +55,12 @@ public:
     uint64_t frameNumber = 0;
     uint64_t previousFrameNumber = 0;
     ReleaseCallbackId previousReleaseCallbackId = ReleaseCallbackId::INVALID_ID;
+    std::shared_ptr<gui::BufferReleaseChannel::ProducerEndpoint> bufferReleaseChannel;
 };
 
 class TransactionCallbackInvoker {
 public:
-    status_t addCallbackHandles(const std::deque<sp<CallbackHandle>>& handles,
-                                const std::vector<JankData>& jankData);
+    status_t addCallbackHandles(const std::deque<sp<CallbackHandle>>& handles);
     status_t addOnCommitCallbackHandles(const std::deque<sp<CallbackHandle>>& handles,
                                              std::deque<sp<CallbackHandle>>& outRemainingHandles);
 
@@ -77,9 +73,7 @@ public:
         mCompletedTransactions.clear();
     }
 
-    status_t addCallbackHandle(const sp<CallbackHandle>& handle,
-                               const std::vector<JankData>& jankData);
-
+    status_t addCallbackHandle(const sp<CallbackHandle>& handle);
 
 private:
     status_t findOrCreateTransactionStats(const sp<IBinder>& listener,
@@ -88,6 +82,14 @@ private:
 
     std::unordered_map<sp<IBinder>, std::deque<TransactionStats>, IListenerHash>
         mCompletedTransactions;
+
+    struct BufferRelease {
+        std::shared_ptr<gui::BufferReleaseChannel::ProducerEndpoint> channel;
+        ReleaseCallbackId callbackId;
+        sp<Fence> fence;
+        uint32_t currentMaxAcquiredBufferCount;
+    };
+    std::vector<BufferRelease> mBufferReleases;
 
     sp<Fence> mPresentFence;
 };

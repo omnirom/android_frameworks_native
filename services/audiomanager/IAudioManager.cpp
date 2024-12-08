@@ -152,6 +152,12 @@ public:
         data.writeNullableParcelable(extras);
         return remote()->transact(PORT_EVENT, data, &reply, IBinder::FLAG_ONEWAY);
     }
+
+    virtual status_t permissionUpdateBarrier() {
+        Parcel data, reply;
+        data.writeInterfaceToken(IAudioManager::getInterfaceDescriptor());
+        return remote()->transact(PERMISSION_UPDATE_BARRIER, data, &reply, 0);
+    }
 };
 
 IMPLEMENT_META_INTERFACE(AudioManager, "android.media.IAudioService");

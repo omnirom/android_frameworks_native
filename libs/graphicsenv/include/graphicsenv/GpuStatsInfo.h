@@ -125,6 +125,11 @@ public:
         VULKAN_DEVICE_EXTENSION = 9,
     };
 
+    enum GLTelemetryHints {
+        NO_HINT = 0,
+        SKIP_TELEMETRY = 1,
+    };
+
     GpuStatsInfo() = default;
     GpuStatsInfo(const GpuStatsInfo&) = default;
     virtual ~GpuStatsInfo() = default;
@@ -136,7 +141,6 @@ public:
     std::string appPackageName = "";
     int32_t vulkanVersion = 0;
     Driver glDriverToLoad = Driver::NONE;
-    Driver glDriverFallback = Driver::NONE;
     Driver vkDriverToLoad = Driver::NONE;
     Driver vkDriverFallback = Driver::NONE;
     bool glDriverToSend = false;

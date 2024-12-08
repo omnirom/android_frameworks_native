@@ -123,8 +123,11 @@ public:
         // We can't send BpBinder for regular binder over RPC.
         return android::binder::Status::fromStatusT(android::INVALID_OPERATION);
     }
-    android::binder::Status checkService(const std::string&,
-                                         android::sp<android::IBinder>*) override {
+    android::binder::Status getService2(const std::string&, android::os::Service*) override {
+        // We can't send BpBinder for regular binder over RPC.
+        return android::binder::Status::fromStatusT(android::INVALID_OPERATION);
+    }
+    android::binder::Status checkService(const std::string&, android::os::Service*) override {
         // We can't send BpBinder for regular binder over RPC.
         return android::binder::Status::fromStatusT(android::INVALID_OPERATION);
     }

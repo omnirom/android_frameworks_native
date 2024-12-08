@@ -16,15 +16,12 @@
 
 #pragma once
 
-#include <stdint.h>
-
 namespace android {
 
 class InputDeviceContext;
 struct RawEvent;
 
 /* Keeps track of cursor scrolling motions. */
-
 class CursorScrollAccumulator {
 public:
     CursorScrollAccumulator();
@@ -37,19 +34,17 @@ public:
     inline bool haveRelativeVWheel() const { return mHaveRelWheel; }
     inline bool haveRelativeHWheel() const { return mHaveRelHWheel; }
 
-    inline int32_t getRelativeX() const { return mRelX; }
-    inline int32_t getRelativeY() const { return mRelY; }
-    inline int32_t getRelativeVWheel() const { return mRelWheel; }
-    inline int32_t getRelativeHWheel() const { return mRelHWheel; }
+    inline float getRelativeVWheel() const { return mRelWheel; }
+    inline float getRelativeHWheel() const { return mRelHWheel; }
 
 private:
     bool mHaveRelWheel;
     bool mHaveRelHWheel;
+    bool mHaveRelWheelHighRes;
+    bool mHaveRelHWheelHighRes;
 
-    int32_t mRelX;
-    int32_t mRelY;
-    int32_t mRelWheel;
-    int32_t mRelHWheel;
+    float mRelWheel;
+    float mRelHWheel;
 
     void clearRelativeAxes();
 };

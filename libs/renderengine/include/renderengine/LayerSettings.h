@@ -31,6 +31,7 @@
 #include <ui/ShadowSettings.h>
 #include <ui/StretchEffect.h>
 #include <ui/Transform.h>
+#include "ui/EdgeExtensionEffect.h"
 
 #include <iosfwd>
 
@@ -134,6 +135,7 @@ struct LayerSettings {
     mat4 blurRegionTransform = mat4();
 
     StretchEffect stretchEffect;
+    EdgeExtensionEffect edgeExtensionEffect;
 
     // Name associated with the layer for debugging purposes.
     std::string name;
@@ -183,7 +185,9 @@ static inline bool operator==(const LayerSettings& lhs, const LayerSettings& rhs
             lhs.skipContentDraw == rhs.skipContentDraw && lhs.shadow == rhs.shadow &&
             lhs.backgroundBlurRadius == rhs.backgroundBlurRadius &&
             lhs.blurRegionTransform == rhs.blurRegionTransform &&
-            lhs.stretchEffect == rhs.stretchEffect && lhs.whitePointNits == rhs.whitePointNits;
+            lhs.stretchEffect == rhs.stretchEffect &&
+            lhs.edgeExtensionEffect == rhs.edgeExtensionEffect &&
+            lhs.whitePointNits == rhs.whitePointNits;
 }
 
 static inline void PrintTo(const Buffer& settings, ::std::ostream* os) {
@@ -254,6 +258,10 @@ static inline void PrintTo(const StretchEffect& effect, ::std::ostream* os) {
     *os << "\n}";
 }
 
+static inline void PrintTo(const EdgeExtensionEffect& effect, ::std::ostream* os) {
+    *os << effect;
+}
+
 static inline void PrintTo(const LayerSettings& settings, ::std::ostream* os) {
     *os << "LayerSettings for '" << settings.name.c_str() << "' {";
     *os << "\n    .geometry = ";
@@ -284,6 +292,10 @@ static inline void PrintTo(const LayerSettings& settings, ::std::ostream* os) {
     if (settings.stretchEffect != StretchEffect()) {
         *os << "\n    .stretchEffect = ";
         PrintTo(settings.stretchEffect, os);
+    }
+
+    if (settings.edgeExtensionEffect.hasEffect()) {
+        *os << "\n    .edgeExtensionEffect = " << settings.edgeExtensionEffect;
     }
     *os << "\n    .whitePointNits = " << settings.whitePointNits;
     *os << "\n}";

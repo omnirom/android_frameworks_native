@@ -227,10 +227,11 @@ public:
     virtual void cancelCurrentTouch() = 0;
 
     /*
-     * Updates key repeat configuration timeout and delay.
+     * Updates whether key repeat is enabled and key repeat configuration timeout and delay.
      */
     virtual void setKeyRepeatConfiguration(std::chrono::nanoseconds timeout,
-                                           std::chrono::nanoseconds delay) = 0;
+                                           std::chrono::nanoseconds delay,
+                                           bool keyRepeatEnabled) = 0;
 
     /*
      * Determine if a pointer from a device is being dispatched to the given window.

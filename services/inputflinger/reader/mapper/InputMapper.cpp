@@ -18,6 +18,7 @@
 
 #include "InputMapper.h"
 
+#include <optional>
 #include <sstream>
 
 #include <ftl/enum.h>
@@ -116,15 +117,16 @@ std::list<NotifyArgs> InputMapper::updateExternalStylusState(const StylusState& 
     return {};
 }
 
-status_t InputMapper::getAbsoluteAxisInfo(int32_t axis, RawAbsoluteAxisInfo* axisInfo) {
-    return getDeviceContext().getAbsoluteAxisInfo(axis, axisInfo);
+std::optional<RawAbsoluteAxisInfo> InputMapper::getAbsoluteAxisInfo(int32_t axis) {
+    return getDeviceContext().getAbsoluteAxisInfo(axis);
 }
 
 void InputMapper::bumpGeneration() {
     getDeviceContext().bumpGeneration();
 }
 
-void InputMapper::dumpRawAbsoluteAxisInfo(std::string& dump, const RawAbsoluteAxisInfo& axis,
+void InputMapper::dumpRawAbsoluteAxisInfo(std::string& dump,
+                                          const std::optional<RawAbsoluteAxisInfo>& axis,
                                           const char* name) {
     std::stringstream out;
     out << INDENT4 << name << ": " << axis << "\n";
@@ -138,4 +140,7 @@ void InputMapper::dumpStylusState(std::string& dump, const StylusState& state) {
     dump += StringPrintf(INDENT4 "Tool Type: %s\n", ftl::enum_string(state.toolType).c_str());
 }
 
+std::optional<HardwareProperties> InputMapper::getTouchpadHardwareProperties() {
+    return std::nullopt;
+}
 } // namespace android

@@ -21,6 +21,7 @@
 
 #include <scheduler/Fps.h>
 #include <scheduler/FrameRateMode.h>
+#include <scheduler/FrameTime.h>
 
 #include "VSyncDispatch.h"
 
@@ -112,8 +113,7 @@ public:
      */
     virtual void setRenderRate(Fps, bool applyImmediately) = 0;
 
-    virtual void onFrameBegin(TimePoint expectedPresentTime,
-                              TimePoint lastConfirmedPresentTime) = 0;
+    virtual void onFrameBegin(TimePoint expectedPresentTime, FrameTime lastSignaledFrameTime) = 0;
 
     virtual void onFrameMissed(TimePoint expectedPresentTime) = 0;
 

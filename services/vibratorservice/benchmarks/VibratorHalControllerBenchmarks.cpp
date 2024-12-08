@@ -16,16 +16,15 @@
 
 #define LOG_TAG "VibratorHalControllerBenchmarks"
 
+#include <android/binder_process.h>
 #include <benchmark/benchmark.h>
-#include <binder/ProcessState.h>
 #include <vibratorservice/VibratorHalController.h>
 #include <future>
 
-using ::android::enum_range;
-using ::android::hardware::vibrator::CompositeEffect;
-using ::android::hardware::vibrator::CompositePrimitive;
-using ::android::hardware::vibrator::Effect;
-using ::android::hardware::vibrator::EffectStrength;
+using ::aidl::android::hardware::vibrator::CompositeEffect;
+using ::aidl::android::hardware::vibrator::CompositePrimitive;
+using ::aidl::android::hardware::vibrator::Effect;
+using ::aidl::android::hardware::vibrator::EffectStrength;
 using ::benchmark::Counter;
 using ::benchmark::Fixture;
 using ::benchmark::kMicrosecond;
@@ -115,8 +114,8 @@ private:
 class VibratorBench : public Fixture {
 public:
     void SetUp(State& /*state*/) override {
-        android::ProcessState::self()->setThreadPoolMaxThreadCount(1);
-        android::ProcessState::self()->startThreadPool();
+        ABinderProcess_setThreadPoolMaxThreadCount(1);
+        ABinderProcess_startThreadPool();
         mController.init();
     }
 
@@ -388,11 +387,11 @@ public:
             return;
         }
 
-        for (const auto& effect : enum_range<Effect>()) {
+        for (const auto& effect : ndk::enum_range<Effect>()) {
             if (std::find(supported.begin(), supported.end(), effect) == supported.end()) {
                 continue;
             }
-            for (const auto& strength : enum_range<EffectStrength>()) {
+            for (const auto& strength : ndk::enum_range<EffectStrength>()) {
                 b->Args({static_cast<long>(effect), static_cast<long>(strength)});
             }
         }
@@ -533,7 +532,7 @@ public:
             return;
         }
 
-        for (const auto& primitive : enum_range<CompositePrimitive>()) {
+        for (const auto& primitive : ndk::enum_range<CompositePrimitive>()) {
             if (std::find(supported.begin(), supported.end(), primitive) == supported.end()) {
                 continue;
             }

@@ -20,7 +20,7 @@
 
 #include <android/gui/ISurfaceComposer.h>
 #include <gtest/gtest.h>
-#include <gui/AidlStatusUtil.h>
+#include <gui/AidlUtil.h>
 #include <gui/Surface.h>
 #include <gui/SurfaceComposerClient.h>
 #include <private/android_filesystem_config.h>
@@ -280,7 +280,7 @@ TEST_F(CredentialsTest, CaptureLayersTest) {
     std::function<status_t()> condition = [=, this]() {
         LayerCaptureArgs captureArgs;
         captureArgs.layerHandle = mBGSurfaceControl->getHandle();
-        captureArgs.sourceCrop = {0, 0, 1, 1};
+        captureArgs.captureArgs.sourceCrop = gui::aidl_utils::toARect(0, 0, 1, 1);
 
         ScreenCaptureResults captureResults;
         return ScreenCapture::captureLayers(captureArgs, captureResults);

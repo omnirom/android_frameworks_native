@@ -436,5 +436,7 @@ typedef details::TMat33<float> mat3f;
 // ----------------------------------------------------------------------------------------
 }  // namespace android
 
+TVECHELPERS_STD_HASH(android::details::TMat33);
+
 #undef PURE
 #undef CONSTEXPR

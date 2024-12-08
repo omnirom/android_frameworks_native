@@ -18,8 +18,8 @@
 
 #include <common/FlagManager.h>
 
+#include <common/trace.h>
 #include <ftl/fake_guard.h>
-#include <gui/TraceUtils.h>
 #include <scheduler/Fps.h>
 #include <scheduler/Timer.h>
 
@@ -182,7 +182,7 @@ void VsyncSchedule::enableHardwareVsync() {
 }
 
 void VsyncSchedule::enableHardwareVsyncLocked() {
-    ATRACE_CALL();
+    SFTRACE_CALL();
     if (mHwVsyncState == HwVsyncState::Disabled) {
         getTracker().resetModel();
         mRequestHardwareVsync(mId, true);
@@ -191,7 +191,7 @@ void VsyncSchedule::enableHardwareVsyncLocked() {
 }
 
 void VsyncSchedule::disableHardwareVsync(bool disallow) {
-    ATRACE_CALL();
+    SFTRACE_CALL();
     std::lock_guard<std::mutex> lock(mHwVsyncLock);
     switch (mHwVsyncState) {
         case HwVsyncState::Enabled:

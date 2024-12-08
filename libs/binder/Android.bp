@@ -19,6 +19,7 @@ package {
     // to get the below license kinds:
     //   SPDX-license-identifier-Apache-2.0
     default_applicable_licenses: ["frameworks_native_license"],
+    default_team: "trendy_team_virtualization",
 }
 
 cc_library_headers {
@@ -86,16 +87,24 @@ cc_library_headers {
 
 cc_cmake_snapshot {
     name: "binder_sdk",
-    modules: [
+    dist: {
+        targets: ["binder_sdk"],
+        dest: "binder_sdk.zip",
+    },
+
+    modules_host: [
         "libbinder_sdk",
         "libbinder_sdk_single_threaded",
         "libbinder_ndk_sdk",
+        "googletest_cmake",
+
         "binderRpcTestNoKernel",
+        "binderRpcTestSingleThreadedNoKernel",
+        "binderRpcWireProtocolTest",
     ],
     prebuilts: [
         // to enable arm64 host support, build with musl - e.g. on aosp_cf_arm64_phone
         "aidl",
-        "libc++",
     ],
     include_sources: true,
     cflags: [
@@ -133,12 +142,16 @@ cc_cmake_snapshot {
         {
             android_name: "libgtest",
             mapped_name: "GTest::gtest",
-            package_system: "GTest",
+            package_pregenerated: "external/googletest",
         },
         {
             android_name: "libgtest_main",
-            mapped_name: "GTest::gtest",
-            package_system: "GTest",
+            mapped_name: "GTest::gtest_main",
+            package_pregenerated: "external/googletest",
+        },
+        {
+            android_name: "googletest_cmake",
+            package_pregenerated: "external/googletest",
         },
 
         // use libbinder_sdk and friends instead of full Android's libbinder
@@ -258,7 +271,20 @@ cc_defaults {
         "-Wunused-const-variable",
         "-DANDROID_BASE_UNIQUE_FD_DISABLE_IMPLICIT_CONVERSION",
         "-DANDROID_UTILS_REF_BASE_DISABLE_IMPLICIT_CONSTRUCTION",
+        // Hide symbols by default and set the BUILDING_LIBBINDER macro so that
+        // the code knows to export them.
+        "-fvisibility=hidden",
+        "-DBUILDING_LIBBINDER",
     ],
+
+    target: {
+        vendor: {
+            // Trimming the exported symbols reveals a bug in vendor code, so
+            // disable it for the vendor variant for now. http://b/349657329
+            // TODO: Fix the issue and remove this override.
+            cflags: ["-fvisibility=default"],
+        },
+    },
 }
 
 cc_defaults {
@@ -429,12 +455,37 @@ cc_library_shared {
     ],
 }
 
+soong_config_module_type {
+    name: "libbinder_client_cache_config",
+    module_type: "cc_defaults",
+    config_namespace: "libbinder",
+    bool_variables: ["release_libbinder_client_cache"],
+    properties: [
+        "cflags",
+    ],
+}
+
+libbinder_client_cache_config {
+    name: "libbinder_client_cache_flag",
+    soong_config_variables: {
+        release_libbinder_client_cache: {
+            cflags: ["-DLIBBINDER_CLIENT_CACHE"],
+            conditions_default: {
+                cflags: ["-DNO_LIBBINDER_CLIENT_CACHE"],
+            },
+        },
+    },
+}
+
 cc_defaults {
     name: "libbinder_kernel_defaults",
+    defaults: ["libbinder_client_cache_flag"],
     srcs: [
         "BufferedTextOutput.cpp",
+        "BackendUnifiedServiceManager.cpp",
         "IPCThreadState.cpp",
         "IServiceManager.cpp",
+        "IServiceManagerFFI.cpp",
         "ProcessState.cpp",
         "Static.cpp",
         ":libbinder_aidl",
@@ -510,7 +561,6 @@ cc_library {
         "ParcelableHolder.cpp",
         "PersistableBundle.cpp",
     ],
-
     target: {
         android: {
             // NOT static to keep the wire protocol unfrozen
@@ -749,9 +799,39 @@ filegroup {
         "aidl/android/os/IClientCallback.aidl",
         "aidl/android/os/IServiceCallback.aidl",
         "aidl/android/os/IServiceManager.aidl",
+        "aidl/android/os/Service.aidl",
         "aidl/android/os/ServiceDebugInfo.aidl",
+        ":libbinder_accessor_aidl",
     ],
     path: "aidl",
+}
+
+filegroup {
+    name: "libbinder_accessor_aidl",
+    srcs: [
+        "aidl/android/os/IAccessor.aidl",
+    ],
+    path: "aidl",
+}
+
+// TODO(b/353492849): Make this interface private to libbinder.
+aidl_interface {
+    name: "android.os.accessor",
+    srcs: [":libbinder_accessor_aidl"],
+    unstable: true,
+    backend: {
+        rust: {
+            enabled: true,
+            apex_available: [
+                "com.android.virt",
+            ],
+        },
+    },
+    visibility: [
+        ":__subpackages__",
+        "//system/tools/aidl:__subpackages__",
+        "//packages/modules/Virtualization:__subpackages__",
+    ],
 }
 
 aidl_interface {

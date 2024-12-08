@@ -19,6 +19,8 @@
 #include <android/input.h>
 #include <attestation/HmacKeyManager.h>
 #include <input/Input.h>
+#include <input/InputTransport.h>
+#include <ui/LogicalDisplayId.h>
 #include <utils/Timers.h> // for nsecs_t, systemTime
 
 #include <vector>
@@ -44,6 +46,11 @@ public:
 
     PointerBuilder& y(float y) { return axis(AMOTION_EVENT_AXIS_Y, y); }
 
+    PointerBuilder& isResampled(bool isResampled) {
+        mCoords.isResampled = isResampled;
+        return *this;
+    }
+
     PointerBuilder& axis(int32_t axis, float value) {
         mCoords.setAxisValue(axis, value);
         return *this;
@@ -56,6 +63,87 @@ public:
 private:
     PointerProperties mProperties;
     PointerCoords mCoords;
+};
+
+class InputMessageBuilder {
+public:
+    InputMessageBuilder(InputMessage::Type type, uint32_t seq) : mType{type}, mSeq{seq} {}
+
+    InputMessageBuilder& eventId(int32_t eventId) {
+        mEventId = eventId;
+        return *this;
+    }
+
+    InputMessageBuilder& eventTime(nsecs_t eventTime) {
+        mEventTime = eventTime;
+        return *this;
+    }
+
+    InputMessageBuilder& deviceId(DeviceId deviceId) {
+        mDeviceId = deviceId;
+        return *this;
+    }
+
+    InputMessageBuilder& source(int32_t source) {
+        mSource = source;
+        return *this;
+    }
+
+    InputMessageBuilder& displayId(ui::LogicalDisplayId displayId) {
+        mDisplayId = displayId;
+        return *this;
+    }
+
+    InputMessageBuilder& action(int32_t action) {
+        mAction = action;
+        return *this;
+    }
+
+    InputMessageBuilder& downTime(nsecs_t downTime) {
+        mDownTime = downTime;
+        return *this;
+    }
+
+    InputMessageBuilder& pointer(PointerBuilder pointerBuilder) {
+        mPointers.push_back(pointerBuilder);
+        return *this;
+    }
+
+    InputMessage build() const {
+        InputMessage message{};
+        // Header
+        message.header.type = mType;
+        message.header.seq = mSeq;
+        // Body
+        message.body.motion.eventId = mEventId;
+        message.body.motion.pointerCount = mPointers.size();
+        message.body.motion.eventTime = mEventTime;
+        message.body.motion.deviceId = mDeviceId;
+        message.body.motion.source = mSource;
+        message.body.motion.displayId = mDisplayId.val();
+        message.body.motion.action = mAction;
+        message.body.motion.downTime = mDownTime;
+
+        for (size_t i = 0; i < mPointers.size(); ++i) {
+            message.body.motion.pointers[i].properties = mPointers[i].buildProperties();
+            message.body.motion.pointers[i].coords = mPointers[i].buildCoords();
+        }
+        return message;
+    }
+
+private:
+    const InputMessage::Type mType;
+    const uint32_t mSeq;
+
+    int32_t mEventId{InputEvent::nextId()};
+    nsecs_t mEventTime{systemTime(SYSTEM_TIME_MONOTONIC)};
+    DeviceId mDeviceId{DEFAULT_DEVICE_ID};
+    int32_t mSource{AINPUT_SOURCE_TOUCHSCREEN};
+    ui::LogicalDisplayId mDisplayId{ui::LogicalDisplayId::DEFAULT};
+    int32_t mAction{AMOTION_EVENT_ACTION_MOVE};
+    nsecs_t mDownTime{mEventTime};
+
+    std::vector<PointerBuilder> mPointers;
 };
 
 class MotionEventBuilder {
@@ -127,7 +215,7 @@ public:
         return *this;
     }
 
-    MotionEvent build() {
+    MotionEvent build() const {
         std::vector<PointerProperties> pointerProperties;
         std::vector<PointerCoords> pointerCoords;
         for (const PointerBuilder& pointer : mPointers) {
@@ -135,20 +223,22 @@ public:
             pointerCoords.push_back(pointer.buildCoords());
         }
 
+        auto [xCursorPosition, yCursorPosition] =
+                std::make_pair(mRawXCursorPosition, mRawYCursorPosition);
         // Set mouse cursor position for the most common cases to avoid boilerplate.
         if (mSource == AINPUT_SOURCE_MOUSE &&
-            !MotionEvent::isValidCursorPosition(mRawXCursorPosition, mRawYCursorPosition)) {
-            mRawXCursorPosition = pointerCoords[0].getX();
-            mRawYCursorPosition = pointerCoords[0].getY();
+            !MotionEvent::isValidCursorPosition(xCursorPosition, yCursorPosition)) {
+            xCursorPosition = pointerCoords[0].getX();
+            yCursorPosition = pointerCoords[0].getY();
         }
 
         MotionEvent event;
         event.initialize(InputEvent::nextId(), mDeviceId, mSource, mDisplayId, INVALID_HMAC,
                          mAction, mActionButton, mFlags, /*edgeFlags=*/0, AMETA_NONE, mButtonState,
                          MotionClassification::NONE, mTransform,
-                         /*xPrecision=*/0, /*yPrecision=*/0, mRawXCursorPosition,
-                         mRawYCursorPosition, mRawTransform, mDownTime, mEventTime,
-                         mPointers.size(), pointerProperties.data(), pointerCoords.data());
+                         /*xPrecision=*/0, /*yPrecision=*/0, xCursorPosition, yCursorPosition,
+                         mRawTransform, mDownTime, mEventTime, mPointers.size(),
+                         pointerProperties.data(), pointerCoords.data());
         return event;
     }
 

@@ -17,7 +17,7 @@
 #ifndef ANDROID_OS_VIBRATOR_MANAGER_HAL_CONTROLLER_H
 #define ANDROID_OS_VIBRATOR_MANAGER_HAL_CONTROLLER_H
 
-#include <android/hardware/vibrator/IVibratorManager.h>
+#include <aidl/android/hardware/vibrator/IVibratorManager.h>
 #include <vibratorservice/VibratorHalController.h>
 #include <vibratorservice/VibratorManagerHalWrapper.h>
 #include <unordered_map>

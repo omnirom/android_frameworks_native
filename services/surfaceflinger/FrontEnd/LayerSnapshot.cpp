@@ -322,6 +322,10 @@ std::ostream& operator<<(std::ostream& out, const LayerSnapshot& obj) {
             << touchableRegion.bottom << "," << touchableRegion.right << "}"
             << "}";
     }
+
+    if (obj.edgeExtensionEffect.hasEffect()) {
+        out << obj.edgeExtensionEffect;
+    }
     return out;
 }
 
@@ -492,8 +496,10 @@ void LayerSnapshot::merge(const RequestedLayerState& requested, bool forceUpdate
         requested.what &
                 (layer_state_t::eBufferChanged | layer_state_t::eDataspaceChanged |
                  layer_state_t::eApiChanged | layer_state_t::eShadowRadiusChanged |
-                 layer_state_t::eBlurRegionsChanged | layer_state_t::eStretchChanged)) {
-        forceClientComposition = shadowSettings.length > 0 || stretchEffect.hasEffect();
+                 layer_state_t::eBlurRegionsChanged | layer_state_t::eStretchChanged |
+                 layer_state_t::eEdgeExtensionChanged)) {
+        forceClientComposition = shadowSettings.length > 0 || stretchEffect.hasEffect() ||
+                edgeExtensionEffect.hasEffect();
     }
 
     if (forceUpdate ||

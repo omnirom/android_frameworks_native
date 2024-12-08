@@ -17,7 +17,7 @@
 #ifndef ANDROID_OS_VIBRATOR_MANAGER_HAL_WRAPPER_H
 #define ANDROID_OS_VIBRATOR_MANAGER_HAL_WRAPPER_H
 
-#include <android/hardware/vibrator/IVibratorManager.h>
+#include <aidl/android/hardware/vibrator/IVibratorManager.h>
 #include <vibratorservice/VibratorHalController.h>
 #include <unordered_map>
 
@@ -28,14 +28,17 @@ namespace vibrator {
 // VibratorManager HAL capabilities.
 enum class ManagerCapabilities : int32_t {
     NONE = 0,
-    SYNC = hardware::vibrator::IVibratorManager::CAP_SYNC,
-    PREPARE_ON = hardware::vibrator::IVibratorManager::CAP_PREPARE_ON,
-    PREPARE_PERFORM = hardware::vibrator::IVibratorManager::CAP_PREPARE_PERFORM,
-    PREPARE_COMPOSE = hardware::vibrator::IVibratorManager::CAP_PREPARE_COMPOSE,
-    MIXED_TRIGGER_ON = hardware::vibrator::IVibratorManager::IVibratorManager::CAP_MIXED_TRIGGER_ON,
-    MIXED_TRIGGER_PERFORM = hardware::vibrator::IVibratorManager::CAP_MIXED_TRIGGER_PERFORM,
-    MIXED_TRIGGER_COMPOSE = hardware::vibrator::IVibratorManager::CAP_MIXED_TRIGGER_COMPOSE,
-    TRIGGER_CALLBACK = hardware::vibrator::IVibratorManager::CAP_TRIGGER_CALLBACK
+    SYNC = aidl::android::hardware::vibrator::IVibratorManager::CAP_SYNC,
+    PREPARE_ON = aidl::android::hardware::vibrator::IVibratorManager::CAP_PREPARE_ON,
+    PREPARE_PERFORM = aidl::android::hardware::vibrator::IVibratorManager::CAP_PREPARE_PERFORM,
+    PREPARE_COMPOSE = aidl::android::hardware::vibrator::IVibratorManager::CAP_PREPARE_COMPOSE,
+    MIXED_TRIGGER_ON = aidl::android::hardware::vibrator::IVibratorManager::IVibratorManager::
+            CAP_MIXED_TRIGGER_ON,
+    MIXED_TRIGGER_PERFORM =
+            aidl::android::hardware::vibrator::IVibratorManager::CAP_MIXED_TRIGGER_PERFORM,
+    MIXED_TRIGGER_COMPOSE =
+            aidl::android::hardware::vibrator::IVibratorManager::CAP_MIXED_TRIGGER_COMPOSE,
+    TRIGGER_CALLBACK = aidl::android::hardware::vibrator::IVibratorManager::CAP_TRIGGER_CALLBACK
 };
 
 inline ManagerCapabilities operator|(ManagerCapabilities lhs, ManagerCapabilities rhs) {
@@ -106,8 +109,10 @@ private:
 // Wrapper for the AIDL VibratorManager HAL.
 class AidlManagerHalWrapper : public ManagerHalWrapper {
 public:
+    using VibratorManager = aidl::android::hardware::vibrator::IVibratorManager;
+
     explicit AidlManagerHalWrapper(std::shared_ptr<CallbackScheduler> callbackScheduler,
-                                   sp<hardware::vibrator::IVibratorManager> handle)
+                                   std::shared_ptr<VibratorManager> handle)
           : mHandle(std::move(handle)), mCallbackScheduler(callbackScheduler) {}
     virtual ~AidlManagerHalWrapper() = default;
 
@@ -126,14 +131,14 @@ private:
     std::mutex mHandleMutex;
     std::mutex mCapabilitiesMutex;
     std::mutex mVibratorsMutex;
-    sp<hardware::vibrator::IVibratorManager> mHandle GUARDED_BY(mHandleMutex);
+    std::shared_ptr<VibratorManager> mHandle GUARDED_BY(mHandleMutex);
     std::optional<ManagerCapabilities> mCapabilities GUARDED_BY(mCapabilitiesMutex);
     std::optional<std::vector<int32_t>> mVibratorIds GUARDED_BY(mVibratorsMutex);
     std::unordered_map<int32_t, std::shared_ptr<HalController>> mVibrators
             GUARDED_BY(mVibratorsMutex);
     std::shared_ptr<CallbackScheduler> mCallbackScheduler;
 
-    sp<hardware::vibrator::IVibratorManager> getHal();
+    std::shared_ptr<VibratorManager> getHal();
     std::shared_ptr<HalWrapper> connectToVibrator(int32_t vibratorId,
                                                   std::shared_ptr<CallbackScheduler> scheduler);
 };

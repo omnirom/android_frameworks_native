@@ -37,19 +37,6 @@ void TestInputListener::assertNotifyInputDevicesChangedWasCalled(
                                                         "to have been called."));
 }
 
-void TestInputListener::assertNotifyConfigurationChangedWasCalled(
-        NotifyConfigurationChangedArgs* outEventArgs) {
-    ASSERT_NO_FATAL_FAILURE(
-            assertCalled<NotifyConfigurationChangedArgs>(outEventArgs,
-                                                         "Expected notifyConfigurationChanged() "
-                                                         "to have been called."));
-}
-
-void TestInputListener::assertNotifyConfigurationChangedWasNotCalled() {
-    ASSERT_NO_FATAL_FAILURE(assertNotCalled<NotifyConfigurationChangedArgs>(
-            "notifyConfigurationChanged() should not be called."));
-}
-
 void TestInputListener::assertNotifyDeviceResetWasCalled(NotifyDeviceResetArgs* outEventArgs) {
     ASSERT_NO_FATAL_FAILURE(
             assertCalled<
@@ -190,10 +177,6 @@ void TestInputListener::addToQueue(const NotifyArgsType& args) {
 
 void TestInputListener::notifyInputDevicesChanged(const NotifyInputDevicesChangedArgs& args) {
     addToQueue<NotifyInputDevicesChangedArgs>(args);
-}
-
-void TestInputListener::notifyConfigurationChanged(const NotifyConfigurationChangedArgs& args) {
-    addToQueue<NotifyConfigurationChangedArgs>(args);
 }
 
 void TestInputListener::notifyDeviceReset(const NotifyDeviceResetArgs& args) {

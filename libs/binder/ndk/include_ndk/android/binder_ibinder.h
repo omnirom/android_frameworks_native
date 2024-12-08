@@ -771,7 +771,7 @@ const char* AIBinder_Class_getDescriptor(const AIBinder_Class* clazz) __INTRODUC
  * This provides a per-process-unique total ordering of binders where a null
  * AIBinder* object is considered to be before all other binder objects.
  * For instance, two binders refer to the same object in a local or remote
- * process when both AIBinder_lt(a, b) and AIBinder(b, a) are false. This API
+ * process when both AIBinder_lt(a, b) and AIBinder_lt(b, a) are false. This API
  * might be used to insert and lookup binders in binary search trees.
  *
  * AIBinder* pointers themselves actually also create a per-process-unique total

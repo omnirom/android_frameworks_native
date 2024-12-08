@@ -16,6 +16,8 @@
 
 #pragma once
 
+#include <optional>
+
 #include "EventHub.h"
 #include "InputDevice.h"
 #include "InputListener.h"
@@ -120,16 +122,19 @@ public:
     virtual std::optional<ui::LogicalDisplayId> getAssociatedDisplayId() { return std::nullopt; }
     virtual void updateLedState(bool reset) {}
 
+    virtual std::optional<HardwareProperties> getTouchpadHardwareProperties();
+
 protected:
     InputDeviceContext& mDeviceContext;
 
     explicit InputMapper(InputDeviceContext& deviceContext,
                          const InputReaderConfiguration& readerConfig);
 
-    status_t getAbsoluteAxisInfo(int32_t axis, RawAbsoluteAxisInfo* axisInfo);
+    std::optional<RawAbsoluteAxisInfo> getAbsoluteAxisInfo(int32_t axis);
     void bumpGeneration();
 
-    static void dumpRawAbsoluteAxisInfo(std::string& dump, const RawAbsoluteAxisInfo& axis,
+    static void dumpRawAbsoluteAxisInfo(std::string& dump,
+                                        const std::optional<RawAbsoluteAxisInfo>& axis,
                                         const char* name);
     static void dumpStylusState(std::string& dump, const StylusState& state);
 };

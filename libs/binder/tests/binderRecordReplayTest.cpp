@@ -99,12 +99,12 @@ public:
     GENERATE_GETTER_SETTER(SingleDataParcelableArray, std::vector<SingleDataParcelable>);
 
     Status setFileDescriptor(unique_fd input) {
-        mFd = std::move(unique_fd(dup(input)));
+        mFd = unique_fd(dup(input));
         return Status::ok();
     }
 
     Status getFileDescriptor(unique_fd* output) {
-        *output = std::move(unique_fd(dup(mFd)));
+        *output = unique_fd(dup(mFd));
         return Status::ok();
     }
     unique_fd mFd;
@@ -117,7 +117,7 @@ std::vector<uint8_t> retrieveData(borrowed_fd fd) {
     std::vector<uint8_t> buffer(fdStat.st_size);
     auto readResult = android::base::ReadFully(fd, buffer.data(), fdStat.st_size);
     EXPECT_TRUE(readResult != 0);
-    return std::move(buffer);
+    return buffer;
 }
 
 void replayFuzzService(const sp<BpBinder>& binder, const RecordedTransaction& transaction) {
@@ -387,8 +387,8 @@ TEST_F(BinderRecordReplayTest, ReplayFd) {
 
     // When fds are replayed, it will be replaced by /dev/null..reading from it should yield
     // null data
-    recordReplay(&IBinderRecordReplayTest::setFileDescriptor, std::move(unique_fd(dup(saved))),
-                 &IBinderRecordReplayTest::getFileDescriptor, std::move(unique_fd(dup(changed))));
+    recordReplay(&IBinderRecordReplayTest::setFileDescriptor, unique_fd(dup(saved)),
+                 &IBinderRecordReplayTest::getFileDescriptor, unique_fd(dup(changed)));
 }
 
 int main(int argc, char** argv) {

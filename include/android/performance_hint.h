@@ -53,6 +53,7 @@
  */
 
 #include <android/api-level.h>
+#include <stdbool.h>
 #include <stdint.h>
 #include <unistd.h>
 
@@ -84,7 +85,6 @@ typedef struct AWorkDuration AWorkDuration;
 
 /**
  * An opaque type representing a handle to a performance hint manager.
- * It must be released after use.
  *
  * To use:<ul>
  *    <li>Obtain the performance hint manager instance by calling

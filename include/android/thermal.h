@@ -85,6 +85,7 @@ enum AThermalStatus {
     /** Need shutdown immediately. */
     ATHERMAL_STATUS_SHUTDOWN = 6,
 };
+typedef enum AThermalStatus AThermalStatus;
 
 /**
  * An opaque type representing a handle to a thermal manager.
@@ -240,6 +241,7 @@ struct AThermalHeadroomThreshold {
     float headroom;
     AThermalStatus thermalStatus;
 };
+typedef struct AThermalHeadroomThreshold AThermalHeadroomThreshold;
 
 /**
  * Gets the thermal headroom thresholds for all available thermal status.

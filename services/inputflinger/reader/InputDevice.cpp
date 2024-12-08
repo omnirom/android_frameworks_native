@@ -365,6 +365,18 @@ std::list<NotifyArgs> InputDevice::configureInternal(nsecs_t when,
             // so update the enabled state when there is a change in display info.
             out += updateEnableState(when, readerConfig, forceEnable);
         }
+
+        if (!changes.any() || changes.test(InputReaderConfiguration::Change::KEY_REMAPPING)) {
+            const bool isFullKeyboard =
+                    (mSources & AINPUT_SOURCE_KEYBOARD) == AINPUT_SOURCE_KEYBOARD &&
+                    mKeyboardType == KeyboardType::ALPHABETIC;
+            if (isFullKeyboard) {
+                for_each_subdevice([&readerConfig](auto& context) {
+                    context.setKeyRemapping(readerConfig.keyRemapping);
+                });
+                bumpGeneration();
+            }
+        }
     }
     return out;
 }
@@ -689,12 +701,6 @@ void InputDevice::updateMetaState(int32_t keyCode) {
     });
 }
 
-void InputDevice::addKeyRemapping(int32_t fromKeyCode, int32_t toKeyCode) {
-    for_each_subdevice([fromKeyCode, toKeyCode](auto& context) {
-        context.addKeyRemapping(fromKeyCode, toKeyCode);
-    });
-}
-
 void InputDevice::bumpGeneration() {
     mGeneration = mContext->bumpGeneration();
 }
@@ -723,6 +729,15 @@ size_t InputDevice::getMapperCount() {
         count += mappers.size();
     }
     return count;
+}
+
+std::optional<HardwareProperties> InputDevice::getTouchpadHardwareProperties() {
+    std::optional<HardwareProperties> result = first_in_mappers<HardwareProperties>(
+            [](InputMapper& mapper) -> std::optional<HardwareProperties> {
+                return mapper.getTouchpadHardwareProperties();
+            });
+
+    return result;
 }
 
 void InputDevice::updateLedState(bool reset) {

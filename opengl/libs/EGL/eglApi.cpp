@@ -248,7 +248,7 @@ __eglMustCastToProperFunctionPointerType eglGetProcAddress(const char* procname)
     return cnx->platform.eglGetProcAddress(procname);
 }
 
-EGLBoolean eglSwapBuffersWithDamageKHR(EGLDisplay dpy, EGLSurface draw, EGLint* rects,
+EGLBoolean eglSwapBuffersWithDamageKHR(EGLDisplay dpy, EGLSurface draw, const EGLint* rects,
                                        EGLint n_rects) {
     ATRACE_CALL();
     clearError();

@@ -17,10 +17,12 @@
 #ifndef ANDROID_OS_VIBRATORHALWRAPPER_H
 #define ANDROID_OS_VIBRATORHALWRAPPER_H
 
+#include <aidl/android/hardware/vibrator/BnVibratorCallback.h>
+#include <aidl/android/hardware/vibrator/IVibrator.h>
+
 #include <android-base/thread_annotations.h>
+#include <android/binder_manager.h>
 #include <android/hardware/vibrator/1.3/IVibrator.h>
-#include <android/hardware/vibrator/BnVibratorCallback.h>
-#include <android/hardware/vibrator/IVibrator.h>
 #include <binder/IServiceManager.h>
 
 #include <vibratorservice/VibratorCallbackScheduler.h>
@@ -98,43 +100,49 @@ private:
 class HalResultFactory {
 public:
     template <typename T>
-    static HalResult<T> fromStatus(binder::Status status, T data) {
-        return status.isOk() ? HalResult<T>::ok(data) : fromFailedStatus<T>(status);
+    static HalResult<T> fromStatus(ndk::ScopedAStatus&& status, T data) {
+        return status.isOk() ? HalResult<T>::ok(std::move(data))
+                             : fromFailedStatus<T>(std::move(status));
     }
 
     template <typename T>
-    static HalResult<T> fromStatus(hardware::vibrator::V1_0::Status status, T data) {
-        return (status == hardware::vibrator::V1_0::Status::OK) ? HalResult<T>::ok(data)
-                                                                : fromFailedStatus<T>(status);
+    static HalResult<T> fromStatus(hardware::vibrator::V1_0::Status&& status, T data) {
+        return (status == hardware::vibrator::V1_0::Status::OK)
+                ? HalResult<T>::ok(std::move(data))
+                : fromFailedStatus<T>(std::move(status));
     }
 
     template <typename T, typename R>
-    static HalResult<T> fromReturn(hardware::Return<R>& ret, T data) {
-        return ret.isOk() ? HalResult<T>::ok(data) : fromFailedReturn<T, R>(ret);
+    static HalResult<T> fromReturn(hardware::Return<R>&& ret, T data) {
+        return ret.isOk() ? HalResult<T>::ok(std::move(data))
+                          : fromFailedReturn<T, R>(std::move(ret));
     }
 
     template <typename T, typename R>
-    static HalResult<T> fromReturn(hardware::Return<R>& ret,
+    static HalResult<T> fromReturn(hardware::Return<R>&& ret,
                                    hardware::vibrator::V1_0::Status status, T data) {
-        return ret.isOk() ? fromStatus<T>(status, data) : fromFailedReturn<T, R>(ret);
+        return ret.isOk() ? fromStatus<T>(std::move(status), std::move(data))
+                          : fromFailedReturn<T, R>(std::move(ret));
     }
 
     static HalResult<void> fromStatus(status_t status) {
-        return (status == android::OK) ? HalResult<void>::ok() : fromFailedStatus<void>(status);
+        return (status == android::OK) ? HalResult<void>::ok()
+                                       : fromFailedStatus<void>(std::move(status));
     }
 
-    static HalResult<void> fromStatus(binder::Status status) {
-        return status.isOk() ? HalResult<void>::ok() : fromFailedStatus<void>(status);
+    static HalResult<void> fromStatus(ndk::ScopedAStatus&& status) {
+        return status.isOk() ? HalResult<void>::ok() : fromFailedStatus<void>(std::move(status));
     }
 
-    static HalResult<void> fromStatus(hardware::vibrator::V1_0::Status status) {
-        return (status == hardware::vibrator::V1_0::Status::OK) ? HalResult<void>::ok()
-                                                                : fromFailedStatus<void>(status);
+    static HalResult<void> fromStatus(hardware::vibrator::V1_0::Status&& status) {
+        return (status == hardware::vibrator::V1_0::Status::OK)
+                ? HalResult<void>::ok()
+                : fromFailedStatus<void>(std::move(status));
     }
 
     template <typename R>
-    static HalResult<void> fromReturn(hardware::Return<R>& ret) {
-        return ret.isOk() ? HalResult<void>::ok() : fromFailedReturn<void, R>(ret);
+    static HalResult<void> fromReturn(hardware::Return<R>&& ret) {
+        return ret.isOk() ? HalResult<void>::ok() : fromFailedReturn<void, R>(std::move(ret));
     }
 
 private:
@@ -146,21 +154,21 @@ private:
     }
 
     template <typename T>
-    static HalResult<T> fromFailedStatus(binder::Status status) {
-        if (status.exceptionCode() == binder::Status::EX_UNSUPPORTED_OPERATION ||
-            status.transactionError() == android::UNKNOWN_TRANSACTION) {
-            // UNKNOWN_TRANSACTION means the HAL implementation is an older version, so this is
-            // the same as the operation being unsupported by this HAL. Should not retry.
+    static HalResult<T> fromFailedStatus(ndk::ScopedAStatus&& status) {
+        if (status.getExceptionCode() == EX_UNSUPPORTED_OPERATION ||
+            status.getStatus() == STATUS_UNKNOWN_TRANSACTION) {
+            // STATUS_UNKNOWN_TRANSACTION means the HAL implementation is an older version, so this
+            // is the same as the operation being unsupported by this HAL. Should not retry.
             return HalResult<T>::unsupported();
         }
-        if (status.exceptionCode() == binder::Status::EX_TRANSACTION_FAILED) {
-            return HalResult<T>::transactionFailed(status.toString8().c_str());
+        if (status.getExceptionCode() == EX_TRANSACTION_FAILED) {
+            return HalResult<T>::transactionFailed(status.getMessage());
         }
-        return HalResult<T>::failed(status.toString8().c_str());
+        return HalResult<T>::failed(status.getMessage());
     }
 
     template <typename T>
-    static HalResult<T> fromFailedStatus(hardware::vibrator::V1_0::Status status) {
+    static HalResult<T> fromFailedStatus(hardware::vibrator::V1_0::Status&& status) {
         switch (status) {
             case hardware::vibrator::V1_0::Status::UNSUPPORTED_OPERATION:
                 return HalResult<T>::unsupported();
@@ -171,7 +179,7 @@ private:
     }
 
     template <typename T, typename R>
-    static HalResult<T> fromFailedReturn(hardware::Return<R>& ret) {
+    static HalResult<T> fromFailedReturn(hardware::Return<R>&& ret) {
         return ret.isDeadObject() ? HalResult<T>::transactionFailed(ret.description().c_str())
                                   : HalResult<T>::failed(ret.description().c_str());
     }
@@ -179,14 +187,14 @@ private:
 
 // -------------------------------------------------------------------------------------------------
 
-class HalCallbackWrapper : public hardware::vibrator::BnVibratorCallback {
+class HalCallbackWrapper : public aidl::android::hardware::vibrator::BnVibratorCallback {
 public:
     HalCallbackWrapper(std::function<void()> completionCallback)
           : mCompletionCallback(completionCallback) {}
 
-    binder::Status onComplete() override {
+    ndk::ScopedAStatus onComplete() override {
         mCompletionCallback();
-        return binder::Status::ok();
+        return ndk::ScopedAStatus::ok();
     }
 
 private:
@@ -198,14 +206,15 @@ private:
 // Vibrator HAL capabilities.
 enum class Capabilities : int32_t {
     NONE = 0,
-    ON_CALLBACK = hardware::vibrator::IVibrator::CAP_ON_CALLBACK,
-    PERFORM_CALLBACK = hardware::vibrator::IVibrator::CAP_PERFORM_CALLBACK,
-    AMPLITUDE_CONTROL = hardware::vibrator::IVibrator::CAP_AMPLITUDE_CONTROL,
-    EXTERNAL_CONTROL = hardware::vibrator::IVibrator::CAP_EXTERNAL_CONTROL,
-    EXTERNAL_AMPLITUDE_CONTROL = hardware::vibrator::IVibrator::CAP_EXTERNAL_AMPLITUDE_CONTROL,
-    COMPOSE_EFFECTS = hardware::vibrator::IVibrator::CAP_COMPOSE_EFFECTS,
-    COMPOSE_PWLE_EFFECTS = hardware::vibrator::IVibrator::CAP_COMPOSE_PWLE_EFFECTS,
-    ALWAYS_ON_CONTROL = hardware::vibrator::IVibrator::CAP_ALWAYS_ON_CONTROL,
+    ON_CALLBACK = aidl::android::hardware::vibrator::IVibrator::CAP_ON_CALLBACK,
+    PERFORM_CALLBACK = aidl::android::hardware::vibrator::IVibrator::CAP_PERFORM_CALLBACK,
+    AMPLITUDE_CONTROL = aidl::android::hardware::vibrator::IVibrator::CAP_AMPLITUDE_CONTROL,
+    EXTERNAL_CONTROL = aidl::android::hardware::vibrator::IVibrator::CAP_EXTERNAL_CONTROL,
+    EXTERNAL_AMPLITUDE_CONTROL =
+            aidl::android::hardware::vibrator::IVibrator::CAP_EXTERNAL_AMPLITUDE_CONTROL,
+    COMPOSE_EFFECTS = aidl::android::hardware::vibrator::IVibrator::CAP_COMPOSE_EFFECTS,
+    COMPOSE_PWLE_EFFECTS = aidl::android::hardware::vibrator::IVibrator::CAP_COMPOSE_PWLE_EFFECTS,
+    ALWAYS_ON_CONTROL = aidl::android::hardware::vibrator::IVibrator::CAP_ALWAYS_ON_CONTROL,
 };
 
 inline Capabilities operator|(Capabilities lhs, Capabilities rhs) {
@@ -230,10 +239,15 @@ inline Capabilities& operator&=(Capabilities& lhs, Capabilities rhs) {
 
 class Info {
 public:
+    using Effect = aidl::android::hardware::vibrator::Effect;
+    using EffectStrength = aidl::android::hardware::vibrator::EffectStrength;
+    using CompositePrimitive = aidl::android::hardware::vibrator::CompositePrimitive;
+    using Braking = aidl::android::hardware::vibrator::Braking;
+
     const HalResult<Capabilities> capabilities;
-    const HalResult<std::vector<hardware::vibrator::Effect>> supportedEffects;
-    const HalResult<std::vector<hardware::vibrator::Braking>> supportedBraking;
-    const HalResult<std::vector<hardware::vibrator::CompositePrimitive>> supportedPrimitives;
+    const HalResult<std::vector<Effect>> supportedEffects;
+    const HalResult<std::vector<Braking>> supportedBraking;
+    const HalResult<std::vector<CompositePrimitive>> supportedPrimitives;
     const HalResult<std::vector<std::chrono::milliseconds>> primitiveDurations;
     const HalResult<std::chrono::milliseconds> primitiveDelayMax;
     const HalResult<std::chrono::milliseconds> pwlePrimitiveDurationMax;
@@ -244,15 +258,15 @@ public:
     const HalResult<float> frequencyResolution;
     const HalResult<float> qFactor;
     const HalResult<std::vector<float>> maxAmplitudes;
+    const HalResult<int32_t> maxEnvelopeEffectSize;
+    const HalResult<std::chrono::milliseconds> minEnvelopeEffectControlPointDuration;
+    const HalResult<std::chrono::milliseconds> maxEnvelopeEffectControlPointDuration;
 
     void logFailures() const {
         logFailure<Capabilities>(capabilities, "getCapabilities");
-        logFailure<std::vector<hardware::vibrator::Effect>>(supportedEffects,
-                                                            "getSupportedEffects");
-        logFailure<std::vector<hardware::vibrator::Braking>>(supportedBraking,
-                                                             "getSupportedBraking");
-        logFailure<std::vector<hardware::vibrator::CompositePrimitive>>(supportedPrimitives,
-                                                                        "getSupportedPrimitives");
+        logFailure<std::vector<Effect>>(supportedEffects, "getSupportedEffects");
+        logFailure<std::vector<Braking>>(supportedBraking, "getSupportedBraking");
+        logFailure<std::vector<CompositePrimitive>>(supportedPrimitives, "getSupportedPrimitives");
         logFailure<std::vector<std::chrono::milliseconds>>(primitiveDurations,
                                                            "getPrimitiveDuration");
         logFailure<std::chrono::milliseconds>(primitiveDelayMax, "getPrimitiveDelayMax");
@@ -265,6 +279,11 @@ public:
         logFailure<float>(frequencyResolution, "getFrequencyResolution");
         logFailure<float>(qFactor, "getQFactor");
         logFailure<std::vector<float>>(maxAmplitudes, "getMaxAmplitudes");
+        logFailure<int32_t>(maxEnvelopeEffectSize, "getMaxEnvelopeEffectSize");
+        logFailure<std::chrono::milliseconds>(minEnvelopeEffectControlPointDuration,
+                                              "getMinEnvelopeEffectControlPointDuration");
+        logFailure<std::chrono::milliseconds>(maxEnvelopeEffectControlPointDuration,
+                                              "getMaxEnvelopeEffectControlPointDuration");
     }
 
     bool shouldRetry() const {
@@ -274,7 +293,10 @@ public:
                 pwlePrimitiveDurationMax.shouldRetry() || compositionSizeMax.shouldRetry() ||
                 pwleSizeMax.shouldRetry() || minFrequency.shouldRetry() ||
                 resonantFrequency.shouldRetry() || frequencyResolution.shouldRetry() ||
-                qFactor.shouldRetry() || maxAmplitudes.shouldRetry();
+                qFactor.shouldRetry() || maxAmplitudes.shouldRetry() ||
+                maxEnvelopeEffectSize.shouldRetry() ||
+                minEnvelopeEffectControlPointDuration.shouldRetry() ||
+                maxEnvelopeEffectControlPointDuration.shouldRetry();
     }
 
 private:
@@ -302,19 +324,22 @@ public:
                 mResonantFrequency,
                 mFrequencyResolution,
                 mQFactor,
-                mMaxAmplitudes};
+                mMaxAmplitudes,
+                mMaxEnvelopeEffectSize,
+                mMinEnvelopeEffectControlPointDuration,
+                mMaxEnvelopeEffectControlPointDuration};
     }
 
 private:
     // Create a transaction failed results as default so we can retry on the first time we get them.
     static const constexpr char* MSG = "never loaded";
     HalResult<Capabilities> mCapabilities = HalResult<Capabilities>::transactionFailed(MSG);
-    HalResult<std::vector<hardware::vibrator::Effect>> mSupportedEffects =
-            HalResult<std::vector<hardware::vibrator::Effect>>::transactionFailed(MSG);
-    HalResult<std::vector<hardware::vibrator::Braking>> mSupportedBraking =
-            HalResult<std::vector<hardware::vibrator::Braking>>::transactionFailed(MSG);
-    HalResult<std::vector<hardware::vibrator::CompositePrimitive>> mSupportedPrimitives =
-            HalResult<std::vector<hardware::vibrator::CompositePrimitive>>::transactionFailed(MSG);
+    HalResult<std::vector<Info::Effect>> mSupportedEffects =
+            HalResult<std::vector<Info::Effect>>::transactionFailed(MSG);
+    HalResult<std::vector<Info::Braking>> mSupportedBraking =
+            HalResult<std::vector<Info::Braking>>::transactionFailed(MSG);
+    HalResult<std::vector<Info::CompositePrimitive>> mSupportedPrimitives =
+            HalResult<std::vector<Info::CompositePrimitive>>::transactionFailed(MSG);
     HalResult<std::vector<std::chrono::milliseconds>> mPrimitiveDurations =
             HalResult<std::vector<std::chrono::milliseconds>>::transactionFailed(MSG);
     HalResult<std::chrono::milliseconds> mPrimitiveDelayMax =
@@ -329,6 +354,11 @@ private:
     HalResult<float> mQFactor = HalResult<float>::transactionFailed(MSG);
     HalResult<std::vector<float>> mMaxAmplitudes =
             HalResult<std::vector<float>>::transactionFailed(MSG);
+    HalResult<int32_t> mMaxEnvelopeEffectSize = HalResult<int>::transactionFailed(MSG);
+    HalResult<std::chrono::milliseconds> mMinEnvelopeEffectControlPointDuration =
+            HalResult<std::chrono::milliseconds>::transactionFailed(MSG);
+    HalResult<std::chrono::milliseconds> mMaxEnvelopeEffectControlPointDuration =
+            HalResult<std::chrono::milliseconds>::transactionFailed(MSG);
 
     friend class HalWrapper;
 };
@@ -336,6 +366,16 @@ private:
 // Wrapper for Vibrator HAL handlers.
 class HalWrapper {
 public:
+    using Effect = aidl::android::hardware::vibrator::Effect;
+    using EffectStrength = aidl::android::hardware::vibrator::EffectStrength;
+    using VendorEffect = aidl::android::hardware::vibrator::VendorEffect;
+    using CompositePrimitive = aidl::android::hardware::vibrator::CompositePrimitive;
+    using CompositeEffect = aidl::android::hardware::vibrator::CompositeEffect;
+    using Braking = aidl::android::hardware::vibrator::Braking;
+    using PrimitivePwle = aidl::android::hardware::vibrator::PrimitivePwle;
+    using PwleV2Primitive = aidl::android::hardware::vibrator::PwleV2Primitive;
+    using PwleV2OutputMapEntry = aidl::android::hardware::vibrator::PwleV2OutputMapEntry;
+
     explicit HalWrapper(std::shared_ptr<CallbackScheduler> scheduler)
           : mCallbackScheduler(std::move(scheduler)) {}
     virtual ~HalWrapper() = default;
@@ -355,21 +395,25 @@ public:
     virtual HalResult<void> setAmplitude(float amplitude) = 0;
     virtual HalResult<void> setExternalControl(bool enabled) = 0;
 
-    virtual HalResult<void> alwaysOnEnable(int32_t id, hardware::vibrator::Effect effect,
-                                           hardware::vibrator::EffectStrength strength) = 0;
+    virtual HalResult<void> alwaysOnEnable(int32_t id, Effect effect, EffectStrength strength) = 0;
     virtual HalResult<void> alwaysOnDisable(int32_t id) = 0;
 
     virtual HalResult<std::chrono::milliseconds> performEffect(
-            hardware::vibrator::Effect effect, hardware::vibrator::EffectStrength strength,
+            Effect effect, EffectStrength strength,
             const std::function<void()>& completionCallback) = 0;
 
+    virtual HalResult<void> performVendorEffect(const VendorEffect& effect,
+                                                const std::function<void()>& completionCallback);
+
     virtual HalResult<std::chrono::milliseconds> performComposedEffect(
-            const std::vector<hardware::vibrator::CompositeEffect>& primitives,
+            const std::vector<CompositeEffect>& primitives,
             const std::function<void()>& completionCallback);
 
-    virtual HalResult<void> performPwleEffect(
-            const std::vector<hardware::vibrator::PrimitivePwle>& primitives,
-            const std::function<void()>& completionCallback);
+    virtual HalResult<void> performPwleEffect(const std::vector<PrimitivePwle>& primitives,
+                                              const std::function<void()>& completionCallback);
+
+    virtual HalResult<void> composePwleV2(const std::vector<PwleV2Primitive>& composite,
+                                          const std::function<void()>& completionCallback);
 
 protected:
     // Shared pointer to allow CallbackScheduler to outlive this wrapper.
@@ -381,12 +425,11 @@ protected:
 
     // Request vibrator info to HAL skipping cache.
     virtual HalResult<Capabilities> getCapabilitiesInternal() = 0;
-    virtual HalResult<std::vector<hardware::vibrator::Effect>> getSupportedEffectsInternal();
-    virtual HalResult<std::vector<hardware::vibrator::Braking>> getSupportedBrakingInternal();
-    virtual HalResult<std::vector<hardware::vibrator::CompositePrimitive>>
-    getSupportedPrimitivesInternal();
+    virtual HalResult<std::vector<Effect>> getSupportedEffectsInternal();
+    virtual HalResult<std::vector<Braking>> getSupportedBrakingInternal();
+    virtual HalResult<std::vector<CompositePrimitive>> getSupportedPrimitivesInternal();
     virtual HalResult<std::vector<std::chrono::milliseconds>> getPrimitiveDurationsInternal(
-            const std::vector<hardware::vibrator::CompositePrimitive>& supportedPrimitives);
+            const std::vector<CompositePrimitive>& supportedPrimitives);
     virtual HalResult<std::chrono::milliseconds> getPrimitiveDelayMaxInternal();
     virtual HalResult<std::chrono::milliseconds> getPrimitiveDurationMaxInternal();
     virtual HalResult<int32_t> getCompositionSizeMaxInternal();
@@ -396,6 +439,9 @@ protected:
     virtual HalResult<float> getFrequencyResolutionInternal();
     virtual HalResult<float> getQFactorInternal();
     virtual HalResult<std::vector<float>> getMaxAmplitudesInternal();
+    virtual HalResult<int32_t> getMaxEnvelopeEffectSizeInternal();
+    virtual HalResult<std::chrono::milliseconds> getMinEnvelopeEffectControlPointDurationInternal();
+    virtual HalResult<std::chrono::milliseconds> getMaxEnvelopeEffectControlPointDurationInternal();
 
 private:
     std::mutex mInfoMutex;
@@ -405,12 +451,17 @@ private:
 // Wrapper for the AIDL Vibrator HAL.
 class AidlHalWrapper : public HalWrapper {
 public:
+    using IVibrator = aidl::android::hardware::vibrator::IVibrator;
+    using reconnect_fn = std::function<HalResult<std::shared_ptr<IVibrator>>()>;
+
     AidlHalWrapper(
-            std::shared_ptr<CallbackScheduler> scheduler, sp<hardware::vibrator::IVibrator> handle,
-            std::function<HalResult<sp<hardware::vibrator::IVibrator>>()> reconnectFn =
+            std::shared_ptr<CallbackScheduler> scheduler, std::shared_ptr<IVibrator> handle,
+            reconnect_fn reconnectFn =
                     []() {
-                        return HalResult<sp<hardware::vibrator::IVibrator>>::ok(
-                                checkVintfService<hardware::vibrator::IVibrator>());
+                        auto serviceName = std::string(IVibrator::descriptor) + "/default";
+                        auto hal = IVibrator::fromBinder(
+                                ndk::SpAIBinder(AServiceManager_checkService(serviceName.c_str())));
+                        return HalResult<std::shared_ptr<IVibrator>>::ok(std::move(hal));
                     })
           : HalWrapper(std::move(scheduler)),
             mReconnectFn(reconnectFn),
@@ -427,32 +478,36 @@ public:
     HalResult<void> setAmplitude(float amplitude) override final;
     HalResult<void> setExternalControl(bool enabled) override final;
 
-    HalResult<void> alwaysOnEnable(int32_t id, hardware::vibrator::Effect effect,
-                                   hardware::vibrator::EffectStrength strength) override final;
+    HalResult<void> alwaysOnEnable(int32_t id, Effect effect,
+                                   EffectStrength strength) override final;
     HalResult<void> alwaysOnDisable(int32_t id) override final;
 
     HalResult<std::chrono::milliseconds> performEffect(
-            hardware::vibrator::Effect effect, hardware::vibrator::EffectStrength strength,
+            Effect effect, EffectStrength strength,
+            const std::function<void()>& completionCallback) override final;
+
+    HalResult<void> performVendorEffect(
+            const VendorEffect& effect,
             const std::function<void()>& completionCallback) override final;
 
     HalResult<std::chrono::milliseconds> performComposedEffect(
-            const std::vector<hardware::vibrator::CompositeEffect>& primitives,
+            const std::vector<CompositeEffect>& primitives,
             const std::function<void()>& completionCallback) override final;
 
     HalResult<void> performPwleEffect(
-            const std::vector<hardware::vibrator::PrimitivePwle>& primitives,
+            const std::vector<PrimitivePwle>& primitives,
             const std::function<void()>& completionCallback) override final;
+
+    HalResult<void> composePwleV2(const std::vector<PwleV2Primitive>& composite,
+                                  const std::function<void()>& completionCallback) override final;
 
 protected:
     HalResult<Capabilities> getCapabilitiesInternal() override final;
-    HalResult<std::vector<hardware::vibrator::Effect>> getSupportedEffectsInternal() override final;
-    HalResult<std::vector<hardware::vibrator::Braking>> getSupportedBrakingInternal()
-            override final;
-    HalResult<std::vector<hardware::vibrator::CompositePrimitive>> getSupportedPrimitivesInternal()
-            override final;
+    HalResult<std::vector<Effect>> getSupportedEffectsInternal() override final;
+    HalResult<std::vector<Braking>> getSupportedBrakingInternal() override final;
+    HalResult<std::vector<CompositePrimitive>> getSupportedPrimitivesInternal() override final;
     HalResult<std::vector<std::chrono::milliseconds>> getPrimitiveDurationsInternal(
-            const std::vector<hardware::vibrator::CompositePrimitive>& supportedPrimitives)
-            override final;
+            const std::vector<CompositePrimitive>& supportedPrimitives) override final;
     HalResult<std::chrono::milliseconds> getPrimitiveDelayMaxInternal() override final;
     HalResult<std::chrono::milliseconds> getPrimitiveDurationMaxInternal() override final;
     HalResult<int32_t> getCompositionSizeMaxInternal() override final;
@@ -462,13 +517,20 @@ protected:
     HalResult<float> getFrequencyResolutionInternal() override final;
     HalResult<float> getQFactorInternal() override final;
     HalResult<std::vector<float>> getMaxAmplitudesInternal() override final;
+    HalResult<int32_t> getMaxEnvelopeEffectSizeInternal() override final;
+
+    HalResult<std::chrono::milliseconds> getMinEnvelopeEffectControlPointDurationInternal()
+            override final;
+
+    HalResult<std::chrono::milliseconds> getMaxEnvelopeEffectControlPointDurationInternal()
+            override final;
 
 private:
-    const std::function<HalResult<sp<hardware::vibrator::IVibrator>>()> mReconnectFn;
+    const reconnect_fn mReconnectFn;
     std::mutex mHandleMutex;
-    sp<hardware::vibrator::IVibrator> mHandle GUARDED_BY(mHandleMutex);
+    std::shared_ptr<IVibrator> mHandle GUARDED_BY(mHandleMutex);
 
-    sp<hardware::vibrator::IVibrator> getHal();
+    std::shared_ptr<IVibrator> getHal();
 };
 
 // Wrapper for the HDIL Vibrator HALs.
@@ -489,8 +551,8 @@ public:
     HalResult<void> setAmplitude(float amplitude) override final;
     virtual HalResult<void> setExternalControl(bool enabled) override;
 
-    HalResult<void> alwaysOnEnable(int32_t id, hardware::vibrator::Effect effect,
-                                   hardware::vibrator::EffectStrength strength) override final;
+    HalResult<void> alwaysOnEnable(int32_t id, HalWrapper::Effect effect,
+                                   HalWrapper::EffectStrength strength) override final;
     HalResult<void> alwaysOnDisable(int32_t id) override final;
 
 protected:
@@ -506,8 +568,7 @@ protected:
 
     template <class T>
     HalResult<std::chrono::milliseconds> performInternal(
-            perform_fn<T> performFn, sp<I> handle, T effect,
-            hardware::vibrator::EffectStrength strength,
+            perform_fn<T> performFn, sp<I> handle, T effect, HalWrapper::EffectStrength strength,
             const std::function<void()>& completionCallback);
 
     sp<I> getHal();
@@ -523,7 +584,7 @@ public:
     virtual ~HidlHalWrapperV1_0() = default;
 
     HalResult<std::chrono::milliseconds> performEffect(
-            hardware::vibrator::Effect effect, hardware::vibrator::EffectStrength strength,
+            HalWrapper::Effect effect, HalWrapper::EffectStrength strength,
             const std::function<void()>& completionCallback) override final;
 };
 
@@ -537,7 +598,7 @@ public:
     virtual ~HidlHalWrapperV1_1() = default;
 
     HalResult<std::chrono::milliseconds> performEffect(
-            hardware::vibrator::Effect effect, hardware::vibrator::EffectStrength strength,
+            HalWrapper::Effect effect, HalWrapper::EffectStrength strength,
             const std::function<void()>& completionCallback) override final;
 };
 
@@ -551,7 +612,7 @@ public:
     virtual ~HidlHalWrapperV1_2() = default;
 
     HalResult<std::chrono::milliseconds> performEffect(
-            hardware::vibrator::Effect effect, hardware::vibrator::EffectStrength strength,
+            HalWrapper::Effect effect, HalWrapper::EffectStrength strength,
             const std::function<void()>& completionCallback) override final;
 };
 
@@ -567,7 +628,7 @@ public:
     HalResult<void> setExternalControl(bool enabled) override final;
 
     HalResult<std::chrono::milliseconds> performEffect(
-            hardware::vibrator::Effect effect, hardware::vibrator::EffectStrength strength,
+            HalWrapper::Effect effect, HalWrapper::EffectStrength strength,
             const std::function<void()>& completionCallback) override final;
 
 protected:

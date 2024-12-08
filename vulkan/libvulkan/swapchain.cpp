@@ -1215,8 +1215,15 @@ VkResult GetPhysicalDeviceSurfaceFormats2KHR(
                             surfaceCompressionProps
                                 ->imageCompressionFixedRateFlags =
                                 compressionProps.imageCompressionFixedRateFlags;
-                        } else {
+                        } else if (compressionRes ==
+                                       VK_ERROR_OUT_OF_HOST_MEMORY ||
+                                   compressionRes ==
+                                       VK_ERROR_OUT_OF_DEVICE_MEMORY) {
                             return compressionRes;
+                        } else {
+                            // For any of the *_NOT_SUPPORTED errors we continue
+                            // onto the next format
+                            continue;
                         }
                     }
                 } break;
@@ -1465,6 +1472,12 @@ static VkResult getProducerUsage(const VkDevice& device,
             .flags = create_protected_swapchain ? VK_IMAGE_CREATE_PROTECTED_BIT : 0u,
         };
 
+        // If supporting mutable format swapchain add the mutable format flag
+        if (create_info->flags & VK_SWAPCHAIN_CREATE_MUTABLE_FORMAT_BIT_KHR) {
+            image_format_info.flags |= VK_IMAGE_CREATE_MUTABLE_FORMAT_BIT;
+            image_format_info.flags |= VK_IMAGE_CREATE_EXTENDED_USAGE_BIT_KHR;
+        }
+
         VkAndroidHardwareBufferUsageANDROID ahb_usage;
         ahb_usage.sType = VK_STRUCTURE_TYPE_ANDROID_HARDWARE_BUFFER_USAGE_ANDROID;
         ahb_usage.pNext = nullptr;
@@ -1473,23 +1486,14 @@ static VkResult getProducerUsage(const VkDevice& device,
         image_format_properties.sType = VK_STRUCTURE_TYPE_IMAGE_FORMAT_PROPERTIES_2;
         image_format_properties.pNext = &ahb_usage;
 
-        if (instance_dispatch.GetPhysicalDeviceImageFormatProperties2) {
-            VkResult result = instance_dispatch.GetPhysicalDeviceImageFormatProperties2(
-                pdev, &image_format_info, &image_format_properties);
-            if (result != VK_SUCCESS) {
-                ALOGE("VkGetPhysicalDeviceImageFormatProperties2 for AHB usage failed: %d", result);
-                return VK_ERROR_SURFACE_LOST_KHR;
-            }
-        }
-        else {
-            VkResult result = instance_dispatch.GetPhysicalDeviceImageFormatProperties2KHR(
-                pdev, &image_format_info,
-                &image_format_properties);
-            if (result != VK_SUCCESS) {
-                ALOGE("VkGetPhysicalDeviceImageFormatProperties2KHR for AHB usage failed: %d",
-                    result);
-                return VK_ERROR_SURFACE_LOST_KHR;
-            }
+        VkResult result = GetPhysicalDeviceImageFormatProperties2(
+            pdev, &image_format_info, &image_format_properties);
+        if (result != VK_SUCCESS) {
+            ALOGE(
+                "VkGetPhysicalDeviceImageFormatProperties2 for AHB usage "
+                "failed: %d",
+                result);
+            return VK_ERROR_SURFACE_LOST_KHR;
         }
 
         // Determine if USAGE_FRONT_BUFFER is needed.
@@ -1892,6 +1896,11 @@ VkResult CreateSwapchainKHR(VkDevice device,
         num_images = 1;
     }
 
+    VkImageFormatListCreateInfo extra_mutable_formats = {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_FORMAT_LIST_CREATE_INFO_KHR,
+    };
+    VkImageFormatListCreateInfo* extra_mutable_formats_ptr;
+
     // Look through the create_info pNext chain passed to createSwapchainKHR
     // for an image compression control struct.
     // if one is found AND the appropriate extensions are enabled, create a
@@ -1910,7 +1919,29 @@ VkResult CreateSwapchainKHR(VkDevice device,
                 image_compression.pNext = nullptr;
                 usage_info_pNext = &image_compression;
             } break;
-
+            case VK_STRUCTURE_TYPE_IMAGE_FORMAT_LIST_CREATE_INFO: {
+                const VkImageFormatListCreateInfo* format_list =
+                    reinterpret_cast<const VkImageFormatListCreateInfo*>(
+                        create_infos);
+                if (create_info->flags &
+                    VK_SWAPCHAIN_CREATE_MUTABLE_FORMAT_BIT_KHR) {
+                    if (format_list && format_list->viewFormatCount > 0 &&
+                        format_list->pViewFormats) {
+                        extra_mutable_formats.viewFormatCount =
+                            format_list->viewFormatCount;
+                        extra_mutable_formats.pViewFormats =
+                            format_list->pViewFormats;
+                        extra_mutable_formats_ptr = &extra_mutable_formats;
+                    } else {
+                        ALOGE(
+                            "vk_swapchain_create_mutable_format_bit_khr was "
+                            "set during swapchain creation but no valid "
+                            "vkimageformatlistcreateinfo was found in the "
+                            "pnext chain");
+                        return VK_ERROR_INITIALIZATION_FAILED;
+                    }
+                }
+            } break;
             default:
                 // Ignore all other info structs
                 break;
@@ -2006,6 +2037,11 @@ VkResult CreateSwapchainKHR(VkDevice device,
         .pQueueFamilyIndices = create_info->pQueueFamilyIndices,
     };
 
+    if (create_info->flags & VK_SWAPCHAIN_CREATE_MUTABLE_FORMAT_BIT_KHR) {
+        image_create.flags |= VK_IMAGE_CREATE_MUTABLE_FORMAT_BIT;
+        image_create.flags |= VK_IMAGE_CREATE_EXTENDED_USAGE_BIT_KHR;
+    }
+
     // Note: don't do deferred allocation for shared present modes. There's only one buffer
     // involved so very little benefit.
     if ((create_info->flags & VK_SWAPCHAIN_CREATE_DEFERRED_MEMORY_ALLOCATION_BIT_EXT) &&
@@ -2015,7 +2051,7 @@ VkResult CreateSwapchainKHR(VkDevice device,
         // AcquireNextImage.
         VkImageSwapchainCreateInfoKHR image_swapchain_create = {
             .sType = VK_STRUCTURE_TYPE_IMAGE_SWAPCHAIN_CREATE_INFO_KHR,
-            .pNext = nullptr,
+            .pNext = extra_mutable_formats_ptr,
             .swapchain = HandleFromSwapchain(swapchain),
         };
         image_create.pNext = &image_swapchain_create;
@@ -2066,6 +2102,11 @@ VkResult CreateSwapchainKHR(VkDevice device,
             image_native_buffer.ahb =
                 ANativeWindowBuffer_getHardwareBuffer(img.buffer.get());
             image_create.pNext = &image_native_buffer;
+
+            if (extra_mutable_formats_ptr) {
+                extra_mutable_formats_ptr->pNext = image_create.pNext;
+                image_create.pNext = extra_mutable_formats_ptr;
+            }
 
             ATRACE_BEGIN("CreateImage");
             result =

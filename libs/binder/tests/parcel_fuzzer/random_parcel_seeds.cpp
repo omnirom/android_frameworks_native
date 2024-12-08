@@ -55,7 +55,7 @@ std::vector<uint8_t> reverseBytes(T min, T max, T val) {
         offset += CHAR_BIT;
     }
 
-    return std::move(reverseData);
+    return reverseData;
 }
 
 template <typename T>

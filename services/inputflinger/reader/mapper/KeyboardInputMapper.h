@@ -60,7 +60,10 @@ private:
         int32_t flags{};
     };
 
-    uint32_t mSource{};
+    // The keyboard source for this mapper. Events generated should use the source shared
+    // by all KeyboardInputMappers for this input device.
+    uint32_t mMapperSource{};
+
     std::optional<KeyboardLayoutInfo> mKeyboardLayoutInfo;
 
     std::vector<KeyDown> mKeyDowns{}; // keys that are down
@@ -106,6 +109,7 @@ private:
     std::optional<DisplayViewport> findViewport(const InputReaderConfiguration& readerConfig);
     [[nodiscard]] std::list<NotifyArgs> cancelAllDownKeys(nsecs_t when);
     void onKeyDownProcessed(nsecs_t downTime);
+    uint32_t getEventSource() const;
 };
 
 } // namespace android

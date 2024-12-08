@@ -114,7 +114,7 @@ HdrSdrRatioOverlay::HdrSdrRatioOverlay(ConstructorTag)
         ALOGE("%s: Failed to create buffer state layer", __func__);
         return;
     }
-    SurfaceComposerClient::Transaction()
+    createTransaction()
             .setLayer(mSurfaceControl->get(), INT32_MAX - 2)
             .setTrustedOverlay(mSurfaceControl->get(), true)
             .apply();
@@ -130,7 +130,7 @@ void HdrSdrRatioOverlay::changeHdrSdrRatio(float currentHdrSdrRatio) {
 }
 
 void HdrSdrRatioOverlay::setLayerStack(ui::LayerStack stack) {
-    SurfaceComposerClient::Transaction().setLayerStack(mSurfaceControl->get(), stack).apply();
+    createTransaction().setLayerStack(mSurfaceControl->get(), stack).apply();
 }
 
 void HdrSdrRatioOverlay::setViewport(ui::Size viewport) {
@@ -141,7 +141,7 @@ void HdrSdrRatioOverlay::setViewport(ui::Size viewport) {
     // set the ratio frame to the top right of the screen
     frame.offsetBy(viewport.width - frame.width(), height >> 4);
 
-    SurfaceComposerClient::Transaction()
+    createTransaction()
             .setMatrix(mSurfaceControl->get(), frame.getWidth() / static_cast<float>(kBufferWidth),
                        0, 0, frame.getHeight() / static_cast<float>(kBufferHeight))
             .setPosition(mSurfaceControl->get(), frame.left, frame.top)
@@ -167,7 +167,7 @@ auto HdrSdrRatioOverlay::getOrCreateBuffers(float currentHdrSdrRatio) -> const s
         }
     }();
 
-    SurfaceComposerClient::Transaction().setTransform(mSurfaceControl->get(), transform).apply();
+    createTransaction().setTransform(mSurfaceControl->get(), transform).apply();
 
     constexpr SkColor kMinRatioColor = SK_ColorBLUE;
     constexpr SkColor kMaxRatioColor = SK_ColorGREEN;
@@ -194,9 +194,21 @@ auto HdrSdrRatioOverlay::getOrCreateBuffers(float currentHdrSdrRatio) -> const s
 
 void HdrSdrRatioOverlay::animate() {
     if (!std::isfinite(mCurrentHdrSdrRatio) || mCurrentHdrSdrRatio < 1.0f) return;
-    SurfaceComposerClient::Transaction()
+    createTransaction()
             .setBuffer(mSurfaceControl->get(), getOrCreateBuffers(mCurrentHdrSdrRatio))
             .apply();
+}
+
+SurfaceComposerClient::Transaction HdrSdrRatioOverlay::createTransaction() const {
+    constexpr float kFrameRate = 0.f;
+    constexpr int8_t kCompatibility = ANATIVEWINDOW_FRAME_RATE_NO_VOTE;
+    constexpr int8_t kSeamlessness = ANATIVEWINDOW_CHANGE_FRAME_RATE_ONLY_IF_SEAMLESS;
+
+    const sp<SurfaceControl>& surface = mSurfaceControl->get();
+
+    SurfaceComposerClient::Transaction transaction;
+    transaction.setFrameRate(surface, kFrameRate, kCompatibility, kSeamlessness);
+    return transaction;
 }
 
 } // namespace android

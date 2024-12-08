@@ -24,6 +24,10 @@ package {
 cc_defaults {
     name: "libvibrator_defaults",
 
+    defaults: [
+        "aconfig_lib_cc_shared_link.defaults",
+    ],
+
     cflags: [
         "-Wall",
         "-Werror",
@@ -50,9 +54,11 @@ cc_library {
         "libbinder",
         "liblog",
         "libutils",
+        "server_configurable_flags",
     ],
 
     whole_static_libs: [
+        "android.os.vibrator.flags-aconfig-cc",
         "libvibratorutils",
     ],
 
@@ -79,8 +85,14 @@ cc_library {
     vendor_available: true,
     double_loadable: true,
 
+    static_libs: [
+        "android.os.vibrator.flags-aconfig-cc",
+    ],
+
     shared_libs: [
+        "liblog",
         "libutils",
+        "server_configurable_flags",
     ],
 
     srcs: [
@@ -89,6 +101,7 @@ cc_library {
 
     visibility: [
         "//frameworks/native/libs/vibrator",
+        "//frameworks/native/libs/vibrator/tests",
         "//frameworks/av/media/libeffects/hapticgenerator",
     ],
 }

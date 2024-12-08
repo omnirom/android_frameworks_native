@@ -134,6 +134,14 @@ impl Filter for StickyKeysFilter {
     fn destroy(&mut self) {
         self.next.destroy();
     }
+
+    fn dump(&mut self, dump_str: String) -> String {
+        let mut result = "Sticky Keys filter: \n".to_string();
+        result += &format!("\tmodifier_state = {:?}\n", self.modifier_state);
+        result += &format!("\tlocked_modifier_state = {:?}\n", self.locked_modifier_state);
+        result += &format!("\tcontributing_devices = {:?}\n", self.contributing_devices);
+        self.next.dump(dump_str + &result)
+    }
 }
 
 fn is_modifier_key(keycode: i32) -> bool {
@@ -235,6 +243,7 @@ mod tests {
         DeviceInfo::DeviceInfo, IInputFilter::IInputFilterCallbacks::IInputFilterCallbacks,
         KeyEvent::KeyEvent, KeyEventAction::KeyEventAction,
     };
+    use input::KeyboardType;
     use input::ModifierState;
     use std::sync::{Arc, RwLock};
 
@@ -496,7 +505,11 @@ mod tests {
             ..BASE_KEY_UP
         });
 
-        sticky_keys_filter.notify_devices_changed(&[DeviceInfo { deviceId: 2, external: true }]);
+        sticky_keys_filter.notify_devices_changed(&[DeviceInfo {
+            deviceId: 2,
+            external: true,
+            keyboardType: KeyboardType::Alphabetic as i32,
+        }]);
         assert_eq!(
             test_callbacks.get_last_modifier_state(),
             ModifierState::CtrlLeftOn | ModifierState::CtrlOn

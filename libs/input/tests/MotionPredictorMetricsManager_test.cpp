@@ -167,7 +167,8 @@ MotionEvent makeMotionEvent(const std::vector<PredictionPoint>& predictionPoints
                         .y(predictionPoints[i].position[0])
                         .axis(AMOTION_EVENT_AXIS_PRESSURE, predictionPoints[i].pressure)
                         .buildCoords();
-        predictionEvent.addSample(predictionPoints[i].targetTimestamp, &coords);
+        predictionEvent.addSample(predictionPoints[i].targetTimestamp, &coords,
+                                  predictionEvent.getId());
     }
     return predictionEvent;
 }

@@ -27,9 +27,18 @@ ndk_library {
     symbol_file: "libvulkan.map.txt",
     first_version: "24",
     unversioned_until: "current",
-    export_header_libs: [
-        "ndk_vulkan_headers",
-    ],
+}
+
+aconfig_declarations {
+    name: "libvulkan_flags",
+    package: "com.android.graphics.libvulkan.flags",
+    container: "system",
+    srcs: ["libvulkan_flags.aconfig"],
+}
+
+cc_aconfig_library {
+    name: "libvulkanflags",
+    aconfig_declarations: "libvulkan_flags",
 }
 
 cc_library_shared {
@@ -113,5 +122,8 @@ cc_library_shared {
         "android.hardware.graphics.common@1.0",
         "libSurfaceFlingerProp",
     ],
-    static_libs: ["libgrallocusage"],
+    static_libs: [
+        "libgrallocusage",
+        "libvulkanflags",
+    ],
 }

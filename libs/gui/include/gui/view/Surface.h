@@ -59,8 +59,9 @@ class Surface : public Parcelable {
     // of the full parceling to happen on its native side.
     status_t readFromParcel(const Parcel* parcel, bool nameAlreadyRead);
 
-  private:
+    std::string toString() const;
 
+private:
     static String16 readMaybeEmptyString16(const Parcel* parcel);
 };
 

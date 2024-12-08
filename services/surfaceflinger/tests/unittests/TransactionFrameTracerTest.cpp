@@ -94,7 +94,7 @@ public:
                                                          HAL_PIXEL_FORMAT_RGBA_8888,
                                                          0ULL /*usage*/);
         layer->setBuffer(externalTexture, bufferData, postTime, /*desiredPresentTime*/ 30, false,
-                         FrameTimelineInfo{});
+                         FrameTimelineInfo{}, gui::GameMode::Unsupported);
 
         commitTransaction(layer.get());
         nsecs_t latchTime = 25;
@@ -112,7 +112,8 @@ public:
         EXPECT_CALL(*mFlinger.getFrameTracer(),
                     traceFence(layerId, bufferId, frameNumber, presentFence,
                                FrameTracer::FrameEvent::PRESENT_FENCE, /*startTime*/ 0));
-        layer->onCompositionPresented(nullptr, glDoneFence, presentFence, compositorTiming);
+        layer->onCompositionPresented(nullptr, glDoneFence, presentFence, compositorTiming,
+                                      gui::GameMode::Unsupported);
     }
 };
 

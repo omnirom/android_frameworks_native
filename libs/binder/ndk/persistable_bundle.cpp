@@ -17,10 +17,11 @@
 #include <android/persistable_bundle.h>
 #include <binder/PersistableBundle.h>
 #include <log/log.h>
-#include <persistable_bundle_internal.h>
 #include <string.h>
 
 #include <set>
+
+#include "persistable_bundle_internal.h"
 
 __BEGIN_DECLS
 

@@ -210,6 +210,8 @@ public:
         // within the timeout of DisplayPowerTimer.
         bool powerOnImminent = false;
 
+        bool shouldEmitEvent() const { return !idle; }
+
         bool operator==(GlobalSignals other) const {
             return touch == other.touch && idle == other.idle &&
                     powerOnImminent == other.powerOnImminent;
@@ -321,7 +323,10 @@ public:
     RefreshRateSelector(const RefreshRateSelector&) = delete;
     RefreshRateSelector& operator=(const RefreshRateSelector&) = delete;
 
-    const DisplayModes& displayModes() const { return mDisplayModes; }
+    DisplayModes displayModes() const {
+        std::lock_guard lock(mLock);
+        return mDisplayModes;
+    }
 
     // Returns whether switching modes (refresh rate or resolution) is possible.
     // TODO(b/158780872): Consider HAL support, and skip frame rate detection if the modes only

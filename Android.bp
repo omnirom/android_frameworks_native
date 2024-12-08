@@ -38,7 +38,13 @@ license {
 
 cc_library_headers {
     name: "native_headers",
+    vendor_available: true,
     host_supported: true,
+    target: {
+        windows: {
+            enabled: true,
+        },
+    },
     export_include_dirs: [
         "include/",
     ],

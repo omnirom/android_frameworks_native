@@ -61,12 +61,12 @@ const std::chrono::duration ANR_TIMEOUT = std::chrono::milliseconds(
 
 InputEventTimeline getTestTimeline() {
     InputEventTimeline t(
-            /*isDown=*/true,
             /*eventTime=*/2,
             /*readTime=*/3,
             /*vendorId=*/0,
             /*productId=*/0,
-            /*sources=*/{InputDeviceUsageSource::UNKNOWN});
+            /*sources=*/{InputDeviceUsageSource::UNKNOWN},
+            /*inputEventActionType=*/InputEventActionType::UNKNOWN_INPUT_EVENT);
     ConnectionTimeline expectedCT(/*deliveryTime=*/6, /*consumeTime=*/7, /*finishTime=*/8);
     std::array<nsecs_t, GraphicsTimeline::SIZE> graphicsTimeline;
     graphicsTimeline[GraphicsTimeline::GPU_COMPLETED_TIME] = 9;
@@ -116,9 +116,10 @@ private:
 void LatencyTrackerTest::triggerEventReporting(nsecs_t lastEventTime) {
     const nsecs_t triggerEventTime =
             lastEventTime + std::chrono::nanoseconds(ANR_TIMEOUT).count() + 1;
-    mTracker->trackListener(/*inputEventId=*/1, /*isDown=*/true, triggerEventTime,
+    mTracker->trackListener(/*inputEventId=*/1, triggerEventTime,
                             /*readTime=*/3, DEVICE_ID,
-                            /*sources=*/{InputDeviceUsageSource::UNKNOWN});
+                            /*sources=*/{InputDeviceUsageSource::UNKNOWN},
+                            AMOTION_EVENT_ACTION_CANCEL, InputEventType::MOTION);
 }
 
 void LatencyTrackerTest::assertReceivedTimeline(const InputEventTimeline& timeline) {
@@ -167,12 +168,15 @@ void LatencyTrackerTest::assertReceivedTimelines(const std::vector<InputEventTim
  * any additional ConnectionTimeline's.
  */
 TEST_F(LatencyTrackerTest, TrackListener_DoesNotTriggerReporting) {
-    mTracker->trackListener(/*inputEventId=*/1, /*isDown=*/false, /*eventTime=*/2,
-                            /*readTime=*/3, DEVICE_ID, {InputDeviceUsageSource::UNKNOWN});
+    mTracker->trackListener(/*inputEventId=*/1, /*eventTime=*/2,
+                            /*readTime=*/3, DEVICE_ID, {InputDeviceUsageSource::UNKNOWN},
+                            AMOTION_EVENT_ACTION_CANCEL, InputEventType::MOTION);
     triggerEventReporting(/*eventTime=*/2);
-    assertReceivedTimeline(InputEventTimeline{/*isDown=*/false, /*eventTime=*/2,
-                                              /*readTime=*/3, /*vendorId=*/0, /*productID=*/0,
-                                              /*sources=*/{InputDeviceUsageSource::UNKNOWN}});
+    assertReceivedTimeline(
+            InputEventTimeline{/*eventTime=*/2,
+                               /*readTime=*/3, /*vendorId=*/0, /*productID=*/0,
+                               /*sources=*/{InputDeviceUsageSource::UNKNOWN},
+                               /*inputEventActionType=*/InputEventActionType::UNKNOWN_INPUT_EVENT});
 }
 
 /**
@@ -203,8 +207,9 @@ TEST_F(LatencyTrackerTest, TrackAllParameters_ReportsFullTimeline) {
 
     const auto& [connectionToken, expectedCT] = *expected.connectionTimelines.begin();
 
-    mTracker->trackListener(inputEventId, expected.isDown, expected.eventTime, expected.readTime,
-                            DEVICE_ID, {InputDeviceUsageSource::UNKNOWN});
+    mTracker->trackListener(inputEventId, expected.eventTime, expected.readTime, DEVICE_ID,
+                            {InputDeviceUsageSource::UNKNOWN}, AMOTION_EVENT_ACTION_CANCEL,
+                            InputEventType::MOTION);
     mTracker->trackFinishedEvent(inputEventId, connectionToken, expectedCT.deliveryTime,
                                  expectedCT.consumeTime, expectedCT.finishTime);
     mTracker->trackGraphicsLatency(inputEventId, connectionToken, expectedCT.graphicsTimeline);
@@ -220,14 +225,15 @@ TEST_F(LatencyTrackerTest, TrackAllParameters_ReportsFullTimeline) {
 TEST_F(LatencyTrackerTest, WhenDuplicateEventsAreReported_DoesNotCrash) {
     constexpr nsecs_t inputEventId = 1;
     constexpr nsecs_t readTime = 3; // does not matter for this test
-    constexpr bool isDown = true;   // does not matter for this test
 
     // In the following 2 calls to trackListener, the inputEventId's are the same, but event times
     // are different.
-    mTracker->trackListener(inputEventId, isDown, /*eventTime=*/1, readTime, DEVICE_ID,
-                            {InputDeviceUsageSource::UNKNOWN});
-    mTracker->trackListener(inputEventId, isDown, /*eventTime=*/2, readTime, DEVICE_ID,
-                            {InputDeviceUsageSource::UNKNOWN});
+    mTracker->trackListener(inputEventId, /*eventTime=*/1, readTime, DEVICE_ID,
+                            {InputDeviceUsageSource::UNKNOWN}, AMOTION_EVENT_ACTION_CANCEL,
+                            InputEventType::MOTION);
+    mTracker->trackListener(inputEventId, /*eventTime=*/2, readTime, DEVICE_ID,
+                            {InputDeviceUsageSource::UNKNOWN}, AMOTION_EVENT_ACTION_CANCEL,
+                            InputEventType::MOTION);
 
     triggerEventReporting(/*eventTime=*/2);
     // Since we sent duplicate input events, the tracker should just delete all of them, because it
@@ -238,12 +244,12 @@ TEST_F(LatencyTrackerTest, WhenDuplicateEventsAreReported_DoesNotCrash) {
 TEST_F(LatencyTrackerTest, MultipleEvents_AreReportedConsistently) {
     constexpr int32_t inputEventId1 = 1;
     InputEventTimeline timeline1(
-            /*isDown*/ true,
             /*eventTime*/ 2,
             /*readTime*/ 3,
             /*vendorId=*/0,
             /*productId=*/0,
-            /*sources=*/{InputDeviceUsageSource::UNKNOWN});
+            /*sources=*/{InputDeviceUsageSource::UNKNOWN},
+            /*inputEventType=*/InputEventActionType::UNKNOWN_INPUT_EVENT);
     timeline1.connectionTimelines.emplace(connection1,
                                           ConnectionTimeline(/*deliveryTime*/ 6, /*consumeTime*/ 7,
                                                              /*finishTime*/ 8));
@@ -255,12 +261,12 @@ TEST_F(LatencyTrackerTest, MultipleEvents_AreReportedConsistently) {
 
     constexpr int32_t inputEventId2 = 10;
     InputEventTimeline timeline2(
-            /*isDown=*/false,
             /*eventTime=*/20,
             /*readTime=*/30,
             /*vendorId=*/0,
             /*productId=*/0,
-            /*sources=*/{InputDeviceUsageSource::UNKNOWN});
+            /*sources=*/{InputDeviceUsageSource::UNKNOWN},
+            /*inputEventActionType=*/InputEventActionType::UNKNOWN_INPUT_EVENT);
     timeline2.connectionTimelines.emplace(connection2,
                                           ConnectionTimeline(/*deliveryTime=*/60,
                                                              /*consumeTime=*/70,
@@ -272,11 +278,13 @@ TEST_F(LatencyTrackerTest, MultipleEvents_AreReportedConsistently) {
     connectionTimeline2.setGraphicsTimeline(std::move(graphicsTimeline2));
 
     // Start processing first event
-    mTracker->trackListener(inputEventId1, timeline1.isDown, timeline1.eventTime,
-                            timeline1.readTime, DEVICE_ID, {InputDeviceUsageSource::UNKNOWN});
+    mTracker->trackListener(inputEventId1, timeline1.eventTime, timeline1.readTime, DEVICE_ID,
+                            {InputDeviceUsageSource::UNKNOWN}, AMOTION_EVENT_ACTION_CANCEL,
+                            InputEventType::MOTION);
     // Start processing second event
-    mTracker->trackListener(inputEventId2, timeline2.isDown, timeline2.eventTime,
-                            timeline2.readTime, DEVICE_ID, {InputDeviceUsageSource::UNKNOWN});
+    mTracker->trackListener(inputEventId2, timeline2.eventTime, timeline2.readTime, DEVICE_ID,
+                            {InputDeviceUsageSource::UNKNOWN}, AMOTION_EVENT_ACTION_CANCEL,
+                            InputEventType::MOTION);
     mTracker->trackFinishedEvent(inputEventId1, connection1, connectionTimeline1.deliveryTime,
                                  connectionTimeline1.consumeTime, connectionTimeline1.finishTime);
 
@@ -301,12 +309,14 @@ TEST_F(LatencyTrackerTest, IncompleteEvents_AreHandledConsistently) {
     const sp<IBinder>& token = timeline.connectionTimelines.begin()->first;
 
     for (size_t i = 1; i <= 100; i++) {
-        mTracker->trackListener(/*inputEventId=*/i, timeline.isDown, timeline.eventTime,
-                                timeline.readTime, /*deviceId=*/DEVICE_ID,
-                                /*sources=*/{InputDeviceUsageSource::UNKNOWN});
-        expectedTimelines.push_back(InputEventTimeline{timeline.isDown, timeline.eventTime,
-                                                       timeline.readTime, timeline.vendorId,
-                                                       timeline.productId, timeline.sources});
+        mTracker->trackListener(/*inputEventId=*/i, timeline.eventTime, timeline.readTime,
+                                /*deviceId=*/DEVICE_ID,
+                                /*sources=*/{InputDeviceUsageSource::UNKNOWN},
+                                AMOTION_EVENT_ACTION_CANCEL, InputEventType::MOTION);
+        expectedTimelines.push_back(InputEventTimeline{timeline.eventTime, timeline.readTime,
+                                                       timeline.vendorId, timeline.productId,
+                                                       timeline.sources,
+                                                       timeline.inputEventActionType});
     }
     // Now, complete the first event that was sent.
     mTracker->trackFinishedEvent(/*inputEventId=*/1, token, expectedCT.deliveryTime,
@@ -332,12 +342,13 @@ TEST_F(LatencyTrackerTest, EventsAreTracked_WhenTrackListenerIsCalledFirst) {
                                  expectedCT.consumeTime, expectedCT.finishTime);
     mTracker->trackGraphicsLatency(inputEventId, connection1, expectedCT.graphicsTimeline);
 
-    mTracker->trackListener(inputEventId, expected.isDown, expected.eventTime, expected.readTime,
-                            DEVICE_ID, {InputDeviceUsageSource::UNKNOWN});
+    mTracker->trackListener(inputEventId, expected.eventTime, expected.readTime, DEVICE_ID,
+                            {InputDeviceUsageSource::UNKNOWN}, AMOTION_EVENT_ACTION_CANCEL,
+                            InputEventType::MOTION);
     triggerEventReporting(expected.eventTime);
-    assertReceivedTimeline(InputEventTimeline{expected.isDown, expected.eventTime,
-                                              expected.readTime, expected.vendorId,
-                                              expected.productId, expected.sources});
+    assertReceivedTimeline(InputEventTimeline{expected.eventTime, expected.readTime,
+                                              expected.vendorId, expected.productId,
+                                              expected.sources, expected.inputEventActionType});
 }
 
 /**
@@ -348,22 +359,92 @@ TEST_F(LatencyTrackerTest, EventsAreTracked_WhenTrackListenerIsCalledFirst) {
 TEST_F(LatencyTrackerTest, TrackListenerCheck_DeviceInfoFieldsInputEventTimeline) {
     constexpr int32_t inputEventId = 1;
     InputEventTimeline timeline(
-            /*isDown*/ true, /*eventTime*/ 2, /*readTime*/ 3,
+            /*eventTime*/ 2, /*readTime*/ 3,
             /*vendorId=*/50, /*productId=*/60,
             /*sources=*/
-            {InputDeviceUsageSource::TOUCHSCREEN, InputDeviceUsageSource::STYLUS_DIRECT});
+            {InputDeviceUsageSource::TOUCHSCREEN, InputDeviceUsageSource::STYLUS_DIRECT},
+            /*inputEventActionType=*/InputEventActionType::UNKNOWN_INPUT_EVENT);
     InputDeviceInfo deviceInfo1 = generateTestDeviceInfo(
             /*vendorId=*/5, /*productId=*/6, /*deviceId=*/DEVICE_ID + 1);
     InputDeviceInfo deviceInfo2 = generateTestDeviceInfo(
             /*vendorId=*/50, /*productId=*/60, /*deviceId=*/DEVICE_ID);
 
     mTracker->setInputDevices({deviceInfo1, deviceInfo2});
-    mTracker->trackListener(inputEventId, timeline.isDown, timeline.eventTime, timeline.readTime,
-                            DEVICE_ID,
+    mTracker->trackListener(inputEventId, timeline.eventTime, timeline.readTime, DEVICE_ID,
                             {InputDeviceUsageSource::TOUCHSCREEN,
-                             InputDeviceUsageSource::STYLUS_DIRECT});
+                             InputDeviceUsageSource::STYLUS_DIRECT},
+                            AMOTION_EVENT_ACTION_CANCEL, InputEventType::MOTION);
     triggerEventReporting(timeline.eventTime);
     assertReceivedTimeline(timeline);
+}
+
+/**
+ * Check that InputEventActionType is correctly assigned to InputEventTimeline in trackListener.
+ */
+TEST_F(LatencyTrackerTest, TrackListenerCheck_InputEventActionTypeFieldInputEventTimeline) {
+    constexpr int32_t inputEventId = 1;
+    // Create timelines for different event types (Motion, Key)
+    InputEventTimeline motionDownTimeline(
+            /*eventTime*/ 2, /*readTime*/ 3,
+            /*vendorId*/ 0, /*productId*/ 0,
+            /*sources*/ {InputDeviceUsageSource::UNKNOWN},
+            /*inputEventActionType*/ InputEventActionType::MOTION_ACTION_DOWN);
+
+    InputEventTimeline motionMoveTimeline(
+            /*eventTime*/ 4, /*readTime*/ 5,
+            /*vendorId*/ 0, /*productId*/ 0,
+            /*sources*/ {InputDeviceUsageSource::UNKNOWN},
+            /*inputEventActionType*/ InputEventActionType::MOTION_ACTION_MOVE);
+
+    InputEventTimeline motionUpTimeline(
+            /*eventTime*/ 6, /*readTime*/ 7,
+            /*vendorId*/ 0, /*productId*/ 0,
+            /*sources*/ {InputDeviceUsageSource::UNKNOWN},
+            /*inputEventActionType*/ InputEventActionType::MOTION_ACTION_UP);
+
+    InputEventTimeline keyDownTimeline(
+            /*eventTime*/ 8, /*readTime*/ 9,
+            /*vendorId*/ 0, /*productId*/ 0,
+            /*sources*/ {InputDeviceUsageSource::UNKNOWN},
+            /*inputEventActionType*/ InputEventActionType::KEY);
+
+    InputEventTimeline keyUpTimeline(
+            /*eventTime*/ 10, /*readTime*/ 11,
+            /*vendorId*/ 0, /*productId*/ 0,
+            /*sources*/ {InputDeviceUsageSource::UNKNOWN},
+            /*inputEventActionType*/ InputEventActionType::KEY);
+
+    InputEventTimeline unknownTimeline(
+            /*eventTime*/ 12, /*readTime*/ 13,
+            /*vendorId*/ 0, /*productId*/ 0,
+            /*sources*/ {InputDeviceUsageSource::UNKNOWN},
+            /*inputEventActionType*/ InputEventActionType::UNKNOWN_INPUT_EVENT);
+
+    mTracker->trackListener(inputEventId, motionDownTimeline.eventTime, motionDownTimeline.readTime,
+                            DEVICE_ID, motionDownTimeline.sources, AMOTION_EVENT_ACTION_DOWN,
+                            InputEventType::MOTION);
+    mTracker->trackListener(inputEventId + 1, motionMoveTimeline.eventTime,
+                            motionMoveTimeline.readTime, DEVICE_ID, motionMoveTimeline.sources,
+                            AMOTION_EVENT_ACTION_MOVE, InputEventType::MOTION);
+    mTracker->trackListener(inputEventId + 2, motionUpTimeline.eventTime, motionUpTimeline.readTime,
+                            DEVICE_ID, motionUpTimeline.sources, AMOTION_EVENT_ACTION_UP,
+                            InputEventType::MOTION);
+    mTracker->trackListener(inputEventId + 3, keyDownTimeline.eventTime, keyDownTimeline.readTime,
+                            DEVICE_ID, keyDownTimeline.sources, AKEY_EVENT_ACTION_DOWN,
+                            InputEventType::KEY);
+    mTracker->trackListener(inputEventId + 4, keyUpTimeline.eventTime, keyUpTimeline.readTime,
+                            DEVICE_ID, keyUpTimeline.sources, AKEY_EVENT_ACTION_UP,
+                            InputEventType::KEY);
+    mTracker->trackListener(inputEventId + 5, unknownTimeline.eventTime, unknownTimeline.readTime,
+                            DEVICE_ID, unknownTimeline.sources, AMOTION_EVENT_ACTION_POINTER_DOWN,
+                            InputEventType::MOTION);
+
+    triggerEventReporting(unknownTimeline.eventTime);
+
+    std::vector<InputEventTimeline> expectedTimelines = {motionDownTimeline, motionMoveTimeline,
+                                                         motionUpTimeline,   keyDownTimeline,
+                                                         keyUpTimeline,      unknownTimeline};
+    assertReceivedTimelines(expectedTimelines);
 }
 
 } // namespace android::inputdispatcher

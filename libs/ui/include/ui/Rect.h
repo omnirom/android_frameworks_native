@@ -233,7 +233,7 @@ void PrintTo(const Rect& rect, ::std::ostream* os);
 
 ANDROID_BASIC_TYPES_TRAITS(Rect)
 
-}; // namespace android
+} // namespace android
 
 namespace std {
 template <>

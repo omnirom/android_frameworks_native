@@ -26,17 +26,12 @@
 #include "accumulator/CursorButtonAccumulator.h"
 #include "accumulator/MultiTouchMotionAccumulator.h"
 #include "accumulator/TouchButtonAccumulator.h"
+#include "include/TouchpadHardwareState.h"
 
+#include "TouchpadHardwareState.h"
 #include "include/gestures.h"
 
 namespace android {
-
-// A HardwareState struct, but bundled with a vector to contain its FingerStates, so you don't have
-// to worry about where that memory is allocated.
-struct SelfContainedHardwareState {
-    HardwareState state;
-    std::vector<FingerState> fingers;
-};
 
 // Converts RawEvents into the HardwareState structs used by the gestures library.
 class HardwareStateConverter {

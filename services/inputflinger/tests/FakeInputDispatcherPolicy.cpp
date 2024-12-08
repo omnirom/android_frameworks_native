@@ -54,13 +54,6 @@ void FakeInputDispatcherPolicy::assertFilterInputEventWasNotCalled() {
     ASSERT_EQ(nullptr, mFilteredEvent);
 }
 
-void FakeInputDispatcherPolicy::assertNotifyConfigurationChangedWasCalled(nsecs_t when) {
-    std::scoped_lock lock(mLock);
-    ASSERT_TRUE(mConfigurationChangedTime) << "Timed out waiting for configuration changed call";
-    ASSERT_EQ(*mConfigurationChangedTime, when);
-    mConfigurationChangedTime = std::nullopt;
-}
-
 void FakeInputDispatcherPolicy::assertNotifySwitchWasCalled(const NotifySwitchArgs& args) {
     std::scoped_lock lock(mLock);
     ASSERT_TRUE(mLastNotifySwitch);
@@ -340,11 +333,6 @@ std::optional<T> FakeInputDispatcherPolicy::getItemFromStorageLockedInterruptibl
     T item = storage.front();
     storage.pop();
     return std::make_optional(item);
-}
-
-void FakeInputDispatcherPolicy::notifyConfigurationChanged(nsecs_t when) {
-    std::scoped_lock lock(mLock);
-    mConfigurationChangedTime = when;
 }
 
 void FakeInputDispatcherPolicy::notifyWindowUnresponsive(const sp<IBinder>& connectionToken,

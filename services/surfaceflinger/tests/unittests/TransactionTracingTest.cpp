@@ -20,6 +20,7 @@
 #include <gui/SurfaceComposerClient.h>
 #include <cstdint>
 #include "Client.h"
+#include "Layer.h"
 
 #include <layerproto/LayerProtoHeader.h>
 #include "FrontEnd/LayerCreationArgs.h"
@@ -131,14 +132,14 @@ protected:
         // add layers and add some layer transaction
         {
             frontend::Update update;
-            update.layerCreationArgs.emplace_back(std::move(
+            update.layerCreationArgs.emplace_back(
                     getLayerCreationArgs(mParentLayerId, /*parentId=*/UNASSIGNED_LAYER_ID,
                                          /*layerIdToMirror=*/UNASSIGNED_LAYER_ID, /*flags=*/123,
-                                         /*addToRoot=*/true)));
-            update.layerCreationArgs.emplace_back(std::move(
+                                         /*addToRoot=*/true));
+            update.layerCreationArgs.emplace_back(
                     getLayerCreationArgs(mChildLayerId, mParentLayerId,
                                          /*layerIdToMirror=*/UNASSIGNED_LAYER_ID, /*flags=*/456,
-                                         /*addToRoot=*/true)));
+                                         /*addToRoot=*/true));
             TransactionState transaction;
             transaction.id = 50;
             ResolvedComposerState layerState;

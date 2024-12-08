@@ -18,6 +18,7 @@ cc_defaults {
         "libSurfaceFlingerProp",
         "server_configurable_flags",
         "libaconfig_storage_read_api_cc",
+        "libtracing_perfetto",
     ],
     static_libs: [
         "librenderengine_includes",
@@ -27,6 +28,7 @@ cc_defaults {
     ],
     local_include_dirs: ["include"],
     export_include_dirs: ["include"],
+    export_shared_lib_headers: ["libtracing_perfetto"],
 }
 
 cc_library_static {
@@ -60,6 +62,7 @@ cc_defaults {
     shared_libs: [
         "server_configurable_flags",
         "libaconfig_storage_read_api_cc",
+        "libtracing_perfetto",
     ],
     static_libs: [
         "libsurfaceflinger_common",
@@ -75,6 +78,7 @@ cc_defaults {
     shared_libs: [
         "server_configurable_flags",
         "libaconfig_storage_read_api_cc",
+        "libtracing_perfetto",
     ],
     static_libs: [
         "libsurfaceflinger_common_test",

@@ -19,13 +19,12 @@
 #include <android-base/file.h>
 #include <android-base/stringprintf.h>
 
+#include <common/trace.h>
 #include <log/log.h>
 #include <utils/Errors.h>
 #include <utils/Timers.h>
-#include <utils/Trace.h>
 #include <chrono>
 #include <fstream>
-#include <queue>
 
 namespace android {
 
@@ -57,7 +56,7 @@ public:
     }
 
     status_t appendToStream(FileProto& fileProto, std::ofstream& out) {
-        ATRACE_CALL();
+        SFTRACE_CALL();
         writeToProto(fileProto);
         std::string output;
         if (!fileProto.SerializeToString(&output)) {

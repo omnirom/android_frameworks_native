@@ -17,8 +17,6 @@
 #ifndef SF_SKIAVKRENDERENGINE_H_
 #define SF_SKIAVKRENDERENGINE_H_
 
-#include <vk/GrVkBackendContext.h>
-
 #include "SkiaRenderEngine.h"
 #include "VulkanInterface.h"
 #include "compat/SkiaGpuContext.h"

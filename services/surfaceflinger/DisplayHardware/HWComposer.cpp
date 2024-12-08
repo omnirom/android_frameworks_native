@@ -28,16 +28,15 @@
 #include "HWComposer.h"
 
 #include <android-base/properties.h>
+#include <common/trace.h>
 #include <compositionengine/Output.h>
 #include <compositionengine/OutputLayer.h>
 #include <compositionengine/impl/OutputLayerCompositionState.h>
 #include <ftl/concat.h>
-#include <gui/TraceUtils.h>
 #include <log/log.h>
 #include <ui/DebugUtils.h>
 #include <ui/GraphicBuffer.h>
 #include <utils/Errors.h>
-#include <utils/Trace.h>
 
 #include "../Layer.h" // needed only for debugging
 #include "../SurfaceFlingerProperties.h"
@@ -77,6 +76,7 @@ using aidl::android::hardware::graphics::common::HdrConversionCapability;
 using aidl::android::hardware::graphics::common::HdrConversionStrategy;
 using aidl::android::hardware::graphics::composer3::Capability;
 using aidl::android::hardware::graphics::composer3::DisplayCapability;
+using aidl::android::hardware::graphics::composer3::DisplayConfiguration;
 using namespace std::string_literals;
 
 namespace android {
@@ -178,8 +178,8 @@ std::optional<PhysicalDisplayId> HWComposer::onVsync(hal::HWDisplayId hwcDisplay
         displayData.lastPresentTimestamp = timestamp;
     }
 
-    ATRACE_INT(ftl::Concat("HW_VSYNC_", displayIdOpt->value).c_str(),
-               displayData.vsyncTraceToggle);
+    SFTRACE_INT(ftl::Concat("HW_VSYNC_", displayIdOpt->value).c_str(),
+                displayData.vsyncTraceToggle);
     displayData.vsyncTraceToggle = !displayData.vsyncTraceToggle;
 
     return displayIdOpt;
@@ -223,8 +223,8 @@ bool HWComposer::allocateVirtualDisplay(HalVirtualDisplayId displayId, ui::Size 
     return true;
 }
 
-void HWComposer::allocatePhysicalDisplay(hal::HWDisplayId hwcDisplayId,
-                                         PhysicalDisplayId displayId) {
+void HWComposer::allocatePhysicalDisplay(hal::HWDisplayId hwcDisplayId, PhysicalDisplayId displayId,
+                                         std::optional<ui::Size> physicalSize) {
     mPhysicalDisplayIdMap[hwcDisplayId] = displayId;
 
     if (!mPrimaryHwcDisplayId) {
@@ -236,6 +236,7 @@ void HWComposer::allocatePhysicalDisplay(hal::HWDisplayId hwcDisplayId,
             std::make_unique<HWC2::impl::Display>(*mComposer.get(), mCapabilities, hwcDisplayId,
                                                   hal::DisplayType::PHYSICAL);
     newDisplay->setConnected(true);
+    newDisplay->setPhysicalSizeInMm(physicalSize);
     displayData.hwcDisplay = std::move(newDisplay);
 }
 
@@ -277,6 +278,47 @@ std::vector<HWComposer::HWCDisplayMode> HWComposer::getModes(PhysicalDisplayId d
     return getModesFromLegacyDisplayConfigs(hwcDisplayId);
 }
 
+DisplayConfiguration::Dpi HWComposer::getEstimatedDotsPerInchFromSize(
+        uint64_t hwcDisplayId, const HWCDisplayMode& hwcMode) const {
+    if (!FlagManager::getInstance().correct_dpi_with_display_size()) {
+        return {-1, -1};
+    }
+    if (const auto displayId = toPhysicalDisplayId(hwcDisplayId)) {
+        if (const auto it = mDisplayData.find(displayId.value());
+            it != mDisplayData.end() && it->second.hwcDisplay->getPhysicalSizeInMm()) {
+            ui::Size size = it->second.hwcDisplay->getPhysicalSizeInMm().value();
+            if (hwcMode.width > 0 && hwcMode.height > 0 && size.width > 0 && size.height > 0) {
+                static constexpr float kMmPerInch = 25.4f;
+                return {hwcMode.width * kMmPerInch / size.width,
+                        hwcMode.height * kMmPerInch / size.height};
+            }
+        }
+    }
+    return {-1, -1};
+}
+
+DisplayConfiguration::Dpi HWComposer::correctedDpiIfneeded(
+        DisplayConfiguration::Dpi dpi, DisplayConfiguration::Dpi estimatedDpi) const {
+    // hwc can be unreliable when it comes to dpi. A rough estimated dpi may yield better
+    // results. For instance, libdrm and bad edid may result in a dpi of {350, 290} for a
+    // 16:9 3840x2160 display, which would match a 4:3 aspect ratio.
+    // The logic here checks if hwc was able to provide some dpi, and if so if the dpi
+    // disparity between the axes is more reasonable than a rough estimate, otherwise use
+    // the estimated dpi as a corrected value.
+    if (estimatedDpi.x == -1 || estimatedDpi.y == -1) {
+        return dpi;
+    }
+    if (dpi.x == -1 || dpi.y == -1) {
+        return estimatedDpi;
+    }
+    if (std::min(dpi.x, dpi.y) != 0 && std::min(estimatedDpi.x, estimatedDpi.y) != 0 &&
+        abs(dpi.x - dpi.y) / std::min(dpi.x, dpi.y) >
+                abs(estimatedDpi.x - estimatedDpi.y) / std::min(estimatedDpi.x, estimatedDpi.y)) {
+        return estimatedDpi;
+    }
+    return dpi;
+}
+
 std::vector<HWComposer::HWCDisplayMode> HWComposer::getModesFromDisplayConfigurations(
         uint64_t hwcDisplayId, int32_t maxFrameIntervalNs) const {
     std::vector<hal::DisplayConfiguration> configs;
@@ -295,9 +337,16 @@ std::vector<HWComposer::HWCDisplayMode> HWComposer::getModesFromDisplayConfigura
                                       .configGroup = config.configGroup,
                                       .vrrConfig = config.vrrConfig};
 
+        const DisplayConfiguration::Dpi estimatedDPI =
+                getEstimatedDotsPerInchFromSize(hwcDisplayId, hwcMode);
         if (config.dpi) {
-            hwcMode.dpiX = config.dpi->x;
-            hwcMode.dpiY = config.dpi->y;
+            const DisplayConfiguration::Dpi dpi =
+                    correctedDpiIfneeded(config.dpi.value(), estimatedDPI);
+            hwcMode.dpiX = dpi.x;
+            hwcMode.dpiY = dpi.y;
+        } else if (estimatedDPI.x != -1 && estimatedDPI.y != -1) {
+            hwcMode.dpiX = estimatedDPI.x;
+            hwcMode.dpiY = estimatedDPI.y;
         }
 
         if (!mEnableVrrTimeout) {
@@ -329,12 +378,14 @@ std::vector<HWComposer::HWCDisplayMode> HWComposer::getModesFromLegacyDisplayCon
 
         const int32_t dpiX = getAttribute(hwcDisplayId, configId, hal::Attribute::DPI_X);
         const int32_t dpiY = getAttribute(hwcDisplayId, configId, hal::Attribute::DPI_Y);
-        if (dpiX != -1) {
-            hwcMode.dpiX = static_cast<float>(dpiX) / 1000.f;
-        }
-        if (dpiY != -1) {
-            hwcMode.dpiY = static_cast<float>(dpiY) / 1000.f;
-        }
+        const DisplayConfiguration::Dpi hwcDpi =
+                DisplayConfiguration::Dpi{dpiX == -1 ? dpiY : dpiX / 1000.f,
+                                          dpiY == -1 ? dpiY : dpiY / 1000.f};
+        const DisplayConfiguration::Dpi estimatedDPI =
+                getEstimatedDotsPerInchFromSize(hwcDisplayId, hwcMode);
+        const DisplayConfiguration::Dpi dpi = correctedDpiIfneeded(hwcDpi, estimatedDPI);
+        hwcMode.dpiX = dpi.x;
+        hwcMode.dpiY = dpi.y;
 
         modes.push_back(hwcMode);
     }
@@ -428,14 +479,14 @@ void HWComposer::setVsyncEnabled(PhysicalDisplayId displayId, hal::Vsync enabled
         return;
     }
 
-    ATRACE_CALL();
+    SFTRACE_CALL();
     auto error = displayData.hwcDisplay->setVsyncEnabled(enabled);
     RETURN_IF_HWC_ERROR(error, displayId);
 
     displayData.vsyncEnabled = enabled;
 
-    ATRACE_INT(ftl::Concat("HW_VSYNC_ON_", displayId.value).c_str(),
-               enabled == hal::Vsync::ENABLE ? 1 : 0);
+    SFTRACE_INT(ftl::Concat("HW_VSYNC_ON_", displayId.value).c_str(),
+                enabled == hal::Vsync::ENABLE ? 1 : 0);
 }
 
 status_t HWComposer::setClientTarget(HalDisplayId displayId, uint32_t slot,
@@ -455,7 +506,7 @@ status_t HWComposer::getDeviceCompositionChanges(
         std::optional<std::chrono::steady_clock::time_point> earliestPresentTime,
         nsecs_t expectedPresentTime, Fps frameInterval,
         std::optional<android::HWComposer::DeviceRequestedChanges>* outChanges) {
-    ATRACE_CALL();
+    SFTRACE_CALL();
 
     RETURN_IF_INVALID_DISPLAY(displayId, BAD_INDEX);
 
@@ -493,7 +544,7 @@ status_t HWComposer::getDeviceCompositionChanges(
     }();
 
     displayData.validateWasSkipped = false;
-    ATRACE_FORMAT("NextFrameInterval %d_Hz", frameInterval.getIntValue());
+    SFTRACE_FORMAT("NextFrameInterval %d_Hz", frameInterval.getIntValue());
     if (canSkipValidate) {
         sp<Fence> outPresentFence = Fence::NO_FENCE;
         uint32_t state = UINT32_MAX;
@@ -534,6 +585,7 @@ status_t HWComposer::getDeviceCompositionChanges(
 
     DeviceRequestedChanges::ClientTargetProperty clientTargetProperty;
     error = hwcDisplay->getClientTargetProperty(&clientTargetProperty);
+    RETURN_IF_HWC_ERROR_FOR("getClientTargetProperty", error, displayId, BAD_INDEX);
 
     outChanges->emplace(DeviceRequestedChanges{std::move(changedTypes), std::move(displayRequests),
                                                std::move(layerRequests),
@@ -568,7 +620,7 @@ sp<Fence> HWComposer::getLayerReleaseFence(HalDisplayId displayId, HWC2::Layer* 
 status_t HWComposer::presentAndGetReleaseFences(
         HalDisplayId displayId,
         std::optional<std::chrono::steady_clock::time_point> earliestPresentTime) {
-    ATRACE_CALL();
+    SFTRACE_CALL();
 
     RETURN_IF_INVALID_DISPLAY(displayId, BAD_INDEX);
 
@@ -584,7 +636,7 @@ status_t HWComposer::presentAndGetReleaseFences(
     }
 
     if (earliestPresentTime) {
-        ATRACE_NAME("wait for earliest present time");
+        SFTRACE_NAME("wait for earliest present time");
         std::this_thread::sleep_until(*earliestPresentTime);
     }
 
@@ -897,9 +949,9 @@ status_t HWComposer::setRefreshRateChangedCallbackDebugEnabled(PhysicalDisplayId
 status_t HWComposer::notifyExpectedPresent(PhysicalDisplayId displayId,
                                            TimePoint expectedPresentTime, Fps frameInterval) {
     RETURN_IF_INVALID_DISPLAY(displayId, BAD_INDEX);
-    ATRACE_FORMAT("%s ExpectedPresentTime in %.2fms frameInterval %.2fms", __func__,
-                  ticks<std::milli, float>(expectedPresentTime - TimePoint::now()),
-                  ticks<std::milli, float>(Duration::fromNs(frameInterval.getPeriodNsecs())));
+    SFTRACE_FORMAT("%s ExpectedPresentTime in %.2fms frameInterval %.2fms", __func__,
+                   ticks<std::milli, float>(expectedPresentTime - TimePoint::now()),
+                   ticks<std::milli, float>(Duration::fromNs(frameInterval.getPeriodNsecs())));
     const auto error = mComposer->notifyExpectedPresent(mDisplayData[displayId].hwcDisplay->getId(),
                                                         expectedPresentTime.ns(),
                                                         frameInterval.getPeriodNsecs());
@@ -916,6 +968,21 @@ status_t HWComposer::getDisplayDecorationSupport(
                 support) {
     RETURN_IF_INVALID_DISPLAY(displayId, BAD_INDEX);
     const auto error = mDisplayData[displayId].hwcDisplay->getDisplayDecorationSupport(support);
+    if (error == hal::Error::UNSUPPORTED) {
+        RETURN_IF_HWC_ERROR(error, displayId, INVALID_OPERATION);
+    }
+    if (error == hal::Error::BAD_PARAMETER) {
+        RETURN_IF_HWC_ERROR(error, displayId, BAD_VALUE);
+    }
+    RETURN_IF_HWC_ERROR(error, displayId, UNKNOWN_ERROR);
+    return NO_ERROR;
+}
+
+status_t HWComposer::getRequestedLuts(
+        PhysicalDisplayId displayId,
+        std::vector<aidl::android::hardware::graphics::composer3::DisplayLuts::LayerLut>* outLuts) {
+    RETURN_IF_INVALID_DISPLAY(displayId, BAD_INDEX);
+    const auto error = mDisplayData[displayId].hwcDisplay->getRequestedLuts(outLuts);
     if (error == hal::Error::UNSUPPORTED) {
         RETURN_IF_HWC_ERROR(error, displayId, INVALID_OPERATION);
     }
@@ -1057,6 +1124,8 @@ std::optional<DisplayIdentificationInfo> HWComposer::onHotplugConnect(
             getDisplayIdentificationData(hwcDisplayId, &port, &data);
             if (auto newInfo = parseDisplayIdentificationData(port, data)) {
                 info->deviceProductInfo = std::move(newInfo->deviceProductInfo);
+                info->preferredDetailedTimingDescriptor =
+                        std::move(newInfo->preferredDetailedTimingDescriptor);
             } else {
                 ALOGE("Failed to parse identification data for display %" PRIu64, hwcDisplayId);
             }
@@ -1099,7 +1168,11 @@ std::optional<DisplayIdentificationInfo> HWComposer::onHotplugConnect(
     }
 
     if (!isConnected(info->id)) {
-        allocatePhysicalDisplay(hwcDisplayId, info->id);
+        std::optional<ui::Size> size = std::nullopt;
+        if (info->preferredDetailedTimingDescriptor) {
+            size = info->preferredDetailedTimingDescriptor->physicalSizeInMm;
+        }
+        allocatePhysicalDisplay(hwcDisplayId, info->id, size);
     }
     return info;
 }
@@ -1149,7 +1222,7 @@ void HWComposer::loadHdrConversionCapabilities() {
 
 status_t HWComposer::setIdleTimerEnabled(PhysicalDisplayId displayId,
                                          std::chrono::milliseconds timeout) {
-    ATRACE_CALL();
+    SFTRACE_CALL();
     RETURN_IF_INVALID_DISPLAY(displayId, BAD_INDEX);
     const auto error = mDisplayData[displayId].hwcDisplay->setIdleTimerEnabled(timeout);
     if (error == hal::Error::UNSUPPORTED) {
@@ -1168,7 +1241,7 @@ bool HWComposer::hasDisplayIdleTimerCapability(PhysicalDisplayId displayId) cons
 }
 
 Hwc2::AidlTransform HWComposer::getPhysicalDisplayOrientation(PhysicalDisplayId displayId) const {
-    ATRACE_CALL();
+    SFTRACE_CALL();
     RETURN_IF_INVALID_DISPLAY(displayId, Hwc2::AidlTransform::NONE);
     Hwc2::AidlTransform outTransform;
     const auto& hwcDisplay = mDisplayData.at(displayId).hwcDisplay;

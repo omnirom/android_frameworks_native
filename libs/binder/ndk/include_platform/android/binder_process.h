@@ -47,8 +47,11 @@ void ABinderProcess_startThreadPool(void);
  * be called once before startThreadPool. The number of threads can never decrease.
  *
  * This count refers to the number of threads that will be created lazily by the kernel, in
- * addition to the threads created by ABinderProcess_startThreadPool or
- * ABinderProcess_joinThreadPool.
+ * addition to the single threads created by ABinderProcess_startThreadPool (+1) or
+ * ABinderProcess_joinThreadPool (+1). Note: ABinderProcess_startThreadPool starts a thread
+ * itself, but it also enables up to the number of threads passed to this function to start.
+ * This function does not start any threads itself; it only configures
+ * ABinderProcess_startThreadPool.
  *
  * Do not use this from a library. Apps setup their own threadpools, and otherwise, the main
  * function should be responsible for configuring the threadpool for the entire application.
@@ -63,8 +66,8 @@ bool ABinderProcess_setThreadPoolMaxThreadCount(uint32_t numThreads);
 bool ABinderProcess_isThreadPoolStarted(void);
 /**
  * This adds the current thread to the threadpool. This thread will be in addition to the thread
- * started by ABinderProcess_startThreadPool and the lazy kernel-started threads specified by
- * ABinderProcess_setThreadPoolMaxThreadCount.
+ * configured with ABinderProcess_setThreadPoolMaxThreadCount and started with
+ * ABinderProcess_startThreadPool.
  *
  * Do not use this from a library. Apps setup their own threadpools, and otherwise, the main
  * function should be responsible for configuring the threadpool for the entire application.

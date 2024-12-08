@@ -34,6 +34,7 @@
 #include <binder/IServiceManager.h>
 #include <binder/IShellCallback.h>
 #include <sys/prctl.h>
+#include <sys/socket.h>
 
 #include <chrono>
 #include <condition_variable>
@@ -41,9 +42,11 @@
 #include <mutex>
 #include <thread>
 
+#include "../Utils.h"
 #include "android/binder_ibinder.h"
 
 using namespace android;
+using namespace std::chrono_literals;
 
 constexpr char kExistingNonNdkService[] = "SurfaceFlinger";
 constexpr char kBinderNdkUnitTestService[] = "BinderNdkUnitTest";
@@ -52,7 +55,7 @@ constexpr char kForcePersistNdkUnitTestService[] = "ForcePersistNdkUnitTestServi
 constexpr char kActiveServicesNdkUnitTestService[] = "ActiveServicesNdkUnitTestService";
 constexpr char kBinderNdkUnitTestServiceFlagged[] = "BinderNdkUnitTestFlagged";
 
-constexpr unsigned int kShutdownWaitTime = 11;
+constexpr auto kShutdownWaitTime = 30s;
 constexpr uint64_t kContextTestValue = 0xb4e42fb4d9a1d715;
 
 class MyTestFoo : public IFoo {
@@ -68,21 +71,21 @@ class MyTestFoo : public IFoo {
 };
 
 class MyBinderNdkUnitTest : public aidl::BnBinderNdkUnitTest {
-    ndk::ScopedAStatus repeatInt(int32_t in, int32_t* out) {
+    ndk::ScopedAStatus repeatInt(int32_t in, int32_t* out) override {
         *out = in;
         return ndk::ScopedAStatus::ok();
     }
-    ndk::ScopedAStatus takeInterface(const std::shared_ptr<aidl::IEmpty>& empty) {
+    ndk::ScopedAStatus takeInterface(const std::shared_ptr<aidl::IEmpty>& empty) override {
         (void)empty;
         return ndk::ScopedAStatus::ok();
     }
-    ndk::ScopedAStatus forceFlushCommands() {
+    ndk::ScopedAStatus forceFlushCommands() override {
         // warning: this is assuming that libbinder_ndk is using the same copy
         // of libbinder that we are.
         android::IPCThreadState::self()->flushCommands();
         return ndk::ScopedAStatus::ok();
     }
-    ndk::ScopedAStatus getsRequestedSid(bool* out) {
+    ndk::ScopedAStatus getsRequestedSid(bool* out) override {
         const char* sid = AIBinder_getCallingSid();
         std::cout << "Got security context: " << (sid ?: "null") << std::endl;
         *out = sid != nullptr;
@@ -96,11 +99,11 @@ class MyBinderNdkUnitTest : public aidl::BnBinderNdkUnitTest {
         fsync(out);
         return STATUS_OK;
     }
-    ndk::ScopedAStatus forcePersist(bool persist) {
+    ndk::ScopedAStatus forcePersist(bool persist) override {
         AServiceManager_forceLazyServicesPersist(persist);
         return ndk::ScopedAStatus::ok();
     }
-    ndk::ScopedAStatus setCustomActiveServicesCallback() {
+    ndk::ScopedAStatus setCustomActiveServicesCallback() override {
         AServiceManager_setActiveServicesCallback(activeServicesCallback, this);
         return ndk::ScopedAStatus::ok();
     }
@@ -251,12 +254,22 @@ int lazyService(const char* instance) {
 }
 
 bool isServiceRunning(const char* serviceName) {
-    AIBinder* binder = AServiceManager_checkService(serviceName);
-    if (binder == nullptr) {
-        return false;
+    static const sp<android::IServiceManager> sm(android::defaultServiceManager());
+    const Vector<String16> services = sm->listServices();
+    for (const auto service : services) {
+        if (service == String16(serviceName)) return true;
     }
-    AIBinder_decStrong(binder);
+    return false;
+}
 
+bool isServiceShutdownWithWait(const char* serviceName) {
+    LOG(INFO) << "About to check and wait for shutdown of " << std::string(serviceName);
+    const auto before = std::chrono::steady_clock::now();
+    while (isServiceRunning(serviceName)) {
+        sleep(1);
+        const auto after = std::chrono::steady_clock::now();
+        if (after - before >= kShutdownWaitTime) return false;
+    }
     return true;
 }
 
@@ -341,10 +354,9 @@ TEST(NdkBinder, UnimplementedShell) {
     // libbinder across processes to the NDK service which doesn't implement
     // shell
     static const sp<android::IServiceManager> sm(android::defaultServiceManager());
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+    LIBBINDER_IGNORE("-Wdeprecated-declarations")
     sp<IBinder> testService = sm->getService(String16(IFoo::kSomeInstanceName));
-#pragma clang diagnostic pop
+    LIBBINDER_IGNORE_END()
 
     Vector<String16> argsVec;
     EXPECT_EQ(OK, IBinder::shellCommand(testService, STDIN_FILENO, STDOUT_FILENO, STDERR_FILENO,
@@ -387,10 +399,9 @@ TEST(NdkBinder, GetTestServiceStressTest) {
     // checkService on it, since the other process serving it might not be started yet.
     {
         // getService, not waitForService, to take advantage of timeout
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+        LIBBINDER_IGNORE("-Wdeprecated-declarations")
         auto binder = ndk::SpAIBinder(AServiceManager_getService(IFoo::kSomeInstanceName));
-#pragma clang diagnostic pop
+        LIBBINDER_IGNORE_END()
         ASSERT_NE(nullptr, binder.get());
     }
 
@@ -424,7 +435,7 @@ TEST(NdkBinder, GetDeclaredInstances) {
     // At the time of writing this test, there is no good interface guaranteed
     // to be on all devices. Cuttlefish has light, so this will generally test
     // things.
-    EXPECT_EQ(count, hasLight ? 1 : 0);
+    EXPECT_EQ(count, hasLight ? 1u : 0u);
 }
 
 TEST(NdkBinder, GetLazyService) {
@@ -450,8 +461,8 @@ TEST(NdkBinder, CheckLazyServiceShutDown) {
     service = nullptr;
     IPCThreadState::self()->flushCommands();
     // Make sure the service is dead after some time of no use
-    sleep(kShutdownWaitTime);
-    ASSERT_EQ(nullptr, AServiceManager_checkService(kLazyBinderNdkUnitTestService));
+    ASSERT_TRUE(isServiceShutdownWithWait(kLazyBinderNdkUnitTestService))
+            << "Service failed to shut down";
 }
 
 TEST(NdkBinder, ForcedPersistenceTest) {
@@ -466,14 +477,12 @@ TEST(NdkBinder, ForcedPersistenceTest) {
         service = nullptr;
         IPCThreadState::self()->flushCommands();
 
-        sleep(kShutdownWaitTime);
-
-        bool isRunning = isServiceRunning(kForcePersistNdkUnitTestService);
-
         if (i == 0) {
-            ASSERT_TRUE(isRunning) << "Service shut down when it shouldn't have.";
+            ASSERT_TRUE(isServiceRunning(kForcePersistNdkUnitTestService))
+                    << "Service shut down when it shouldn't have.";
         } else {
-            ASSERT_FALSE(isRunning) << "Service failed to shut down.";
+            ASSERT_TRUE(isServiceShutdownWithWait(kForcePersistNdkUnitTestService))
+                    << "Service failed to shut down";
         }
     }
 }
@@ -491,10 +500,7 @@ TEST(NdkBinder, ActiveServicesCallbackTest) {
     service = nullptr;
     IPCThreadState::self()->flushCommands();
 
-    LOG(INFO) << "ActiveServicesCallbackTest about to sleep";
-    sleep(kShutdownWaitTime);
-
-    ASSERT_FALSE(isServiceRunning(kActiveServicesNdkUnitTestService))
+    ASSERT_TRUE(isServiceShutdownWithWait(kActiveServicesNdkUnitTestService))
             << "Service failed to shut down.";
 }
 
@@ -514,7 +520,7 @@ void LambdaOnDeath(void* cookie) {
     // may reference other cookie members
 
     (*funcs->onDeath)();
-};
+}
 void LambdaOnUnlink(void* cookie) {
     auto funcs = static_cast<DeathRecipientCookie*>(cookie);
     (*funcs->onUnlink)();
@@ -522,7 +528,7 @@ void LambdaOnUnlink(void* cookie) {
     // may reference other cookie members
 
     delete funcs;
-};
+}
 TEST(NdkBinder, DeathRecipient) {
     using namespace std::chrono_literals;
 
@@ -700,7 +706,7 @@ TEST(NdkBinder, DeathRecipientDropBinderOnDied) {
 void LambdaOnUnlinkMultiple(void* cookie) {
     auto funcs = static_cast<DeathRecipientCookie*>(cookie);
     (*funcs->onUnlink)();
-};
+}
 
 TEST(NdkBinder, DeathRecipientMultipleLinks) {
     using namespace std::chrono_literals;
@@ -732,7 +738,7 @@ TEST(NdkBinder, DeathRecipientMultipleLinks) {
     ndk::ScopedAIBinder_DeathRecipient recipient(AIBinder_DeathRecipient_new(LambdaOnDeath));
     AIBinder_DeathRecipient_setOnUnlinked(recipient.get(), LambdaOnUnlinkMultiple);
 
-    for (int32_t i = 0; i < kNumberOfLinksToDeath; i++) {
+    for (uint32_t i = 0; i < kNumberOfLinksToDeath; i++) {
         EXPECT_EQ(STATUS_OK,
                   AIBinder_linkToDeath(binder.get(), recipient.get(), static_cast<void*>(cookie)));
     }
@@ -744,14 +750,13 @@ TEST(NdkBinder, DeathRecipientMultipleLinks) {
     EXPECT_TRUE(unlinkCv.wait_for(lockUnlink, 5s, [&] { return unlinkReceived; }))
             << "countdown: " << countdown;
     EXPECT_TRUE(unlinkReceived);
-    EXPECT_EQ(countdown, 0);
+    EXPECT_EQ(countdown, 0u);
 }
 
 TEST(NdkBinder, RetrieveNonNdkService) {
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+    LIBBINDER_IGNORE("-Wdeprecated-declarations")
     AIBinder* binder = AServiceManager_getService(kExistingNonNdkService);
-#pragma clang diagnostic pop
+    LIBBINDER_IGNORE_END()
     ASSERT_NE(nullptr, binder);
     EXPECT_TRUE(AIBinder_isRemote(binder));
     EXPECT_TRUE(AIBinder_isAlive(binder));
@@ -765,10 +770,9 @@ void OnBinderDeath(void* cookie) {
 }
 
 TEST(NdkBinder, LinkToDeath) {
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+    LIBBINDER_IGNORE("-Wdeprecated-declarations")
     AIBinder* binder = AServiceManager_getService(kExistingNonNdkService);
-#pragma clang diagnostic pop
+    LIBBINDER_IGNORE_END()
     ASSERT_NE(nullptr, binder);
 
     AIBinder_DeathRecipient* recipient = AIBinder_DeathRecipient_new(OnBinderDeath);
@@ -798,10 +802,9 @@ TEST(NdkBinder, SetInheritRt) {
 }
 
 TEST(NdkBinder, SetInheritRtNonLocal) {
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+    LIBBINDER_IGNORE("-Wdeprecated-declarations")
     AIBinder* binder = AServiceManager_getService(kExistingNonNdkService);
-#pragma clang diagnostic pop
+    LIBBINDER_IGNORE_END()
     ASSERT_NE(binder, nullptr);
 
     ASSERT_TRUE(AIBinder_isRemote(binder));
@@ -837,14 +840,13 @@ TEST(NdkBinder, GetServiceInProcess) {
 }
 
 TEST(NdkBinder, EqualityOfRemoteBinderPointer) {
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+    LIBBINDER_IGNORE("-Wdeprecated-declarations")
     AIBinder* binderA = AServiceManager_getService(kExistingNonNdkService);
     ASSERT_NE(nullptr, binderA);
 
     AIBinder* binderB = AServiceManager_getService(kExistingNonNdkService);
     ASSERT_NE(nullptr, binderB);
-#pragma clang diagnostic pop
+    LIBBINDER_IGNORE_END()
 
     EXPECT_EQ(binderA, binderB);
 
@@ -858,10 +860,9 @@ TEST(NdkBinder, ToFromJavaNullptr) {
 }
 
 TEST(NdkBinder, ABpBinderRefCount) {
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+    LIBBINDER_IGNORE("-Wdeprecated-declarations")
     AIBinder* binder = AServiceManager_getService(kExistingNonNdkService);
-#pragma clang diagnostic pop
+    LIBBINDER_IGNORE_END()
     AIBinder_Weak* wBinder = AIBinder_Weak_new(binder);
 
     ASSERT_NE(nullptr, binder);
@@ -884,10 +885,9 @@ TEST(NdkBinder, AddServiceMultipleTimes) {
 }
 
 TEST(NdkBinder, RequestedSidWorks) {
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+    LIBBINDER_IGNORE("-Wdeprecated-declarations")
     ndk::SpAIBinder binder(AServiceManager_getService(kBinderNdkUnitTestService));
-#pragma clang diagnostic pop
+    LIBBINDER_IGNORE_END()
     std::shared_ptr<aidl::IBinderNdkUnitTest> service =
             aidl::IBinderNdkUnitTest::fromBinder(binder);
 
@@ -910,10 +910,9 @@ TEST(NdkBinder, SentAidlBinderCanBeDestroyed) {
 
     std::shared_ptr<MyEmpty> empty = ndk::SharedRefBase::make<MyEmpty>();
 
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+    LIBBINDER_IGNORE("-Wdeprecated-declarations")
     ndk::SpAIBinder binder(AServiceManager_getService(kBinderNdkUnitTestService));
-#pragma clang diagnostic pop
+    LIBBINDER_IGNORE_END()
     std::shared_ptr<aidl::IBinderNdkUnitTest> service =
             aidl::IBinderNdkUnitTest::fromBinder(binder);
 
@@ -934,14 +933,11 @@ TEST(NdkBinder, SentAidlBinderCanBeDestroyed) {
 }
 
 TEST(NdkBinder, ConvertToPlatformBinder) {
-    for (const ndk::SpAIBinder& binder :
-         {// remote
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
-          ndk::SpAIBinder(AServiceManager_getService(kBinderNdkUnitTestService)),
-#pragma clang diagnostic pop
-          // local
-          ndk::SharedRefBase::make<MyBinderNdkUnitTest>()->asBinder()}) {
+    LIBBINDER_IGNORE("-Wdeprecated-declarations")
+    ndk::SpAIBinder remoteBinder(AServiceManager_getService(kBinderNdkUnitTestService));
+    LIBBINDER_IGNORE_END()
+    auto localBinder = ndk::SharedRefBase::make<MyBinderNdkUnitTest>()->asBinder();
+    for (const ndk::SpAIBinder& binder : {remoteBinder, localBinder}) {
         // convert to platform binder
         EXPECT_NE(binder, nullptr);
         sp<IBinder> platformBinder = AIBinder_toPlatformBinder(binder.get());
@@ -970,14 +966,11 @@ TEST(NdkBinder, ConvertToPlatformParcel) {
 }
 
 TEST(NdkBinder, GetAndVerifyScopedAIBinder_Weak) {
-    for (const ndk::SpAIBinder& binder :
-         {// remote
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
-          ndk::SpAIBinder(AServiceManager_getService(kBinderNdkUnitTestService)),
-#pragma clang diagnostic pop
-          // local
-          ndk::SharedRefBase::make<MyBinderNdkUnitTest>()->asBinder()}) {
+    LIBBINDER_IGNORE("-Wdeprecated-declarations")
+    ndk::SpAIBinder remoteBinder(AServiceManager_getService(kBinderNdkUnitTestService));
+    LIBBINDER_IGNORE_END()
+    auto localBinder = ndk::SharedRefBase::make<MyBinderNdkUnitTest>()->asBinder();
+    for (const ndk::SpAIBinder& binder : {remoteBinder, localBinder}) {
         // get a const ScopedAIBinder_Weak and verify promote
         EXPECT_NE(binder.get(), nullptr);
         const ndk::ScopedAIBinder_Weak wkAIBinder =
@@ -994,22 +987,22 @@ TEST(NdkBinder, GetAndVerifyScopedAIBinder_Weak) {
 
 class MyResultReceiver : public BnResultReceiver {
    public:
-    Mutex mMutex;
-    Condition mCondition;
+    std::mutex mMutex;
+    std::condition_variable mCondition;
     bool mHaveResult = false;
     int32_t mResult = 0;
 
     virtual void send(int32_t resultCode) {
-        AutoMutex _l(mMutex);
+        std::unique_lock<std::mutex> _l(mMutex);
         mResult = resultCode;
         mHaveResult = true;
-        mCondition.signal();
+        mCondition.notify_one();
     }
 
     int32_t waitForResult() {
-        AutoMutex _l(mMutex);
+        std::unique_lock<std::mutex> _l(mMutex);
         while (!mHaveResult) {
-            mCondition.wait(mMutex);
+            mCondition.wait(_l);
         }
         return mResult;
     }
@@ -1046,7 +1039,7 @@ std::string shellCmdToString(sp<IBinder> unitTestService, const std::vector<cons
     sp<MyResultReceiver> resultReceiver = new MyResultReceiver();
 
     Vector<String16> argsVec;
-    for (int i = 0; i < args.size(); i++) {
+    for (size_t i = 0; i < args.size(); i++) {
         argsVec.add(String16(args[i]));
     }
     status_t error = IBinder::shellCommand(unitTestService, inFd[0], outFd[0], errFd[0], argsVec,
@@ -1070,10 +1063,9 @@ std::string shellCmdToString(sp<IBinder> unitTestService, const std::vector<cons
 
 TEST(NdkBinder, UseHandleShellCommand) {
     static const sp<android::IServiceManager> sm(android::defaultServiceManager());
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+    LIBBINDER_IGNORE("-Wdeprecated-declarations")
     sp<IBinder> testService = sm->getService(String16(kBinderNdkUnitTestService));
-#pragma clang diagnostic pop
+    LIBBINDER_IGNORE_END()
 
     EXPECT_EQ("", shellCmdToString(testService, {}));
     EXPECT_EQ("", shellCmdToString(testService, {"", ""}));
@@ -1083,10 +1075,9 @@ TEST(NdkBinder, UseHandleShellCommand) {
 
 TEST(NdkBinder, FlaggedServiceAccessible) {
     static const sp<android::IServiceManager> sm(android::defaultServiceManager());
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+    LIBBINDER_IGNORE("-Wdeprecated-declarations")
     sp<IBinder> testService = sm->getService(String16(kBinderNdkUnitTestServiceFlagged));
-#pragma clang diagnostic pop
+    LIBBINDER_IGNORE_END()
     ASSERT_NE(nullptr, testService);
 }
 

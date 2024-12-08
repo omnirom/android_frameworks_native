@@ -20,7 +20,7 @@
 
 #include <vibratorservice/VibratorManagerHalController.h>
 
-namespace Aidl = android::hardware::vibrator;
+namespace Aidl = aidl::android::hardware::vibrator;
 
 namespace android {
 
@@ -29,10 +29,15 @@ namespace vibrator {
 std::shared_ptr<ManagerHalWrapper> connectManagerHal(std::shared_ptr<CallbackScheduler> scheduler) {
     static bool gHalExists = true;
     if (gHalExists) {
-        sp<Aidl::IVibratorManager> hal = waitForVintfService<Aidl::IVibratorManager>();
-        if (hal) {
-            ALOGV("Successfully connected to VibratorManager HAL AIDL service.");
-            return std::make_shared<AidlManagerHalWrapper>(std::move(scheduler), hal);
+        auto serviceName = std::string(Aidl::IVibratorManager::descriptor) + "/default";
+        if (AServiceManager_isDeclared(serviceName.c_str())) {
+            std::shared_ptr<Aidl::IVibratorManager> hal = Aidl::IVibratorManager::fromBinder(
+                    ndk::SpAIBinder(AServiceManager_checkService(serviceName.c_str())));
+            if (hal) {
+                ALOGV("Successfully connected to VibratorManager HAL AIDL service.");
+                return std::make_shared<AidlManagerHalWrapper>(std::move(scheduler),
+                                                               std::move(hal));
+            }
         }
     }
 

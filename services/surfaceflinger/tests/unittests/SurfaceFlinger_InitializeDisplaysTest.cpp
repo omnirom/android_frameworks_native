@@ -28,7 +28,7 @@ struct InitializeDisplaysTest : DualDisplayTransactionTest<hal::PowerMode::OFF, 
 
 TEST_F(InitializeDisplaysTest, initializesDisplays) {
     // Scheduled by the display transaction, and by powering on each display.
-    EXPECT_CALL(*mFlinger.scheduler(), scheduleFrame()).Times(3);
+    EXPECT_CALL(*mFlinger.scheduler(), scheduleFrame(_)).Times(3);
 
     EXPECT_CALL(static_cast<mock::VSyncTracker&>(
                         mFlinger.scheduler()->getVsyncSchedule()->getTracker()),

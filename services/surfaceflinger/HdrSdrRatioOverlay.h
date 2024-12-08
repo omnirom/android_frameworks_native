@@ -53,5 +53,7 @@ private:
 
     size_t mIndex = 0;
     std::array<sp<GraphicBuffer>, 2> mRingBuffer;
+
+    SurfaceComposerClient::Transaction createTransaction() const;
 };
 } // namespace android

@@ -17,22 +17,20 @@
 #ifndef ANDROID_GUI_SENSOR_MANAGER_H
 #define ANDROID_GUI_SENSOR_MANAGER_H
 
-#include <map>
-#include <unordered_map>
-
-#include <stdint.h>
-#include <sys/types.h>
-
 #include <binder/IBinder.h>
 #include <binder/IPCThreadState.h>
 #include <binder/IServiceManager.h>
-
+#include <sensor/SensorEventQueue.h>
+#include <stdint.h>
+#include <sys/types.h>
 #include <utils/Errors.h>
+#include <utils/String8.h>
 #include <utils/StrongPointer.h>
 #include <utils/Vector.h>
-#include <utils/String8.h>
 
-#include <sensor/SensorEventQueue.h>
+#include <map>
+#include <string>
+#include <unordered_map>
 
 // ----------------------------------------------------------------------------
 // Concrete types for the NDK
@@ -66,6 +64,7 @@ public:
     sp<SensorEventQueue> createEventQueue(
         String8 packageName = String8(""), int mode = 0, String16 attributionTag = String16(""));
     bool isDataInjectionEnabled();
+    std::optional<std::string_view> getSensorNameByHandle(int32_t handle);
     bool isReplayDataInjectionEnabled();
     bool isHalBypassReplayDataInjectionEnabled();
     int createDirectChannel(size_t size, int channelType, const native_handle_t *channelData);
@@ -97,6 +96,9 @@ private:
     const String16 mOpPackageName;
     const int mDeviceId;
     std::unordered_map<int, sp<ISensorEventConnection>> mDirectConnection;
+
+    std::mutex mSensorHandleToNameMutex;
+    std::unordered_map<int32_t, std::string> mSensorHandleToName;
     int32_t mDirectConnectionHandle;
 };
 

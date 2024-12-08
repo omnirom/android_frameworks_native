@@ -83,6 +83,55 @@ static constexpr const char* kNativeLibrariesSystemConfigPath[] =
 
 static const char* kLlndkLibrariesTxtPath = "/system/etc/llndk.libraries.txt";
 
+// List of libraries that were previously available via VNDK-SP,
+// and are now available via SPHAL.
+// On modern devices that lack the VNDK APEX, the device no longer
+// contains a helpful list of these libraries on the filesystem as above.
+// See system/sepolicy/vendor/file_contexts
+static const char* kFormerlyVndkspLibrariesList =
+    "android.hardware.common-V2-ndk.so:"
+    "android.hardware.common.fmq-V1-ndk.so:"
+    "android.hardware.graphics.allocator-V2-ndk.so:"
+    "android.hardware.graphics.common-V5-ndk.so:"
+    "android.hardware.graphics.common@1.0.so:"
+    "android.hardware.graphics.common@1.1.so:"
+    "android.hardware.graphics.common@1.2.so:"
+    "android.hardware.graphics.composer3-V1-ndk.so:"
+    "android.hardware.graphics.mapper@2.0.so:"
+    "android.hardware.graphics.mapper@2.1.so:"
+    "android.hardware.graphics.mapper@3.0.so:"
+    "android.hardware.graphics.mapper@4.0.so:"
+    "android.hardware.renderscript@1.0.so:"
+    "android.hidl.memory.token@1.0.so:"
+    "android.hidl.memory@1.0-impl.so:"
+    "android.hidl.memory@1.0.so:"
+    "android.hidl.safe_union@1.0.so:"
+    "libRSCpuRef.so:"
+    "libRSDriver.so:"
+    "libRS_internal.so:"
+    "libbacktrace.so:"
+    "libbase.so:"
+    "libbcinfo.so:"
+    "libblas.so:"
+    "libc++.so:"
+    "libcompiler_rt.so:"
+    "libcutils.so:"
+    "libdmabufheap.so:"
+    "libft2.so:"
+    "libgralloctypes.so:"
+    "libhardware.so:"
+    "libhidlbase.so:"
+    "libhidlmemory.so:"
+    "libion.so:"
+    "libjsoncpp.so:"
+    "liblzma.so:"
+    "libpng.so:"
+    "libprocessgroup.so:"
+    "libunwindstack.so:"
+    "libutils.so:"
+    "libutilscallstack.so:"
+    "libz.so";
+
 static std::string vndkVersionStr() {
 #ifdef __BIONIC__
     return base::GetProperty("ro.vndk.version", "");
@@ -122,8 +171,12 @@ static bool readConfig(const std::string& configFile, std::vector<std::string>* 
 static const std::string getSystemNativeLibraries(NativeLibrary type) {
     std::string nativeLibrariesSystemConfig = "";
 
-    if (!isVndkEnabled() && type == NativeLibrary::LLNDK) {
-        nativeLibrariesSystemConfig = kLlndkLibrariesTxtPath;
+    if (!isVndkEnabled()) {
+        if (type == NativeLibrary::VNDKSP) {
+            return kFormerlyVndkspLibrariesList;
+        } else {
+            nativeLibrariesSystemConfig = kLlndkLibrariesTxtPath;
+        }
     } else {
         nativeLibrariesSystemConfig = kNativeLibrariesSystemConfigPath[type];
         insertVndkVersionStr(&nativeLibrariesSystemConfig);
@@ -263,7 +316,7 @@ android_namespace_t* GraphicsEnv::getDriverNamespace() {
         ALOGI("Driver path is setup via UPDATABLE_GFX_DRIVER: %s", mDriverPath.c_str());
     }
 
-    auto vndkNamespace = android_get_exported_namespace("vndk");
+    auto vndkNamespace = android_get_exported_namespace(isVndkEnabled() ? "vndk" : "sphal");
     if (!vndkNamespace) {
         mDriverNamespace = nullptr;
         return mDriverNamespace;
@@ -348,18 +401,10 @@ void GraphicsEnv::setDriverToLoad(GpuStatsInfo::Driver driver) {
     switch (driver) {
         case GpuStatsInfo::Driver::GL:
         case GpuStatsInfo::Driver::GL_UPDATED:
-        case GpuStatsInfo::Driver::ANGLE: {
-            if (mGpuStats.glDriverToLoad == GpuStatsInfo::Driver::NONE ||
-                mGpuStats.glDriverToLoad == GpuStatsInfo::Driver::GL) {
-                mGpuStats.glDriverToLoad = driver;
-                break;
-            }
-
-            if (mGpuStats.glDriverFallback == GpuStatsInfo::Driver::NONE) {
-                mGpuStats.glDriverFallback = driver;
-            }
+        case GpuStatsInfo::Driver::ANGLE:
+            mGpuStats.glDriverToLoad = driver;
             break;
-        }
+
         case GpuStatsInfo::Driver::VULKAN:
         case GpuStatsInfo::Driver::VULKAN_UPDATED: {
             if (mGpuStats.vkDriverToLoad == GpuStatsInfo::Driver::NONE ||
@@ -508,8 +553,7 @@ void GraphicsEnv::sendGpuStatsLocked(GpuStatsInfo::Api api, bool isDriverLoaded,
     bool isIntendedDriverLoaded = false;
     if (api == GpuStatsInfo::Api::API_GL) {
         driver = mGpuStats.glDriverToLoad;
-        isIntendedDriverLoaded =
-                isDriverLoaded && (mGpuStats.glDriverFallback == GpuStatsInfo::Driver::NONE);
+        isIntendedDriverLoaded = isDriverLoaded;
     } else {
         driver = mGpuStats.vkDriverToLoad;
         isIntendedDriverLoaded =
@@ -631,7 +675,7 @@ android_namespace_t* GraphicsEnv::getAngleNamespace() {
         return mAngleNamespace;
     }
 
-    auto vndkNamespace = android_get_exported_namespace("vndk");
+    auto vndkNamespace = android_get_exported_namespace(isVndkEnabled() ? "vndk" : "sphal");
     if (!vndkNamespace) {
         mAngleNamespace = nullptr;
         return mAngleNamespace;

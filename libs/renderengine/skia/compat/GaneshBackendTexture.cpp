@@ -21,26 +21,26 @@
 #define ATRACE_TAG ATRACE_TAG_GRAPHICS
 
 #include <include/core/SkImage.h>
-#include <include/gpu/GrDirectContext.h>
+#include <include/gpu/ganesh/GrDirectContext.h>
 #include <include/gpu/ganesh/SkImageGanesh.h>
 #include <include/gpu/ganesh/SkSurfaceGanesh.h>
 #include <include/gpu/ganesh/gl/GrGLBackendSurface.h>
 #include <include/gpu/ganesh/vk/GrVkBackendSurface.h>
-#include <include/gpu/vk/GrVkTypes.h>
+#include <include/gpu/ganesh/vk/GrVkTypes.h>
 
 #include "skia/ColorSpaces.h"
 #include "skia/compat/SkiaBackendTexture.h"
 
 #include <android/hardware_buffer.h>
+#include <common/trace.h>
 #include <log/log_main.h>
-#include <utils/Trace.h>
 
 namespace android::renderengine::skia {
 
 GaneshBackendTexture::GaneshBackendTexture(sk_sp<GrDirectContext> grContext,
                                            AHardwareBuffer* buffer, bool isOutputBuffer)
       : SkiaBackendTexture(buffer, isOutputBuffer), mGrContext(grContext) {
-    ATRACE_CALL();
+    SFTRACE_CALL();
     AHardwareBuffer_Desc desc;
     AHardwareBuffer_describe(buffer, &desc);
     const bool createProtectedImage = 0 != (desc.usage & AHARDWAREBUFFER_USAGE_PROTECTED_CONTENT);

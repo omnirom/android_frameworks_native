@@ -156,6 +156,6 @@ private:
     base::unique_fd mFenceFd;
 };
 
-}; // namespace android
+} // namespace android
 
 #endif // ANDROID_FENCE_H

@@ -180,6 +180,12 @@ public:
     MOCK_METHOD1(onHotplugDisconnect, void(Display));
     MOCK_METHOD(Error, setRefreshRateChangedCallbackDebugEnabled, (Display, bool));
     MOCK_METHOD(Error, notifyExpectedPresent, (Display, nsecs_t, int32_t));
+    MOCK_METHOD(
+            Error, getRequestedLuts,
+            (Display,
+             std::vector<aidl::android::hardware::graphics::composer3::DisplayLuts::LayerLut>*));
+    MOCK_METHOD(Error, setLayerLuts,
+                (Display, Layer, std::vector<aidl::android::hardware::graphics::composer3::Lut>&));
 };
 
 } // namespace Hwc2::mock

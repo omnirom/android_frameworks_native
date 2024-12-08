@@ -15,31 +15,41 @@
  */
 
 #define LOG_TAG "Sensors"
-
-#include <sensor/SensorEventQueue.h>
-
-#include <algorithm>
-#include <sys/socket.h>
-
-#include <utils/RefBase.h>
-#include <utils/Looper.h>
-
-#include <sensor/Sensor.h>
-#include <sensor/BitTube.h>
-#include <sensor/ISensorEventConnection.h>
+#define ATRACE_TAG ATRACE_TAG_SYSTEM_SERVER
 
 #include <android/sensor.h>
+#include <com_android_hardware_libsensor_flags.h>
+#include <cutils/trace.h>
 #include <hardware/sensors-base.h>
+#include <sensor/BitTube.h>
+#include <sensor/ISensorEventConnection.h>
+#include <sensor/Sensor.h>
+#include <sensor/SensorEventQueue.h>
+#include <sensor/SensorManager.h>
+#include <sys/socket.h>
+#include <utils/Looper.h>
+#include <utils/RefBase.h>
+
+#include <algorithm>
+#include <cinttypes>
+#include <string>
 
 using std::min;
+namespace libsensor_flags = com::android::hardware::libsensor::flags;
 
 // ----------------------------------------------------------------------------
 namespace android {
 // ----------------------------------------------------------------------------
 
-SensorEventQueue::SensorEventQueue(const sp<ISensorEventConnection>& connection)
-    : mSensorEventConnection(connection), mRecBuffer(nullptr), mAvailable(0), mConsumed(0),
-      mNumAcksToSend(0) {
+SensorEventQueue::SensorEventQueue(const sp<ISensorEventConnection>& connection,
+                                   SensorManager& sensorManager, String8 packageName)
+      : mSensorEventConnection(connection),
+        mRecBuffer(nullptr),
+        mSensorManager(sensorManager),
+        mPackageName(packageName),
+        mAvailable(0),
+        mConsumed(0),
+        mNumAcksToSend(0) {
     mRecBuffer = new ASensorEvent[MAX_RECEIVE_BUFFER_EVENT_COUNT];
 }
 
@@ -65,8 +75,8 @@ ssize_t SensorEventQueue::write(const sp<BitTube>& tube,
 
 ssize_t SensorEventQueue::read(ASensorEvent* events, size_t numEvents) {
     if (mAvailable == 0) {
-        ssize_t err = BitTube::recvObjects(mSensorChannel,
-                mRecBuffer, MAX_RECEIVE_BUFFER_EVENT_COUNT);
+        ssize_t err =
+                BitTube::recvObjects(mSensorChannel, mRecBuffer, MAX_RECEIVE_BUFFER_EVENT_COUNT);
         if (err < 0) {
             return err;
         }
@@ -75,6 +85,23 @@ ssize_t SensorEventQueue::read(ASensorEvent* events, size_t numEvents) {
     }
     size_t count = min(numEvents, mAvailable);
     memcpy(events, mRecBuffer + mConsumed, count * sizeof(ASensorEvent));
+
+    if (CC_UNLIKELY(ATRACE_ENABLED()) &&
+        libsensor_flags::sensor_event_queue_report_sensor_usage_in_tracing()) {
+        for (size_t i = 0; i < count; i++) {
+            std::optional<std::string_view> sensorName =
+                    mSensorManager.getSensorNameByHandle(events->sensor);
+            if (sensorName.has_value()) {
+                char buffer[UINT8_MAX];
+                IPCThreadState* thread = IPCThreadState::self();
+                pid_t pid = (thread != nullptr) ? thread->getCallingPid() : -1;
+                std::snprintf(buffer, sizeof(buffer),
+                              "Sensor event from %s to %s PID: %d (%zu/%zu)",
+                              sensorName.value().data(), mPackageName.c_str(), pid, i, count);
+                ATRACE_INSTANT_FOR_TRACK(LOG_TAG, buffer);
+            }
+        }
+    }
     mAvailable -= count;
     mConsumed += count;
     return static_cast<ssize_t>(count);

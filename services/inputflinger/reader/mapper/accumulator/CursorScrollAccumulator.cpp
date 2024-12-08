@@ -16,18 +16,29 @@
 
 #include "CursorScrollAccumulator.h"
 
+#include <android_companion_virtualdevice_flags.h>
 #include "EventHub.h"
 #include "InputDevice.h"
 
 namespace android {
 
-CursorScrollAccumulator::CursorScrollAccumulator() : mHaveRelWheel(false), mHaveRelHWheel(false) {
+namespace vd_flags = android::companion::virtualdevice::flags;
+
+CursorScrollAccumulator::CursorScrollAccumulator()
+      : mHaveRelWheel(false),
+        mHaveRelHWheel(false),
+        mHaveRelWheelHighRes(false),
+        mHaveRelHWheelHighRes(false) {
     clearRelativeAxes();
 }
 
 void CursorScrollAccumulator::configure(InputDeviceContext& deviceContext) {
     mHaveRelWheel = deviceContext.hasRelativeAxis(REL_WHEEL);
     mHaveRelHWheel = deviceContext.hasRelativeAxis(REL_HWHEEL);
+    if (vd_flags::high_resolution_scroll()) {
+        mHaveRelWheelHighRes = deviceContext.hasRelativeAxis(REL_WHEEL_HI_RES);
+        mHaveRelHWheelHighRes = deviceContext.hasRelativeAxis(REL_HWHEEL_HI_RES);
+    }
 }
 
 void CursorScrollAccumulator::reset(InputDeviceContext& deviceContext) {
@@ -42,11 +53,31 @@ void CursorScrollAccumulator::clearRelativeAxes() {
 void CursorScrollAccumulator::process(const RawEvent& rawEvent) {
     if (rawEvent.type == EV_REL) {
         switch (rawEvent.code) {
+            case REL_WHEEL_HI_RES:
+                if (mHaveRelWheelHighRes) {
+                    mRelWheel =
+                            rawEvent.value / static_cast<float>(kEvdevHighResScrollUnitsPerDetent);
+                }
+                break;
+            case REL_HWHEEL_HI_RES:
+                if (mHaveRelHWheelHighRes) {
+                    mRelHWheel =
+                            rawEvent.value / static_cast<float>(kEvdevHighResScrollUnitsPerDetent);
+                }
+                break;
             case REL_WHEEL:
-                mRelWheel = rawEvent.value;
+                // We should ignore regular scroll events, if we have already have high-res scroll
+                // enabled.
+                if (!mHaveRelWheelHighRes) {
+                    mRelWheel = rawEvent.value;
+                }
                 break;
             case REL_HWHEEL:
-                mRelHWheel = rawEvent.value;
+                // We should ignore regular scroll events, if we have already have high-res scroll
+                // enabled.
+                if (!mHaveRelHWheelHighRes) {
+                    mRelHWheel = rawEvent.value;
+                }
                 break;
         }
     }

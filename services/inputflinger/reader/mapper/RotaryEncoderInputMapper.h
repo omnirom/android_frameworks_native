@@ -47,6 +47,7 @@ private:
     int32_t mSource;
     float mScalingFactor;
     ui::Rotation mOrientation;
+    ui::LogicalDisplayId mDisplayId = ui::LogicalDisplayId::INVALID;
     std::unique_ptr<SlopController> mSlopController;
 
     explicit RotaryEncoderInputMapper(InputDeviceContext& deviceContext,

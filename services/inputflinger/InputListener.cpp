@@ -47,7 +47,6 @@ Visitor(V...) -> Visitor<V...>;
 void InputListenerInterface::notify(const NotifyArgs& generalArgs) {
     Visitor v{
             [&](const NotifyInputDevicesChangedArgs& args) { notifyInputDevicesChanged(args); },
-            [&](const NotifyConfigurationChangedArgs& args) { notifyConfigurationChanged(args); },
             [&](const NotifyKeyArgs& args) { notifyKey(args); },
             [&](const NotifyMotionArgs& args) { notifyMotion(args); },
             [&](const NotifySwitchArgs& args) { notifySwitch(args); },
@@ -65,10 +64,6 @@ QueuedInputListener::QueuedInputListener(InputListenerInterface& innerListener)
       : mInnerListener(innerListener) {}
 
 void QueuedInputListener::notifyInputDevicesChanged(const NotifyInputDevicesChangedArgs& args) {
-    mArgsQueue.emplace_back(args);
-}
-
-void QueuedInputListener::notifyConfigurationChanged(const NotifyConfigurationChangedArgs& args) {
     mArgsQueue.emplace_back(args);
 }
 
@@ -113,13 +108,6 @@ TracedInputListener::TracedInputListener(const char* name, InputListenerInterfac
       : mInnerListener(innerListener), mName(name) {}
 
 void TracedInputListener::notifyInputDevicesChanged(const NotifyInputDevicesChangedArgs& args) {
-    constexpr static auto& fnName = __func__;
-    ATRACE_NAME_IF(ATRACE_ENABLED(),
-                   StringPrintf("%s::%s(id=0x%" PRIx32 ")", mName, fnName, args.id));
-    mInnerListener.notify(args);
-}
-
-void TracedInputListener::notifyConfigurationChanged(const NotifyConfigurationChangedArgs& args) {
     constexpr static auto& fnName = __func__;
     ATRACE_NAME_IF(ATRACE_ENABLED(),
                    StringPrintf("%s::%s(id=0x%" PRIx32 ")", mName, fnName, args.id));

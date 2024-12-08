@@ -28,6 +28,7 @@ cc_binary {
         "libsurfaceflinger_mocks_defaults",
         "librenderengine_deps",
         "surfaceflinger_defaults",
+        "libsurfaceflinger_common_deps",
     ],
     srcs: [
         ":libsurfaceflinger_sources",

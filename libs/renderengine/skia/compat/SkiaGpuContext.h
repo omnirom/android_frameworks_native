@@ -20,11 +20,10 @@
 #define LOG_TAG "RenderEngine"
 
 #include <include/core/SkSurface.h>
-#include <include/gpu/GrDirectContext.h>
-#include <include/gpu/gl/GrGLInterface.h>
+#include <include/gpu/ganesh/GrDirectContext.h>
+#include <include/gpu/ganesh/gl/GrGLInterface.h>
 #include <include/gpu/graphite/Context.h>
-#include <include/gpu/vk/GrVkBackendContext.h>
-#include "include/gpu/vk/VulkanBackendContext.h"
+#include <include/gpu/vk/VulkanBackendContext.h>
 
 #include "SkiaBackendTexture.h"
 
@@ -52,10 +51,10 @@ public:
             GrContextOptions::PersistentCache& skSLCacheMonitor);
 
     /**
-     * grVkBackendContext must remain valid until after SkiaGpuContext is destroyed.
+     * vkBackendContext must remain valid until after SkiaGpuContext is destroyed.
      */
     static std::unique_ptr<SkiaGpuContext> MakeVulkan_Ganesh(
-            const GrVkBackendContext& grVkBackendContext,
+            const skgpu::VulkanBackendContext& vkBackendContext,
             GrContextOptions::PersistentCache& skSLCacheMonitor);
 
     // TODO: b/293371537 - Need shader / pipeline monitoring support in Graphite.

@@ -61,18 +61,6 @@ public:
 
 class LayerLifecycleManagerTest : public LayerHierarchyTestBase {
 protected:
-    std::unique_ptr<RequestedLayerState> rootLayer(uint32_t id) {
-        return std::make_unique<RequestedLayerState>(createArgs(/*id=*/id, /*canBeRoot=*/true,
-                                                                /*parent=*/UNASSIGNED_LAYER_ID,
-                                                                /*mirror=*/UNASSIGNED_LAYER_ID));
-    }
-
-    std::unique_ptr<RequestedLayerState> childLayer(uint32_t id, uint32_t parentId) {
-        return std::make_unique<RequestedLayerState>(createArgs(/*id=*/id, /*canBeRoot=*/false,
-                                                                parentId,
-                                                                /*mirror=*/UNASSIGNED_LAYER_ID));
-    }
-
     RequestedLayerState* getRequestedLayerState(LayerLifecycleManager& lifecycleManager,
                                                 uint32_t layerId) {
         return lifecycleManager.getLayerFromId(layerId);
@@ -629,6 +617,16 @@ TEST_F(LayerLifecycleManagerTest, isSimpleBufferUpdate) {
         state.y = 10;
         EXPECT_TRUE(layer->isSimpleBufferUpdate(state));
     }
+}
+
+TEST_F(LayerLifecycleManagerTest, testInputInfoOfRequestedLayerState) {
+    // By default the layer has no buffer, so it doesn't need an input info
+    EXPECT_FALSE(getRequestedLayerState(mLifecycleManager, 111)->needsInputInfo());
+
+    setBuffer(111);
+    mLifecycleManager.commitChanges();
+
+    EXPECT_TRUE(getRequestedLayerState(mLifecycleManager, 111)->needsInputInfo());
 }
 
 } // namespace android::surfaceflinger::frontend

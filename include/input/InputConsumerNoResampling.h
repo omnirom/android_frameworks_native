@@ -16,15 +16,21 @@
 
 #pragma once
 
+#include <map>
+#include <memory>
+#include <optional>
+
+#include <input/Input.h>
+#include <input/InputTransport.h>
+#include <input/Resampler.h>
 #include <utils/Looper.h>
-#include "InputTransport.h"
 
 namespace android {
 
 /**
  * An interface to receive batched input events. Even if you don't want batching, you still have to
  * use this interface, and some of the events will be batched if your implementation is slow to
- * handle the incoming input.
+ * handle the incoming input. The events received by these callbacks are never null.
  */
 class InputConsumerCallbacks {
 public:
@@ -34,7 +40,7 @@ public:
     /**
      * When you receive this callback, you must (eventually) call "consumeBatchedInputEvents".
      * If you don't want batching, then call "consumeBatchedInputEvents" immediately with
-     * std::nullopt frameTime to receive the pending motion event(s).
+     * std::nullopt requestedFrameTime to receive the pending motion event(s).
      * @param pendingBatchSource the source of the pending batch.
      */
     virtual void onBatchedInputEventPending(int32_t pendingBatchSource) = 0;
@@ -47,13 +53,13 @@ public:
 /**
  * Consumes input events from an input channel.
  *
- * This is a re-implementation of InputConsumer that does not have resampling at the current moment.
- * A lot of the higher-level logic has been folded into this class, to make it easier to use.
- * In the legacy class, InputConsumer, the consumption logic was partially handled in the jni layer,
- * as well as various actions like adding the fd to the Choreographer.
+ * This is a re-implementation of InputConsumer. At the moment it only supports resampling for
+ * single pointer events. A lot of the higher-level logic has been folded into this class, to make
+ * it easier to use. In the legacy class, InputConsumer, the consumption logic was partially handled
+ * in the jni layer, as well as various actions like adding the fd to the Choreographer.
  *
  * TODO(b/297226446): use this instead of "InputConsumer":
- * - Add resampling to this class
+ * - Add resampling for multiple pointer events.
  * - Allow various resampling strategies to be specified
  * - Delete the old "InputConsumer" and use this class instead, renaming it to "InputConsumer".
  * - Add tracing
@@ -64,8 +70,18 @@ public:
  */
 class InputConsumerNoResampling final {
 public:
+    /**
+     * @param callbacks are used to interact with InputConsumerNoResampling. They're called whenever
+     * the event is ready to consume.
+     * @param looper needs to be sp and not shared_ptr because it inherits from
+     * RefBase
+     * @param resampler the resampling strategy to use. If null, no resampling will be
+     * performed.
+     */
     explicit InputConsumerNoResampling(const std::shared_ptr<InputChannel>& channel,
-                                       sp<Looper> looper, InputConsumerCallbacks& callbacks);
+                                       sp<Looper> looper, InputConsumerCallbacks& callbacks,
+                                       std::unique_ptr<Resampler> resampler);
+
     ~InputConsumerNoResampling();
 
     /**
@@ -74,15 +90,17 @@ public:
     void finishInputEvent(uint32_t seq, bool handled);
     void reportTimeline(int32_t inputEventId, nsecs_t gpuCompletedTime, nsecs_t presentTime);
     /**
-     * If you want to consume all events immediately (disable batching), the you still must call
-     * this. For frameTime, use a std::nullopt.
-     * @param frameTime the time up to which consume the events. When there's double (or triple)
-     * buffering, you may want to not consume all events currently available, because you could be
-     * still working on an older frame, but there could already have been events that arrived that
-     * are more recent.
+     * If you want to consume all events immediately (disable batching), then you still must call
+     * this. For requestedFrameTime, use a std::nullopt. It is not guaranteed that the consumption
+     * will occur at requestedFrameTime. The resampling strategy may modify it.
+     * @param requestedFrameTime the time up to which consume the events. When there's double (or
+     * triple) buffering, you may want to not consume all events currently available, because you
+     * could be still working on an older frame, but there could already have been events that
+     * arrived that are more recent.
      * @return whether any events were actually consumed
      */
-    bool consumeBatchedInputEvents(std::optional<nsecs_t> frameTime);
+    bool consumeBatchedInputEvents(std::optional<nsecs_t> requestedFrameTime);
+
     /**
      * Returns true when there is *likely* a pending batch or a pending event in the channel.
      *
@@ -99,6 +117,7 @@ private:
     std::shared_ptr<InputChannel> mChannel;
     sp<Looper> mLooper;
     InputConsumerCallbacks& mCallbacks;
+    std::unique_ptr<Resampler> mResampler;
 
     // Looper-related infrastructure
     /**
@@ -177,10 +196,33 @@ private:
     /**
      * Batched InputMessages, per deviceId.
      * For each device, we are storing a queue of batched messages. These will all be collapsed into
-     * a single MotionEvent (up to a specific frameTime) when the consumer calls
+     * a single MotionEvent (up to a specific requestedFrameTime) when the consumer calls
      * `consumeBatchedInputEvents`.
      */
     std::map<DeviceId, std::queue<InputMessage>> mBatches;
+    /**
+     * Creates a MotionEvent by consuming samples from the provided queue. If one message has
+     * eventTime > adjustedFrameTime, all subsequent messages in the queue will be skipped. It is
+     * assumed that messages are queued in chronological order. In other words, only events that
+     * occurred prior to the adjustedFrameTime will be consumed.
+     * @param requestedFrameTime the time up to which to consume events.
+     * @param messages the queue of messages to consume from
+     */
+    std::pair<std::unique_ptr<MotionEvent>, std::optional<uint32_t>> createBatchedMotionEvent(
+            const nsecs_t requestedFrameTime, std::queue<InputMessage>& messages);
+
+    /**
+     * Consumes the batched input events, optionally allowing the caller to specify a device id
+     * and/or requestedFrameTime threshold. It is not guaranteed that consumption will occur at
+     * requestedFrameTime.
+     * @param deviceId The device id from which to consume events. If std::nullopt, consumes events
+     * from any device id.
+     * @param requestedFrameTime The time up to which consume the events. If std::nullopt, consumes
+     * input events with any timestamp.
+     * @return Whether or not any events were consumed.
+     */
+    bool consumeBatchedInputEvents(std::optional<DeviceId> deviceId,
+                                   std::optional<nsecs_t> requestedFrameTime);
     /**
      * A map from a single sequence number to several sequence numbers. This is needed because of
      * batching. When batching is enabled, a single MotionEvent will contain several samples. Each

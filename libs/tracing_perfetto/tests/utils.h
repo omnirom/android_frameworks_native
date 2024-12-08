@@ -74,10 +74,6 @@ class TracingSession {
   class Builder {
    public:
     Builder() = default;
-    Builder& set_data_source_name(std::string data_source_name) {
-      data_source_name_ = std::move(data_source_name);
-      return *this;
-    }
     Builder& add_enabled_category(std::string category) {
       enabled_categories_.push_back(std::move(category));
       return *this;
@@ -86,12 +82,21 @@ class TracingSession {
       disabled_categories_.push_back(std::move(category));
       return *this;
     }
+    Builder& add_atrace_category(std::string category) {
+      atrace_categories_.push_back(std::move(category));
+      return *this;
+    }
+    Builder& add_atrace_category_prefer_sdk(std::string category) {
+      atrace_categories_prefer_sdk_.push_back(std::move(category));
+      return *this;
+    }
     TracingSession Build();
 
    private:
-    std::string data_source_name_;
     std::vector<std::string> enabled_categories_;
     std::vector<std::string> disabled_categories_;
+    std::vector<std::string> atrace_categories_;
+    std::vector<std::string> atrace_categories_prefer_sdk_;
   };
 
   static TracingSession Adopt(struct PerfettoTracingSessionImpl*);

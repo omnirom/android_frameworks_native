@@ -351,9 +351,50 @@ def parse_vulkan_registry():
                           'external', 'vulkan-headers', 'registry', 'vk.xml')
   tree = element_tree.parse(registry)
   root = tree.getroot()
+
+  for exts in root.iter('extensions'):
+    for extension in exts.iter('extension'):
+      if 'vulkan' not in extension.get('supported').split(','):
+        # ANDROID_native_buffer is a weird special case -- it's declared in vk.xml as
+        # disabled but we _do_ want to generate plumbing for it in the Android loader.
+        if extension.get('name') != 'VK_ANDROID_native_buffer':
+          print('skip extension disabled or not for vulkan: ' + extension.get('name'))
+          continue
+
+      apiversion = 'VK_VERSION_1_0'
+      if extension.tag == 'extension':
+        extname = extension.get('name')
+        if (extension.get('type') == 'instance' and
+            extension.get('promotedto') is not None):
+          promoted_inst_ext_dict[extname] = \
+              version_2_api_version(extension.get('promotedto'))
+        for req in extension.iter('require'):
+          if req.get('feature') is not None:
+            apiversion = req.get('feature')
+          for commands in req:
+            if commands.tag == 'command':
+              cmd_name = commands.get('name')
+              if cmd_name not in extension_dict:
+                extension_dict[cmd_name] = extname
+                version_dict[cmd_name] = apiversion
+
+  for feature in root.iter('feature'):
+    if 'vulkan' not in feature.get('api').split(','):
+      continue
+
+    apiversion = feature.get('name')
+    for req in feature.iter('require'):
+      for command in req:
+        if command.tag == 'command':
+          cmd_name = command.get('name')
+          version_dict[cmd_name] = apiversion
+
   for commands in root.iter('commands'):
     for command in commands:
       if command.tag == 'command':
+        if command.get('api') == 'vulkansc':
+          continue
+
         parameter_list = []
         protoset = False
         cmd_name = ''
@@ -361,12 +402,18 @@ def parse_vulkan_registry():
         if command.get('alias') is not None:
           alias = command.get('alias')
           cmd_name = command.get('name')
-          alias_dict[cmd_name] = alias
-          command_list.append(cmd_name)
-          param_dict[cmd_name] = param_dict[alias].copy()
-          return_type_dict[cmd_name] = return_type_dict[alias]
+          # At this stage all valid commands have been added to the version
+          # dict so we can use it to filter valid commands
+          if cmd_name in version_dict:
+            alias_dict[cmd_name] = alias
+            command_list.append(cmd_name)
+            param_dict[cmd_name] = param_dict[alias].copy()
+            return_type_dict[cmd_name] = return_type_dict[alias]
         for params in command:
           if params.tag == 'param':
+            if params.get('api') == 'vulkansc':
+              # skip SC-only param variant
+              continue
             param_type = ''
             if params.text is not None and params.text.strip():
               param_type = params.text.strip() + ' '
@@ -387,39 +434,13 @@ def parse_vulkan_registry():
                 cmd_type = c.text
               if c.tag == 'name':
                 cmd_name = c.text
-                protoset = True
-                command_list.append(cmd_name)
-                return_type_dict[cmd_name] = cmd_type
+                if cmd_name in version_dict:
+                  protoset = True
+                  command_list.append(cmd_name)
+                  return_type_dict[cmd_name] = cmd_type
         if protoset:
           param_dict[cmd_name] = parameter_list.copy()
 
-  for exts in root.iter('extensions'):
-    for extension in exts:
-      apiversion = 'VK_VERSION_1_0'
-      if extension.tag == 'extension':
-        extname = extension.get('name')
-        if (extension.get('type') == 'instance' and
-            extension.get('promotedto') is not None):
-          promoted_inst_ext_dict[extname] = \
-              version_2_api_version(extension.get('promotedto'))
-        for req in extension:
-          if req.get('feature') is not None:
-            apiversion = req.get('feature')
-          for commands in req:
-            if commands.tag == 'command':
-              cmd_name = commands.get('name')
-              if cmd_name not in extension_dict:
-                extension_dict[cmd_name] = extname
-                version_dict[cmd_name] = apiversion
-
-  for feature in root.iter('feature'):
-    apiversion = feature.get('name')
-    for req in feature:
-      for command in req:
-        if command.tag == 'command':
-          cmd_name = command.get('name')
-          if cmd_name in command_list:
-            version_dict[cmd_name] = apiversion
 
   version_code_set = set()
   for version in version_dict.values():

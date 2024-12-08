@@ -1,0 +1,31 @@
+package {
+    // See: http://go/android-license-faq
+    // A large-scale-change added 'default_applicable_licenses' to import
+    // all of the 'license_kinds' from "frameworks_native_license"
+    // to get the below license kinds:
+    //   SPDX-license-identifier-Apache-2.0
+    default_applicable_licenses: ["frameworks_native_license"],
+}
+
+cc_benchmark {
+    name: "surfaceflinger_microbenchmarks",
+    srcs: [
+        ":libsurfaceflinger_mock_sources",
+        ":libsurfaceflinger_sources",
+        "*.cpp",
+    ],
+    defaults: [
+        "libsurfaceflinger_mocks_defaults",
+        "skia_renderengine_deps",
+        "surfaceflinger_defaults",
+    ],
+    static_libs: [
+        "libgmock",
+        "libgtest",
+        "libc++fs",
+    ],
+    header_libs: [
+        "libsurfaceflinger_mocks_headers",
+        "surfaceflinger_tests_common_headers",
+    ],
+}

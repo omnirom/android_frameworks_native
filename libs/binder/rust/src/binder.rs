@@ -768,14 +768,14 @@ macro_rules! declare_binder_interface {
         $interface:path[$descriptor:expr] {
             native: $native:ident($on_transact:path),
             proxy: $proxy:ident,
-            $(async: $async_interface:ident,)?
+            $(async: $async_interface:ident $(($try_into_local_async:ident))?,)?
         }
     } => {
         $crate::declare_binder_interface! {
             $interface[$descriptor] {
                 native: $native($on_transact),
                 proxy: $proxy {},
-                $(async: $async_interface,)?
+                $(async: $async_interface $(($try_into_local_async))?,)?
                 stability: $crate::binder_impl::Stability::default(),
             }
         }
@@ -785,7 +785,7 @@ macro_rules! declare_binder_interface {
         $interface:path[$descriptor:expr] {
             native: $native:ident($on_transact:path),
             proxy: $proxy:ident,
-            $(async: $async_interface:ident,)?
+            $(async: $async_interface:ident $(($try_into_local_async:ident))?,)?
             stability: $stability:expr,
         }
     } => {
@@ -793,7 +793,7 @@ macro_rules! declare_binder_interface {
             $interface[$descriptor] {
                 native: $native($on_transact),
                 proxy: $proxy {},
-                $(async: $async_interface,)?
+                $(async: $async_interface $(($try_into_local_async))?,)?
                 stability: $stability,
             }
         }
@@ -805,7 +805,7 @@ macro_rules! declare_binder_interface {
             proxy: $proxy:ident {
                 $($fname:ident: $fty:ty = $finit:expr),*
             },
-            $(async: $async_interface:ident,)?
+            $(async: $async_interface:ident $(($try_into_local_async:ident))?,)?
         }
     } => {
         $crate::declare_binder_interface! {
@@ -814,7 +814,7 @@ macro_rules! declare_binder_interface {
                 proxy: $proxy {
                     $($fname: $fty = $finit),*
                 },
-                $(async: $async_interface,)?
+                $(async: $async_interface $(($try_into_local_async))?,)?
                 stability: $crate::binder_impl::Stability::default(),
             }
         }
@@ -826,7 +826,7 @@ macro_rules! declare_binder_interface {
             proxy: $proxy:ident {
                 $($fname:ident: $fty:ty = $finit:expr),*
             },
-            $(async: $async_interface:ident,)?
+            $(async: $async_interface:ident $(($try_into_local_async:ident))?,)?
             stability: $stability:expr,
         }
     } => {
@@ -838,7 +838,7 @@ macro_rules! declare_binder_interface {
                 proxy: $proxy {
                     $($fname: $fty = $finit),*
                 },
-                $(async: $async_interface,)?
+                $(async: $async_interface $(($try_into_local_async))?,)?
                 stability: $stability,
             }
         }
@@ -854,7 +854,7 @@ macro_rules! declare_binder_interface {
                 $($fname:ident: $fty:ty = $finit:expr),*
             },
 
-            $( async: $async_interface:ident, )?
+            $(async: $async_interface:ident $(($try_into_local_async:ident))?,)?
 
             stability: $stability:expr,
         }
@@ -1043,6 +1043,24 @@ macro_rules! declare_binder_interface {
                 }
 
                 if ibinder.associate_class(<$native as $crate::binder_impl::Remotable>::get_class()) {
+                    let service: std::result::Result<$crate::binder_impl::Binder<$native>, $crate::StatusCode> =
+                        std::convert::TryFrom::try_from(ibinder.clone());
+                    $(
+                    // This part is only generated if the user of the macro specifies that the
+                    // trait has an `try_into_local_async` implementation.
+                    if let Ok(service) = service {
+                        if let Some(async_service) = $native::$try_into_local_async(service) {
+                            // We were able to associate with our expected class,
+                            // the service is local, and the local service is async.
+                            return Ok(async_service);
+                        }
+                        // The service is local but not async. Fall back to treating it as a
+                        // remote service. This means that calls to this local service have an
+                        // extra performance cost due to serialization, but async handle to
+                        // non-async server is considered a rare case, so this is okay.
+                    }
+                    )?
+                    // Treat service as remote.
                     return Ok($crate::Strong::new(Box::new(<$proxy as $crate::binder_impl::Proxy>::from_binder(ibinder)?)));
                 }
 

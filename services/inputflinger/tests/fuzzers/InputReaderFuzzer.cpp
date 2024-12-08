@@ -117,6 +117,10 @@ public:
         return reader->getSensors(deviceId);
     }
 
+    std::optional<HardwareProperties> getTouchpadHardwareProperties(int32_t deviceId) {
+        return reader->getTouchpadHardwareProperties(deviceId);
+    }
+
     bool canDispatchToDisplay(int32_t deviceId, ui::LogicalDisplayId displayId) {
         return reader->canDispatchToDisplay(deviceId, displayId);
     }
@@ -151,10 +155,6 @@ public:
         return reader->getLightPlayerId(deviceId, lightId);
     }
 
-    void addKeyRemapping(int32_t deviceId, int32_t fromKeyCode, int32_t toKeyCode) const {
-        reader->addKeyRemapping(deviceId, fromKeyCode, toKeyCode);
-    }
-
     int32_t getKeyCodeForKeyLocation(int32_t deviceId, int32_t locationKeyCode) const {
         return reader->getKeyCodeForKeyLocation(deviceId, locationKeyCode);
     }
@@ -168,6 +168,8 @@ public:
     }
 
     DeviceId getLastUsedInputDeviceId() override { return reader->getLastUsedInputDeviceId(); }
+
+    void notifyMouseCursorFadedOnTyping() override { reader->notifyMouseCursorFadedOnTyping(); }
 
 private:
     std::unique_ptr<InputReaderInterface> reader;

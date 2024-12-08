@@ -51,7 +51,8 @@ public:
     MOCK_CONST_METHOD0(getMaxVirtualDisplayCount, size_t());
     MOCK_CONST_METHOD0(getMaxVirtualDisplayDimension, size_t());
     MOCK_METHOD3(allocateVirtualDisplay, bool(HalVirtualDisplayId, ui::Size, ui::PixelFormat*));
-    MOCK_METHOD2(allocatePhysicalDisplay, void(hal::HWDisplayId, PhysicalDisplayId));
+    MOCK_METHOD3(allocatePhysicalDisplay,
+                 void(hal::HWDisplayId, PhysicalDisplayId, std::optional<ui::Size>));
 
     MOCK_METHOD1(createLayer, std::shared_ptr<HWC2::Layer>(HalDisplayId));
     MOCK_METHOD(status_t, getDeviceCompositionChanges,
@@ -151,6 +152,10 @@ public:
                 getOverlaySupport, (), (const, override));
     MOCK_METHOD(status_t, setRefreshRateChangedCallbackDebugEnabled, (PhysicalDisplayId, bool));
     MOCK_METHOD(status_t, notifyExpectedPresent, (PhysicalDisplayId, TimePoint, Fps));
+    MOCK_METHOD(status_t, getRequestedLuts,
+                (PhysicalDisplayId,
+                 std::vector<aidl::android::hardware::graphics::composer3::DisplayLuts::LayerLut>*),
+                (override));
 };
 
 } // namespace mock

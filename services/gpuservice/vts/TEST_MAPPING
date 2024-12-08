@@ -1,7 +1,13 @@
 {
   "presubmit": [
     {
-      "name": "GpuServiceVendorTests"
+      "name": "GpuServiceVendorTests",
+      "options": [
+        {
+          // Exclude test methods that require a physical device to run.
+          "exclude-annotation": "android.platform.test.annotations.RequiresDevice"
+        }
+      ]
     }
   ]
 }

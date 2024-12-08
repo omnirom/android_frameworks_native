@@ -426,6 +426,14 @@ prebuilt_etc {
     defaults: ["frameworks_native_data_etc_defaults"],
 }
 
+// installed in system
+prebuilt_etc {
+    name: "android.software.preview_sdk.prebuilt.xml",
+    relative_install_path: "permissions",
+    src: "android.software.preview_sdk.xml",
+    filename_from_src: true,
+}
+
 prebuilt_etc {
     name: "android.software.sip.voip.prebuilt.xml",
     src: "android.software.sip.voip.xml",
@@ -466,6 +474,22 @@ prebuilt_etc {
     name: "android.software.vulkan.deqp.level-latest.prebuilt.xml",
     src: "android.software.vulkan.deqp.level-latest.xml",
     defaults: ["frameworks_native_data_etc_defaults"],
+}
+
+// installed in system
+prebuilt_etc {
+    name: "android.software.webview.prebuilt.xml",
+    relative_install_path: "permissions",
+    src: "android.software.webview.xml",
+    filename_from_src: true,
+}
+
+// installed in system
+prebuilt_etc {
+    name: "android.software.window_magnification.prebuilt.xml",
+    relative_install_path: "permissions",
+    src: "android.software.window_magnification.xml",
+    filename_from_src: true,
 }
 
 prebuilt_etc {

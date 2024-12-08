@@ -35,6 +35,7 @@ public:
                 (const, override));
     MOCK_METHOD(bool, isVsyncPeriodSwitchSupported, (), (const, override));
     MOCK_METHOD(void, onLayerDestroyed, (hal::HWLayerId), (override));
+    MOCK_METHOD(std::optional<ui::Size>, getPhysicalSizeInMm, (), (const override));
 
     MOCK_METHOD(hal::Error, acceptChanges, (), (override));
     MOCK_METHOD((base::expected<std::shared_ptr<HWC2::Layer>, hal::Error>), createLayer, (),
@@ -109,6 +110,9 @@ public:
     MOCK_METHOD(hal::Error, getOverlaySupport,
                 (aidl::android::hardware::graphics::composer3::OverlayProperties *),
                 (const override));
+    MOCK_METHOD(hal::Error, getRequestedLuts,
+                (std::vector<aidl::android::hardware::graphics::composer3::DisplayLuts::LayerLut>*),
+                (override));
 };
 
 class Layer : public HWC2::Layer {
@@ -143,6 +147,8 @@ public:
                 (const std::string &, bool, const std::vector<uint8_t> &), (override));
     MOCK_METHOD(hal::Error, setBrightness, (float), (override));
     MOCK_METHOD(hal::Error, setBlockingRegion, (const android::Region &), (override));
+    MOCK_METHOD(hal::Error, setLuts,
+                (std::vector<aidl::android::hardware::graphics::composer3::Lut>&), (override));
 };
 
 } // namespace android::HWC2::mock

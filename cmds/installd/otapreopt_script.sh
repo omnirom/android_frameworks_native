@@ -60,7 +60,7 @@ function infinite_source {
 }
 
 PR_DEXOPT_JOB_VERSION="$(pm art pr-dexopt-job --version)"
-if (( $? == 0 )) && (( $PR_DEXOPT_JOB_VERSION >= 2 )); then
+if (( $? == 0 )) && (( $PR_DEXOPT_JOB_VERSION >= 3 )); then
   # Delegate to Pre-reboot Dexopt, a feature of ART Service.
   # ART Service decides what to do with this request:
   # - If Pre-reboot Dexopt is disabled or unsupported, the command returns

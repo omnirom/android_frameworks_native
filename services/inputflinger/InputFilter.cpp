@@ -60,14 +60,11 @@ void InputFilter::notifyInputDevicesChanged(const NotifyInputDevicesChangedArgs&
         AidlDeviceInfo& aidlInfo = mDeviceInfos.emplace_back();
         aidlInfo.deviceId = info.getId();
         aidlInfo.external = info.isExternal();
+        aidlInfo.keyboardType = info.getKeyboardType();
     }
     if (isFilterEnabled()) {
         LOG_ALWAYS_FATAL_IF(!mInputFilterRust->notifyInputDevicesChanged(mDeviceInfos).isOk());
     }
-    mNextListener.notify(args);
-}
-
-void InputFilter::notifyConfigurationChanged(const NotifyConfigurationChangedArgs& args) {
     mNextListener.notify(args);
 }
 
@@ -149,6 +146,12 @@ void InputFilter::notifyConfigurationChangedLocked() {
 
 void InputFilter::dump(std::string& dump) {
     dump += "InputFilter:\n";
+    if (isFilterEnabled()) {
+        std::string result;
+        LOG_ALWAYS_FATAL_IF(!mInputFilterRust->dumpFilter(&result).isOk());
+        dump += result;
+        dump += "\n";
+    }
 }
 
 } // namespace android

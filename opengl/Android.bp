@@ -30,6 +30,10 @@ ndk_headers {
     to: "",
     srcs: ["include/EGL/**/*.h"],
     license: "include/EGL/NOTICE",
+    // eglext.h is not self-contained. Safe to skip C-compat verification
+    // though since upstream also cares about C compatibility, and the header is
+    // auto-generated anyway.
+    skip_verification: true,
 }
 
 ndk_headers {
@@ -38,6 +42,10 @@ ndk_headers {
     to: "",
     srcs: ["include/GLES/**/*.h"],
     license: "include/GLES/NOTICE",
+    // glext.h is not self-contained. Safe to skip C-compat verification
+    // though since upstream also cares about C compatibility, and the header is
+    // auto-generated anyway.
+    skip_verification: true,
 }
 
 ndk_headers {
@@ -46,6 +54,10 @@ ndk_headers {
     to: "",
     srcs: ["include/GLES2/**/*.h"],
     license: "include/GLES2/NOTICE",
+    // gl2ext.h is not self-contained. Safe to skip C-compat verification
+    // though since upstream also cares about C compatibility, and the header is
+    // auto-generated anyway.
+    skip_verification: true,
 }
 
 ndk_headers {

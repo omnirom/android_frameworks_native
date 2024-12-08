@@ -97,6 +97,17 @@ public:
     void setActiveMode(PhysicalDisplayId, DisplayModeId, Fps vsyncRate, Fps renderFps)
             EXCLUDES(mDisplayLock);
 
+    void updateKernelIdleTimer(PhysicalDisplayId) REQUIRES(kMainThreadContext)
+            EXCLUDES(mDisplayLock);
+
+    struct KernelIdleTimerState {
+        std::optional<DisplayModeId> desiredModeIdOpt = std::nullopt;
+        bool isEnabled = false;
+    };
+
+    KernelIdleTimerState getKernelIdleTimerState(PhysicalDisplayId) const
+            REQUIRES(kMainThreadContext) EXCLUDES(mDisplayLock);
+
 private:
     struct Display {
         template <size_t N>
@@ -121,12 +132,18 @@ private:
 
         DisplayModeRequestOpt pendingModeOpt GUARDED_BY(kMainThreadContext);
         bool isModeSetPending GUARDED_BY(kMainThreadContext) = false;
+
+        bool isKernelIdleTimerEnabled GUARDED_BY(kMainThreadContext) = false;
     };
 
     using DisplayPtr = std::unique_ptr<Display>;
 
     void setActiveModeLocked(PhysicalDisplayId, DisplayModeId, Fps vsyncRate, Fps renderFps)
             REQUIRES(mDisplayLock);
+
+    using KernelIdleTimerController = scheduler::RefreshRateSelector::KernelIdleTimerController;
+    void updateKernelIdleTimer(PhysicalDisplayId, std::chrono::milliseconds timeout,
+                               KernelIdleTimerController) REQUIRES(mDisplayLock);
 
     // Set once when initializing the DisplayModeController, which the HWComposer must outlive.
     HWComposer* mComposerPtr = nullptr;

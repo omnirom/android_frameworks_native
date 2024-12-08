@@ -24,6 +24,12 @@ namespace android {
 
 using std::chrono_literals::operator""ms;
 
+// Timeout for waiting for an input device to be added and processed
+static constexpr std::chrono::duration ADD_INPUT_DEVICE_TIMEOUT = 5000ms;
+
+// Timeout for asserting that an input device change did not occur
+static constexpr std::chrono::duration INPUT_DEVICES_DIDNT_CHANGE_TIMEOUT = 100ms;
+
 // Timeout for waiting for an expected event
 static constexpr std::chrono::duration WAIT_TIMEOUT = 100ms;
 

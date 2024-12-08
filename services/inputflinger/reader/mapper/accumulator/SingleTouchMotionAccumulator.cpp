@@ -26,13 +26,13 @@ SingleTouchMotionAccumulator::SingleTouchMotionAccumulator() {
 }
 
 void SingleTouchMotionAccumulator::reset(InputDeviceContext& deviceContext) {
-    mAbsX = deviceContext.getAbsoluteAxisValue(ABS_X);
-    mAbsY = deviceContext.getAbsoluteAxisValue(ABS_Y);
-    mAbsPressure = deviceContext.getAbsoluteAxisValue(ABS_PRESSURE);
-    mAbsToolWidth = deviceContext.getAbsoluteAxisValue(ABS_TOOL_WIDTH);
-    mAbsDistance = deviceContext.getAbsoluteAxisValue(ABS_DISTANCE);
-    mAbsTiltX = deviceContext.getAbsoluteAxisValue(ABS_TILT_X);
-    mAbsTiltY = deviceContext.getAbsoluteAxisValue(ABS_TILT_Y);
+    mAbsX = deviceContext.getAbsoluteAxisValue(ABS_X).value_or(0);
+    mAbsY = deviceContext.getAbsoluteAxisValue(ABS_Y).value_or(0);
+    mAbsPressure = deviceContext.getAbsoluteAxisValue(ABS_PRESSURE).value_or(0);
+    mAbsToolWidth = deviceContext.getAbsoluteAxisValue(ABS_TOOL_WIDTH).value_or(0);
+    mAbsDistance = deviceContext.getAbsoluteAxisValue(ABS_DISTANCE).value_or(0);
+    mAbsTiltX = deviceContext.getAbsoluteAxisValue(ABS_TILT_X).value_or(0);
+    mAbsTiltY = deviceContext.getAbsoluteAxisValue(ABS_TILT_Y).value_or(0);
 }
 
 void SingleTouchMotionAccumulator::clearAbsoluteAxes() {

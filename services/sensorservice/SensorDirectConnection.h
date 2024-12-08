@@ -17,9 +17,10 @@
 #ifndef ANDROID_SENSOR_DIRECT_CONNECTION_H
 #define ANDROID_SENSOR_DIRECT_CONNECTION_H
 
-#include <optional>
+#include <android-base/thread_annotations.h>
 #include <stdint.h>
 #include <sys/types.h>
+#include <optional>
 
 #include <binder/BinderService.h>
 
@@ -37,15 +38,15 @@ class BitTube;
 
 class SensorService::SensorDirectConnection: public BnSensorEventConnection {
 public:
-    SensorDirectConnection(const sp<SensorService>& service, uid_t uid,
-            const sensors_direct_mem_t *mem, int32_t halChannelHandle,
-            const String16& opPackageName, int deviceId);
+    SensorDirectConnection(const sp<SensorService>& service, uid_t uid, pid_t pid,
+                           const sensors_direct_mem_t* mem, int32_t halChannelHandle,
+                           const String16& opPackageName, int deviceId);
     void dump(String8& result) const;
     void dump(util::ProtoOutputStream* proto) const;
     uid_t getUid() const { return mUid; }
     const String16& getOpPackageName() const { return mOpPackageName; }
     int32_t getHalChannelHandle() const;
-    bool isEquivalent(const sensors_direct_mem_t *mem) const;
+    bool isEquivalent(const sensors_direct_mem_t* mem) const;
 
     // Invoked when access to sensors for this connection has changed, e.g. lost or
     // regained due to changes in the sensor restricted/privacy mode or the
@@ -94,8 +95,13 @@ private:
     // Recover sensor requests previously capped by capRates().
     void uncapRates();
 
+    // Dumps a set of sensor infos.
+    void dumpSensorInfoWithLock(String8& result, std::unordered_map<int, int> sensors) const
+            EXCLUSIVE_LOCKS_REQUIRED(mConnectionLock);
+
     const sp<SensorService> mService;
     const uid_t mUid;
+    const pid_t mPid;
     const sensors_direct_mem_t mMem;
     const int32_t mHalChannelHandle;
     const String16 mOpPackageName;

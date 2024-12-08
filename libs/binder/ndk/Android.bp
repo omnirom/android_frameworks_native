@@ -230,10 +230,22 @@ cc_library_headers {
     },
     apex_available: [
         "//apex_available:platform",
+        "//apex_available:anyapex",
         "com.android.media",
         "com.android.media.swcodec",
     ],
     min_sdk_version: "29",
+}
+
+// TODO: if you try to export libbinder_headers_platform_shared from libbinder_ndk.ndk, it will
+// not select the NDK variant of libbinder_headers_platform_shared and instead, it will error
+// that the NDK can't depend on glibc C++.
+cc_library_headers {
+    name: "libbinder_headers_platform_shared_ndk",
+    export_include_dirs: ["include_cpp"],
+    sdk_version: "29",
+    min_sdk_version: "29",
+    visibility: [":__subpackages__"],
 }
 
 ndk_headers {
@@ -246,23 +258,14 @@ ndk_headers {
     license: "NOTICE",
 }
 
-// TODO(b/160624671): package with the aidl compiler
-ndk_headers {
-    name: "libbinder_ndk_helper_headers",
-    from: "include_cpp/android",
-    to: "android",
-    srcs: [
-        "include_cpp/android/*.h",
-    ],
-    license: "NOTICE",
-}
+// include_cpp are packaged in development/build/sdk.atree with the AIDL compiler
 
 ndk_library {
     name: "libbinder_ndk",
     symbol_file: "libbinder_ndk.map.txt",
     first_version: "29",
     export_header_libs: [
-        "libbinder_ndk_headers",
-        "libbinder_ndk_helper_headers",
+        // used to be part of the NDK, platform things depend on it
+        "libbinder_headers_platform_shared_ndk",
     ],
 }

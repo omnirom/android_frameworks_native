@@ -63,6 +63,8 @@ cc_library {
         "libhardware",
         "libpermission",
         "android.companion.virtual.virtualdevice_aidl-cpp",
+        "libaconfig_storage_read_api_cc",
+        "server_configurable_flags",
     ],
 
     static_libs: [

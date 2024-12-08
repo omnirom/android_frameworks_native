@@ -106,5 +106,5 @@ EGL_ENTRY(EGLuint64NV, eglGetSystemTimeNV, void)
 
 /* Partial update extensions */
 
-EGL_ENTRY(EGLBoolean, eglSwapBuffersWithDamageKHR, EGLDisplay, EGLSurface, EGLint *, EGLint)
+EGL_ENTRY(EGLBoolean, eglSwapBuffersWithDamageKHR, EGLDisplay, EGLSurface, const EGLint *, EGLint)
 EGL_ENTRY(EGLBoolean, eglSetDamageRegionKHR, EGLDisplay, EGLSurface, EGLint *, EGLint)

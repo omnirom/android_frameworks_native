@@ -195,7 +195,7 @@ impl PartialOrd for SpIBinder {
 
 impl PartialEq for SpIBinder {
     fn eq(&self, other: &Self) -> bool {
-        ptr::eq(self.0.as_ptr(), other.0.as_ptr())
+        self.cmp(other) == Ordering::Equal
     }
 }
 

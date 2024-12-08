@@ -29,6 +29,16 @@
 using namespace android;
 using namespace android::renderengine;
 
+// To run tests:
+/**
+ * mmm frameworks/native/libs/renderengine/benchmark;\
+ * adb push $OUT/data/benchmarktest/librenderengine_bench/librenderengine_bench
+ *      /data/benchmarktest/librenderengine_bench/librenderengine_bench;\
+ * adb shell /data/benchmarktest/librenderengine_bench/librenderengine_bench
+ *
+ * (64-bit devices: out directory contains benchmarktest64 instead of benchmarktest)
+ */
+
 ///////////////////////////////////////////////////////////////////////////////
 //  Helpers for calling drawLayers
 ///////////////////////////////////////////////////////////////////////////////
@@ -64,14 +74,15 @@ std::pair<uint32_t, uint32_t> getDisplaySize() {
     return std::pair<uint32_t, uint32_t>(width, height);
 }
 
-static std::unique_ptr<RenderEngine> createRenderEngine(RenderEngine::Threaded threaded,
-                                                        RenderEngine::GraphicsApi graphicsApi) {
+static std::unique_ptr<RenderEngine> createRenderEngine(
+        RenderEngine::Threaded threaded, RenderEngine::GraphicsApi graphicsApi,
+        RenderEngine::BlurAlgorithm blurAlgorithm = RenderEngine::BlurAlgorithm::KAWASE) {
     auto args = RenderEngineCreationArgs::Builder()
                         .setPixelFormat(static_cast<int>(ui::PixelFormat::RGBA_8888))
                         .setImageCacheSize(1)
                         .setEnableProtectedContext(true)
                         .setPrecacheToneMapperShaderOnly(false)
-                        .setBlurAlgorithm(renderengine::RenderEngine::BlurAlgorithm::KAWASE)
+                        .setBlurAlgorithm(blurAlgorithm)
                         .setContextPriority(RenderEngine::ContextPriority::REALTIME)
                         .setThreaded(threaded)
                         .setGraphicsApi(graphicsApi)
@@ -172,28 +183,67 @@ static void benchDrawLayers(RenderEngine& re, const std::vector<LayerSettings>& 
     }
 }
 
+/**
+ * Return a buffer with the image in the provided path, relative to the executable directory
+ */
+static std::shared_ptr<ExternalTexture> createTexture(RenderEngine& re, const char* relPathImg) {
+    // Initially use cpu access so we can decode into it with AImageDecoder.
+    auto [width, height] = getDisplaySize();
+    auto srcBuffer =
+            allocateBuffer(re, width, height, GRALLOC_USAGE_SW_WRITE_OFTEN, "decoded_source");
+    std::string fileName = base::GetExecutableDirectory().append(relPathImg);
+    renderenginebench::decode(fileName.c_str(), srcBuffer->getBuffer());
+    // Now copy into GPU-only buffer for more realistic timing.
+    srcBuffer = copyBuffer(re, srcBuffer, 0, "source");
+    return srcBuffer;
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 //  Benchmarks
 ///////////////////////////////////////////////////////////////////////////////
 
+constexpr char kHomescreenPath[] = "/resources/homescreen.png";
+
+/**
+ * Draw a layer with texture and no additional shaders as a baseline to evaluate a shader's impact
+ * on performance
+ */
 template <class... Args>
-void BM_blur(benchmark::State& benchState, Args&&... args) {
+void BM_homescreen(benchmark::State& benchState, Args&&... args) {
     auto args_tuple = std::make_tuple(std::move(args)...);
     auto re = createRenderEngine(static_cast<RenderEngine::Threaded>(std::get<0>(args_tuple)),
                                  static_cast<RenderEngine::GraphicsApi>(std::get<1>(args_tuple)));
 
-    // Initially use cpu access so we can decode into it with AImageDecoder.
     auto [width, height] = getDisplaySize();
-    auto srcBuffer =
-            allocateBuffer(*re, width, height, GRALLOC_USAGE_SW_WRITE_OFTEN, "decoded_source");
-    {
-        std::string srcImage = base::GetExecutableDirectory();
-        srcImage.append("/resources/homescreen.png");
-        renderenginebench::decode(srcImage.c_str(), srcBuffer->getBuffer());
+    auto srcBuffer = createTexture(*re, kHomescreenPath);
 
-        // Now copy into GPU-only buffer for more realistic timing.
-        srcBuffer = copyBuffer(*re, srcBuffer, 0, "source");
-    }
+    const FloatRect layerRect(0, 0, width, height);
+    LayerSettings layer{
+            .geometry =
+                    Geometry{
+                            .boundaries = layerRect,
+                    },
+            .source =
+                    PixelSource{
+                            .buffer =
+                                    Buffer{
+                                            .buffer = srcBuffer,
+                                    },
+                    },
+            .alpha = half(1.0f),
+    };
+    auto layers = std::vector<LayerSettings>{layer};
+    benchDrawLayers(*re, layers, benchState, "homescreen");
+}
+
+template <class... Args>
+void BM_homescreen_blur(benchmark::State& benchState, Args&&... args) {
+    auto args_tuple = std::make_tuple(std::move(args)...);
+    auto re = createRenderEngine(static_cast<RenderEngine::Threaded>(std::get<0>(args_tuple)),
+                                 static_cast<RenderEngine::GraphicsApi>(std::get<1>(args_tuple)));
+
+    auto [width, height] = getDisplaySize();
+    auto srcBuffer = createTexture(*re, kHomescreenPath);
 
     const FloatRect layerRect(0, 0, width, height);
     LayerSettings layer{
@@ -221,8 +271,55 @@ void BM_blur(benchmark::State& benchState, Args&&... args) {
     };
 
     auto layers = std::vector<LayerSettings>{layer, blurLayer};
-    benchDrawLayers(*re, layers, benchState, "blurred");
+    benchDrawLayers(*re, layers, benchState, "homescreen_blurred");
 }
 
-BENCHMARK_CAPTURE(BM_blur, SkiaGLThreaded, RenderEngine::Threaded::YES,
+template <class... Args>
+void BM_homescreen_edgeExtension(benchmark::State& benchState, Args&&... args) {
+    auto args_tuple = std::make_tuple(std::move(args)...);
+    auto re = createRenderEngine(static_cast<RenderEngine::Threaded>(std::get<0>(args_tuple)),
+                                 static_cast<RenderEngine::GraphicsApi>(std::get<1>(args_tuple)));
+
+    auto [width, height] = getDisplaySize();
+    auto srcBuffer = createTexture(*re, kHomescreenPath);
+
+    LayerSettings layer{
+            .geometry =
+                    Geometry{
+                            .boundaries = FloatRect(0, 0, width, height),
+                    },
+            .source =
+                    PixelSource{
+                            .buffer =
+                                    Buffer{
+                                            .buffer = srcBuffer,
+                                            // Part of the screen is not covered by the texture but
+                                            // will be filled in by the shader
+                                            .textureTransform =
+                                                    mat4(mat3(),
+                                                         vec3(width * 0.3f, height * 0.3f, 0.0f)),
+                                    },
+                    },
+            .alpha = half(1.0f),
+            .edgeExtensionEffect =
+                    EdgeExtensionEffect(/* left */ true,
+                                        /* right  */ false, /* top */ true, /* bottom */ false),
+    };
+    auto layers = std::vector<LayerSettings>{layer};
+    benchDrawLayers(*re, layers, benchState, "homescreen_edge_extension");
+}
+
+BENCHMARK_CAPTURE(BM_homescreen_blur, gaussian, RenderEngine::Threaded::YES,
+                  RenderEngine::GraphicsApi::GL, RenderEngine::BlurAlgorithm::GAUSSIAN);
+
+BENCHMARK_CAPTURE(BM_homescreen_blur, kawase, RenderEngine::Threaded::YES,
+                  RenderEngine::GraphicsApi::GL, RenderEngine::BlurAlgorithm::KAWASE);
+
+BENCHMARK_CAPTURE(BM_homescreen_blur, kawase_dual_filter, RenderEngine::Threaded::YES,
+                  RenderEngine::GraphicsApi::GL, RenderEngine::BlurAlgorithm::KAWASE_DUAL_FILTER);
+
+BENCHMARK_CAPTURE(BM_homescreen, SkiaGLThreaded, RenderEngine::Threaded::YES,
+                  RenderEngine::GraphicsApi::GL);
+
+BENCHMARK_CAPTURE(BM_homescreen_edgeExtension, SkiaGLThreaded, RenderEngine::Threaded::YES,
                   RenderEngine::GraphicsApi::GL);

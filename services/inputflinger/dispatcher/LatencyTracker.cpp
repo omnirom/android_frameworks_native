@@ -67,9 +67,10 @@ LatencyTracker::LatencyTracker(InputEventTimelineProcessor* processor)
     LOG_ALWAYS_FATAL_IF(processor == nullptr);
 }
 
-void LatencyTracker::trackListener(int32_t inputEventId, bool isDown, nsecs_t eventTime,
-                                   nsecs_t readTime, DeviceId deviceId,
-                                   const std::set<InputDeviceUsageSource>& sources) {
+void LatencyTracker::trackListener(int32_t inputEventId, nsecs_t eventTime, nsecs_t readTime,
+                                   DeviceId deviceId,
+                                   const std::set<InputDeviceUsageSource>& sources,
+                                   int32_t inputEventAction, InputEventType inputEventType) {
     reportAndPruneMatureRecords(eventTime);
     const auto it = mTimelines.find(inputEventId);
     if (it != mTimelines.end()) {
@@ -101,9 +102,41 @@ void LatencyTracker::trackListener(int32_t inputEventId, bool isDown, nsecs_t ev
         return;
     }
 
+    const InputEventActionType inputEventActionType = [&]() {
+        switch (inputEventType) {
+            case InputEventType::MOTION: {
+                switch (MotionEvent::getActionMasked(inputEventAction)) {
+                    case AMOTION_EVENT_ACTION_DOWN:
+                        return InputEventActionType::MOTION_ACTION_DOWN;
+                    case AMOTION_EVENT_ACTION_MOVE:
+                        return InputEventActionType::MOTION_ACTION_MOVE;
+                    case AMOTION_EVENT_ACTION_UP:
+                        return InputEventActionType::MOTION_ACTION_UP;
+                    case AMOTION_EVENT_ACTION_HOVER_MOVE:
+                        return InputEventActionType::MOTION_ACTION_HOVER_MOVE;
+                    case AMOTION_EVENT_ACTION_SCROLL:
+                        return InputEventActionType::MOTION_ACTION_SCROLL;
+                    default:
+                        return InputEventActionType::UNKNOWN_INPUT_EVENT;
+                }
+            }
+            case InputEventType::KEY: {
+                switch (inputEventAction) {
+                    case AKEY_EVENT_ACTION_DOWN:
+                    case AKEY_EVENT_ACTION_UP:
+                        return InputEventActionType::KEY;
+                    default:
+                        return InputEventActionType::UNKNOWN_INPUT_EVENT;
+                }
+            }
+            default:
+                return InputEventActionType::UNKNOWN_INPUT_EVENT;
+        }
+    }();
+
     mTimelines.emplace(inputEventId,
-                       InputEventTimeline(isDown, eventTime, readTime, identifier->vendor,
-                                          identifier->product, sources));
+                       InputEventTimeline(eventTime, readTime, identifier->vendor,
+                                          identifier->product, sources, inputEventActionType));
     mEventTimes.emplace(eventTime, inputEventId);
 }
 

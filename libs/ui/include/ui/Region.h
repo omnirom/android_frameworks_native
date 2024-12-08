@@ -233,7 +233,7 @@ static inline void PrintTo(const Region& region, ::std::ostream* os) {
 }
 
 // ---------------------------------------------------------------------------
-}; // namespace android
+} // namespace android
 
 namespace std {
 template <>

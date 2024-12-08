@@ -59,17 +59,13 @@ typedef bool (*AInputReceiver_onKeyEvent)(void *_Null_unspecified context,
                                           AInputEvent *_Nonnull keyEvent)
                                           __INTRODUCED_IN(__ANDROID_API_V__);
 
-struct AInputReceiverCallbacks;
-
-struct AInputReceiver;
+typedef struct AInputReceiverCallbacks AInputReceiverCallbacks;
 
 /**
  * The InputReceiver that holds the reference to the registered input channel. This must be released
  * using AInputReceiver_release
- *
- * Available since API level 35.
  */
-typedef struct AInputReceiver AInputReceiver __INTRODUCED_IN(__ANDROID_API_V__);
+typedef struct AInputReceiver AInputReceiver;
 
 /**
  * Registers an input receiver for an ASurfaceControl that will receive batched input event. For

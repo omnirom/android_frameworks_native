@@ -18,9 +18,9 @@
 #define LOG_TAG "CpuConsumer"
 //#define ATRACE_TAG ATRACE_TAG_GRAPHICS
 
-#include <gui/CpuConsumer.h>
-
+#include <com_android_graphics_libgui_flags.h>
 #include <gui/BufferItem.h>
+#include <gui/CpuConsumer.h>
 #include <utils/Log.h>
 
 #define CC_LOGV(x, ...) ALOGV("[%s] " x, mName.c_str(), ##__VA_ARGS__)
@@ -31,12 +31,25 @@
 
 namespace android {
 
-CpuConsumer::CpuConsumer(const sp<IGraphicBufferConsumer>& bq,
-        size_t maxLockedBuffers, bool controlledByApp) :
-    ConsumerBase(bq, controlledByApp),
-    mMaxLockedBuffers(maxLockedBuffers),
-    mCurrentLockedBuffers(0)
-{
+#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
+CpuConsumer::CpuConsumer(size_t maxLockedBuffers, bool controlledByApp,
+                         bool isConsumerSurfaceFlinger)
+      : ConsumerBase(controlledByApp, isConsumerSurfaceFlinger),
+        mMaxLockedBuffers(maxLockedBuffers),
+        mCurrentLockedBuffers(0) {
+    // Create tracking entries for locked buffers
+    mAcquiredBuffers.insertAt(0, maxLockedBuffers);
+
+    mConsumer->setConsumerUsageBits(GRALLOC_USAGE_SW_READ_OFTEN);
+    mConsumer->setMaxAcquiredBufferCount(static_cast<int32_t>(maxLockedBuffers));
+}
+#endif // COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
+
+CpuConsumer::CpuConsumer(const sp<IGraphicBufferConsumer>& bq, size_t maxLockedBuffers,
+                         bool controlledByApp)
+      : ConsumerBase(bq, controlledByApp),
+        mMaxLockedBuffers(maxLockedBuffers),
+        mCurrentLockedBuffers(0) {
     // Create tracking entries for locked buffers
     mAcquiredBuffers.insertAt(0, maxLockedBuffers);
 

@@ -19,6 +19,8 @@
 use crate::ffi::RustInputDeviceIdentifier;
 use bitflags::bitflags;
 use inputconstants::aidl::android::os::IInputConstants;
+use inputconstants::aidl::android::os::MotionEventFlag::MotionEventFlag;
+use serde::{Deserialize, Serialize};
 use std::fmt;
 
 /// The InputDevice ID.
@@ -193,31 +195,34 @@ impl MotionAction {
 
 bitflags! {
     /// MotionEvent flags.
+    /// The source of truth for the flag definitions are the MotionEventFlag AIDL enum.
+    /// The flag values are redefined here as a bitflags API.
     #[derive(Debug)]
     pub struct MotionFlags: u32 {
         /// FLAG_WINDOW_IS_OBSCURED
-        const WINDOW_IS_OBSCURED = IInputConstants::MOTION_EVENT_FLAG_WINDOW_IS_OBSCURED as u32;
+        const WINDOW_IS_OBSCURED = MotionEventFlag::WINDOW_IS_OBSCURED.0 as u32;
         /// FLAG_WINDOW_IS_PARTIALLY_OBSCURED
-        const WINDOW_IS_PARTIALLY_OBSCURED = IInputConstants::MOTION_EVENT_FLAG_WINDOW_IS_PARTIALLY_OBSCURED as u32;
+        const WINDOW_IS_PARTIALLY_OBSCURED = MotionEventFlag::WINDOW_IS_PARTIALLY_OBSCURED.0 as u32;
         /// FLAG_HOVER_EXIT_PENDING
-        const HOVER_EXIT_PENDING = IInputConstants::MOTION_EVENT_FLAG_HOVER_EXIT_PENDING as u32;
+        const HOVER_EXIT_PENDING = MotionEventFlag::HOVER_EXIT_PENDING.0 as u32;
         /// FLAG_IS_GENERATED_GESTURE
-        const IS_GENERATED_GESTURE = IInputConstants::MOTION_EVENT_FLAG_IS_GENERATED_GESTURE as u32;
+        const IS_GENERATED_GESTURE = MotionEventFlag::IS_GENERATED_GESTURE.0 as u32;
         /// FLAG_CANCELED
-        const CANCELED = IInputConstants::INPUT_EVENT_FLAG_CANCELED as u32;
+        const CANCELED = MotionEventFlag::CANCELED.0 as u32;
         /// FLAG_NO_FOCUS_CHANGE
-        const NO_FOCUS_CHANGE = IInputConstants::MOTION_EVENT_FLAG_NO_FOCUS_CHANGE as u32;
+        const NO_FOCUS_CHANGE = MotionEventFlag::NO_FOCUS_CHANGE.0 as u32;
         /// PRIVATE_FLAG_SUPPORTS_ORIENTATION
-        const PRIVATE_SUPPORTS_ORIENTATION = IInputConstants::MOTION_EVENT_PRIVATE_FLAG_SUPPORTS_ORIENTATION as u32;
+        const PRIVATE_FLAG_SUPPORTS_ORIENTATION =
+                MotionEventFlag::PRIVATE_FLAG_SUPPORTS_ORIENTATION.0 as u32;
         /// PRIVATE_FLAG_SUPPORTS_DIRECTIONAL_ORIENTATION
-        const PRIVATE_SUPPORTS_DIRECTIONAL_ORIENTATION =
-                IInputConstants::MOTION_EVENT_PRIVATE_FLAG_SUPPORTS_DIRECTIONAL_ORIENTATION as u32;
+        const PRIVATE_FLAG_SUPPORTS_DIRECTIONAL_ORIENTATION =
+                MotionEventFlag::PRIVATE_FLAG_SUPPORTS_DIRECTIONAL_ORIENTATION.0 as u32;
         /// FLAG_IS_ACCESSIBILITY_EVENT
-        const IS_ACCESSIBILITY_EVENT = IInputConstants::INPUT_EVENT_FLAG_IS_ACCESSIBILITY_EVENT as u32;
+        const IS_ACCESSIBILITY_EVENT = MotionEventFlag::IS_ACCESSIBILITY_EVENT.0 as u32;
         /// FLAG_TAINTED
-        const TAINTED = IInputConstants::INPUT_EVENT_FLAG_TAINTED as u32;
+        const TAINTED = MotionEventFlag::TAINTED.0 as u32;
         /// FLAG_TARGET_ACCESSIBILITY_FOCUS
-        const TARGET_ACCESSIBILITY_FOCUS = IInputConstants::MOTION_EVENT_FLAG_TARGET_ACCESSIBILITY_FOCUS as u32;
+        const TARGET_ACCESSIBILITY_FOCUS = MotionEventFlag::TARGET_ACCESSIBILITY_FOCUS.0 as u32;
     }
 }
 
@@ -320,9 +325,11 @@ bitflags! {
 
 /// A rust enum representation of a Keyboard type.
 #[repr(u32)]
-#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+#[derive(Debug, Default, Copy, Clone, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type")]
 pub enum KeyboardType {
     /// KEYBOARD_TYPE_NONE
+    #[default]
     None = input_bindgen::AINPUT_KEYBOARD_TYPE_NONE,
     /// KEYBOARD_TYPE_NON_ALPHABETIC
     NonAlphabetic = input_bindgen::AINPUT_KEYBOARD_TYPE_NON_ALPHABETIC,
@@ -333,10 +340,24 @@ pub enum KeyboardType {
 #[cfg(test)]
 mod tests {
     use crate::input::SourceClass;
+    use crate::MotionFlags;
     use crate::Source;
+    use inputconstants::aidl::android::os::MotionEventFlag::MotionEventFlag;
+
     #[test]
     fn convert_source_class_pointer() {
         let source = Source::from_bits(input_bindgen::AINPUT_SOURCE_CLASS_POINTER).unwrap();
         assert!(source.is_from_class(SourceClass::Pointer));
+    }
+
+    /// Ensure all MotionEventFlag constants are re-defined in rust.
+    #[test]
+    fn all_motion_event_flags_defined() {
+        for flag in MotionEventFlag::enum_values() {
+            assert!(
+                MotionFlags::from_bits(flag.0 as u32).is_some(),
+                "MotionEventFlag value {flag:?} is not redefined as a rust MotionFlags"
+            );
+        }
     }
 }

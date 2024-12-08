@@ -91,8 +91,7 @@ static void *loadIMapperLibrary() {
         }
 
         void* so = nullptr;
-        // TODO(b/322384429) switch this to __ANDROID_API_V__ when V is finalized
-        if API_LEVEL_AT_LEAST(__ANDROID_API_FUTURE__, 202404) {
+        if API_LEVEL_AT_LEAST (__ANDROID_API_V__, 202404) {
             so = AServiceManager_openDeclaredPassthroughHal("mapper", mapperSuffix.c_str(),
                                                             RTLD_LOCAL | RTLD_NOW);
         } else {

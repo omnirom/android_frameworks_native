@@ -42,6 +42,7 @@ import android.gui.ISurfaceComposerClient;
 import android.gui.ITunnelModeEnabledListener;
 import android.gui.IWindowInfosListener;
 import android.gui.IWindowInfosPublisher;
+import android.gui.IJankListener;
 import android.gui.LayerCaptureArgs;
 import android.gui.OverlayProperties;
 import android.gui.PullAtomData;
@@ -580,4 +581,22 @@ interface ISurfaceComposer {
      * This method should not block the ShutdownThread therefore it's handled asynchronously.
      */
     oneway void notifyShutdown();
+
+    /**
+     * Registers the jank listener on the given layer to receive jank data of future frames.
+     */
+    void addJankListener(IBinder layer, IJankListener listener);
+
+    /**
+     * Flushes any pending jank data on the given layer to any registered listeners on that layer.
+     */
+    oneway void flushJankData(int layerId);
+
+    /**
+     * Schedules the removal of the jank listener from the given layer after the VSync with the
+     * specified ID. Use a value <= 0 for afterVsync to remove the listener immediately. The given
+     * listener will not be removed before the given VSync, but may still receive data for frames
+     * past the provided VSync.
+     */
+    oneway void removeJankListener(int layerId, IJankListener listener, long afterVsync);
 }

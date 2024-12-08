@@ -36,7 +36,9 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
     FuzzedDataProvider fdp(data, size);
 
     std::string addr = std::string(getenv("TMPDIR") ?: "/tmp") + "/binderRpcBenchmark";
-    (void)unlink(addr.c_str());
+    if (0 != unlink(addr.c_str()) && errno != ENOENT) {
+        LOG(WARNING) << "Could not unlink: " << strerror(errno);
+    }
 
     sp<RpcServer> server = RpcServer::make();
 

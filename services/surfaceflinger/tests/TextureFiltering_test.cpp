@@ -14,9 +14,10 @@
  * limitations under the License.
  */
 
+#include <android/gui/DisplayCaptureArgs.h>
 #include <android/gui/ISurfaceComposerClient.h>
 #include <gtest/gtest.h>
-#include <gui/DisplayCaptureArgs.h>
+#include <gui/AidlUtil.h>
 #include <ui/GraphicTypes.h>
 #include <ui/Rect.h>
 
@@ -84,7 +85,7 @@ protected:
 };
 
 TEST_F(TextureFilteringTest, NoFiltering) {
-    captureArgs.sourceCrop = Rect{0, 0, 100, 100};
+    captureArgs.captureArgs.sourceCrop = gui::aidl_utils::toARect(100, 100);
     captureArgs.layerHandle = mParent->getHandle();
     ScreenCapture::captureLayers(&mCapture, captureArgs);
 
@@ -93,7 +94,7 @@ TEST_F(TextureFilteringTest, NoFiltering) {
 }
 
 TEST_F(TextureFilteringTest, BufferCropNoFiltering) {
-    captureArgs.sourceCrop = Rect{0, 0, 100, 100};
+    captureArgs.captureArgs.sourceCrop = gui::aidl_utils::toARect(100, 100);
     captureArgs.layerHandle = mParent->getHandle();
     ScreenCapture::captureLayers(&mCapture, captureArgs);
 
@@ -105,7 +106,7 @@ TEST_F(TextureFilteringTest, BufferCropNoFiltering) {
 TEST_F(TextureFilteringTest, BufferCropIsFiltered) {
     Transaction().setBufferCrop(mLayer, Rect{25, 25, 75, 75}).apply();
 
-    captureArgs.sourceCrop = Rect{0, 0, 100, 100};
+    captureArgs.captureArgs.sourceCrop = gui::aidl_utils::toARect(100, 100);
     captureArgs.layerHandle = mParent->getHandle();
     ScreenCapture::captureLayers(&mCapture, captureArgs);
 
@@ -114,9 +115,9 @@ TEST_F(TextureFilteringTest, BufferCropIsFiltered) {
 
 // Expect filtering because the output source crop is stretched to the output buffer's size.
 TEST_F(TextureFilteringTest, OutputSourceCropIsFiltered) {
-    captureArgs.frameScaleX = 2;
-    captureArgs.frameScaleY = 2;
-    captureArgs.sourceCrop = Rect{25, 25, 75, 75};
+    captureArgs.captureArgs.frameScaleX = 2;
+    captureArgs.captureArgs.frameScaleY = 2;
+    captureArgs.captureArgs.sourceCrop = gui::aidl_utils::toARect(25, 25, 75, 75);
     captureArgs.layerHandle = mParent->getHandle();
     ScreenCapture::captureLayers(&mCapture, captureArgs);
 
@@ -127,9 +128,9 @@ TEST_F(TextureFilteringTest, OutputSourceCropIsFiltered) {
 // buffer's size.
 TEST_F(TextureFilteringTest, LayerCropOutputSourceCropIsFiltered) {
     Transaction().setCrop(mLayer, Rect{25, 25, 75, 75}).apply();
-    captureArgs.frameScaleX = 2;
-    captureArgs.frameScaleY = 2;
-    captureArgs.sourceCrop = Rect{25, 25, 75, 75};
+    captureArgs.captureArgs.frameScaleX = 2;
+    captureArgs.captureArgs.frameScaleY = 2;
+    captureArgs.captureArgs.sourceCrop = gui::aidl_utils::toARect(25, 25, 75, 75);
     captureArgs.layerHandle = mParent->getHandle();
     ScreenCapture::captureLayers(&mCapture, captureArgs);
 
@@ -139,8 +140,8 @@ TEST_F(TextureFilteringTest, LayerCropOutputSourceCropIsFiltered) {
 // Expect filtering because the layer is scaled up.
 TEST_F(TextureFilteringTest, LayerCaptureWithScalingIsFiltered) {
     captureArgs.layerHandle = mLayer->getHandle();
-    captureArgs.frameScaleX = 2;
-    captureArgs.frameScaleY = 2;
+    captureArgs.captureArgs.frameScaleX = 2;
+    captureArgs.captureArgs.frameScaleY = 2;
     ScreenCapture::captureLayers(&mCapture, captureArgs);
 
     expectFiltered({0, 0, 100, 200}, {100, 0, 200, 200});
@@ -149,7 +150,7 @@ TEST_F(TextureFilteringTest, LayerCaptureWithScalingIsFiltered) {
 // Expect no filtering because the output buffer's size matches the source crop.
 TEST_F(TextureFilteringTest, LayerCaptureOutputSourceCropNoFiltering) {
     captureArgs.layerHandle = mLayer->getHandle();
-    captureArgs.sourceCrop = Rect{25, 25, 75, 75};
+    captureArgs.captureArgs.sourceCrop = gui::aidl_utils::toARect(25, 25, 75, 75);
     ScreenCapture::captureLayers(&mCapture, captureArgs);
 
     mCapture->expectColor(Rect{0, 0, 25, 50}, Color::RED);
@@ -162,7 +163,7 @@ TEST_F(TextureFilteringTest, LayerCaptureWithCropNoFiltering) {
     Transaction().setCrop(mLayer, Rect{10, 10, 90, 90}).apply();
 
     captureArgs.layerHandle = mLayer->getHandle();
-    captureArgs.sourceCrop = Rect{25, 25, 75, 75};
+    captureArgs.captureArgs.sourceCrop = gui::aidl_utils::toARect(25, 25, 75, 75);
     ScreenCapture::captureLayers(&mCapture, captureArgs);
 
     mCapture->expectColor(Rect{0, 0, 25, 50}, Color::RED);
@@ -172,7 +173,7 @@ TEST_F(TextureFilteringTest, LayerCaptureWithCropNoFiltering) {
 // Expect no filtering because the output source crop and output buffer are the same size.
 TEST_F(TextureFilteringTest, OutputSourceCropDisplayFrameMatchNoFiltering) {
     captureArgs.layerHandle = mLayer->getHandle();
-    captureArgs.sourceCrop = Rect{25, 25, 75, 75};
+    captureArgs.captureArgs.sourceCrop = gui::aidl_utils::toARect(25, 25, 75, 75);
     ScreenCapture::captureLayers(&mCapture, captureArgs);
 
     mCapture->expectColor(Rect{0, 0, 25, 50}, Color::RED);
@@ -206,7 +207,7 @@ TEST_F(TextureFilteringTest, ParentHasTransformNoFiltering) {
     Transaction().setPosition(mParent, 100, 100).apply();
 
     captureArgs.layerHandle = mParent->getHandle();
-    captureArgs.sourceCrop = Rect{0, 0, 100, 100};
+    captureArgs.captureArgs.sourceCrop = gui::aidl_utils::toARect(100, 100);
     ScreenCapture::captureLayers(&mCapture, captureArgs);
 
     mCapture->expectColor(Rect{0, 0, 50, 100}, Color::RED);

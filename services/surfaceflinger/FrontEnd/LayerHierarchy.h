@@ -211,8 +211,11 @@ public:
     const LayerHierarchy& getHierarchy() const;
     const LayerHierarchy& getOffscreenHierarchy() const;
     std::string getDebugString(uint32_t layerId, uint32_t depth = 0) const;
+    void dumpLayerSample(const LayerHierarchy& layerHierarchy) const;
 
 private:
+    void logSampledChildren(const LayerHierarchy& hierarchy) const;
+
     void onLayerAdded(RequestedLayerState* layer);
     void attachToParent(LayerHierarchy*);
     void detachFromParent(LayerHierarchy*);

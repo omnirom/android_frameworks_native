@@ -326,7 +326,7 @@ enum AHardwareBuffer_UsageFlags {
      * COMPOSER_OVERLAY, the system will try to prioritize the buffer receiving
      * an overlay plane & avoid caching it in intermediate composition buffers.
      */
-    AHARDWAREBUFFER_USAGE_FRONT_BUFFER = 1UL << 32,
+    AHARDWAREBUFFER_USAGE_FRONT_BUFFER = 1ULL << 32,
 
     AHARDWAREBUFFER_USAGE_VENDOR_0  = 1ULL << 28,
     AHARDWAREBUFFER_USAGE_VENDOR_1  = 1ULL << 29,

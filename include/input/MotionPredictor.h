@@ -43,7 +43,9 @@ static inline bool isMotionPredictionEnabled() {
 class JerkTracker {
 public:
     // Initialize the tracker. If normalizedDt is true, assume that each sample pushed has dt=1.
-    JerkTracker(bool normalizedDt);
+    // alpha is the coefficient of the first-order IIR filter for jerk. A factor of 1 results
+    // in no smoothing.
+    JerkTracker(bool normalizedDt, float alpha);
 
     // Add a position to the tracker and update derivative estimates.
     void pushSample(int64_t timestamp, float xPos, float yPos);
@@ -58,10 +60,13 @@ public:
 
 private:
     const bool mNormalizedDt;
+    // Coefficient of first-order IIR filter to smooth jerk calculation.
+    const float mAlpha;
 
     RingBuffer<int64_t> mTimestamps{4};
     std::array<float, 4> mXDerivatives{}; // [x, x', x'', x''']
     std::array<float, 4> mYDerivatives{}; // [y, y', y'', y''']
+    float mJerkMagnitude;
 };
 
 /**
@@ -124,15 +129,17 @@ private:
 
     std::unique_ptr<TfLiteMotionPredictorBuffers> mBuffers;
     std::optional<MotionEvent> mLastEvent;
-    // mJerkTracker assumes normalized dt = 1 between recorded samples because
-    // the underlying mModel input also assumes fixed-interval samples.
-    // Normalized dt as 1 is also used to correspond with the similar Jank
-    // implementation from the JetPack MotionPredictor implementation.
-    JerkTracker mJerkTracker{true};
 
-    std::optional<MotionPredictorMetricsManager> mMetricsManager;
+    std::unique_ptr<JerkTracker> mJerkTracker;
+
+    std::unique_ptr<MotionPredictorMetricsManager> mMetricsManager;
 
     const ReportAtomFunction mReportAtomFunction;
+
+    // Initialize prediction model and associated objects.
+    // Called during lazy initialization.
+    // TODO: b/210158587 Consider removing lazy initialization.
+    void initializeObjects();
 };
 
 } // namespace android

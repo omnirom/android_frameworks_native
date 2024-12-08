@@ -21,6 +21,7 @@
 
 #include <android-base/properties.h>
 #include <android-base/stringprintf.h>
+#include <common/trace.h>
 #include <compositionengine/impl/OutputCompositionState.h>
 #include <compositionengine/impl/planner/CachedSet.h>
 #include <math/HashCombine.h>
@@ -28,7 +29,6 @@
 #include <renderengine/RenderEngine.h>
 #include <ui/DebugUtils.h>
 #include <ui/HdrRenderTypeUtils.h>
-#include <utils/Trace.h>
 
 namespace android::compositionengine::impl::planner {
 
@@ -160,7 +160,7 @@ void CachedSet::updateAge(std::chrono::steady_clock::time_point now) {
 void CachedSet::render(renderengine::RenderEngine& renderEngine, TexturePool& texturePool,
                        const OutputCompositionState& outputState,
                        bool deviceHandlesColorTransform) {
-    ATRACE_CALL();
+    SFTRACE_CALL();
     if (outputState.powerCallback) {
         outputState.powerCallback->notifyCpuLoadUp();
     }

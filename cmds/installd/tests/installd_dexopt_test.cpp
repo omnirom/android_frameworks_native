@@ -1449,7 +1449,7 @@ TEST_F(ProfileTest, CopySystemProfileFailWrongProfileName) {
 
 class BootProfileTest : public ProfileTest {
   public:
-    std::vector<const std::string> extra_apps_;
+    std::vector<std::string> extra_apps_;
     std::vector<int64_t> extra_ce_data_inodes_;
 
     virtual void SetUp() {

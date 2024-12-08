@@ -39,12 +39,6 @@ extern "C" int LLVMFuzzerTestOneInput(uint8_t *data, size_t size) {
     while (fdp.remaining_bytes() > 0) {
         fdp.PickValueInArray<std::function<void()>>({
                 [&]() -> void {
-                    // SendToNextStage_NotifyConfigurationChangedArgs
-                    mClassifier->notifyConfigurationChanged(
-                            {/*sequenceNum=*/fdp.ConsumeIntegral<int32_t>(),
-                             /*eventTime=*/fdp.ConsumeIntegral<nsecs_t>()});
-                },
-                [&]() -> void {
                     // SendToNextStage_NotifyKeyArgs
                     const nsecs_t eventTime =
                             fdp.ConsumeIntegralInRange<nsecs_t>(0,

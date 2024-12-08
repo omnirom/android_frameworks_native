@@ -220,6 +220,7 @@ private:
     std::chrono::nanoseconds mReadyDuration GUARDED_BY(mMutex);
     std::shared_ptr<scheduler::VsyncSchedule> mVsyncSchedule GUARDED_BY(mMutex);
     TimePoint mLastVsyncCallbackTime GUARDED_BY(mMutex) = TimePoint::now();
+    TimePoint mLastCommittedVsyncTime GUARDED_BY(mMutex) = TimePoint::now();
     scheduler::VSyncCallbackRegistration mVsyncRegistration GUARDED_BY(mMutex);
     frametimeline::TokenManager* const mTokenManager;
 

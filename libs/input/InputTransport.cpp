@@ -375,13 +375,11 @@ status_t InputChannel::openInputChannelPair(const std::string& name,
 
     sp<IBinder> token = sp<BBinder>::make();
 
-    std::string serverChannelName = name + " (server)";
     android::base::unique_fd serverFd(sockets[0]);
-    outServerChannel = InputChannel::create(serverChannelName, std::move(serverFd), token);
+    outServerChannel = InputChannel::create(name, std::move(serverFd), token);
 
-    std::string clientChannelName = name + " (client)";
     android::base::unique_fd clientFd(sockets[1]);
-    outClientChannel = InputChannel::create(clientChannelName, std::move(clientFd), token);
+    outClientChannel = InputChannel::create(name, std::move(clientFd), token);
     return OK;
 }
 
@@ -424,10 +422,11 @@ status_t InputChannel::sendMessage(const InputMessage* msg) {
     return OK;
 }
 
-status_t InputChannel::receiveMessage(InputMessage* msg) {
+android::base::Result<InputMessage> InputChannel::receiveMessage() {
     ssize_t nRead;
+    InputMessage msg;
     do {
-        nRead = ::recv(getFd(), msg, sizeof(InputMessage), MSG_DONTWAIT);
+        nRead = ::recv(getFd(), &msg, sizeof(InputMessage), MSG_DONTWAIT);
     } while (nRead == -1 && errno == EINTR);
 
     if (nRead < 0) {
@@ -435,36 +434,36 @@ status_t InputChannel::receiveMessage(InputMessage* msg) {
         ALOGD_IF(DEBUG_CHANNEL_MESSAGES, "channel '%s' ~ receive message failed, errno=%d",
                  name.c_str(), errno);
         if (error == EAGAIN || error == EWOULDBLOCK) {
-            return WOULD_BLOCK;
+            return android::base::Error(WOULD_BLOCK);
         }
         if (error == EPIPE || error == ENOTCONN || error == ECONNREFUSED) {
-            return DEAD_OBJECT;
+            return android::base::Error(DEAD_OBJECT);
         }
-        return -error;
+        return android::base::Error(-error);
     }
 
     if (nRead == 0) { // check for EOF
         ALOGD_IF(DEBUG_CHANNEL_MESSAGES,
                  "channel '%s' ~ receive message failed because peer was closed", name.c_str());
-        return DEAD_OBJECT;
+        return android::base::Error(DEAD_OBJECT);
     }
 
-    if (!msg->isValid(nRead)) {
+    if (!msg.isValid(nRead)) {
         ALOGE("channel '%s' ~ received invalid message of size %zd", name.c_str(), nRead);
-        return BAD_VALUE;
+        return android::base::Error(BAD_VALUE);
     }
 
     ALOGD_IF(DEBUG_CHANNEL_MESSAGES, "channel '%s' ~ received message of type %s", name.c_str(),
-             ftl::enum_string(msg->header.type).c_str());
+             ftl::enum_string(msg.header.type).c_str());
     if (ATRACE_ENABLED()) {
         // Add an additional trace point to include data about the received message.
         std::string message =
                 StringPrintf("receiveMessage(inputChannel=%s, seq=0x%" PRIx32 ", type=%s)",
-                             name.c_str(), msg->header.seq,
-                             ftl::enum_string(msg->header.type).c_str());
+                             name.c_str(), msg.header.seq,
+                             ftl::enum_string(msg.header.type).c_str());
         ATRACE_NAME(message.c_str());
     }
-    return OK;
+    return msg;
 }
 
 bool InputChannel::probablyHasInput() const {
@@ -589,7 +588,8 @@ status_t InputPublisher::publishMotionEvent(
                 mInputVerifier.processMovement(deviceId, source, action, pointerCount,
                                                pointerProperties, pointerCoords, flags);
         if (!result.ok()) {
-            LOG(FATAL) << "Bad stream: " << result.error();
+            LOG(ERROR) << "Bad stream: " << result.error();
+            return BAD_VALUE;
         }
     }
     if (debugTransportPublisher()) {
@@ -729,15 +729,16 @@ status_t InputPublisher::publishTouchModeEvent(uint32_t seq, int32_t eventId, bo
 }
 
 android::base::Result<InputPublisher::ConsumerResponse> InputPublisher::receiveConsumerResponse() {
-    InputMessage msg;
-    status_t result = mChannel->receiveMessage(&msg);
-    if (result) {
-        if (debugTransportPublisher() && result != WOULD_BLOCK) {
+    android::base::Result<InputMessage> result = mChannel->receiveMessage();
+    if (!result.ok()) {
+        if (debugTransportPublisher() && result.error().code() != WOULD_BLOCK) {
             LOG(INFO) << "channel '" << mChannel->getName() << "' publisher ~ " << __func__ << ": "
-                      << strerror(result);
+                      << result.error().message();
         }
-        return android::base::Error(result);
+        return result.error();
     }
+
+    const InputMessage& msg = *result;
     if (msg.header.type == InputMessage::Type::FINISHED) {
         ALOGD_IF(debugTransportPublisher(),
                  "channel '%s' publisher ~ %s: finished: seq=%u, handled=%s",
