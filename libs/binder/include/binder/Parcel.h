@@ -637,9 +637,6 @@ public:
 
     LIBBINDER_EXPORTED const flat_binder_object* readObject(bool nullMetaData) const;
 
-    // Explicitly close all file descriptors in the parcel.
-    LIBBINDER_EXPORTED void closeFileDescriptors();
-
     // Debugging: get metrics on current allocations.
     LIBBINDER_EXPORTED static size_t getGlobalAllocSize();
     LIBBINDER_EXPORTED static size_t getGlobalAllocCount();
@@ -652,6 +649,9 @@ public:
     LIBBINDER_EXPORTED void print(std::ostream& to, uint32_t flags = 0) const;
 
 private:
+    // Close all file descriptors in the parcel at object positions >= newObjectsSize.
+    void closeFileDescriptors(size_t newObjectsSize);
+
     // `objects` and `objectsSize` always 0 for RPC Parcels.
     typedef void (*release_func)(const uint8_t* data, size_t dataSize, const binder_size_t* objects,
                                  size_t objectsSize);
