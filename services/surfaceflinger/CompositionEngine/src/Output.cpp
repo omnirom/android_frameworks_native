@@ -1002,8 +1002,7 @@ compositionengine::OutputLayer* Output::findLayerRequestingBackgroundComposition
         // because that somehow leads to the Udfps touched layer getting device composition
         // consistently.
         if ((nextLayer != nullptr && layerRequestingBgComposition == nullptr) &&
-            (strncmp(nextLayer->getLayerFE().getDebugName(), UDFPS_TOUCHED_LAYER_NAME,
-                     strlen(UDFPS_TOUCHED_LAYER_NAME)) == 0)) {
+            (strstr(nextLayer->getLayerFE().getDebugName(), UDFPS_TOUCHED_LAYER_NAME) != nullptr)) {
             layerRequestingBgComposition = layer;
             break;
         }
