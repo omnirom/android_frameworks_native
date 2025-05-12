@@ -180,6 +180,7 @@ public:
     MOCK_METHOD(status_t, enableDevice, (int32_t deviceId), (override));
     MOCK_METHOD(status_t, disableDevice, (int32_t deviceId), (override));
     MOCK_METHOD(void, sysfsNodeChanged, (const std::string& sysfsNodePath), (override));
+    MOCK_METHOD(bool, setKernelWakeEnabled, (int32_t deviceId, bool enabled), (override));
 };
 
 class MockPointerChoreographerPolicyInterface : public PointerChoreographerPolicyInterface {
@@ -187,7 +188,7 @@ public:
     MOCK_METHOD(std::shared_ptr<PointerControllerInterface>, createPointerController,
                 (PointerControllerInterface::ControllerType), (override));
     MOCK_METHOD(void, notifyPointerDisplayIdChanged,
-                (ui::LogicalDisplayId displayId, const FloatPoint& position), (override));
+                (ui::LogicalDisplayId displayId, const vec2& position), (override));
     MOCK_METHOD(bool, isInputMethodConnectionActive, (), (override));
     MOCK_METHOD(void, notifyMouseCursorFadedOnTyping, (), (override));
 };
@@ -200,7 +201,9 @@ public:
 
     MOCK_METHOD(uint32_t, getSources, (), (const, override));
     MOCK_METHOD(std::optional<DisplayViewport>, getAssociatedViewport, (), (const));
+    MOCK_METHOD(KeyboardType, getKeyboardType, (), (const, override));
     MOCK_METHOD(bool, isEnabled, (), ());
+    MOCK_METHOD(bool, isExternal, (), (override));
 
     MOCK_METHOD(void, dump, (std::string& dump, const std::string& eventHubDevStr), ());
     MOCK_METHOD(void, addEmptyEventHubDevice, (int32_t eventHubId), ());
@@ -246,11 +249,7 @@ public:
     MOCK_METHOD(std::optional<int32_t>, getLightPlayerId, (int32_t lightId), ());
 
     MOCK_METHOD(int32_t, getMetaState, (), ());
-    MOCK_METHOD(void, updateMetaState, (int32_t keyCode), ());
-
     MOCK_METHOD(void, setKeyboardType, (KeyboardType keyboardType), ());
-
-    MOCK_METHOD(void, bumpGeneration, (), ());
 
     MOCK_METHOD(const PropertyMap&, getConfiguration, (), (const, override));
 
@@ -261,5 +260,11 @@ public:
     MOCK_METHOD(void, updateLedState, (bool reset), ());
 
     MOCK_METHOD(size_t, getMapperCount, (), ());
+
+    virtual int32_t getGeneration() const override { return mGeneration; }
+    virtual void bumpGeneration() override { mGeneration++; }
+
+private:
+    int32_t mGeneration = 0;
 };
 } // namespace android

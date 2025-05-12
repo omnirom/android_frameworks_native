@@ -458,7 +458,8 @@ void VSyncPredictor::setDisplayModePtr(ftl::NonNull<DisplayModePtr> modePtr) {
 
 Duration VSyncPredictor::ensureMinFrameDurationIsKept(TimePoint expectedPresentTime,
                                                       TimePoint lastConfirmedPresentTime) {
-    SFTRACE_CALL();
+    SFTRACE_FORMAT("%s mNumVsyncsForFrame=%d mPastExpectedPresentTimes.size()=%zu", __func__,
+                   mNumVsyncsForFrame, mPastExpectedPresentTimes.size());
 
     if (mNumVsyncsForFrame <= 1) {
         return 0ns;
@@ -470,12 +471,8 @@ Duration VSyncPredictor::ensureMinFrameDurationIsKept(TimePoint expectedPresentT
 
     auto prev = lastConfirmedPresentTime.ns();
     for (auto& current : mPastExpectedPresentTimes) {
-        if (CC_UNLIKELY(mTraceOn)) {
-            SFTRACE_FORMAT_INSTANT("current %.2f past last signaled fence",
-                                   static_cast<float>(current.ns() -
-                                                      lastConfirmedPresentTime.ns()) /
-                                           1e6f);
-        }
+        SFTRACE_FORMAT_INSTANT("current %.2f past last signaled fence",
+                               static_cast<float>(current.ns() - prev) / 1e6f);
 
         const auto minPeriodViolation = current.ns() - prev + threshold < minFramePeriod.ns();
         if (minPeriodViolation) {
@@ -522,11 +519,9 @@ void VSyncPredictor::onFrameBegin(TimePoint expectedPresentTime, FrameTime lastS
         const auto front = mPastExpectedPresentTimes.front().ns();
         const bool frontIsBeforeConfirmed = front < lastConfirmedPresentTime.ns() + threshold;
         if (frontIsBeforeConfirmed) {
-            if (CC_UNLIKELY(mTraceOn)) {
-                SFTRACE_FORMAT_INSTANT("Discarding old vsync - %.2f before last signaled fence",
-                                       static_cast<float>(lastConfirmedPresentTime.ns() - front) /
-                                               1e6f);
-            }
+            SFTRACE_FORMAT_INSTANT("Discarding old vsync - %.2f before last signaled fence",
+                                   static_cast<float>(lastConfirmedPresentTime.ns() - front) /
+                                           1e6f);
             mPastExpectedPresentTimes.pop_front();
         } else {
             break;

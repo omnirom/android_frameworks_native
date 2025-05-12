@@ -112,6 +112,10 @@ static_assert(
         static_cast<int>(aidl::android::hardware::graphics::common::PixelFormat::RGBA_10101010) ==
                 AHARDWAREBUFFER_FORMAT_R10G10B10A10_UNORM,
         "HAL and AHardwareBuffer pixel format don't match");
+static_assert(
+        static_cast<int>(aidl::android::hardware::graphics::common::PixelFormat::YCBCR_P210) ==
+                AHARDWAREBUFFER_FORMAT_YCbCr_P210,
+        "HAL and AHardwareBuffer pixel format don't match");
 
 static enum AHardwareBufferStatus filterStatus(status_t status) {
     switch (status) {
@@ -300,8 +304,10 @@ int AHardwareBuffer_lockPlanes(AHardwareBuffer* buffer, uint64_t usage,
       if (result == 0) {
         outPlanes->planeCount = 3;
         outPlanes->planes[0].data = yuvData.y;
-        // P010 is word-aligned 10-bit semiplaner, and YCbCr_422_I is a single interleaved plane
+        // P010 & P210 are word-aligned 10-bit semiplaner, and YCbCr_422_I is a single interleaved
+        // plane
         if (format == AHARDWAREBUFFER_FORMAT_YCbCr_P010 ||
+            format == AHARDWAREBUFFER_FORMAT_YCbCr_P210 ||
             format == AHARDWAREBUFFER_FORMAT_YCbCr_422_I) {
             outPlanes->planes[0].pixelStride = 2;
         } else {
@@ -724,6 +730,7 @@ bool AHardwareBuffer_formatIsYuv(uint32_t format) {
         case AHARDWAREBUFFER_FORMAT_YCrCb_420_SP:
         case AHARDWAREBUFFER_FORMAT_YCbCr_422_I:
         case AHARDWAREBUFFER_FORMAT_YCbCr_P010:
+        case AHARDWAREBUFFER_FORMAT_YCbCr_P210:
             return true;
         default:
             return false;

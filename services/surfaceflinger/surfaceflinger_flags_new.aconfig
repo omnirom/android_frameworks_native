@@ -4,11 +4,60 @@ package: "com.android.graphics.surfaceflinger.flags"
 container: "system"
 
 flag {
+  name: "adpf_fmq_sf"
+  namespace: "game"
+  description: "Guards use of the ADPF FMQ system specifically for SurfaceFlinger"
+  bug: "315894228"
+  is_fixed_read_only: true
+} # adpf_fmq_sf
+
+flag {
   name: "adpf_gpu_sf"
   namespace: "game"
   description: "Guards use of the sending ADPF GPU duration hint and load hints from SurfaceFlinger to Power HAL"
   bug: "284324521"
 } # adpf_gpu_sf
+
+flag {
+  name: "adpf_native_session_manager"
+  namespace: "game"
+  description: "Controls ADPF SessionManager being enabled in SF"
+  bug: "367803904"
+} # adpf_sessionmanager
+
+flag {
+  name: "arr_setframerate_api"
+  namespace: "core_graphics"
+  description: "New SDK Surface#setFrameRate API and Surface.FrameRateParams for Android 16"
+  bug: "356987016"
+  is_fixed_read_only: true
+  is_exported: true
+} # arr_setframerate_api
+
+flag {
+  name: "arr_setframerate_gte_enum"
+  namespace: "core_graphics"
+  description: "Exposes GTE (greater than or equal to) enum for Android 16"
+  bug: "380949716"
+  is_fixed_read_only: true
+} # arr_setframerate_gte_enum
+
+flag {
+  name: "arr_surfacecontrol_setframerate_api"
+  namespace: "core_graphics"
+  description: "New SDK SurfaceControl.Transaction#setFrameRate API for Android 16"
+  bug: "356987016"
+  is_fixed_read_only: true
+  is_exported: true
+} # arr_surfacecontrol_setframerate_api
+
+flag {
+  name: "begone_bright_hlg"
+  namespace: "core_graphics"
+  description: "Caps HLG brightness relative to SDR"
+  bug: "362510107"
+  is_fixed_read_only: true
+} # begone_bright_hlg
 
 flag {
   name: "ce_fence_promise"
@@ -33,6 +82,14 @@ flag {
 } # commit_not_composited
 
 flag {
+  name: "connected_display_hdr"
+  namespace: "core_graphics"
+  description: "enable connected display hdr capability"
+  bug: "374182788"
+  is_fixed_read_only: true
+} # connected_display_hdr
+
+flag {
   name: "correct_dpi_with_display_size"
   namespace: "core_graphics"
   description: "indicate whether missing or likely incorrect dpi should be corrected using the display size."
@@ -42,6 +99,17 @@ flag {
     purpose: PURPOSE_BUGFIX
   }
 } # correct_dpi_with_display_size
+
+flag {
+  name: "deprecate_frame_tracker"
+  namespace: "core_graphics"
+  description: "Deprecate using FrameTracker to accumulate and provide FrameStats"
+  bug: "241394120"
+  is_fixed_read_only: true
+  metadata {
+    purpose: PURPOSE_BUGFIX
+  }
+} # deprecate_frame_tracker
 
 flag {
   name: "deprecate_vsync_sf"
@@ -64,6 +132,14 @@ flag {
     purpose: PURPOSE_BUGFIX
   }
 } # detached_mirror
+
+flag {
+  name: "display_config_error_hal"
+  namespace: "core_graphics"
+  description: "Report HAL display configuration errors like modeset failure or link training failure"
+  bug: "374184110"
+  is_fixed_read_only: true
+} # display_config_error_hal
 
 flag {
   name: "filter_frames_before_trace_starts"
@@ -107,6 +183,13 @@ flag {
 } # frame_rate_category_mrr
 
 flag {
+  name: "graphite_renderengine_preview_rollout"
+  namespace: "core_graphics"
+  description: "R/W flag to enable Skia's Graphite Vulkan backend in RenderEngine, IF it is already compiled with force_compile_graphite_renderengine, AND the debug.renderengine.graphite_preview_optin sysprop is set to true."
+  bug: "293371537"
+} # graphite_renderengine_preview_rollout
+
+flag {
   name: "latch_unsignaled_with_auto_refresh_changed"
   namespace: "core_graphics"
   description: "Ignore eAutoRefreshChanged with latch unsignaled"
@@ -126,6 +209,14 @@ flag {
 } # local_tonemap_screenshots
 
 flag {
+  name: "no_vsyncs_on_screen_off"
+  namespace: "core_graphics"
+  description: "Stop vsync / Choreographer callbacks to apps when the screen is off"
+  bug: "331636736"
+  is_fixed_read_only: true
+} # no_vsyncs_on_screen_off
+
+flag {
   name: "single_hop_screenshot"
   namespace: "window_surfaces"
   description: "Only access SF main thread once during a screenshot"
@@ -135,6 +226,25 @@ flag {
     purpose: PURPOSE_BUGFIX
   }
  } # single_hop_screenshot
+
+flag {
+  name: "skip_invisible_windows_in_input"
+  namespace: "window_surfaces"
+  description: "Only send visible windows to input list"
+  bug: "305254099"
+  is_fixed_read_only: true
+  metadata {
+    purpose: PURPOSE_BUGFIX
+  }
+ } # skip_invisible_windows_in_input
+
+flag {
+  name: "stable_edid_ids"
+  namespace: "core_graphics"
+  description: "Guard use of the new stable EDID-based display IDs system."
+  bug: "352320847"
+  is_fixed_read_only: true
+} # stable_edid_ids
 
 flag {
   name: "true_hdr_screenshots"
@@ -184,5 +294,12 @@ flag {
     purpose: PURPOSE_BUGFIX
   }
 } # vrr_bugfix_dropped_frame
+
+flag {
+  name: "window_blur_kawase2"
+  namespace: "core_graphics"
+  description: "Flag for using Kawase2 algorithm for window blur"
+  bug: "353826438"
+} # window_blur_kawase2
 
 # IMPORTANT - please keep alphabetize to reduce merge conflicts

@@ -7,6 +7,11 @@ package {
     default_applicable_licenses: ["frameworks_native_license"],
 }
 
+vintf_fragment {
+    name: "android.frameworks.stats-service.xml",
+    src: "android.frameworks.stats-service.xml",
+}
+
 cc_library_shared {
     name: "libstatshidl",
     srcs: [
@@ -38,7 +43,7 @@ cc_library_shared {
     local_include_dirs: [
         "include/stats",
     ],
-    vintf_fragments: [
+    vintf_fragment_modules: [
         "android.frameworks.stats-service.xml",
     ],
 }

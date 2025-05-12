@@ -150,6 +150,23 @@ HalResult<void> ManagerHalController::cancelSynced() {
     return apply(cancelSyncedFn, "cancelSynced");
 }
 
+HalResult<std::shared_ptr<Aidl::IVibrationSession>> ManagerHalController::startSession(
+        const std::vector<int32_t>& ids, const Aidl::VibrationSessionConfig& config,
+        const std::function<void()>& completionCallback) {
+    hal_fn<std::shared_ptr<Aidl::IVibrationSession>> startSessionFn =
+            [&](std::shared_ptr<ManagerHalWrapper> hal) {
+                return hal->startSession(ids, config, completionCallback);
+            };
+    return apply(startSessionFn, "startSession");
+}
+
+HalResult<void> ManagerHalController::clearSessions() {
+    hal_fn<void> clearSessionsFn = [](std::shared_ptr<ManagerHalWrapper> hal) {
+        return hal->clearSessions();
+    };
+    return apply(clearSessionsFn, "clearSessions");
+}
+
 }; // namespace vibrator
 
 }; // namespace android

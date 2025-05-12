@@ -42,6 +42,7 @@ cc_defaults {
         "libutils",
     ],
     static_libs: [
+        "libguiflags",
         "libmath",
         "librenderengine",
         "libtimestats",
@@ -49,9 +50,7 @@ cc_defaults {
         "libaidlcommonsupport",
         "libprocessgroup",
         "libprocessgroup_util",
-        "libcgrouprc",
         "libjsoncpp",
-        "libcgrouprc_format",
     ],
     header_libs: [
         "android.hardware.graphics.composer@2.1-command-buffer",
@@ -59,7 +58,7 @@ cc_defaults {
         "android.hardware.graphics.composer@2.3-command-buffer",
         "android.hardware.graphics.composer@2.4-command-buffer",
         "android.hardware.graphics.composer3-command-buffer",
-        "libsurfaceflinger_headers",
+        "libsurfaceflinger_backend_headers",
     ],
 }
 
@@ -143,6 +142,8 @@ cc_test {
     ],
     srcs: [
         ":libcompositionengine_sources",
+        ":libsurfaceflinger_backend_mock_sources",
+        ":libsurfaceflinger_backend_sources",
         "tests/planner/CachedSetTest.cpp",
         "tests/planner/FlattenerTest.cpp",
         "tests/planner/LayerStateTest.cpp",
@@ -153,13 +154,13 @@ cc_test {
         "tests/DisplayTest.cpp",
         "tests/HwcAsyncWorkerTest.cpp",
         "tests/HwcBufferCacheTest.cpp",
-        "tests/MockHWC2.cpp",
-        "tests/MockHWComposer.cpp",
-        "tests/MockPowerAdvisor.cpp",
         "tests/OutputLayerTest.cpp",
         "tests/OutputTest.cpp",
         "tests/ProjectionSpaceTest.cpp",
         "tests/RenderSurfaceTest.cpp",
+    ],
+    header_libs: [
+        "libsurfaceflinger_backend_mock_headers",
     ],
     static_libs: [
         "libcompositionengine_mocks",
@@ -169,6 +170,7 @@ cc_test {
         "libgtest",
     ],
     shared_libs: [
+        "libbinder_ndk",
         // For some reason, libvulkan isn't picked up from librenderengine
         // Probably ASAN related?
         "libvulkan",

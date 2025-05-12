@@ -21,11 +21,14 @@
 
 #include <include/gpu/ganesh/vk/GrVkBackendSemaphore.h>
 
+#include <android-base/stringprintf.h>
 #include <common/trace.h>
 #include <log/log_main.h>
 #include <sync/sync.h>
 
 namespace android::renderengine::skia {
+
+using base::StringAppendF;
 
 std::unique_ptr<GaneshVkRenderEngine> GaneshVkRenderEngine::create(
         const RenderEngineCreationArgs& args) {
@@ -109,6 +112,11 @@ base::unique_fd GaneshVkRenderEngine::flushAndSubmit(SkiaGpuContext* context,
     }
     base::unique_fd res(drawFenceFd);
     return res;
+}
+
+void GaneshVkRenderEngine::appendBackendSpecificInfoToDump(std::string& result) {
+    StringAppendF(&result, "\n ------------RE Vulkan (Ganesh)----------\n");
+    SkiaVkRenderEngine::appendBackendSpecificInfoToDump(result);
 }
 
 } // namespace android::renderengine::skia

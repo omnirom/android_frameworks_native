@@ -57,14 +57,14 @@ void KeyboardClassifier::notifyKeyboardChanged(DeviceId deviceId,
                                                uint32_t deviceClasses) {
     if (mRustClassifier) {
         RustInputDeviceIdentifier rustIdentifier;
-        rustIdentifier.name = identifier.name;
-        rustIdentifier.location = identifier.location;
-        rustIdentifier.unique_id = identifier.uniqueId;
+        rustIdentifier.name = rust::String::lossy(identifier.name);
+        rustIdentifier.location = rust::String::lossy(identifier.location);
+        rustIdentifier.unique_id = rust::String::lossy(identifier.uniqueId);
         rustIdentifier.bus = identifier.bus;
         rustIdentifier.vendor = identifier.vendor;
         rustIdentifier.product = identifier.product;
         rustIdentifier.version = identifier.version;
-        rustIdentifier.descriptor = identifier.descriptor;
+        rustIdentifier.descriptor = rust::String::lossy(identifier.descriptor);
         android::input::keyboardClassifier::notifyKeyboardChanged(**mRustClassifier, deviceId,
                                                                   rustIdentifier, deviceClasses);
     } else {

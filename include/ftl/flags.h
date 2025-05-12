@@ -22,6 +22,7 @@
 #include <bitset>
 #include <cstdint>
 #include <iterator>
+#include <initializer_list>
 #include <string>
 #include <type_traits>
 
@@ -40,6 +41,7 @@ class Flags {
 
 public:
     constexpr Flags(F f) : mFlags(static_cast<U>(f)) {}
+    constexpr Flags(std::initializer_list<F> fs) : mFlags(combine(fs)) {}
     constexpr Flags() : mFlags(0) {}
     constexpr Flags(const Flags<F>& f) : mFlags(f.mFlags) {}
 
@@ -196,6 +198,14 @@ public:
 
 private:
     U mFlags;
+
+    static constexpr U combine(std::initializer_list<F> fs) {
+        U result = 0;
+        for (const F f : fs) {
+            result |= static_cast<U>(f);
+        }
+        return result;
+    }
 
     static void appendFlag(std::string& str, const std::string_view& flag, bool& first) {
         if (first) {

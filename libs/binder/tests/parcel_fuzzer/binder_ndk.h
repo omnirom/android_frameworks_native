@@ -50,3 +50,4 @@ private:
 };
 
 extern std::vector<ParcelRead<NdkParcelAdapter>> BINDER_NDK_PARCEL_READ_FUNCTIONS;
+extern std::vector<ParcelWrite<NdkParcelAdapter>> BINDER_NDK_PARCEL_WRITE_FUNCTIONS;

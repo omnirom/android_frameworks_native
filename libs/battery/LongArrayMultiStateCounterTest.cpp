@@ -24,25 +24,25 @@ namespace battery {
 class LongArrayMultiStateCounterTest : public testing::Test {};
 
 TEST_F(LongArrayMultiStateCounterTest, stateChange) {
-    LongArrayMultiStateCounter testCounter(2, std::vector<uint64_t>(4));
-    testCounter.updateValue(std::vector<uint64_t>({0, 0, 0, 0}), 1000);
+    LongArrayMultiStateCounter testCounter(2, Uint64Array(4));
+    testCounter.updateValue(Uint64ArrayRW({0, 0, 0, 0}), 1000);
     testCounter.setState(0, 1000);
     testCounter.setState(1, 2000);
-    testCounter.updateValue(std::vector<uint64_t>({100, 200, 300, 400}), 3000);
+    testCounter.updateValue(Uint64ArrayRW({100, 200, 300, 400}), 3000);
 
     // Time was split in half between the two states, so the counts will be split 50:50 too
-    EXPECT_EQ(std::vector<uint64_t>({50, 100, 150, 200}), testCounter.getCount(0));
-    EXPECT_EQ(std::vector<uint64_t>({50, 100, 150, 200}), testCounter.getCount(1));
+    EXPECT_EQ(Uint64ArrayRW({50, 100, 150, 200}), testCounter.getCount(0));
+    EXPECT_EQ(Uint64ArrayRW({50, 100, 150, 200}), testCounter.getCount(1));
 }
 
 TEST_F(LongArrayMultiStateCounterTest, accumulation) {
-    LongArrayMultiStateCounter testCounter(2, std::vector<uint64_t>(4));
-    testCounter.updateValue(std::vector<uint64_t>({0, 0, 0, 0}), 1000);
+    LongArrayMultiStateCounter testCounter(2, Uint64Array(4));
+    testCounter.updateValue(Uint64ArrayRW({0, 0, 0, 0}), 1000);
     testCounter.setState(0, 1000);
     testCounter.setState(1, 2000);
-    testCounter.updateValue(std::vector<uint64_t>({100, 200, 300, 400}), 3000);
+    testCounter.updateValue(Uint64ArrayRW({100, 200, 300, 400}), 3000);
     testCounter.setState(0, 4000);
-    testCounter.updateValue(std::vector<uint64_t>({200, 300, 400, 500}), 8000);
+    testCounter.updateValue(Uint64ArrayRW({200, 300, 400, 500}), 8000);
 
     // The first delta is split 50:50:
     //   0: {50, 100, 150, 200}
@@ -50,16 +50,16 @@ TEST_F(LongArrayMultiStateCounterTest, accumulation) {
     // The second delta is split 4:1
     //   0: {80, 80, 80, 80}
     //   1: {20, 20, 20, 20}
-    EXPECT_EQ(std::vector<uint64_t>({130, 180, 230, 280}), testCounter.getCount(0));
-    EXPECT_EQ(std::vector<uint64_t>({70, 120, 170, 220}), testCounter.getCount(1));
+    EXPECT_EQ(Uint64ArrayRW({130, 180, 230, 280}), testCounter.getCount(0));
+    EXPECT_EQ(Uint64ArrayRW({70, 120, 170, 220}), testCounter.getCount(1));
 }
 
 TEST_F(LongArrayMultiStateCounterTest, toString) {
-    LongArrayMultiStateCounter testCounter(2, std::vector<uint64_t>(4));
-    testCounter.updateValue(std::vector<uint64_t>({0, 0, 0, 0}), 1000);
+    LongArrayMultiStateCounter testCounter(2, Uint64Array(4));
+    testCounter.updateValue(Uint64ArrayRW({0, 0, 0, 0}), 1000);
     testCounter.setState(0, 1000);
     testCounter.setState(1, 2000);
-    testCounter.updateValue(std::vector<uint64_t>({100, 200, 300, 400}), 3000);
+    testCounter.updateValue(Uint64ArrayRW({100, 200, 300, 400}), 3000);
 
     EXPECT_STREQ("[0: {50, 100, 150, 200}, 1: {50, 100, 150, 200}] updated: 3000 currentState: 1",
                  testCounter.toString().c_str());

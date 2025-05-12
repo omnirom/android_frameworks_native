@@ -59,6 +59,8 @@ enum class PublicFormat {
     DEPTH_JPEG = 0x69656963,
     JPEG_R = 0x1005,
     HEIC = 0x48454946,
+    HEIC_ULTRAHDR = 0x1006,
+    YCBCR_P210 = 0x3c,
 };
 
 /* Convert from android.graphics.ImageFormat/PixelFormat enums to graphics.h HAL

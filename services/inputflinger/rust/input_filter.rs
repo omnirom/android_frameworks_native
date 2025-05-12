@@ -33,6 +33,8 @@ use crate::slow_keys_filter::SlowKeysFilter;
 use crate::sticky_keys_filter::StickyKeysFilter;
 use input::ModifierState;
 use log::{error, info};
+use std::any::Any;
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex, RwLock};
 
 /// Virtual keyboard device ID
@@ -43,6 +45,11 @@ pub trait Filter {
     fn notify_key(&mut self, event: &KeyEvent);
     fn notify_devices_changed(&mut self, device_infos: &[DeviceInfo]);
     fn destroy(&mut self);
+    fn save(
+        &mut self,
+        state: HashMap<&'static str, Box<dyn Any + Send + Sync>>,
+    ) -> HashMap<&'static str, Box<dyn Any + Send + Sync>>;
+    fn restore(&mut self, state: &HashMap<&'static str, Box<dyn Any + Send + Sync>>);
     fn dump(&mut self, dump_str: String) -> String;
 }
 
@@ -105,6 +112,7 @@ impl IInputFilter for InputFilter {
     fn notifyConfigurationChanged(&self, config: &InputFilterConfiguration) -> binder::Result<()> {
         {
             let mut state = self.state.lock().unwrap();
+            let saved_state = state.first_filter.save(HashMap::new());
             state.first_filter.destroy();
             let mut first_filter: Box<dyn Filter + Send + Sync> =
                 Box::new(BaseFilter::new(self.callbacks.clone()));
@@ -138,6 +146,7 @@ impl IInputFilter for InputFilter {
                 );
             }
             state.first_filter = first_filter;
+            state.first_filter.restore(&saved_state);
         }
         Result::Ok(())
     }
@@ -172,6 +181,18 @@ impl Filter for BaseFilter {
     }
 
     fn destroy(&mut self) {
+        // do nothing
+    }
+
+    fn save(
+        &mut self,
+        state: HashMap<&'static str, Box<dyn Any + Send + Sync>>,
+    ) -> HashMap<&'static str, Box<dyn Any + Send + Sync>> {
+        // do nothing
+        state
+    }
+
+    fn restore(&mut self, _state: &HashMap<&'static str, Box<dyn Any + Send + Sync>>) {
         // do nothing
     }
 
@@ -367,6 +388,8 @@ pub mod test_filter {
     use com_android_server_inputflinger::aidl::com::android::server::inputflinger::{
         DeviceInfo::DeviceInfo, KeyEvent::KeyEvent,
     };
+    use std::any::Any;
+    use std::collections::HashMap;
     use std::sync::{Arc, RwLock, RwLockWriteGuard};
 
     #[derive(Default)]
@@ -414,6 +437,16 @@ pub mod test_filter {
         }
         fn destroy(&mut self) {
             self.inner().is_destroy_called = true;
+        }
+        fn save(
+            &mut self,
+            state: HashMap<&'static str, Box<dyn Any + Send + Sync>>,
+        ) -> HashMap<&'static str, Box<dyn Any + Send + Sync>> {
+            // do nothing
+            state
+        }
+        fn restore(&mut self, _state: &HashMap<&'static str, Box<dyn Any + Send + Sync>>) {
+            // do nothing
         }
         fn dump(&mut self, dump_str: String) -> String {
             // do nothing

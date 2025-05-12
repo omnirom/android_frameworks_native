@@ -72,11 +72,12 @@ struct LayerSnapshot : public compositionengine::LayerFECompositionState {
     bool premultipliedAlpha;
     ui::Transform parentTransform;
     Rect bufferSize;
-    Rect croppedBufferSize;
+    FloatRect croppedBufferSize;
     std::shared_ptr<renderengine::ExternalTexture> externalTexture;
     gui::LayerMetadata layerMetadata;
     gui::LayerMetadata relativeLayerMetadata;
     bool hasReadyFrame; // used in post composition to check if there is another frame ready
+    bool autoRefresh;
     ui::Transform localTransformInverse;
     gui::WindowInfo inputInfo;
     ui::Transform localTransform;

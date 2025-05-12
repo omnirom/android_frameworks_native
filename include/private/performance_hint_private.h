@@ -74,6 +74,20 @@ enum SessionHint: int32_t {
      * baseline to prepare for an arbitrary load, and must wake up if inactive.
      */
     GPU_LOAD_RESET = 7,
+
+    /**
+     * This hint indicates an upcoming CPU workload that is abnormally large and
+     * not representative of the workload. This should be used for rare, one-time
+     * operations and should be ignored by any load tracking or session hysteresis.
+     */
+    CPU_LOAD_SPIKE = 8,
+
+    /**
+     * This hint indicates an upcoming GPU workload that is abnormally large and
+     * not representative of the workload. This should be used for rare, one-time
+     * operations and should be ignored by any load tracking or session hysteresis.
+     */
+    GPU_LOAD_SPIKE = 9,
 };
 
 // Allows access to PowerHAL's SessionTags without needing to import its AIDL
@@ -83,6 +97,7 @@ enum class SessionTag : int32_t {
   HWUI = 2,
   GAME = 3,
   APP = 4,
+  SYSUI = 5,
 };
 
 /**
@@ -107,11 +122,45 @@ int APerformanceHint_getThreadIds(APerformanceHintSession* session,
 APerformanceHintSession* APerformanceHint_createSessionInternal(APerformanceHintManager* manager,
                                         const int32_t* threadIds, size_t size,
                                         int64_t initialTargetWorkDurationNanos, SessionTag tag);
+/**
+ * Creates a session using ASessionCreationConfig
+ */
+APerformanceHintSession* APerformanceHint_createSessionUsingConfigInternal(
+        APerformanceHintManager* manager, ASessionCreationConfig* sessionCreationConfig,
+        SessionTag tag);
+
+/**
+ * Creates a session from the Java SDK implementation
+ */
+APerformanceHintSession* APerformanceHint_createSessionFromJava(APerformanceHintManager* manager,
+                                        const int32_t* threadIds, size_t size,
+                                        int64_t initialTargetWorkDurationNanos);
+
+/**
+ * Special method for Java SDK implementation to kill sessions
+ */
+void APerformanceHint_closeSessionFromJava(APerformanceHintSession* session);
 
 /**
  * Forces FMQ to be enabled or disabled, for testing only.
  */
 void APerformanceHint_setUseFMQForTesting(bool enabled);
+
+/**
+ * Get the rate limiter properties for testing.
+ */
+void APerformanceHint_getRateLimiterPropertiesForTesting(
+        int32_t* maxLoadHintsPerInterval, int64_t* loadHintInterval);
+
+/*
+ * Forces the "new load hint" flag to be disabled for testing.
+ */
+void APerformanceHint_setUseNewLoadHintBehaviorForTesting(bool newBehavior);
+
+/*
+ * Forces the graphics pipeline flag to be enabled or disabled, for testing only.
+ */
+void APerformanceHint_setUseGraphicsPipelineForTesting(bool enabled);
 
 __END_DECLS
 

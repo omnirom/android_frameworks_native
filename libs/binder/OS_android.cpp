@@ -48,6 +48,10 @@ void trace_int(uint64_t tag, const char* name, int32_t value) {
     atrace_int(tag, name, value);
 }
 
+uint64_t get_trace_enabled_tags() {
+    return atrace_enabled_tags;
+}
+
 } // namespace os
 
 // Legacy trace symbol. To be removed once all of downstream rebuilds.

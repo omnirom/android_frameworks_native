@@ -8,3 +8,11 @@ flag {
   bug: "341978292"
   is_fixed_read_only: true
 }
+
+flag {
+  name: "vulkan_1_4_instance_api"
+  namespace: "core_graphics"
+  description: "Enable support for the Vulkan 1.4 instance API"
+  bug: "370568136"
+  is_fixed_read_only: true
+}

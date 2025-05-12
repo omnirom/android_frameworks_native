@@ -38,7 +38,8 @@ enum class ManagerCapabilities : int32_t {
             aidl::android::hardware::vibrator::IVibratorManager::CAP_MIXED_TRIGGER_PERFORM,
     MIXED_TRIGGER_COMPOSE =
             aidl::android::hardware::vibrator::IVibratorManager::CAP_MIXED_TRIGGER_COMPOSE,
-    TRIGGER_CALLBACK = aidl::android::hardware::vibrator::IVibratorManager::CAP_TRIGGER_CALLBACK
+    TRIGGER_CALLBACK = aidl::android::hardware::vibrator::IVibratorManager::CAP_TRIGGER_CALLBACK,
+    START_SESSIONS = aidl::android::hardware::vibrator::IVibratorManager::CAP_START_SESSIONS
 };
 
 inline ManagerCapabilities operator|(ManagerCapabilities lhs, ManagerCapabilities rhs) {
@@ -64,6 +65,9 @@ inline ManagerCapabilities& operator&=(ManagerCapabilities& lhs, ManagerCapabili
 // Wrapper for VibratorManager HAL handlers.
 class ManagerHalWrapper {
 public:
+    using IVibrationSession = aidl::android::hardware::vibrator::IVibrationSession;
+    using VibrationSessionConfig = aidl::android::hardware::vibrator::VibrationSessionConfig;
+
     ManagerHalWrapper() = default;
     virtual ~ManagerHalWrapper() = default;
 
@@ -78,9 +82,13 @@ public:
     virtual HalResult<std::vector<int32_t>> getVibratorIds() = 0;
     virtual HalResult<std::shared_ptr<HalController>> getVibrator(int32_t id) = 0;
 
-    virtual HalResult<void> prepareSynced(const std::vector<int32_t>& ids) = 0;
-    virtual HalResult<void> triggerSynced(const std::function<void()>& completionCallback) = 0;
-    virtual HalResult<void> cancelSynced() = 0;
+    virtual HalResult<void> prepareSynced(const std::vector<int32_t>& ids);
+    virtual HalResult<void> triggerSynced(const std::function<void()>& completionCallback);
+    virtual HalResult<void> cancelSynced();
+    virtual HalResult<std::shared_ptr<IVibrationSession>> startSession(
+            const std::vector<int32_t>& ids, const VibrationSessionConfig& config,
+            const std::function<void()>& completionCallback);
+    virtual HalResult<void> clearSessions();
 };
 
 // Wrapper for the VibratorManager over single Vibrator HAL.
@@ -97,10 +105,6 @@ public:
     HalResult<ManagerCapabilities> getCapabilities() override final;
     HalResult<std::vector<int32_t>> getVibratorIds() override final;
     HalResult<std::shared_ptr<HalController>> getVibrator(int32_t id) override final;
-
-    HalResult<void> prepareSynced(const std::vector<int32_t>& ids) override final;
-    HalResult<void> triggerSynced(const std::function<void()>& completionCallback) override final;
-    HalResult<void> cancelSynced() override final;
 
 private:
     const std::shared_ptr<HalController> mController;
@@ -126,6 +130,10 @@ public:
     HalResult<void> prepareSynced(const std::vector<int32_t>& ids) override final;
     HalResult<void> triggerSynced(const std::function<void()>& completionCallback) override final;
     HalResult<void> cancelSynced() override final;
+    HalResult<std::shared_ptr<IVibrationSession>> startSession(
+            const std::vector<int32_t>& ids, const VibrationSessionConfig& config,
+            const std::function<void()>& completionCallback) override final;
+    HalResult<void> clearSessions() override final;
 
 private:
     std::mutex mHandleMutex;

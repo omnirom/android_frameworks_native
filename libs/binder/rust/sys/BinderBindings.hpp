@@ -15,14 +15,19 @@
  */
 
 #include <android/binder_ibinder.h>
+#include <android/binder_parcel.h>
+#include <android/binder_status.h>
+
+/* Platform only */
+#if defined(ANDROID_PLATFORM) || defined(__ANDROID_VENDOR__)
 #include <android/binder_ibinder_platform.h>
 #include <android/binder_manager.h>
-#include <android/binder_parcel.h>
 #include <android/binder_parcel_platform.h>
 #include <android/binder_process.h>
+#include <android/binder_rpc.h>
 #include <android/binder_shell.h>
 #include <android/binder_stability.h>
-#include <android/binder_status.h>
+#endif
 
 namespace android {
 
@@ -80,8 +85,10 @@ enum {
 
 enum {
     FLAG_ONEWAY = FLAG_ONEWAY,
+#if defined(ANDROID_PLATFORM) || defined(__ANDROID_VENDOR__)
     FLAG_CLEAR_BUF = FLAG_CLEAR_BUF,
     FLAG_PRIVATE_LOCAL = FLAG_PRIVATE_LOCAL,
+#endif
 };
 
 } // namespace consts

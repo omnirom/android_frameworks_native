@@ -36,15 +36,16 @@ TEST(DisplayEventStructLayoutTest, TestEventAlignment) {
     CHECK_OFFSET(DisplayEventReceiver::Event::VSync, vsyncData.frameInterval, 8);
     CHECK_OFFSET(DisplayEventReceiver::Event::VSync, vsyncData.preferredFrameTimelineIndex, 16);
     CHECK_OFFSET(DisplayEventReceiver::Event::VSync, vsyncData.frameTimelinesLength, 20);
-    CHECK_OFFSET(DisplayEventReceiver::Event::VSync, vsyncData.frameTimelines, 24);
-    CHECK_OFFSET(DisplayEventReceiver::Event::VSync, vsyncData.frameTimelines[0].vsyncId, 24);
+    CHECK_OFFSET(DisplayEventReceiver::Event::VSync, vsyncData.numberQueuedBuffers, 24);
+    CHECK_OFFSET(DisplayEventReceiver::Event::VSync, vsyncData.frameTimelines, 32);
+    CHECK_OFFSET(DisplayEventReceiver::Event::VSync, vsyncData.frameTimelines[0].vsyncId, 32);
     CHECK_OFFSET(DisplayEventReceiver::Event::VSync, vsyncData.frameTimelines[0].deadlineTimestamp,
-                 32);
+                 40);
     CHECK_OFFSET(DisplayEventReceiver::Event::VSync,
-                 vsyncData.frameTimelines[0].expectedPresentationTime, 40);
+                 vsyncData.frameTimelines[0].expectedPresentationTime, 48);
     // Also test the offsets of the last frame timeline. A loop is not used because the non-const
     // index cannot be used in static_assert.
-    const int lastFrameTimelineOffset = /* Start of array */ 24 +
+    const int lastFrameTimelineOffset = /* Start of array */ 32 +
             (VsyncEventData::kFrameTimelinesCapacity - 1) * /* Size of FrameTimeline */ 24;
     CHECK_OFFSET(DisplayEventReceiver::Event::VSync,
                  vsyncData.frameTimelines[VsyncEventData::kFrameTimelinesCapacity - 1].vsyncId,

@@ -33,6 +33,7 @@ import android.gui.FrameEvent;
 import android.gui.FrameStats;
 import android.gui.HdrConversionCapability;
 import android.gui.HdrConversionStrategy;
+import android.gui.IActivePictureListener;
 import android.gui.IDisplayEventConnection;
 import android.gui.IFpsListener;
 import android.gui.IHdrLayerInfoListener;
@@ -226,6 +227,11 @@ interface ISurfaceComposer {
      * For more information, see the HDMI 1.4 specification.
      */
     void setGameContentType(IBinder display, boolean on);
+
+    /**
+     * Gets the maximum number of picture profiles supported by the display.
+     */
+    int getMaxLayerPictureProfiles(IBinder display);
 
     /**
      * Capture the specified screen. This requires READ_FRAME_BUFFER
@@ -599,4 +605,10 @@ interface ISurfaceComposer {
      * past the provided VSync.
      */
     oneway void removeJankListener(int layerId, IJankListener listener, long afterVsync);
+
+    /**
+     * Sets the listener used to monitor visible content that is being processed with picture
+     * profiles.
+     */
+    oneway void setActivePictureListener(IActivePictureListener listener);
 }

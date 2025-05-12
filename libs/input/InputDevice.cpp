@@ -191,7 +191,9 @@ InputDeviceInfo::InputDeviceInfo(const InputDeviceInfo& other)
         mKeyboardLayoutInfo(other.mKeyboardLayoutInfo),
         mSources(other.mSources),
         mKeyboardType(other.mKeyboardType),
-        mKeyCharacterMap(other.mKeyCharacterMap),
+        mKeyCharacterMap(other.mKeyCharacterMap
+                                 ? std::make_unique<KeyCharacterMap>(*other.mKeyCharacterMap)
+                                 : nullptr),
         mUsiVersion(other.mUsiVersion),
         mAssociatedDisplayId(other.mAssociatedDisplayId),
         mEnabled(other.mEnabled),
@@ -203,6 +205,34 @@ InputDeviceInfo::InputDeviceInfo(const InputDeviceInfo& other)
         mSensors(other.mSensors),
         mLights(other.mLights),
         mViewBehavior(other.mViewBehavior) {}
+
+InputDeviceInfo& InputDeviceInfo::operator=(const InputDeviceInfo& other) {
+    mId = other.mId;
+    mGeneration = other.mGeneration;
+    mControllerNumber = other.mControllerNumber;
+    mIdentifier = other.mIdentifier;
+    mAlias = other.mAlias;
+    mIsExternal = other.mIsExternal;
+    mHasMic = other.mHasMic;
+    mKeyboardLayoutInfo = other.mKeyboardLayoutInfo;
+    mSources = other.mSources;
+    mKeyboardType = other.mKeyboardType;
+    mKeyCharacterMap = other.mKeyCharacterMap
+            ? std::make_unique<KeyCharacterMap>(*other.mKeyCharacterMap)
+            : nullptr;
+    mUsiVersion = other.mUsiVersion;
+    mAssociatedDisplayId = other.mAssociatedDisplayId;
+    mEnabled = other.mEnabled;
+    mHasVibrator = other.mHasVibrator;
+    mHasBattery = other.mHasBattery;
+    mHasButtonUnderPad = other.mHasButtonUnderPad;
+    mHasSensor = other.mHasSensor;
+    mMotionRanges = other.mMotionRanges;
+    mSensors = other.mSensors;
+    mLights = other.mLights;
+    mViewBehavior = other.mViewBehavior;
+    return *this;
+}
 
 InputDeviceInfo::~InputDeviceInfo() {
 }

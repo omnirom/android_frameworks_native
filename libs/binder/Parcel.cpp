@@ -180,7 +180,7 @@ static void acquire_object(const sp<ProcessState>& proc, const flat_binder_objec
         }
     }
 
-    ALOGD("Invalid object type 0x%08x", obj.hdr.type);
+    ALOGE("Invalid object type 0x%08x to acquire", obj.hdr.type);
 }
 
 static void release_object(const sp<ProcessState>& proc, const flat_binder_object& obj,
@@ -210,7 +210,7 @@ static void release_object(const sp<ProcessState>& proc, const flat_binder_objec
         }
     }
 
-    ALOGE("Invalid object type 0x%08x", obj.hdr.type);
+    ALOGE("Invalid object type 0x%08x to release", obj.hdr.type);
 }
 #endif // BINDER_WITH_KERNEL_IPC
 
@@ -668,7 +668,8 @@ status_t Parcel::appendFrom(const Parcel* parcel, size_t offset, size_t len) {
                 // FD was unowned in the source parcel.
                 int newFd = -1;
                 if (status_t status = binder::os::dupFileDescriptor(oldFd, &newFd); status != OK) {
-                    ALOGW("Failed to duplicate file descriptor %d: %s", oldFd, strerror(-status));
+                    ALOGW("Failed to duplicate file descriptor %d: %s", oldFd,
+                          statusToString(status).c_str());
                 }
                 rpcFields->mFds->emplace_back(unique_fd(newFd));
                 // Fixup the index in the data.
@@ -683,7 +684,7 @@ status_t Parcel::appendFrom(const Parcel* parcel, size_t offset, size_t len) {
     return err;
 }
 
-int Parcel::compareData(const Parcel& other) {
+int Parcel::compareData(const Parcel& other) const {
     size_t size = dataSize();
     if (size != other.dataSize()) {
         return size < other.dataSize() ? -1 : 1;
@@ -1148,31 +1149,6 @@ status_t Parcel::finishWrite(size_t len)
     }
     //printf("New pos=%d, size=%d\n", mDataPos, mDataSize);
     return NO_ERROR;
-}
-
-status_t Parcel::writeUnpadded(const void* data, size_t len)
-{
-    if (len > INT32_MAX) {
-        // don't accept size_t values which may have come from an
-        // inadvertent conversion from a negative int.
-        return BAD_VALUE;
-    }
-
-    size_t end = mDataPos + len;
-    if (end < mDataPos) {
-        // integer overflow
-        return BAD_VALUE;
-    }
-
-    if (end <= mDataCapacity) {
-restart_write:
-        memcpy(mData+mDataPos, data, len);
-        return finishWrite(len);
-    }
-
-    status_t err = growData(len);
-    if (err == NO_ERROR) goto restart_write;
-    return err;
 }
 
 status_t Parcel::write(const void* data, size_t len)
@@ -1882,7 +1858,10 @@ status_t Parcel::validateReadData(size_t upperBound) const
                 if (mDataPos < kernelFields->mObjects[nextObject] + sizeof(flat_binder_object)) {
                     // Requested info overlaps with an object
                     if (!mServiceFuzzing) {
-                        ALOGE("Attempt to read from protected data in Parcel %p", this);
+                        ALOGE("Attempt to read or write from protected data in Parcel %p. pos: "
+                              "%zu, nextObject: %zu, object offset: %llu, object size: %zu",
+                              this, mDataPos, nextObject, kernelFields->mObjects[nextObject],
+                              sizeof(flat_binder_object));
                     }
                     return PERMISSION_DENIED;
                 }
@@ -2244,9 +2223,7 @@ const char* Parcel::readCString() const
         const char* eos = reinterpret_cast<const char*>(memchr(str, 0, avail));
         if (eos) {
             const size_t len = eos - str;
-            mDataPos += pad_size(len+1);
-            ALOGV("readCString Setting data pos of %p to %zu", this, mDataPos);
-            return str;
+            return static_cast<const char*>(readInplace(len + 1));
         }
     }
     return nullptr;

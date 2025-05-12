@@ -26,6 +26,7 @@ cc_test {
         "android.hardware.configstore@1.0",
         "android.hardware.configstore-utils",
         "libEGL",
+        "libegl_flags",
         "libbase",
         "libcutils",
         "libbinder",

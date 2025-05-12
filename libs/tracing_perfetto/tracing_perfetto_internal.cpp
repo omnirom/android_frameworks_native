@@ -236,6 +236,7 @@ void registerWithPerfetto(bool test) {
   std::call_once(registration, [test]() {
     struct PerfettoProducerInitArgs args = PERFETTO_PRODUCER_INIT_ARGS_INIT();
     args.backends = test ? PERFETTO_BACKEND_IN_PROCESS : PERFETTO_BACKEND_SYSTEM;
+    args.shmem_size_hint_kb = 1024;
     PerfettoProducerInit(args);
     PerfettoTeInit();
     PERFETTO_TE_REGISTER_CATEGORIES(FRAMEWORK_CATEGORIES);
@@ -253,15 +254,31 @@ void perfettoTraceEnd(const struct PerfettoTeCategory& category) {
 void perfettoTraceAsyncBeginForTrack(const struct PerfettoTeCategory& category, const char* name,
                                        const char* trackName, uint64_t cookie) {
   PERFETTO_TE(
-      category, PERFETTO_TE_SLICE_BEGIN(name),
-      PERFETTO_TE_NAMED_TRACK(trackName, cookie, PerfettoTeProcessTrackUuid()));
+        category, PERFETTO_TE_SLICE_BEGIN(name),
+        PERFETTO_TE_PROTO_TRACK(
+            PerfettoTeNamedTrackUuid(trackName, cookie,
+                                     PerfettoTeProcessTrackUuid()),
+            PERFETTO_TE_PROTO_FIELD_CSTR(
+                perfetto_protos_TrackDescriptor_atrace_name_field_number,
+                trackName),
+            PERFETTO_TE_PROTO_FIELD_VARINT(
+                perfetto_protos_TrackDescriptor_parent_uuid_field_number,
+                PerfettoTeProcessTrackUuid())));
 }
 
 void perfettoTraceAsyncEndForTrack(const struct PerfettoTeCategory& category,
                                      const char* trackName, uint64_t cookie) {
-  PERFETTO_TE(
-      category, PERFETTO_TE_SLICE_END(),
-      PERFETTO_TE_NAMED_TRACK(trackName, cookie, PerfettoTeProcessTrackUuid()));
+    PERFETTO_TE(
+        category, PERFETTO_TE_SLICE_END(),
+        PERFETTO_TE_PROTO_TRACK(
+            PerfettoTeNamedTrackUuid(trackName, cookie,
+                                     PerfettoTeProcessTrackUuid()),
+            PERFETTO_TE_PROTO_FIELD_CSTR(
+                perfetto_protos_TrackDescriptor_atrace_name_field_number,
+                trackName),
+            PERFETTO_TE_PROTO_FIELD_VARINT(
+                perfetto_protos_TrackDescriptor_parent_uuid_field_number,
+                PerfettoTeProcessTrackUuid())));
 }
 
 void perfettoTraceAsyncBegin(const struct PerfettoTeCategory& category, const char* name,
@@ -281,14 +298,35 @@ void perfettoTraceInstant(const struct PerfettoTeCategory& category, const char*
 void perfettoTraceInstantForTrack(const struct PerfettoTeCategory& category,
                                     const char* trackName, const char* name) {
   PERFETTO_TE(
-      category, PERFETTO_TE_INSTANT(name),
-      PERFETTO_TE_NAMED_TRACK(trackName, 1, PerfettoTeProcessTrackUuid()));
+        category, PERFETTO_TE_INSTANT(name),
+        PERFETTO_TE_PROTO_TRACK(
+            PerfettoTeNamedTrackUuid(trackName, 1,
+                                     PerfettoTeProcessTrackUuid()),
+            PERFETTO_TE_PROTO_FIELD_CSTR(
+                perfetto_protos_TrackDescriptor_atrace_name_field_number,
+                trackName),
+            PERFETTO_TE_PROTO_FIELD_VARINT(
+                perfetto_protos_TrackDescriptor_parent_uuid_field_number,
+                PerfettoTeProcessTrackUuid())));
 }
 
 void perfettoTraceCounter(const struct PerfettoTeCategory& category,
-                            [[maybe_unused]] const char* name, int64_t value) {
-  PERFETTO_TE(category, PERFETTO_TE_COUNTER(),
-              PERFETTO_TE_INT_COUNTER(value));
+                          const char* name, int64_t value) {
+  PERFETTO_TE(
+        category, PERFETTO_TE_COUNTER(),
+        PERFETTO_TE_PROTO_TRACK(
+            PerfettoTeCounterTrackUuid(name,
+                                       PerfettoTeProcessTrackUuid()),
+            PERFETTO_TE_PROTO_FIELD_CSTR(
+                perfetto_protos_TrackDescriptor_atrace_name_field_number,
+                name),
+            PERFETTO_TE_PROTO_FIELD_VARINT(
+                perfetto_protos_TrackDescriptor_parent_uuid_field_number,
+                PerfettoTeProcessTrackUuid()),
+            PERFETTO_TE_PROTO_FIELD_BYTES(
+                perfetto_protos_TrackDescriptor_counter_field_number,
+                PERFETTO_NULL, 0)),
+        PERFETTO_TE_INT_COUNTER(value));
 }
 }  // namespace internal
 

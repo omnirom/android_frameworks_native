@@ -32,7 +32,7 @@
 namespace android {
 
 LayerTracing::LayerTracing() {
-    mTakeLayersSnapshotProto = [](uint32_t) { return perfetto::protos::LayersSnapshotProto{}; };
+    mTakeLayersSnapshotProto = [](uint32_t, const OnLayersSnapshotCallback&) {};
     LayerDataSource::Initialize(*this);
 }
 
@@ -45,7 +45,7 @@ LayerTracing::~LayerTracing() {
 }
 
 void LayerTracing::setTakeLayersSnapshotProtoFunction(
-        const std::function<perfetto::protos::LayersSnapshotProto(uint32_t)>& callback) {
+        const std::function<void(uint32_t, const OnLayersSnapshotCallback&)>& callback) {
     mTakeLayersSnapshotProto = callback;
 }
 
@@ -62,7 +62,10 @@ void LayerTracing::onStart(Mode mode, uint32_t flags) {
             // It might take a while before a layers change occurs and a "spontaneous" snapshot is
             // taken. Let's manually take a snapshot, so that the trace's first entry will contain
             // the current layers state.
-            addProtoSnapshotToOstream(mTakeLayersSnapshotProto(flags), Mode::MODE_ACTIVE);
+            auto onLayersSnapshot = [this](perfetto::protos::LayersSnapshotProto&& snapshot) {
+                addProtoSnapshotToOstream(std::move(snapshot), Mode::MODE_ACTIVE);
+            };
+            mTakeLayersSnapshotProto(flags, onLayersSnapshot);
             ALOGD("Started active tracing (traced initial snapshot)");
             break;
         }
@@ -89,9 +92,7 @@ void LayerTracing::onStart(Mode mode, uint32_t flags) {
             break;
         }
         case Mode::MODE_DUMP: {
-            auto snapshot = mTakeLayersSnapshotProto(flags);
-            addProtoSnapshotToOstream(std::move(snapshot), Mode::MODE_DUMP);
-            ALOGD("Started dump tracing (dumped single snapshot)");
+            ALOGD("Started dump tracing");
             break;
         }
         default: {
@@ -125,10 +126,27 @@ void LayerTracing::onFlush(Mode mode, uint32_t flags, bool isBugreport) {
     ALOGD("Flushed generated tracing");
 }
 
-void LayerTracing::onStop(Mode mode) {
-    if (mode == Mode::MODE_ACTIVE) {
-        mIsActiveTracingStarted.store(false);
-        ALOGD("Stopped active tracing");
+void LayerTracing::onStop(Mode mode, uint32_t flags, std::function<void()>&& deferredStopDone) {
+    switch (mode) {
+        case Mode::MODE_ACTIVE: {
+            mIsActiveTracingStarted.store(false);
+            deferredStopDone();
+            ALOGD("Stopped active tracing");
+            break;
+        }
+        case Mode::MODE_DUMP: {
+            auto onLayersSnapshot = [this, deferredStopDone = std::move(deferredStopDone)](
+                                            perfetto::protos::LayersSnapshotProto&& snapshot) {
+                addProtoSnapshotToOstream(std::move(snapshot), Mode::MODE_DUMP);
+                deferredStopDone();
+                ALOGD("Stopped dump tracing (written single snapshot)");
+            };
+            mTakeLayersSnapshotProto(flags, onLayersSnapshot);
+            break;
+        }
+        default: {
+            deferredStopDone();
+        }
     }
 }
 

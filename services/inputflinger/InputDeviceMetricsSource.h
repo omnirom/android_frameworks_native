@@ -54,6 +54,10 @@ enum class InputDeviceUsageSource : int32_t {
 /** Returns the InputDeviceUsageSource that corresponds to the key event. */
 InputDeviceUsageSource getUsageSourceForKeyArgs(int32_t keyboardType, const NotifyKeyArgs&);
 
+/** Returns the InputDeviceUsageSources that correspond to the key event. */
+std::set<InputDeviceUsageSource> getUsageSourcesForKeyArgs(
+        const NotifyKeyArgs&, const std::vector<InputDeviceInfo>& inputDevices);
+
 /** Returns the InputDeviceUsageSources that correspond to the motion event. */
 std::set<InputDeviceUsageSource> getUsageSourcesForMotionArgs(const NotifyMotionArgs&);
 

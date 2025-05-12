@@ -24,13 +24,15 @@
 #include <input/Keyboard.h>
 #include <utils/Timers.h> // for nsecs_t, systemTime
 
+#include <cstdint>
 #include <vector>
 
 namespace android {
 
 class MotionArgsBuilder {
 public:
-    MotionArgsBuilder(int32_t action, int32_t source) : mEventId(InputEvent::nextId()) {
+    MotionArgsBuilder(int32_t action, int32_t source, int32_t eventId = InputEvent::nextId())
+          : mEventId(eventId) {
         mAction = action;
         if (mAction == AMOTION_EVENT_ACTION_CANCEL) {
             addFlag(AMOTION_EVENT_FLAG_CANCELED);
@@ -52,6 +54,11 @@ public:
 
     MotionArgsBuilder& eventTime(nsecs_t eventTime) {
         mEventTime = eventTime;
+        return *this;
+    }
+
+    MotionArgsBuilder& readTime(nsecs_t readTime) {
+        mReadTime = readTime;
         return *this;
     }
 
@@ -121,7 +128,7 @@ public:
 
         return {mEventId,
                 mEventTime,
-                /*readTime=*/mEventTime,
+                mReadTime.value_or(mEventTime),
                 mDeviceId,
                 mSource,
                 mDisplayId,
@@ -151,6 +158,7 @@ private:
     uint32_t mSource;
     nsecs_t mDownTime;
     nsecs_t mEventTime;
+    std::optional<nsecs_t> mReadTime;
     ui::LogicalDisplayId mDisplayId{ui::LogicalDisplayId::DEFAULT};
     uint32_t mPolicyFlags = DEFAULT_POLICY_FLAGS;
     int32_t mActionButton{0};
@@ -165,7 +173,8 @@ private:
 
 class KeyArgsBuilder {
 public:
-    KeyArgsBuilder(int32_t action, int32_t source) : mEventId(InputEvent::nextId()) {
+    KeyArgsBuilder(int32_t action, int32_t source, int32_t eventId = InputEvent::nextId())
+          : mEventId(eventId) {
         mAction = action;
         mSource = source;
         mEventTime = systemTime(SYSTEM_TIME_MONOTONIC);
@@ -184,6 +193,11 @@ public:
 
     KeyArgsBuilder& eventTime(nsecs_t eventTime) {
         mEventTime = eventTime;
+        return *this;
+    }
+
+    KeyArgsBuilder& readTime(nsecs_t readTime) {
+        mReadTime = readTime;
         return *this;
     }
 
@@ -214,18 +228,10 @@ public:
     }
 
     NotifyKeyArgs build() const {
-        return {mEventId,
-                mEventTime,
-                /*readTime=*/mEventTime,
-                mDeviceId,
-                mSource,
-                mDisplayId,
-                mPolicyFlags,
-                mAction,
-                mFlags,
-                mKeyCode,
-                mScanCode,
-                mMetaState,
+        return {mEventId,     mEventTime, mReadTime.value_or(mEventTime),
+                mDeviceId,    mSource,    mDisplayId,
+                mPolicyFlags, mAction,    mFlags,
+                mKeyCode,     mScanCode,  mMetaState,
                 mDownTime};
     }
 
@@ -236,6 +242,7 @@ private:
     uint32_t mSource;
     nsecs_t mDownTime;
     nsecs_t mEventTime;
+    std::optional<nsecs_t> mReadTime;
     ui::LogicalDisplayId mDisplayId{ui::LogicalDisplayId::DEFAULT};
     uint32_t mPolicyFlags = DEFAULT_POLICY_FLAGS;
     int32_t mFlags{0};

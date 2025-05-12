@@ -22,7 +22,6 @@ cc_benchmark {
     static_libs: [
         "libgmock",
         "libgtest",
-        "libc++fs",
     ],
     header_libs: [
         "libsurfaceflinger_mocks_headers",

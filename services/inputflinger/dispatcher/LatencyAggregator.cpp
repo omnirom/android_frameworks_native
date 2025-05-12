@@ -28,6 +28,8 @@ using android::base::StringPrintf;
 using dist_proc::aggregation::KllQuantile;
 using std::chrono_literals::operator""ms;
 
+namespace {
+
 // Convert the provided nanoseconds into hundreds of microseconds.
 // Use hundreds of microseconds (as opposed to microseconds) to preserve space.
 static inline int64_t ns2hus(nsecs_t nanos) {
@@ -73,6 +75,8 @@ static std::chrono::milliseconds getSlowEventMinReportingInterval() {
                                               DEFAULT_SLOW_EVENT_MIN_REPORTING_INTERVAL.count()));
     return std::chrono::milliseconds(std::stoi(millis));
 }
+
+} // namespace
 
 namespace android::inputdispatcher {
 
@@ -124,6 +128,9 @@ void LatencyAggregator::processTimeline(const InputEventTimeline& timeline) {
     processStatistics(timeline);
     processSlowEvent(timeline);
 }
+
+// This version of LatencyAggregator doesn't push any atoms
+void LatencyAggregator::pushLatencyStatistics() {}
 
 void LatencyAggregator::processStatistics(const InputEventTimeline& timeline) {
     std::scoped_lock lock(mLock);

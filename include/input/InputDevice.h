@@ -111,12 +111,12 @@ enum class InputDeviceSensorType : int32_t {
 };
 
 enum class InputDeviceSensorAccuracy : int32_t {
-    ACCURACY_NONE = 0,
-    ACCURACY_LOW = 1,
-    ACCURACY_MEDIUM = 2,
-    ACCURACY_HIGH = 3,
+    NONE = 0,
+    LOW = 1,
+    MEDIUM = 2,
+    HIGH = 3,
 
-    ftl_last = ACCURACY_HIGH,
+    ftl_last = HIGH,
 };
 
 enum class InputDeviceSensorReportingMode : int32_t {
@@ -131,8 +131,9 @@ enum class InputDeviceLightType : int32_t {
     PLAYER_ID = 1,
     KEYBOARD_BACKLIGHT = 2,
     KEYBOARD_MIC_MUTE = 3,
+    KEYBOARD_VOLUME_MUTE = 4,
 
-    ftl_last = KEYBOARD_MIC_MUTE
+    ftl_last = KEYBOARD_VOLUME_MUTE
 };
 
 enum class InputDeviceLightCapability : uint32_t {
@@ -266,6 +267,7 @@ class InputDeviceInfo {
 public:
     InputDeviceInfo();
     InputDeviceInfo(const InputDeviceInfo& other);
+    InputDeviceInfo& operator=(const InputDeviceInfo& other);
     ~InputDeviceInfo();
 
     struct MotionRange {
@@ -315,13 +317,11 @@ public:
 
     inline const InputDeviceViewBehavior& getViewBehavior() const { return mViewBehavior; }
 
-    inline void setKeyCharacterMap(const std::shared_ptr<KeyCharacterMap> value) {
-        mKeyCharacterMap = value;
+    inline void setKeyCharacterMap(std::unique_ptr<KeyCharacterMap> value) {
+        mKeyCharacterMap = std::move(value);
     }
 
-    inline const std::shared_ptr<KeyCharacterMap> getKeyCharacterMap() const {
-        return mKeyCharacterMap;
-    }
+    inline const KeyCharacterMap* getKeyCharacterMap() const { return mKeyCharacterMap.get(); }
 
     inline void setVibrator(bool hasVibrator) { mHasVibrator = hasVibrator; }
     inline bool hasVibrator() const { return mHasVibrator; }
@@ -364,7 +364,7 @@ private:
     std::optional<KeyboardLayoutInfo> mKeyboardLayoutInfo;
     uint32_t mSources;
     int32_t mKeyboardType;
-    std::shared_ptr<KeyCharacterMap> mKeyCharacterMap;
+    std::unique_ptr<KeyCharacterMap> mKeyCharacterMap;
     std::optional<InputDeviceUsiVersion> mUsiVersion;
     ui::LogicalDisplayId mAssociatedDisplayId{ui::LogicalDisplayId::INVALID};
     bool mEnabled;

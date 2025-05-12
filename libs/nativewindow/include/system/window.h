@@ -1060,12 +1060,7 @@ enum {
     /**
      * This surface will vote for the minimum refresh rate.
      */
-    ANATIVEWINDOW_FRAME_RATE_MIN,
-
-    /**
-     * The surface requests a frame rate that is greater than or equal to `frameRate`.
-     */
-    ANATIVEWINDOW_FRAME_RATE_GTE
+    ANATIVEWINDOW_FRAME_RATE_MIN
 };
 
 /*

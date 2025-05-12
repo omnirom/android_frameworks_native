@@ -19,14 +19,14 @@
 #include <gmock/gmock.h>
 
 #include "TestableSurfaceFlinger.h"
-#include "mock/DisplayHardware/MockPowerAdvisor.h"
+#include "mock/PowerAdvisor/MockPowerAdvisor.h"
 #include "mock/system/window/MockNativeWindow.h"
 
 namespace android {
 
 using FakeDisplayDeviceInjector = TestableSurfaceFlinger::FakeDisplayDeviceInjector;
+using android::adpf::mock::PowerAdvisor;
 using android::hardware::graphics::composer::hal::HWDisplayId;
-using android::Hwc2::mock::PowerAdvisor;
 
 struct FakeDisplayInjectorArgs {
     PhysicalDisplayId displayId = PhysicalDisplayId::fromPort(255u);
@@ -36,7 +36,7 @@ struct FakeDisplayInjectorArgs {
 
 class FakeDisplayInjector {
 public:
-    FakeDisplayInjector(TestableSurfaceFlinger& flinger, Hwc2::mock::PowerAdvisor& powerAdvisor,
+    FakeDisplayInjector(TestableSurfaceFlinger& flinger, PowerAdvisor& powerAdvisor,
                         sp<mock::NativeWindow> nativeWindow)
           : mFlinger(flinger), mPowerAdvisor(powerAdvisor), mNativeWindow(nativeWindow) {}
 
@@ -89,7 +89,7 @@ public:
     }
 
     TestableSurfaceFlinger& mFlinger;
-    Hwc2::mock::PowerAdvisor& mPowerAdvisor;
+    PowerAdvisor& mPowerAdvisor;
     sp<mock::NativeWindow> mNativeWindow;
 };
 

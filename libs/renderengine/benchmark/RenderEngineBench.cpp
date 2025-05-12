@@ -17,6 +17,7 @@
 #include <RenderEngineBench.h>
 #include <android-base/file.h>
 #include <benchmark/benchmark.h>
+#include <com_android_graphics_libgui_flags.h>
 #include <gui/SurfaceComposerClient.h>
 #include <log/log.h>
 #include <renderengine/ExternalTexture.h>
@@ -321,5 +322,7 @@ BENCHMARK_CAPTURE(BM_homescreen_blur, kawase_dual_filter, RenderEngine::Threaded
 BENCHMARK_CAPTURE(BM_homescreen, SkiaGLThreaded, RenderEngine::Threaded::YES,
                   RenderEngine::GraphicsApi::GL);
 
+#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS_EDGE_EXTENSION_SHADER
 BENCHMARK_CAPTURE(BM_homescreen_edgeExtension, SkiaGLThreaded, RenderEngine::Threaded::YES,
                   RenderEngine::GraphicsApi::GL);
+#endif

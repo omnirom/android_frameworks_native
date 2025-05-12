@@ -24,6 +24,7 @@
 #include <utils/String16.h>
 #include <utils/Vector.h>
 #include <optional>
+#include <set>
 
 namespace android {
 
@@ -149,6 +150,12 @@ public:
         int pid;
     };
     virtual std::vector<ServiceDebugInfo> getServiceDebugInfo() = 0;
+
+    /**
+     * Directly enable or disable caching binder during addService calls.
+     * Only used for testing. This is enabled by default.
+     */
+    virtual void enableAddServiceCache(bool value) = 0;
 };
 
 LIBBINDER_EXPORTED sp<IServiceManager> defaultServiceManager();
@@ -224,20 +231,36 @@ LIBBINDER_EXPORTED bool checkPermission(const String16& permission, pid_t pid, u
 typedef std::function<status_t(const String16& name, sockaddr* outAddr, socklen_t addrSize)>
         RpcSocketAddressProvider;
 
-typedef std::function<sp<IBinder>(const String16& name)> RpcAccessorProvider;
+/**
+ * This callback provides a way for clients to get access to remote services by
+ * providing an Accessor object from libbinder that can connect to the remote
+ * service over sockets.
+ *
+ * \param instance name of the service that the callback will provide an
+ *        Accessor for. The provided accessor will be used to set up a client
+ *        RPC connection in libbinder in order to return a binder for the
+ *        associated remote service.
+ *
+ * \return IBinder of the Accessor object that libbinder implements.
+ *         nullptr if the provider callback doesn't know how to reach the
+ *         service or doesn't want to provide access for any other reason.
+ */
+typedef std::function<sp<IBinder>(const String16& instance)> RpcAccessorProvider;
 
 class AccessorProvider;
 
 /**
- * Register an accessor provider for the service manager APIs.
+ * Register a RpcAccessorProvider for the service manager APIs.
  *
+ * \param instances that the RpcAccessorProvider knows about and can provide an
+ *        Accessor for.
  * \param provider callback that generates Accessors.
  *
  * \return A pointer used as a recept for the successful addition of the
  *         AccessorProvider. This is needed to unregister it later.
  */
 [[nodiscard]] LIBBINDER_EXPORTED std::weak_ptr<AccessorProvider> addAccessorProvider(
-        RpcAccessorProvider&& providerCallback);
+        std::set<std::string>&& instances, RpcAccessorProvider&& providerCallback);
 
 /**
  * Remove an accessor provider using the pointer provided by addAccessorProvider
@@ -274,6 +297,28 @@ LIBBINDER_EXPORTED sp<IBinder> createAccessor(const String16& instance,
  * \return OK if the binder is an IAccessor for `instance`
  */
 LIBBINDER_EXPORTED status_t validateAccessor(const String16& instance, const sp<IBinder>& binder);
+
+/**
+ * Have libbinder wrap this IAccessor binder in an IAccessorDelegator and return
+ * it.
+ *
+ * This is required only in very specific situations when the process that has
+ * permissions to connect the to RPC service's socket and create the FD for it
+ * is in a separate process from this process that wants to service the Accessor
+ * binder and the communication between these two processes is binder RPC. This
+ * is needed because the binder passed over the binder RPC connection can not be
+ * used as a kernel binder, and needs to be wrapped by a kernel binder that can
+ * then be registered with service manager.
+ *
+ * \param instance name of the Accessor.
+ * \param binder to wrap in a Delegator and register with service manager.
+ * \param outDelegator the wrapped kernel binder for IAccessorDelegator
+ *
+ * \return OK if the binder is an IAccessor for `instance` and the delegator was
+ * successfully created.
+ */
+LIBBINDER_EXPORTED status_t delegateAccessor(const String16& name, const sp<IBinder>& accessor,
+                                             sp<IBinder>* delegator);
 #endif // __TRUSTY__
 
 #ifndef __ANDROID__

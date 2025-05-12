@@ -47,10 +47,6 @@ static inline int32_t toArgb(int32_t brightness, int32_t red, int32_t green, int
     return (brightness & 0xff) << 24 | (red & 0xff) << 16 | (green & 0xff) << 8 | (blue & 0xff);
 }
 
-static inline bool isKeyboardBacklightCustomLevelsEnabled() {
-    return sysprop::InputProperties::enable_keyboard_backlight_custom_levels().value_or(true);
-}
-
 /**
  * Input controller owned by InputReader device, implements the native API for querying input
  * lights, getting and setting the lights brightness and color, by interacting with EventHub
@@ -289,8 +285,7 @@ void PeripheralController::populateDeviceInfo(InputDeviceInfo* deviceInfo) {
 std::set<BrightnessLevel> PeripheralController::getPreferredBrightnessLevels(
         const Light* light) const {
     std::set<BrightnessLevel> levels;
-    if (!isKeyboardBacklightCustomLevelsEnabled() ||
-        light->type != InputDeviceLightType::KEYBOARD_BACKLIGHT) {
+    if (light->type != InputDeviceLightType::KEYBOARD_BACKLIGHT) {
         return levels;
     }
     std::optional<std::string> keyboardBacklightLevels =
@@ -514,6 +509,8 @@ void PeripheralController::configureLights() {
             type = InputDeviceLightType::KEYBOARD_BACKLIGHT;
         } else if (rawInfo.flags.test(InputLightClass::KEYBOARD_MIC_MUTE)) {
             type = InputDeviceLightType::KEYBOARD_MIC_MUTE;
+        } else if (rawInfo.flags.test(InputLightClass::KEYBOARD_VOLUME_MUTE)) {
+            type = InputDeviceLightType::KEYBOARD_VOLUME_MUTE;
         } else {
             type = InputDeviceLightType::INPUT;
         }

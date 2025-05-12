@@ -17,12 +17,14 @@ use super::event::Event;
 use super::event_type::EventType;
 use super::storage::Storage;
 use crate::cxxffi::uptimeMillis;
-use once_cell::sync::Lazy;
 use std::fmt;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{
+    atomic::{AtomicU64, Ordering},
+    LazyLock,
+};
 
 //  Lazily initialized static instance of DebugStore.
-static INSTANCE: Lazy<DebugStore> = Lazy::new(DebugStore::new);
+static INSTANCE: LazyLock<DebugStore> = LazyLock::new(DebugStore::new);
 
 /// The `DebugStore` struct is responsible for managing debug events and data.
 pub struct DebugStore {

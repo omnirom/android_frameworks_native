@@ -23,6 +23,11 @@ package {
     default_applicable_licenses: ["frameworks_native_license"],
 }
 
+vintf_fragment {
+    name: "manifest_android.frameworks.automotive.display@1.0.xml",
+    src: "manifest_android.frameworks.automotive.display@1.0.xml",
+}
+
 cc_binary {
     name: "android.frameworks.automotive.display@1.0-service",
     defaults: ["hidl_defaults"],
@@ -50,7 +55,7 @@ cc_binary {
         "-DLOG_TAG=\"AutomotiveDisplayService\""
     ],
 
-    vintf_fragments: [
+    vintf_fragment_modules: [
         "manifest_android.frameworks.automotive.display@1.0.xml",
     ],
 }

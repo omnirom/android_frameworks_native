@@ -87,6 +87,7 @@ EOF
 class LayerTracing {
 public:
     using Mode = perfetto::protos::pbzero::SurfaceFlingerLayersConfig::Mode;
+    using OnLayersSnapshotCallback = std::function<void(perfetto::protos::LayersSnapshotProto&&)>;
 
     enum Flag : uint32_t {
         TRACE_INPUT = 1 << 1,
@@ -102,7 +103,7 @@ public:
     LayerTracing(std::ostream&);
     ~LayerTracing();
     void setTakeLayersSnapshotProtoFunction(
-            const std::function<perfetto::protos::LayersSnapshotProto(uint32_t)>&);
+            const std::function<void(uint32_t, const OnLayersSnapshotCallback&)>&);
     void setTransactionTracing(TransactionTracing&);
 
     // Start event from perfetto data source
@@ -110,7 +111,7 @@ public:
     // Flush event from perfetto data source
     void onFlush(Mode mode, uint32_t flags, bool isBugreport);
     // Stop event from perfetto data source
-    void onStop(Mode mode);
+    void onStop(Mode mode, uint32_t flags, std::function<void()>&& deferredStopDone);
 
     void addProtoSnapshotToOstream(perfetto::protos::LayersSnapshotProto&& snapshot, Mode mode);
     bool isActiveTracingStarted() const;
@@ -123,7 +124,7 @@ private:
     void writeSnapshotToPerfetto(const perfetto::protos::LayersSnapshotProto& snapshot, Mode mode);
     bool checkAndUpdateLastVsyncIdWrittenToPerfetto(Mode mode, std::int64_t vsyncId);
 
-    std::function<perfetto::protos::LayersSnapshotProto(uint32_t)> mTakeLayersSnapshotProto;
+    std::function<void(uint32_t, const OnLayersSnapshotCallback&)> mTakeLayersSnapshotProto;
     TransactionTracing* mTransactionTracing;
 
     std::atomic<bool> mIsActiveTracingStarted{false};

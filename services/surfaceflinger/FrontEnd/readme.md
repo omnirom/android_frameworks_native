@@ -17,6 +17,29 @@ maintain policies at different levels without needing to understand the entire h
 This allows control to be delegated to different parts of the system - such as SystemServer,
 SysUI and Apps.
 
+### Layer Drawing Order
+Layers are drawn based on an inorder traversal, treating relative parents as
+direct parents. Negative z-values place layers below their parent, while
+non-negative values place them above. Layers with the same z-value are drawn
+in creation order (newer on top).  However, relying on creation order for
+z-ordering is discouraged; use unique z-values whenever possible for better
+control.
+
+Traversal pseudo code:
+```
+fn traverseBottomToTop(root):
+  for each child node including relative children,
+    sorted by z then layer id, with z less than 0:
+          traverseBottomToTop(childNode)
+
+  visit(root)
+
+  for each child node including relative children,
+    sorted by z then layer id, with z greater than
+    or equal to 0:
+          traverseBottomToTop(childNode)
+```
+
 ### Layer Lifecycle
 Layer is created by a client. The client receives a strong binder reference to the layer
 handle, which will keep the layer alive as long as the client holds the reference. The

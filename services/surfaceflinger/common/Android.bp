@@ -38,6 +38,7 @@ cc_library_static {
     ],
     static_libs: [
         "libsurfaceflingerflags",
+        "aconfig_hardware_flags_c_lib",
         "android.os.flags-aconfig-cc",
         "android.server.display.flags-aconfig-cc",
         "libguiflags_no_apex",
@@ -51,6 +52,7 @@ cc_library_static {
     ],
     static_libs: [
         "libsurfaceflingerflags_test",
+        "aconfig_hardware_flags_c_lib",
         "android.os.flags-aconfig-cc-test",
         "android.server.display.flags-aconfig-cc",
         "libguiflags_no_apex",
@@ -67,6 +69,7 @@ cc_defaults {
     static_libs: [
         "libsurfaceflinger_common",
         "libsurfaceflingerflags",
+        "aconfig_hardware_flags_c_lib",
         "android.os.flags-aconfig-cc",
         "android.server.display.flags-aconfig-cc",
         "libguiflags_no_apex",
@@ -83,6 +86,7 @@ cc_defaults {
     static_libs: [
         "libsurfaceflinger_common_test",
         "libsurfaceflingerflags_test",
+        "aconfig_hardware_flags_c_lib",
         "android.os.flags-aconfig-cc-test",
         "android.server.display.flags-aconfig-cc",
         "libguiflags_no_apex",

@@ -92,7 +92,7 @@ static const char* kFormerlyVndkspLibrariesList =
     "android.hardware.common-V2-ndk.so:"
     "android.hardware.common.fmq-V1-ndk.so:"
     "android.hardware.graphics.allocator-V2-ndk.so:"
-    "android.hardware.graphics.common-V5-ndk.so:"
+    "android.hardware.graphics.common-V6-ndk.so:"
     "android.hardware.graphics.common@1.0.so:"
     "android.hardware.graphics.common@1.1.so:"
     "android.hardware.graphics.common@1.2.so:"

@@ -31,10 +31,12 @@ using aidl::android::hardware::vibrator::CompositeEffect;
 using aidl::android::hardware::vibrator::CompositePrimitive;
 using aidl::android::hardware::vibrator::Effect;
 using aidl::android::hardware::vibrator::EffectStrength;
+using aidl::android::hardware::vibrator::IVibrationSession;
 using aidl::android::hardware::vibrator::IVibrator;
 using aidl::android::hardware::vibrator::IVibratorCallback;
 using aidl::android::hardware::vibrator::IVibratorManager;
 using aidl::android::hardware::vibrator::PrimitivePwle;
+using aidl::android::hardware::vibrator::VibrationSessionConfig;
 
 using namespace android;
 using namespace testing;
@@ -55,6 +57,24 @@ public:
     MOCK_METHOD(ndk::ScopedAStatus, triggerSynced, (const std::shared_ptr<IVibratorCallback>& cb),
                 (override));
     MOCK_METHOD(ndk::ScopedAStatus, cancelSynced, (), (override));
+    MOCK_METHOD(ndk::ScopedAStatus, startSession,
+                (const std::vector<int32_t>& ids, const VibrationSessionConfig& s,
+                 const std::shared_ptr<IVibratorCallback>& cb,
+                 std::shared_ptr<IVibrationSession>* ret),
+                (override));
+    MOCK_METHOD(ndk::ScopedAStatus, clearSessions, (), (override));
+    MOCK_METHOD(ndk::ScopedAStatus, getInterfaceVersion, (int32_t*), (override));
+    MOCK_METHOD(ndk::ScopedAStatus, getInterfaceHash, (std::string*), (override));
+    MOCK_METHOD(ndk::SpAIBinder, asBinder, (), (override));
+    MOCK_METHOD(bool, isRemote, (), (override));
+};
+
+class MockIVibrationSession : public IVibrationSession {
+public:
+    MockIVibrationSession() = default;
+
+    MOCK_METHOD(ndk::ScopedAStatus, close, (), (override));
+    MOCK_METHOD(ndk::ScopedAStatus, abort, (), (override));
     MOCK_METHOD(ndk::ScopedAStatus, getInterfaceVersion, (int32_t*), (override));
     MOCK_METHOD(ndk::ScopedAStatus, getInterfaceHash, (std::string*), (override));
     MOCK_METHOD(ndk::SpAIBinder, asBinder, (), (override));
@@ -67,6 +87,7 @@ class VibratorManagerHalWrapperAidlTest : public Test {
 public:
     void SetUp() override {
         mMockVibrator = ndk::SharedRefBase::make<StrictMock<vibrator::MockIVibrator>>();
+        mMockSession = ndk::SharedRefBase::make<StrictMock<MockIVibrationSession>>();
         mMockHal = ndk::SharedRefBase::make<StrictMock<MockIVibratorManager>>();
         mMockScheduler = std::make_shared<StrictMock<vibrator::MockCallbackScheduler>>();
         mWrapper = std::make_unique<vibrator::AidlManagerHalWrapper>(mMockScheduler, mMockHal);
@@ -78,11 +99,13 @@ protected:
     std::unique_ptr<vibrator::ManagerHalWrapper> mWrapper = nullptr;
     std::shared_ptr<StrictMock<MockIVibratorManager>> mMockHal = nullptr;
     std::shared_ptr<StrictMock<vibrator::MockIVibrator>> mMockVibrator = nullptr;
+    std::shared_ptr<StrictMock<MockIVibrationSession>> mMockSession = nullptr;
 };
 
 // -------------------------------------------------------------------------------------------------
 
 static const std::vector<int32_t> kVibratorIds = {1, 2};
+static const VibrationSessionConfig kSessionConfig;
 static constexpr int kVibratorId = 1;
 
 TEST_F(VibratorManagerHalWrapperAidlTest, TestGetCapabilitiesDoesNotCacheFailedResult) {
@@ -310,4 +333,36 @@ TEST_F(VibratorManagerHalWrapperAidlTest, TestCancelSyncedReloadsAllControllers)
 
     ASSERT_TRUE(mWrapper->getVibratorIds().isOk());
     ASSERT_TRUE(mWrapper->cancelSynced().isOk());
+}
+
+TEST_F(VibratorManagerHalWrapperAidlTest, TestStartSession) {
+    EXPECT_CALL(*mMockHal.get(), startSession(_, _, _, _))
+            .Times(Exactly(3))
+            .WillOnce(Return(ndk::ScopedAStatus::fromStatus(STATUS_UNKNOWN_TRANSACTION)))
+            .WillOnce(Return(ndk::ScopedAStatus::fromExceptionCode(EX_SECURITY)))
+            .WillOnce(
+                    DoAll(DoAll(SetArgPointee<3>(mMockSession), Return(ndk::ScopedAStatus::ok()))));
+
+    std::unique_ptr<int32_t> callbackCounter = std::make_unique<int32_t>();
+    auto callback = vibrator::TestFactory::createCountingCallback(callbackCounter.get());
+
+    ASSERT_TRUE(mWrapper->startSession(kVibratorIds, kSessionConfig, callback).isUnsupported());
+    ASSERT_TRUE(mWrapper->startSession(kVibratorIds, kSessionConfig, callback).isFailed());
+
+    auto result = mWrapper->startSession(kVibratorIds, kSessionConfig, callback);
+    ASSERT_TRUE(result.isOk());
+    ASSERT_NE(nullptr, result.value().get());
+    ASSERT_EQ(0, *callbackCounter.get());
+}
+
+TEST_F(VibratorManagerHalWrapperAidlTest, TestClearSessions) {
+    EXPECT_CALL(*mMockHal.get(), clearSessions())
+            .Times(Exactly(3))
+            .WillOnce(Return(ndk::ScopedAStatus::fromStatus(STATUS_UNKNOWN_TRANSACTION)))
+            .WillOnce(Return(ndk::ScopedAStatus::fromExceptionCode(EX_SECURITY)))
+            .WillOnce(Return(ndk::ScopedAStatus::ok()));
+
+    ASSERT_TRUE(mWrapper->clearSessions().isUnsupported());
+    ASSERT_TRUE(mWrapper->clearSessions().isFailed());
+    ASSERT_TRUE(mWrapper->clearSessions().isOk());
 }

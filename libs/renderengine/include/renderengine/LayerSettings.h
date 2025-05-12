@@ -16,6 +16,7 @@
 
 #pragma once
 
+#include <gui/DisplayLuts.h>
 #include <math/mat4.h>
 #include <math/vec3.h>
 #include <renderengine/ExternalTexture.h>
@@ -145,6 +146,8 @@ struct LayerSettings {
     // If white point nits are unknown, then this layer is assumed to have the
     // same luminance as the brightest layer in the scene.
     float whitePointNits = -1.f;
+
+    std::shared_ptr<gui::DisplayLuts> luts;
 };
 
 // Keep in sync with custom comparison function in
@@ -187,7 +190,7 @@ static inline bool operator==(const LayerSettings& lhs, const LayerSettings& rhs
             lhs.blurRegionTransform == rhs.blurRegionTransform &&
             lhs.stretchEffect == rhs.stretchEffect &&
             lhs.edgeExtensionEffect == rhs.edgeExtensionEffect &&
-            lhs.whitePointNits == rhs.whitePointNits;
+            lhs.whitePointNits == rhs.whitePointNits && lhs.luts == rhs.luts;
 }
 
 static inline void PrintTo(const Buffer& settings, ::std::ostream* os) {

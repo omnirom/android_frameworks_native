@@ -28,7 +28,6 @@
 #include "ui/GraphicTypes.h"
 
 #include <com_android_graphics_libgui_flags.h>
-#include <com_android_graphics_surfaceflinger_flags.h>
 
 #define UPDATE_AND_VERIFY(BUILDER, ...)                                    \
     ({                                                                     \
@@ -162,12 +161,12 @@ TEST_F(LayerSnapshotTest, croppedByParent) {
     info.info.logicalHeight = 100;
     info.info.logicalWidth = 200;
     mFrontEndDisplayInfos.emplace_or_replace(ui::LayerStack::fromValue(1), info);
-    Rect layerCrop(0, 0, 10, 20);
+    FloatRect layerCrop(0, 0, 10, 20);
     setCrop(11, layerCrop);
     EXPECT_TRUE(mLifecycleManager.getGlobalChanges().test(RequestedLayerState::Changes::Geometry));
     UPDATE_AND_VERIFY_WITH_DISPLAY_CHANGES(mSnapshotBuilder, STARTING_ZORDER);
     EXPECT_EQ(getSnapshot(11)->geomCrop, layerCrop);
-    EXPECT_EQ(getSnapshot(111)->geomLayerBounds, layerCrop.toFloatRect());
+    EXPECT_EQ(getSnapshot(111)->geomLayerBounds, layerCrop);
     float maxHeight = static_cast<float>(info.info.logicalHeight * 10);
     float maxWidth = static_cast<float>(info.info.logicalWidth * 10);
 
@@ -1551,6 +1550,9 @@ TEST_F(LayerSnapshotTest, propagateDropInputMode) {
 }
 
 TEST_F(LayerSnapshotTest, NonVisibleLayerWithInput) {
+    SET_FLAG_FOR_TEST(com::android::graphics::surfaceflinger::flags::
+                              skip_invisible_windows_in_input,
+                      false);
     LayerHierarchyTestBase::createRootLayer(3);
     setColor(3, {-1._hf, -1._hf, -1._hf});
     UPDATE_AND_VERIFY(mSnapshotBuilder, STARTING_ZORDER);
@@ -1574,6 +1576,39 @@ TEST_F(LayerSnapshotTest, NonVisibleLayerWithInput) {
         }
     });
     EXPECT_TRUE(foundInputLayer);
+}
+
+TEST_F(LayerSnapshotTest, NonVisibleLayerWithInputShouldNotBeIncluded) {
+    SET_FLAG_FOR_TEST(com::android::graphics::surfaceflinger::flags::
+                              skip_invisible_windows_in_input,
+                      true);
+    LayerHierarchyTestBase::createRootLayer(3);
+    setColor(3, {-1._hf, -1._hf, -1._hf});
+    UPDATE_AND_VERIFY(mSnapshotBuilder, STARTING_ZORDER);
+
+    std::vector<TransactionState> transactions;
+    transactions.emplace_back();
+    transactions.back().states.push_back({});
+    transactions.back().states.front().state.what = layer_state_t::eInputInfoChanged;
+    transactions.back().states.front().layerId = 3;
+    transactions.back().states.front().state.windowInfoHandle = sp<gui::WindowInfoHandle>::make();
+    auto inputInfo = transactions.back().states.front().state.windowInfoHandle->editInfo();
+    inputInfo->token = sp<BBinder>::make();
+    hideLayer(3);
+    mLifecycleManager.applyTransactions(transactions);
+
+    update(mSnapshotBuilder);
+
+    bool foundInputLayer = false;
+    mSnapshotBuilder.forEachInputSnapshot([&](const frontend::LayerSnapshot& snapshot) {
+        if (snapshot.uniqueSequence == 3) {
+            EXPECT_TRUE(
+                    snapshot.inputInfo.inputConfig.test(gui::WindowInfo::InputConfig::NOT_VISIBLE));
+            EXPECT_FALSE(snapshot.isVisible);
+            foundInputLayer = true;
+        }
+    });
+    EXPECT_FALSE(foundInputLayer);
 }
 
 TEST_F(LayerSnapshotTest, ForEachSnapshotsWithPredicate) {
@@ -1922,17 +1957,108 @@ TEST_F(LayerSnapshotTest, multipleEdgeExtensionIncreaseBoundSizeWithinCrop) {
 }
 
 TEST_F(LayerSnapshotTest, shouldUpdateInputWhenNoInputInfo) {
-    // By default the layer has no buffer, so we don't expect it to have an input info
+    // If a layer has no buffer or no color, it doesn't have an input info
+    setColor(111, {-1._hf, -1._hf, -1._hf});
+    UPDATE_AND_VERIFY(mSnapshotBuilder, {1, 11, 12, 121, 122, 1221, 13, 2});
     EXPECT_FALSE(getSnapshot(111)->hasInputInfo());
 
     setBuffer(111);
-
     UPDATE_AND_VERIFY(mSnapshotBuilder, STARTING_ZORDER);
 
     EXPECT_TRUE(getSnapshot(111)->hasInputInfo());
     EXPECT_TRUE(getSnapshot(111)->inputInfo.inputConfig.test(
             gui::WindowInfo::InputConfig::NO_INPUT_CHANNEL));
-    EXPECT_FALSE(getSnapshot(2)->hasInputInfo());
+}
+
+// content dirty test
+TEST_F(LayerSnapshotTest, contentDirtyWhenParentAlphaChanges) {
+    setAlpha(1, 0.5);
+    UPDATE_AND_VERIFY(mSnapshotBuilder, STARTING_ZORDER);
+    EXPECT_TRUE(getSnapshot(1)->contentDirty);
+    EXPECT_TRUE(getSnapshot(11)->contentDirty);
+    EXPECT_TRUE(getSnapshot(111)->contentDirty);
+
+    // subsequent updates clear the dirty bit
+    UPDATE_AND_VERIFY(mSnapshotBuilder, STARTING_ZORDER);
+    EXPECT_FALSE(getSnapshot(1)->contentDirty);
+    EXPECT_FALSE(getSnapshot(11)->contentDirty);
+    EXPECT_FALSE(getSnapshot(111)->contentDirty);
+}
+
+TEST_F(LayerSnapshotTest, contentDirtyWhenAutoRefresh) {
+    setAutoRefresh(1, true);
+    UPDATE_AND_VERIFY(mSnapshotBuilder, STARTING_ZORDER);
+    EXPECT_TRUE(getSnapshot(1)->contentDirty);
+
+    // subsequent updates don't clear the dirty bit
+    UPDATE_AND_VERIFY(mSnapshotBuilder, STARTING_ZORDER);
+    EXPECT_TRUE(getSnapshot(1)->contentDirty);
+
+    // second update after removing auto refresh will clear content dirty
+    setAutoRefresh(1, false);
+    UPDATE_AND_VERIFY(mSnapshotBuilder, STARTING_ZORDER);
+    UPDATE_AND_VERIFY(mSnapshotBuilder, STARTING_ZORDER);
+    EXPECT_FALSE(getSnapshot(1)->contentDirty);
+}
+
+TEST_F(LayerSnapshotTest, contentDirtyWhenColorChanges) {
+    setColor(1, {1, 2, 3});
+    UPDATE_AND_VERIFY(mSnapshotBuilder, STARTING_ZORDER);
+    EXPECT_TRUE(getSnapshot(1)->contentDirty);
+
+    // subsequent updates clear the dirty bit
+    UPDATE_AND_VERIFY(mSnapshotBuilder, STARTING_ZORDER);
+    EXPECT_FALSE(getSnapshot(1)->contentDirty);
+}
+
+TEST_F(LayerSnapshotTest, contentDirtyWhenParentGeometryChanges) {
+    setPosition(1, 2, 3);
+    UPDATE_AND_VERIFY(mSnapshotBuilder, STARTING_ZORDER);
+    EXPECT_TRUE(getSnapshot(1)->contentDirty);
+
+    // subsequent updates clear the dirty bit
+    UPDATE_AND_VERIFY(mSnapshotBuilder, STARTING_ZORDER);
+    EXPECT_FALSE(getSnapshot(1)->contentDirty);
+}
+TEST_F(LayerSnapshotTest, shouldUpdatePictureProfileHandle) {
+    if (!com_android_graphics_libgui_flags_apply_picture_profiles()) {
+        GTEST_SKIP() << "Flag disabled, skipping test";
+    }
+    std::vector<TransactionState> transactions;
+    transactions.emplace_back();
+    transactions.back().states.push_back({});
+    transactions.back().states.front().layerId = 1;
+    transactions.back().states.front().state.layerId = 1;
+    transactions.back().states.front().state.what = layer_state_t::ePictureProfileHandleChanged;
+    transactions.back().states.front().state.pictureProfileHandle = PictureProfileHandle(3);
+
+    mLifecycleManager.applyTransactions(transactions);
+    EXPECT_EQ(mLifecycleManager.getGlobalChanges(), RequestedLayerState::Changes::Content);
+
+    update(mSnapshotBuilder);
+
+    EXPECT_EQ(getSnapshot(1)->clientChanges, layer_state_t::ePictureProfileHandleChanged);
+    EXPECT_EQ(getSnapshot(1)->pictureProfileHandle, PictureProfileHandle(3));
+}
+
+TEST_F(LayerSnapshotTest, shouldUpdatePictureProfilePriorityFromAppContentPriority) {
+    if (!com_android_graphics_libgui_flags_apply_picture_profiles()) {
+        GTEST_SKIP() << "Flag disabled, skipping test";
+    }
+    std::vector<TransactionState> transactions;
+    transactions.emplace_back();
+    transactions.back().states.push_back({});
+    transactions.back().states.front().layerId = 1;
+    transactions.back().states.front().state.layerId = 1;
+    transactions.back().states.front().state.what = layer_state_t::eAppContentPriorityChanged;
+    transactions.back().states.front().state.appContentPriority = 3;
+
+    mLifecycleManager.applyTransactions(transactions);
+    EXPECT_EQ(mLifecycleManager.getGlobalChanges(), RequestedLayerState::Changes::Content);
+
+    update(mSnapshotBuilder);
+
+    EXPECT_EQ(getSnapshot(1)->pictureProfilePriority, 3);
 }
 
 } // namespace android::surfaceflinger::frontend

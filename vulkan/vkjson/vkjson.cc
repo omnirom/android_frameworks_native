@@ -400,6 +400,78 @@ struct EnumTraits<VkShaderFloatControlsIndependence> {
   }
 };
 
+template <>
+struct EnumTraits<VkPipelineRobustnessBufferBehavior> {
+  static bool exist(uint32_t e) {
+    switch (e) {
+      case VK_PIPELINE_ROBUSTNESS_BUFFER_BEHAVIOR_DEVICE_DEFAULT:
+      case VK_PIPELINE_ROBUSTNESS_BUFFER_BEHAVIOR_DISABLED:
+      case VK_PIPELINE_ROBUSTNESS_BUFFER_BEHAVIOR_ROBUST_BUFFER_ACCESS:
+      case VK_PIPELINE_ROBUSTNESS_BUFFER_BEHAVIOR_ROBUST_BUFFER_ACCESS_2:
+        return true;
+    }
+    return false;
+  }
+};
+
+template <>
+struct EnumTraits<VkPipelineRobustnessImageBehavior> {
+  static bool exist(uint32_t e) {
+    switch (e) {
+      case VK_PIPELINE_ROBUSTNESS_IMAGE_BEHAVIOR_DEVICE_DEFAULT:
+      case VK_PIPELINE_ROBUSTNESS_IMAGE_BEHAVIOR_DISABLED:
+      case VK_PIPELINE_ROBUSTNESS_IMAGE_BEHAVIOR_ROBUST_IMAGE_ACCESS:
+      case VK_PIPELINE_ROBUSTNESS_IMAGE_BEHAVIOR_ROBUST_IMAGE_ACCESS_2:
+        return true;
+    }
+    return false;
+  }
+};
+
+template <>
+struct EnumTraits<VkImageLayout> {
+  static bool exist(uint32_t e) {
+    switch (e) {
+      case VK_IMAGE_LAYOUT_UNDEFINED:
+      case VK_IMAGE_LAYOUT_GENERAL:
+      case VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL:
+      case VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL:
+      case VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL:
+      case VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL:
+      case VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL:
+      case VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL:
+      case VK_IMAGE_LAYOUT_PREINITIALIZED:
+      case VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_STENCIL_ATTACHMENT_OPTIMAL:
+      case VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_STENCIL_READ_ONLY_OPTIMAL:
+      case VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL:
+      case VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_OPTIMAL:
+      case VK_IMAGE_LAYOUT_STENCIL_ATTACHMENT_OPTIMAL:
+      case VK_IMAGE_LAYOUT_STENCIL_READ_ONLY_OPTIMAL:
+      case VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL:
+      case VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL:
+      case VK_IMAGE_LAYOUT_PRESENT_SRC_KHR:
+      case VK_IMAGE_LAYOUT_VIDEO_DECODE_DST_KHR:
+      case VK_IMAGE_LAYOUT_VIDEO_DECODE_SRC_KHR:
+      case VK_IMAGE_LAYOUT_VIDEO_DECODE_DPB_KHR:
+      case VK_IMAGE_LAYOUT_SHARED_PRESENT_KHR:
+      case VK_IMAGE_LAYOUT_FRAGMENT_DENSITY_MAP_OPTIMAL_EXT:
+      case VK_IMAGE_LAYOUT_FRAGMENT_SHADING_RATE_ATTACHMENT_OPTIMAL_KHR:
+#ifdef VK_ENABLE_BETA_EXTENSIONS
+      case VK_IMAGE_LAYOUT_VIDEO_ENCODE_DST_KHR:
+#endif
+#ifdef VK_ENABLE_BETA_EXTENSIONS
+      case VK_IMAGE_LAYOUT_VIDEO_ENCODE_SRC_KHR:
+#endif
+#ifdef VK_ENABLE_BETA_EXTENSIONS
+      case VK_IMAGE_LAYOUT_VIDEO_ENCODE_DPB_KHR:
+#endif
+      case VK_IMAGE_LAYOUT_ATTACHMENT_FEEDBACK_LOOP_OPTIMAL_EXT:
+        return true;
+    }
+    return false;
+  }
+};
+
 // VkSparseImageFormatProperties
 
 template <typename Visitor>
@@ -810,6 +882,68 @@ inline bool Iterate(Visitor* visitor, VkPhysicalDeviceVulkan13Features* features
     visitor->Visit("shaderIntegerDotProduct", &features->shaderIntegerDotProduct) &&
     visitor->Visit("maintenance4", &features->maintenance4);
 }
+
+template <typename Visitor>
+inline bool Iterate(Visitor* visitor, VkJsonCore14* core) {
+  return
+    visitor->Visit("features", &core->features) &&
+    visitor->Visit("properties", &core->properties);
+}
+
+template <typename Visitor>
+inline bool Iterate(Visitor* visitor, VkPhysicalDeviceVulkan14Properties* properties) {
+  return
+    visitor->Visit("lineSubPixelPrecisionBits", &properties->lineSubPixelPrecisionBits) &&
+    visitor->Visit("maxVertexAttribDivisor", &properties->maxVertexAttribDivisor) &&
+    visitor->Visit("supportsNonZeroFirstInstance", &properties->supportsNonZeroFirstInstance) &&
+    visitor->Visit("maxPushDescriptors", &properties->maxPushDescriptors) &&
+    visitor->Visit("dynamicRenderingLocalReadDepthStencilAttachments", &properties->dynamicRenderingLocalReadDepthStencilAttachments) &&
+    visitor->Visit("dynamicRenderingLocalReadMultisampledAttachments", &properties->dynamicRenderingLocalReadMultisampledAttachments) &&
+    visitor->Visit("earlyFragmentMultisampleCoverageAfterSampleCounting", &properties->earlyFragmentMultisampleCoverageAfterSampleCounting) &&
+    visitor->Visit("earlyFragmentSampleMaskTestBeforeSampleCounting", &properties->earlyFragmentSampleMaskTestBeforeSampleCounting) &&
+    visitor->Visit("depthStencilSwizzleOneSupport", &properties->depthStencilSwizzleOneSupport) &&
+    visitor->Visit("polygonModePointSize", &properties->polygonModePointSize) &&
+    visitor->Visit("nonStrictSinglePixelWideLinesUseParallelogram", &properties->nonStrictSinglePixelWideLinesUseParallelogram) &&
+    visitor->Visit("nonStrictWideLinesUseParallelogram", &properties->nonStrictWideLinesUseParallelogram) &&
+    visitor->Visit("blockTexelViewCompatibleMultipleLayers", &properties->blockTexelViewCompatibleMultipleLayers) &&
+    visitor->Visit("maxCombinedImageSamplerDescriptorCount", &properties->maxCombinedImageSamplerDescriptorCount) &&
+    visitor->Visit("fragmentShadingRateClampCombinerInputs", &properties->fragmentShadingRateClampCombinerInputs) &&
+    visitor->Visit("defaultRobustnessStorageBuffers", &properties->defaultRobustnessStorageBuffers) &&
+    visitor->Visit("defaultRobustnessUniformBuffers", &properties->defaultRobustnessUniformBuffers) &&
+    visitor->Visit("defaultRobustnessVertexInputs", &properties->defaultRobustnessVertexInputs) &&
+    visitor->Visit("defaultRobustnessImages", &properties->defaultRobustnessImages) &&
+    visitor->Visit("copySrcLayoutCount", &properties->copySrcLayoutCount) &&
+    visitor->VisitArray("pCopySrcLayouts", properties->copySrcLayoutCount, &properties->pCopySrcLayouts) &&
+    visitor->Visit("copyDstLayoutCount", &properties->copyDstLayoutCount) &&
+    visitor->VisitArray("pCopyDstLayouts", properties->copyDstLayoutCount, &properties->pCopyDstLayouts) &&
+    visitor->Visit("optimalTilingLayoutUUID", &properties->optimalTilingLayoutUUID) &&
+    visitor->Visit("identicalMemoryTypeRequirements", &properties->identicalMemoryTypeRequirements);
+}
+
+template <typename Visitor>
+inline bool Iterate(Visitor* visitor, VkPhysicalDeviceVulkan14Features* features) {
+  return
+    visitor->Visit("globalPriorityQuery", &features->globalPriorityQuery) &&
+    visitor->Visit("shaderSubgroupRotate", &features->shaderSubgroupRotate) &&
+    visitor->Visit("shaderSubgroupRotateClustered", &features->shaderSubgroupRotateClustered) &&
+    visitor->Visit("shaderFloatControls2", &features->shaderFloatControls2) &&
+    visitor->Visit("shaderExpectAssume", &features->shaderExpectAssume) &&
+    visitor->Visit("rectangularLines", &features->rectangularLines) &&
+    visitor->Visit("bresenhamLines", &features->bresenhamLines) &&
+    visitor->Visit("smoothLines", &features->smoothLines) &&
+    visitor->Visit("stippledRectangularLines", &features->stippledRectangularLines) &&
+    visitor->Visit("stippledBresenhamLines", &features->stippledBresenhamLines) &&
+    visitor->Visit("stippledSmoothLines", &features->stippledSmoothLines) &&
+    visitor->Visit("vertexAttributeInstanceRateDivisor", &features->vertexAttributeInstanceRateDivisor) &&
+    visitor->Visit("vertexAttributeInstanceRateZeroDivisor", &features->vertexAttributeInstanceRateZeroDivisor) &&
+    visitor->Visit("indexTypeUint8", &features->indexTypeUint8) &&
+    visitor->Visit("dynamicRenderingLocalRead", &features->dynamicRenderingLocalRead) &&
+    visitor->Visit("maintenance5", &features->maintenance5) &&
+    visitor->Visit("maintenance6", &features->maintenance6) &&
+    visitor->Visit("pipelineProtectedAccess", &features->pipelineProtectedAccess) &&
+    visitor->Visit("pipelineRobustness", &features->pipelineRobustness) &&
+    visitor->Visit("hostImageCopy", &features->hostImageCopy);
+}
 // clang-format on
 
 template <typename Visitor>
@@ -1050,6 +1184,9 @@ inline bool Iterate(Visitor* visitor, VkJsonDevice* device) {
   bool ret = true;
   switch (device->properties.apiVersion ^
           VK_API_VERSION_PATCH(device->properties.apiVersion)) {
+    case VK_API_VERSION_1_4:
+      ret &= visitor->Visit("core14", &device->core14);
+      FALLTHROUGH_INTENDED;
     case VK_API_VERSION_1_3:
       ret &= visitor->Visit("core13", &device->core13);
       FALLTHROUGH_INTENDED;
@@ -1110,6 +1247,8 @@ template <typename Visitor>
 inline bool Iterate(Visitor* visitor, VkJsonInstance* instance) {
   bool ret = true;
   switch (instance->api_version ^ VK_API_VERSION_PATCH(instance->api_version)) {
+    case VK_API_VERSION_1_4:
+      FALLTHROUGH_INTENDED;
     case VK_API_VERSION_1_3:
       FALLTHROUGH_INTENDED;
     case VK_API_VERSION_1_2:
@@ -1169,7 +1308,7 @@ inline Json::Value ArrayToJsonValue(uint32_t count, const T* values) {
   return array;
 }
 
-template <typename T, unsigned int N>
+template <typename T, size_t N>
 inline Json::Value ToJsonValue(const T (&value)[N]) {
   return ArrayToJsonValue(N, value);
 }
@@ -1215,6 +1354,12 @@ class JsonWriterVisitor {
   template <typename T, uint32_t N>
   bool VisitArray(const char* key, uint32_t count, const T (*value)[N]) {
     assert(count <= N);
+    object_[key] = ArrayToJsonValue(count, *value);
+    return true;
+  }
+
+  template <typename T>
+  bool VisitArray(const char* key, uint32_t count, const T *value) {
     object_[key] = ArrayToJsonValue(count, *value);
     return true;
   }
@@ -1283,6 +1428,15 @@ inline bool AsValue(Json::Value* json_value, float* value) {
   return true;
 }
 
+inline bool AsValue(Json::Value* json_value, VkImageLayout* t) {
+  uint32_t value = 0;
+  if (!AsValue(json_value, &value))
+    return false;
+  if (!EnumTraits<VkImageLayout>::exist(value)) return false;
+  *t = static_cast<VkImageLayout>(value);
+  return true;
+}
+
 template <typename T>
 inline bool AsArray(Json::Value* json_value, uint32_t count, T* values) {
   if (json_value->type() != Json::arrayValue || json_value->size() != count)
@@ -1293,7 +1447,7 @@ inline bool AsArray(Json::Value* json_value, uint32_t count, T* values) {
   return true;
 }
 
-template <typename T, unsigned int N>
+template <typename T, size_t N>
 inline bool AsValue(Json::Value* json_value, T (*value)[N]) {
   return AsArray(json_value, N, *value);
 }
@@ -1381,6 +1535,20 @@ class JsonReaderVisitor {
   bool VisitArray(const char* key, uint32_t count, T (*value)[N]) {
     if (count > N)
       return false;
+    Json::Value json_value = (*object_)[key];
+    if (!json_value) {
+      if (errors_)
+        *errors_ = std::string(key) + " missing.";
+      return false;
+    }
+    if (AsArray(&json_value, count, *value)) return true;
+    if (errors_)
+      *errors_ = std::string("Wrong type for ") + std::string(key) + ".";
+    return false;
+  }
+
+  template <typename T>
+  bool VisitArray(const char* key, uint32_t count, T *value) {
     Json::Value json_value = (*object_)[key];
     if (!json_value) {
       if (errors_)

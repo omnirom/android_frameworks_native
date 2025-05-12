@@ -26,11 +26,8 @@
 #include <gtest/gtest.h>
 #include <renderengine/mock/RenderEngine.h>
 
-#include "MockHWComposer.h"
 #include "TimeStats/TimeStats.h"
-#include "gmock/gmock.h"
-
-#include <variant>
+#include "mock/DisplayHardware/MockHWComposer.h"
 
 using namespace com::android::graphics::surfaceflinger;
 
@@ -494,9 +491,6 @@ struct CompositionEnginePostCompositionTest : public CompositionEngineTest {
 };
 
 TEST_F(CompositionEnginePostCompositionTest, postCompositionReleasesAllFences) {
-    SET_FLAG_FOR_TEST(com::android::graphics::surfaceflinger::flags::ce_fence_promise, true);
-    ASSERT_TRUE(FlagManager::getInstance().ce_fence_promise());
-
     EXPECT_CALL(*mLayer1FE, getReleaseFencePromiseStatus)
             .WillOnce(Return(LayerFE::ReleaseFencePromiseStatus::FULFILLED));
     EXPECT_CALL(*mLayer2FE, getReleaseFencePromiseStatus)

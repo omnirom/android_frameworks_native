@@ -34,7 +34,7 @@ using namespace com::android::graphics::surfaceflinger;
                                                static_cast<hal::HWConfigId>(        \
                                                        ftl::to_underlying(modeId)), \
                                                _, _))                               \
-            .WillOnce(DoAll(SetArgPointee<3>(timeline), Return(Error::NONE)))
+            .WillOnce(DoAll(SetArgPointee<3>(timeline), Return(hal::Error::NONE)))
 
 namespace android {
 namespace {

@@ -168,6 +168,11 @@ HalResult<void> PowerHalController::closeSessionChannel(int tgid, int uid) {
                                           "closeSessionChannel"));
 }
 
+HalResult<aidl::android::hardware::power::SupportInfo> PowerHalController::getSupportInfo() {
+    std::shared_ptr<HalWrapper> handle = initHal();
+    return CACHE_SUPPORT(6, processHalResult(handle->getSupportInfo(), "getSupportInfo"));
+}
+
 } // namespace power
 
 } // namespace android

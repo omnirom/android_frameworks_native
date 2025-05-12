@@ -16,6 +16,7 @@
 
 #pragma once
 
+#include <functional>
 #include <map>
 #include <memory>
 #include <optional>
@@ -75,12 +76,13 @@ public:
      * the event is ready to consume.
      * @param looper needs to be sp and not shared_ptr because it inherits from
      * RefBase
-     * @param resampler the resampling strategy to use. If null, no resampling will be
-     * performed.
+     * @param resamplerCreator callable that returns the resampling strategy to be used. If null, no
+     * resampling will be performed. resamplerCreator must never return nullptr.
      */
-    explicit InputConsumerNoResampling(const std::shared_ptr<InputChannel>& channel,
-                                       sp<Looper> looper, InputConsumerCallbacks& callbacks,
-                                       std::unique_ptr<Resampler> resampler);
+    explicit InputConsumerNoResampling(
+            const std::shared_ptr<InputChannel>& channel, sp<Looper> looper,
+            InputConsumerCallbacks& callbacks,
+            std::function<std::unique_ptr<Resampler>()> resamplerCreator);
 
     ~InputConsumerNoResampling();
 
@@ -117,7 +119,13 @@ private:
     std::shared_ptr<InputChannel> mChannel;
     sp<Looper> mLooper;
     InputConsumerCallbacks& mCallbacks;
-    std::unique_ptr<Resampler> mResampler;
+    const std::function<std::unique_ptr<Resampler>()> mResamplerCreator;
+
+    /**
+     * A map to manage multidevice resampling. Each contained resampler is never null. This map is
+     * only modified by handleMessages.
+     */
+    std::map<DeviceId, std::unique_ptr<Resampler>> mResamplers;
 
     // Looper-related infrastructure
     /**
@@ -133,7 +141,7 @@ private:
         }
 
     private:
-        std::function<int(int events)> mCallback;
+        const std::function<int(int events)> mCallback;
     };
     sp<LooperEventCallback> mCallback;
     /**
@@ -190,7 +198,10 @@ private:
     /**
      * Batch messages that can be batched. When an unbatchable message is encountered, send it
      * to the InputConsumerCallbacks immediately. If there are batches remaining,
-     * notify InputConsumerCallbacks.
+     * notify InputConsumerCallbacks. If a resampleable ACTION_DOWN message is received, then a
+     * resampler is inserted for that deviceId in mResamplers. If a resampleable ACTION_UP or
+     * ACTION_CANCEL message is received then the resampler associated to that deviceId is erased
+     * from mResamplers.
      */
     void handleMessages(std::vector<InputMessage>&& messages);
     /**
@@ -200,16 +211,17 @@ private:
      * `consumeBatchedInputEvents`.
      */
     std::map<DeviceId, std::queue<InputMessage>> mBatches;
+
     /**
-     * Creates a MotionEvent by consuming samples from the provided queue. If one message has
-     * eventTime > adjustedFrameTime, all subsequent messages in the queue will be skipped. It is
-     * assumed that messages are queued in chronological order. In other words, only events that
-     * occurred prior to the adjustedFrameTime will be consumed.
-     * @param requestedFrameTime the time up to which to consume events.
-     * @param messages the queue of messages to consume from
+     * Creates a MotionEvent by consuming samples from the provided queue. Consumes all messages
+     * with eventTime <= requestedFrameTime - resampleLatency, where `resampleLatency` is latency
+     * introduced by the resampler. Assumes that messages are queued in chronological order.
+     * @param requestedFrameTime The time up to which consume messages, as given by the inequality
+     * above. If std::nullopt, everything in messages will be consumed.
+     * @param messages the queue of messages to consume from.
      */
     std::pair<std::unique_ptr<MotionEvent>, std::optional<uint32_t>> createBatchedMotionEvent(
-            const nsecs_t requestedFrameTime, std::queue<InputMessage>& messages);
+            const std::optional<nsecs_t> requestedFrameTime, std::queue<InputMessage>& messages);
 
     /**
      * Consumes the batched input events, optionally allowing the caller to specify a device id

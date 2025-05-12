@@ -30,6 +30,7 @@ int mapPublicFormatToHalFormat(PublicFormat f) {
         case PublicFormat::DEPTH_POINT_CLOUD:
         case PublicFormat::DEPTH_JPEG:
         case PublicFormat::HEIC:
+        case PublicFormat::HEIC_ULTRAHDR:
         case PublicFormat::JPEG_R:
             return HAL_PIXEL_FORMAT_BLOB;
         case PublicFormat::DEPTH16:
@@ -73,6 +74,9 @@ android_dataspace mapPublicFormatToHalDataspace(PublicFormat f) {
             break;
         case PublicFormat::HEIC:
             dataspace = Dataspace::HEIF;
+            break;
+        case PublicFormat::HEIC_ULTRAHDR:
+            dataspace = Dataspace::HEIF_ULTRAHDR;
             break;
         case PublicFormat::JPEG_R:
             dataspace = Dataspace::JPEG_R;
@@ -153,6 +157,9 @@ PublicFormat mapHalFormatDataspaceToPublicFormat(int format, android_dataspace d
                         return PublicFormat::DEPTH_JPEG;
                     } else if (dataSpace == static_cast<android_dataspace>(Dataspace::JPEG_R)) {
                         return PublicFormat::JPEG_R;
+                    } else if (dataSpace == static_cast<android_dataspace>(
+                                Dataspace::HEIF_ULTRAHDR)) {
+                        return PublicFormat::HEIC_ULTRAHDR;
                     }else {
                         // Assume otherwise-marked blobs are also JPEG
                         return PublicFormat::JPEG;

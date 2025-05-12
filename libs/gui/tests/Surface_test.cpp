@@ -21,6 +21,7 @@
 #include <gtest/gtest.h>
 
 #include <SurfaceFlingerProperties.h>
+#include <android/gui/IActivePictureListener.h>
 #include <android/gui/IDisplayEventConnection.h>
 #include <android/gui/ISurfaceComposer.h>
 #include <android/hardware/configstore/1.0/ISurfaceFlingerConfigs.h>
@@ -201,9 +202,9 @@ protected:
         releasedItems.resize(1+extraDiscardedBuffers);
         for (size_t i = 0; i < releasedItems.size(); i++) {
             ASSERT_EQ(NO_ERROR, consumer->acquireBuffer(&releasedItems[i], 0));
-            ASSERT_EQ(NO_ERROR, consumer->releaseBuffer(releasedItems[i].mSlot,
-                    releasedItems[i].mFrameNumber, EGL_NO_DISPLAY, EGL_NO_SYNC_KHR,
-                    Fence::NO_FENCE));
+            ASSERT_EQ(NO_ERROR,
+                      consumer->releaseBuffer(releasedItems[i].mSlot, releasedItems[i].mFrameNumber,
+                                              Fence::NO_FENCE));
         }
         int32_t expectedReleaseCb = (enableReleasedCb ? releasedItems.size() : 0);
         if (hasSurfaceListener) {
@@ -1012,6 +1013,15 @@ public:
     binder::Status removeJankListener(int32_t /*layerId*/,
                                       const sp<gui::IJankListener>& /*listener*/,
                                       int64_t /*afterVsync*/) override {
+        return binder::Status::ok();
+    }
+
+    binder::Status setActivePictureListener(const sp<gui::IActivePictureListener>&) {
+        return binder::Status::ok();
+    }
+
+    binder::Status getMaxLayerPictureProfiles(const sp<IBinder>& /*display*/,
+                                              int32_t* /*outMaxProfiles*/) {
         return binder::Status::ok();
     }
 

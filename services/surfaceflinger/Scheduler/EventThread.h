@@ -21,6 +21,7 @@
 #include <gui/DisplayEventReceiver.h>
 #include <private/gui/BitTube.h>
 #include <sys/types.h>
+#include <ui/DisplayId.h>
 #include <utils/Errors.h>
 
 #include <scheduler/FrameRateMode.h>
@@ -55,6 +56,7 @@ using gui::VsyncEventData;
 // ---------------------------------------------------------------------------
 
 using FrameRateOverride = DisplayEventReceiver::Event::FrameRateOverride;
+using BufferStuffingMap = ftl::SmallMap<uid_t, uint32_t, 10>;
 
 enum class VSyncRequest {
     None = -2,
@@ -106,12 +108,17 @@ public:
     // Feed clients with fake VSYNC, e.g. while the display is off.
     virtual void enableSyntheticVsync(bool) = 0;
 
+    virtual void omitVsyncDispatching(bool) = 0;
+
     virtual void onHotplugReceived(PhysicalDisplayId displayId, bool connected) = 0;
 
     virtual void onHotplugConnectionError(int32_t connectionError) = 0;
 
     // called when SF changes the active mode and apps needs to be notified about the change
     virtual void onModeChanged(const scheduler::FrameRateMode&) = 0;
+
+    // called when SF rejects the mode change request
+    virtual void onModeRejected(PhysicalDisplayId displayId, DisplayModeId modeId) = 0;
 
     // called when SF updates the Frame Rate Override list
     virtual void onFrameRateOverridesChanged(PhysicalDisplayId displayId,
@@ -134,6 +141,10 @@ public:
 
     virtual void onHdcpLevelsChanged(PhysicalDisplayId displayId, int32_t connectedLevel,
                                      int32_t maxLevel) = 0;
+
+    // An elevated number of queued buffers in the server is detected. This propagates a
+    // flag to Choreographer indicating that buffer stuffing recovery should begin.
+    virtual void addBufferStuffedUids(BufferStuffingMap bufferStuffedUids);
 };
 
 struct IEventThreadCallback {
@@ -165,11 +176,15 @@ public:
 
     void enableSyntheticVsync(bool) override;
 
+    void omitVsyncDispatching(bool) override;
+
     void onHotplugReceived(PhysicalDisplayId displayId, bool connected) override;
 
     void onHotplugConnectionError(int32_t connectionError) override;
 
     void onModeChanged(const scheduler::FrameRateMode&) override;
+
+    void onModeRejected(PhysicalDisplayId displayId, DisplayModeId modeId) override;
 
     void onFrameRateOverridesChanged(PhysicalDisplayId displayId,
                                      std::vector<FrameRateOverride> overrides) override;
@@ -183,6 +198,8 @@ public:
 
     void onHdcpLevelsChanged(PhysicalDisplayId displayId, int32_t connectedLevel,
                              int32_t maxLevel) override;
+
+    void addBufferStuffedUids(BufferStuffingMap bufferStuffedUids) override;
 
 private:
     friend EventThreadTest;
@@ -224,6 +241,10 @@ private:
     scheduler::VSyncCallbackRegistration mVsyncRegistration GUARDED_BY(mMutex);
     frametimeline::TokenManager* const mTokenManager;
 
+    // All consumers that need to recover from buffer stuffing and the number
+    // of their queued buffers.
+    BufferStuffingMap mBufferStuffedUids GUARDED_BY(mMutex);
+
     IEventThreadCallback& mCallback;
 
     std::thread mThread;
@@ -235,15 +256,14 @@ private:
 
     // VSYNC state of connected display.
     struct VSyncState {
-        explicit VSyncState(PhysicalDisplayId displayId) : displayId(displayId) {}
-
-        const PhysicalDisplayId displayId;
-
         // Number of VSYNC events since display was connected.
         uint32_t count = 0;
 
         // True if VSYNC should be faked, e.g. when display is off.
         bool synthetic = false;
+
+        // True if VSYNC should not be delivered to apps. Used when the display is off.
+        bool omitted = false;
     };
 
     // TODO(b/74619554): Create per-display threads waiting on respective VSYNC signals,

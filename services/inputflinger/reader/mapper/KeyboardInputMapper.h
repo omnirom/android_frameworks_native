@@ -16,6 +16,8 @@
 
 #pragma once
 
+#include <com_android_input_flags.h>
+
 #include "HidUsageAccumulator.h"
 #include "InputMapper.h"
 
@@ -45,7 +47,6 @@ public:
     int32_t getKeyCodeForKeyLocation(int32_t locationKeyCode) const override;
 
     int32_t getMetaState() override;
-    bool updateMetaState(int32_t keyCode) override;
     std::optional<ui::LogicalDisplayId> getAssociatedDisplayId() override;
     void updateLedState(bool reset) override;
 
@@ -86,6 +87,10 @@ private:
         bool doNotWakeByDefault{};
     } mParameters{};
 
+    // Store the value of enable wake for alphanumeric keyboard flag.
+    const bool mEnableAlphabeticKeyboardWakeFlag =
+            com::android::input::flags::enable_alphabetic_keyboard_wake();
+
     KeyboardInputMapper(InputDeviceContext& deviceContext,
                         const InputReaderConfiguration& readerConfig, uint32_t source);
     void configureParameters();
@@ -110,6 +115,8 @@ private:
     [[nodiscard]] std::list<NotifyArgs> cancelAllDownKeys(nsecs_t when);
     void onKeyDownProcessed(nsecs_t downTime);
     uint32_t getEventSource() const;
+
+    bool wakeOnAlphabeticKeyboard(const KeyboardType keyboardType) const;
 };
 
 } // namespace android

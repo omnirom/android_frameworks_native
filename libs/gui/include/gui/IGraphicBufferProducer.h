@@ -19,6 +19,7 @@
 
 #include <stdint.h>
 #include <sys/types.h>
+#include <optional>
 
 #include <utils/Errors.h>
 #include <utils/RefBase.h>
@@ -28,6 +29,7 @@
 #include <ui/BufferQueueDefs.h>
 #include <ui/Fence.h>
 #include <ui/GraphicBuffer.h>
+#include <ui/PictureProfileHandle.h>
 #include <ui/Rect.h>
 #include <ui/Region.h>
 
@@ -365,6 +367,14 @@ public:
         const HdrMetadata& getHdrMetadata() const { return hdrMetadata; }
         void setHdrMetadata(const HdrMetadata& metadata) { hdrMetadata = metadata; }
 
+        const std::optional<PictureProfileHandle>& getPictureProfileHandle() const {
+            return pictureProfileHandle;
+        }
+        void setPictureProfileHandle(const PictureProfileHandle& profile) {
+            pictureProfileHandle = profile;
+        }
+        void clearPictureProfileHandle() { pictureProfileHandle = std::nullopt; }
+
         int64_t timestamp{0};
         int isAutoTimestamp{0};
         android_dataspace dataSpace{HAL_DATASPACE_UNKNOWN};
@@ -377,6 +387,7 @@ public:
         bool getFrameTimestamps{false};
         int slot{-1};
         HdrMetadata hdrMetadata;
+        std::optional<PictureProfileHandle> pictureProfileHandle;
     };
 
     struct QueueBufferOutput : public Flattenable<QueueBufferOutput> {
@@ -403,7 +414,7 @@ public:
         uint64_t nextFrameNumber{0};
         FrameEventHistoryDelta frameTimestamps;
         bool bufferReplaced{false};
-        int maxBufferCount{0};
+        int maxBufferCount{BufferQueueDefs::NUM_BUFFER_SLOTS};
         status_t result{NO_ERROR};
     };
 

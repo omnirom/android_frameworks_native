@@ -108,20 +108,33 @@ public:
     using is_gtest_matcher = void;
     explicit WithMotionActionMatcher(int32_t action) : mAction(action) {}
 
-    bool MatchAndExplain(const NotifyMotionArgs& args, std::ostream*) const {
-        bool matches = mAction == args.action;
-        if (args.action == AMOTION_EVENT_ACTION_CANCEL) {
-            matches &= (args.flags & AMOTION_EVENT_FLAG_CANCELED) != 0;
+    bool MatchAndExplain(const NotifyMotionArgs& args,
+                         testing::MatchResultListener* listener) const {
+        if (mAction != args.action) {
+            *listener << "expected " << MotionEvent::actionToString(mAction) << ", but got "
+                      << MotionEvent::actionToString(args.action);
+            return false;
         }
-        return matches;
+        if (args.action == AMOTION_EVENT_ACTION_CANCEL &&
+            (args.flags & AMOTION_EVENT_FLAG_CANCELED) == 0) {
+            *listener << "event with CANCEL action is missing FLAG_CANCELED";
+            return false;
+        }
+        return true;
     }
 
-    bool MatchAndExplain(const MotionEvent& event, std::ostream*) const {
-        bool matches = mAction == event.getAction();
-        if (event.getAction() == AMOTION_EVENT_ACTION_CANCEL) {
-            matches &= (event.getFlags() & AMOTION_EVENT_FLAG_CANCELED) != 0;
+    bool MatchAndExplain(const MotionEvent& event, testing::MatchResultListener* listener) const {
+        if (mAction != event.getAction()) {
+            *listener << "expected " << MotionEvent::actionToString(mAction) << ", but got "
+                      << MotionEvent::actionToString(event.getAction());
+            return false;
         }
-        return matches;
+        if (event.getAction() == AMOTION_EVENT_ACTION_CANCEL &&
+            (event.getFlags() & AMOTION_EVENT_FLAG_CANCELED) == 0) {
+            *listener << "event with CANCEL action is missing FLAG_CANCELED";
+            return false;
+        }
+        return true;
     }
 
     void DescribeTo(std::ostream* os) const {
@@ -538,6 +551,34 @@ private:
 
 inline WithKeyCodeMatcher WithKeyCode(int32_t keyCode) {
     return WithKeyCodeMatcher(keyCode);
+}
+
+/// Scan code
+class WithScanCodeMatcher {
+public:
+    using is_gtest_matcher = void;
+    explicit WithScanCodeMatcher(int32_t scanCode) : mScanCode(scanCode) {}
+
+    bool MatchAndExplain(const NotifyKeyArgs& args, std::ostream*) const {
+        return mScanCode == args.scanCode;
+    }
+
+    bool MatchAndExplain(const KeyEvent& event, std::ostream*) const {
+        return mScanCode == event.getKeyCode();
+    }
+
+    void DescribeTo(std::ostream* os) const {
+        *os << "with scan code " << KeyEvent::getLabel(mScanCode);
+    }
+
+    void DescribeNegationTo(std::ostream* os) const { *os << "wrong scan code"; }
+
+private:
+    const int32_t mScanCode;
+};
+
+inline WithScanCodeMatcher WithScanCode(int32_t scanCode) {
+    return WithScanCodeMatcher(scanCode);
 }
 
 /// EventId

@@ -234,8 +234,7 @@ void StreamSplitter::onBufferReleasedByOutput(
     LOG_ALWAYS_FATAL_IF(status != NO_ERROR,
             "attaching buffer to input failed (%d)", status);
 
-    status = mInput->releaseBuffer(consumerSlot, /* frameNumber */ 0,
-            EGL_NO_DISPLAY, EGL_NO_SYNC_KHR, tracker->getMergedFence());
+    status = mInput->releaseBuffer(consumerSlot, /* frameNumber */ 0, tracker->getMergedFence());
     LOG_ALWAYS_FATAL_IF(status != NO_ERROR,
             "releasing buffer to input failed (%d)", status);
 

@@ -68,6 +68,15 @@ class NonNull final {
   constexpr NonNull(const NonNull&) = default;
   constexpr NonNull& operator=(const NonNull&) = default;
 
+  template <typename U, typename = std::enable_if_t<std::is_convertible_v<U, Pointer>>>
+  constexpr NonNull(const NonNull<U>& other) : pointer_(other.get()) {}
+
+  template <typename U, typename = std::enable_if_t<std::is_convertible_v<U, Pointer>>>
+  constexpr NonNull& operator=(const NonNull<U>& other) {
+    pointer_ = other.get();
+    return *this;
+  }
+
   [[nodiscard]] constexpr const Pointer& get() const { return pointer_; }
   [[nodiscard]] constexpr explicit operator const Pointer&() const { return get(); }
 

@@ -49,6 +49,8 @@ interface IServiceManager {
              DUMP_FLAG_PRIORITY_CRITICAL | DUMP_FLAG_PRIORITY_HIGH
              | DUMP_FLAG_PRIORITY_NORMAL | DUMP_FLAG_PRIORITY_DEFAULT;
 
+    const int FLAG_IS_LAZY_SERVICE = 1 << 30;
+
     /* Allows services to dump sections in protobuf format. */
     const int DUMP_FLAG_PROTO = 1 << 4;
 
@@ -61,7 +63,8 @@ interface IServiceManager {
      *
      * Returns null if the service does not exist.
      *
-     * @deprecated TODO(b/355394904): Use getService2 instead.
+     * @deprecated TODO(b/355394904): Use getService2 instead. This does not return metadata
+     * that is included in ServiceWithMetadata
      */
     @UnsupportedAppUsage
     @nullable IBinder getService(@utf8InCpp String name);

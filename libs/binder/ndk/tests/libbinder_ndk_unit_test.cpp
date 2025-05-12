@@ -1108,6 +1108,37 @@ TEST(NdkBinder_ScopedAResource, Release) {
     EXPECT_EQ(deleteCount, 0);
 }
 
+void* EmptyOnCreate(void* args) {
+    return args;
+}
+void EmptyOnDestroy(void* /*userData*/) {}
+binder_status_t EmptyOnTransact(AIBinder* /*binder*/, transaction_code_t /*code*/,
+                                const AParcel* /*in*/, AParcel* /*out*/) {
+    return STATUS_OK;
+}
+
+TEST(NdkBinder_DeathTest, SetCodeMapTwice) {
+    const char* codeToFunction1[] = {"function-1", "function-2", "function-3"};
+    const char* codeToFunction2[] = {"function-4", "function-5"};
+    const char* interfaceName = "interface_descriptor";
+    AIBinder_Class* clazz =
+            AIBinder_Class_define(interfaceName, EmptyOnCreate, EmptyOnDestroy, EmptyOnTransact);
+    AIBinder_Class_setTransactionCodeToFunctionNameMap(clazz, codeToFunction1, 3);
+    // Reset/clear is not allowed
+    EXPECT_DEATH(AIBinder_Class_setTransactionCodeToFunctionNameMap(clazz, codeToFunction2, 2), "");
+}
+
+TEST(NdkBinder_DeathTest, SetNullCodeMap) {
+    const char* codeToFunction[] = {"function-1", "function-2", "function-3"};
+    const char* interfaceName = "interface_descriptor";
+    AIBinder_Class* clazz =
+            AIBinder_Class_define(interfaceName, EmptyOnCreate, EmptyOnDestroy, EmptyOnTransact);
+    EXPECT_DEATH(AIBinder_Class_setTransactionCodeToFunctionNameMap(nullptr, codeToFunction, 3),
+                 "");
+    EXPECT_DEATH(AIBinder_Class_setTransactionCodeToFunctionNameMap(clazz, nullptr, 0), "");
+    EXPECT_DEATH(AIBinder_Class_setTransactionCodeToFunctionNameMap(nullptr, nullptr, 0), "");
+}
+
 int main(int argc, char* argv[]) {
     ::testing::InitGoogleTest(&argc, argv);
 

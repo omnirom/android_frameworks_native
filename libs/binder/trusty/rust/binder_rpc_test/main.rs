@@ -19,7 +19,7 @@ use binder::{BinderFeatures, IBinder, Status, StatusCode, Strong};
 use binder_rpc_test_aidl::aidl::IBinderRpcSession::{BnBinderRpcSession, IBinderRpcSession};
 use binder_rpc_test_aidl::aidl::IBinderRpcTest::{BnBinderRpcTest, IBinderRpcTest};
 use binder_rpc_test_session::MyBinderRpcSession;
-use libc::{clock_gettime, CLOCK_REALTIME};
+use libc::{clock_gettime, CLOCK_BOOTTIME};
 use rpcbinder::RpcSession;
 use trusty_std::ffi::{CString, FallibleCString};
 
@@ -56,7 +56,7 @@ fn get_time_ns() -> u64 {
     let mut ts = libc::timespec { tv_sec: 0, tv_nsec: 0 };
 
     // Safety: Passing valid pointer to variable ts which lives past end of call
-    assert_eq!(unsafe { clock_gettime(CLOCK_REALTIME, &mut ts) }, 0);
+    assert_eq!(unsafe { clock_gettime(CLOCK_BOOTTIME, &mut ts) }, 0);
 
     ts.tv_sec as u64 * 1_000_000_000u64 + ts.tv_nsec as u64
 }

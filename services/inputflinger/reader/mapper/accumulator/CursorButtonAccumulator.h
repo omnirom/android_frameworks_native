@@ -41,6 +41,8 @@ public:
     inline bool isExtraPressed() const { return mBtnExtra; }
     inline bool isTaskPressed() const { return mBtnTask; }
 
+    void setSwapLeftRightButtons(bool shouldSwap);
+
 private:
     bool mBtnLeft;
     bool mBtnRight;
@@ -50,6 +52,8 @@ private:
     bool mBtnForward;
     bool mBtnExtra;
     bool mBtnTask;
+
+    bool mSwapLeftRightButtons = false;
 
     void clearButtons();
 };

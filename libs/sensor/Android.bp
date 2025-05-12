@@ -69,6 +69,7 @@ cc_library {
 
     static_libs: [
         "libsensor_flags_c_lib",
+        "android.permission.flags-aconfig-cc",
     ],
 
     export_include_dirs: ["include"],

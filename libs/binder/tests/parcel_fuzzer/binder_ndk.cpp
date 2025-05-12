@@ -20,8 +20,11 @@
 #include "aidl/parcelables/GenericDataParcelable.h"
 #include "aidl/parcelables/SingleDataParcelable.h"
 
+#include <android/binder_libbinder.h>
 #include <android/binder_parcel_utils.h>
 #include <android/binder_parcelable_utils.h>
+#include <fuzzbinder/random_binder.h>
+#include <fuzzbinder/random_fd.h>
 
 #include "util.h"
 
@@ -49,7 +52,8 @@ static binder_status_t onTransact(AIBinder*, transaction_code_t, const AParcel*,
     return STATUS_UNKNOWN_TRANSACTION;
 }
 
-static AIBinder_Class* g_class = ::ndk::ICInterface::defineClass("ISomeInterface", onTransact);
+static AIBinder_Class* g_class =
+        ::ndk::ICInterface::defineClass("ISomeInterface", onTransact, nullptr, 0);
 
 class BpSomeInterface : public ::ndk::BpCInterface<ISomeInterface> {
 public:
@@ -210,16 +214,51 @@ std::vector<ParcelRead<NdkParcelAdapter>> BINDER_NDK_PARCEL_READ_FUNCTIONS{
             binder_status_t status = AParcel_marshal(p.aParcel(), buffer, start, len);
             FUZZ_LOG() << "status: " << status;
         },
-        [](const NdkParcelAdapter& /*p*/, FuzzedDataProvider& provider) {
-            FUZZ_LOG() << "about to unmarshal AParcel";
+};
+std::vector<ParcelWrite<NdkParcelAdapter>> BINDER_NDK_PARCEL_WRITE_FUNCTIONS{
+        [] (NdkParcelAdapter& p, FuzzedDataProvider& provider, android::RandomParcelOptions* options) {
+            FUZZ_LOG() << "about to call AParcel_writeStrongBinder";
+
+            // TODO: this logic is somewhat duplicated with random parcel
+            android::sp<android::IBinder> binder;
+            if (provider.ConsumeBool() && options->extraBinders.size() > 0) {
+                binder = options->extraBinders.at(
+                        provider.ConsumeIntegralInRange<size_t>(0, options->extraBinders.size() - 1));
+            } else {
+                binder = android::getRandomBinder(&provider);
+                options->extraBinders.push_back(binder);
+            }
+
+            ndk::SpAIBinder abinder = ndk::SpAIBinder(AIBinder_fromPlatformBinder(binder));
+            AParcel_writeStrongBinder(p.aParcel(), abinder.get());
+        },
+        [] (NdkParcelAdapter& p, FuzzedDataProvider& provider, android::RandomParcelOptions* options) {
+            FUZZ_LOG() << "about to call AParcel_writeParcelFileDescriptor";
+
+            auto fds = android::getRandomFds(&provider);
+            if (fds.size() == 0) return;
+
+            AParcel_writeParcelFileDescriptor(p.aParcel(), fds.at(0).get());
+            options->extraFds.insert(options->extraFds.end(),
+                 std::make_move_iterator(fds.begin() + 1),
+                 std::make_move_iterator(fds.end()));
+        },
+        // all possible data writes can be done as a series of 4-byte reads
+        [] (NdkParcelAdapter& p, FuzzedDataProvider& provider, android::RandomParcelOptions* /*options*/) {
+            FUZZ_LOG() << "about to call AParcel_writeInt32";
+            int32_t val = provider.ConsumeIntegral<int32_t>();
+            AParcel_writeInt32(p.aParcel(), val);
+        },
+        [] (NdkParcelAdapter& p, FuzzedDataProvider& /* provider */, android::RandomParcelOptions* /*options*/) {
+            FUZZ_LOG() << "about to call AParcel_reset";
+            AParcel_reset(p.aParcel());
+        },
+        [](NdkParcelAdapter& p, FuzzedDataProvider& provider, android::RandomParcelOptions* /*options*/) {
+            FUZZ_LOG() << "about to call AParcel_unmarshal";
             size_t len = provider.ConsumeIntegralInRange<size_t>(0, provider.remaining_bytes());
-            std::vector<uint8_t> parcelData = provider.ConsumeBytes<uint8_t>(len);
-            const uint8_t* buffer = parcelData.data();
-            const size_t bufferLen = parcelData.size();
-            NdkParcelAdapter adapter;
-            binder_status_t status = AParcel_unmarshal(adapter.aParcel(), buffer, bufferLen);
+            std::vector<uint8_t> data = provider.ConsumeBytes<uint8_t>(len);
+            binder_status_t status = AParcel_unmarshal(p.aParcel(), data.data(), data.size());
             FUZZ_LOG() << "status: " << status;
         },
-
 };
 // clang-format on

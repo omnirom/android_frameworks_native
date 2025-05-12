@@ -17,7 +17,8 @@
 #undef LOG_TAG
 #define LOG_TAG "PowerAdvisorTest"
 
-#include <DisplayHardware/PowerAdvisor.h>
+#include "PowerAdvisor/PowerAdvisor.h"
+
 #include <android_os.h>
 #include <binder/Status.h>
 #include <com_android_graphics_surfaceflinger_flags.h>
@@ -29,18 +30,17 @@
 #include <ui/DisplayId.h>
 #include <chrono>
 #include <future>
-#include "TestableSurfaceFlinger.h"
-#include "mock/DisplayHardware/MockPowerHalController.h"
-#include "mock/DisplayHardware/MockPowerHintSessionWrapper.h"
+#include "mock/PowerAdvisor/MockPowerHalController.h"
+#include "mock/PowerAdvisor/MockPowerHintSessionWrapper.h"
 
 using namespace android;
-using namespace android::Hwc2::mock;
+using namespace android::adpf::mock;
 using namespace android::hardware::power;
 using namespace std::chrono_literals;
 using namespace testing;
 using namespace android::power;
 
-namespace android::Hwc2::impl {
+namespace android::adpf::impl {
 
 class PowerAdvisorTest : public testing::Test {
 public:
@@ -73,7 +73,6 @@ public:
     void testGpuScenario(GpuTestConfig& config, WorkDuration& ret);
 
 protected:
-    TestableSurfaceFlinger mFlinger;
     std::unique_ptr<PowerAdvisor> mPowerAdvisor;
     MockPowerHalController* mMockPowerHalController;
     std::shared_ptr<MockPowerHintSessionWrapper> mMockPowerHintSession;
@@ -85,6 +84,7 @@ protected:
     int64_t mSessionId = 123;
     SET_FLAG_FOR_TEST(android::os::adpf_use_fmq_channel, true);
     SET_FLAG_FOR_TEST(android::os::adpf_use_fmq_channel_fixed, false);
+    SET_FLAG_FOR_TEST(com::android::graphics::surfaceflinger::flags::adpf_fmq_sf, false);
 };
 
 bool PowerAdvisorTest::sessionExists() {
@@ -97,7 +97,7 @@ int64_t PowerAdvisorTest::toNanos(Duration d) {
 }
 
 void PowerAdvisorTest::SetUp() {
-    mPowerAdvisor = std::make_unique<impl::PowerAdvisor>(*mFlinger.flinger());
+    mPowerAdvisor = std::make_unique<impl::PowerAdvisor>([]() {}, 80ms);
     mPowerAdvisor->mPowerHal = std::make_unique<NiceMock<MockPowerHalController>>();
     mMockPowerHalController =
             reinterpret_cast<MockPowerHalController*>(mPowerAdvisor->mPowerHal.get());
@@ -184,6 +184,7 @@ void PowerAdvisorTest::testGpuScenario(GpuTestConfig& config, WorkDuration& ret)
     SET_FLAG_FOR_TEST(com::android::graphics::surfaceflinger::flags::adpf_gpu_sf,
                       config.adpfGpuFlagOn);
     SET_FLAG_FOR_TEST(android::os::adpf_use_fmq_channel_fixed, config.usesFmq);
+    SET_FLAG_FOR_TEST(com::android::graphics::surfaceflinger::flags::adpf_fmq_sf, config.usesFmq);
     mPowerAdvisor->onBootFinished();
     bool expectsFmqSuccess = config.usesSharedFmqFlag && !config.fmqFull;
     if (config.usesFmq) {
@@ -789,6 +790,7 @@ TEST_F(PowerAdvisorTest, fmq_sendTargetAndActualDuration_queueFull) {
 
 TEST_F(PowerAdvisorTest, fmq_sendHint) {
     SET_FLAG_FOR_TEST(android::os::adpf_use_fmq_channel_fixed, true);
+    SET_FLAG_FOR_TEST(com::android::graphics::surfaceflinger::flags::adpf_fmq_sf, true);
     mPowerAdvisor->onBootFinished();
     SetUpFmq(true, false);
     auto startTime = uptimeNanos();
@@ -807,6 +809,7 @@ TEST_F(PowerAdvisorTest, fmq_sendHint) {
 
 TEST_F(PowerAdvisorTest, fmq_sendHint_noSharedFlag) {
     SET_FLAG_FOR_TEST(android::os::adpf_use_fmq_channel_fixed, true);
+    SET_FLAG_FOR_TEST(com::android::graphics::surfaceflinger::flags::adpf_fmq_sf, true);
     mPowerAdvisor->onBootFinished();
     SetUpFmq(false, false);
     SessionHint hint;
@@ -821,6 +824,7 @@ TEST_F(PowerAdvisorTest, fmq_sendHint_noSharedFlag) {
 
 TEST_F(PowerAdvisorTest, fmq_sendHint_queueFull) {
     SET_FLAG_FOR_TEST(android::os::adpf_use_fmq_channel_fixed, true);
+    SET_FLAG_FOR_TEST(com::android::graphics::surfaceflinger::flags::adpf_fmq_sf, true);
     mPowerAdvisor->onBootFinished();
     SetUpFmq(true, true);
     ASSERT_EQ(mBackendFmq->availableToRead(), 2uL);
@@ -839,4 +843,4 @@ TEST_F(PowerAdvisorTest, fmq_sendHint_queueFull) {
 }
 
 } // namespace
-} // namespace android::Hwc2::impl
+} // namespace android::adpf::impl

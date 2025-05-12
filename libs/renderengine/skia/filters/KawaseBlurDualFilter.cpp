@@ -96,13 +96,17 @@ void KawaseBlurDualFilter::blurInto(const sk_sp<SkSurface>& drawSurface,
 void KawaseBlurDualFilter::blurInto(const sk_sp<SkSurface>& drawSurface, sk_sp<SkShader> input,
                                     const float inverseScale, const float radius,
                                     const float alpha) const {
-    SkRuntimeShaderBuilder blurBuilder(mBlurEffect);
-    blurBuilder.child("child") = std::move(input);
-    blurBuilder.uniform("in_inverseScale") = inverseScale;
-    blurBuilder.uniform("in_blurOffset") = radius;
-    blurBuilder.uniform("in_crossFade") = alpha;
     SkPaint paint;
-    paint.setShader(blurBuilder.makeShader(nullptr));
+    if (radius == 0) {
+        paint.setShader(std::move(input));
+        paint.setAlphaf(alpha);
+    } else {
+        SkRuntimeShaderBuilder blurBuilder(mBlurEffect);
+        blurBuilder.child("child") = std::move(input);
+        blurBuilder.uniform("in_blurOffset") = radius;
+        blurBuilder.uniform("in_crossFade") = alpha;
+        paint.setShader(blurBuilder.makeShader(nullptr));
+    }
     paint.setBlendMode(alpha == 1.0f ? SkBlendMode::kSrc : SkBlendMode::kSrcOver);
     drawSurface->getCanvas()->drawPaint(paint);
 }
@@ -116,32 +120,35 @@ sk_sp<SkImage> KawaseBlurDualFilter::generate(SkiaGpuContext* context, const uin
 
     // Use a variable number of blur passes depending on the radius. The non-integer part of this
     // calculation is used to mix the final pass into the second-last with an alpha blend.
-    constexpr int kMaxSurfaces = 4;
-    const float filterDepth =
-            std::min(kMaxSurfaces - 1.0f, 1.0f + std::max(0.0f, log2f(radius * kInputScale)));
+    constexpr int kMaxSurfaces = 3;
+    const float filterDepth = std::min(kMaxSurfaces - 1.0f, radius * kInputScale / 2.5f);
     const int filterPasses = std::min(kMaxSurfaces - 1, static_cast<int>(ceil(filterDepth)));
 
-    // Render into surfaces downscaled by 1x, 1x, 2x, and 4x from the initial downscale.
+    // Render into surfaces downscaled by 1x, 2x, and 4x from the initial downscale.
     sk_sp<SkSurface> surfaces[kMaxSurfaces] =
             {filterPasses >= 0 ? makeSurface(context, blurRect, 1 * kInverseInputScale) : nullptr,
-             filterPasses >= 1 ? makeSurface(context, blurRect, 1 * kInverseInputScale) : nullptr,
-             filterPasses >= 2 ? makeSurface(context, blurRect, 2 * kInverseInputScale) : nullptr,
-             filterPasses >= 3 ? makeSurface(context, blurRect, 4 * kInverseInputScale) : nullptr};
+             filterPasses >= 1 ? makeSurface(context, blurRect, 2 * kInverseInputScale) : nullptr,
+             filterPasses >= 2 ? makeSurface(context, blurRect, 4 * kInverseInputScale) : nullptr};
 
-    // These weights for scaling offsets per-pass are handpicked to look good at 1 <= radius <= 600.
-    static const float kWeights[7] = {1.0f, 2.0f, 3.5f, 1.0f, 2.0f, 2.0f, 2.0f};
+    // These weights for scaling offsets per-pass are handpicked to look good at 1 <= radius <= 250.
+    static const float kWeights[5] = {
+            1.0f, // 1st downsampling pass
+            1.0f, // 2nd downsampling pass
+            1.0f, // 3rd downsampling pass
+            0.0f, // 1st upscaling pass. Set to zero to upscale without blurring for performance.
+            1.0f, // 2nd upscaling pass
+    };
 
     // Kawase is an approximation of Gaussian, but behaves differently because it is made up of many
     // simpler blurs. A transformation is required to approximate the same effect as Gaussian.
-    float sumSquaredR = powf(kWeights[0] * powf(2.0f, 1), 2.0f);
+    float sumSquaredR = powf(kWeights[0], 2.0f);
     for (int i = 0; i < filterPasses; i++) {
         const float alpha = std::min(1.0f, filterDepth - i);
-        sumSquaredR += powf(powf(2.0f, i + 1) * alpha * kWeights[1 + i], 2.0f);
-        sumSquaredR += powf(powf(2.0f, i + 1) * alpha * kWeights[6 - i], 2.0f);
+        sumSquaredR += powf(powf(2.0f, i) * alpha * kWeights[1 + i] / kInputScale, 2.0f);
+        sumSquaredR += powf(powf(2.0f, i + 1) * alpha * kWeights[4 - i] / kInputScale, 2.0f);
     }
-    // Solve for R = sqrt(sum(r_i^2)). Divide R by hypot(1,1) to find some (x,y) offsets.
-    const float step = M_SQRT1_2 *
-            sqrtf(max(0.0f, (powf(radius, 2.0f) - powf(kInverseInputScale, 2.0f)) / sumSquaredR));
+    // Solve for R = sqrt(sum(r_i^2)).
+    const float step = radius * sqrt(1.0f / sumSquaredR);
 
     // Start by downscaling and doing the first blur pass.
     {
@@ -162,7 +169,7 @@ sk_sp<SkImage> KawaseBlurDualFilter::generate(SkiaGpuContext* context, const uin
     }
     // Finally blur+upscale back to our original size.
     for (int i = filterPasses - 1; i >= 0; i--) {
-        blurInto(surfaces[i], surfaces[i + 1]->makeImageSnapshot(), kWeights[6 - i] * step,
+        blurInto(surfaces[i], surfaces[i + 1]->makeImageSnapshot(), kWeights[4 - i] * step,
                  std::min(1.0f, filterDepth - i));
     }
     return surfaces[0]->makeImageSnapshot();

@@ -843,6 +843,44 @@ enum {
     AKEYCODE_EMOJI_PICKER = 317,
     /** Take Screenshot */
     AKEYCODE_SCREENSHOT = 318,
+    /** To start dictate to an input field */
+    AKEYCODE_DICTATE = 319,
+    /** AC New */
+    AKEYCODE_NEW = 320,
+    /** AC Close */
+    AKEYCODE_CLOSE = 321,
+    /** To toggle 'Do Not Disturb' mode */
+    AKEYCODE_DO_NOT_DISTURB = 322,
+    /** To Print */
+    AKEYCODE_PRINT = 323,
+    /** To Lock the screen */
+    AKEYCODE_LOCK = 324,
+    /** To toggle fullscreen mode (on the current application) */
+    AKEYCODE_FULLSCREEN = 325,
+    /** F13 key */
+    AKEYCODE_F13 = 326,
+    /** F14 key */
+    AKEYCODE_F14 = 327,
+    /** F15 key */
+    AKEYCODE_F15 = 328,
+    /** F16 key */
+    AKEYCODE_F16 = 329,
+    /** F17 key */
+    AKEYCODE_F17 = 330,
+    /** F18 key */
+    AKEYCODE_F18 = 331,
+    /** F19 key */
+    AKEYCODE_F19 = 332,
+    /** F20 key */
+    AKEYCODE_F20 = 333,
+    /** F21 key */
+    AKEYCODE_F21 = 334,
+    /** F22 key */
+    AKEYCODE_F22 = 335,
+    /** F23 key */
+    AKEYCODE_F23 = 336,
+    /** F24 key */
+    AKEYCODE_F24 = 337,
 
     // NOTE: If you add a new keycode here you must also add it to several other files.
     //       Refer to frameworks/base/core/java/android/view/KeyEvent.java for the full list.

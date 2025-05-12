@@ -151,8 +151,10 @@ int RpcServerTrusty::handleMessage(const tipc_port* /*port*/, handle_t /*chan*/,
 
 int RpcServerTrusty::handleMessageInternal(void* ctx) {
     auto* channelContext = reinterpret_cast<ChannelContext*>(ctx);
-    LOG_ALWAYS_FATAL_IF(channelContext == nullptr,
-                        "bad state: message received on uninitialized channel");
+    if (channelContext == nullptr) {
+        LOG_RPC_DETAIL("bad state: message received on uninitialized channel");
+        return ERR_BAD_STATE;
+    }
 
     auto& session = channelContext->session;
     auto& connection = channelContext->connection;

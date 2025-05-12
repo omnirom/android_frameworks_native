@@ -17,9 +17,12 @@
 #ifndef ANDROID_GUI_BUFFERITEM_H
 #define ANDROID_GUI_BUFFERITEM_H
 
+#include <optional>
+
 #include <gui/HdrMetadata.h>
 
 #include <ui/FenceTime.h>
+#include <ui/PictureProfileHandle.h>
 #include <ui/Rect.h>
 #include <ui/Region.h>
 
@@ -90,6 +93,10 @@ class BufferItem : public Flattenable<BufferItem> {
 
     // mHdrMetadata is the HDR metadata associated with this buffer slot.
     HdrMetadata mHdrMetadata;
+
+    // mPictureProfileHandle is a handle that points to a set of parameters that configure picture
+    // processing hardware to enhance the quality of buffer contents.
+    std::optional<PictureProfileHandle> mPictureProfileHandle;
 
     // mFrameNumber is the number of the queued frame for this slot.
     uint64_t mFrameNumber;

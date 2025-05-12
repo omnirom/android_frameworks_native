@@ -109,10 +109,6 @@ int32_t InputMapper::getMetaState() {
     return 0;
 }
 
-bool InputMapper::updateMetaState(int32_t keyCode) {
-    return false;
-}
-
 std::list<NotifyArgs> InputMapper::updateExternalStylusState(const StylusState& state) {
     return {};
 }

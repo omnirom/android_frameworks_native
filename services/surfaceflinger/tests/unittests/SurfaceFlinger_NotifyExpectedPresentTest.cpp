@@ -18,12 +18,13 @@
 #define LOG_TAG "LibSurfaceFlingerUnittests"
 
 #include <gui/SurfaceComposerClient.h>
+#include "DisplayHardware/Hal.h"
 #include "DisplayTransactionTestHelpers.h"
 
 namespace android {
 
 using FakeHwcDisplayInjector = TestableSurfaceFlinger::FakeHwcDisplayInjector;
-using android::hardware::graphics::composer::V2_1::Error;
+using android::hardware::graphics::composer::hal::Error;
 
 class NotifyExpectedPresentTest : public DisplayTransactionTest {
 public:

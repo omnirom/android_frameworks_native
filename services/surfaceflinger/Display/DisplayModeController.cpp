@@ -28,6 +28,7 @@
 #include <ftl/concat.h>
 #include <ftl/expected.h>
 #include <log/log.h>
+#include <utils/Errors.h>
 
 namespace android::display {
 
@@ -177,12 +178,13 @@ void DisplayModeController::clearDesiredMode(PhysicalDisplayId displayId) {
     }
 }
 
-bool DisplayModeController::initiateModeChange(PhysicalDisplayId displayId,
-                                               DisplayModeRequest&& desiredMode,
-                                               const hal::VsyncPeriodChangeConstraints& constraints,
-                                               hal::VsyncPeriodChangeTimeline& outTimeline) {
+auto DisplayModeController::initiateModeChange(
+        PhysicalDisplayId displayId, DisplayModeRequest&& desiredMode,
+        const hal::VsyncPeriodChangeConstraints& constraints,
+        hal::VsyncPeriodChangeTimeline& outTimeline) -> ModeChangeResult {
     std::lock_guard lock(mDisplayLock);
-    const auto& displayPtr = FTL_EXPECT(mDisplays.get(displayId).ok_or(false)).get();
+    const auto& displayPtr =
+            FTL_EXPECT(mDisplays.get(displayId).ok_or(ModeChangeResult::Aborted)).get();
 
     // TODO: b/255635711 - Flow the DisplayModeRequest through the desired/pending/active states.
     // For now, `desiredMode` and `desiredModeOpt` are one and the same, but the latter is not
@@ -201,13 +203,17 @@ bool DisplayModeController::initiateModeChange(PhysicalDisplayId displayId,
 
     const auto& mode = *displayPtr->pendingModeOpt->mode.modePtr;
 
-    if (mComposerPtr->setActiveModeWithConstraints(displayId, mode.getHwcId(), constraints,
-                                                   &outTimeline) != OK) {
-        return false;
+    const auto error = mComposerPtr->setActiveModeWithConstraints(displayId, mode.getHwcId(),
+                                                                  constraints, &outTimeline);
+    switch (error) {
+        case FAILED_TRANSACTION:
+            return ModeChangeResult::Rejected;
+        case OK:
+            SFTRACE_INT(displayPtr->pendingModeFpsTrace.c_str(), mode.getVsyncRate().getIntValue());
+            return ModeChangeResult::Changed;
+        default:
+            return ModeChangeResult::Aborted;
     }
-
-    SFTRACE_INT(displayPtr->pendingModeFpsTrace.c_str(), mode.getVsyncRate().getIntValue());
-    return true;
 }
 
 void DisplayModeController::finalizeModeChange(PhysicalDisplayId displayId, DisplayModeId modeId,
@@ -283,6 +289,8 @@ void DisplayModeController::updateKernelIdleTimer(PhysicalDisplayId displayId,
     }
 }
 
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wunused-value" // b/369277774
 auto DisplayModeController::getKernelIdleTimerState(PhysicalDisplayId displayId) const
         -> KernelIdleTimerState {
     std::lock_guard lock(mDisplayLock);
@@ -298,4 +306,5 @@ auto DisplayModeController::getKernelIdleTimerState(PhysicalDisplayId displayId)
     return {desiredModeIdOpt, displayPtr->isKernelIdleTimerEnabled};
 }
 
+#pragma clang diagnostic pop
 } // namespace android::display

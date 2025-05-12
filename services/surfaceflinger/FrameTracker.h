@@ -41,8 +41,6 @@ public:
     // frame time history.
     enum { NUM_FRAME_RECORDS = 128 };
 
-    enum { NUM_FRAME_BUCKETS = 7 };
-
     FrameTracker();
 
     // setDesiredPresentTime sets the time at which the current frame
@@ -141,13 +139,6 @@ private:
     // The number of fences is tracked so that the run time of processFences
     // doesn't grow with NUM_FRAME_RECORDS.
     int mNumFences;
-
-    // mNumFrames keeps a count of the number of frames with a duration in a
-    // particular range of vsync periods.  Element n of the array stores the
-    // number of frames with duration in the half-inclusive range
-    // [2^n, 2^(n+1)).  The last element of the array contains the count for
-    // all frames with duration greater than 2^(NUM_FRAME_BUCKETS-1).
-    int32_t mNumFrames[NUM_FRAME_BUCKETS];
 
     // mDisplayPeriod is the display refresh period of the display for which
     // this FrameTracker is gathering information.

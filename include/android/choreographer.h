@@ -318,7 +318,7 @@ size_t AChoreographerFrameCallbackData_getPreferredFrameTimelineIndex(
 
 /**
  * Gets the token used by the platform to identify the frame timeline at the given \c index.
- * q
+ *
  * Available since API level 33.
  *
  * \param index index of a frame timeline, in \f( [0, FrameTimelinesLength) \f). See

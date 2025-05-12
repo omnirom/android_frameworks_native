@@ -16,6 +16,8 @@
 
 #pragma once
 
+#include <ftl/future.h>
+#include <ftl/optional.h>
 #include <cstdint>
 #include <iterator>
 #include <optional>
@@ -26,18 +28,18 @@
 #include <vector>
 
 #include <compositionengine/LayerFE.h>
-#include <ftl/future.h>
 #include <renderengine/LayerSettings.h>
+#include <ui/DisplayIdentification.h>
 #include <ui/Fence.h>
 #include <ui/FenceTime.h>
 #include <ui/GraphicTypes.h>
 #include <ui/LayerStack.h>
+#include <ui/PictureProfileHandle.h>
 #include <ui/Region.h>
 #include <ui/Transform.h>
 #include <utils/StrongPointer.h>
 #include <utils/Vector.h>
 
-#include <ui/DisplayIdentification.h>
 #include "DisplayHardware/HWComposer.h"
 
 namespace android {
@@ -167,7 +169,7 @@ public:
     virtual bool isValid() const = 0;
 
     // Returns the DisplayId the output represents, if it has one
-    virtual std::optional<DisplayId> getDisplayId() const = 0;
+    virtual ftl::Optional<DisplayId> getDisplayId() const = 0;
 
     // Enables (or disables) composition on this output
     virtual void setCompositionEnabled(bool) = 0;
@@ -329,6 +331,11 @@ protected:
     virtual bool isPowerHintSessionGpuReportingEnabled() = 0;
     virtual void cacheClientCompositionRequests(uint32_t cacheSize) = 0;
     virtual bool canPredictCompositionStrategy(const CompositionRefreshArgs&) = 0;
+    virtual const aidl::android::hardware::graphics::composer3::OverlayProperties*
+    getOverlaySupport() = 0;
+    virtual bool hasPictureProcessing() const = 0;
+    virtual int32_t getMaxLayerPictureProfiles() const = 0;
+    virtual void applyPictureProfile() = 0;
 };
 
 } // namespace compositionengine

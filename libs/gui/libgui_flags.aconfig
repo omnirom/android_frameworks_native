@@ -2,6 +2,14 @@ package: "com.android.graphics.libgui.flags"
 container: "system"
 
 flag {
+  name: "apply_picture_profiles"
+  namespace: "tv_os_media"
+  description: "This flag controls sending picture profiles from BBQ to Composer HAL"
+  bug: "337330263"
+  is_fixed_read_only: true
+} # apply_picture_profiles
+
+flag {
   name: "bq_setframerate"
   namespace: "core_graphics"
   description: "This flag controls plumbing setFrameRate thru BufferQueue"
@@ -109,9 +117,25 @@ flag {
 } # wb_libcameraservice
 
 flag {
+  name: "wb_unlimited_slots"
+  namespace: "core_graphics"
+  description: "Adds APIs and updates the implementation of bufferqueues to have a user-defined slot count."
+  bug: "341359814"
+  is_fixed_read_only: true
+} # wb_unlimited_slots
+
+flag {
   name: "bq_producer_throttles_only_async_mode"
   namespace: "core_graphics"
   description: "BufferQueueProducer only CPU throttle on queueBuffer() in async mode."
   bug: "359252619"
   is_fixed_read_only: true
 } # bq_producer_throttles_only_async_mode
+
+flag {
+  name: "bq_gl_fence_cleanup"
+  namespace: "core_graphics"
+  description: "Remove BufferQueueProducer::dequeue's wait on this fence (or the fence entirely) to prevent deadlocks"
+  bug: "339705065"
+  is_fixed_read_only: true
+} # bq_gl_fence_cleanup

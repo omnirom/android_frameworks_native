@@ -94,6 +94,8 @@ class FakeEventHub : public EventHubInterface {
     // Simulates a device light intensities, from light id to light intensities map.
     std::unordered_map<int32_t /* lightId */, std::unordered_map<LightColor, int32_t>>
             mLightIntensities;
+    // fake sysfs node path and value.
+    std::unordered_map<int32_t /*deviceId*/, bool /* wakeupNode*/> mKernelWakeup;
 
 public:
     static constexpr int32_t DEFAULT_BATTERY = 1;
@@ -158,6 +160,8 @@ public:
     void setMtSlotValues(int32_t deviceId, int32_t axis, const std::vector<int32_t>& values);
     base::Result<std::vector<int32_t>> getMtSlotValues(int32_t deviceId, int32_t axis,
                                                        size_t slotCount) const override;
+    bool setKernelWakeEnabled(int32_t deviceId, bool enabled) override;
+    bool fakeReadKernelWakeup(int32_t deviceId) const;
 
 private:
     Device* getDevice(int32_t deviceId) const;

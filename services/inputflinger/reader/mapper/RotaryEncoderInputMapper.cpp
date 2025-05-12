@@ -20,6 +20,8 @@
 
 #include "RotaryEncoderInputMapper.h"
 
+#include <Counter.h>
+#include <com_android_input_flags.h>
 #include <utils/Timers.h>
 #include <optional>
 
@@ -27,14 +29,26 @@
 
 namespace android {
 
+using android::expresslog::Counter;
+
+constexpr float kDefaultResolution = 0;
 constexpr float kDefaultScaleFactor = 1.0f;
+constexpr int32_t kDefaultMinRotationsToLog = 3;
 
 RotaryEncoderInputMapper::RotaryEncoderInputMapper(InputDeviceContext& deviceContext,
                                                    const InputReaderConfiguration& readerConfig)
+      : RotaryEncoderInputMapper(deviceContext, readerConfig,
+                                 Counter::logIncrement /* telemetryLogCounter */) {}
+
+RotaryEncoderInputMapper::RotaryEncoderInputMapper(
+        InputDeviceContext& deviceContext, const InputReaderConfiguration& readerConfig,
+        std::function<void(const char*, int64_t)> telemetryLogCounter)
       : InputMapper(deviceContext, readerConfig),
         mSource(AINPUT_SOURCE_ROTARY_ENCODER),
         mScalingFactor(kDefaultScaleFactor),
-        mOrientation(ui::ROTATION_0) {}
+        mResolution(kDefaultResolution),
+        mOrientation(ui::ROTATION_0),
+        mTelemetryLogCounter(telemetryLogCounter) {}
 
 RotaryEncoderInputMapper::~RotaryEncoderInputMapper() {}
 
@@ -51,6 +65,7 @@ void RotaryEncoderInputMapper::populateDeviceInfo(InputDeviceInfo& info) {
         if (!res.has_value()) {
             ALOGW("Rotary Encoder device configuration file didn't specify resolution!\n");
         }
+        mResolution = res.value_or(kDefaultResolution);
         std::optional<float> scalingFactor = config.getFloat("device.scalingFactor");
         if (!scalingFactor.has_value()) {
             ALOGW("Rotary Encoder device configuration file didn't specify scaling factor,"
@@ -59,7 +74,22 @@ void RotaryEncoderInputMapper::populateDeviceInfo(InputDeviceInfo& info) {
         }
         mScalingFactor = scalingFactor.value_or(kDefaultScaleFactor);
         info.addMotionRange(AMOTION_EVENT_AXIS_SCROLL, mSource, -1.0f, 1.0f, 0.0f, 0.0f,
-                            res.value_or(0.0f) * mScalingFactor);
+                            mResolution * mScalingFactor);
+
+        if (com::android::input::flags::rotary_input_telemetry()) {
+            mMinRotationsToLog = config.getInt("rotary_encoder.min_rotations_to_log");
+            if (!mMinRotationsToLog.has_value()) {
+                ALOGI("Rotary Encoder device configuration file didn't specify min log rotation.");
+            } else if (*mMinRotationsToLog <= 0) {
+                ALOGE("Rotary Encoder device configuration specified non-positive min log rotation "
+                      ": %d. Telemetry logging of rotations disabled.",
+                      *mMinRotationsToLog);
+                mMinRotationsToLog = {};
+            } else {
+                ALOGD("Rotary Encoder telemetry enabled. mMinRotationsToLog=%d",
+                      *mMinRotationsToLog);
+            }
+        }
     }
 }
 
@@ -121,10 +151,29 @@ std::list<NotifyArgs> RotaryEncoderInputMapper::process(const RawEvent& rawEvent
     return out;
 }
 
+void RotaryEncoderInputMapper::logScroll(float scroll) {
+    if (mResolution <= 0 || !mMinRotationsToLog) return;
+
+    mUnloggedScrolls += fabs(scroll);
+
+    // unitsPerRotation = (2 * PI * radians) * (units per radian (i.e. resolution))
+    const float unitsPerRotation = 2 * M_PI * mResolution;
+    const float scrollsPerMinRotationsToLog = *mMinRotationsToLog * unitsPerRotation;
+    const int32_t numMinRotationsToLog =
+            static_cast<int32_t>(mUnloggedScrolls / scrollsPerMinRotationsToLog);
+    mUnloggedScrolls = std::fmod(mUnloggedScrolls, scrollsPerMinRotationsToLog);
+    if (numMinRotationsToLog) {
+        mTelemetryLogCounter("input.value_rotary_input_device_full_rotation_count",
+                             numMinRotationsToLog * (*mMinRotationsToLog));
+    }
+}
+
 std::list<NotifyArgs> RotaryEncoderInputMapper::sync(nsecs_t when, nsecs_t readTime) {
     std::list<NotifyArgs> out;
 
     float scroll = mRotaryEncoderScrollAccumulator.getRelativeVWheel();
+    logScroll(scroll);
+
     if (mSlopController) {
         scroll = mSlopController->consumeEvent(when, scroll);
     }

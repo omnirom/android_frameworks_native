@@ -20,6 +20,7 @@
 
 #include <inttypes.h>
 
+#include <android-base/logging.h>
 #include <android-base/properties.h>
 #include <android-base/stringprintf.h>
 #include <android/os/IInputConstants.h>
@@ -31,6 +32,8 @@ using android::base::HwTimeoutMultiplier;
 using android::base::StringPrintf;
 
 namespace android::inputdispatcher {
+
+namespace {
 
 /**
  * Events that are older than this time will be considered mature, at which point we will stop
@@ -62,9 +65,25 @@ static void eraseByValue(std::multimap<K, V>& map, const V& value) {
     }
 }
 
-LatencyTracker::LatencyTracker(InputEventTimelineProcessor* processor)
-      : mTimelineProcessor(processor) {
-    LOG_ALWAYS_FATAL_IF(processor == nullptr);
+} // namespace
+
+LatencyTracker::LatencyTracker(InputEventTimelineProcessor& processor)
+      : mTimelineProcessor(&processor) {}
+
+void LatencyTracker::trackListener(const NotifyArgs& args) {
+    if (const NotifyKeyArgs* keyArgs = std::get_if<NotifyKeyArgs>(&args)) {
+        std::set<InputDeviceUsageSource> sources =
+                getUsageSourcesForKeyArgs(*keyArgs, mInputDevices);
+        trackListener(keyArgs->id, keyArgs->eventTime, keyArgs->readTime, keyArgs->deviceId,
+                      sources, keyArgs->action, InputEventType::KEY);
+
+    } else if (const NotifyMotionArgs* motionArgs = std::get_if<NotifyMotionArgs>(&args)) {
+        std::set<InputDeviceUsageSource> sources = getUsageSourcesForMotionArgs(*motionArgs);
+        trackListener(motionArgs->id, motionArgs->eventTime, motionArgs->readTime,
+                      motionArgs->deviceId, sources, motionArgs->action, InputEventType::MOTION);
+    } else {
+        LOG(FATAL) << "Unexpected NotifyArgs type: " << args.index();
+    }
 }
 
 void LatencyTracker::trackListener(int32_t inputEventId, nsecs_t eventTime, nsecs_t readTime,

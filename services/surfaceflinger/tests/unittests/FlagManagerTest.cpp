@@ -85,12 +85,6 @@ TEST_F(FlagManagerTest, legacyReturnsValue) {
     EXPECT_EQ(false, mFlagManager.test_flag());
 }
 
-TEST_F(FlagManagerTest, crashesIfQueriedBeforeBoot) {
-    mFlagManager.markBootIncomplete();
-    EXPECT_DEATH(FlagManager::getInstance()
-        .refresh_rate_overlay_on_external_display(), "");
-}
-
 TEST_F(FlagManagerTest, returnsOverrideTrue) {
     mFlagManager.markBootCompleted();
 

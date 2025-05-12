@@ -28,7 +28,6 @@
 #include "Utils/FenceUtils.h"
 
 #include <binder/IInterface.h>
-#include <common/FlagManager.h>
 #include <common/trace.h>
 #include <utils/RefBase.h>
 
@@ -127,14 +126,8 @@ status_t TransactionCallbackInvoker::addCallbackHandle(const sp<CallbackHandle>&
     if (surfaceControl) {
         sp<Fence> prevFence = nullptr;
 
-        if (FlagManager::getInstance().ce_fence_promise()) {
-            for (auto& future : handle->previousReleaseFences) {
-                mergeFence(handle->name.c_str(), future.get().value_or(Fence::NO_FENCE), prevFence);
-            }
-        } else {
-            for (const auto& future : handle->previousSharedReleaseFences) {
-                mergeFence(handle->name.c_str(), future.get().value_or(Fence::NO_FENCE), prevFence);
-            }
+        for (auto& future : handle->previousReleaseFences) {
+            mergeFence(handle->name.c_str(), future.get().value_or(Fence::NO_FENCE), prevFence);
         }
 
         handle->previousReleaseFence = prevFence;
@@ -151,7 +144,7 @@ status_t TransactionCallbackInvoker::addCallbackHandle(const sp<CallbackHandle>&
                                                     eventStats, handle->previousReleaseCallbackId);
         if (handle->bufferReleaseChannel &&
             handle->previousReleaseCallbackId != ReleaseCallbackId::INVALID_ID) {
-            mBufferReleases.emplace_back(handle->bufferReleaseChannel,
+            mBufferReleases.emplace_back(handle->name, handle->bufferReleaseChannel,
                                          handle->previousReleaseCallbackId,
                                          handle->previousReleaseFence,
                                          handle->currentMaxAcquiredBufferCount);
@@ -166,8 +159,13 @@ void TransactionCallbackInvoker::addPresentFence(sp<Fence> presentFence) {
 
 void TransactionCallbackInvoker::sendCallbacks(bool onCommitOnly) {
     for (const auto& bufferRelease : mBufferReleases) {
-        bufferRelease.channel->writeReleaseFence(bufferRelease.callbackId, bufferRelease.fence,
-                                                 bufferRelease.currentMaxAcquiredBufferCount);
+        status_t status = bufferRelease.channel
+                                  ->writeReleaseFence(bufferRelease.callbackId, bufferRelease.fence,
+                                                      bufferRelease.currentMaxAcquiredBufferCount);
+        if (status != OK) {
+            ALOGE("[%s] writeReleaseFence failed. error %d (%s)", bufferRelease.layerName.c_str(),
+                  -status, strerror(-status));
+        }
     }
     mBufferReleases.clear();
 

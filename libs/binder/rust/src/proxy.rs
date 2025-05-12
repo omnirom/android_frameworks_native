@@ -298,7 +298,7 @@ impl<T: AsNative<sys::AIBinder>> IBinderInternal for T {
         unsafe { sys::AIBinder_isAlive(self.as_native()) }
     }
 
-    #[cfg(not(android_vndk))]
+    #[cfg(not(any(android_vndk, android_ndk)))]
     fn set_requesting_sid(&mut self, enable: bool) {
         // Safety: `SpIBinder` guarantees that `self` always contains a valid
         // pointer to an `AIBinder`.

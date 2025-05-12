@@ -571,11 +571,12 @@ TEST_F(TouchResamplingTest, TwoPointersAreResampledIndependently) {
     std::chrono::nanoseconds frameTime;
     std::vector<InputEventEntry> entries, expectedEntries;
 
-    // full action for when a pointer with id=1 appears (some other pointer must already be present)
+    // full action for when a pointer with index=1 appears (some other pointer must already be
+    // present)
     constexpr int32_t actionPointer1Down =
             AMOTION_EVENT_ACTION_POINTER_DOWN + (1 << AMOTION_EVENT_ACTION_POINTER_INDEX_SHIFT);
 
-    // full action for when a pointer with id=0 disappears (some other pointer must still remain)
+    // full action for when a pointer with index=0 disappears (some other pointer must still remain)
     constexpr int32_t actionPointer0Up =
             AMOTION_EVENT_ACTION_POINTER_UP + (0 << AMOTION_EVENT_ACTION_POINTER_INDEX_SHIFT);
 

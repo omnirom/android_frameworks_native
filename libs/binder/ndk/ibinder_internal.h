@@ -132,6 +132,9 @@ struct AIBinder_Class {
 
     const ::android::String16& getInterfaceDescriptor() const { return mWideInterfaceDescriptor; }
     const char* getInterfaceDescriptorUtf8() const { return mInterfaceDescriptor.c_str(); }
+    bool setTransactionCodeMap(const char** transactionCodeMap, size_t transactionCodeMapSize);
+    const char* getFunctionName(transaction_code_t code) const;
+    size_t getTransactionCodeToFunctionLength() const { return mTransactionCodeToFunctionLength; }
 
     // whether a transaction header should be written
     bool writeHeader = true;
@@ -151,6 +154,10 @@ struct AIBinder_Class {
     // This must be a String16 since BBinder virtual getInterfaceDescriptor returns a reference to
     // one.
     const ::android::String16 mWideInterfaceDescriptor;
+    // Array which holds names of the functions
+    const char** mTransactionCodeToFunction = nullptr;
+    // length of mmTransactionCodeToFunctionLength array
+    size_t mTransactionCodeToFunctionLength = 0;
 };
 
 // Ownership is like this (when linked to death):

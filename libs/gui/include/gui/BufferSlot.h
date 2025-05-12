@@ -174,26 +174,30 @@ struct BufferState {
 };
 
 struct BufferSlot {
-
     BufferSlot()
-    : mGraphicBuffer(nullptr),
-      mEglDisplay(EGL_NO_DISPLAY),
-      mBufferState(),
-      mRequestBufferCalled(false),
-      mFrameNumber(0),
-      mEglFence(EGL_NO_SYNC_KHR),
-      mFence(Fence::NO_FENCE),
-      mAcquireCalled(false),
-      mNeedsReallocation(false) {
+          : mGraphicBuffer(nullptr),
+#if !COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(BQ_GL_FENCE_CLEANUP)
+            mEglDisplay(EGL_NO_DISPLAY),
+#endif
+            mBufferState(),
+            mRequestBufferCalled(false),
+            mFrameNumber(0),
+#if !COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(BQ_GL_FENCE_CLEANUP)
+            mEglFence(EGL_NO_SYNC_KHR),
+#endif
+            mFence(Fence::NO_FENCE),
+            mAcquireCalled(false),
+            mNeedsReallocation(false) {
     }
 
     // mGraphicBuffer points to the buffer allocated for this slot or is NULL
     // if no buffer has been allocated.
     sp<GraphicBuffer> mGraphicBuffer;
 
+#if !COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(BQ_GL_FENCE_CLEANUP)
     // mEglDisplay is the EGLDisplay used to create EGLSyncKHR objects.
     EGLDisplay mEglDisplay;
-
+#endif
     // mBufferState is the current state of this buffer slot.
     BufferState mBufferState;
 
@@ -207,12 +211,14 @@ struct BufferSlot {
     // may be released before their release fence is signaled).
     uint64_t mFrameNumber;
 
+#if !COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(BQ_GL_FENCE_CLEANUP)
     // mEglFence is the EGL sync object that must signal before the buffer
     // associated with this buffer slot may be dequeued. It is initialized
     // to EGL_NO_SYNC_KHR when the buffer is created and may be set to a
     // new sync object in releaseBuffer.  (This is deprecated in favor of
     // mFence, below.)
     EGLSyncKHR mEglFence;
+#endif
 
     // mFence is a fence which will signal when work initiated by the
     // previous owner of the buffer is finished. When the buffer is FREE,

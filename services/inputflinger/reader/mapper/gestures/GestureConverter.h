@@ -55,6 +55,12 @@ public:
 
     void setBoundsInLogicalDisplay(FloatRect bounds) { mBoundsInLogicalDisplay = bounds; }
 
+    void setThreeFingerTapShortcutEnabled(bool enabled) {
+        mThreeFingerTapShortcutEnabled = enabled;
+    }
+
+    [[nodiscard]] std::list<NotifyArgs> setEnableSystemGestures(nsecs_t when, bool enable);
+
     void populateMotionRanges(InputDeviceInfo& info) const;
 
     [[nodiscard]] std::list<NotifyArgs> handleGesture(nsecs_t when, nsecs_t readTime,
@@ -100,6 +106,9 @@ private:
     InputReaderContext& mReaderContext;
     const bool mEnableFlingStop;
     const bool mEnableNoFocusChange;
+    bool mEnableSystemGestures{true};
+
+    bool mThreeFingerTapShortcutEnabled;
 
     std::optional<ui::LogicalDisplayId> mDisplayId;
     FloatRect mBoundsInLogicalDisplay{};

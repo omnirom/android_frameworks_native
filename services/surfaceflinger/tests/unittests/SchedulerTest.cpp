@@ -222,7 +222,7 @@ TEST_F(SchedulerTest, emitModeChangeEvent) {
     const auto selectorPtr =
             std::make_shared<RefreshRateSelector>(kDisplay1Modes, kDisplay1Mode120->getId());
     mScheduler->registerDisplay(kDisplayId1, selectorPtr);
-    mScheduler->onDisplayModeChanged(kDisplayId1, kDisplay1Mode120_120);
+    mScheduler->onDisplayModeChanged(kDisplayId1, kDisplay1Mode120_120, true);
 
     mScheduler->setContentRequirements({kLayer});
 
@@ -250,7 +250,7 @@ TEST_F(SchedulerTest, emitModeChangeEvent) {
     EXPECT_CALL(*mEventThread, onModeChanged(kDisplay1Mode120_120)).Times(1);
 
     mScheduler->touchTimerCallback(TimerState::Reset);
-    mScheduler->onDisplayModeChanged(kDisplayId1, kDisplay1Mode120_120);
+    mScheduler->onDisplayModeChanged(kDisplayId1, kDisplay1Mode120_120, true);
 }
 
 TEST_F(SchedulerTest, calculateMaxAcquiredBufferCount) {

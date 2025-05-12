@@ -35,35 +35,35 @@ namespace android::gui {
 namespace {
 
 template <typename T>
-static void readAligned(const void*& buffer, size_t& size, T& value) {
+void readAligned(const void*& buffer, size_t& size, T& value) {
     size -= FlattenableUtils::align<alignof(T)>(buffer);
     FlattenableUtils::read(buffer, size, value);
 }
 
 template <typename T>
-static void writeAligned(void*& buffer, size_t& size, T value) {
+void writeAligned(void*& buffer, size_t& size, T value) {
     size -= FlattenableUtils::align<alignof(T)>(buffer);
     FlattenableUtils::write(buffer, size, value);
 }
 
 template <typename T>
-static void addAligned(size_t& size, T /* value */) {
+void addAligned(size_t& size, T /* value */) {
     size = FlattenableUtils::align<sizeof(T)>(size);
     size += sizeof(T);
 }
 
 template <typename T>
-static inline constexpr uint32_t low32(const T n) {
+inline constexpr uint32_t low32(const T n) {
     return static_cast<uint32_t>(static_cast<uint64_t>(n));
 }
 
 template <typename T>
-static inline constexpr uint32_t high32(const T n) {
+inline constexpr uint32_t high32(const T n) {
     return static_cast<uint32_t>(static_cast<uint64_t>(n) >> 32);
 }
 
 template <typename T>
-static inline constexpr T to64(const uint32_t lo, const uint32_t hi) {
+inline constexpr T to64(const uint32_t lo, const uint32_t hi) {
     return static_cast<T>(static_cast<uint64_t>(hi) << 32 | lo);
 }
 
@@ -136,23 +136,23 @@ status_t BufferReleaseChannel::Message::unflatten(void const*& buffer, size_t& s
 status_t BufferReleaseChannel::ConsumerEndpoint::readReleaseFence(
         ReleaseCallbackId& outReleaseCallbackId, sp<Fence>& outReleaseFence,
         uint32_t& outMaxAcquiredBufferCount) {
+    std::lock_guard lock{mMutex};
     Message message;
     mFlattenedBuffer.resize(message.getFlattenedSize());
-    std::array<uint8_t, CMSG_SPACE(sizeof(int))> controlMessageBuffer;
+    std::array<uint8_t, CMSG_SPACE(sizeof(int))> controlMessageBuffer{};
 
     iovec iov{
             .iov_base = mFlattenedBuffer.data(),
             .iov_len = mFlattenedBuffer.size(),
     };
 
-    msghdr msg{
-            .msg_iov = &iov,
-            .msg_iovlen = 1,
-            .msg_control = controlMessageBuffer.data(),
-            .msg_controllen = controlMessageBuffer.size(),
-    };
+    msghdr msg{};
+    msg.msg_iov = &iov;
+    msg.msg_iovlen = 1;
+    msg.msg_control = controlMessageBuffer.data();
+    msg.msg_controllen = controlMessageBuffer.size();
 
-    int result;
+    ssize_t result;
     do {
         result = recvmsg(mFd, &msg, 0);
     } while (result == -1 && errno == EINTR);
@@ -160,7 +160,7 @@ status_t BufferReleaseChannel::ConsumerEndpoint::readReleaseFence(
         if (errno == EWOULDBLOCK || errno == EAGAIN) {
             return WOULD_BLOCK;
         }
-        ALOGE("Error reading release fence from socket: error %#x (%s)", errno, strerror(errno));
+        ALOGE("Error reading release fence from socket: error %d (%s)", errno, strerror(errno));
         return UNKNOWN_ERROR;
     }
 
@@ -199,9 +199,9 @@ status_t BufferReleaseChannel::ConsumerEndpoint::readReleaseFence(
     return OK;
 }
 
-int BufferReleaseChannel::ProducerEndpoint::writeReleaseFence(const ReleaseCallbackId& callbackId,
-                                                              const sp<Fence>& fence,
-                                                              uint32_t maxAcquiredBufferCount) {
+status_t BufferReleaseChannel::ProducerEndpoint::writeReleaseFence(
+        const ReleaseCallbackId& callbackId, const sp<Fence>& fence,
+        uint32_t maxAcquiredBufferCount) {
     Message message{callbackId, fence ? fence : Fence::NO_FENCE, maxAcquiredBufferCount};
     mFlattenedBuffer.resize(message.getFlattenedSize());
     int flattenedFd;
@@ -212,25 +212,22 @@ int BufferReleaseChannel::ProducerEndpoint::writeReleaseFence(const ReleaseCallb
         size_t flattenedBufferSize = mFlattenedBuffer.size();
         int* flattenedFdPtr = &flattenedFd;
         size_t flattenedFdCount = 1;
-        if (status_t err = message.flatten(flattenedBufferPtr, flattenedBufferSize, flattenedFdPtr,
-                                           flattenedFdCount);
-            err != OK) {
-            ALOGE("Failed to flatten BufferReleaseChannel message.");
-            return err;
+        if (status_t status = message.flatten(flattenedBufferPtr, flattenedBufferSize,
+                                              flattenedFdPtr, flattenedFdCount);
+            status != OK) {
+            return status;
         }
     }
 
-    iovec iov{
-            .iov_base = mFlattenedBuffer.data(),
-            .iov_len = mFlattenedBuffer.size(),
-    };
+    iovec iov{};
+    iov.iov_base = mFlattenedBuffer.data();
+    iov.iov_len = mFlattenedBuffer.size();
 
-    msghdr msg{
-            .msg_iov = &iov,
-            .msg_iovlen = 1,
-    };
+    msghdr msg{};
+    msg.msg_iov = &iov;
+    msg.msg_iovlen = 1;
 
-    std::array<uint8_t, CMSG_SPACE(sizeof(int))> controlMessageBuffer;
+    std::array<uint8_t, CMSG_SPACE(sizeof(int))> controlMessageBuffer{};
     if (fence && fence->isValid()) {
         msg.msg_control = controlMessageBuffer.data();
         msg.msg_controllen = controlMessageBuffer.size();
@@ -242,12 +239,11 @@ int BufferReleaseChannel::ProducerEndpoint::writeReleaseFence(const ReleaseCallb
         memcpy(CMSG_DATA(cmsg), &flattenedFd, sizeof(int));
     }
 
-    int result;
+    ssize_t result;
     do {
         result = sendmsg(mFd, &msg, 0);
     } while (result == -1 && errno == EINTR);
     if (result == -1) {
-        ALOGD("Error writing release fence to socket: error %#x (%s)", errno, strerror(errno));
         return -errno;
     }
 
@@ -339,13 +335,6 @@ status_t BufferReleaseChannel::open(std::string name,
     // Make the consumer read-only
     if (shutdown(consumerFd.get(), SHUT_WR) == -1) {
         ALOGE("[%s] Failed to shutdown writing on consumer socket. errno=%d message='%s'",
-              name.c_str(), errno, strerror(errno));
-        return -errno;
-    }
-
-    // Make the producer write-only
-    if (shutdown(producerFd.get(), SHUT_RD) == -1) {
-        ALOGE("[%s] Failed to shutdown reading on producer socket. errno=%d message='%s'",
               name.c_str(), errno, strerror(errno));
         return -errno;
     }

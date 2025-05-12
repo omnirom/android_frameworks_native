@@ -250,6 +250,7 @@ std::string LayerSnapshot::getIsVisibleReason() const {
     if (drawShadows()) reason << " shadowSettings.length=" << shadowSettings.length;
     if (backgroundBlurRadius > 0) reason << " backgroundBlurRadius=" << backgroundBlurRadius;
     if (blurRegions.size() > 0) reason << " blurRegions.size()=" << blurRegions.size();
+    if (contentDirty) reason << " contentDirty";
     return reason.str();
 }
 
@@ -359,8 +360,9 @@ void LayerSnapshot::merge(const RequestedLayerState& requested, bool forceUpdate
                           uint32_t displayRotationFlags) {
     clientChanges = requested.what;
     changes = requested.changes;
-    contentDirty = requested.what & layer_state_t::CONTENT_DIRTY;
-    hasReadyFrame = requested.autoRefresh;
+    autoRefresh = requested.autoRefresh;
+    contentDirty = requested.what & layer_state_t::CONTENT_DIRTY || autoRefresh;
+    hasReadyFrame = autoRefresh;
     sidebandStreamHasFrame = requested.hasSidebandStreamFrame();
     updateSurfaceDamage(requested, requested.hasReadyFrame(), forceFullDamage, surfaceDamage);
 
@@ -410,6 +412,13 @@ void LayerSnapshot::merge(const RequestedLayerState& requested, bool forceUpdate
     }
     if (forceUpdate || requested.what & layer_state_t::eCropChanged) {
         geomCrop = requested.crop;
+    }
+    if (forceUpdate || requested.what & layer_state_t::ePictureProfileHandleChanged) {
+        pictureProfileHandle = requested.pictureProfileHandle;
+    }
+    if (forceUpdate || requested.what & layer_state_t::eAppContentPriorityChanged) {
+        // TODO(b/337330263): Also consider the system-determined priority of the app
+        pictureProfilePriority = requested.appContentPriority;
     }
 
     if (forceUpdate || requested.what & layer_state_t::eDefaultFrameRateCompatibilityChanged) {
@@ -512,6 +521,10 @@ void LayerSnapshot::merge(const RequestedLayerState& requested, bool forceUpdate
         contentOpaque = isContentOpaque();
         isOpaque = contentOpaque && !roundedCorner.hasRoundedCorners() && color.a == 1.f;
         blendMode = getBlendMode(requested);
+    }
+
+    if (forceUpdate || requested.what & layer_state_t::eLutsChanged) {
+        luts = requested.luts;
     }
 }
 

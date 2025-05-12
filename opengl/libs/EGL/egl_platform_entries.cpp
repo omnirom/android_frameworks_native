@@ -2141,6 +2141,10 @@ EGLBoolean eglPresentationTimeANDROIDImpl(EGLDisplay dpy, EGLSurface surface,
     }
 
     egl_surface_t const* const s = get_surface(surface);
+    if (!s->getNativeWindow()) {
+        setError(EGL_BAD_SURFACE, EGL_FALSE);
+        return EGL_FALSE;
+    }
     native_window_set_buffers_timestamp(s->getNativeWindow(), time);
 
     return EGL_TRUE;
@@ -2405,7 +2409,7 @@ EGLBoolean eglGetFrameTimestampsANDROIDImpl(EGLDisplay dpy, EGLSurface surface,
         case 0:
             return EGL_TRUE;
         case -ENOENT:
-            return setError(EGL_BAD_ACCESS, (EGLBoolean)EGL_FALSE);
+            return setErrorQuiet(EGL_BAD_ACCESS, (EGLBoolean)EGL_FALSE);
         case -ENOSYS:
             return setError(EGL_BAD_SURFACE, (EGLBoolean)EGL_FALSE);
         case -EINVAL:

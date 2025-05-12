@@ -176,6 +176,7 @@ pub fn wait_for_service(name: &str) -> Option<SpIBinder> {
 /// seconds if it doesn't yet exist.
 #[deprecated = "this polls 5s, use wait_for_interface or check_interface"]
 pub fn get_interface<T: FromIBinder + ?Sized>(name: &str) -> Result<Strong<T>> {
+    #[allow(deprecated)]
     interface_cast(get_service(name))
 }
 

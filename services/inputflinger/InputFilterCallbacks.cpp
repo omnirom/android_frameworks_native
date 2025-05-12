@@ -44,7 +44,8 @@ public:
     InputFilterThread(std::shared_ptr<IInputThreadCallback> callback) : mCallback(callback) {
         mLooper = sp<Looper>::make(/*allowNonCallbacks=*/false);
         mThread = std::make_unique<InputThread>(
-                "InputFilter", [this]() { loopOnce(); }, [this]() { mLooper->wake(); });
+                "InputFilter", [this]() { loopOnce(); }, [this]() { mLooper->wake(); },
+                /*isInCriticalPath=*/false);
     }
 
     ndk::ScopedAStatus finish() override {

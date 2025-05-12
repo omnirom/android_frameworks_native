@@ -18,6 +18,7 @@
 #include <android/os/BnServiceManager.h>
 #include <android/os/IServiceManager.h>
 #include <binder/IPCThreadState.h>
+#include <binder/Trace.h>
 #include <map>
 #include <memory>
 
@@ -59,6 +60,12 @@ public:
     }
 
     bool removeItem(const std::string& key, const sp<IBinder>& who) {
+        std::string traceStr;
+        uint64_t tag = ATRACE_TAG_AIDL;
+        if (atrace_is_tag_enabled(tag)) {
+            traceStr = "BinderCacheWithInvalidation::removeItem " + key;
+        }
+        binder::ScopedTrace aidlTrace(tag, traceStr.c_str());
         std::lock_guard<std::mutex> lock(mCacheMutex);
         if (auto it = mCache.find(key); it != mCache.end()) {
             if (it->second.service == who) {
@@ -81,14 +88,24 @@ public:
         if (item->localBinder() == nullptr) {
             status_t status = item->linkToDeath(deathRecipient);
             if (status != android::OK) {
+                std::string traceStr;
+                uint64_t tag = ATRACE_TAG_AIDL;
+                if (atrace_is_tag_enabled(tag)) {
+                    traceStr =
+                            "BinderCacheWithInvalidation::setItem Failed LinkToDeath for service " +
+                            key + " : " + std::to_string(status);
+                }
+                binder::ScopedTrace aidlTrace(tag, traceStr.c_str());
+
                 ALOGE("Failed to linkToDeath binder for service %s. Error: %d", key.c_str(),
                       status);
                 return binder::Status::fromStatusT(status);
             }
         }
+        binder::ScopedTrace aidlTrace(ATRACE_TAG_AIDL,
+                                      "BinderCacheWithInvalidation::setItem Successfully Cached");
         std::lock_guard<std::mutex> lock(mCacheMutex);
-        Entry entry = {.service = item, .deathRecipient = deathRecipient};
-        mCache[key] = entry;
+        mCache[key] = {.service = item, .deathRecipient = deathRecipient};
         return binder::Status::ok();
     }
 
@@ -103,7 +120,6 @@ class BackendUnifiedServiceManager : public android::os::BnServiceManager {
 public:
     explicit BackendUnifiedServiceManager(const sp<os::IServiceManager>& impl);
 
-    sp<os::IServiceManager> getImpl();
     binder::Status getService(const ::std::string& name, sp<IBinder>* _aidl_return) override;
     binder::Status getService2(const ::std::string& name, os::Service* out) override;
     binder::Status checkService(const ::std::string& name, os::Service* out) override;
@@ -130,17 +146,21 @@ public:
                                         const sp<IBinder>& service) override;
     binder::Status getServiceDebugInfo(::std::vector<os::ServiceDebugInfo>* _aidl_return) override;
 
+    void enableAddServiceCache(bool value) { mEnableAddServiceCache = value; }
     // for legacy ABI
     const String16& getInterfaceDescriptor() const override {
         return mTheRealServiceManager->getInterfaceDescriptor();
     }
 
 private:
+    bool mEnableAddServiceCache = true;
     std::shared_ptr<BinderCacheWithInvalidation> mCacheForGetService;
     sp<os::IServiceManager> mTheRealServiceManager;
     binder::Status toBinderService(const ::std::string& name, const os::Service& in,
                                    os::Service* _out);
     binder::Status updateCache(const std::string& serviceName, const os::Service& service);
+    binder::Status updateCache(const std::string& serviceName, const sp<IBinder>& binder,
+                               bool isLazyService);
     bool returnIfCached(const std::string& serviceName, os::Service* _out);
 };
 

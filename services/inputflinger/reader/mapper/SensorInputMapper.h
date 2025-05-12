@@ -101,7 +101,7 @@ private:
         std::array<int32_t, SENSOR_VEC_LEN> dataVec;
         void resetValue() {
             this->enabled = false;
-            this->accuracy = InputDeviceSensorAccuracy::ACCURACY_NONE;
+            this->accuracy = InputDeviceSensorAccuracy::NONE;
             this->samplingPeriod = std::chrono::nanoseconds(0);
             this->maxBatchReportLatency = std::chrono::nanoseconds(0);
             this->lastSampleTimeNs = std::nullopt;

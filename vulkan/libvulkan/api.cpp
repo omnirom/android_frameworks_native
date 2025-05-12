@@ -45,6 +45,9 @@
 #include "driver.h"
 #include "layers_extensions.h"
 
+#include <com_android_graphics_libvulkan_flags.h>
+
+using namespace com::android::graphics::libvulkan;
 
 namespace vulkan {
 namespace api {
@@ -1473,7 +1476,7 @@ VkResult EnumerateInstanceVersion(uint32_t* pApiVersion) {
     if (!EnsureInitialized())
         return VK_ERROR_OUT_OF_HOST_MEMORY;
 
-    *pApiVersion = VK_API_VERSION_1_3;
+    *pApiVersion = flags::vulkan_1_4_instance_api() ? VK_API_VERSION_1_4 : VK_API_VERSION_1_3;
     return VK_SUCCESS;
 }
 

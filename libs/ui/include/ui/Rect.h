@@ -74,12 +74,10 @@ public:
     }
 
     inline explicit Rect(const FloatRect& floatRect) {
-        // Ideally we would use std::round, but we don't want to add an STL
-        // dependency here, so we use an approximation
-        left = static_cast<int32_t>(floatRect.left + 0.5f);
-        top = static_cast<int32_t>(floatRect.top + 0.5f);
-        right = static_cast<int32_t>(floatRect.right + 0.5f);
-        bottom = static_cast<int32_t>(floatRect.bottom + 0.5f);
+        left = static_cast<int32_t>(std::round(floatRect.left));
+        top = static_cast<int32_t>(std::round(floatRect.top));
+        right = static_cast<int32_t>(std::round(floatRect.right));
+        bottom = static_cast<int32_t>(std::round(floatRect.bottom));
     }
 
     inline explicit Rect(const ui::Size& size) {

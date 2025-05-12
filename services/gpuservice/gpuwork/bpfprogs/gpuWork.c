@@ -20,11 +20,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#ifdef MOCK_BPF
-#include <test/mock_bpf_helpers.h>
-#else
 #include <bpf_helpers.h>
-#endif
 
 #define S_IN_NS (1000000000)
 #define SMALL_TIME_GAP_LIMIT_NS (S_IN_NS)

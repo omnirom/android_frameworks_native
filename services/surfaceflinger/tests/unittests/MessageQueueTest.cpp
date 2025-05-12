@@ -159,9 +159,9 @@ TEST_F(MessageQueueTest, commitTwiceWithCallback) {
     constexpr VsyncId vsyncId{42};
 
     EXPECT_CALL(mTokenManager,
-                generateTokenForPredictions(frametimeline::TimelineItem(kStartTime.ns(),
-                                                                        kEndTime.ns(),
-                                                                        kPresentTime.ns())))
+                generateTokenForPredictions(
+                        frametimeline::TimelineItem(kStartTime.ns(), kEndTime.ns(),
+                                                    kPresentTime.ns(), kPresentTime.ns())))
             .WillOnce(Return(ftl::to_underlying(vsyncId)));
     EXPECT_CALL(*mEventQueue.mHandler, dispatchFrame(vsyncId, kPresentTime)).Times(1);
     EXPECT_NO_FATAL_FAILURE(

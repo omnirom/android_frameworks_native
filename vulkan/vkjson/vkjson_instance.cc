@@ -292,6 +292,22 @@ VkJsonDevice VkJsonGetDevice(VkPhysicalDevice physical_device) {
     vkGetPhysicalDeviceFeatures2(physical_device, &features);
   }
 
+  if (device.properties.apiVersion >= VK_API_VERSION_1_4) {
+    device.core14.properties.sType =
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_4_PROPERTIES;
+    device.core14.properties.pNext = properties.pNext;
+    properties.pNext = &device.core14.properties;
+
+    vkGetPhysicalDeviceProperties2(physical_device, &properties);
+
+    device.core14.features.sType =
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_4_FEATURES;
+    device.core14.features.pNext = features.pNext;
+    features.pNext = &device.core14.features;
+
+    vkGetPhysicalDeviceFeatures2(physical_device, &features);
+  }
+
   return device;
 }
 

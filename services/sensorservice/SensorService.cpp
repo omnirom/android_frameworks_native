@@ -2049,9 +2049,10 @@ status_t SensorService::enable(const sp<SensorEventConnection>& connection,
     }
 
     ConnectionSafeAutolock connLock = mConnectionHolder.lock(mLock);
-    if (mCurrentOperatingMode != NORMAL && mCurrentOperatingMode != REPLAY_DATA_INJECTION &&
-           !isAllowListedPackage(connection->getPackageName())) {
-        return INVALID_OPERATION;
+    if (mCurrentOperatingMode != NORMAL &&
+        !isInjectionMode(mCurrentOperatingMode) &&
+        !isAllowListedPackage(connection->getPackageName())) {
+      return INVALID_OPERATION;
     }
 
     SensorRecord* rec = mActiveSensors.valueFor(handle);

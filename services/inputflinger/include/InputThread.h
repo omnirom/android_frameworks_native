@@ -28,17 +28,15 @@ namespace android {
  */
 class InputThread {
 public:
-    explicit InputThread(std::string name, std::function<void()> loop,
-                         std::function<void()> wake = nullptr);
+    explicit InputThread(std::string name, std::function<void()> loop, std::function<void()> wake,
+                         bool isInCriticalPath);
     virtual ~InputThread();
 
     bool isCallingThread();
 
 private:
-    std::string mName;
     std::function<void()> mThreadWake;
     sp<Thread> mThread;
-    bool applyInputEventProfile();
 };
 
 } // namespace android

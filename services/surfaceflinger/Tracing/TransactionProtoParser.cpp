@@ -147,7 +147,7 @@ perfetto::protos::LayerState TransactionProtoParser::toProto(
         proto.set_transform_to_display_inverse(layer.transformToDisplayInverse);
     }
     if (layer.what & layer_state_t::eCropChanged) {
-        LayerProtoHelper::writeToProto(layer.crop, proto.mutable_crop());
+        LayerProtoHelper::writeToProto(Rect(layer.crop), proto.mutable_crop());
     }
     if (layer.what & layer_state_t::eBufferChanged) {
         perfetto::protos::LayerState_BufferData* bufferProto = proto.mutable_buffer_data();

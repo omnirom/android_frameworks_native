@@ -23,7 +23,6 @@ rust_defaults {
     rustlibs: [
         "libcrossbeam_queue",
         "libparking_lot",
-        "libonce_cell",
         "libcxx",
     ],
     shared_libs: ["libutils"],

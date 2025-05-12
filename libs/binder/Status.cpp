@@ -99,27 +99,28 @@ status_t Status::readFromParcel(const Parcel& parcel) {
         return status;
     }
 
+    if (mException == EX_HAS_NOTED_APPOPS_REPLY_HEADER) {
+        status = skipUnusedHeader(parcel);
+        if (status != OK) {
+            setFromStatusT(status);
+            return status;
+        }
+        // Read next exception code.
+        status = parcel.readInt32(&mException);
+        if (status != OK) {
+            setFromStatusT(status);
+            return status;
+        }
+    }
+
     // Skip over fat response headers.  Not used (or propagated) in native code.
     if (mException == EX_HAS_REPLY_HEADER) {
-        // Note that the header size includes the 4 byte size field.
-        const size_t header_start = parcel.dataPosition();
-        // Get available size before reading more
-        const size_t header_avail = parcel.dataAvail();
-
-        int32_t header_size;
-        status = parcel.readInt32(&header_size);
+        status = skipUnusedHeader(parcel);
         if (status != OK) {
             setFromStatusT(status);
             return status;
         }
 
-        if (header_size < 0 || static_cast<size_t>(header_size) > header_avail) {
-            android_errorWriteLog(0x534e4554, "132650049");
-            setFromStatusT(UNKNOWN_ERROR);
-            return UNKNOWN_ERROR;
-        }
-
-        parcel.setDataPosition(header_start + header_size);
         // And fat response headers are currently only used when there are no
         // exceptions, so act like there was no error.
         mException = EX_NONE;
@@ -255,6 +256,29 @@ String8 Status::toString8() const {
         ret.append("'");
     }
     return ret;
+}
+
+status_t Status::skipUnusedHeader(const Parcel& parcel) {
+    // Note that the header size includes the 4 byte size field.
+    const size_t header_start = parcel.dataPosition();
+    // Get available size before reading more
+    const size_t header_avail = parcel.dataAvail();
+
+    int32_t header_size;
+    status_t status = parcel.readInt32(&header_size);
+    ALOGD("Skip unused header. exception code: %d, start: %zu, size: %d.",
+           mException, header_start, header_size);
+    if (status != OK) {
+        return status;
+    }
+
+    if (header_size < 0 || static_cast<size_t>(header_size) > header_avail) {
+        android_errorWriteLog(0x534e4554, "132650049");
+        return UNKNOWN_ERROR;
+    }
+
+    parcel.setDataPosition(header_start + header_size);
+    return OK;
 }
 
 }  // namespace binder

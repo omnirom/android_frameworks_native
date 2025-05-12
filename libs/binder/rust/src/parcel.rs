@@ -197,6 +197,7 @@ unsafe impl<'a> AsNative<sys::AParcel> for BorrowedParcel<'a> {
 // Data serialization methods
 impl<'a> BorrowedParcel<'a> {
     /// Data written to parcelable is zero'd before being deleted or reallocated.
+    #[cfg(not(android_ndk))]
     pub fn mark_sensitive(&mut self) {
         // Safety: guaranteed to have a parcel object, and this method never fails
         unsafe { sys::AParcel_markSensitive(self.as_native()) }
@@ -342,6 +343,7 @@ impl<'a> WritableSubParcel<'a> {
 
 impl Parcel {
     /// Data written to parcelable is zero'd before being deleted or reallocated.
+    #[cfg(not(android_ndk))]
     pub fn mark_sensitive(&mut self) {
         self.borrowed().mark_sensitive()
     }

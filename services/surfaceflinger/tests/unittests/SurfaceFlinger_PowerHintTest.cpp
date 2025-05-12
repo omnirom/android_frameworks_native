@@ -21,6 +21,8 @@
 
 #include "CommitAndCompositeTest.h"
 
+#include "DisplayHardware/Hal.h"
+
 using namespace std::chrono_literals;
 using testing::_;
 using testing::Return;
@@ -40,7 +42,7 @@ TEST_F(SurfaceFlingerPowerHintTest, sendDurationsIncludingHwcWaitTime) {
     EXPECT_CALL(*mComposer, presentOrValidateDisplay(HWC_DISPLAY, _, _, _, _, _, _)).WillOnce([] {
         constexpr Duration kMockHwcRunTime = 20ms;
         std::this_thread::sleep_for(kMockHwcRunTime);
-        return hardware::graphics::composer::V2_1::Error::NONE;
+        return hardware::graphics::composer::hal::Error::NONE;
     });
     EXPECT_CALL(*mPowerAdvisor, reportActualWorkDuration()).Times(1);
 
@@ -61,7 +63,7 @@ TEST_F(SurfaceFlingerPowerHintTest, inactiveOnDisplayDoze) {
     EXPECT_CALL(*mComposer, presentOrValidateDisplay(HWC_DISPLAY, _, _, _, _, _, _)).WillOnce([] {
         constexpr Duration kMockHwcRunTime = 20ms;
         std::this_thread::sleep_for(kMockHwcRunTime);
-        return hardware::graphics::composer::V2_1::Error::NONE;
+        return hardware::graphics::composer::hal::Error::NONE;
     });
     EXPECT_CALL(*mPowerAdvisor, reportActualWorkDuration()).Times(0);
 

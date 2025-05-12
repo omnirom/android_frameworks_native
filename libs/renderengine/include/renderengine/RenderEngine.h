@@ -38,6 +38,14 @@
 #define PROPERTY_DEBUG_RENDERENGINE_BACKEND "debug.renderengine.backend"
 
 /**
+ * Allows opting particular devices into an initial preview rollout of RenderEngine on Graphite.
+ *
+ * Only applicable within SurfaceFlinger, and if relevant aconfig flags are enabled.
+ */
+#define PROPERTY_DEBUG_RENDERENGINE_GRAPHITE_PREVIEW_OPTIN \
+    "debug.renderengine.graphite_preview_optin"
+
+/**
  * Turns on recording of skia commands in SkiaGL version of the RE. This property
  * defines number of milliseconds for the recording to take place. A non zero value
  * turns on the recording.

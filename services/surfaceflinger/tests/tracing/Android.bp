@@ -35,9 +35,6 @@ cc_test {
         ":libsurfaceflinger_mock_sources",
         "TransactionTraceTestSuite.cpp",
     ],
-    static_libs: [
-        "libc++fs",
-    ],
     header_libs: [
         "libsurfaceflinger_mocks_headers",
     ],

@@ -100,10 +100,12 @@ mod error;
 mod native;
 mod parcel;
 mod proxy;
-#[cfg(not(trusty))]
+#[cfg(not(any(trusty, android_ndk)))]
 mod service;
-#[cfg(not(trusty))]
+#[cfg(not(any(trusty, android_ndk)))]
 mod state;
+#[cfg(not(any(android_vendor, android_ndk, android_vndk)))]
+mod system_only;
 
 use binder_ndk_sys as sys;
 
@@ -112,14 +114,19 @@ pub use binder::{BinderFeatures, FromIBinder, IBinder, Interface, Strong, Weak};
 pub use error::{ExceptionCode, IntoBinderResult, Status, StatusCode};
 pub use parcel::{ParcelFileDescriptor, Parcelable, ParcelableHolder};
 pub use proxy::{DeathRecipient, SpIBinder, WpIBinder};
-#[cfg(not(trusty))]
+#[cfg(not(any(trusty, android_ndk)))]
 pub use service::{
     add_service, check_interface, check_service, force_lazy_services_persist,
-    get_declared_instances, get_interface, get_service, is_declared, is_handling_transaction,
-    register_lazy_service, wait_for_interface, wait_for_service, LazyServiceGuard,
+    get_declared_instances, is_declared, is_handling_transaction, register_lazy_service,
+    wait_for_interface, wait_for_service, LazyServiceGuard,
 };
-#[cfg(not(trusty))]
+#[cfg(not(any(trusty, android_ndk)))]
+#[allow(deprecated)]
+pub use service::{get_interface, get_service};
+#[cfg(not(any(trusty, android_ndk)))]
 pub use state::{ProcessState, ThreadState};
+#[cfg(not(any(android_vendor, android_vndk, android_ndk)))]
+pub use system_only::{delegate_accessor, Accessor, AccessorProvider, ConnectionInfo};
 
 /// Binder result containing a [`Status`] on error.
 pub type Result<T> = std::result::Result<T, Status>;
@@ -128,10 +135,12 @@ pub type Result<T> = std::result::Result<T, Status>;
 /// without AIDL.
 pub mod binder_impl {
     pub use crate::binder::{
-        IBinderInternal, InterfaceClass, Remotable, Stability, ToAsyncInterface, ToSyncInterface,
-        TransactionCode, TransactionFlags, FIRST_CALL_TRANSACTION, FLAG_CLEAR_BUF, FLAG_ONEWAY,
-        FLAG_PRIVATE_LOCAL, LAST_CALL_TRANSACTION,
+        IBinderInternal, InterfaceClass, LocalStabilityType, Remotable, Stability, StabilityType,
+        ToAsyncInterface, ToSyncInterface, TransactionCode, TransactionFlags, VintfStabilityType,
+        FIRST_CALL_TRANSACTION, FLAG_ONEWAY, LAST_CALL_TRANSACTION,
     };
+    #[cfg(not(android_ndk))]
+    pub use crate::binder::{FLAG_CLEAR_BUF, FLAG_PRIVATE_LOCAL};
     pub use crate::binder_async::BinderAsyncRuntime;
     pub use crate::error::status_t;
     pub use crate::native::Binder;

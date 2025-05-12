@@ -29,6 +29,8 @@ using aidl::android::hardware::vibrator::CompositeEffect;
 using aidl::android::hardware::vibrator::CompositePrimitive;
 using aidl::android::hardware::vibrator::Effect;
 using aidl::android::hardware::vibrator::EffectStrength;
+using aidl::android::hardware::vibrator::IVibrationSession;
+using aidl::android::hardware::vibrator::VibrationSessionConfig;
 
 using std::chrono::milliseconds;
 
@@ -111,4 +113,13 @@ TEST_F(VibratorManagerHalWrapperLegacyTest, TestSyncedOperationsUnsupported) {
     ASSERT_TRUE(mWrapper->prepareSynced(vibratorIds).isUnsupported());
     ASSERT_TRUE(mWrapper->triggerSynced([]() {}).isUnsupported());
     ASSERT_TRUE(mWrapper->cancelSynced().isUnsupported());
+}
+
+TEST_F(VibratorManagerHalWrapperLegacyTest, TestSessionOperationsUnsupported) {
+    std::vector<int32_t> vibratorIds;
+    vibratorIds.push_back(0);
+    VibrationSessionConfig config;
+
+    ASSERT_TRUE(mWrapper->startSession(vibratorIds, config, []() {}).isUnsupported());
+    ASSERT_TRUE(mWrapper->clearSessions().isUnsupported());
 }

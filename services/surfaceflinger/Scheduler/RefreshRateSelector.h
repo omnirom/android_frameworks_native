@@ -52,6 +52,12 @@ public:
     // The lowest Render Frame Rate that will ever be selected
     static constexpr Fps kMinSupportedFrameRate = 20_Hz;
 
+    // Start range for FrameRateCategory Normal and High.
+    static constexpr Fps kFrameRateCategoryRateHigh = 90_Hz;
+    static constexpr Fps kFrameRateCategoryRateNormal = 60_Hz;
+    static constexpr std::pair<Fps, Fps> kFrameRateCategoryRates = {kFrameRateCategoryRateNormal,
+                                                                    kFrameRateCategoryRateHigh};
+
     class Policy {
         static constexpr int kAllowGroupSwitchingDefault = false;
 
@@ -433,6 +439,10 @@ public:
 
     bool isVrrDevice() const;
 
+    std::pair<Fps, Fps> getFrameRateCategoryRates() const { return kFrameRateCategoryRates; }
+
+    std::vector<float> getSupportedFrameRates() const EXCLUDES(mLock);
+
 private:
     friend struct TestableRefreshRateSelector;
 
@@ -543,6 +553,7 @@ private:
     // Display modes that satisfy the Policy's ranges, filtered and sorted by refresh rate.
     std::vector<FrameRateMode> mPrimaryFrameRates GUARDED_BY(mLock);
     std::vector<FrameRateMode> mAppRequestFrameRates GUARDED_BY(mLock);
+    std::vector<FrameRateMode> mAllFrameRates GUARDED_BY(mLock);
 
     // Caches whether the device is VRR-compatible based on the active display mode.
     std::atomic_bool mIsVrrDevice = false;
@@ -587,6 +598,9 @@ private:
     // Used to detect (lack of) frame activity.
     ftl::Optional<scheduler::OneShotTimer> mIdleTimer;
     std::atomic<bool> mIdleTimerStarted = false;
+
+    // Returns the range of supported frame rates.
+    FpsRange getSupportedFrameRateRangeLocked() const REQUIRES(mLock);
 };
 
 } // namespace android::scheduler

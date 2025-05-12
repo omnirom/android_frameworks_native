@@ -28,7 +28,7 @@ LayerHandle::LayerHandle(const sp<android::SurfaceFlinger>& flinger,
 
 LayerHandle::~LayerHandle() {
     if (mFlinger) {
-        mFlinger->onHandleDestroyed(this, mLayer, mLayerId);
+        mFlinger->onHandleDestroyed(mLayer, mLayerId);
     }
 }
 

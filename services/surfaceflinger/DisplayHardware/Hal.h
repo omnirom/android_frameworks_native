@@ -17,15 +17,20 @@
 #pragma once
 
 #include <android/hardware/graphics/common/1.1/types.h>
+#include <android/hardware/graphics/composer/2.1/types.h>
 #include <android/hardware/graphics/composer/2.4/IComposer.h>
 #include <android/hardware/graphics/composer/2.4/IComposerClient.h>
+#include <android/hardware/graphics/composer/2.4/types.h>
 
 #include <aidl/android/hardware/graphics/common/DisplayHotplugEvent.h>
 #include <aidl/android/hardware/graphics/common/Hdr.h>
 #include <aidl/android/hardware/graphics/composer3/Composition.h>
 #include <aidl/android/hardware/graphics/composer3/DisplayCapability.h>
 #include <aidl/android/hardware/graphics/composer3/DisplayConfiguration.h>
+#include <aidl/android/hardware/graphics/composer3/IComposerClient.h>
 #include <aidl/android/hardware/graphics/composer3/VrrConfig.h>
+
+#include <ftl/enum.h>
 
 #define ERROR_HAS_CHANGES 5
 
@@ -46,7 +51,6 @@ using types::V1_2::ColorMode;
 using types::V1_2::Dataspace;
 using types::V1_2::PixelFormat;
 
-using V2_1::Error;
 using V2_4::IComposer;
 using V2_4::IComposerCallback;
 using V2_4::IComposerClient;
@@ -77,6 +81,22 @@ using VsyncPeriodChangeConstraints = IComposerClient::VsyncPeriodChangeConstrain
 using Hdr = aidl::android::hardware::graphics::common::Hdr;
 using DisplayConfiguration = V3_0::DisplayConfiguration;
 using VrrConfig = V3_0::VrrConfig;
+
+enum class Error : int32_t {
+    NONE = static_cast<int32_t>(V2_1::Error::NONE),
+    BAD_CONFIG = static_cast<int32_t>(V2_1::Error::BAD_CONFIG),
+    BAD_DISPLAY = static_cast<int32_t>(V2_1::Error::BAD_DISPLAY),
+    BAD_LAYER = static_cast<int32_t>(V2_1::Error::BAD_LAYER),
+    BAD_PARAMETER = static_cast<int32_t>(V2_1::Error::BAD_PARAMETER),
+    NO_RESOURCES = static_cast<int32_t>(V2_1::Error::NO_RESOURCES),
+    NOT_VALIDATED = static_cast<int32_t>(V2_1::Error::NOT_VALIDATED),
+    UNSUPPORTED = static_cast<int32_t>(V2_1::Error::UNSUPPORTED),
+    SEAMLESS_NOT_ALLOWED = static_cast<int32_t>(V2_4::Error::SEAMLESS_NOT_ALLOWED),
+    SEAMLESS_NOT_POSSIBLE = static_cast<int32_t>(V2_4::Error::SEAMLESS_NOT_POSSIBLE),
+    CONFIG_FAILED = V3_0::IComposerClient::EX_CONFIG_FAILED,
+    PICTURE_PROFILE_MAX_EXCEEDED = V3_0::IComposerClient::EX_PICTURE_PROFILE_MAX_EXCEEDED,
+    ftl_last = PICTURE_PROFILE_MAX_EXCEEDED
+};
 
 } // namespace hardware::graphics::composer::hal
 
@@ -210,7 +230,11 @@ inline std::string to_string(hardware::graphics::composer::hal::V2_4::Error erro
 }
 
 inline std::string to_string(hardware::graphics::composer::hal::Error error) {
-    return to_string(static_cast<hardware::graphics::composer::hal::V2_4::Error>(error));
+    // 5 is reserved for historical reason, during validation 5 means has changes.
+    if (hasChangesError(error)) {
+        return "HAS_CHANGES";
+    }
+    return ftl::enum_string(error);
 }
 
 // For utils::Dumper ADL.

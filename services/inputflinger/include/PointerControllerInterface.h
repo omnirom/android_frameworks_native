@@ -24,20 +24,6 @@ namespace android {
 
 struct SpriteIcon;
 
-struct FloatPoint {
-    float x;
-    float y;
-
-    inline FloatPoint(float x, float y) : x(x), y(y) {}
-
-    inline explicit FloatPoint(vec2 p) : x(p.x), y(p.y) {}
-
-    template <typename T, typename U>
-    operator std::tuple<T, U>() {
-        return {x, y};
-    }
-};
-
 /**
  * Interface for tracking a mouse / touch pad pointer and touch pad spots.
  *
@@ -72,14 +58,18 @@ public:
     /* Dumps the state of the pointer controller. */
     virtual std::string dump() = 0;
 
-    /* Move the pointer. */
-    virtual void move(float deltaX, float deltaY) = 0;
+    /* Move the pointer and return unconsumed delta if the pointer has crossed the current
+     * viewport bounds.
+     *
+     * Return value may be used to move pointer to corresponding adjacent display, if it exists in
+     * the display-topology */
+    [[nodiscard]] virtual vec2 move(float deltaX, float deltaY) = 0;
 
     /* Sets the absolute location of the pointer. */
     virtual void setPosition(float x, float y) = 0;
 
     /* Gets the absolute location of the pointer. */
-    virtual FloatPoint getPosition() const = 0;
+    virtual vec2 getPosition() const = 0;
 
     enum class Transition {
         // Fade/unfade immediately.
@@ -145,6 +135,8 @@ public:
 
     /* Resets the flag to skip screenshot of the pointer indicators for all displays. */
     virtual void clearSkipScreenshotFlags() = 0;
+
+    virtual ui::Transform getDisplayTransform() const = 0;
 };
 
 } // namespace android

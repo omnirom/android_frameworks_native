@@ -50,6 +50,18 @@ InputDeviceUsageSource getUsageSourceForKeyArgs(int32_t keyboardType,
     return InputDeviceUsageSource::BUTTONS;
 }
 
+std::set<InputDeviceUsageSource> getUsageSourcesForKeyArgs(
+        const NotifyKeyArgs& args, const std::vector<InputDeviceInfo>& inputDevices) {
+    int32_t keyboardType = AINPUT_KEYBOARD_TYPE_NONE;
+    for (const InputDeviceInfo& inputDevice : inputDevices) {
+        if (args.deviceId == inputDevice.getId()) {
+            keyboardType = inputDevice.getKeyboardType();
+            break;
+        }
+    }
+    return std::set{getUsageSourceForKeyArgs(keyboardType, args)};
+}
+
 std::set<InputDeviceUsageSource> getUsageSourcesForMotionArgs(const NotifyMotionArgs& motionArgs) {
     LOG_ALWAYS_FATAL_IF(motionArgs.getPointerCount() < 1, "Received motion args without pointers");
     std::set<InputDeviceUsageSource> sources;

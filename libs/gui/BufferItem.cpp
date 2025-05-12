@@ -38,26 +38,25 @@ static inline constexpr T to64(const uint32_t lo, const uint32_t hi) {
     return static_cast<T>(static_cast<uint64_t>(hi)<<32 | lo);
 }
 
-BufferItem::BufferItem() :
-    mGraphicBuffer(nullptr),
-    mFence(nullptr),
-    mCrop(Rect::INVALID_RECT),
-    mTransform(0),
-    mScalingMode(NATIVE_WINDOW_SCALING_MODE_FREEZE),
-    mTimestamp(0),
-    mIsAutoTimestamp(false),
-    mDataSpace(HAL_DATASPACE_UNKNOWN),
-    mFrameNumber(0),
-    mSlot(INVALID_BUFFER_SLOT),
-    mIsDroppable(false),
-    mAcquireCalled(false),
-    mTransformToDisplayInverse(false),
-    mSurfaceDamage(),
-    mAutoRefresh(false),
-    mQueuedBuffer(true),
-    mIsStale(false),
-    mApi(0) {
-}
+BufferItem::BufferItem()
+      : mGraphicBuffer(nullptr),
+        mFence(nullptr),
+        mCrop(Rect::INVALID_RECT),
+        mTransform(0),
+        mScalingMode(NATIVE_WINDOW_SCALING_MODE_FREEZE),
+        mTimestamp(0),
+        mIsAutoTimestamp(false),
+        mDataSpace(HAL_DATASPACE_UNKNOWN),
+        mFrameNumber(0),
+        mSlot(INVALID_BUFFER_SLOT),
+        mIsDroppable(false),
+        mAcquireCalled(false),
+        mTransformToDisplayInverse(false),
+        mSurfaceDamage(),
+        mAutoRefresh(false),
+        mQueuedBuffer(true),
+        mIsStale(false),
+        mApi(0) {}
 
 BufferItem::~BufferItem() {}
 
@@ -76,6 +75,11 @@ size_t BufferItem::getPodSize() const {
     addAligned(size, high32(mTimestamp));
     addAligned(size, mIsAutoTimestamp);
     addAligned(size, mDataSpace);
+#if COM_ANDROID_GRAPHICS_LIBUI_FLAGS_APPLY_PICTURE_PROFILES
+    addAligned(size, mPictureProfileHandle.has_value());
+    addAligned(size, low32(PictureProfileHandle::NONE.getId()));
+    addAligned(size, high32(PictureProfileHandle::NONE.getId()));
+#endif // COM_ANDROID_GRAPHICS_LIBUI_FLAGS_APPLY_PICTURE_PROFILES
     addAligned(size, low32(mFrameNumber));
     addAligned(size, high32(mFrameNumber));
     addAligned(size, mSlot);
@@ -170,6 +174,16 @@ status_t BufferItem::flatten(
     writeAligned(buffer, size, high32(mTimestamp));
     writeAligned(buffer, size, mIsAutoTimestamp);
     writeAligned(buffer, size, mDataSpace);
+#if COM_ANDROID_GRAPHICS_LIBUI_FLAGS_APPLY_PICTURE_PROFILES
+    writeAligned(buffer, size, mPictureProfileHandle.has_value());
+    if (mPictureProfileHandle.has_value()) {
+        writeAligned(buffer, size, low32(mPictureProfileHandle->getId()));
+        writeAligned(buffer, size, high32(mPictureProfileHandle->getId()));
+    } else {
+        writeAligned(buffer, size, low32(PictureProfileHandle::NONE.getId()));
+        writeAligned(buffer, size, high32(PictureProfileHandle::NONE.getId()));
+    }
+#endif // COM_ANDROID_GRAPHICS_LIBUI_FLAGS_APPLY_PICTURE_PROFILES
     writeAligned(buffer, size, low32(mFrameNumber));
     writeAligned(buffer, size, high32(mFrameNumber));
     writeAligned(buffer, size, mSlot);
@@ -231,6 +245,7 @@ status_t BufferItem::unflatten(
 
     uint32_t timestampLo = 0, timestampHi = 0;
     uint32_t frameNumberLo = 0, frameNumberHi = 0;
+    int32_t pictureProfileIdLo = 0, pictureProfileIdHi = 0;
 
     readAligned(buffer, size, mCrop);
     readAligned(buffer, size, mTransform);
@@ -240,6 +255,16 @@ status_t BufferItem::unflatten(
     mTimestamp = to64<int64_t>(timestampLo, timestampHi);
     readAligned(buffer, size, mIsAutoTimestamp);
     readAligned(buffer, size, mDataSpace);
+#if COM_ANDROID_GRAPHICS_LIBUI_FLAGS_APPLY_PICTURE_PROFILES
+    bool hasPictureProfileHandle;
+    readAligned(buffer, size, hasPictureProfileHandle);
+    readAligned(buffer, size, pictureProfileIdLo);
+    readAligned(buffer, size, pictureProfileIdHi);
+    mPictureProfileHandle = hasPictureProfileHandle
+            ? std::optional(PictureProfileHandle(
+                      to64<PictureProfileId>(pictureProfileIdLo, pictureProfileIdHi)))
+            : std::nullopt;
+#endif // COM_ANDROID_GRAPHICS_LIBUI_FLAGS_APPLY_PICTURE_PROFILES
     readAligned(buffer, size, frameNumberLo);
     readAligned(buffer, size, frameNumberHi);
     mFrameNumber = to64<uint64_t>(frameNumberLo, frameNumberHi);

@@ -17,7 +17,7 @@
 //! Contains the DataStore, used to store input related data in a persistent way.
 
 use crate::input::KeyboardType;
-use log::{debug, error};
+use log::{debug, error, info};
 use serde::{Deserialize, Serialize};
 use std::fs::File;
 use std::io::{Read, Write};
@@ -157,7 +157,7 @@ impl FileReaderWriter for DefaultFileReaderWriter {
         let path = Path::new(&self.filepath);
         let mut fs_string = String::new();
         match File::open(path) {
-            Err(e) => error!("couldn't open {:?}: {}", path, e),
+            Err(e) => info!("couldn't open {:?}: {}", path, e),
             Ok(mut file) => match file.read_to_string(&mut fs_string) {
                 Err(e) => error!("Couldn't read from {:?}: {}", path, e),
                 Ok(_) => debug!("Successfully read from file {:?}", path),

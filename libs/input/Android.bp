@@ -217,6 +217,7 @@ cc_library {
     ],
     srcs: [
         "AccelerationCurve.cpp",
+        "CoordinateFilter.cpp",
         "Input.cpp",
         "InputConsumer.cpp",
         "InputConsumerNoResampling.cpp",
@@ -230,6 +231,7 @@ cc_library {
         "KeyLayoutMap.cpp",
         "MotionPredictor.cpp",
         "MotionPredictorMetricsManager.cpp",
+        "OneEuroFilter.cpp",
         "PrintTools.cpp",
         "PropertyMap.cpp",
         "Resampler.cpp",

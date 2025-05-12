@@ -53,13 +53,13 @@ void InputMapperUnitTest::SetUpWithBus(int bus) {
 }
 
 void InputMapperUnitTest::setupAxis(int axis, bool valid, int32_t min, int32_t max,
-                                    int32_t resolution) {
+                                    int32_t resolution, int32_t flat, int32_t fuzz) {
     EXPECT_CALL(mMockEventHub, getAbsoluteAxisInfo(EVENTHUB_ID, axis))
             .WillRepeatedly(Return(valid ? std::optional<RawAbsoluteAxisInfo>{{
                                                    .minValue = min,
                                                    .maxValue = max,
-                                                   .flat = 0,
-                                                   .fuzz = 0,
+                                                   .flat = flat,
+                                                   .fuzz = fuzz,
                                                    .resolution = resolution,
                                            }}
                                          : std::nullopt));
@@ -100,9 +100,14 @@ std::list<NotifyArgs> InputMapperUnitTest::process(int32_t type, int32_t code, i
 
 std::list<NotifyArgs> InputMapperUnitTest::process(nsecs_t when, int32_t type, int32_t code,
                                                    int32_t value) {
+    return process(when, when, type, code, value);
+}
+
+std::list<NotifyArgs> InputMapperUnitTest::process(nsecs_t when, nsecs_t readTime, int32_t type,
+                                                   int32_t code, int32_t value) {
     RawEvent event;
     event.when = when;
-    event.readTime = when;
+    event.readTime = readTime;
     event.deviceId = mMapper->getDeviceContext().getEventHubId();
     event.type = type;
     event.code = code;

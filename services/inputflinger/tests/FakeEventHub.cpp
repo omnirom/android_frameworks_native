@@ -650,4 +650,25 @@ void FakeEventHub::sysfsNodeChanged(const std::string& sysfsNodePath) {
     }
 }
 
+bool FakeEventHub::setKernelWakeEnabled(int32_t deviceId, bool enabled) {
+    Device* device = getDevice(deviceId);
+    if (device == nullptr) {
+        return false;
+    }
+    mKernelWakeup.emplace(deviceId, enabled);
+    return true;
+}
+
+bool FakeEventHub::fakeReadKernelWakeup(int32_t deviceId) const {
+    Device* device = getDevice(deviceId);
+    if (device == nullptr) {
+        return false;
+    }
+    auto it = mKernelWakeup.find(deviceId);
+    if (it == mKernelWakeup.end()) {
+        return false;
+    }
+    return it->second;
+}
+
 } // namespace android

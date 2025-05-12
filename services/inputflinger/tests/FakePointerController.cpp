@@ -43,7 +43,7 @@ void FakePointerController::setPosition(float x, float y) {
     mY = y;
 }
 
-FloatPoint FakePointerController::getPosition() const {
+vec2 FakePointerController::getPosition() const {
     if (!mEnabled) {
         return {0, 0};
     }
@@ -96,9 +96,9 @@ void FakePointerController::assertViewportNotSet() {
 }
 
 void FakePointerController::assertPosition(float x, float y) {
-    const auto [actualX, actualY] = getPosition();
-    ASSERT_NEAR(x, actualX, 1);
-    ASSERT_NEAR(y, actualY, 1);
+    const auto actual = getPosition();
+    ASSERT_NEAR(x, actual.x, 1);
+    ASSERT_NEAR(y, actual.y, 1);
 }
 
 void FakePointerController::assertSpotCount(ui::LogicalDisplayId displayId, int32_t count) {
@@ -148,15 +148,20 @@ bool FakePointerController::isPointerShown() {
     return mIsPointerShown;
 }
 
-void FakePointerController::move(float deltaX, float deltaY) {
-    if (!mEnabled) return;
+vec2 FakePointerController::move(float deltaX, float deltaY) {
+    if (!mEnabled) return {0, 0};
 
     mX += deltaX;
+    mY += deltaY;
+
+    const vec2 position(mX, mY);
+
     if (mX < mMinX) mX = mMinX;
     if (mX > mMaxX) mX = mMaxX;
-    mY += deltaY;
     if (mY < mMinY) mY = mMinY;
     if (mY > mMaxY) mY = mMaxY;
+
+    return {position.x - mX, position.y - mY};
 }
 
 void FakePointerController::fade(Transition) {
@@ -188,6 +193,10 @@ void FakePointerController::clearSpots() {
     if (!mEnabled) return;
 
     mSpotsByDisplay.clear();
+}
+
+ui::Transform FakePointerController::getDisplayTransform() const {
+    return ui::Transform();
 }
 
 } // namespace android

@@ -81,7 +81,8 @@ RpcSession::FileDescriptorTransportMode toTransportMode(
 extern "C" {
 
 #ifndef __TRUSTY__
-ARpcServer* ARpcServer_newVsock(AIBinder* service, unsigned int cid, unsigned int port) {
+ARpcServer* ARpcServer_newVsock(AIBinder* service, unsigned int cid, unsigned int port,
+                                unsigned int* assignedPort) {
     auto server = RpcServer::make();
 
     unsigned int bindCid = VMADDR_CID_ANY; // bind to the remote interface
@@ -90,7 +91,7 @@ ARpcServer* ARpcServer_newVsock(AIBinder* service, unsigned int cid, unsigned in
         cid = VMADDR_CID_ANY;       // no need for a connection filter
     }
 
-    if (status_t status = server->setupVsockServer(bindCid, port); status != OK) {
+    if (status_t status = server->setupVsockServer(bindCid, port, assignedPort); status != OK) {
         ALOGE("Failed to set up vsock server with port %u error: %s", port,
               statusToString(status).c_str());
         return nullptr;

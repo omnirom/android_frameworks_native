@@ -49,6 +49,12 @@ interface IInputConstants
     const int POLICY_FLAG_INJECTED_FROM_ACCESSIBILITY = 0x20000;
 
     /**
+     * The key event triggered a key gesture. Used in policy flag to notify that a key gesture was
+     * triggered using the event.
+     */
+    const int POLICY_FLAG_KEY_GESTURE_TRIGGERED = 0x40000;
+
+    /**
      * Common input event flag used for both motion and key events for a gesture or pointer being
      * canceled.
      */

@@ -330,8 +330,8 @@ void BpMemoryHeap::assertReallyMapped() const
         if (err != NO_ERROR || // failed transaction
                 size != size64 || offset != offset64) { // ILP32 size check
             ALOGE("binder=%p transaction failed fd=%d, size=%zu, err=%d (%s)",
-                    IInterface::asBinder(this).get(),
-                    parcel_fd, size, err, strerror(-err));
+                  IInterface::asBinder(this).get(), parcel_fd, size, err,
+                  statusToString(err).c_str());
             return;
         }
 

@@ -112,6 +112,8 @@ public:
 
     bool getPendingHardwareVsyncState() const REQUIRES(kMainThreadContext);
 
+    PhysicalDisplayId getPhysicalDisplayId() const { return mId; }
+
 protected:
     using ControllerPtr = std::unique_ptr<VsyncController>;
 

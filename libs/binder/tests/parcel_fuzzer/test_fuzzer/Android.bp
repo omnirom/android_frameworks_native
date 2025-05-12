@@ -59,6 +59,11 @@ sh_test_host {
         darwin: {
             enabled: false,
         },
+        host: {
+            data_libs: [
+                "libc++",
+            ],
+        },
     },
     test_suites: ["general-tests"],
 }

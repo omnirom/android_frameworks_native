@@ -29,11 +29,11 @@ namespace {
 
 // Helper function to check if two file descriptors point to the same file.
 bool is_same_file(int fd1, int fd2) {
-    struct stat stat1;
+    struct stat stat1 {};
     if (fstat(fd1, &stat1) != 0) {
         return false;
     }
-    struct stat stat2;
+    struct stat stat2 {};
     if (fstat(fd2, &stat2) != 0) {
         return false;
     }
@@ -42,7 +42,18 @@ bool is_same_file(int fd1, int fd2) {
 
 } // namespace
 
-TEST(BufferReleaseChannelTest, MessageFlattenable) {
+class BufferReleaseChannelTest : public testing::Test {
+protected:
+    std::unique_ptr<BufferReleaseChannel::ConsumerEndpoint> mConsumer;
+    std::shared_ptr<BufferReleaseChannel::ProducerEndpoint> mProducer;
+
+    void SetUp() override {
+        ASSERT_EQ(OK,
+                  BufferReleaseChannel::open("BufferReleaseChannelTest"s, mConsumer, mProducer));
+    }
+};
+
+TEST_F(BufferReleaseChannelTest, MessageFlattenable) {
     ReleaseCallbackId releaseCallbackId{1, 2};
     sp<Fence> releaseFence = sp<Fence>::make(memfd_create("fake-fence-fd", 0));
     uint32_t maxAcquiredBufferCount = 5;
@@ -92,31 +103,23 @@ TEST(BufferReleaseChannelTest, MessageFlattenable) {
 
 // Verify that the BufferReleaseChannel consume returns WOULD_BLOCK when there's no message
 // available.
-TEST(BufferReleaseChannelTest, ConsumerEndpointIsNonBlocking) {
-    std::unique_ptr<BufferReleaseChannel::ConsumerEndpoint> consumer;
-    std::shared_ptr<BufferReleaseChannel::ProducerEndpoint> producer;
-    ASSERT_EQ(OK, BufferReleaseChannel::open("test-channel"s, consumer, producer));
-
+TEST_F(BufferReleaseChannelTest, ConsumerEndpointIsNonBlocking) {
     ReleaseCallbackId releaseCallbackId;
     sp<Fence> releaseFence;
     uint32_t maxAcquiredBufferCount;
     ASSERT_EQ(WOULD_BLOCK,
-              consumer->readReleaseFence(releaseCallbackId, releaseFence, maxAcquiredBufferCount));
+              mConsumer->readReleaseFence(releaseCallbackId, releaseFence, maxAcquiredBufferCount));
 }
 
 // Verify that we can write a message to the BufferReleaseChannel producer and read that message
 // using the BufferReleaseChannel consumer.
-TEST(BufferReleaseChannelTest, ProduceAndConsume) {
-    std::unique_ptr<BufferReleaseChannel::ConsumerEndpoint> consumer;
-    std::shared_ptr<BufferReleaseChannel::ProducerEndpoint> producer;
-    ASSERT_EQ(OK, BufferReleaseChannel::open("test-channel"s, consumer, producer));
-
+TEST_F(BufferReleaseChannelTest, ProduceAndConsume) {
     sp<Fence> fence = sp<Fence>::make(memfd_create("fake-fence-fd", 0));
 
     for (uint64_t i = 0; i < 64; i++) {
         ReleaseCallbackId producerId{i, i + 1};
         uint32_t maxAcquiredBufferCount = i + 2;
-        ASSERT_EQ(OK, producer->writeReleaseFence(producerId, fence, maxAcquiredBufferCount));
+        ASSERT_EQ(OK, mProducer->writeReleaseFence(producerId, fence, maxAcquiredBufferCount));
     }
 
     for (uint64_t i = 0; i < 64; i++) {
@@ -127,12 +130,24 @@ TEST(BufferReleaseChannelTest, ProduceAndConsume) {
         sp<Fence> consumerFence;
         uint32_t maxAcquiredBufferCount;
         ASSERT_EQ(OK,
-                  consumer->readReleaseFence(consumerId, consumerFence, maxAcquiredBufferCount));
+                  mConsumer->readReleaseFence(consumerId, consumerFence, maxAcquiredBufferCount));
 
         ASSERT_EQ(expectedId, consumerId);
         ASSERT_TRUE(is_same_file(fence->get(), consumerFence->get()));
         ASSERT_EQ(expectedMaxAcquiredBufferCount, maxAcquiredBufferCount);
     }
+}
+
+// Verify that BufferReleaseChannel::ConsumerEndpoint's socket can't be written to.
+TEST_F(BufferReleaseChannelTest, ConsumerSocketReadOnly) {
+    uint64_t data = 0;
+    ASSERT_EQ(-1, write(mConsumer->getFd().get(), &data, sizeof(uint64_t)));
+    ASSERT_EQ(errno, EPIPE);
+}
+
+// Verify that BufferReleaseChannel::ProducerEndpoint's socket can't be read from.
+TEST_F(BufferReleaseChannelTest, ProducerSocketWriteOnly) {
+    ASSERT_EQ(0, read(mProducer->getFd().get(), nullptr, sizeof(uint64_t)));
 }
 
 } // namespace android

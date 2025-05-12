@@ -80,6 +80,7 @@ void doTransactFuzz(const char* backend, const sp<B>& binder, FuzzedDataProvider
     (void)binder->transact(code, data, &reply, flag);
 }
 
+// start with a Parcel full of data (e.g. like you get from another process)
 template <typename P>
 void doReadFuzz(const char* backend, const std::vector<ParcelRead<P>>& reads,
                 FuzzedDataProvider&& provider) {
@@ -95,10 +96,10 @@ void doReadFuzz(const char* backend, const std::vector<ParcelRead<P>>& reads,
     RandomParcelOptions options;
 
     P p;
-    fillRandomParcel(&p, std::move(provider), &options);
+    fillRandomParcel(&p, std::move(provider), &options); // consumes provider
 
     // since we are only using a byte to index
-    CHECK(reads.size() <= 255) << reads.size();
+    CHECK_LE(reads.size(), 255u) << reads.size();
 
     FUZZ_LOG() << "backend: " << backend;
     FUZZ_LOG() << "input: " << HexString(p.data(), p.dataSize());
@@ -115,26 +116,29 @@ void doReadFuzz(const char* backend, const std::vector<ParcelRead<P>>& reads,
     }
 }
 
-// Append two random parcels.
 template <typename P>
-void doAppendFuzz(const char* backend, FuzzedDataProvider&& provider) {
-    int32_t start = provider.ConsumeIntegral<int32_t>();
-    int32_t len = provider.ConsumeIntegral<int32_t>();
-
-    std::vector<uint8_t> bytes = provider.ConsumeBytes<uint8_t>(
-            provider.ConsumeIntegralInRange<size_t>(0, provider.remaining_bytes()));
-
-    // same options so that FDs and binders could be shared in both Parcels
+void doReadWriteFuzz(const char* backend, const std::vector<ParcelRead<P>>& reads,
+                     const std::vector<ParcelWrite<P>>& writes, FuzzedDataProvider&& provider) {
     RandomParcelOptions options;
+    P p;
 
-    P p0, p1;
-    fillRandomParcel(&p0, FuzzedDataProvider(bytes.data(), bytes.size()), &options);
-    fillRandomParcel(&p1, std::move(provider), &options);
+    // since we are only using a byte to index
+    CHECK_LE(reads.size() + writes.size(), 255u) << reads.size();
 
     FUZZ_LOG() << "backend: " << backend;
-    FUZZ_LOG() << "start: " << start << " len: " << len;
 
-    p0.appendFrom(&p1, start, len);
+    while (provider.remaining_bytes() > 0) {
+        uint8_t idx = provider.ConsumeIntegralInRange<uint8_t>(0, reads.size() + writes.size() - 1);
+
+        FUZZ_LOG() << "Instruction " << idx << " avail: " << p.dataAvail()
+                   << " pos: " << p.dataPosition() << " cap: " << p.dataCapacity();
+
+        if (idx < reads.size()) {
+            reads.at(idx)(p, provider);
+        } else {
+            writes.at(idx - reads.size())(p, provider, &options);
+        }
+    }
 }
 
 void* NothingClass_onCreate(void* args) {
@@ -156,7 +160,7 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
 
     FuzzedDataProvider provider = FuzzedDataProvider(data, size);
 
-    const std::function<void(FuzzedDataProvider &&)> fuzzBackend[] = {
+    const std::function<void(FuzzedDataProvider&&)> fuzzBackend[] = {
             [](FuzzedDataProvider&& provider) {
                 doTransactFuzz<
                         ::android::hardware::Parcel>("hwbinder",
@@ -187,10 +191,14 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
                                              std::move(provider));
             },
             [](FuzzedDataProvider&& provider) {
-                doAppendFuzz<::android::Parcel>("binder", std::move(provider));
+                doReadWriteFuzz<::android::Parcel>("binder", BINDER_PARCEL_READ_FUNCTIONS,
+                                                   BINDER_PARCEL_WRITE_FUNCTIONS,
+                                                   std::move(provider));
             },
             [](FuzzedDataProvider&& provider) {
-                doAppendFuzz<NdkParcelAdapter>("binder_ndk", std::move(provider));
+                doReadWriteFuzz<NdkParcelAdapter>("binder_ndk", BINDER_NDK_PARCEL_READ_FUNCTIONS,
+                                                  BINDER_NDK_PARCEL_WRITE_FUNCTIONS,
+                                                  std::move(provider));
             },
     };
 

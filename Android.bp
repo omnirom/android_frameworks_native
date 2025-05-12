@@ -48,6 +48,7 @@ cc_library_headers {
     export_include_dirs: [
         "include/",
     ],
+    product_available: true,
 }
 
 ndk_headers {
@@ -124,4 +125,10 @@ filegroup {
     name: "deviceproductinfoconstants_aidl",
     srcs: ["aidl/android/hardware/display/IDeviceProductInfoConstants.aidl"],
     path: "aidl",
+}
+
+dirgroup {
+    name: "trusty_dirgroup_frameworks_native",
+    dirs: ["libs/binder"],
+    visibility: ["//trusty/vendor/google/aosp/scripts"],
 }

@@ -35,12 +35,12 @@ namespace battery {
 
 typedef uint16_t state_t;
 
-template <class T>
+template <class T, class V>
 class MultiStateCounter {
-    uint16_t stateCount;
+    const uint16_t stateCount;
+    const V emptyValue;
     state_t currentState;
     time_t lastStateChangeTimestamp;
-    T emptyValue;
     T lastValue;
     time_t lastUpdateTimestamp;
     T deltaValue;
@@ -54,7 +54,7 @@ class MultiStateCounter {
     State* states;
 
 public:
-    MultiStateCounter(uint16_t stateCount, const T& emptyValue);
+    MultiStateCounter(uint16_t stateCount, const V& emptyValue);
 
     virtual ~MultiStateCounter();
 
@@ -66,35 +66,35 @@ public:
      * Copies the current state and accumulated times-in-state from the source. Resets
      * the accumulated value.
      */
-    void copyStatesFrom(const MultiStateCounter<T>& source);
+    void copyStatesFrom(const MultiStateCounter<T, V> &source);
 
-    void setValue(state_t state, const T& value);
+    void setValue(state_t state, const V& value);
 
     /**
      * Updates the value by distributing the delta from the previously set value
      * among states according to their respective time-in-state.
      * Returns the delta from the previously set value.
      */
-    const T& updateValue(const T& value, time_t timestamp);
+    const V& updateValue(const V& value, time_t timestamp);
 
     /**
      * Updates the value by distributing the specified increment among states according
      * to their respective time-in-state.
      */
-    void incrementValue(const T& increment, time_t timestamp);
+    void incrementValue(const V& increment, time_t timestamp);
 
     /**
      * Adds the specified increment to the value for the current state, without affecting
      * the last updated value or timestamp.  Ignores partial time-in-state: the entirety of
      * the increment is given to the current state.
      */
-    void addValue(const T& increment);
+    void addValue(const V& increment);
 
     void reset();
 
     uint16_t getStateCount();
 
-    const T& getCount(state_t state);
+    const V& getCount(state_t state);
 
     std::string toString();
 
@@ -104,27 +104,25 @@ private:
      * Returns true iff the combination of previousValue and newValue is valid
      * (newValue >= prevValue)
      */
-    bool delta(const T& previousValue, const T& newValue, T* outValue) const;
+    bool delta(const T& previousValue, const V& newValue, T* outValue) const;
 
     /**
      * Adds value2 to value1 and stores the result in value1.  Denominator is
      * guaranteed to be non-zero.
      */
-    void add(T* value1, const T& value2, const uint64_t numerator,
+    void add(T* value1, const V& value2, const uint64_t numerator,
              const uint64_t denominator) const;
-
-    std::string valueToString(const T& value) const;
 };
 
 // ---------------------- MultiStateCounter Implementation -------------------------
 // Since MultiStateCounter is a template, the implementation must be inlined.
 
-template <class T>
-MultiStateCounter<T>::MultiStateCounter(uint16_t stateCount, const T& emptyValue)
+template <class T, class V>
+MultiStateCounter<T, V>::MultiStateCounter(uint16_t stateCount, const V& emptyValue)
       : stateCount(stateCount),
+        emptyValue(emptyValue),
         currentState(0),
         lastStateChangeTimestamp(-1),
-        emptyValue(emptyValue),
         lastValue(emptyValue),
         lastUpdateTimestamp(-1),
         deltaValue(emptyValue),
@@ -136,13 +134,13 @@ MultiStateCounter<T>::MultiStateCounter(uint16_t stateCount, const T& emptyValue
     }
 }
 
-template <class T>
-MultiStateCounter<T>::~MultiStateCounter() {
+template <class T, class V>
+MultiStateCounter<T, V>::~MultiStateCounter() {
     delete[] states;
 };
 
-template <class T>
-void MultiStateCounter<T>::setEnabled(bool enabled, time_t timestamp) {
+template <class T, class V>
+void MultiStateCounter<T, V>::setEnabled(bool enabled, time_t timestamp) {
     if (enabled == isEnabled) {
         return;
     }
@@ -167,8 +165,8 @@ void MultiStateCounter<T>::setEnabled(bool enabled, time_t timestamp) {
     }
 }
 
-template <class T>
-void MultiStateCounter<T>::setState(state_t state, time_t timestamp) {
+template <class T, class V>
+void MultiStateCounter<T, V>::setState(state_t state, time_t timestamp) {
     if (isEnabled && lastStateChangeTimestamp >= 0 && lastUpdateTimestamp >= 0) {
         // If the update arrived out-of-order, just push back the timestamp to
         // avoid having the situation where timeInStateSinceUpdate > timeSinceUpdate
@@ -198,8 +196,8 @@ void MultiStateCounter<T>::setState(state_t state, time_t timestamp) {
     lastStateChangeTimestamp = timestamp;
 }
 
-template <class T>
-void MultiStateCounter<T>::copyStatesFrom(const MultiStateCounter<T>& source) {
+template <class T, class V>
+void MultiStateCounter<T, V>::copyStatesFrom(const MultiStateCounter<T, V>& source) {
     if (stateCount != source.stateCount) {
         ALOGE("State count mismatch: %u vs. %u\n", stateCount, source.stateCount);
         return;
@@ -214,14 +212,14 @@ void MultiStateCounter<T>::copyStatesFrom(const MultiStateCounter<T>& source) {
     lastUpdateTimestamp = source.lastUpdateTimestamp;
 }
 
-template <class T>
-void MultiStateCounter<T>::setValue(state_t state, const T& value) {
+template <class T, class V>
+void MultiStateCounter<T, V>::setValue(state_t state, const V& value) {
     states[state].counter = value;
 }
 
-template <class T>
-const T& MultiStateCounter<T>::updateValue(const T& value, time_t timestamp) {
-    T* returnValue = &emptyValue;
+template <class T, class V>
+const V& MultiStateCounter<T, V>::updateValue(const V& value, time_t timestamp) {
+    const V* returnValue = &emptyValue;
 
     // If the counter is disabled, we ignore the update, except when the counter got disabled after
     // the previous update, in which case we still need to pick up the residual delta.
@@ -250,8 +248,8 @@ const T& MultiStateCounter<T>::updateValue(const T& value, time_t timestamp) {
                     }
                 } else {
                     std::stringstream str;
-                    str << "updateValue is called with a value " << valueToString(value)
-                        << ", which is lower than the previous value " << valueToString(lastValue)
+                    str << "updateValue is called with a value " << value
+                        << ", which is lower than the previous value " << lastValue
                         << "\n";
                     ALOGE("%s", str.str().c_str());
 
@@ -276,23 +274,25 @@ const T& MultiStateCounter<T>::updateValue(const T& value, time_t timestamp) {
     return *returnValue;
 }
 
-template <class T>
-void MultiStateCounter<T>::incrementValue(const T& increment, time_t timestamp) {
+template <class T, class V>
+void MultiStateCounter<T, V>::incrementValue(const V& increment, time_t timestamp) {
+//    T newValue;
+//    newValue = lastValue; // Copy assignment, not initialization.
     T newValue = lastValue;
     add(&newValue, increment, 1 /* numerator */, 1 /* denominator */);
     updateValue(newValue, timestamp);
 }
 
-template <class T>
-void MultiStateCounter<T>::addValue(const T& value) {
+template <class T, class V>
+void MultiStateCounter<T, V>::addValue(const V& value) {
     if (!isEnabled) {
         return;
     }
     add(&states[currentState].counter, value, 1 /* numerator */, 1 /* denominator */);
 }
 
-template <class T>
-void MultiStateCounter<T>::reset() {
+template <class T, class V>
+void MultiStateCounter<T, V>::reset() {
     lastStateChangeTimestamp = -1;
     lastUpdateTimestamp = -1;
     for (int i = 0; i < stateCount; i++) {
@@ -301,25 +301,26 @@ void MultiStateCounter<T>::reset() {
     }
 }
 
-template <class T>
-uint16_t MultiStateCounter<T>::getStateCount() {
+template <class T, class V>
+uint16_t MultiStateCounter<T, V>::getStateCount() {
     return stateCount;
 }
 
-template <class T>
-const T& MultiStateCounter<T>::getCount(state_t state) {
+template <class T, class V>
+const V& MultiStateCounter<T, V>::getCount(state_t state) {
     return states[state].counter;
 }
 
-template <class T>
-std::string MultiStateCounter<T>::toString() {
+template <class T, class V>
+std::string MultiStateCounter<T, V>::toString() {
     std::stringstream str;
+//    str << "LAST VALUE: " << valueToString(lastValue);
     str << "[";
     for (int i = 0; i < stateCount; i++) {
         if (i != 0) {
             str << ", ";
         }
-        str << i << ": " << valueToString(states[i].counter);
+        str << i << ": " << states[i].counter;
         if (states[i].timeInStateSinceUpdate > 0) {
             str << " timeInStateSinceUpdate: " << states[i].timeInStateSinceUpdate;
         }

@@ -541,7 +541,7 @@ int SkiaGLRenderEngine::getContextPriority() {
 
 void SkiaGLRenderEngine::appendBackendSpecificInfoToDump(std::string& result) {
     const GLExtensions& extensions = GLExtensions::getInstance();
-    StringAppendF(&result, "\n ------------RE GLES------------\n");
+    StringAppendF(&result, "\n ------------RE GLES (Ganesh)------------\n");
     StringAppendF(&result, "EGL implementation : %s\n", extensions.getEGLVersion());
     StringAppendF(&result, "%s\n", extensions.getEGLExtensions());
     StringAppendF(&result, "GLES: %s, %s, %s\n", extensions.getVendor(), extensions.getRenderer(),

@@ -72,6 +72,9 @@ void OutputLayerCompositionState::dump(std::string& out) const {
     dumpVal(out, "dataspace", toString(dataspace), dataspace);
     dumpVal(out, "whitePointNits", whitePointNits);
     dumpVal(out, "dimmingRatio", dimmingRatio);
+    if (pictureProfileHandle) {
+        dumpVal(out, "pictureProfile", toString(pictureProfileHandle));
+    }
     dumpVal(out, "override buffer", overrideInfo.buffer.get());
     dumpVal(out, "override acquire fence", overrideInfo.acquireFence.get());
     dumpVal(out, "override display frame", overrideInfo.displayFrame);

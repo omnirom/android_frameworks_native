@@ -212,7 +212,7 @@ SensorInputMapper::Sensor SensorInputMapper::createSensor(InputDeviceSensorType 
     // One input device can only have 1 sensor for each sensor Type.
     InputDeviceSensorInfo sensorInfo(identifier.name, std::to_string(identifier.vendor),
                                      identifier.version, sensorType,
-                                     InputDeviceSensorAccuracy::ACCURACY_HIGH,
+                                     InputDeviceSensorAccuracy::HIGH,
                                      /*maxRange=*/axis.max, /*resolution=*/axis.scale,
                                      /*power=*/config.getFloat(prefix + ".power").value_or(0.0f),
                                      /*minDelay=*/config.getInt(prefix + ".minDelay").value_or(0),

@@ -26,6 +26,7 @@ rust_bindgen {
     source_stem: "bindings",
     bindgen_flags: [
         "--constified-enum-module=AHardwareBuffer_Format",
+        "--bitfield-enum=ADataSpace",
         "--bitfield-enum=AHardwareBuffer_UsageFlags",
 
         "--allowlist-file=.*/nativewindow/include/.*\\.h",
@@ -109,7 +110,9 @@ rust_defaults {
     name: "libnativewindow_defaults",
     srcs: ["src/lib.rs"],
     rustlibs: [
+        "android.hardware.common-V2-rust",
         "libbinder_rs",
+        "libbitflags",
         "libnativewindow_bindgen",
     ],
 }

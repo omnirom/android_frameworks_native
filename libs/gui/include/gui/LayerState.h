@@ -26,6 +26,7 @@
 #include <android/gui/LayerCaptureArgs.h>
 #include <android/gui/TrustedPresentationThresholds.h>
 #include <android/native_window.h>
+#include <gui/DisplayLuts.h>
 #include <gui/IGraphicBufferProducer.h>
 #include <gui/ITransactionCompletedListener.h>
 #include <math/mat4.h>
@@ -46,6 +47,7 @@
 #include <ui/BlurRegion.h>
 #include <ui/GraphicTypes.h>
 #include <ui/LayerStack.h>
+#include <ui/PictureProfileHandle.h>
 #include <ui/Rect.h>
 #include <ui/Region.h>
 #include <ui/Rotation.h>
@@ -169,6 +171,10 @@ struct layer_state_t {
         // Sets a property on this layer indicating that its visible region should be considered
         // when computing TrustedPresentation Thresholds.
         eCanOccludePresentation = 0x1000,
+        // Indicates that the SurfaceControl should recover from buffer stuffing when
+        // possible. This is the case when the SurfaceControl is the root SurfaceControl
+        // owned by ViewRootImpl.
+        eRecoverableFromBufferStuffing = 0x2000,
     };
 
     enum {
@@ -184,6 +190,7 @@ struct layer_state_t {
         eCachingHintChanged = 0x00000200,
         eDimmingEnabledChanged = 0x00000400,
         eShadowRadiusChanged = 0x00000800,
+        eLutsChanged = 0x00001000,
         eBufferCropChanged = 0x00002000,
         eRelativeLayerChanged = 0x00004000,
         eReparent = 0x00008000,
@@ -222,6 +229,8 @@ struct layer_state_t {
         eExtendedRangeBrightnessChanged = 0x10000'00000000,
         eEdgeExtensionChanged = 0x20000'00000000,
         eBufferReleaseChannelChanged = 0x40000'00000000,
+        ePictureProfileHandleChanged = 0x80000'00000000,
+        eAppContentPriorityChanged = 0x100000'00000000,
     };
 
     layer_state_t();
@@ -255,7 +264,7 @@ struct layer_state_t {
             layer_state_t::eTransformToDisplayInverseChanged |
             layer_state_t::eTransparentRegionChanged |
             layer_state_t::eExtendedRangeBrightnessChanged |
-            layer_state_t::eDesiredHdrHeadroomChanged;
+            layer_state_t::eDesiredHdrHeadroomChanged | layer_state_t::eLutsChanged;
 
     // Content updates.
     static constexpr uint64_t CONTENT_CHANGES = layer_state_t::BUFFER_CHANGES |
@@ -265,7 +274,8 @@ struct layer_state_t {
             layer_state_t::eColorSpaceAgnosticChanged | layer_state_t::eColorTransformChanged |
             layer_state_t::eCornerRadiusChanged | layer_state_t::eDimmingEnabledChanged |
             layer_state_t::eHdrMetadataChanged | layer_state_t::eShadowRadiusChanged |
-            layer_state_t::eStretchChanged;
+            layer_state_t::eStretchChanged | layer_state_t::ePictureProfileHandleChanged |
+            layer_state_t::eAppContentPriorityChanged;
 
     // Changes which invalidates the layer's visible region in CE.
     static constexpr uint64_t CONTENT_DIRTY = layer_state_t::CONTENT_CHANGES |
@@ -330,7 +340,7 @@ struct layer_state_t {
     Region transparentRegion;
     uint32_t bufferTransform;
     bool transformToDisplayInverse;
-    Rect crop;
+    FloatRect crop;
     std::shared_ptr<BufferData> bufferData = nullptr;
     ui::Dataspace dataspace;
     HdrMetadata hdrMetadata;
@@ -410,12 +420,23 @@ struct layer_state_t {
     float currentHdrSdrRatio = 1.f;
     float desiredHdrSdrRatio = 1.f;
 
+    // Enhance the quality of the buffer contents by configurating a picture processing pipeline
+    // with values as specified by this picture profile.
+    PictureProfileHandle pictureProfileHandle{PictureProfileHandle::NONE};
+
+    // A value indicating the significance of the layer's content to the app's desired user
+    // experience. A lower priority will result in more likelihood of getting access to limited
+    // resources, such as picture processing hardware.
+    int32_t appContentPriority = 0;
+
     gui::CachingHint cachingHint = gui::CachingHint::Enabled;
 
     TrustedPresentationThresholds trustedPresentationThresholds;
     TrustedPresentationListener trustedPresentationListener;
 
     std::shared_ptr<gui::BufferReleaseChannel::ProducerEndpoint> bufferReleaseChannel;
+
+    std::shared_ptr<gui::DisplayLuts> luts;
 };
 
 class ComposerState {

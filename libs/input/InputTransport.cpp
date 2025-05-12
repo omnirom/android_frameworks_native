@@ -583,15 +583,6 @@ status_t InputPublisher::publishMotionEvent(
                    StringPrintf("publishMotionEvent(inputChannel=%s, action=%s)",
                                 mChannel->getName().c_str(),
                                 MotionEvent::actionToString(action).c_str()));
-    if (verifyEvents()) {
-        Result<void> result =
-                mInputVerifier.processMovement(deviceId, source, action, pointerCount,
-                                               pointerProperties, pointerCoords, flags);
-        if (!result.ok()) {
-            LOG(ERROR) << "Bad stream: " << result.error();
-            return BAD_VALUE;
-        }
-    }
     if (debugTransportPublisher()) {
         std::string transformString;
         transform.dump(transformString, "transform", "        ");
@@ -657,8 +648,18 @@ status_t InputPublisher::publishMotionEvent(
         msg.body.motion.pointers[i].properties = pointerProperties[i];
         msg.body.motion.pointers[i].coords = pointerCoords[i];
     }
+    const status_t status = mChannel->sendMessage(&msg);
 
-    return mChannel->sendMessage(&msg);
+    if (status == OK && verifyEvents()) {
+        Result<void> result =
+                mInputVerifier.processMovement(deviceId, source, action, pointerCount,
+                                               pointerProperties, pointerCoords, flags);
+        if (!result.ok()) {
+            LOG(ERROR) << "Bad stream: " << result.error();
+            return BAD_VALUE;
+        }
+    }
+    return status;
 }
 
 status_t InputPublisher::publishFocusEvent(uint32_t seq, int32_t eventId, bool hasFocus) {

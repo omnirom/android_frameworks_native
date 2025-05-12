@@ -19,6 +19,7 @@
 #pragma clang diagnostic ignored "-Wconversion"
 
 #include <common/FlagManager.h>
+#include <gui/IConsumerListener.h>
 #include <ui/DisplayState.h>
 
 #include "LayerTransactionTest.h"
@@ -45,11 +46,17 @@ protected:
         SurfaceComposerClient::getDisplayState(mMainDisplay, &mMainDisplayState);
         SurfaceComposerClient::getActiveDisplayMode(mMainDisplay, &mMainDisplayMode);
 
-        sp<IGraphicBufferConsumer> consumer;
-        BufferQueue::createBufferQueue(&mProducer, &consumer);
-        consumer->setConsumerName(String8("Virtual disp consumer"));
-        consumer->setDefaultBufferSize(mMainDisplayMode.resolution.getWidth(),
-                                       mMainDisplayMode.resolution.getHeight());
+        BufferQueue::createBufferQueue(&mProducer, &mConsumer);
+        mConsumer->setConsumerName(String8("Virtual disp consumer (MultiDisplayLayerBounds)"));
+        mConsumer->setDefaultBufferSize(mMainDisplayMode.resolution.getWidth(),
+                                        mMainDisplayMode.resolution.getHeight());
+
+        class StubConsumerListener : public BnConsumerListener {
+            virtual void onFrameAvailable(const BufferItem&) override {}
+            virtual void onBuffersReleased() override {}
+            virtual void onSidebandStreamChanged() override {}
+        };
+        mConsumer->consumerConnect(sp<StubConsumerListener>::make(), true);
     }
 
     virtual void TearDown() {
@@ -92,6 +99,7 @@ protected:
     sp<IBinder> mMainDisplay;
     PhysicalDisplayId mMainDisplayId;
     sp<IBinder> mVirtualDisplay;
+    sp<IGraphicBufferConsumer> mConsumer;
     sp<IGraphicBufferProducer> mProducer;
     sp<SurfaceControl> mColorLayer;
     Color mExpectedColor = {63, 63, 195, 255};

@@ -22,6 +22,7 @@ namespace android {
 // must be kept in sync with definitions in AudioPlaybackConfiguration.java
 #define PLAYER_PIID_INVALID -1
 
+// TODO (b/309532236) remove manual IAudioManager impl in favor of AIDL.
 typedef enum {
     PLAYER_TYPE_SLES_AUDIOPLAYER_BUFFERQUEUE = 11,
     PLAYER_TYPE_SLES_AUDIOPLAYER_URI_FD = 12,
@@ -59,6 +60,8 @@ enum {
     PLAYER_MUTE_PLAYBACK_RESTRICTED = (1 << 3),
     PLAYER_MUTE_CLIENT_VOLUME = (1 << 4),
     PLAYER_MUTE_VOLUME_SHAPER = (1 << 5),
+    PLAYER_MUTE_PORT_VOLUME = (1 << 6),
+    PLAYER_MUTE_OP_AUDIO_CONTROL = (1 << 7),
 };
 
 struct mute_state_t {
@@ -72,8 +75,12 @@ struct mute_state_t {
     bool muteFromPlaybackRestricted = false;
     /** Flag used when audio track was muted by client volume. */
     bool muteFromClientVolume = false;
-     /** Flag used when volume is muted by volume shaper. */
+    /** Flag used when volume is muted by volume shaper. */
     bool muteFromVolumeShaper = false;
+    /** Flag used when volume is muted by port volume. */
+    bool muteFromPortVolume = false;
+    /** Flag used when volume is muted by audio control op. */
+    bool muteFromOpAudioControl = false;
 
     explicit operator int() const
     {
@@ -83,6 +90,8 @@ struct mute_state_t {
         result |= muteFromPlaybackRestricted * PLAYER_MUTE_PLAYBACK_RESTRICTED;
         result |= muteFromClientVolume * PLAYER_MUTE_CLIENT_VOLUME;
         result |= muteFromVolumeShaper * PLAYER_MUTE_VOLUME_SHAPER;
+        result |= muteFromPortVolume * PLAYER_MUTE_PORT_VOLUME;
+        result |= muteFromOpAudioControl * PLAYER_MUTE_OP_AUDIO_CONTROL;
         return result;
     }
 

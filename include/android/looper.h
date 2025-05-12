@@ -90,20 +90,23 @@ enum {
     ALOOPER_POLL_WAKE = -1,
 
     /**
-     * Result from ALooper_pollOnce() and ALooper_pollAll():
-     * One or more callbacks were executed.
+     * Result from ALooper_pollOnce():
+     * One or more callbacks were executed. The poll may also have been
+     * explicitly woken by ALooper_wake().
      */
     ALOOPER_POLL_CALLBACK = -2,
 
     /**
      * Result from ALooper_pollOnce() and ALooper_pollAll():
-     * The timeout expired.
+     * The timeout expired. The poll may also have been explicitly woken by
+     * ALooper_wake().
      */
     ALOOPER_POLL_TIMEOUT = -3,
 
     /**
      * Result from ALooper_pollOnce() and ALooper_pollAll():
-     * An error occurred.
+     * An error occurred. The poll may also have been explicitly woken by
+     * ALooper_wake(()).
      */
     ALOOPER_POLL_ERROR = -4,
 };
@@ -182,10 +185,13 @@ typedef int (*ALooper_callbackFunc)(int fd, int events, void* data);
  * If the timeout is zero, returns immediately without blocking.
  * If the timeout is negative, waits indefinitely until an event appears.
  *
+ * **All return values may also imply ALOOPER_POLL_WAKE.** If you call this in a
+ * loop, you must treat all return values as if they also indicated
+ * ALOOPER_POLL_WAKE.
+ *
  * Returns ALOOPER_POLL_WAKE if the poll was awoken using ALooper_wake() before
  * the timeout expired and no callbacks were invoked and no other file
- * descriptors were ready. **All return values may also imply
- * ALOOPER_POLL_WAKE.**
+ * descriptors were ready.
  *
  * Returns ALOOPER_POLL_CALLBACK if one or more callbacks were invoked. The poll
  * may also have been explicitly woken by ALooper_wake.
@@ -214,9 +220,9 @@ int ALooper_pollOnce(int timeoutMillis, int* outFd, int* outEvents, void** outDa
  * data has been consumed or a file descriptor is available with no callback.
  * This function will never return ALOOPER_POLL_CALLBACK.
  *
- * This API cannot be used safely, but a safe alternative exists (see below). As
- * such, new builds will not be able to call this API and must migrate to the
- * safe API. Binary compatibility is preserved to support already-compiled apps.
+ * This API will not reliably respond to ALooper_wake. As such, this API is
+ * hidden and callers should migrate to ALooper_pollOnce. Binary compatibility
+ * is preserved to support already-compiled apps.
  *
  * \bug ALooper_pollAll will not wake in response to ALooper_wake calls if it
  * also handles another event at the same time.
@@ -235,6 +241,8 @@ int ALooper_pollAll(int timeoutMillis, int* outFd, int* outEvents, void** outDat
  *
  * This method can be called on any thread.
  * This method returns immediately.
+ *
+ * \bug ALooper_pollAll will not reliably wake in response to ALooper_wake.
  */
 void ALooper_wake(ALooper* looper);
 

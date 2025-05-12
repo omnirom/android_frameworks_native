@@ -13,6 +13,7 @@
 // limitations under the License.
 
 package {
+    default_team: "trendy_team_android_gpu",
     default_applicable_licenses: ["frameworks_native_license"],
 }
 

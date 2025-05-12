@@ -387,7 +387,7 @@ public:
 
         state.state.what = what;
         if (what & layer_state_t::eCropChanged) {
-            state.state.crop = Rect(1, 2, 3, 4);
+            state.state.crop = FloatRect(1, 2, 3, 4);
         }
         if (what & layer_state_t::eFlagsChanged) {
             state.state.flags = layer_state_t::eEnableBackpressure;

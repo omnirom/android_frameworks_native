@@ -81,6 +81,31 @@ static_assert(static_cast<bool>(kApplePtr));
 static_assert(std::is_same_v<decltype(ftl::as_non_null(std::declval<const int* const>())),
                              ftl::NonNull<const int*>>);
 
+class Base {};
+class Derived : public Base {};
+
+static_assert(std::is_constructible_v<ftl::NonNull<void*>, ftl::NonNull<int*>>);
+static_assert(!std::is_constructible_v<ftl::NonNull<int*>, ftl::NonNull<void*>>);
+static_assert(std::is_constructible_v<ftl::NonNull<const int*>, ftl::NonNull<int*>>);
+static_assert(!std::is_constructible_v<ftl::NonNull<int*>, ftl::NonNull<const int*>>);
+static_assert(std::is_constructible_v<ftl::NonNull<Base*>, ftl::NonNull<Derived*>>);
+static_assert(!std::is_constructible_v<ftl::NonNull<Derived*>, ftl::NonNull<Base*>>);
+static_assert(std::is_constructible_v<ftl::NonNull<std::unique_ptr<const int>>,
+                                      ftl::NonNull<std::unique_ptr<int>>>);
+static_assert(std::is_constructible_v<ftl::NonNull<std::unique_ptr<Base>>,
+                                      ftl::NonNull<std::unique_ptr<Derived>>>);
+
+static_assert(std::is_assignable_v<ftl::NonNull<void*>, ftl::NonNull<int*>>);
+static_assert(!std::is_assignable_v<ftl::NonNull<int*>, ftl::NonNull<void*>>);
+static_assert(std::is_assignable_v<ftl::NonNull<const int*>, ftl::NonNull<int*>>);
+static_assert(!std::is_assignable_v<ftl::NonNull<int*>, ftl::NonNull<const int*>>);
+static_assert(std::is_assignable_v<ftl::NonNull<Base*>, ftl::NonNull<Derived*>>);
+static_assert(!std::is_assignable_v<ftl::NonNull<Derived*>, ftl::NonNull<Base*>>);
+static_assert(std::is_assignable_v<ftl::NonNull<std::unique_ptr<const int>>,
+                                   ftl::NonNull<std::unique_ptr<int>>>);
+static_assert(std::is_assignable_v<ftl::NonNull<std::unique_ptr<Base>>,
+                                   ftl::NonNull<std::unique_ptr<Derived>>>);
+
 }  // namespace
 
 TEST(NonNull, SwapRawPtr) {
@@ -154,6 +179,16 @@ TEST(NonNull, UnorderedSetOfSmartPtr) {
   EXPECT_FALSE(ftl::contains(spi, nullptr));
   EXPECT_TRUE(ftl::contains(spi, spi.begin()->get()));
   EXPECT_TRUE(ftl::contains(spi, *spi.begin()));
+}
+
+TEST(NonNull, ImplicitConversion) {
+  int i = 123;
+  int j = 345;
+  auto ip = ftl::as_non_null(&i);
+  ftl::NonNull<void*> vp{ip};
+  EXPECT_EQ(vp.get(), &i);
+  vp = ftl::as_non_null(&j);
+  EXPECT_EQ(vp.get(), &j);
 }
 
 }  // namespace android::test

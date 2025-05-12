@@ -31,6 +31,9 @@
 #include <ui/Fence.h>
 #include <ui/FloatRect.h>
 #include <ui/GraphicBuffer.h>
+#include <ui/PictureProfileHandle.h>
+
+#include "DisplayHardware/Hal.h"
 
 #include <algorithm>
 #include <cinttypes>
@@ -42,7 +45,8 @@ using aidl::android::hardware::graphics::composer3::Composition;
 using AidlCapability = aidl::android::hardware::graphics::composer3::Capability;
 using aidl::android::hardware::graphics::composer3::DisplayCapability;
 using aidl::android::hardware::graphics::composer3::DisplayLuts;
-using aidl::android::hardware::graphics::composer3::Lut;
+using aidl::android::hardware::graphics::composer3::LutProperties;
+using aidl::android::hardware::graphics::composer3::Luts;
 using aidl::android::hardware::graphics::composer3::OverlayProperties;
 
 namespace android {
@@ -52,6 +56,7 @@ using android::FloatRect;
 using android::GraphicBuffer;
 using android::HdrCapabilities;
 using android::HdrMetadata;
+using android::PictureProfileHandle;
 using android::Rect;
 using android::Region;
 using android::sp;
@@ -609,17 +614,37 @@ Error Display::getClientTargetProperty(
     return static_cast<Error>(error);
 }
 
-Error Display::getRequestedLuts(std::vector<DisplayLuts::LayerLut>* outLayerLuts) {
-    std::vector<DisplayLuts::LayerLut> tmpLayerLuts;
-    const auto error = mComposer.getRequestedLuts(mId, &tmpLayerLuts);
-    for (DisplayLuts::LayerLut& layerLut : tmpLayerLuts) {
-        if (layerLut.lut.pfd.get() >= 0) {
-            outLayerLuts->push_back({layerLut.layer,
-                                     Lut{ndk::ScopedFileDescriptor(layerLut.lut.pfd.release()),
-                                         layerLut.lut.lutProperties}});
+Error Display::getRequestedLuts(LayerLuts* outLuts,
+                                LutFileDescriptorMapper& lutFileDescriptorMapper) {
+    std::vector<Hwc2::Layer> layerIds;
+    std::vector<DisplayLuts::LayerLut> tmpLuts;
+    const auto error = static_cast<Error>(mComposer.getRequestedLuts(mId, &layerIds, &tmpLuts));
+    if (error != Error::NONE) {
+        return error;
+    }
+
+    uint32_t numElements = layerIds.size();
+    outLuts->clear();
+    for (uint32_t i = 0; i < numElements; ++i) {
+        auto layer = getLayerById(layerIds[i]);
+        if (layer) {
+            auto& layerLut = tmpLuts[i];
+            if (layerLut.luts.pfd.get() > 0 && layerLut.luts.offsets.has_value()) {
+                const auto& offsets = layerLut.luts.offsets.value();
+                std::vector<std::pair<int32_t, LutProperties>> lutOffsetsAndProperties;
+                lutOffsetsAndProperties.reserve(offsets.size());
+                std::transform(offsets.begin(), offsets.end(), layerLut.luts.lutProperties.begin(),
+                               std::back_inserter(lutOffsetsAndProperties),
+                               [](int32_t i, LutProperties j) { return std::make_pair(i, j); });
+                outLuts->emplace_or_replace(layer.get(), lutOffsetsAndProperties);
+                lutFileDescriptorMapper.emplace_or_replace(layer.get(),
+                                                           ndk::ScopedFileDescriptor(
+                                                                   layerLut.luts.pfd.release()));
+            }
         }
     }
-    return static_cast<Error>(error);
+
+    return Error::NONE;
 }
 
 Error Display::getDisplayDecorationSupport(
@@ -631,6 +656,16 @@ Error Display::getDisplayDecorationSupport(
 
 Error Display::setIdleTimerEnabled(std::chrono::milliseconds timeout) {
     const auto error = mComposer.setIdleTimerEnabled(mId, timeout);
+    return static_cast<Error>(error);
+}
+
+Error Display::getMaxLayerPictureProfiles(int32_t* outMaxProfiles) {
+    const auto error = mComposer.getMaxLayerPictureProfiles(mId, outMaxProfiles);
+    return static_cast<Error>(error);
+}
+
+Error Display::setPictureProfileHandle(const PictureProfileHandle& handle) {
+    const auto error = mComposer.setDisplayPictureProfileId(mId, handle.getId());
     return static_cast<Error>(error);
 }
 
@@ -1057,11 +1092,20 @@ Error Layer::setBlockingRegion(const Region& region) {
     return static_cast<Error>(intError);
 }
 
-Error Layer::setLuts(std::vector<Lut>& luts) {
+Error Layer::setLuts(aidl::android::hardware::graphics::composer3::Luts& luts) {
     if (CC_UNLIKELY(!mDisplay)) {
         return Error::BAD_DISPLAY;
     }
     const auto intError = mComposer.setLayerLuts(mDisplay->getId(), mId, luts);
+    return static_cast<Error>(intError);
+}
+
+Error Layer::setPictureProfileHandle(const PictureProfileHandle& handle) {
+    if (CC_UNLIKELY(!mDisplay)) {
+        return Error::BAD_DISPLAY;
+    }
+    const auto intError =
+            mComposer.setLayerPictureProfileId(mDisplay->getId(), mId, handle.getId());
     return static_cast<Error>(intError);
 }
 

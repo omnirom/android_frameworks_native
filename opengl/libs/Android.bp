@@ -63,6 +63,18 @@ ndk_library {
     unversioned_until: "current",
 }
 
+aconfig_declarations {
+    name: "egl_flags",
+    package: "com.android.graphics.egl.flags",
+    container: "system",
+    srcs: ["EGL/egl_flags.aconfig"],
+}
+
+cc_aconfig_library {
+    name: "libegl_flags",
+    aconfig_declarations: "egl_flags",
+}
+
 cc_defaults {
     name: "gl_libs_defaults",
     cflags: [
@@ -135,6 +147,10 @@ cc_library_static {
         "EGL/MultifileBlobCache.cpp",
     ],
     export_include_dirs: ["EGL"],
+    shared_libs: [
+        "libegl_flags",
+        "libz",
+    ],
 }
 
 cc_library_shared {
@@ -163,12 +179,14 @@ cc_library_shared {
         "android.hardware.configstore@1.0",
         "android.hardware.configstore-utils",
         "libbase",
+        "libegl_flags",
         "libhidlbase",
         "libnativebridge_lazy",
         "libnativeloader_lazy",
         "libutils",
         "libSurfaceFlingerProp",
         "libunwindstack",
+        "libz",
     ],
     static_libs: [
         "libEGL_getProcAddress",
@@ -198,7 +216,9 @@ cc_test {
         "EGL/MultifileBlobCache_test.cpp",
     ],
     shared_libs: [
+        "libegl_flags",
         "libutils",
+        "libz",
     ],
 }
 

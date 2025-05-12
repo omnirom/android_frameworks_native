@@ -27,8 +27,8 @@ MODULE_LIBRARY_DEPS += \
 	$(LIBBINDER_DIR)/trusty/ndk \
 	$(LIBBINDER_DIR)/trusty/rust/binder_ndk_sys \
 	$(LIBBINDER_DIR)/trusty/rust/binder_rpc_unstable_bindgen \
-	external/rust/crates/downcast-rs \
-	external/rust/crates/libc \
+	$(call FIND_CRATE,downcast-rs) \
+	$(call FIND_CRATE,libc) \
 	trusty/user/base/lib/trusty-sys \
 
 MODULE_RUSTFLAGS += \

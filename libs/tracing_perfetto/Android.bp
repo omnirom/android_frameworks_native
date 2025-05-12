@@ -47,4 +47,6 @@ cc_library_shared {
     ],
 
     host_supported: true,
+    // for vndbinder
+    vendor_available: true,
 }

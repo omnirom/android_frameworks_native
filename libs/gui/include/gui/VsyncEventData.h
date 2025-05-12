@@ -36,6 +36,9 @@ struct VsyncEventData {
     // Size of frame timelines provided by the platform; max is kFrameTimelinesCapacity.
     uint32_t frameTimelinesLength;
 
+    // Number of queued buffers to indicate if buffer stuffing mode is detected.
+    uint32_t numberQueuedBuffers;
+
     struct alignas(8) FrameTimeline {
         // The Vsync Id corresponsing to this vsync event. This will be used to
         // populate ISurfaceComposer::setFrameTimelineVsync and

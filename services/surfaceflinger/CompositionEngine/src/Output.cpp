@@ -33,8 +33,11 @@
 #include <compositionengine/impl/planner/Planner.h>
 #include <ftl/algorithm.h>
 #include <ftl/future.h>
+#include <ftl/optional.h>
 #include <scheduler/FrameTargeter.h>
 #include <scheduler/Time.h>
+
+#include <com_android_graphics_libgui_flags.h>
 
 #include <optional>
 #include <thread>
@@ -112,7 +115,7 @@ bool Output::isValid() const {
             mRenderSurface->isValid();
 }
 
-std::optional<DisplayId> Output::getDisplayId() const {
+ftl::Optional<DisplayId> Output::getDisplayId() const {
     return {};
 }
 
@@ -434,7 +437,7 @@ void Output::prepare(const compositionengine::CompositionRefreshArgs& refreshArg
 ftl::Future<std::monostate> Output::present(
         const compositionengine::CompositionRefreshArgs& refreshArgs) {
     const auto stringifyExpectedPresentTime = [this, &refreshArgs]() -> std::string {
-        return ftl::Optional(getDisplayId())
+        return getDisplayId()
                 .and_then(PhysicalDisplayId::tryCast)
                 .and_then([&refreshArgs](PhysicalDisplayId id) {
                     return refreshArgs.frameTargets.get(id);
@@ -499,15 +502,6 @@ ftl::Future<std::monostate> Output::present(
 void Output::offloadPresentNextFrame() {
     mOffloadPresent = true;
     updateHwcAsyncWorker();
-}
-
-void Output::uncacheBuffers(std::vector<uint64_t> const& bufferIdsToUncache) {
-    if (bufferIdsToUncache.empty()) {
-        return;
-    }
-    for (auto outputLayer : getOutputLayersOrderedByZ()) {
-        outputLayer->uncacheBuffers(bufferIdsToUncache);
-    }
 }
 
 void Output::rebuildLayerStacks(const compositionengine::CompositionRefreshArgs& refreshArgs,
@@ -777,11 +771,11 @@ void Output::ensureOutputLayerIfVisible(sp<compositionengine::LayerFE>& layerFE,
 
     // The layer is visible. Either reuse the existing outputLayer if we have
     // one, or create a new one if we do not.
-    auto result = ensureOutputLayer(prevOutputLayerIndex, layerFE);
+    auto outputLayer = ensureOutputLayer(prevOutputLayerIndex, layerFE);
 
     // Store the layer coverage information into the layer state as some of it
     // is useful later.
-    auto& outputLayerState = result->editState();
+    auto& outputLayerState = outputLayer->editState();
     outputLayerState.visibleRegion = visibleRegion;
     outputLayerState.visibleNonTransparentRegion = visibleNonTransparentRegion;
     outputLayerState.coveredRegion = coveredRegion;
@@ -796,6 +790,54 @@ void Output::ensureOutputLayerIfVisible(sp<compositionengine::LayerFE>& layerFE,
     if (CC_UNLIKELY(computeAboveCoveredExcludingOverlays)) {
         outputLayerState.coveredRegionExcludingDisplayOverlays =
                 std::move(coveredRegionExcludingDisplayOverlays);
+    }
+}
+
+void Output::uncacheBuffers(std::vector<uint64_t> const& bufferIdsToUncache) {
+    if (bufferIdsToUncache.empty()) {
+        return;
+    }
+    for (auto outputLayer : getOutputLayersOrderedByZ()) {
+        outputLayer->uncacheBuffers(bufferIdsToUncache);
+    }
+}
+
+void Output::commitPictureProfilesToCompositionState() {
+    if (!com_android_graphics_libgui_flags_apply_picture_profiles()) {
+        return;
+    }
+    if (!hasPictureProcessing()) {
+        return;
+    }
+    auto compare = [](const ::android::compositionengine::OutputLayer* lhs,
+                      const ::android::compositionengine::OutputLayer* rhs) {
+        return lhs->getPictureProfilePriority() > rhs->getPictureProfilePriority();
+    };
+    std::priority_queue<::android::compositionengine::OutputLayer*,
+                        std::vector<::android::compositionengine::OutputLayer*>, decltype(compare)>
+            layersWithProfiles;
+    for (auto outputLayer : getOutputLayersOrderedByZ()) {
+        if (outputLayer->getPictureProfileHandle()) {
+            layersWithProfiles.push(outputLayer);
+        }
+    }
+
+    // TODO(b/337330263): Use the default display picture profile from SurfaceFlinger
+    editState().pictureProfileHandle = PictureProfileHandle::NONE;
+
+    // When layer-specific picture processing is supported, apply as many high priority profiles as
+    // possible to the layers, and ignore the low priority layers.
+    if (getMaxLayerPictureProfiles() > 0) {
+        for (int i = 0; i < getMaxLayerPictureProfiles() && !layersWithProfiles.empty();
+             layersWithProfiles.pop(), ++i) {
+            layersWithProfiles.top()->commitPictureProfileToCompositionState();
+            layersWithProfiles.top()->getLayerFE().onPictureProfileCommitted();
+        }
+        // No layer-specific picture processing, so apply the highest priority picture profile to
+        // the entire display.
+    } else if (!layersWithProfiles.empty()) {
+        editState().pictureProfileHandle = layersWithProfiles.top()->getPictureProfileHandle();
+        layersWithProfiles.top()->getLayerFE().onPictureProfileCommitted();
     }
 }
 
@@ -814,16 +856,20 @@ void Output::updateCompositionState(const compositionengine::CompositionRefreshA
     mLayerRequestingBackgroundBlur = findLayerRequestingBackgroundComposition();
     bool forceClientComposition = mLayerRequestingBackgroundBlur != nullptr;
 
+    auto* properties = getOverlaySupport();
+
     for (auto* layer : getOutputLayersOrderedByZ()) {
         layer->updateCompositionState(refreshArgs.updatingGeometryThisFrame,
                                       refreshArgs.devOptForceClientComposition ||
                                               forceClientComposition,
-                                      refreshArgs.internalDisplayRotationFlags);
+                                      refreshArgs.internalDisplayRotationFlags,
+                                      properties ? properties->lutProperties : std::nullopt);
 
         if (mLayerRequestingBackgroundBlur == layer) {
             forceClientComposition = false;
         }
     }
+    commitPictureProfilesToCompositionState();
 }
 
 void Output::planComposition() {
@@ -845,16 +891,24 @@ void Output::writeCompositionState(const compositionengine::CompositionRefreshAr
         return;
     }
 
-    if (auto frameTargetPtrOpt = ftl::Optional(getDisplayId())
+    if (auto frameTargetPtrOpt = getDisplayId()
                                          .and_then(PhysicalDisplayId::tryCast)
                                          .and_then([&refreshArgs](PhysicalDisplayId id) {
                                              return refreshArgs.frameTargets.get(id);
                                          })) {
         editState().earliestPresentTime = frameTargetPtrOpt->get()->earliestPresentTime();
         editState().expectedPresentTime = frameTargetPtrOpt->get()->expectedPresentTime().ns();
+        const auto debugPresentDelay = frameTargetPtrOpt->get()->debugPresentDelay();
+        if (debugPresentDelay) {
+            SFTRACE_FORMAT_INSTANT("DEBUG delaying presentation by %.2fms",
+                                   debugPresentDelay->ns() / 1e6f);
+            editState().expectedPresentTime += debugPresentDelay->ns();
+        }
     }
     editState().frameInterval = refreshArgs.frameInterval;
     editState().powerCallback = refreshArgs.powerCallback;
+
+    applyPictureProfile();
 
     compositionengine::OutputLayer* peekThroughLayer = nullptr;
     sp<GraphicBuffer> previousOverride = nullptr;
@@ -1624,13 +1678,7 @@ void Output::presentFrameAndReleaseLayers(bool flushEvenWhenDisabled) {
             releaseFence =
                     Fence::merge("LayerRelease", releaseFence, frame.clientTargetAcquireFence);
         }
-        if (FlagManager::getInstance().ce_fence_promise()) {
-            layer->getLayerFE().setReleaseFence(releaseFence);
-        } else {
-            layer->getLayerFE()
-                    .onLayerDisplayed(ftl::yield<FenceResult>(std::move(releaseFence)).share(),
-                                      outputState.layerFilter.layerStack);
-        }
+        layer->getLayerFE().setReleaseFence(releaseFence);
     }
 
     // We've got a list of layers needing fences, that are disjoint with
@@ -1638,12 +1686,7 @@ void Output::presentFrameAndReleaseLayers(bool flushEvenWhenDisabled) {
     // supply them with the present fence.
     for (auto& weakLayer : mReleasedLayers) {
         if (const auto layer = weakLayer.promote()) {
-            if (FlagManager::getInstance().ce_fence_promise()) {
-                layer->setReleaseFence(frame.presentFence);
-            } else {
-                layer->onLayerDisplayed(ftl::yield<FenceResult>(frame.presentFence).share(),
-                                        outputState.layerFilter.layerStack);
-            }
+            layer->setReleaseFence(frame.presentFence);
         }
     }
 
@@ -1701,6 +1744,10 @@ void Output::updateHwcAsyncWorker() {
 
 void Output::setTreat170mAsSrgb(bool enable) {
     editState().treat170mAsSrgb = enable;
+}
+
+const aidl::android::hardware::graphics::composer3::OverlayProperties* Output::getOverlaySupport() {
+    return nullptr;
 }
 
 bool Output::canPredictCompositionStrategy(const CompositionRefreshArgs& refreshArgs) {
@@ -1779,6 +1826,35 @@ float Output::getHdrSdrRatio(const std::shared_ptr<renderengine::ExternalTexture
     }
 
     return getState().displayBrightnessNits / getState().sdrWhitePointNits;
+}
+
+bool Output::hasPictureProcessing() const {
+    return false;
+}
+
+int32_t Output::getMaxLayerPictureProfiles() const {
+    return 0;
+}
+
+void Output::applyPictureProfile() {
+    if (!com_android_graphics_libgui_flags_apply_picture_profiles()) {
+        return;
+    }
+
+    // TODO(b/337330263): Move this into the Display class and add a Display unit test.
+    if (!getState().pictureProfileHandle) {
+        return;
+    }
+    if (!getDisplayId()) {
+        return;
+    }
+    if (auto displayId = PhysicalDisplayId::tryCast(*getDisplayId())) {
+        auto& hwc = getCompositionEngine().getHwComposer();
+        const status_t error =
+                hwc.setDisplayPictureProfileHandle(*displayId, getState().pictureProfileHandle);
+        ALOGE_IF(error, "setDisplayPictureProfileHandle failed for %s: %d, (%s)", getName().c_str(),
+                 error, strerror(-error));
+    }
 }
 
 } // namespace impl

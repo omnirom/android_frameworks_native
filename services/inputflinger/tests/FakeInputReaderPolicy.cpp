@@ -80,6 +80,17 @@ void FakeInputReaderPolicy::assertTouchpadHardwareStateNotified() {
     ASSERT_TRUE(success) << "Timed out waiting for hardware state to be notified";
 }
 
+void FakeInputReaderPolicy::assertTouchpadThreeFingerTapNotified() {
+    std::unique_lock lock(mLock);
+    base::ScopedLockAssertion assumeLocked(mLock);
+
+    const bool success =
+            mTouchpadThreeFingerTapNotified.wait_for(lock, WAIT_TIMEOUT, [this]() REQUIRES(mLock) {
+                return mTouchpadThreeFingerTapHasBeenReported;
+            });
+    ASSERT_TRUE(success) << "Timed out waiting for three-finger tap to be notified";
+}
+
 void FakeInputReaderPolicy::clearViewports() {
     mViewports.clear();
     mConfig.setDisplayViewports(mViewports);
@@ -217,7 +228,6 @@ float FakeInputReaderPolicy::getPointerGestureZoomSpeedRatio() {
 }
 
 void FakeInputReaderPolicy::setVelocityControlParams(const VelocityControlParameters& params) {
-    mConfig.pointerVelocityControlParameters = params;
     mConfig.wheelVelocityControlParameters = params;
 }
 
@@ -258,6 +268,12 @@ void FakeInputReaderPolicy::notifyTouchpadHardwareState(const SelfContainedHardw
 
 void FakeInputReaderPolicy::notifyTouchpadGestureInfo(GestureType type, int32_t deviceId) {
     std::scoped_lock lock(mLock);
+}
+
+void FakeInputReaderPolicy::notifyTouchpadThreeFingerTap() {
+    std::scoped_lock lock(mLock);
+    mTouchpadThreeFingerTapHasBeenReported = true;
+    mTouchpadThreeFingerTapNotified.notify_all();
 }
 
 std::shared_ptr<KeyCharacterMap> FakeInputReaderPolicy::getKeyboardLayoutOverlay(

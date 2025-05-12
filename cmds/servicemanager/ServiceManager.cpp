@@ -396,7 +396,7 @@ Status ServiceManager::getService(const std::string& name, sp<IBinder>* outBinde
     SM_PERFETTO_TRACE_FUNC(PERFETTO_TE_PROTO_FIELDS(
             PERFETTO_TE_PROTO_FIELD_CSTR(kProtoServiceName, name.c_str())));
 
-    *outBinder = tryGetBinder(name, true);
+    *outBinder = tryGetBinder(name, true).service;
     // returns ok regardless of result for legacy reasons
     return Status::ok();
 }
@@ -430,13 +430,15 @@ os::Service ServiceManager::tryGetService(const std::string& name, bool startIfN
             return os::Service::make<os::Service::Tag::accessor>(nullptr);
         }
         return os::Service::make<os::Service::Tag::accessor>(
-                tryGetBinder(*accessorName, startIfNotFound));
+                tryGetBinder(*accessorName, startIfNotFound).service);
     } else {
-        return os::Service::make<os::Service::Tag::binder>(tryGetBinder(name, startIfNotFound));
+        return os::Service::make<os::Service::Tag::serviceWithMetadata>(
+                tryGetBinder(name, startIfNotFound));
     }
 }
 
-sp<IBinder> ServiceManager::tryGetBinder(const std::string& name, bool startIfNotFound) {
+os::ServiceWithMetadata ServiceManager::tryGetBinder(const std::string& name,
+                                                     bool startIfNotFound) {
     SM_PERFETTO_TRACE_FUNC(PERFETTO_TE_PROTO_FIELDS(
             PERFETTO_TE_PROTO_FIELD_CSTR(kProtoServiceName, name.c_str())));
 
@@ -450,13 +452,13 @@ sp<IBinder> ServiceManager::tryGetBinder(const std::string& name, bool startIfNo
         if (!service->allowIsolated && is_multiuser_uid_isolated(ctx.uid)) {
             LOG(WARNING) << "Isolated app with UID " << ctx.uid << " requested '" << name
                          << "', but the service is not allowed for isolated apps.";
-            return nullptr;
+            return os::ServiceWithMetadata();
         }
         out = service->binder;
     }
 
     if (!mAccess->canFind(ctx, name)) {
-        return nullptr;
+        return os::ServiceWithMetadata();
     }
 
     if (!out && startIfNotFound) {
@@ -473,8 +475,11 @@ sp<IBinder> ServiceManager::tryGetBinder(const std::string& name, bool startIfNo
         CHECK(handleServiceClientCallback(2 /* sm + transaction */, name, false));
         service->guaranteeClient = true;
     }
-
-    return out;
+    os::ServiceWithMetadata serviceWithMetadata = os::ServiceWithMetadata();
+    serviceWithMetadata.service = out;
+    serviceWithMetadata.isLazyService =
+            service ? service->dumpPriority & FLAG_IS_LAZY_SERVICE : false;
+    return serviceWithMetadata;
 }
 
 bool isValidServiceName(const std::string& name) {

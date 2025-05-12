@@ -28,6 +28,7 @@
 
 #include <sys/cdefs.h>
 
+#include <android/display_luts.h>
 #include <android/choreographer.h>
 #include <android/data_space.h>
 #include <android/hardware_buffer.h>
@@ -156,8 +157,6 @@ typedef struct ASurfaceTransactionStats ASurfaceTransactionStats;
  *
  * THREADING
  * The transaction completed callback can be invoked on any thread.
- *
- * Available since API level 29.
  */
 typedef void (*ASurfaceTransaction_OnComplete)(void* _Null_unspecified context,
                                                ASurfaceTransactionStats* _Nonnull stats);
@@ -184,8 +183,6 @@ typedef void (*ASurfaceTransaction_OnComplete)(void* _Null_unspecified context,
  *
  * THREADING
  * The transaction committed callback can be invoked on any thread.
- *
- * Available since API level 31.
  */
 typedef void (*ASurfaceTransaction_OnCommit)(void* _Null_unspecified context,
                                              ASurfaceTransactionStats* _Nonnull stats);
@@ -213,8 +210,6 @@ typedef void (*ASurfaceTransaction_OnCommit)(void* _Null_unspecified context,
  *
  * THREADING
  * The callback can be invoked on any thread.
- *
- * Available since API level 36.
  */
 typedef void (*ASurfaceTransaction_OnBufferRelease)(void* _Null_unspecified context,
                                                     int release_fence_fd);
@@ -717,6 +712,23 @@ void ASurfaceTransaction_setDesiredHdrHeadroom(ASurfaceTransaction* _Nonnull tra
                                                ASurfaceControl* _Nonnull surface_control,
                                                float desiredHeadroom)
         __INTRODUCED_IN(__ANDROID_API_V__);
+
+/**
+ * Sets the Lut(s) to be applied for the layer.
+ *
+ * The function makes a deep copy of the provided `luts`.
+ * Any modifications made to the `luts` object after calling this function
+ * will not affect the Lut(s) applied to the layer.
+ *
+ * @param surface_control The layer where Lut(s) is being applied
+ * @param luts The Lut(s) to be applied
+ *
+ * Available since API level 36.
+ */
+void ASurfaceTransaction_setLuts(ASurfaceTransaction* _Nonnull transaction,
+                                 ASurfaceControl* _Nonnull surface_control,
+                                 const struct ADisplayLuts* _Nullable luts)
+        __INTRODUCED_IN(36);
 
 /**
  * Same as ASurfaceTransaction_setFrameRateWithChangeStrategy(transaction, surface_control,

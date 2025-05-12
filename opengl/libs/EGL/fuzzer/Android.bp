@@ -36,6 +36,11 @@ cc_fuzz {
         "libutils",
     ],
 
+    shared_libs: [
+        "libegl_flags",
+        "libz",
+    ],
+
     srcs: [
         "MultifileBlobCache_fuzzer.cpp",
     ],

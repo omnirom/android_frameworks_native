@@ -164,88 +164,62 @@ LIBBINDER_NDK34 { # introduced=UpsideDownCake
 LIBBINDER_NDK35 { # introduced=VanillaIceCream
   global:
     APersistableBundle_readFromParcel;
-    APersistableBundle_readFromParcel; # llndk=202404
     APersistableBundle_writeToParcel;
-    APersistableBundle_writeToParcel; # llndk=202404
     APersistableBundle_new;
-    APersistableBundle_new; # llndk=202404
     APersistableBundle_dup;
-    APersistableBundle_dup; # llndk=202404
     APersistableBundle_delete;
-    APersistableBundle_delete; # llndk=202404
     APersistableBundle_isEqual;
-    APersistableBundle_isEqual; # llndk=202404
     APersistableBundle_size;
-    APersistableBundle_size; # llndk=202404
     APersistableBundle_erase;
-    APersistableBundle_erase; # llndk=202404
     APersistableBundle_putBoolean;
-    APersistableBundle_putBoolean; # llndk=202404
     APersistableBundle_putInt;
-    APersistableBundle_putInt; # llndk=202404
     APersistableBundle_putLong;
-    APersistableBundle_putLong; # llndk=202404
     APersistableBundle_putDouble;
-    APersistableBundle_putDouble; # llndk=202404
     APersistableBundle_putString;
-    APersistableBundle_putString; # llndk=202404
     APersistableBundle_putBooleanVector;
-    APersistableBundle_putBooleanVector; # llndk=202404
     APersistableBundle_putIntVector;
-    APersistableBundle_putIntVector; # llndk=202404
     APersistableBundle_putLongVector;
-    APersistableBundle_putLongVector; # llndk=202404
     APersistableBundle_putDoubleVector;
-    APersistableBundle_putDoubleVector; # llndk=202404
     APersistableBundle_putStringVector;
-    APersistableBundle_putStringVector; # llndk=202404
     APersistableBundle_putPersistableBundle;
-    APersistableBundle_putPersistableBundle; # llndk=202404
     APersistableBundle_getBoolean;
-    APersistableBundle_getBoolean; # llndk=202404
     APersistableBundle_getInt;
-    APersistableBundle_getInt; # llndk=202404
     APersistableBundle_getLong;
-    APersistableBundle_getLong; # llndk=202404
     APersistableBundle_getDouble;
-    APersistableBundle_getDouble; # llndk=202404
     APersistableBundle_getString;
-    APersistableBundle_getString; # llndk=202404
     APersistableBundle_getBooleanVector;
-    APersistableBundle_getBooleanVector; # llndk=202404
     APersistableBundle_getIntVector;
-    APersistableBundle_getIntVector; # llndk=202404
     APersistableBundle_getLongVector;
-    APersistableBundle_getLongVector; # llndk=202404
     APersistableBundle_getDoubleVector;
-    APersistableBundle_getDoubleVector; # llndk=202404
     APersistableBundle_getStringVector;
-    APersistableBundle_getStringVector; # llndk=202404
     APersistableBundle_getPersistableBundle;
-    APersistableBundle_getPersistableBundle; # llndk=202404
     APersistableBundle_getBooleanKeys;
-    APersistableBundle_getBooleanKeys; # llndk=202404
     APersistableBundle_getIntKeys;
-    APersistableBundle_getIntKeys; # llndk=202404
     APersistableBundle_getLongKeys;
-    APersistableBundle_getLongKeys; # llndk=202404
     APersistableBundle_getDoubleKeys;
-    APersistableBundle_getDoubleKeys; # llndk=202404
     APersistableBundle_getStringKeys;
-    APersistableBundle_getStringKeys; # llndk=202404
     APersistableBundle_getBooleanVectorKeys;
-    APersistableBundle_getBooleanVectorKeys; # llndk=202404
     APersistableBundle_getIntVectorKeys;
-    APersistableBundle_getIntVectorKeys; # llndk=202404
     APersistableBundle_getLongVectorKeys;
-    APersistableBundle_getLongVectorKeys; # llndk=202404
     APersistableBundle_getDoubleVectorKeys;
-    APersistableBundle_getDoubleVectorKeys; # llndk=202404
     APersistableBundle_getStringVectorKeys;
-    APersistableBundle_getStringVectorKeys; # llndk=202404
     APersistableBundle_getPersistableBundleKeys;
-    APersistableBundle_getPersistableBundleKeys; # llndk=202404
-    AServiceManager_openDeclaredPassthroughHal; # systemapi llndk=202404
+    AServiceManager_openDeclaredPassthroughHal; # systemapi llndk
+};
+
+LIBBINDER_NDK36 { # introduced=36
+  global:
+    AIBinder_Class_setTransactionCodeToFunctionNameMap;
+    AIBinder_Class_getFunctionName;
+    ABinderRpc_registerAccessorProvider; # systemapi
+    ABinderRpc_unregisterAccessorProvider; # systemapi
+    ABinderRpc_Accessor_new; # systemapi
+    ABinderRpc_Accessor_delegateAccessor; #systemapi
+    ABinderRpc_Accessor_delete; # systemapi
+    ABinderRpc_Accessor_asBinder; # systemapi
+    ABinderRpc_Accessor_fromBinder; # systemapi
+    ABinderRpc_ConnectionInfo_new; # systemapi
+    ABinderRpc_ConnectionInfo_delete; # systemapi
 };
 
 LIBBINDER_NDK_PLATFORM {

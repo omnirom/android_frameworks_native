@@ -26,16 +26,10 @@
 #include <ui/FrameStats.h>
 
 #include "FrameTracker.h"
-#include "EventLog/EventLog.h"
 
 namespace android {
 
-FrameTracker::FrameTracker() :
-        mOffset(0),
-        mNumFences(0),
-        mDisplayPeriod(0) {
-    resetFrameCountersLocked();
-}
+FrameTracker::FrameTracker() : mOffset(0), mNumFences(0), mDisplayPeriod(0) {}
 
 void FrameTracker::setDesiredPresentTime(nsecs_t presentTime) {
     Mutex::Autolock lock(mMutex);
@@ -72,9 +66,6 @@ void FrameTracker::setDisplayRefreshPeriod(nsecs_t displayPeriod) {
 
 void FrameTracker::advanceFrame() {
     Mutex::Autolock lock(mMutex);
-
-    // Update the statistic to include the frame we just finished.
-    updateStatsLocked(mOffset);
 
     // Advance to the next frame.
     mOffset = (mOffset+1) % NUM_FRAME_RECORDS;
@@ -138,19 +129,12 @@ void FrameTracker::getStats(FrameStats* outStats) const {
     }
 }
 
-void FrameTracker::logAndResetStats(const std::string_view& name) {
-    Mutex::Autolock lock(mMutex);
-    logStatsLocked(name);
-    resetFrameCountersLocked();
-}
-
 void FrameTracker::processFencesLocked() const {
     FrameRecord* records = const_cast<FrameRecord*>(mFrameRecords);
     int& numFences = const_cast<int&>(mNumFences);
 
     for (int i = 1; i < NUM_FRAME_RECORDS && numFences > 0; i++) {
-        size_t idx = (mOffset+NUM_FRAME_RECORDS-i) % NUM_FRAME_RECORDS;
-        bool updated = false;
+        size_t idx = (mOffset + NUM_FRAME_RECORDS - i) % NUM_FRAME_RECORDS;
 
         const std::shared_ptr<FenceTime>& rfence = records[idx].frameReadyFence;
         if (rfence != nullptr) {
@@ -158,7 +142,6 @@ void FrameTracker::processFencesLocked() const {
             if (records[idx].frameReadyTime < INT64_MAX) {
                 records[idx].frameReadyFence = nullptr;
                 numFences--;
-                updated = true;
             }
         }
 
@@ -169,58 +152,7 @@ void FrameTracker::processFencesLocked() const {
             if (records[idx].actualPresentTime < INT64_MAX) {
                 records[idx].actualPresentFence = nullptr;
                 numFences--;
-                updated = true;
             }
-        }
-
-        if (updated) {
-            updateStatsLocked(idx);
-        }
-    }
-}
-
-void FrameTracker::updateStatsLocked(size_t newFrameIdx) const {
-    int* numFrames = const_cast<int*>(mNumFrames);
-
-    if (mDisplayPeriod > 0 && isFrameValidLocked(newFrameIdx)) {
-        size_t prevFrameIdx = (newFrameIdx+NUM_FRAME_RECORDS-1) %
-                NUM_FRAME_RECORDS;
-
-        if (isFrameValidLocked(prevFrameIdx)) {
-            nsecs_t newPresentTime =
-                    mFrameRecords[newFrameIdx].actualPresentTime;
-            nsecs_t prevPresentTime =
-                    mFrameRecords[prevFrameIdx].actualPresentTime;
-
-            nsecs_t duration = newPresentTime - prevPresentTime;
-            int numPeriods = int((duration + mDisplayPeriod/2) /
-                    mDisplayPeriod);
-
-            for (int i = 0; i < NUM_FRAME_BUCKETS-1; i++) {
-                int nextBucket = 1 << (i+1);
-                if (numPeriods < nextBucket) {
-                    numFrames[i]++;
-                    return;
-                }
-            }
-
-            // The last duration bucket is a catch-all.
-            numFrames[NUM_FRAME_BUCKETS-1]++;
-        }
-    }
-}
-
-void FrameTracker::resetFrameCountersLocked() {
-    for (int i = 0; i < NUM_FRAME_BUCKETS; i++) {
-        mNumFrames[i] = 0;
-    }
-}
-
-void FrameTracker::logStatsLocked(const std::string_view& name) const {
-    for (int i = 0; i < NUM_FRAME_BUCKETS; i++) {
-        if (mNumFrames[i] > 0) {
-            EventLog::logFrameDurations(name, mNumFrames, NUM_FRAME_BUCKETS);
-            return;
         }
     }
 }

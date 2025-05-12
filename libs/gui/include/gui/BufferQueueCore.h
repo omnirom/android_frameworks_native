@@ -80,6 +80,13 @@ public:
     BufferQueueCore();
     virtual ~BufferQueueCore();
 
+#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(BUFFER_RELEASE_CHANNEL)
+protected:
+    // Wake up any threads waiting for a buffer release. The BufferQueue mutex should always held
+    // when this method is called.
+    virtual void notifyBufferReleased() const;
+#endif
+
 private:
     // Dump our state in a string
     void dumpState(const String8& prefix, String8* outResult) const;

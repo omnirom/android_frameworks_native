@@ -33,8 +33,6 @@
 
 #include "input/PrintTools.h"
 
-namespace input_flags = com::android::input::flags;
-
 namespace android {
 
 // The default velocity control parameters that has no effect.
@@ -77,8 +75,7 @@ void CursorMotionAccumulator::finishSync() {
 CursorInputMapper::CursorInputMapper(InputDeviceContext& deviceContext,
                                      const InputReaderConfiguration& readerConfig)
       : InputMapper(deviceContext, readerConfig),
-        mLastEventTime(std::numeric_limits<nsecs_t>::min()),
-        mEnableNewMousePointerBallistics(input_flags::enable_new_mouse_pointer_ballistics()) {}
+        mLastEventTime(std::numeric_limits<nsecs_t>::min()) {}
 
 uint32_t CursorInputMapper::getSources() const {
     return mSource;
@@ -164,6 +161,10 @@ std::list<NotifyArgs> CursorInputMapper::reconfigure(nsecs_t when,
         changes.test(InputReaderConfiguration::Change::DISPLAY_INFO) || configurePointerCapture) {
         configureOnChangePointerSpeed(readerConfig);
     }
+
+    if (!changes.any() || changes.test(InputReaderConfiguration::Change::MOUSE_SETTINGS)) {
+        configureOnChangeMouseSettings(readerConfig);
+    }
     return out;
 }
 
@@ -203,8 +204,7 @@ std::list<NotifyArgs> CursorInputMapper::reset(nsecs_t when) {
     mDownTime = 0;
     mLastEventTime = std::numeric_limits<nsecs_t>::min();
 
-    mOldPointerVelocityControl.reset();
-    mNewPointerVelocityControl.reset();
+    mPointerVelocityControl.reset();
     mWheelXVelocityControl.reset();
     mWheelYVelocityControl.reset();
 
@@ -275,18 +275,19 @@ std::list<NotifyArgs> CursorInputMapper::sync(nsecs_t when, nsecs_t readTime) {
     PointerCoords pointerCoords;
     pointerCoords.clear();
 
-    float vscroll = mCursorScrollAccumulator.getRelativeVWheel();
+    // A negative value represents inverted scrolling direction.
+    // Applies only if the source is a mouse.
+    const bool isMouse =
+            (mSource == AINPUT_SOURCE_MOUSE) || (mSource == AINPUT_SOURCE_MOUSE_RELATIVE);
+    const int scrollingDirection = (mMouseReverseVerticalScrolling && isMouse) ? -1 : 1;
+    float vscroll = scrollingDirection * mCursorScrollAccumulator.getRelativeVWheel();
     float hscroll = mCursorScrollAccumulator.getRelativeHWheel();
     bool scrolled = vscroll != 0 || hscroll != 0;
 
     mWheelYVelocityControl.move(when, nullptr, &vscroll);
     mWheelXVelocityControl.move(when, &hscroll, nullptr);
 
-    if (mEnableNewMousePointerBallistics) {
-        mNewPointerVelocityControl.move(when, &deltaX, &deltaY);
-    } else {
-        mOldPointerVelocityControl.move(when, &deltaX, &deltaY);
-    }
+    mPointerVelocityControl.move(when, &deltaX, &deltaY);
 
     float xCursorPosition = AMOTION_EVENT_INVALID_CURSOR_POSITION;
     float yCursorPosition = AMOTION_EVENT_INVALID_CURSOR_POSITION;
@@ -477,27 +478,15 @@ void CursorInputMapper::configureOnPointerCapture(const InputReaderConfiguration
 void CursorInputMapper::configureOnChangePointerSpeed(const InputReaderConfiguration& config) {
     if (mParameters.mode == Parameters::Mode::POINTER_RELATIVE) {
         // Disable any acceleration or scaling for the pointer when Pointer Capture is enabled.
-        if (mEnableNewMousePointerBallistics) {
-            mNewPointerVelocityControl.setAccelerationEnabled(false);
-        } else {
-            mOldPointerVelocityControl.setParameters(FLAT_VELOCITY_CONTROL_PARAMS);
-        }
+        mPointerVelocityControl.setAccelerationEnabled(false);
         mWheelXVelocityControl.setParameters(FLAT_VELOCITY_CONTROL_PARAMS);
         mWheelYVelocityControl.setParameters(FLAT_VELOCITY_CONTROL_PARAMS);
     } else {
-        if (mEnableNewMousePointerBallistics) {
-            mNewPointerVelocityControl.setAccelerationEnabled(
-                    config.displaysWithMousePointerAccelerationDisabled.count(
-                            mDisplayId.value_or(ui::LogicalDisplayId::INVALID)) == 0);
-            mNewPointerVelocityControl.setCurve(
-                    createAccelerationCurveForPointerSensitivity(config.mousePointerSpeed));
-        } else {
-            mOldPointerVelocityControl.setParameters(
-                    (config.displaysWithMousePointerAccelerationDisabled.count(
-                             mDisplayId.value_or(ui::LogicalDisplayId::INVALID)) == 0)
-                            ? config.pointerVelocityControlParameters
-                            : FLAT_VELOCITY_CONTROL_PARAMS);
-        }
+        mPointerVelocityControl.setAccelerationEnabled(
+                config.displaysWithMousePointerAccelerationDisabled.count(
+                        mDisplayId.value_or(ui::LogicalDisplayId::INVALID)) == 0);
+        mPointerVelocityControl.setCurve(
+                createAccelerationCurveForPointerSensitivity(config.mousePointerSpeed));
         mWheelXVelocityControl.setParameters(config.wheelVelocityControlParameters);
         mWheelYVelocityControl.setParameters(config.wheelVelocityControlParameters);
     }
@@ -535,6 +524,11 @@ void CursorInputMapper::configureOnChangeDisplayInfo(const InputReaderConfigurat
             : FloatRect{0, 0, 0, 0};
 
     bumpGeneration();
+}
+
+void CursorInputMapper::configureOnChangeMouseSettings(const InputReaderConfiguration& config) {
+    mMouseReverseVerticalScrolling = config.mouseReverseVerticalScrollingEnabled;
+    mCursorButtonAccumulator.setSwapLeftRightButtons(config.mouseSwapPrimaryButtonEnabled);
 }
 
 } // namespace android

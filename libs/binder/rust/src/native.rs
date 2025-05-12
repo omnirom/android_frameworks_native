@@ -14,9 +14,9 @@
  * limitations under the License.
  */
 
-use crate::binder::{
-    AsNative, Interface, InterfaceClassMethods, Remotable, Stability, TransactionCode,
-};
+#[cfg(not(android_ndk))]
+use crate::binder::Stability;
+use crate::binder::{AsNative, Interface, InterfaceClassMethods, Remotable, TransactionCode};
 use crate::error::{status_result, status_t, Result, StatusCode};
 use crate::parcel::{BorrowedParcel, Serialize};
 use crate::proxy::SpIBinder;
@@ -76,14 +76,32 @@ impl<T: Remotable> Binder<T> {
     /// This moves the `rust_object` into an owned [`Box`] and Binder will
     /// manage its lifetime.
     pub fn new(rust_object: T) -> Binder<T> {
-        Self::new_with_stability(rust_object, Stability::default())
+        #[cfg(not(android_ndk))]
+        {
+            Self::new_with_stability(rust_object, Stability::default())
+        }
+        #[cfg(android_ndk)]
+        {
+            Self::new_unmarked(rust_object)
+        }
     }
 
     /// Create a new Binder remotable object with the given stability
     ///
     /// This moves the `rust_object` into an owned [`Box`] and Binder will
     /// manage its lifetime.
+    #[cfg(not(android_ndk))]
     pub fn new_with_stability(rust_object: T, stability: Stability) -> Binder<T> {
+        let mut binder = Self::new_unmarked(rust_object);
+        binder.mark_stability(stability);
+        binder
+    }
+
+    /// Creates a new Binder remotable object with unset stability
+    ///
+    /// This is internal because normally we want to set the stability explicitly,
+    /// however for the NDK variant we cannot mark the stability.
+    fn new_unmarked(rust_object: T) -> Binder<T> {
         let class = T::get_class();
         let rust_object = Box::into_raw(Box::new(rust_object));
         // Safety: `AIBinder_new` expects a valid class pointer (which we
@@ -93,9 +111,7 @@ impl<T: Remotable> Binder<T> {
         // decremented via `AIBinder_decStrong` when the reference lifetime
         // ends.
         let ibinder = unsafe { sys::AIBinder_new(class.into(), rust_object as *mut c_void) };
-        let mut binder = Binder { ibinder, rust_object };
-        binder.mark_stability(stability);
-        binder
+        Binder { ibinder, rust_object }
     }
 
     /// Set the extension of a binder interface. This allows a downstream
@@ -189,6 +205,7 @@ impl<T: Remotable> Binder<T> {
     }
 
     /// Mark this binder object with the given stability guarantee
+    #[cfg(not(android_ndk))]
     fn mark_stability(&mut self, stability: Stability) {
         match stability {
             Stability::Local => self.mark_local_stability(),
@@ -215,7 +232,7 @@ impl<T: Remotable> Binder<T> {
 
     /// Mark this binder object with local stability, which is vendor if we are
     /// building for android_vendor and system otherwise.
-    #[cfg(not(android_vendor))]
+    #[cfg(not(any(android_vendor, android_ndk)))]
     fn mark_local_stability(&mut self) {
         // Safety: Self always contains a valid `AIBinder` pointer, so we can
         // always call this C API safely.

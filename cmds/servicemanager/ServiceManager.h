@@ -114,7 +114,7 @@ private:
     void removeClientCallback(const wp<IBinder>& who, ClientCallbackMap::iterator* it);
 
     os::Service tryGetService(const std::string& name, bool startIfNotFound);
-    sp<IBinder> tryGetBinder(const std::string& name, bool startIfNotFound);
+    os::ServiceWithMetadata tryGetBinder(const std::string& name, bool startIfNotFound);
     binder::Status canAddService(const Access::CallingContext& ctx, const std::string& name,
                                  std::optional<std::string>* accessor);
     binder::Status canFindService(const Access::CallingContext& ctx, const std::string& name,

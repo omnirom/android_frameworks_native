@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+#include <com_android_graphics_libgui_flags.h>
 #include <compositionengine/impl/HwcBufferCache.h>
 #include <compositionengine/impl/OutputLayer.h>
 #include <compositionengine/impl/OutputLayerCompositionState.h>
@@ -23,13 +24,14 @@
 #include <compositionengine/mock/Output.h>
 #include <gtest/gtest.h>
 #include <log/log.h>
-
 #include <renderengine/impl/ExternalTexture.h>
 #include <renderengine/mock/RenderEngine.h>
+#include <ui/FloatRect.h>
 #include <ui/PixelFormat.h>
-#include "MockHWC2.h"
-#include "MockHWComposer.h"
+
 #include "RegionMatcher.h"
+#include "mock/DisplayHardware/MockHWC2.h"
+#include "mock/DisplayHardware/MockHWComposer.h"
 
 #include <aidl/android/hardware/graphics/composer3/Composition.h>
 
@@ -270,7 +272,7 @@ struct OutputLayerDisplayFrameTest : public OutputLayerTest {
         mLayerFEState.geomLayerTransform = ui::Transform{TR_IDENT};
         mLayerFEState.geomBufferSize = Rect{0, 0, 1920, 1080};
         mLayerFEState.geomBufferUsesDisplayInverseTransform = false;
-        mLayerFEState.geomCrop = Rect{0, 0, 1920, 1080};
+        mLayerFEState.geomCrop = FloatRect{0, 0, 1920, 1080};
         mLayerFEState.geomLayerBounds = FloatRect{0.f, 0.f, 1920.f, 1080.f};
 
         mOutputState.layerStackSpace.setContent(Rect{0, 0, 1920, 1080});
@@ -296,20 +298,20 @@ TEST_F(OutputLayerDisplayFrameTest, fullActiveTransparentRegionReturnsEmptyFrame
 }
 
 TEST_F(OutputLayerDisplayFrameTest, cropAffectsDisplayFrame) {
-    mLayerFEState.geomCrop = Rect{100, 200, 300, 500};
+    mLayerFEState.geomCrop = FloatRect{100, 200, 300, 500};
     const Rect expected{100, 200, 300, 500};
     EXPECT_THAT(calculateOutputDisplayFrame(), expected);
 }
 
 TEST_F(OutputLayerDisplayFrameTest, cropAffectsDisplayFrameRotated) {
-    mLayerFEState.geomCrop = Rect{100, 200, 300, 500};
+    mLayerFEState.geomCrop = FloatRect{100, 200, 300, 500};
     mLayerFEState.geomLayerTransform.set(HAL_TRANSFORM_ROT_90, 1920, 1080);
     const Rect expected{1420, 100, 1720, 300};
     EXPECT_THAT(calculateOutputDisplayFrame(), expected);
 }
 
 TEST_F(OutputLayerDisplayFrameTest, emptyGeomCropIsNotUsedToComputeFrame) {
-    mLayerFEState.geomCrop = Rect{};
+    mLayerFEState.geomCrop = FloatRect{};
     const Rect expected{0, 0, 1920, 1080};
     EXPECT_THAT(calculateOutputDisplayFrame(), expected);
 }
@@ -339,7 +341,7 @@ TEST_F(OutputLayerDisplayFrameTest, shadowExpandsDisplayFrame) {
 
     mLayerFEState.geomLayerBounds = FloatRect{100.f, 100.f, 200.f, 200.f};
     Rect expected{mLayerFEState.geomLayerBounds};
-    expected.inset(-kShadowRadius, -kShadowRadius, -kShadowRadius, -kShadowRadius);
+    expected.inset(-2 * kShadowRadius, -2 * kShadowRadius, -2 * kShadowRadius, -2 * kShadowRadius);
     EXPECT_THAT(calculateOutputDisplayFrame(), expected);
 }
 
@@ -1327,6 +1329,71 @@ TEST_F(OutputLayerWriteStateToHWCTest, setCompositionTypeRefreshRateIndicator) {
     expectSetHdrMetadataAndBufferCalls();
     expectSetCompositionTypeCall(Composition::REFRESH_RATE_INDICATOR);
 
+    mOutputLayer.writeStateToHWC(/*includeGeometry*/ true, /*skipLayer*/ false, 0,
+                                 /*zIsOverridden*/ false, /*isPeekingThrough*/ false);
+}
+
+TEST_F(OutputLayerWriteStateToHWCTest, setsPictureProfileWhenCommitted) {
+    if (!com_android_graphics_libgui_flags_apply_picture_profiles()) {
+        GTEST_SKIP() << "Feature flag disabled, skipping";
+    }
+    mLayerFEState.compositionType = Composition::DEVICE;
+    mLayerFEState.pictureProfileHandle = PictureProfileHandle(1);
+
+    expectGeometryCommonCalls();
+    expectPerFrameCommonCalls();
+    expectSetHdrMetadataAndBufferCalls();
+    expectSetCompositionTypeCall(Composition::DEVICE);
+
+    EXPECT_CALL(*mHwcLayer, setPictureProfileHandle(PictureProfileHandle(1)));
+
+    mOutputLayer.commitPictureProfileToCompositionState();
+    mOutputLayer.writeStateToHWC(/*includeGeometry*/ true, /*skipLayer*/ false, 0,
+                                 /*zIsOverridden*/ false, /*isPeekingThrough*/ false);
+}
+
+TEST_F(OutputLayerWriteStateToHWCTest, doesNotSetPictureProfileWhenNotCommitted) {
+    if (!com_android_graphics_libgui_flags_apply_picture_profiles()) {
+        GTEST_SKIP() << "Feature flag disabled, skipping";
+    }
+    mLayerFEState.compositionType = Composition::DEVICE;
+    mLayerFEState.pictureProfileHandle = PictureProfileHandle(1);
+
+    expectGeometryCommonCalls();
+    expectPerFrameCommonCalls();
+    expectSetHdrMetadataAndBufferCalls();
+    expectSetCompositionTypeCall(Composition::DEVICE);
+
+    EXPECT_CALL(*mHwcLayer, setPictureProfileHandle(_)).Times(0);
+
+    mOutputLayer.writeStateToHWC(/*includeGeometry*/ true, /*skipLayer*/ false, 0,
+                                 /*zIsOverridden*/ false, /*isPeekingThrough*/ false);
+}
+
+TEST_F(OutputLayerWriteStateToHWCTest, doesNotSetPictureProfileWhenNotCommittedLater) {
+    if (!com_android_graphics_libgui_flags_apply_picture_profiles()) {
+        GTEST_SKIP() << "Feature flag disabled, skipping";
+    }
+    mLayerFEState.compositionType = Composition::DEVICE;
+    mLayerFEState.pictureProfileHandle = PictureProfileHandle(1);
+
+    expectGeometryCommonCalls();
+    expectPerFrameCommonCalls();
+    expectSetHdrMetadataAndBufferCalls();
+    expectSetCompositionTypeCall(Composition::DEVICE);
+
+    EXPECT_CALL(*mHwcLayer, setPictureProfileHandle(PictureProfileHandle(1)));
+
+    mOutputLayer.commitPictureProfileToCompositionState();
+    mOutputLayer.writeStateToHWC(/*includeGeometry*/ true, /*skipLayer*/ false, 0,
+                                 /*zIsOverridden*/ false, /*isPeekingThrough*/ false);
+
+    expectGeometryCommonCalls();
+    expectPerFrameCommonCalls();
+    expectSetHdrMetadataAndBufferCalls(kExpectedHwcSlot, nullptr, kFence);
+
+    EXPECT_CALL(*mHwcLayer, setPictureProfileHandle(PictureProfileHandle(1))).Times(0);
+    // No committing of picture profile before writing the state
     mOutputLayer.writeStateToHWC(/*includeGeometry*/ true, /*skipLayer*/ false, 0,
                                  /*zIsOverridden*/ false, /*isPeekingThrough*/ false);
 }

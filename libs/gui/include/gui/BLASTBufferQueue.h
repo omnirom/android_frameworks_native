@@ -17,7 +17,9 @@
 #ifndef ANDROID_GUI_BLAST_BUFFER_QUEUE_H
 #define ANDROID_GUI_BLAST_BUFFER_QUEUE_H
 
-#include <com_android_graphics_libgui_flags.h>
+#include <optional>
+#include <queue>
+
 #include <gui/BufferItem.h>
 #include <gui/BufferItemConsumer.h>
 #include <gui/IGraphicBufferConsumer.h>
@@ -29,7 +31,6 @@
 #include <utils/RefBase.h>
 
 #include <system/window.h>
-#include <queue>
 
 #include <com_android_graphics_libgui_flags.h>
 
@@ -150,6 +151,9 @@ public:
 private:
     friend class BLASTBufferQueueHelper;
     friend class BBQBufferQueueProducer;
+#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(BUFFER_RELEASE_CHANNEL)
+    friend class BBQBufferQueueCore;
+#endif
 
     // can't be copied
     BLASTBufferQueue& operator = (const BLASTBufferQueue& rhs);
@@ -218,6 +222,10 @@ private:
     ui::Size mSize GUARDED_BY(mMutex);
     ui::Size mRequestedSize GUARDED_BY(mMutex);
     int32_t mFormat GUARDED_BY(mMutex);
+
+    // Keep a copy of the current picture profile handle, so it can be moved to a new
+    // SurfaceControl when BBQ migrates via ::update.
+    std::optional<PictureProfileHandle> mPictureProfileHandle;
 
     struct BufferInfo {
         bool hasBuffer = false;
@@ -317,48 +325,47 @@ private:
     std::unordered_set<uint64_t> mSyncedFrameNumbers GUARDED_BY(mMutex);
 
 #if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(BUFFER_RELEASE_CHANNEL)
+    // BufferReleaseChannel is used to communicate buffer releases from SurfaceFlinger to the
+    // client.
+    std::unique_ptr<gui::BufferReleaseChannel::ConsumerEndpoint> mBufferReleaseConsumer;
+    std::shared_ptr<gui::BufferReleaseChannel::ProducerEndpoint> mBufferReleaseProducer;
+
+    void updateBufferReleaseProducer() REQUIRES(mMutex);
+    void drainBufferReleaseConsumer();
+
+    // BufferReleaseReader is used to do blocking but interruptible reads from the buffer
+    // release channel. To implement this, BufferReleaseReader owns an epoll file descriptor that
+    // is configured to wake up when either the BufferReleaseReader::ConsumerEndpoint or an eventfd
+    // becomes readable. Interrupts are necessary because a free buffer may become available for
+    // reasons other than a buffer release from the producer.
     class BufferReleaseReader {
     public:
-        BufferReleaseReader() = default;
-        BufferReleaseReader(std::unique_ptr<gui::BufferReleaseChannel::ConsumerEndpoint>);
-        BufferReleaseReader& operator=(BufferReleaseReader&&);
+        explicit BufferReleaseReader(BLASTBufferQueue&);
+
+        BufferReleaseReader(const BufferReleaseReader&) = delete;
+        BufferReleaseReader& operator=(const BufferReleaseReader&) = delete;
 
         // Block until we can read a buffer release message.
         //
         // Returns:
         // * OK if a ReleaseCallbackId and Fence were successfully read.
         // * WOULD_BLOCK if the blocking read was interrupted by interruptBlockingRead.
+        // * TIMED_OUT if the blocking read timed out.
         // * UNKNOWN_ERROR if something went wrong.
         status_t readBlocking(ReleaseCallbackId& outId, sp<Fence>& outReleaseFence,
-                              uint32_t& outMaxAcquiredBufferCount);
+                              uint32_t& outMaxAcquiredBufferCount, nsecs_t timeout);
 
-        // Signals the reader's eventfd to wake up any threads waiting on readBlocking.
         void interruptBlockingRead();
+        void clearInterrupts();
 
     private:
-        std::mutex mMutex;
-        std::unique_ptr<gui::BufferReleaseChannel::ConsumerEndpoint> mEndpoint GUARDED_BY(mMutex);
+        BLASTBufferQueue& mBbq;
+
         android::base::unique_fd mEpollFd;
         android::base::unique_fd mEventFd;
     };
 
-    // BufferReleaseChannel is used to communicate buffer releases from SurfaceFlinger to
-    // the client. See BBQBufferQueueProducer::dequeueBuffer for details.
-    std::shared_ptr<BufferReleaseReader> mBufferReleaseReader;
-    std::shared_ptr<gui::BufferReleaseChannel::ProducerEndpoint> mBufferReleaseProducer;
-
-    class BufferReleaseThread {
-    public:
-        BufferReleaseThread() = default;
-        ~BufferReleaseThread();
-        void start(const sp<BLASTBufferQueue>&);
-
-    private:
-        std::shared_ptr<std::atomic_bool> mRunning;
-        std::shared_ptr<BufferReleaseReader> mReader;
-    };
-
-    BufferReleaseThread mBufferReleaseThread;
+    std::optional<BufferReleaseReader> mBufferReleaseReader;
 #endif
 };
 

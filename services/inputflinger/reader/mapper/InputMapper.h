@@ -111,11 +111,6 @@ public:
     virtual std::optional<int32_t> getLightPlayerId(int32_t lightId) { return std::nullopt; }
 
     virtual int32_t getMetaState();
-    /**
-     * Process the meta key and update the global meta state when changed.
-     * Return true if the meta key could be handled by the InputMapper.
-     */
-    virtual bool updateMetaState(int32_t keyCode);
 
     [[nodiscard]] virtual std::list<NotifyArgs> updateExternalStylusState(const StylusState& state);
 

@@ -164,7 +164,7 @@ status_t RpcSession::setupUnixDomainSocketBootstrapClient(unique_fd bootstrapFd)
         status_t status = mBootstrapTransport->interruptableWriteFully(mShutdownTrigger.get(), &iov,
                                                                        1, std::nullopt, &fds);
         if (status != OK) {
-            ALOGE("Failed to send fd over bootstrap transport: %s", strerror(-status));
+            ALOGE("Failed to send fd over bootstrap transport: %s", statusToString(status).c_str());
             return status;
         }
 

@@ -29,6 +29,7 @@
 #include <ftl/future.h>
 #include <ui/DisplayIdentification.h>
 #include <ui/FenceTime.h>
+#include <ui/PictureProfileHandle.h>
 
 // TODO(b/129481165): remove the #pragma below and fix conversion issues
 #pragma clang diagnostic push
@@ -53,6 +54,8 @@
 #include <aidl/android/hardware/graphics/composer3/Composition.h>
 #include <aidl/android/hardware/graphics/composer3/DisplayCapability.h>
 #include <aidl/android/hardware/graphics/composer3/DisplayLuts.h>
+#include <aidl/android/hardware/graphics/composer3/LutProperties.h>
+#include <aidl/android/hardware/graphics/composer3/OutputType.h>
 #include <aidl/android/hardware/graphics/composer3/OverlayProperties.h>
 
 namespace android {
@@ -64,6 +67,7 @@ class GraphicBuffer;
 class TestableSurfaceFlinger;
 struct HWComposerTest;
 struct CompositionInfo;
+class PictureProfileHandle;
 
 namespace Hwc2 {
 class Composer;
@@ -90,11 +94,14 @@ public:
                 aidl::android::hardware::graphics::composer3::ClientTargetPropertyWithBrightness;
         using DisplayRequests = hal::DisplayRequest;
         using LayerRequests = std::unordered_map<HWC2::Layer*, hal::LayerRequest>;
+        using LutProperties = aidl::android::hardware::graphics::composer3::LutProperties;
+        using LayerLuts = HWC2::Display::LayerLuts;
 
         ChangedTypes changedTypes;
         DisplayRequests displayRequests;
         LayerRequests layerRequests;
         ClientTargetProperty clientTargetProperty;
+        LayerLuts layerLuts;
     };
 
     struct HWCDisplayMode {
@@ -106,12 +113,14 @@ public:
         float dpiY = -1.f;
         int32_t configGroup = -1;
         std::optional<hal::VrrConfig> vrrConfig;
+        OutputType hdrOutputType;
 
         friend std::ostream& operator<<(std::ostream& os, const HWCDisplayMode& mode) {
             return os << "id=" << mode.hwcId << " res=" << mode.width << "x" << mode.height
                       << " vsyncPeriod=" << mode.vsyncPeriod << " dpi=" << mode.dpiX << "x"
                       << mode.dpiY << " group=" << mode.configGroup
-                      << " vrrConfig=" << to_string(mode.vrrConfig).c_str();
+                      << " vrrConfig=" << to_string(mode.vrrConfig).c_str()
+                      << " hdrOutputType=" << toString(mode.hdrOutputType);
         }
     };
 
@@ -292,7 +301,7 @@ public:
     virtual std::optional<PhysicalDisplayId> toPhysicalDisplayId(hal::HWDisplayId) const = 0;
     virtual std::optional<hal::HWDisplayId> fromPhysicalDisplayId(PhysicalDisplayId) const = 0;
 
-    // Composer 3.0
+    // AIDL Composer
     virtual status_t setBootDisplayMode(PhysicalDisplayId, hal::HWConfigId) = 0;
     virtual status_t clearBootDisplayMode(PhysicalDisplayId) = 0;
     virtual std::optional<hal::HWConfigId> getPreferredBootDisplayMode(PhysicalDisplayId) = 0;
@@ -311,18 +320,17 @@ public:
     virtual status_t setRefreshRateChangedCallbackDebugEnabled(PhysicalDisplayId, bool enabled) = 0;
     virtual status_t notifyExpectedPresent(PhysicalDisplayId, TimePoint expectedPresentTime,
                                            Fps frameInterval) = 0;
-
-    // Composer 4.0
-    virtual status_t getRequestedLuts(
-            PhysicalDisplayId,
-            std::vector<aidl::android::hardware::graphics::composer3::DisplayLuts::LayerLut>*) = 0;
+    virtual HWC2::Display::LutFileDescriptorMapper& getLutFileDescriptorMapper() = 0;
+    virtual int32_t getMaxLayerPictureProfiles(PhysicalDisplayId) = 0;
+    virtual status_t setDisplayPictureProfileHandle(PhysicalDisplayId,
+                                                    const PictureProfileHandle& handle) = 0;
 };
 
 static inline bool operator==(const android::HWComposer::DeviceRequestedChanges& lhs,
                               const android::HWComposer::DeviceRequestedChanges& rhs) {
     return lhs.changedTypes == rhs.changedTypes && lhs.displayRequests == rhs.displayRequests &&
             lhs.layerRequests == rhs.layerRequests &&
-            lhs.clientTargetProperty == rhs.clientTargetProperty;
+            lhs.clientTargetProperty == rhs.clientTargetProperty && lhs.layerLuts == rhs.layerLuts;
 }
 
 namespace impl {
@@ -479,12 +487,10 @@ public:
     status_t setRefreshRateChangedCallbackDebugEnabled(PhysicalDisplayId, bool enabled) override;
     status_t notifyExpectedPresent(PhysicalDisplayId, TimePoint expectedPresentTime,
                                    Fps frameInterval) override;
-
-    // Composer 4.0
-    status_t getRequestedLuts(
-            PhysicalDisplayId,
-            std::vector<aidl::android::hardware::graphics::composer3::DisplayLuts::LayerLut>*)
-            override;
+    HWC2::Display::LutFileDescriptorMapper& getLutFileDescriptorMapper() override;
+    int32_t getMaxLayerPictureProfiles(PhysicalDisplayId) override;
+    status_t setDisplayPictureProfileHandle(PhysicalDisplayId,
+                                            const android::PictureProfileHandle& profile) override;
 
     // for debugging ----------------------------------------------------------
     void dump(std::string& out) const override;
@@ -571,6 +577,8 @@ private:
     const size_t mMaxVirtualDisplayDimension;
     const bool mUpdateDeviceProductInfoOnHotplugReconnect;
     bool mEnableVrrTimeout;
+
+    HWC2::Display::LutFileDescriptorMapper mLutFileDescriptorMapper;
 };
 
 } // namespace impl

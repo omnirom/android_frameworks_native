@@ -19,7 +19,6 @@
 #include <android/os/BnClientCallback.h>
 #include <android/os/IServiceManager.h>
 #include <binder/IPCThreadState.h>
-#include <binder/IServiceManager.h>
 #include <binder/LazyServiceRegistrar.h>
 
 namespace android {
@@ -133,6 +132,12 @@ bool ClientCounterCallbackImpl::registerServiceLocked(const sp<IBinder>& service
     bool reRegister = mRegisteredServices.count(name) > 0;
     std::string regStr = (reRegister) ? "Re-registering" : "Registering";
     ALOGI("%s service %s", regStr.c_str(), name.c_str());
+
+    if (dumpFlags & android::os::IServiceManager::FLAG_IS_LAZY_SERVICE) {
+        ALOGW("FLAG_IS_LAZY_SERVICE flag already set. This should only be set by "
+              "ClientCounterCallbackImpl in LazyServiceRegistrar");
+    }
+    dumpFlags |= android::os::IServiceManager::FLAG_IS_LAZY_SERVICE;
 
     if (Status status = manager->addService(name.c_str(), service, allowIsolated, dumpFlags);
         !status.isOk()) {

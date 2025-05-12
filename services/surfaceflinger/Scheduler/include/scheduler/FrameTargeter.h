@@ -53,6 +53,8 @@ public:
 
     TimePoint expectedPresentTime() const { return mExpectedPresentTime; }
 
+    std::optional<TimePoint> debugPresentDelay() const { return mDebugPresentTimeDelay; }
+
     std::optional<TimePoint> earliestPresentTime() const { return mEarliestPresentTime; }
 
     // Equivalent to `expectedSignaledPresentFence` unless running N VSYNCs ahead.
@@ -84,6 +86,7 @@ protected:
     TimePoint mFrameBeginTime;
     TimePoint mExpectedPresentTime;
     std::optional<TimePoint> mEarliestPresentTime;
+    std::optional<TimePoint> mDebugPresentTimeDelay;
 
     TracedOrdinal<bool> mFramePending;
     TracedOrdinal<bool> mFrameMissed;
@@ -135,6 +138,7 @@ public:
         TimePoint expectedVsyncTime;
         Duration sfWorkDuration;
         Duration hwcMinWorkDuration;
+        std::optional<TimePoint> debugPresentTimeDelay; // used to introduce jank for testing
     };
 
     void beginFrame(const BeginFrameArgs&, const IVsyncSource&);

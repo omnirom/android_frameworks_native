@@ -127,6 +127,7 @@ private:
                                     std::vector<FrameRateOverride> overrides) override;
     void dispatchHdcpLevelsChanged(PhysicalDisplayId displayId, int32_t connectedLevel,
                                    int32_t maxLevel) override;
+    void dispatchModeRejected(PhysicalDisplayId displayId, int32_t modeId) override;
 
     void scheduleCallbacks();
 

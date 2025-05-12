@@ -35,6 +35,7 @@
 #include <compositionengine/CompositionRefreshArgs.h>
 #include <compositionengine/ProjectionSpace.h>
 #include <ui/LayerStack.h>
+#include <ui/PictureProfileHandle.h>
 #include <ui/Rect.h>
 #include <ui/Region.h>
 #include <ui/Transform.h>
@@ -169,6 +170,8 @@ struct OutputCompositionState {
     uint64_t outputLayerHash = 0;
 
     ICEPowerCallback* powerCallback = nullptr;
+
+    PictureProfileHandle pictureProfileHandle;
 
     // Debugging
     void dump(std::string& result) const;

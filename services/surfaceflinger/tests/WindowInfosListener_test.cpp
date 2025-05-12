@@ -50,9 +50,9 @@ protected:
 TEST_F(WindowInfosListenerTest, WindowInfoAddedAndRemoved) {
     std::string name = "Test Layer";
     sp<IBinder> token = sp<BBinder>::make();
-    WindowInfo windowInfo;
-    windowInfo.name = name;
-    windowInfo.token = token;
+    auto windowInfo = sp<gui::WindowInfoHandle>::make();
+    windowInfo->editInfo()->name = name;
+    windowInfo->editInfo()->token = token;
     sp<SurfaceControl> surfaceControl =
             mClient->createSurface(String8(name.c_str()), 100, 100, PIXEL_FORMAT_RGBA_8888,
                                    ISurfaceComposerClient::eFXSurfaceBufferState);
@@ -65,14 +65,14 @@ TEST_F(WindowInfosListenerTest, WindowInfoAddedAndRemoved) {
             .apply();
 
     auto windowPresent = [&](const std::vector<WindowInfo>& windowInfos) {
-        return findMatchingWindowInfo(windowInfo, windowInfos);
+        return findMatchingWindowInfo(*windowInfo->getInfo(), windowInfos);
     };
     ASSERT_TRUE(waitForWindowInfosPredicate(windowPresent));
 
     Transaction().reparent(surfaceControl, nullptr).apply();
 
     auto windowNotPresent = [&](const std::vector<WindowInfo>& windowInfos) {
-        return !findMatchingWindowInfo(windowInfo, windowInfos);
+        return !findMatchingWindowInfo(*windowInfo->getInfo(), windowInfos);
     };
     ASSERT_TRUE(waitForWindowInfosPredicate(windowNotPresent));
 }
@@ -80,9 +80,9 @@ TEST_F(WindowInfosListenerTest, WindowInfoAddedAndRemoved) {
 TEST_F(WindowInfosListenerTest, WindowInfoChanged) {
     std::string name = "Test Layer";
     sp<IBinder> token = sp<BBinder>::make();
-    WindowInfo windowInfo;
-    windowInfo.name = name;
-    windowInfo.token = token;
+    auto windowInfo = sp<gui::WindowInfoHandle>::make();
+    windowInfo->editInfo()->name = name;
+    windowInfo->editInfo()->token = token;
     sp<SurfaceControl> surfaceControl =
             mClient->createSurface(String8(name.c_str()), 100, 100, PIXEL_FORMAT_RGBA_8888,
                                    ISurfaceComposerClient::eFXSurfaceBufferState);
@@ -96,7 +96,7 @@ TEST_F(WindowInfosListenerTest, WindowInfoChanged) {
             .apply();
 
     auto windowIsPresentAndTouchableRegionEmpty = [&](const std::vector<WindowInfo>& windowInfos) {
-        auto foundWindowInfo = findMatchingWindowInfo(windowInfo, windowInfos);
+        auto foundWindowInfo = findMatchingWindowInfo(*windowInfo->getInfo(), windowInfos);
         if (!foundWindowInfo) {
             return false;
         }
@@ -104,19 +104,19 @@ TEST_F(WindowInfosListenerTest, WindowInfoChanged) {
     };
     ASSERT_TRUE(waitForWindowInfosPredicate(windowIsPresentAndTouchableRegionEmpty));
 
-    windowInfo.addTouchableRegion({0, 0, 50, 50});
+    windowInfo->editInfo()->addTouchableRegion({0, 0, 50, 50});
     Transaction().setInputWindowInfo(surfaceControl, windowInfo).apply();
 
     auto windowIsPresentAndTouchableRegionMatches =
             [&](const std::vector<WindowInfo>& windowInfos) {
-                auto foundWindowInfo = findMatchingWindowInfo(windowInfo, windowInfos);
+                auto foundWindowInfo = findMatchingWindowInfo(*windowInfo->getInfo(), windowInfos);
                 if (!foundWindowInfo) {
                     return false;
                 }
 
                 auto touchableRegion =
                         foundWindowInfo->transform.transform(foundWindowInfo->touchableRegion);
-                return touchableRegion.hasSameRects(windowInfo.touchableRegion);
+                return touchableRegion.hasSameRects(windowInfo->getInfo()->touchableRegion);
             };
     ASSERT_TRUE(waitForWindowInfosPredicate(windowIsPresentAndTouchableRegionMatches));
 }

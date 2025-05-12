@@ -69,7 +69,8 @@ public:
                                   sp<Fence>& outReleaseFence, uint32_t& maxAcquiredBufferCount);
 
     private:
-        std::vector<uint8_t> mFlattenedBuffer;
+        std::mutex mMutex;
+        std::vector<uint8_t> mFlattenedBuffer GUARDED_BY(mMutex);
     };
 
     class ProducerEndpoint : public Endpoint, public Parcelable {

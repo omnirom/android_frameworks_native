@@ -4,9 +4,6 @@
       "name": "SurfaceFlinger_test",
       "options": [
         {
-          "include-filter": "*"
-        },
-        {
           // TODO(b/305717998): Deflake and re-enable
           "exclude-filter": "*ChildLayerTest*"
         }
@@ -23,12 +20,7 @@
   ],
   "hwasan-postsubmit": [
     {
-      "name": "SurfaceFlinger_test",
-      "options": [
-        {
-          "include-filter": "*"
-        }
-      ]
+      "name": "SurfaceFlinger_test"
     }
   ]
 }

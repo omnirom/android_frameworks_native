@@ -127,6 +127,8 @@ public:
     }
     IBinder* onAsBinder() override { return IInterface::asBinder(mUnifiedServiceManager).get(); }
 
+    void enableAddServiceCache(bool value) { mUnifiedServiceManager->enableAddServiceCache(value); }
+
 protected:
     sp<BackendUnifiedServiceManager> mUnifiedServiceManager;
     // AidlRegistrationCallback -> services that its been registered for
@@ -150,19 +152,29 @@ protected:
     virtual Status realGetService(const std::string& name, sp<IBinder>* _aidl_return) {
         Service service;
         Status status = mUnifiedServiceManager->getService2(name, &service);
-        *_aidl_return = service.get<Service::Tag::binder>();
+        auto serviceWithMetadata = service.get<Service::Tag::serviceWithMetadata>();
+        *_aidl_return = serviceWithMetadata.service;
         return status;
     }
 };
 
 class AccessorProvider {
 public:
-    AccessorProvider(RpcAccessorProvider&& provider) : mProvider(std::move(provider)) {}
-    sp<IBinder> provide(const String16& name) { return mProvider(name); }
+    AccessorProvider(std::set<std::string>&& instances, RpcAccessorProvider&& provider)
+          : mInstances(std::move(instances)), mProvider(std::move(provider)) {}
+    sp<IBinder> provide(const String16& name) {
+        if (mInstances.count(String8(name).c_str()) > 0) {
+            return mProvider(name);
+        } else {
+            return nullptr;
+        }
+    }
+    const std::set<std::string>& instances() { return mInstances; }
 
 private:
     AccessorProvider() = delete;
 
+    std::set<std::string> mInstances;
     RpcAccessorProvider mProvider;
 };
 
@@ -318,10 +330,32 @@ sp<IServiceManager> getServiceManagerShimFromAidlServiceManagerForTests(
     return sp<CppBackendShim>::make(sp<BackendUnifiedServiceManager>::make(sm));
 }
 
-std::weak_ptr<AccessorProvider> addAccessorProvider(RpcAccessorProvider&& providerCallback) {
+// gAccessorProvidersMutex must be locked already
+static bool isInstanceProvidedLocked(const std::string& instance) {
+    return gAccessorProviders.end() !=
+            std::find_if(gAccessorProviders.begin(), gAccessorProviders.end(),
+                         [&instance](const AccessorProviderEntry& entry) {
+                             return entry.mProvider->instances().count(instance) > 0;
+                         });
+}
+
+std::weak_ptr<AccessorProvider> addAccessorProvider(std::set<std::string>&& instances,
+                                                    RpcAccessorProvider&& providerCallback) {
+    if (instances.empty()) {
+        ALOGE("Set of instances is empty! Need a non empty set of instances to provide for.");
+        return std::weak_ptr<AccessorProvider>();
+    }
     std::lock_guard<std::mutex> lock(gAccessorProvidersMutex);
+    for (const auto& instance : instances) {
+        if (isInstanceProvidedLocked(instance)) {
+            ALOGE("The instance %s is already provided for by a previously added "
+                  "RpcAccessorProvider.",
+                  instance.c_str());
+            return std::weak_ptr<AccessorProvider>();
+        }
+    }
     std::shared_ptr<AccessorProvider> provider =
-            std::make_shared<AccessorProvider>(std::move(providerCallback));
+            std::make_shared<AccessorProvider>(std::move(instances), std::move(providerCallback));
     std::weak_ptr<AccessorProvider> receipt = provider;
     gAccessorProviders.push_back(AccessorProviderEntry(std::move(provider)));
 
@@ -331,8 +365,9 @@ std::weak_ptr<AccessorProvider> addAccessorProvider(RpcAccessorProvider&& provid
 status_t removeAccessorProvider(std::weak_ptr<AccessorProvider> wProvider) {
     std::shared_ptr<AccessorProvider> provider = wProvider.lock();
     if (provider == nullptr) {
-        ALOGE("The provider supplied to removeAccessorProvider has already been removed.");
-        return NAME_NOT_FOUND;
+        ALOGE("The provider supplied to removeAccessorProvider has already been removed or the "
+              "argument to this function was nullptr.");
+        return BAD_VALUE;
     }
     std::lock_guard<std::mutex> lock(gAccessorProvidersMutex);
     size_t sizeBefore = gAccessorProviders.size();
@@ -354,7 +389,7 @@ status_t validateAccessor(const String16& instance, const sp<IBinder>& binder) {
         ALOGE("Binder is null");
         return BAD_VALUE;
     }
-    sp<IAccessor> accessor = interface_cast<IAccessor>(binder);
+    sp<IAccessor> accessor = checked_interface_cast<IAccessor>(binder);
     if (accessor == nullptr) {
         ALOGE("This binder for %s is not an IAccessor binder", String8(instance).c_str());
         return BAD_TYPE;
@@ -386,6 +421,28 @@ sp<IBinder> createAccessor(const String16& instance,
     }
     sp<IBinder> binder = sp<LocalAccessor>::make(instance, std::move(connectionInfoProvider));
     return binder;
+}
+
+status_t delegateAccessor(const String16& name, const sp<IBinder>& accessor,
+                          sp<IBinder>* delegator) {
+    LOG_ALWAYS_FATAL_IF(delegator == nullptr, "delegateAccessor called with a null out param");
+    if (accessor == nullptr) {
+        ALOGW("Accessor argument to delegateAccessor is null.");
+        *delegator = nullptr;
+        return OK;
+    }
+    status_t status = validateAccessor(name, accessor);
+    if (status != OK) {
+        ALOGE("The provided accessor binder is not an IAccessor for instance %s. Status: "
+              "%s",
+              String8(name).c_str(), statusToString(status).c_str());
+        return status;
+    }
+    // validateAccessor already called checked_interface_cast and made sure this
+    // is a valid accessor object.
+    *delegator = sp<android::os::IAccessorDelegator>::make(interface_cast<IAccessor>(accessor));
+
+    return OK;
 }
 
 #if !defined(__ANDROID_VNDK__)
@@ -507,8 +564,9 @@ sp<IBinder> CppBackendShim::getService(const String16& name) const {
     sp<IBinder> svc = checkService(name);
     if (svc != nullptr) return svc;
 
+    sp<ProcessState> self = ProcessState::selfOrNull();
     const bool isVendorService =
-        strcmp(ProcessState::self()->getDriverName().c_str(), "/dev/vndbinder") == 0;
+            self && strcmp(self->getDriverName().c_str(), "/dev/vndbinder") == 0;
     constexpr auto timeout = 5s;
     const auto startTime = std::chrono::steady_clock::now();
     // Vendor code can't access system properties
@@ -525,7 +583,7 @@ sp<IBinder> CppBackendShim::getService(const String16& name) const {
     const useconds_t sleepTime = gSystemBootCompleted ? 1000 : 100;
 
     ALOGI("Waiting for service '%s' on '%s'...", String8(name).c_str(),
-          ProcessState::self()->getDriverName().c_str());
+          self ? self->getDriverName().c_str() : "RPC accessors only");
 
     int n = 0;
     while (std::chrono::steady_clock::now() - startTime < timeout) {
@@ -550,7 +608,7 @@ sp<IBinder> CppBackendShim::checkService(const String16& name) const {
     if (!mUnifiedServiceManager->checkService(String8(name).c_str(), &ret).isOk()) {
         return nullptr;
     }
-    return ret.get<Service::Tag::binder>();
+    return ret.get<Service::Tag::serviceWithMetadata>().service;
 }
 
 status_t CppBackendShim::addService(const String16& name, const sp<IBinder>& service,
@@ -607,7 +665,8 @@ sp<IBinder> CppBackendShim::waitForService(const String16& name16) {
     if (Status status = realGetService(name, &out); !status.isOk()) {
         ALOGW("Failed to getService in waitForService for %s: %s", name.c_str(),
               status.toString8().c_str());
-        if (0 == ProcessState::self()->getThreadPoolMaxTotalThreadCount()) {
+        sp<ProcessState> self = ProcessState::selfOrNull();
+        if (self && 0 == self->getThreadPoolMaxTotalThreadCount()) {
             ALOGW("Got service, but may be racey because we could not wait efficiently for it. "
                   "Threadpool has 0 guaranteed threads. "
                   "Is the threadpool configured properly? "
@@ -641,9 +700,10 @@ sp<IBinder> CppBackendShim::waitForService(const String16& name16) {
             if (waiter->mBinder != nullptr) return waiter->mBinder;
         }
 
+        sp<ProcessState> self = ProcessState::selfOrNull();
         ALOGW("Waited one second for %s (is service started? Number of threads started in the "
               "threadpool: %zu. Are binder threads started and available?)",
-              name.c_str(), ProcessState::self()->getThreadPoolMaxTotalThreadCount());
+              name.c_str(), self ? self->getThreadPoolMaxTotalThreadCount() : 0);
 
         // Handle race condition for lazy services. Here is what can happen:
         // - the service dies (not processed by init yet).

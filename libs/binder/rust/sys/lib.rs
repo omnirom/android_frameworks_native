@@ -20,6 +20,7 @@ use std::error::Error;
 use std::fmt;
 
 #[cfg(not(target_os = "trusty"))]
+#[allow(bad_style)]
 mod bindings {
     include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
 }

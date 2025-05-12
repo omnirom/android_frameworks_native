@@ -344,7 +344,8 @@ protected:
      * mEglSlots array in addition to the ConsumerBase.
      */
     virtual status_t releaseBufferLocked(int slot, const sp<GraphicBuffer> graphicBuffer,
-                                         EGLDisplay display, EGLSyncKHR eglFence) override;
+                                         EGLDisplay display = EGL_NO_DISPLAY,
+                                         EGLSyncKHR eglFence = EGL_NO_SYNC_KHR) override;
 
     /**
      * freeBufferLocked frees up the given buffer slot. If the slot has been

@@ -218,6 +218,14 @@ protected:
     // total maximum buffer count for the buffer queue (dequeued AND acquired)
     status_t setMaxDequeuedBufferCount(int maxDequeuedBuffers, int* maxBufferCount);
 
+#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(BUFFER_RELEASE_CHANNEL)
+    // Wait until a buffer has been released. The method may spuriously return OK when no buffer has
+    // been released. The BufferQueue mutex is passed in the locked state. It must be unlocked
+    // before waiting for a release and locked before returning.
+    virtual status_t waitForBufferRelease(std::unique_lock<std::mutex>& lock,
+                                          nsecs_t timeout) const;
+#endif
+
 private:
     // This is required by the IBinder::DeathRecipient interface
     virtual void binderDied(const wp<IBinder>& who);

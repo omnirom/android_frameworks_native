@@ -99,6 +99,16 @@ TEST(RectTest, constructFromFloatRect) {
         EXPECT_EQ(30, rect.right);
         EXPECT_EQ(40, rect.bottom);
     }
+
+    EXPECT_EQ(Rect(0, 1, -1, 0), Rect(FloatRect(0.f, 1.f, -1.f, 0.f)));
+    EXPECT_EQ(Rect(100000, 100000, -100000, -100000),
+              Rect(FloatRect(100000.f, 100000.f, -100000.f, -100000.f)));
+
+    // round down if < .5
+    EXPECT_EQ(Rect(0, 1, -1, 0), Rect(FloatRect(0.4f, 1.1f, -1.499f, 0.1f)));
+
+    // round up if >= .5
+    EXPECT_EQ(Rect(20, 20, -20, -20), Rect(FloatRect(19.5f, 19.9f, -19.5f, -19.9f)));
 }
 
 TEST(RectTest, makeInvalid) {

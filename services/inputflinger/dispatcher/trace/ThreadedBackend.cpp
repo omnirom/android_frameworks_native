@@ -41,7 +41,7 @@ ThreadedBackend<Backend>::ThreadedBackend(Backend&& innerBackend)
       : mBackend(std::move(innerBackend)),
         mTracerThread(
                 "InputTracer", [this]() { threadLoop(); },
-                [this]() { mThreadWakeCondition.notify_all(); }) {}
+                [this]() { mThreadWakeCondition.notify_all(); }, /*isInCriticalPath=*/false) {}
 
 template <typename Backend>
 ThreadedBackend<Backend>::~ThreadedBackend() {

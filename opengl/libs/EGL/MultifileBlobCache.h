@@ -32,9 +32,13 @@
 
 #include "FileBlobCache.h"
 
+#include <com_android_graphics_egl_flags.h>
+
+using namespace com::android::graphics::egl;
+
 namespace android {
 
-constexpr uint32_t kMultifileBlobCacheVersion = 1;
+constexpr uint32_t kMultifileBlobCacheVersion = 2;
 constexpr char kMultifileBlobCacheStatusFile[] = "cache.status";
 
 struct MultifileHeader {
@@ -45,9 +49,9 @@ struct MultifileHeader {
 };
 
 struct MultifileEntryStats {
+    uint32_t entryHash;
     EGLsizeiANDROID valueSize;
     size_t fileSize;
-    time_t accessTime;
 };
 
 struct MultifileStatus {
@@ -100,6 +104,26 @@ private:
     size_t mBufferSize;
 };
 
+#if COM_ANDROID_GRAPHICS_EGL_FLAGS(MULTIFILE_BLOBCACHE_ADVANCED_USAGE)
+struct MultifileTimeLess {
+    bool operator()(const struct timespec& t1, const struct timespec& t2) const {
+        if (t1.tv_sec == t2.tv_sec) {
+            // If seconds are equal, check nanoseconds
+            return t1.tv_nsec < t2.tv_nsec;
+        } else {
+            // Otherwise, compare seconds
+            return t1.tv_sec < t2.tv_sec;
+        }
+    }
+};
+
+// The third parameter here causes all entries to be sorted by access time,
+// so oldest will be accessed first in applyLRU
+using MultifileEntryStatsMap =
+        std::multimap<struct timespec, MultifileEntryStats, MultifileTimeLess>;
+using MultifileEntryStatsMapIter = MultifileEntryStatsMap::iterator;
+#endif // COM_ANDROID_GRAPHICS_EGL_FLAGS(MULTIFILE_BLOBCACHE_ADVANCED_USAGE)
+
 class MultifileBlobCache {
 public:
     MultifileBlobCache(size_t maxKeySize, size_t maxValueSize, size_t maxTotalSize,
@@ -115,6 +139,7 @@ public:
 
     size_t getTotalSize() const { return mTotalCacheSize; }
     size_t getTotalEntries() const { return mTotalCacheEntries; }
+    size_t getTotalCacheSizeDivisor() const { return mTotalCacheSizeDivisor; }
 
     const std::string& getCurrentBuildId() const { return mBuildId; }
     void setCurrentBuildId(const std::string& buildId) { mBuildId = buildId; }
@@ -124,10 +149,11 @@ public:
 
 private:
     void trackEntry(uint32_t entryHash, EGLsizeiANDROID valueSize, size_t fileSize,
-                    time_t accessTime);
+                    const timespec& accessTime);
     bool contains(uint32_t entryHash) const;
     bool removeEntry(uint32_t entryHash);
     MultifileEntryStats getEntryStats(uint32_t entryHash);
+    void updateEntryTime(uint32_t entryHash, const timespec& newTime);
 
     bool createStatus(const std::string& baseDir);
     bool checkStatus(const std::string& baseDir);
@@ -151,8 +177,14 @@ private:
     std::string mBuildId;
     uint32_t mCacheVersion;
 
+#if COM_ANDROID_GRAPHICS_EGL_FLAGS(MULTIFILE_BLOBCACHE_ADVANCED_USAGE)
+    std::unordered_map<uint32_t, MultifileEntryStatsMapIter> mEntries;
+    MultifileEntryStatsMap mEntryStats;
+#else
     std::unordered_set<uint32_t> mEntries;
     std::unordered_map<uint32_t, MultifileEntryStats> mEntryStats;
+#endif // COM_ANDROID_GRAPHICS_EGL_FLAGS(MULTIFILE_BLOBCACHE_ADVANCED_USAGE)
+
     std::unordered_map<uint32_t, MultifileHotCache> mHotCache;
 
     size_t mMaxKeySize;
@@ -161,6 +193,7 @@ private:
     size_t mMaxTotalEntries;
     size_t mTotalCacheSize;
     size_t mTotalCacheEntries;
+    size_t mTotalCacheSizeDivisor;
     size_t mHotCacheLimit;
     size_t mHotCacheEntryLimit;
     size_t mHotCacheSize;

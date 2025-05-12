@@ -1,0 +1,3 @@
+# ADPF
+per-file thermal_private.h = file:platform/frameworks/base:/ADPF_OWNERS
+per-file performance_hint_private.h = file:platform/frameworks/base:/ADPF_OWNERS

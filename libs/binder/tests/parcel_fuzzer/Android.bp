@@ -39,6 +39,7 @@ cc_fuzz {
             "smoreland@google.com",
             "waghpawan@google.com",
         ],
+        triage_assignee: "smoreland@google.com",
         use_for_presubmit: true,
     },
 

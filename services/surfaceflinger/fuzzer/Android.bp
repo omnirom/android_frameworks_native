@@ -28,16 +28,18 @@ package {
 cc_defaults {
     name: "surfaceflinger_fuzz_defaults",
     static_libs: [
-        "libc++fs",
         "libsurfaceflinger_common",
     ],
     srcs: [
+        ":libsurfaceflinger_backend_mock_sources",
+        ":libsurfaceflinger_mock_sources",
         ":libsurfaceflinger_sources",
     ],
     defaults: [
         "libsurfaceflinger_defaults",
     ],
     header_libs: [
+        "libsurfaceflinger_backend_mock_headers",
         "libsurfaceflinger_headers",
     ],
     cflags: [

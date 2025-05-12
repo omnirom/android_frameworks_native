@@ -61,4 +61,24 @@ inline HdrRenderType getHdrRenderType(ui::Dataspace dataspace,
     return HdrRenderType::SDR;
 }
 
+/**
+ * Returns the maximum headroom allowed for this content under "idealized"
+ * display conditions (low surround luminance, high-enough display brightness).
+ *
+ * TODO: take into account hdr metadata, but square it with the fact that some
+ * HLG content has CTA.861-3 metadata
+ */
+inline float getIdealizedMaxHeadroom(ui::Dataspace dataspace) {
+    const auto transfer = dataspace & HAL_DATASPACE_TRANSFER_MASK;
+
+    switch (transfer) {
+        case HAL_DATASPACE_TRANSFER_ST2084:
+            return 10000.0f / 203.0f;
+        case HAL_DATASPACE_TRANSFER_HLG:
+            return 1000.0f / 203.0f;
+        default:
+            return 1.0f;
+    }
+}
+
 } // namespace android

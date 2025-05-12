@@ -25,6 +25,7 @@
 #include <include/gpu/graphite/Recording.h>
 #include <include/gpu/graphite/vk/VulkanGraphiteTypes.h>
 
+#include <android-base/stringprintf.h>
 #include <log/log_main.h>
 #include <sync/sync.h>
 
@@ -32,6 +33,8 @@
 #include <vector>
 
 namespace android::renderengine::skia {
+
+using base::StringAppendF;
 
 std::unique_ptr<GraphiteVkRenderEngine> GraphiteVkRenderEngine::create(
         const RenderEngineCreationArgs& args) {
@@ -137,6 +140,11 @@ base::unique_fd GraphiteVkRenderEngine::flushAndSubmit(SkiaGpuContext* context, 
         destroySemaphoreInfo->unref();
     }
     return drawFenceFd;
+}
+
+void GraphiteVkRenderEngine::appendBackendSpecificInfoToDump(std::string& result) {
+    StringAppendF(&result, "\n ------------RE Vulkan (Graphite)----------\n");
+    SkiaVkRenderEngine::appendBackendSpecificInfoToDump(result);
 }
 
 } // namespace android::renderengine::skia

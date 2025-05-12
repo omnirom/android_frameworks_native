@@ -82,10 +82,13 @@ void LayerDataSource::OnFlush(const LayerDataSource::FlushArgs& args) {
     }
 }
 
-void LayerDataSource::OnStop(const LayerDataSource::StopArgs&) {
+void LayerDataSource::OnStop(const LayerDataSource::StopArgs& args) {
     ALOGD("Received OnStop event (mode = 0x%02x, flags = 0x%02x)", mMode, mFlags);
     if (auto* p = mLayerTracing.load()) {
-        p->onStop(mMode);
+        // In dump mode we need to defer the stop (through HandleStopAsynchronously()) till
+        // the layers snapshot has been captured and written to perfetto. We must avoid writing
+        // to perfetto within the OnStop callback to prevent deadlocks (b/313130597).
+        p->onStop(mMode, mFlags, args.HandleStopAsynchronously());
     }
 }
 

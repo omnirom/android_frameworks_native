@@ -60,7 +60,6 @@ using types::V1_2::PixelFormat;
 
 using V2_1::Config;
 using V2_1::Display;
-using V2_1::Error;
 using V2_1::Layer;
 using V2_4::CommandReaderBase;
 using V2_4::CommandWriterBase;
@@ -308,7 +307,7 @@ public:
     V2_4::Error getDisplayConnectionType(Display display,
                                          IComposerClient::DisplayConnectionType* outType) override;
     V2_4::Error getDisplayVsyncPeriod(Display display, VsyncPeriodNanos* outVsyncPeriod) override;
-    V2_4::Error setActiveConfigWithConstraints(
+    Error setActiveConfigWithConstraints(
             Display display, Config config,
             const IComposerClient::VsyncPeriodChangeConstraints& vsyncPeriodChangeConstraints,
             VsyncPeriodChangeTimeline* outTimeline) override;
@@ -352,11 +351,14 @@ public:
     Error setRefreshRateChangedCallbackDebugEnabled(Display, bool) override;
     Error notifyExpectedPresent(Display, nsecs_t, int32_t) override;
     Error getRequestedLuts(
-            Display,
+            Display, std::vector<Layer>*,
             std::vector<aidl::android::hardware::graphics::composer3::DisplayLuts::LayerLut>*)
             override;
     Error setLayerLuts(Display, Layer,
-                       std::vector<aidl::android::hardware::graphics::composer3::Lut>&) override;
+                       aidl::android::hardware::graphics::composer3::Luts&) override;
+    Error getMaxLayerPictureProfiles(Display, int32_t* outMaxProfiles) override;
+    Error setDisplayPictureProfileId(Display, PictureProfileId) override;
+    Error setLayerPictureProfileId(Display, Layer, PictureProfileId) override;
 
 private:
     class CommandWriter : public CommandWriterBase {

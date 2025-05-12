@@ -26,7 +26,8 @@ use com_android_server_inputflinger::aidl::com::android::server::inputflinger::{
 };
 use input::KeyboardType;
 use log::debug;
-use std::collections::HashSet;
+use std::any::Any;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 // Policy flags from Input.h
@@ -185,6 +186,19 @@ impl Filter for SlowKeysFilter {
         let mut slow_filter = self.write_inner();
         slow_filter.input_filter_thread.unregister_thread_callback(Box::new(self.clone()));
         slow_filter.next.destroy();
+    }
+
+    fn save(
+        &mut self,
+        state: HashMap<&'static str, Box<dyn Any + Send + Sync>>,
+    ) -> HashMap<&'static str, Box<dyn Any + Send + Sync>> {
+        let mut slow_filter = self.write_inner();
+        slow_filter.next.save(state)
+    }
+
+    fn restore(&mut self, state: &HashMap<&'static str, Box<dyn Any + Send + Sync>>) {
+        let mut slow_filter = self.write_inner();
+        slow_filter.next.restore(state);
     }
 
     fn dump(&mut self, dump_str: String) -> String {

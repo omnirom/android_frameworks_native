@@ -369,6 +369,10 @@ void Choreographer::dispatchHdcpLevelsChanged(PhysicalDisplayId displayId, int32
           this, to_string(displayId).c_str(), connectedLevel, maxLevel);
 }
 
+void Choreographer::dispatchModeRejected(PhysicalDisplayId, int32_t) {
+    LOG_ALWAYS_FATAL("dispatchModeRejected was called but was never registered");
+}
+
 void Choreographer::handleMessage(const Message& message) {
     switch (message.what) {
         case MSG_SCHEDULE_CALLBACKS:

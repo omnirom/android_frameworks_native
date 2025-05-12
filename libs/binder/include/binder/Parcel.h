@@ -92,7 +92,7 @@ public:
 
     LIBBINDER_EXPORTED status_t appendFrom(const Parcel* parcel, size_t start, size_t len);
 
-    LIBBINDER_EXPORTED int compareData(const Parcel& other);
+    LIBBINDER_EXPORTED int compareData(const Parcel& other) const;
     LIBBINDER_EXPORTED status_t compareDataInRange(size_t thisOffset, const Parcel& other,
                                                    size_t otherOffset, size_t length,
                                                    int* result) const;
@@ -172,14 +172,14 @@ public:
 
     LIBBINDER_EXPORTED status_t write(const void* data, size_t len);
     LIBBINDER_EXPORTED void* writeInplace(size_t len);
-    LIBBINDER_EXPORTED status_t writeUnpadded(const void* data, size_t len);
     LIBBINDER_EXPORTED status_t writeInt32(int32_t val);
     LIBBINDER_EXPORTED status_t writeUint32(uint32_t val);
     LIBBINDER_EXPORTED status_t writeInt64(int64_t val);
     LIBBINDER_EXPORTED status_t writeUint64(uint64_t val);
     LIBBINDER_EXPORTED status_t writeFloat(float val);
     LIBBINDER_EXPORTED status_t writeDouble(double val);
-    LIBBINDER_EXPORTED status_t writeCString(const char* str);
+    LIBBINDER_EXPORTED status_t writeCString(const char* str)
+            __attribute__((deprecated("use AIDL, writeString* instead")));
     LIBBINDER_EXPORTED status_t writeString8(const String8& str);
     LIBBINDER_EXPORTED status_t writeString8(const char* str, size_t len);
     LIBBINDER_EXPORTED status_t writeString16(const String16& str);
@@ -435,7 +435,8 @@ public:
     LIBBINDER_EXPORTED status_t readUtf8FromUtf16(std::unique_ptr<std::string>* str) const
             __attribute__((deprecated("use std::optional version instead")));
 
-    LIBBINDER_EXPORTED const char* readCString() const;
+    LIBBINDER_EXPORTED const char* readCString() const
+            __attribute__((deprecated("use AIDL, use readString*")));
     LIBBINDER_EXPORTED String8 readString8() const;
     LIBBINDER_EXPORTED status_t readString8(String8* pArg) const;
     LIBBINDER_EXPORTED const char* readString8Inplace(size_t* outLen) const;
@@ -1240,7 +1241,7 @@ private:
             if (__builtin_mul_overflow(size, sizeof(T), &dataLen)) {
                 return -EOVERFLOW;
             }
-            auto data = reinterpret_cast<const T*>(readInplace(dataLen));
+            auto data = readInplace(dataLen);
             if (data == nullptr) return BAD_VALUE;
             // std::vector::insert and similar methods will require type-dependent
             // byte alignment when inserting from a const iterator such as `data`,

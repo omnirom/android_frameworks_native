@@ -44,6 +44,7 @@ public:
                              std::function<perfetto::protos::RectProto*()> getRectProto);
     static void writeToProto(const Rect& rect, perfetto::protos::RectProto* rectProto);
     static void readFromProto(const perfetto::protos::RectProto& proto, Rect& outRect);
+    static void readFromProto(const perfetto::protos::RectProto& proto, FloatRect& outRect);
     static void writeToProto(const FloatRect& rect,
                              std::function<perfetto::protos::FloatRectProto*()> getFloatRectProto);
     static void writeToProto(const Region& region,

@@ -62,6 +62,10 @@ public:
     HalResult<void> prepareSynced(const std::vector<int32_t>& ids) override final;
     HalResult<void> triggerSynced(const std::function<void()>& completionCallback) override final;
     HalResult<void> cancelSynced() override final;
+    HalResult<std::shared_ptr<IVibrationSession>> startSession(
+            const std::vector<int32_t>& ids, const VibrationSessionConfig& config,
+            const std::function<void()>& completionCallback) override final;
+    HalResult<void> clearSessions() override final;
 
 private:
     Connector mConnector;

@@ -19,10 +19,9 @@ extern crate nativewindow_bindgen as ffi;
 mod handle;
 mod surface;
 
-pub use handle::NativeHandle;
-pub use surface::Surface;
-
 pub use ffi::{AHardwareBuffer_Format, AHardwareBuffer_UsageFlags};
+pub use handle::NativeHandle;
+pub use surface::{buffer::Buffer, Surface};
 
 use binder::{
     binder_impl::{BorrowedParcel, UnstructuredParcelable},
@@ -31,12 +30,14 @@ use binder::{
     StatusCode,
 };
 use ffi::{
-    AHardwareBuffer, AHardwareBuffer_Desc, AHardwareBuffer_readFromParcel,
-    AHardwareBuffer_writeToParcel,
+    AHardwareBuffer, AHardwareBuffer_Desc, AHardwareBuffer_Plane, AHardwareBuffer_Planes,
+    AHardwareBuffer_readFromParcel, AHardwareBuffer_writeToParcel, ARect,
 };
+use std::ffi::c_void;
 use std::fmt::{self, Debug, Formatter};
-use std::mem::ManuallyDrop;
-use std::ptr::{self, null_mut, NonNull};
+use std::mem::{forget, ManuallyDrop};
+use std::os::fd::{AsRawFd, BorrowedFd, FromRawFd, OwnedFd};
+use std::ptr::{self, null, null_mut, NonNull};
 
 /// Wrapper around a C `AHardwareBuffer_Desc`.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -204,8 +205,8 @@ impl HardwareBuffer {
         Self(buffer_ptr)
     }
 
-    /// Creates a new Rust HardwareBuffer to wrap the given AHardwareBuffer without taking ownership
-    /// of it.
+    /// Creates a new Rust HardwareBuffer to wrap the given `AHardwareBuffer` without taking
+    /// ownership of it.
     ///
     /// Unlike [`from_raw`](Self::from_raw) this method will increment the refcount on the buffer.
     /// This means that the caller can continue to use the raw buffer it passed in, and must call
@@ -221,8 +222,20 @@ impl HardwareBuffer {
         Self(buffer)
     }
 
-    /// Get the internal |AHardwareBuffer| pointer without decrementing the refcount. This can
-    /// be used to provide a pointer to the AHB for a C/C++ API over the FFI.
+    /// Returns the internal `AHardwareBuffer` pointer.
+    ///
+    /// This is only valid as long as this `HardwareBuffer` exists, so shouldn't be stored. It can
+    /// be used to provide a pointer for a C/C++ API over FFI.
+    pub fn as_raw(&self) -> NonNull<AHardwareBuffer> {
+        self.0
+    }
+
+    /// Gets the internal `AHardwareBuffer` pointer without decrementing the refcount. This can
+    /// be used for a C/C++ API which takes ownership of the pointer.
+    ///
+    /// The caller is responsible for releasing the `AHardwareBuffer` pointer by calling
+    /// `AHardwareBuffer_release` when it is finished with it, or may convert it back to a Rust
+    /// `HardwareBuffer` by calling [`HardwareBuffer::from_raw`].
     pub fn into_raw(self) -> NonNull<AHardwareBuffer> {
         let buffer = ManuallyDrop::new(self);
         buffer.0
@@ -256,9 +269,191 @@ impl HardwareBuffer {
             rfu0: 0,
             rfu1: 0,
         };
-        // SAFETY: neither the buffer nor AHardwareBuffer_Desc pointers will be null.
+        // SAFETY: The `AHardwareBuffer` pointer we wrap is always valid, and the
+        // AHardwareBuffer_Desc pointer is valid because it comes from a reference.
         unsafe { ffi::AHardwareBuffer_describe(self.0.as_ref(), &mut buffer_desc) };
         HardwareBufferDescription(buffer_desc)
+    }
+
+    /// Locks the hardware buffer for direct CPU access.
+    ///
+    /// # Safety
+    ///
+    /// - If `fence` is `None`, the caller must ensure that all writes to the buffer have completed
+    ///   before calling this function.
+    /// - If the buffer has `AHARDWAREBUFFER_FORMAT_BLOB`, multiple threads or process may lock the
+    ///   buffer simultaneously, but the caller must ensure that they don't access it simultaneously
+    ///   and break Rust's aliasing rules, like any other shared memory.
+    /// - Otherwise if `usage` includes `AHARDWAREBUFFER_USAGE_CPU_WRITE_RARELY` or
+    ///   `AHARDWAREBUFFER_USAGE_CPU_WRITE_OFTEN`, the caller must ensure that no other threads or
+    ///   processes lock the buffer simultaneously for any usage.
+    /// - Otherwise, the caller must ensure that no other threads lock the buffer for writing
+    ///   simultaneously.
+    /// - If `rect` is not `None`, the caller must not modify the buffer outside of that rectangle.
+    pub unsafe fn lock<'a>(
+        &'a self,
+        usage: AHardwareBuffer_UsageFlags,
+        fence: Option<BorrowedFd>,
+        rect: Option<&ARect>,
+    ) -> Result<HardwareBufferGuard<'a>, StatusCode> {
+        let fence = if let Some(fence) = fence { fence.as_raw_fd() } else { -1 };
+        let rect = rect.map(ptr::from_ref).unwrap_or(null());
+        let mut address = null_mut();
+        // SAFETY: The `AHardwareBuffer` pointer we wrap is always valid, and the buffer address out
+        // pointer is valid because it comes from a reference. Our caller promises that writes have
+        // completed and there will be no simultaneous read/write locks.
+        let status = unsafe {
+            ffi::AHardwareBuffer_lock(self.0.as_ptr(), usage.0, fence, rect, &mut address)
+        };
+        status_result(status)?;
+        Ok(HardwareBufferGuard {
+            buffer: self,
+            address: NonNull::new(address)
+                .expect("AHardwareBuffer_lock set a null outVirtualAddress"),
+        })
+    }
+
+    /// Lock a potentially multi-planar hardware buffer for direct CPU access.
+    ///
+    /// # Safety
+    ///
+    /// - If `fence` is `None`, the caller must ensure that all writes to the buffer have completed
+    ///   before calling this function.
+    /// - If the buffer has `AHARDWAREBUFFER_FORMAT_BLOB`, multiple threads or process may lock the
+    ///   buffer simultaneously, but the caller must ensure that they don't access it simultaneously
+    ///   and break Rust's aliasing rules, like any other shared memory.
+    /// - Otherwise if `usage` includes `AHARDWAREBUFFER_USAGE_CPU_WRITE_RARELY` or
+    ///   `AHARDWAREBUFFER_USAGE_CPU_WRITE_OFTEN`, the caller must ensure that no other threads or
+    ///   processes lock the buffer simultaneously for any usage.
+    /// - Otherwise, the caller must ensure that no other threads lock the buffer for writing
+    ///   simultaneously.
+    /// - If `rect` is not `None`, the caller must not modify the buffer outside of that rectangle.
+    pub unsafe fn lock_planes<'a>(
+        &'a self,
+        usage: AHardwareBuffer_UsageFlags,
+        fence: Option<BorrowedFd>,
+        rect: Option<&ARect>,
+    ) -> Result<Vec<PlaneGuard<'a>>, StatusCode> {
+        let fence = if let Some(fence) = fence { fence.as_raw_fd() } else { -1 };
+        let rect = rect.map(ptr::from_ref).unwrap_or(null());
+        let mut planes = AHardwareBuffer_Planes {
+            planeCount: 0,
+            planes: [const { AHardwareBuffer_Plane { data: null_mut(), pixelStride: 0, rowStride: 0 } };
+                4],
+        };
+
+        // SAFETY: The `AHardwareBuffer` pointer we wrap is always valid, and the various out
+        // pointers are valid because they come from references. Our caller promises that writes have
+        // completed and there will be no simultaneous read/write locks.
+        let status = unsafe {
+            ffi::AHardwareBuffer_lockPlanes(self.0.as_ptr(), usage.0, fence, rect, &mut planes)
+        };
+        status_result(status)?;
+        let plane_count = planes.planeCount.try_into().unwrap();
+        Ok(planes.planes[..plane_count]
+            .iter()
+            .map(|plane| PlaneGuard {
+                guard: HardwareBufferGuard {
+                    buffer: self,
+                    address: NonNull::new(plane.data)
+                        .expect("AHardwareBuffer_lockAndGetInfo set a null outVirtualAddress"),
+                },
+                pixel_stride: plane.pixelStride,
+                row_stride: plane.rowStride,
+            })
+            .collect())
+    }
+
+    /// Locks the hardware buffer for direct CPU access, returning information about the bytes per
+    /// pixel and stride as well.
+    ///
+    /// # Safety
+    ///
+    /// - If `fence` is `None`, the caller must ensure that all writes to the buffer have completed
+    ///   before calling this function.
+    /// - If the buffer has `AHARDWAREBUFFER_FORMAT_BLOB`, multiple threads or process may lock the
+    ///   buffer simultaneously, but the caller must ensure that they don't access it simultaneously
+    ///   and break Rust's aliasing rules, like any other shared memory.
+    /// - Otherwise if `usage` includes `AHARDWAREBUFFER_USAGE_CPU_WRITE_RARELY` or
+    ///   `AHARDWAREBUFFER_USAGE_CPU_WRITE_OFTEN`, the caller must ensure that no other threads or
+    ///   processes lock the buffer simultaneously for any usage.
+    /// - Otherwise, the caller must ensure that no other threads lock the buffer for writing
+    ///   simultaneously.
+    pub unsafe fn lock_and_get_info<'a>(
+        &'a self,
+        usage: AHardwareBuffer_UsageFlags,
+        fence: Option<BorrowedFd>,
+        rect: Option<&ARect>,
+    ) -> Result<LockedBufferInfo<'a>, StatusCode> {
+        let fence = if let Some(fence) = fence { fence.as_raw_fd() } else { -1 };
+        let rect = rect.map(ptr::from_ref).unwrap_or(null());
+        let mut address = null_mut();
+        let mut bytes_per_pixel = 0;
+        let mut stride = 0;
+        // SAFETY: The `AHardwareBuffer` pointer we wrap is always valid, and the various out
+        // pointers are valid because they come from references. Our caller promises that writes have
+        // completed and there will be no simultaneous read/write locks.
+        let status = unsafe {
+            ffi::AHardwareBuffer_lockAndGetInfo(
+                self.0.as_ptr(),
+                usage.0,
+                fence,
+                rect,
+                &mut address,
+                &mut bytes_per_pixel,
+                &mut stride,
+            )
+        };
+        status_result(status)?;
+        Ok(LockedBufferInfo {
+            guard: HardwareBufferGuard {
+                buffer: self,
+                address: NonNull::new(address)
+                    .expect("AHardwareBuffer_lockAndGetInfo set a null outVirtualAddress"),
+            },
+            bytes_per_pixel: bytes_per_pixel as u32,
+            stride: stride as u32,
+        })
+    }
+
+    /// Unlocks the hardware buffer from direct CPU access.
+    ///
+    /// Must be called after all changes to the buffer are completed by the caller. This will block
+    /// until the unlocking is complete and the buffer contents are updated.
+    fn unlock(&self) -> Result<(), StatusCode> {
+        // SAFETY: The `AHardwareBuffer` pointer we wrap is always valid.
+        let status = unsafe { ffi::AHardwareBuffer_unlock(self.0.as_ptr(), null_mut()) };
+        status_result(status)?;
+        Ok(())
+    }
+
+    /// Unlocks the hardware buffer from direct CPU access.
+    ///
+    /// Must be called after all changes to the buffer are completed by the caller.
+    ///
+    /// This may not block until all work is completed, but rather will return a file descriptor
+    /// which will be signalled once the unlocking is complete and the buffer contents is updated.
+    /// If `Ok(None)` is returned then unlocking has already completed and no further waiting is
+    /// necessary. The file descriptor may be passed to a subsequent call to [`Self::lock`].
+    pub fn unlock_with_fence(
+        &self,
+        guard: HardwareBufferGuard,
+    ) -> Result<Option<OwnedFd>, StatusCode> {
+        // Forget the guard so that its `Drop` implementation doesn't try to unlock the
+        // HardwareBuffer again.
+        forget(guard);
+
+        let mut fence = -2;
+        // SAFETY: The `AHardwareBuffer` pointer we wrap is always valid.
+        let status = unsafe { ffi::AHardwareBuffer_unlock(self.0.as_ptr(), &mut fence) };
+        let fence = if fence < 0 {
+            None
+        } else {
+            // SAFETY: `AHardwareBuffer_unlock` gives us ownership of the fence file descriptor.
+            Some(unsafe { OwnedFd::from_raw_fd(fence) })
+        };
+        status_result(status)?;
+        Ok(fence)
     }
 }
 
@@ -334,6 +529,49 @@ unsafe impl Send for HardwareBuffer {}
 //   - "locking" for reading/writing (which is explicitly allowed to be done across multiple threads
 //     according to the docs on the underlying gralloc calls)
 unsafe impl Sync for HardwareBuffer {}
+
+/// A guard for when a `HardwareBuffer` is locked.
+///
+/// The `HardwareBuffer` will be unlocked when this is dropped, or may be unlocked via
+/// [`HardwareBuffer::unlock_with_fence`].
+#[derive(Debug)]
+pub struct HardwareBufferGuard<'a> {
+    buffer: &'a HardwareBuffer,
+    /// The address of the buffer in memory.
+    pub address: NonNull<c_void>,
+}
+
+impl<'a> Drop for HardwareBufferGuard<'a> {
+    fn drop(&mut self) {
+        self.buffer
+            .unlock()
+            .expect("Failed to unlock HardwareBuffer when dropping HardwareBufferGuard");
+    }
+}
+
+/// A guard for when a `HardwareBuffer` is locked, with additional information about the number of
+/// bytes per pixel and stride.
+#[derive(Debug)]
+pub struct LockedBufferInfo<'a> {
+    /// The locked buffer guard.
+    pub guard: HardwareBufferGuard<'a>,
+    /// The number of bytes used for each pixel in the buffer.
+    pub bytes_per_pixel: u32,
+    /// The stride in bytes between rows in the buffer.
+    pub stride: u32,
+}
+
+/// A guard for a single plane of a locked `HardwareBuffer`, with additional information about the
+/// stride.
+#[derive(Debug)]
+pub struct PlaneGuard<'a> {
+    /// The locked buffer guard.
+    pub guard: HardwareBufferGuard<'a>,
+    /// The stride in bytes between the color channel for one pixel to the next pixel.
+    pub pixel_stride: u32,
+    /// The stride in bytes between rows in the buffer.
+    pub row_stride: u32,
+}
 
 #[cfg(test)]
 mod test {
@@ -487,5 +725,109 @@ mod test {
 
         assert_eq!(buffer.description(), buffer_description);
         assert_eq!(buffer2.description(), buffer_description);
+    }
+
+    #[test]
+    fn lock() {
+        let buffer = HardwareBuffer::new(&HardwareBufferDescription::new(
+            1024,
+            512,
+            1,
+            AHardwareBuffer_Format::AHARDWAREBUFFER_FORMAT_R8G8B8A8_UNORM,
+            AHardwareBuffer_UsageFlags::AHARDWAREBUFFER_USAGE_CPU_READ_OFTEN,
+            0,
+        ))
+        .expect("Failed to create buffer");
+
+        // SAFETY: No other threads or processes have access to the buffer.
+        let guard = unsafe {
+            buffer.lock(
+                AHardwareBuffer_UsageFlags::AHARDWAREBUFFER_USAGE_CPU_READ_OFTEN,
+                None,
+                None,
+            )
+        }
+        .unwrap();
+
+        drop(guard);
+    }
+
+    #[test]
+    fn lock_with_rect() {
+        let buffer = HardwareBuffer::new(&HardwareBufferDescription::new(
+            1024,
+            512,
+            1,
+            AHardwareBuffer_Format::AHARDWAREBUFFER_FORMAT_R8G8B8A8_UNORM,
+            AHardwareBuffer_UsageFlags::AHARDWAREBUFFER_USAGE_CPU_READ_OFTEN,
+            0,
+        ))
+        .expect("Failed to create buffer");
+        let rect = ARect { left: 10, right: 20, top: 35, bottom: 45 };
+
+        // SAFETY: No other threads or processes have access to the buffer.
+        let guard = unsafe {
+            buffer.lock(
+                AHardwareBuffer_UsageFlags::AHARDWAREBUFFER_USAGE_CPU_READ_OFTEN,
+                None,
+                Some(&rect),
+            )
+        }
+        .unwrap();
+
+        drop(guard);
+    }
+
+    #[test]
+    fn unlock_with_fence() {
+        let buffer = HardwareBuffer::new(&HardwareBufferDescription::new(
+            1024,
+            512,
+            1,
+            AHardwareBuffer_Format::AHARDWAREBUFFER_FORMAT_R8G8B8A8_UNORM,
+            AHardwareBuffer_UsageFlags::AHARDWAREBUFFER_USAGE_CPU_READ_OFTEN,
+            0,
+        ))
+        .expect("Failed to create buffer");
+
+        // SAFETY: No other threads or processes have access to the buffer.
+        let guard = unsafe {
+            buffer.lock(
+                AHardwareBuffer_UsageFlags::AHARDWAREBUFFER_USAGE_CPU_READ_OFTEN,
+                None,
+                None,
+            )
+        }
+        .unwrap();
+
+        buffer.unlock_with_fence(guard).unwrap();
+    }
+
+    #[test]
+    fn lock_with_info() {
+        const WIDTH: u32 = 1024;
+        let buffer = HardwareBuffer::new(&HardwareBufferDescription::new(
+            WIDTH,
+            512,
+            1,
+            AHardwareBuffer_Format::AHARDWAREBUFFER_FORMAT_R8G8B8A8_UNORM,
+            AHardwareBuffer_UsageFlags::AHARDWAREBUFFER_USAGE_CPU_READ_OFTEN,
+            0,
+        ))
+        .expect("Failed to create buffer");
+
+        // SAFETY: No other threads or processes have access to the buffer.
+        let info = unsafe {
+            buffer.lock_and_get_info(
+                AHardwareBuffer_UsageFlags::AHARDWAREBUFFER_USAGE_CPU_READ_OFTEN,
+                None,
+                None,
+            )
+        }
+        .unwrap();
+
+        assert_eq!(info.bytes_per_pixel, 4);
+        assert_eq!(info.stride, WIDTH * 4);
+        drop(info);
     }
 }

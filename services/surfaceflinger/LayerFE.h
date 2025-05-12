@@ -18,19 +18,24 @@
 
 #include <android/gui/CachingHint.h>
 #include <gui/LayerMetadata.h>
+#include <ui/LayerStack.h>
+#include <ui/PictureProfileHandle.h>
+
 #include "FrontEnd/LayerSnapshot.h"
 #include "compositionengine/LayerFE.h"
 #include "compositionengine/LayerFECompositionState.h"
 #include "renderengine/LayerSettings.h"
-#include "ui/LayerStack.h"
 
 #include <ftl/future.h>
 
 namespace android {
 
 struct CompositionResult {
-    std::vector<std::pair<ftl::SharedFuture<FenceResult>, ui::LayerStack>> releaseFences;
     sp<Fence> lastClientCompositionFence = nullptr;
+    bool wasPictureProfileCommitted = false;
+    // TODO(b/337330263): Why does LayerFE coming from SF have a null composition state?
+    // It would be better not to duplicate this information
+    PictureProfileHandle pictureProfileHandle = PictureProfileHandle::NONE;
 };
 
 class LayerFE : public virtual RefBase, public virtual compositionengine::LayerFE {
@@ -41,7 +46,6 @@ public:
     // compositionengine::LayerFE overrides
     const compositionengine::LayerFECompositionState* getCompositionState() const override;
     bool onPreComposition(bool updatingOutputGeometryThisFrame) override;
-    void onLayerDisplayed(ftl::SharedFuture<FenceResult>, ui::LayerStack) override;
     const char* getDebugName() const override;
     int32_t getSequence() const override;
     bool hasRoundedCorners() const override;
@@ -50,10 +54,11 @@ public:
     const gui::LayerMetadata* getRelativeMetadata() const override;
     std::optional<compositionengine::LayerFE::LayerSettings> prepareClientComposition(
             compositionengine::LayerFE::ClientCompositionTargetSettings&) const;
-    CompositionResult&& stealCompositionResult();
+    CompositionResult stealCompositionResult();
     ftl::Future<FenceResult> createReleaseFenceFuture() override;
     void setReleaseFence(const FenceResult& releaseFence) override;
     LayerFE::ReleaseFencePromiseStatus getReleaseFencePromiseStatus() override;
+    void onPictureProfileCommitted() override;
 
     std::unique_ptr<surfaceflinger::frontend::LayerSnapshot> mSnapshot;
 

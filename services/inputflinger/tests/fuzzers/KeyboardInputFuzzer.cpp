@@ -99,7 +99,6 @@ extern "C" int LLVMFuzzerTestOneInput(uint8_t* data, size_t size) {
                                                  nullptr);
                 },
                 [&]() -> void { mapper.getMetaState(); },
-                [&]() -> void { mapper.updateMetaState(fdp->ConsumeIntegral<int32_t>()); },
                 [&]() -> void { mapper.getAssociatedDisplayId(); },
         })();
     }

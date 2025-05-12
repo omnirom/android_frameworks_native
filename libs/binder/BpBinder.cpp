@@ -197,7 +197,9 @@ sp<BpBinder> BpBinder::create(int32_t handle, std::function<void()>* postTask) {
                     && currentValue < sBinderProxyCountHighWatermark
                     && ((trackedValue & WARNING_REACHED_MASK) == 0)) [[unlikely]] {
                 sTrackingMap[trackedUid] |= WARNING_REACHED_MASK;
-                if (sWarningCallback) sWarningCallback(trackedUid);
+                if (sWarningCallback) {
+                    *postTask = [=]() { sWarningCallback(trackedUid); };
+                }
             } else if (currentValue >= sBinderProxyCountHighWatermark) {
                 ALOGE("Too many binder proxy objects sent to uid %d from uid %d (%d proxies held)",
                       getuid(), trackedUid, trackedValue);

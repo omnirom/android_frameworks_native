@@ -90,10 +90,14 @@ cc_defaults {
         "libstatslog",
         "libstatspull",
         "libutils",
+        "libstatssocket",
     ],
     static_libs: [
         "libchrome-gestures",
         "libui-types",
+        "libexpresslog",
+        "libtextclassifier_hash_static",
+        "libstatslog_express",
     ],
     header_libs: [
         "libbatteryservice_headers",

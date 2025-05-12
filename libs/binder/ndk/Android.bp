@@ -82,7 +82,6 @@ cc_library {
 
     llndk: {
         symbol_file: "libbinder_ndk.map.txt",
-        export_llndk_headers: ["libvendorsupport_llndk_headers"],
     },
 
     cflags: [
@@ -95,6 +94,7 @@ cc_library {
         "persistable_bundle.cpp",
         "process.cpp",
         "service_manager.cpp",
+        "binder_rpc.cpp",
     ],
 
     static_libs: [
@@ -109,11 +109,9 @@ cc_library {
     ],
 
     header_libs: [
-        "libvendorsupport_llndk_headers",
         "jni_headers",
     ],
     export_header_lib_headers: [
-        "libvendorsupport_llndk_headers",
         "jni_headers",
     ],
 

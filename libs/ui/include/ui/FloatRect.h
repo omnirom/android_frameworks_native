@@ -51,6 +51,9 @@ public:
     float bottom = 0.0f;
 
     constexpr bool isEmpty() const { return !(left < right && top < bottom); }
+
+    // a valid rectangle has a non negative width and height
+    inline bool isValid() const { return (getWidth() >= 0) && (getHeight() >= 0); }
 };
 
 inline bool operator==(const FloatRect& a, const FloatRect& b) {

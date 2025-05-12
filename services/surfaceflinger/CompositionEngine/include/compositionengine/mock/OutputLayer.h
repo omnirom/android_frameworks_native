@@ -43,7 +43,10 @@ public:
     MOCK_CONST_METHOD0(getState, const impl::OutputLayerCompositionState&());
     MOCK_METHOD0(editState, impl::OutputLayerCompositionState&());
 
-    MOCK_METHOD3(updateCompositionState, void(bool, bool, ui::Transform::RotationFlags));
+    MOCK_METHOD(void, updateCompositionState,
+                (bool, bool, ui::Transform::RotationFlags,
+                 (const std::optional<std::vector<std::optional<
+                          aidl::android::hardware::graphics::composer3::LutProperties>>>)));
     MOCK_METHOD5(writeStateToHWC, void(bool, bool, uint32_t, bool, bool));
     MOCK_CONST_METHOD0(writeCursorPositionToHWC, void());
 
@@ -56,7 +59,13 @@ public:
     MOCK_METHOD1(applyDeviceLayerRequest, void(Hwc2::IComposerClient::LayerRequest request));
     MOCK_CONST_METHOD0(needsFiltering, bool());
     MOCK_CONST_METHOD0(getOverrideCompositionSettings, std::optional<LayerFE::LayerSettings>());
-
+    MOCK_METHOD(void, applyDeviceLayerLut,
+                (ndk::ScopedFileDescriptor,
+                 (std::vector<std::pair<
+                          int, aidl::android::hardware::graphics::composer3::LutProperties>>)));
+    MOCK_METHOD(int64_t, getPictureProfilePriority, (), (const));
+    MOCK_METHOD(const PictureProfileHandle&, getPictureProfileHandle, (), (const));
+    MOCK_METHOD(void, commitPictureProfileToCompositionState, ());
     MOCK_CONST_METHOD1(dump, void(std::string&));
 };
 

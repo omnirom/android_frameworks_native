@@ -83,6 +83,7 @@ cc_defaults {
         "libpowermanager",
         "libprocessgroup",
         "libprotobuf-cpp-lite",
+        "libstatslog_surfaceflinger",
         "libsync",
         "libui",
         "libutils",
@@ -148,6 +149,46 @@ cc_defaults {
     },
 }
 
+// libsurfaceflinger_backend_{headers|sources} are a step towards pulling out
+// the "backend" sources to clean up the dependency graph between
+// CompositionEngine and SurfaceFlinger. Completing the cleanup would require
+// moving the headers in particular so that the dependency can strictly be a
+// DAG. There would certainly be additional cleanups: VirtualDisplaySurface.cpp
+// and FrameBufferSurface.cpp likely belong in CompositionEngine for example.
+cc_library_headers {
+    name: "libsurfaceflinger_backend_headers",
+    export_include_dirs: ["."],
+    static_libs: ["libserviceutils"],
+    export_static_lib_headers: ["libserviceutils"],
+
+    shared_libs: [
+        "android.hardware.configstore-utils",
+        "android.hardware.configstore@1.0",
+        "android.hardware.configstore@1.1",
+        "libbinder_ndk",
+    ],
+    export_shared_lib_headers: [
+        "android.hardware.configstore-utils",
+        "android.hardware.configstore@1.0",
+        "android.hardware.configstore@1.1",
+        "libbinder_ndk",
+    ],
+}
+
+filegroup {
+    name: "libsurfaceflinger_backend_sources",
+    srcs: [
+        "PowerAdvisor/*.cpp",
+        "DisplayHardware/AidlComposerHal.cpp",
+        "DisplayHardware/ComposerHal.cpp",
+        "DisplayHardware/FramebufferSurface.cpp",
+        "DisplayHardware/HWC2.cpp",
+        "DisplayHardware/HWComposer.cpp",
+        "DisplayHardware/HidlComposerHal.cpp",
+        "DisplayHardware/VirtualDisplaySurface.cpp",
+    ],
+}
+
 cc_library_headers {
     name: "libsurfaceflinger_headers",
     export_include_dirs: ["."],
@@ -158,23 +199,16 @@ cc_library_headers {
 filegroup {
     name: "libsurfaceflinger_sources",
     srcs: [
+        ":libsurfaceflinger_backend_sources",
+        "ActivePictureUpdater.cpp",
         "BackgroundExecutor.cpp",
         "Client.cpp",
         "ClientCache.cpp",
         "Display/DisplayModeController.cpp",
         "Display/DisplaySnapshot.cpp",
         "DisplayDevice.cpp",
-        "DisplayHardware/AidlComposerHal.cpp",
-        "DisplayHardware/ComposerHal.cpp",
-        "DisplayHardware/FramebufferSurface.cpp",
-        "DisplayHardware/HWC2.cpp",
-        "DisplayHardware/HWComposer.cpp",
-        "DisplayHardware/HidlComposerHal.cpp",
-        "DisplayHardware/PowerAdvisor.cpp",
-        "DisplayHardware/VirtualDisplaySurface.cpp",
         "DisplayRenderArea.cpp",
         "Effects/Daltonizer.cpp",
-        "EventLog/EventLog.cpp",
         "FrontEnd/LayerCreationArgs.cpp",
         "FrontEnd/LayerHandle.cpp",
         "FrontEnd/LayerSnapshot.cpp",
@@ -252,7 +286,6 @@ cc_defaults {
     ],
     static_libs: [
         "android.frameworks.displayservice@1.0",
-        "libc++fs",
         "libdisplayservicehidl",
         "libserviceutils",
     ],
@@ -280,7 +313,7 @@ cc_binary {
         "libSurfaceFlingerProp",
     ],
 
-    logtags: ["EventLog/EventLogTags.logtags"],
+    logtags: ["surfaceflinger.logtags"],
 }
 
 subdirs = [
@@ -313,5 +346,39 @@ cc_library_shared {
     ],
     export_static_lib_headers: [
         "libSurfaceFlingerProperties",
+    ],
+}
+
+cc_library {
+    name: "libstatslog_surfaceflinger",
+    generated_sources: ["statslog_surfaceflinger.cpp"],
+    generated_headers: ["statslog_surfaceflinger.h"],
+    export_generated_headers: ["statslog_surfaceflinger.h"],
+    shared_libs: [
+        "libbinder",
+        "libstatsbootstrap",
+        "libutils",
+        "android.os.statsbootstrap_aidl-cpp",
+    ],
+}
+
+genrule {
+    name: "statslog_surfaceflinger.h",
+    tools: ["stats-log-api-gen"],
+    cmd: "$(location stats-log-api-gen) --header $(genDir)/statslog_surfaceflinger.h" +
+        " --module surfaceflinger --namespace android,surfaceflinger,stats --bootstrap",
+    out: [
+        "statslog_surfaceflinger.h",
+    ],
+}
+
+genrule {
+    name: "statslog_surfaceflinger.cpp",
+    tools: ["stats-log-api-gen"],
+    cmd: "$(location stats-log-api-gen) --cpp $(genDir)/statslog_surfaceflinger.cpp" +
+        " --module surfaceflinger --namespace android,surfaceflinger,stats" +
+        " --importHeader statslog_surfaceflinger.h --bootstrap",
+    out: [
+        "statslog_surfaceflinger.cpp",
     ],
 }

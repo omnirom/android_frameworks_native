@@ -70,6 +70,7 @@ public:
     RefreshRateSelectorPtr selectorPtrFor(PhysicalDisplayId) const EXCLUDES(mDisplayLock);
 
     enum class DesiredModeAction { None, InitiateDisplayModeSwitch, InitiateRenderRateSwitch };
+    enum class ModeChangeResult { Changed, Rejected, Aborted };
 
     DesiredModeAction setDesiredMode(PhysicalDisplayId, DisplayModeRequest&&)
             EXCLUDES(mDisplayLock);
@@ -86,9 +87,9 @@ public:
 
     scheduler::FrameRateMode getActiveMode(PhysicalDisplayId) const EXCLUDES(mDisplayLock);
 
-    bool initiateModeChange(PhysicalDisplayId, DisplayModeRequest&&,
-                            const hal::VsyncPeriodChangeConstraints&,
-                            hal::VsyncPeriodChangeTimeline& outTimeline)
+    ModeChangeResult initiateModeChange(PhysicalDisplayId, DisplayModeRequest&&,
+                                        const hal::VsyncPeriodChangeConstraints&,
+                                        hal::VsyncPeriodChangeTimeline& outTimeline)
             REQUIRES(kMainThreadContext) EXCLUDES(mDisplayLock);
 
     void finalizeModeChange(PhysicalDisplayId, DisplayModeId, Fps vsyncRate, Fps renderFps)

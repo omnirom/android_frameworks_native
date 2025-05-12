@@ -23,6 +23,8 @@
 
 #include <android-base/logging.h>
 #include <android_companion_virtualdevice_flags.h>
+#include <com_android_input_flags.h>
+#include <flag_macros.h>
 #include <gtest/gtest.h>
 #include <input/DisplayViewport.h>
 #include <linux/input-event-codes.h>
@@ -100,6 +102,15 @@ protected:
         EXPECT_CALL(mMockEventHub, hasRelativeAxis(EVENTHUB_ID, REL_HWHEEL_HI_RES))
                 .WillRepeatedly(Return(false));
     }
+
+    std::map<std::string, int64_t> mTelemetryLogCounts;
+
+    /**
+     * A fake function for telemetry logging.
+     * Records the log counts in the `mTelemetryLogCounts` map.
+     */
+    std::function<void(const char*, int64_t)> mTelemetryLogCounter =
+            [this](const char* key, int64_t value) { mTelemetryLogCounts[key] += value; };
 };
 
 TEST_F(RotaryEncoderInputMapperTest, ConfigureDisplayIdWithAssociatedViewport) {
@@ -185,6 +196,144 @@ TEST_F(RotaryEncoderInputMapperTest, HighResScrollIgnoresRegularScroll) {
                 ElementsAre(VariantWith<NotifyMotionArgs>(
                         AllOf(WithSource(AINPUT_SOURCE_ROTARY_ENCODER),
                               WithMotionAction(AMOTION_EVENT_ACTION_SCROLL), WithScroll(0.5f)))));
+}
+
+TEST_F_WITH_FLAGS(RotaryEncoderInputMapperTest, RotaryInputTelemetryFlagOff_NoRotationLogging,
+                  REQUIRES_FLAGS_DISABLED(ACONFIG_FLAG(com::android::input::flags,
+                                                       rotary_input_telemetry))) {
+    mPropertyMap.addProperty("device.res", "3");
+    mMapper = createInputMapper<RotaryEncoderInputMapper>(*mDeviceContext, mReaderConfiguration,
+                                                          mTelemetryLogCounter);
+    InputDeviceInfo info;
+    mMapper->populateDeviceInfo(info);
+
+    std::list<NotifyArgs> args;
+    args += process(ARBITRARY_TIME, EV_REL, REL_WHEEL, 70);
+    args += process(ARBITRARY_TIME, EV_SYN, SYN_REPORT, 0);
+
+    ASSERT_EQ(mTelemetryLogCounts.find("input.value_rotary_input_device_full_rotation_count"),
+              mTelemetryLogCounts.end());
+}
+
+TEST_F_WITH_FLAGS(RotaryEncoderInputMapperTest, ZeroResolution_NoRotationLogging,
+                  REQUIRES_FLAGS_ENABLED(ACONFIG_FLAG(com::android::input::flags,
+                                                      rotary_input_telemetry))) {
+    mPropertyMap.addProperty("device.res", "-3");
+    mPropertyMap.addProperty("rotary_encoder.min_rotations_to_log", "2");
+    mMapper = createInputMapper<RotaryEncoderInputMapper>(*mDeviceContext, mReaderConfiguration,
+                                                          mTelemetryLogCounter);
+    InputDeviceInfo info;
+    mMapper->populateDeviceInfo(info);
+
+    std::list<NotifyArgs> args;
+    args += process(ARBITRARY_TIME, EV_REL, REL_WHEEL, 700);
+    args += process(ARBITRARY_TIME, EV_SYN, SYN_REPORT, 0);
+
+    ASSERT_EQ(mTelemetryLogCounts.find("input.value_rotary_input_device_full_rotation_count"),
+              mTelemetryLogCounts.end());
+}
+
+TEST_F_WITH_FLAGS(RotaryEncoderInputMapperTest, NegativeMinLogRotation_NoRotationLogging,
+                  REQUIRES_FLAGS_ENABLED(ACONFIG_FLAG(com::android::input::flags,
+                                                      rotary_input_telemetry))) {
+    mPropertyMap.addProperty("device.res", "3");
+    mPropertyMap.addProperty("rotary_encoder.min_rotations_to_log", "-2");
+    mMapper = createInputMapper<RotaryEncoderInputMapper>(*mDeviceContext, mReaderConfiguration,
+                                                          mTelemetryLogCounter);
+    InputDeviceInfo info;
+    mMapper->populateDeviceInfo(info);
+
+    std::list<NotifyArgs> args;
+    args += process(ARBITRARY_TIME, EV_REL, REL_WHEEL, 700);
+    args += process(ARBITRARY_TIME, EV_SYN, SYN_REPORT, 0);
+
+    ASSERT_EQ(mTelemetryLogCounts.find("input.value_rotary_input_device_full_rotation_count"),
+              mTelemetryLogCounts.end());
+}
+
+TEST_F_WITH_FLAGS(RotaryEncoderInputMapperTest, ZeroMinLogRotation_NoRotationLogging,
+                  REQUIRES_FLAGS_ENABLED(ACONFIG_FLAG(com::android::input::flags,
+                                                      rotary_input_telemetry))) {
+    mPropertyMap.addProperty("device.res", "3");
+    mPropertyMap.addProperty("rotary_encoder.min_rotations_to_log", "0");
+    mMapper = createInputMapper<RotaryEncoderInputMapper>(*mDeviceContext, mReaderConfiguration,
+                                                          mTelemetryLogCounter);
+    InputDeviceInfo info;
+    mMapper->populateDeviceInfo(info);
+
+    std::list<NotifyArgs> args;
+    args += process(ARBITRARY_TIME, EV_REL, REL_WHEEL, 700);
+    args += process(ARBITRARY_TIME, EV_SYN, SYN_REPORT, 0);
+
+    ASSERT_EQ(mTelemetryLogCounts.find("input.value_rotary_input_device_full_rotation_count"),
+              mTelemetryLogCounts.end());
+}
+
+TEST_F_WITH_FLAGS(RotaryEncoderInputMapperTest, NoMinLogRotation_NoRotationLogging,
+                  REQUIRES_FLAGS_ENABLED(ACONFIG_FLAG(com::android::input::flags,
+                                                      rotary_input_telemetry))) {
+    // 3 units per radian, 2 * M_PI * 3 = ~18.85 units per rotation.
+    mPropertyMap.addProperty("device.res", "3");
+    mMapper = createInputMapper<RotaryEncoderInputMapper>(*mDeviceContext, mReaderConfiguration,
+                                                          mTelemetryLogCounter);
+    InputDeviceInfo info;
+    mMapper->populateDeviceInfo(info);
+
+    std::list<NotifyArgs> args;
+    args += process(ARBITRARY_TIME, EV_REL, REL_WHEEL, 700);
+    args += process(ARBITRARY_TIME, EV_SYN, SYN_REPORT, 0);
+
+    ASSERT_EQ(mTelemetryLogCounts.find("input.value_rotary_input_device_full_rotation_count"),
+              mTelemetryLogCounts.end());
+}
+
+TEST_F_WITH_FLAGS(RotaryEncoderInputMapperTest, RotationLogging,
+                  REQUIRES_FLAGS_ENABLED(ACONFIG_FLAG(com::android::input::flags,
+                                                      rotary_input_telemetry))) {
+    // 3 units per radian, 2 * M_PI * 3 = ~18.85 units per rotation.
+    // Multiples of `unitsPerRoation`, to easily follow the assertions below.
+    // [18.85, 37.7, 56.55, 75.4, 94.25, 113.1, 131.95, 150.8]
+    mPropertyMap.addProperty("device.res", "3");
+    mPropertyMap.addProperty("rotary_encoder.min_rotations_to_log", "2");
+
+    mMapper = createInputMapper<RotaryEncoderInputMapper>(*mDeviceContext, mReaderConfiguration,
+                                                          mTelemetryLogCounter);
+    InputDeviceInfo info;
+    mMapper->populateDeviceInfo(info);
+
+    std::list<NotifyArgs> args;
+    args += process(ARBITRARY_TIME, EV_REL, REL_WHEEL, 15); // total scroll = 15
+    args += process(ARBITRARY_TIME, EV_SYN, SYN_REPORT, 0);
+    ASSERT_EQ(mTelemetryLogCounts.find("input.value_rotary_input_device_full_rotation_count"),
+              mTelemetryLogCounts.end());
+
+    args += process(ARBITRARY_TIME, EV_REL, REL_WHEEL, 13); // total scroll = 28
+    args += process(ARBITRARY_TIME, EV_SYN, SYN_REPORT, 0);
+    // Expect 0 since `min_rotations_to_log` = 2, and total scroll 28 only has 1 rotation.
+    ASSERT_EQ(mTelemetryLogCounts.find("input.value_rotary_input_device_full_rotation_count"),
+              mTelemetryLogCounts.end());
+
+    args += process(ARBITRARY_TIME, EV_REL, REL_WHEEL, 10); // total scroll = 38
+    args += process(ARBITRARY_TIME, EV_SYN, SYN_REPORT, 0);
+    // Total scroll includes >= `min_rotations_to_log` (2), expect log.
+    ASSERT_EQ(mTelemetryLogCounts["input.value_rotary_input_device_full_rotation_count"], 2);
+
+    args += process(ARBITRARY_TIME, EV_REL, REL_WHEEL, -22); // total scroll = 60
+    args += process(ARBITRARY_TIME, EV_SYN, SYN_REPORT, 0);
+    // Expect no additional telemetry. Total rotation is 3, and total unlogged rotation is 1, which
+    // is less than `min_rotations_to_log`.
+    ASSERT_EQ(mTelemetryLogCounts["input.value_rotary_input_device_full_rotation_count"], 2);
+
+    args += process(ARBITRARY_TIME, EV_REL, REL_WHEEL, -16); // total scroll = 76
+    args += process(ARBITRARY_TIME, EV_SYN, SYN_REPORT, 0);
+    // Total unlogged rotation >= `min_rotations_to_log` (2), so expect 2 more logged rotation.
+    ASSERT_EQ(mTelemetryLogCounts["input.value_rotary_input_device_full_rotation_count"], 4);
+
+    args += process(ARBITRARY_TIME, EV_REL, REL_WHEEL, -76); // total scroll = 152
+    args += process(ARBITRARY_TIME, EV_SYN, SYN_REPORT, 0);
+    // Total unlogged scroll >= 4*`min_rotations_to_log`. Expect *all* unlogged rotations to be
+    // logged, even if that's more than multiple of `min_rotations_to_log`.
+    ASSERT_EQ(mTelemetryLogCounts["input.value_rotary_input_device_full_rotation_count"], 8);
 }
 
 } // namespace android

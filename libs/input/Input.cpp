@@ -685,11 +685,12 @@ void MotionEvent::setCursorPosition(float x, float y) {
 
 const PointerCoords* MotionEvent::getRawPointerCoords(size_t pointerIndex) const {
     if (CC_UNLIKELY(pointerIndex < 0 || pointerIndex >= getPointerCount())) {
-        LOG(FATAL) << __func__ << ": Invalid pointer index " << pointerIndex << " for " << *this;
+        LOG(FATAL) << __func__ << ": Invalid pointer index " << pointerIndex << " for "
+                   << safeDump();
     }
     const size_t position = getHistorySize() * getPointerCount() + pointerIndex;
     if (CC_UNLIKELY(position < 0 || position >= mSamplePointerCoords.size())) {
-        LOG(FATAL) << __func__ << ": Invalid array index " << position << " for " << *this;
+        LOG(FATAL) << __func__ << ": Invalid array index " << position << " for " << safeDump();
     }
     return &mSamplePointerCoords[position];
 }
@@ -705,15 +706,16 @@ float MotionEvent::getAxisValue(int32_t axis, size_t pointerIndex) const {
 const PointerCoords* MotionEvent::getHistoricalRawPointerCoords(
         size_t pointerIndex, size_t historicalIndex) const {
     if (CC_UNLIKELY(pointerIndex < 0 || pointerIndex >= getPointerCount())) {
-        LOG(FATAL) << __func__ << ": Invalid pointer index " << pointerIndex << " for " << *this;
+        LOG(FATAL) << __func__ << ": Invalid pointer index " << pointerIndex << " for "
+                   << safeDump();
     }
     if (CC_UNLIKELY(historicalIndex < 0 || historicalIndex > getHistorySize())) {
         LOG(FATAL) << __func__ << ": Invalid historical index " << historicalIndex << " for "
-                   << *this;
+                   << safeDump();
     }
     const size_t position = historicalIndex * getPointerCount() + pointerIndex;
     if (CC_UNLIKELY(position < 0 || position >= mSamplePointerCoords.size())) {
-        LOG(FATAL) << __func__ << ": Invalid array index " << position << " for " << *this;
+        LOG(FATAL) << __func__ << ": Invalid array index " << position << " for " << safeDump();
     }
     return &mSamplePointerCoords[position];
 }
@@ -1142,6 +1144,53 @@ bool MotionEvent::operator==(const android::MotionEvent& o) const {
             mSampleEventTimes == o.mSampleEventTimes &&
             mSamplePointerCoords == o.mSamplePointerCoords;
     // clang-format on
+}
+
+std::string MotionEvent::safeDump() const {
+    std::stringstream out;
+    // Field names have the m prefix here to make it easy to distinguish safeDump output from
+    // operator<< output in logs.
+    out << "MotionEvent { mAction=" << MotionEvent::actionToString(mAction);
+    if (mActionButton != 0) {
+        out << ", mActionButton=" << mActionButton;
+    }
+    if (mButtonState != 0) {
+        out << ", mButtonState=" << mButtonState;
+    }
+    if (mClassification != MotionClassification::NONE) {
+        out << ", mClassification=" << motionClassificationToString(mClassification);
+    }
+    if (mMetaState != 0) {
+        out << ", mMetaState=" << mMetaState;
+    }
+    if (mFlags != 0) {
+        out << ", mFlags=0x" << std::hex << mFlags << std::dec;
+    }
+    if (mEdgeFlags != 0) {
+        out << ", mEdgeFlags=" << mEdgeFlags;
+    }
+    out << ", mDownTime=" << mDownTime;
+    out << ", mDeviceId=" << mDeviceId;
+    out << ", mSource=" << inputEventSourceToString(mSource);
+    out << ", mDisplayId=" << mDisplayId;
+    out << ", mEventId=0x" << std::hex << mId << std::dec;
+    // Since we're not assuming the data is at all valid, we also limit the number of items that
+    // might be printed from vectors, in case the vector's size field is corrupted.
+    out << ", mPointerProperties=(" << mPointerProperties.size() << ")[";
+    for (size_t i = 0; i < mPointerProperties.size() && i < MAX_POINTERS; i++) {
+        out << (i > 0 ? ", " : "") << mPointerProperties.at(i);
+    }
+    out << "], mSampleEventTimes=(" << mSampleEventTimes.size() << ")[";
+    for (size_t i = 0; i < mSampleEventTimes.size() && i < 256; i++) {
+        out << (i > 0 ? ", " : "") << mSampleEventTimes.at(i);
+    }
+    out << "], mSamplePointerCoords=(" << mSamplePointerCoords.size() << ")[";
+    for (size_t i = 0; i < mSamplePointerCoords.size() && i < MAX_POINTERS; i++) {
+        const PointerCoords& coords = mSamplePointerCoords.at(i);
+        out << (i > 0 ? ", " : "") << "(" << coords.getX() << ", " << coords.getY() << ")";
+    }
+    out << "] }";
+    return out.str();
 }
 
 std::ostream& operator<<(std::ostream& out, const MotionEvent& event) {

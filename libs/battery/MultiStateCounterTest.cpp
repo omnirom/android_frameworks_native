@@ -21,7 +21,7 @@
 namespace android {
 namespace battery {
 
-typedef MultiStateCounter<double> DoubleMultiStateCounter;
+typedef MultiStateCounter<double, double> DoubleMultiStateCounter;
 
 template <>
 bool DoubleMultiStateCounter::delta(const double& previousValue, const double& newValue,
@@ -39,11 +39,6 @@ void DoubleMultiStateCounter::add(double* value1, const double& value2, const ui
     } else {
         *value1 += value2;
     }
-}
-
-template <>
-std::string DoubleMultiStateCounter::valueToString(const double& v) const {
-    return std::to_string(v);
 }
 
 class MultiStateCounterTest : public testing::Test {};

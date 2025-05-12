@@ -94,13 +94,6 @@ flag {
 }
 
 flag {
-  name: "enable_new_mouse_pointer_ballistics"
-  namespace: "input"
-  description: "Change the acceleration curves for mouse pointer movements to match the touchpad ones"
-  bug: "315313622"
-}
-
-flag {
   name: "rate_limit_user_activity_poke_in_dispatcher"
   namespace: "input"
   description: "Move user-activity poke rate-limiting from PowerManagerService to InputDispatcher."
@@ -206,4 +199,35 @@ flag {
   namespace: "input"
   description: "Allow user to enable key repeats or configure timeout before key repeat and key repeat delay rates."
   bug: "336585002"
+}
+
+flag {
+  name: "rotary_input_telemetry"
+  namespace: "wear_frameworks"
+  description: "Enable telemetry for rotary input"
+  bug: "370353565"
+}
+
+flag {
+  name: "set_input_device_kernel_wake"
+  namespace: "input"
+  description: "Set input device's power/wakeup sysfs node"
+  bug: "372812925"
+}
+
+flag {
+  name: "enable_alphabetic_keyboard_wake"
+  namespace: "input"
+  description: "Enable wake from alphabetic keyboards."
+  bug: "352856881"
+  metadata {
+    purpose: PURPOSE_BUGFIX
+  }
+}
+
+flag {
+  name: "connected_displays_cursor"
+  namespace: "lse_desktop_experience"
+  description: "Allow cursor to transition across multiple connected displays"
+  bug: "362719483"
 }

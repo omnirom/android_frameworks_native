@@ -43,6 +43,7 @@
 #include <android-base/strings.h>
 #include <cutils/properties.h>
 #include <ftl/enum.h>
+#include <input/InputEventLabels.h>
 #include <input/KeyCharacterMap.h>
 #include <input/KeyLayoutMap.h>
 #include <input/PrintTools.h>
@@ -128,7 +129,8 @@ static const std::unordered_map<std::string, InputLightClass> LIGHT_CLASSES =
          {"multi_intensity", InputLightClass::MULTI_INTENSITY},
          {"max_brightness", InputLightClass::MAX_BRIGHTNESS},
          {"kbd_backlight", InputLightClass::KEYBOARD_BACKLIGHT},
-         {"mic_mute", InputLightClass::KEYBOARD_MIC_MUTE}};
+         {"mic_mute", InputLightClass::KEYBOARD_MIC_MUTE},
+         {"mute", InputLightClass::KEYBOARD_VOLUME_MUTE}};
 
 // Mapping for input multicolor led class node names.
 // https://www.kernel.org/doc/html/latest/leds/leds-class-multicolor.html
@@ -659,6 +661,21 @@ void EventHub::Device::populateAbsoluteAxisStates() {
 }
 
 bool EventHub::Device::hasKeycodeLocked(int keycode) const {
+    if (hasKeycodeInternalLocked(keycode)) {
+        return true;
+    }
+    if (!keyMap.haveKeyCharacterMap()) {
+        return false;
+    }
+    for (auto& fromKey : getKeyCharacterMap()->findKeyCodesMappedToKeyCode(keycode)) {
+        if (hasKeycodeInternalLocked(fromKey)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool EventHub::Device::hasKeycodeInternalLocked(int keycode) const {
     if (!keyMap.haveKeyLayout()) {
         return false;
     }
@@ -676,7 +693,6 @@ bool EventHub::Device::hasKeycodeLocked(int keycode) const {
     if (usageCodes.size() > 0 && mscBitmask.test(MSC_SCAN)) {
         return true;
     }
-
     return false;
 }
 
@@ -1007,6 +1023,8 @@ std::optional<RawAbsoluteAxisInfo> EventHub::getAbsoluteAxisInfo(int32_t deviceI
     std::scoped_lock _l(mLock);
     const Device* device = getDeviceLocked(deviceId);
     if (device == nullptr) {
+        ALOGE("Couldn't find device with ID %d, so returning null axis info for axis %s", deviceId,
+              InputEventLookup::getLinuxEvdevLabel(EV_ABS, axis, 0).code.c_str());
         return std::nullopt;
     }
     // We can read the RawAbsoluteAxisInfo even if the device is disabled and doesn't have a valid
@@ -2832,6 +2850,35 @@ void EventHub::requestReopenDevices() {
 
     std::scoped_lock _l(mLock);
     mNeedToReopenDevices = true;
+}
+
+bool EventHub::setKernelWakeEnabled(int32_t deviceId, bool enabled) {
+    std::scoped_lock _l(mLock);
+    std::string enabledStr = enabled ? "enabled" : "disabled";
+    Device* device = getDeviceLocked(deviceId);
+    if (device == nullptr) {
+        ALOGE("Device Id %d does not exist for setting power wakeup", deviceId);
+        return false;
+    }
+    if (device->associatedDevice == nullptr) {
+        return false;
+    }
+    std::filesystem::path currentPath = device->associatedDevice->sysfsRootPath;
+    while (!currentPath.empty() && currentPath != "/") {
+        std::string nodePath = currentPath / "power/wakeup";
+        if (std::filesystem::exists(nodePath)) {
+            if (base::WriteStringToFile(enabledStr, nodePath)) {
+                return true;
+
+            }
+            // No need to continue searching in parent directories as power/wakeup nodes
+            // higher up may control other subdevices.
+            ALOGW("Failed to set power/wakeup node at %s", nodePath.c_str());
+            return false;
+        }
+        currentPath = currentPath.parent_path();
+    }
+    return false;
 }
 
 void EventHub::dump(std::string& dump) const {

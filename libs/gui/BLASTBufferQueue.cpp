@@ -50,9 +50,27 @@ using namespace com::android::graphics::libgui;
 using namespace std::chrono_literals;
 
 namespace {
+
+#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(BUFFER_RELEASE_CHANNEL)
+template <class Mutex>
+class UnlockGuard {
+public:
+    explicit UnlockGuard(Mutex& lock) : mLock{lock} { mLock.unlock(); }
+
+    ~UnlockGuard() { mLock.lock(); }
+
+    UnlockGuard(const UnlockGuard&) = delete;
+    UnlockGuard& operator=(const UnlockGuard&) = delete;
+
+private:
+    Mutex& mLock;
+};
+#endif
+
 inline const char* boolToString(bool b) {
     return b ? "true" : "false";
 }
+
 } // namespace
 
 namespace android {
@@ -76,12 +94,6 @@ namespace android {
 #define UNIQUE_LOCK_WITH_ASSERTION(mutex) \
     std::unique_lock _lock{mutex};        \
     base::ScopedLockAssertion assumeLocked(mutex);
-
-#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(BUFFER_RELEASE_CHANNEL)
-static ReleaseBufferCallback EMPTY_RELEASE_CALLBACK =
-        [](const ReleaseCallbackId&, const sp<Fence>& /*releaseFence*/,
-           std::optional<uint32_t> /*currentMaxAcquiredBufferCount*/) {};
-#endif
 
 void BLASTBufferItemConsumer::onDisconnect() {
     Mutex::Autolock lock(mMutex);
@@ -225,9 +237,8 @@ BLASTBufferQueue::BLASTBufferQueue(const std::string& name, bool updateDestinati
             this);
 
 #if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(BUFFER_RELEASE_CHANNEL)
-    std::unique_ptr<gui::BufferReleaseChannel::ConsumerEndpoint> bufferReleaseConsumer;
-    gui::BufferReleaseChannel::open(mName, bufferReleaseConsumer, mBufferReleaseProducer);
-    mBufferReleaseReader = std::make_shared<BufferReleaseReader>(std::move(bufferReleaseConsumer));
+    gui::BufferReleaseChannel::open(mName, mBufferReleaseConsumer, mBufferReleaseProducer);
+    mBufferReleaseReader.emplace(*this);
 #endif
 
     BQA_LOGV("BLASTBufferQueue created");
@@ -259,9 +270,6 @@ BLASTBufferQueue::~BLASTBufferQueue() {
 void BLASTBufferQueue::onFirstRef() {
     // safe default, most producers are expected to override this
     mProducer->setMaxDequeuedBufferCount(2);
-#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(BUFFER_RELEASE_CHANNEL)
-    mBufferReleaseThread.start(sp<BLASTBufferQueue>::fromExisting(this));
-#endif
 }
 
 void BLASTBufferQueue::update(const sp<SurfaceControl>& surface, uint32_t width, uint32_t height,
@@ -278,18 +286,23 @@ void BLASTBufferQueue::update(const sp<SurfaceControl>& surface, uint32_t width,
     if (surfaceControlChanged && mSurfaceControl != nullptr) {
         BQA_LOGD("Updating SurfaceControl without recreating BBQ");
     }
-    bool applyTransaction = false;
 
     // Always update the native object even though they might have the same layer handle, so we can
     // get the updated transform hint from WM.
     mSurfaceControl = surface;
     SurfaceComposerClient::Transaction t;
+    bool applyTransaction = false;
     if (surfaceControlChanged) {
+#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(BUFFER_RELEASE_CHANNEL)
+        updateBufferReleaseProducer();
+#endif
         t.setFlags(mSurfaceControl, layer_state_t::eEnableBackpressure,
                    layer_state_t::eEnableBackpressure);
-#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(BUFFER_RELEASE_CHANNEL)
-        t.setBufferReleaseChannel(mSurfaceControl, mBufferReleaseProducer);
-#endif
+        // Migrate the picture profile handle to the new surface control.
+        if (com_android_graphics_libgui_flags_apply_picture_profiles() &&
+            mPictureProfileHandle.has_value()) {
+            t.setPictureProfileHandle(mSurfaceControl, *mPictureProfileHandle);
+        }
         applyTransaction = true;
     }
     mTransformHint = mSurfaceControl->getTransformHint();
@@ -313,7 +326,7 @@ void BLASTBufferQueue::update(const sp<SurfaceControl>& surface, uint32_t width,
     }
     if (applyTransaction) {
         // All transactions on our apply token are one-way. See comment on mAppliedLastTransaction
-        t.setApplyToken(mApplyToken).apply(false, true);
+        t.setApplyToken(mApplyToken).apply(false /* synchronous */, true /* oneWay */);
     }
 }
 
@@ -407,7 +420,6 @@ void BLASTBufferQueue::transactionCallback(nsecs_t /*latchTime*/, const sp<Fence
                                                     stat.latchTime,
                                                     stat.frameEventStats.dequeueReadyTime);
                 }
-#if !COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(BUFFER_RELEASE_CHANNEL)
                 auto currFrameNumber = stat.frameEventStats.frameNumber;
                 std::vector<ReleaseCallbackId> staleReleases;
                 for (const auto& [key, value]: mSubmitted) {
@@ -423,7 +435,6 @@ void BLASTBufferQueue::transactionCallback(nsecs_t /*latchTime*/, const sp<Fence
                                                 stat.currentMaxAcquiredBufferCount,
                                                 true /* fakeRelease */);
                 }
-#endif
             } else {
                 BQA_LOGE("Failed to find matching SurfaceControl in transactionCallback");
             }
@@ -457,6 +468,9 @@ ReleaseBufferCallback BLASTBufferQueue::makeReleaseBufferCallbackThunk() {
             return;
         }
         bbq->releaseBufferCallback(id, releaseFence, currentMaxAcquiredBufferCount);
+#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(BUFFER_RELEASE_CHANNEL)
+        bbq->drainBufferReleaseConsumer();
+#endif
     };
 }
 
@@ -523,8 +537,6 @@ void BLASTBufferQueue::releaseBuffer(const ReleaseCallbackId& callbackId,
                                      const sp<Fence>& releaseFence) {
     auto it = mSubmitted.find(callbackId);
     if (it == mSubmitted.end()) {
-        BQA_LOGE("ERROR: releaseBufferCallback without corresponding submitted buffer %s",
-                 callbackId.to_string().c_str());
         return;
     }
     mNumAcquired--;
@@ -634,12 +646,7 @@ status_t BLASTBufferQueue::acquireNextBufferLocked(
                            bufferItem.mGraphicBuffer->getHeight(), bufferItem.mTransform,
                            bufferItem.mScalingMode, crop);
 
-#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(BUFFER_RELEASE_CHANNEL)
-    ReleaseBufferCallback releaseBufferCallback =
-            applyTransaction ? EMPTY_RELEASE_CALLBACK : makeReleaseBufferCallbackThunk();
-#else
     auto releaseBufferCallback = makeReleaseBufferCallbackThunk();
-#endif
     sp<Fence> fence = bufferItem.mFence ? new Fence(bufferItem.mFence->dup()) : Fence::NO_FENCE;
 
     nsecs_t dequeueTime = -1;
@@ -676,6 +683,17 @@ status_t BLASTBufferQueue::acquireNextBufferLocked(
     t->setAutoRefresh(mSurfaceControl, bufferItem.mAutoRefresh);
     if (!bufferItem.mIsAutoTimestamp) {
         t->setDesiredPresentTime(bufferItem.mTimestamp);
+    }
+    if (com_android_graphics_libgui_flags_apply_picture_profiles() &&
+        bufferItem.mPictureProfileHandle.has_value()) {
+        t->setPictureProfileHandle(mSurfaceControl, *bufferItem.mPictureProfileHandle);
+        // The current picture profile must be maintained in case the BBQ gets its
+        // SurfaceControl switched out.
+        mPictureProfileHandle = bufferItem.mPictureProfileHandle;
+        // Clear out the picture profile if the requestor has asked for it to be cleared
+        if (mPictureProfileHandle == PictureProfileHandle::NONE) {
+            mPictureProfileHandle = std::nullopt;
+        }
     }
 
     // Drop stale frame timeline infos
@@ -1137,6 +1155,24 @@ public:
 #endif
 };
 
+#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(BUFFER_RELEASE_CHANNEL)
+class BBQBufferQueueCore : public BufferQueueCore {
+public:
+    explicit BBQBufferQueueCore(const wp<BLASTBufferQueue>& bbq) : mBLASTBufferQueue{bbq} {}
+
+    void notifyBufferReleased() const override {
+        sp<BLASTBufferQueue> bbq = mBLASTBufferQueue.promote();
+        if (!bbq) {
+            return;
+        }
+        bbq->mBufferReleaseReader->interruptBlockingRead();
+    }
+
+private:
+    wp<BLASTBufferQueue> mBLASTBufferQueue;
+};
+#endif
+
 // Extends the BufferQueueProducer to create a wrapper around the listener so the listener calls
 // can be non-blocking when the producer is in the client process.
 class BBQBufferQueueProducer : public BufferQueueProducer {
@@ -1188,6 +1224,39 @@ public:
         return BufferQueueProducer::query(what, value);
     }
 
+#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(BUFFER_RELEASE_CHANNEL)
+    status_t waitForBufferRelease(std::unique_lock<std::mutex>& bufferQueueLock,
+                                  nsecs_t timeout) const override {
+        sp<BLASTBufferQueue> bbq = mBLASTBufferQueue.promote();
+        if (!bbq) {
+            return OK;
+        }
+
+        // BufferQueue has already checked if we have a free buffer. If there's an unread interrupt,
+        // we want to ignore it. This must be done before unlocking the BufferQueue lock to ensure
+        // we don't miss an interrupt.
+        bbq->mBufferReleaseReader->clearInterrupts();
+        UnlockGuard unlockGuard{bufferQueueLock};
+
+        ATRACE_FORMAT("waiting for free buffer");
+        ReleaseCallbackId id;
+        sp<Fence> fence;
+        uint32_t maxAcquiredBufferCount;
+        status_t status =
+                bbq->mBufferReleaseReader->readBlocking(id, fence, maxAcquiredBufferCount, timeout);
+        if (status == TIMED_OUT) {
+            return TIMED_OUT;
+        } else if (status != OK) {
+            // Waiting was interrupted or an error occurred. BufferQueueProducer will check if we
+            // have a free buffer and call this method again if not.
+            return OK;
+        }
+
+        bbq->releaseBufferCallback(id, fence, maxAcquiredBufferCount);
+        return OK;
+    }
+#endif
+
 private:
     const wp<BLASTBufferQueue> mBLASTBufferQueue;
 };
@@ -1201,14 +1270,18 @@ void BLASTBufferQueue::createBufferQueue(sp<IGraphicBufferProducer>* outProducer
     LOG_ALWAYS_FATAL_IF(outProducer == nullptr, "BLASTBufferQueue: outProducer must not be NULL");
     LOG_ALWAYS_FATAL_IF(outConsumer == nullptr, "BLASTBufferQueue: outConsumer must not be NULL");
 
-    sp<BufferQueueCore> core(new BufferQueueCore());
+#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(BUFFER_RELEASE_CHANNEL)
+    auto core = sp<BBQBufferQueueCore>::make(this);
+#else
+    auto core = sp<BufferQueueCore>::make();
+#endif
     LOG_ALWAYS_FATAL_IF(core == nullptr, "BLASTBufferQueue: failed to create BufferQueueCore");
 
-    sp<IGraphicBufferProducer> producer(new BBQBufferQueueProducer(core, this));
+    auto producer = sp<BBQBufferQueueProducer>::make(core, this);
     LOG_ALWAYS_FATAL_IF(producer == nullptr,
                         "BLASTBufferQueue: failed to create BBQBufferQueueProducer");
 
-    sp<BufferQueueConsumer> consumer(new BufferQueueConsumer(core));
+    auto consumer = sp<BufferQueueConsumer>::make(core);
     consumer->setAllowExtraAcquire(true);
     LOG_ALWAYS_FATAL_IF(consumer == nullptr,
                         "BLASTBufferQueue: failed to create BufferQueueConsumer");
@@ -1273,10 +1346,37 @@ void BLASTBufferQueue::setApplyToken(sp<IBinder> applyToken) {
 
 #if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(BUFFER_RELEASE_CHANNEL)
 
-BLASTBufferQueue::BufferReleaseReader::BufferReleaseReader(
-        std::unique_ptr<gui::BufferReleaseChannel::ConsumerEndpoint> endpoint)
-      : mEndpoint{std::move(endpoint)} {
-    mEpollFd = android::base::unique_fd{epoll_create1(0)};
+void BLASTBufferQueue::updateBufferReleaseProducer() {
+    // SELinux policy may prevent this process from sending the BufferReleaseChannel's file
+    // descriptor to SurfaceFlinger, causing the entire transaction to be dropped. We send this
+    // transaction independently of any other updates to ensure those updates aren't lost.
+    SurfaceComposerClient::Transaction t;
+    status_t status = t.setApplyToken(mApplyToken)
+                              .setBufferReleaseChannel(mSurfaceControl, mBufferReleaseProducer)
+                              .apply(false /* synchronous */, true /* oneWay */);
+    if (status != OK) {
+        ALOGW("[%s] %s - failed to set buffer release channel on %s", mName.c_str(),
+              statusToString(status).c_str(), mSurfaceControl->getName().c_str());
+    }
+}
+
+void BLASTBufferQueue::drainBufferReleaseConsumer() {
+    ATRACE_CALL();
+    while (true) {
+        ReleaseCallbackId id;
+        sp<Fence> fence;
+        uint32_t maxAcquiredBufferCount;
+        status_t status =
+                mBufferReleaseConsumer->readReleaseFence(id, fence, maxAcquiredBufferCount);
+        if (status != OK) {
+            return;
+        }
+        releaseBufferCallback(id, fence, maxAcquiredBufferCount);
+    }
+}
+
+BLASTBufferQueue::BufferReleaseReader::BufferReleaseReader(BLASTBufferQueue& bbq) : mBbq{bbq} {
+    mEpollFd = android::base::unique_fd{epoll_create1(EPOLL_CLOEXEC)};
     LOG_ALWAYS_FATAL_IF(!mEpollFd.ok(),
                         "Failed to create buffer release epoll file descriptor. errno=%d "
                         "message='%s'",
@@ -1284,9 +1384,9 @@ BLASTBufferQueue::BufferReleaseReader::BufferReleaseReader(
 
     epoll_event registerEndpointFd{};
     registerEndpointFd.events = EPOLLIN;
-    registerEndpointFd.data.fd = mEndpoint->getFd();
-    status_t status =
-            epoll_ctl(mEpollFd.get(), EPOLL_CTL_ADD, mEndpoint->getFd(), &registerEndpointFd);
+    registerEndpointFd.data.fd = mBbq.mBufferReleaseConsumer->getFd();
+    status_t status = epoll_ctl(mEpollFd.get(), EPOLL_CTL_ADD, mBbq.mBufferReleaseConsumer->getFd(),
+                                &registerEndpointFd);
     LOG_ALWAYS_FATAL_IF(status == -1,
                         "Failed to register buffer release consumer file descriptor with epoll. "
                         "errno=%d message='%s'",
@@ -1308,78 +1408,64 @@ BLASTBufferQueue::BufferReleaseReader::BufferReleaseReader(
                         errno, strerror(errno));
 }
 
-BLASTBufferQueue::BufferReleaseReader& BLASTBufferQueue::BufferReleaseReader::operator=(
-        BufferReleaseReader&& other) {
-    if (this != &other) {
-        ftl::FakeGuard guard{mMutex};
-        ftl::FakeGuard otherGuard{other.mMutex};
-        mEndpoint = std::move(other.mEndpoint);
-        mEpollFd = std::move(other.mEpollFd);
-        mEventFd = std::move(other.mEventFd);
-    }
-    return *this;
-}
-
 status_t BLASTBufferQueue::BufferReleaseReader::readBlocking(ReleaseCallbackId& outId,
                                                              sp<Fence>& outFence,
-                                                             uint32_t& outMaxAcquiredBufferCount) {
+                                                             uint32_t& outMaxAcquiredBufferCount,
+                                                             nsecs_t timeout) {
+    // TODO(b/363290953) epoll_wait only has millisecond timeout precision. If timeout is less than
+    // 1ms, then we round timeout up to 1ms. Otherwise, we round timeout to the nearest
+    // millisecond. Once epoll_pwait2 can be used in libgui, we can specify timeout with nanosecond
+    // precision.
+    int timeoutMs = -1;
+    if (timeout == 0) {
+        timeoutMs = 0;
+    } else if (timeout > 0) {
+        const int nsPerMs = 1000000;
+        if (timeout < nsPerMs) {
+            timeoutMs = 1;
+        } else {
+            timeoutMs = static_cast<int>(
+                    std::chrono::round<std::chrono::milliseconds>(std::chrono::nanoseconds{timeout})
+                            .count());
+        }
+    }
+
     epoll_event event{};
-    while (true) {
-        int eventCount = epoll_wait(mEpollFd.get(), &event, 1 /* maxevents */, -1 /* timeout */);
-        if (eventCount == 1) {
-            break;
-        }
-        if (eventCount == -1 && errno != EINTR) {
-            ALOGE("epoll_wait error while waiting for buffer release. errno=%d message='%s'", errno,
-                  strerror(errno));
-        }
+    int eventCount;
+    do {
+        eventCount = epoll_wait(mEpollFd.get(), &event, 1 /*maxevents*/, timeoutMs);
+    } while (eventCount == -1 && errno != EINTR);
+
+    if (eventCount == -1) {
+        ALOGE("epoll_wait error while waiting for buffer release. errno=%d message='%s'", errno,
+              strerror(errno));
+        return UNKNOWN_ERROR;
+    }
+
+    if (eventCount == 0) {
+        return TIMED_OUT;
     }
 
     if (event.data.fd == mEventFd.get()) {
-        uint64_t value;
-        if (read(mEventFd.get(), &value, sizeof(uint64_t)) == -1 && errno != EWOULDBLOCK) {
-            ALOGE("error while reading from eventfd. errno=%d message='%s'", errno,
-                  strerror(errno));
-        }
+        clearInterrupts();
         return WOULD_BLOCK;
     }
 
-    std::lock_guard lock{mMutex};
-    return mEndpoint->readReleaseFence(outId, outFence, outMaxAcquiredBufferCount);
+    return mBbq.mBufferReleaseConsumer->readReleaseFence(outId, outFence,
+                                                         outMaxAcquiredBufferCount);
 }
 
 void BLASTBufferQueue::BufferReleaseReader::interruptBlockingRead() {
-    uint64_t value = 1;
-    if (write(mEventFd.get(), &value, sizeof(uint64_t)) == -1) {
+    if (eventfd_write(mEventFd.get(), 1) == -1) {
         ALOGE("failed to notify dequeue event. errno=%d message='%s'", errno, strerror(errno));
     }
 }
 
-void BLASTBufferQueue::BufferReleaseThread::start(const sp<BLASTBufferQueue>& bbq) {
-    mRunning = std::make_shared<std::atomic_bool>(true);
-    mReader = bbq->mBufferReleaseReader;
-    std::thread([running = mRunning, reader = mReader, weakBbq = wp<BLASTBufferQueue>(bbq)]() {
-        pthread_setname_np(pthread_self(), "BufferReleaseThread");
-        while (*running) {
-            ReleaseCallbackId id;
-            sp<Fence> fence;
-            uint32_t maxAcquiredBufferCount;
-            if (status_t status = reader->readBlocking(id, fence, maxAcquiredBufferCount);
-                status != OK) {
-                continue;
-            }
-            sp<BLASTBufferQueue> bbq = weakBbq.promote();
-            if (!bbq) {
-                return;
-            }
-            bbq->releaseBufferCallback(id, fence, maxAcquiredBufferCount);
-        }
-    }).detach();
-}
-
-BLASTBufferQueue::BufferReleaseThread::~BufferReleaseThread() {
-    *mRunning = false;
-    mReader->interruptBlockingRead();
+void BLASTBufferQueue::BufferReleaseReader::clearInterrupts() {
+    eventfd_t value;
+    if (eventfd_read(mEventFd.get(), &value) == -1 && errno != EWOULDBLOCK) {
+        ALOGE("error while reading from eventfd. errno=%d message='%s'", errno, strerror(errno));
+    }
 }
 
 #endif

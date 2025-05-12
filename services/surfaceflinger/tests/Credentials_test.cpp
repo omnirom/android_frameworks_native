@@ -341,9 +341,9 @@ TEST_F(CredentialsTest, TransactionPermissionTest) {
     WindowInfosListenerUtils windowInfosListenerUtils;
     std::string name = "Test Layer";
     sp<IBinder> token = sp<BBinder>::make();
-    WindowInfo windowInfo;
-    windowInfo.name = name;
-    windowInfo.token = token;
+    auto windowInfo = sp<gui::WindowInfoHandle>::make();
+    windowInfo->editInfo()->name = name;
+    windowInfo->editInfo()->token = token;
     sp<SurfaceControl> surfaceControl =
             mComposerClient->createSurface(String8(name.c_str()), 100, 100, PIXEL_FORMAT_RGBA_8888,
                                            ISurfaceComposerClient::eFXSurfaceBufferState);
@@ -370,7 +370,8 @@ TEST_F(CredentialsTest, TransactionPermissionTest) {
         UIDFaker f(AID_SYSTEM);
         auto windowIsPresentAndNotTrusted = [&](const std::vector<WindowInfo>& windowInfos) {
             auto foundWindowInfo =
-                    WindowInfosListenerUtils::findMatchingWindowInfo(windowInfo, windowInfos);
+                    WindowInfosListenerUtils::findMatchingWindowInfo(*windowInfo->getInfo(),
+                                                                     windowInfos);
             if (!foundWindowInfo) {
                 return false;
             }
@@ -386,7 +387,8 @@ TEST_F(CredentialsTest, TransactionPermissionTest) {
         Transaction().setTrustedOverlay(surfaceControl, true).apply(/*synchronous=*/true);
         auto windowIsPresentAndTrusted = [&](const std::vector<WindowInfo>& windowInfos) {
             auto foundWindowInfo =
-                    WindowInfosListenerUtils::findMatchingWindowInfo(windowInfo, windowInfos);
+                    WindowInfosListenerUtils::findMatchingWindowInfo(*windowInfo->getInfo(),
+                                                                     windowInfos);
             if (!foundWindowInfo) {
                 return false;
             }

@@ -127,6 +127,9 @@ void LayerFECompositionState::dump(std::string& out) const {
     }
     dumpVal(out, "colorTransform", colorTransform);
     dumpVal(out, "caching hint", toString(cachingHint));
+    if (pictureProfileHandle) {
+        dumpVal(out, "pictureProfile", toString(pictureProfileHandle));
+    }
 
     out.append("\n");
 }

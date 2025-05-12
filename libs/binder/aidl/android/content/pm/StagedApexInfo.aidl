@@ -22,6 +22,7 @@ package android.content.pm;
  *
  * @hide
  */
+@JavaDerive(equals=true)
 parcelable StagedApexInfo {
   @utf8InCpp String moduleName;
   @utf8InCpp String diskImagePath;

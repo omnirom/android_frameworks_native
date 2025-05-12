@@ -46,13 +46,39 @@ private:
 
     int32_t mSource;
     float mScalingFactor;
+    /** Units per rotation, provided via the `device.res` IDC property. */
+    float mResolution;
     ui::Rotation mOrientation;
+    /**
+     * The minimum number of rotations to log for telemetry.
+     * Provided via `rotary_encoder.min_rotations_to_log` IDC property. If no value is provided in
+     * the IDC file, or if a non-positive value is provided, the telemetry will be disabled, and
+     * this value is set to the empty optional.
+     */
+    std::optional<int32_t> mMinRotationsToLog;
+    /**
+     * A function to log count for telemetry.
+     * The char* is the logging key, and the int64_t is the value to log.
+     * Abstracting the actual logging APIs via this function is helpful for simple unit testing.
+     */
+    std::function<void(const char*, int64_t)> mTelemetryLogCounter;
     ui::LogicalDisplayId mDisplayId = ui::LogicalDisplayId::INVALID;
     std::unique_ptr<SlopController> mSlopController;
 
+    /** Amount of raw scrolls (pre-slop) not yet logged for telemetry. */
+    float mUnloggedScrolls = 0;
+
     explicit RotaryEncoderInputMapper(InputDeviceContext& deviceContext,
                                       const InputReaderConfiguration& readerConfig);
+
+    /** This is a test constructor that allows injecting the expresslog Counter logic. */
+    RotaryEncoderInputMapper(InputDeviceContext& deviceContext,
+                             const InputReaderConfiguration& readerConfig,
+                             std::function<void(const char*, int64_t)> expressLogCounter);
     [[nodiscard]] std::list<NotifyArgs> sync(nsecs_t when, nsecs_t readTime);
+
+    /** Logs a given amount of scroll for telemetry. */
+    void logScroll(float scroll);
 };
 
 } // namespace android

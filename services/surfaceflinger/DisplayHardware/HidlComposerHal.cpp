@@ -27,6 +27,7 @@
 #include <SurfaceFlingerProperties.h>
 #include <aidl/android/hardware/graphics/common/DisplayHotplugEvent.h>
 #include <android/binder_manager.h>
+#include <android/hardware/graphics/composer/2.1/types.h>
 #include <common/trace.h>
 #include <composer-command-buffer/2.2/ComposerCommandBuffer.h>
 #include <hidl/HidlTransportSupport.h>
@@ -47,7 +48,7 @@ using aidl::android::hardware::graphics::composer3::ClientTargetPropertyWithBrig
 using aidl::android::hardware::graphics::composer3::DimmingStage;
 using aidl::android::hardware::graphics::composer3::DisplayCapability;
 using aidl::android::hardware::graphics::composer3::DisplayLuts;
-using aidl::android::hardware::graphics::composer3::Lut;
+using aidl::android::hardware::graphics::composer3::Luts;
 using aidl::android::hardware::graphics::composer3::OverlayProperties;
 
 namespace android {
@@ -173,7 +174,7 @@ private:
 };
 
 // assume NO_RESOURCES when Status::isOk returns false
-constexpr Error kDefaultError = Error::NO_RESOURCES;
+constexpr V2_1::Error kDefaultError = V2_1::Error::NO_RESOURCES;
 constexpr V2_4::Error kDefaultError_2_4 = static_cast<V2_4::Error>(kDefaultError);
 
 template <typename T, typename U>
@@ -181,7 +182,7 @@ T unwrapRet(Return<T>& ret, const U& default_val) {
     return (ret.isOk()) ? static_cast<T>(ret) : static_cast<T>(default_val);
 }
 
-Error unwrapRet(Return<Error>& ret) {
+V2_1::Error unwrapRet(Return<V2_1::Error>& ret) {
     return unwrapRet(ret, kDefaultError);
 }
 
@@ -235,7 +236,7 @@ HidlComposer::HidlComposer(const std::string& serviceName)
         });
     } else if (sp<V2_3::IComposer> composer_2_3 = V2_3::IComposer::castFrom(mComposer)) {
         composer_2_3->createClient_2_3([&](const auto& tmpError, const auto& tmpClient) {
-            if (tmpError == Error::NONE) {
+            if (tmpError == V2_1::Error::NONE) {
                 mClient = tmpClient;
                 mClient_2_2 = tmpClient;
                 mClient_2_3 = tmpClient;
@@ -243,7 +244,7 @@ HidlComposer::HidlComposer(const std::string& serviceName)
         });
     } else {
         mComposer->createClient([&](const auto& tmpError, const auto& tmpClient) {
-            if (tmpError != Error::NONE) {
+            if (tmpError != V2_1::Error::NONE) {
                 return;
             }
 
@@ -325,14 +326,14 @@ uint32_t HidlComposer::getMaxVirtualDisplayCount() {
 Error HidlComposer::createVirtualDisplay(uint32_t width, uint32_t height, PixelFormat* format,
                                          Display* outDisplay) {
     const uint32_t bufferSlotCount = 1;
-    Error error = kDefaultError;
+    Error error = static_cast<Error>(kDefaultError);
     if (mClient_2_2) {
         mClient_2_2->createVirtualDisplay_2_2(width, height,
                                               static_cast<types::V1_1::PixelFormat>(*format),
                                               bufferSlotCount,
                                               [&](const auto& tmpError, const auto& tmpDisplay,
                                                   const auto& tmpFormat) {
-                                                  error = tmpError;
+                                                  error = static_cast<Error>(tmpError);
                                                   if (error != Error::NONE) {
                                                       return;
                                                   }
@@ -346,7 +347,7 @@ Error HidlComposer::createVirtualDisplay(uint32_t width, uint32_t height, PixelF
                                       bufferSlotCount,
                                       [&](const auto& tmpError, const auto& tmpDisplay,
                                           const auto& tmpFormat) {
-                                          error = tmpError;
+                                          error = static_cast<Error>(tmpError);
                                           if (error != Error::NONE) {
                                               return;
                                           }
@@ -361,7 +362,7 @@ Error HidlComposer::createVirtualDisplay(uint32_t width, uint32_t height, PixelF
 
 Error HidlComposer::destroyVirtualDisplay(Display display) {
     auto ret = mClient->destroyVirtualDisplay(display);
-    return unwrapRet(ret);
+    return static_cast<Error>(unwrapRet(ret));
 }
 
 Error HidlComposer::acceptDisplayChanges(Display display) {
@@ -371,10 +372,10 @@ Error HidlComposer::acceptDisplayChanges(Display display) {
 }
 
 Error HidlComposer::createLayer(Display display, Layer* outLayer) {
-    Error error = kDefaultError;
+    Error error = static_cast<Error>(kDefaultError);
     mClient->createLayer(display, kMaxLayerBufferCount,
                          [&](const auto& tmpError, const auto& tmpLayer) {
-                             error = tmpError;
+                             error = static_cast<Error>(tmpError);
                              if (error != Error::NONE) {
                                  return;
                              }
@@ -387,13 +388,13 @@ Error HidlComposer::createLayer(Display display, Layer* outLayer) {
 
 Error HidlComposer::destroyLayer(Display display, Layer layer) {
     auto ret = mClient->destroyLayer(display, layer);
-    return unwrapRet(ret);
+    return static_cast<Error>(unwrapRet(ret));
 }
 
 Error HidlComposer::getActiveConfig(Display display, Config* outConfig) {
-    Error error = kDefaultError;
+    Error error = static_cast<Error>(kDefaultError);
     mClient->getActiveConfig(display, [&](const auto& tmpError, const auto& tmpConfig) {
-        error = tmpError;
+        error = static_cast<Error>(tmpError);
         if (error != Error::NONE) {
             return;
         }
@@ -412,11 +413,11 @@ Error HidlComposer::getChangedCompositionTypes(
 }
 
 Error HidlComposer::getColorModes(Display display, std::vector<ColorMode>* outModes) {
-    Error error = kDefaultError;
+    Error error = static_cast<Error>(kDefaultError);
 
     if (mClient_2_3) {
         mClient_2_3->getColorModes_2_3(display, [&](const auto& tmpError, const auto& tmpModes) {
-            error = tmpError;
+            error = static_cast<Error>(tmpError);
             if (error != Error::NONE) {
                 return;
             }
@@ -425,7 +426,7 @@ Error HidlComposer::getColorModes(Display display, std::vector<ColorMode>* outMo
         });
     } else if (mClient_2_2) {
         mClient_2_2->getColorModes_2_2(display, [&](const auto& tmpError, const auto& tmpModes) {
-            error = tmpError;
+            error = static_cast<Error>(tmpError);
             if (error != Error::NONE) {
                 return;
             }
@@ -436,7 +437,7 @@ Error HidlComposer::getColorModes(Display display, std::vector<ColorMode>* outMo
         });
     } else {
         mClient->getColorModes(display, [&](const auto& tmpError, const auto& tmpModes) {
-            error = tmpError;
+            error = static_cast<Error>(tmpError);
             if (error != Error::NONE) {
                 return;
             }
@@ -451,7 +452,7 @@ Error HidlComposer::getColorModes(Display display, std::vector<ColorMode>* outMo
 
 Error HidlComposer::getDisplayAttribute(Display display, Config config,
                                         IComposerClient::Attribute attribute, int32_t* outValue) {
-    Error error = kDefaultError;
+    Error error = static_cast<Error>(kDefaultError);
     if (mClient_2_4) {
         mClient_2_4->getDisplayAttribute_2_4(display, config, attribute,
                                              [&](const auto& tmpError, const auto& tmpValue) {
@@ -466,7 +467,7 @@ Error HidlComposer::getDisplayAttribute(Display display, Config config,
         mClient->getDisplayAttribute(display, config,
                                      static_cast<V2_1::IComposerClient::Attribute>(attribute),
                                      [&](const auto& tmpError, const auto& tmpValue) {
-                                         error = tmpError;
+                                         error = static_cast<Error>(tmpError);
                                          if (error != Error::NONE) {
                                              return;
                                          }
@@ -479,9 +480,9 @@ Error HidlComposer::getDisplayAttribute(Display display, Config config,
 }
 
 Error HidlComposer::getDisplayConfigs(Display display, std::vector<Config>* outConfigs) {
-    Error error = kDefaultError;
+    Error error = static_cast<Error>(kDefaultError);
     mClient->getDisplayConfigs(display, [&](const auto& tmpError, const auto& tmpConfigs) {
-        error = tmpError;
+        error = static_cast<Error>(tmpError);
         if (error != Error::NONE) {
             return;
         }
@@ -499,9 +500,9 @@ Error HidlComposer::getDisplayConfigurations(Display, int32_t /*maxFrameInterval
 }
 
 Error HidlComposer::getDisplayName(Display display, std::string* outName) {
-    Error error = kDefaultError;
+    Error error = static_cast<Error>(kDefaultError);
     mClient->getDisplayName(display, [&](const auto& tmpError, const auto& tmpName) {
-        error = tmpError;
+        error = static_cast<Error>(tmpError);
         if (error != Error::NONE) {
             return;
         }
@@ -520,9 +521,9 @@ Error HidlComposer::getDisplayRequests(Display display, uint32_t* outDisplayRequ
 }
 
 Error HidlComposer::getDozeSupport(Display display, bool* outSupport) {
-    Error error = kDefaultError;
+    Error error = static_cast<Error>(kDefaultError);
     mClient->getDozeSupport(display, [&](const auto& tmpError, const auto& tmpSupport) {
-        error = tmpError;
+        error = static_cast<Error>(tmpError);
         if (error != Error::NONE) {
             return;
         }
@@ -541,14 +542,14 @@ Error HidlComposer::hasDisplayIdleTimerCapability(Display, bool*) {
 Error HidlComposer::getHdrCapabilities(Display display, std::vector<Hdr>* outHdrTypes,
                                        float* outMaxLuminance, float* outMaxAverageLuminance,
                                        float* outMinLuminance) {
-    Error error = kDefaultError;
+    Error error = static_cast<Error>(kDefaultError);
     if (mClient_2_3) {
         mClient_2_3->getHdrCapabilities_2_3(display,
                                             [&](const auto& tmpError, const auto& tmpHdrTypes,
                                                 const auto& tmpMaxLuminance,
                                                 const auto& tmpMaxAverageLuminance,
                                                 const auto& tmpMinLuminance) {
-                                                error = tmpError;
+                                                error = static_cast<Error>(tmpError);
                                                 if (error != Error::NONE) {
                                                     return;
                                                 }
@@ -564,7 +565,7 @@ Error HidlComposer::getHdrCapabilities(Display display, std::vector<Hdr>* outHdr
                                         const auto& tmpMaxLuminance,
                                         const auto& tmpMaxAverageLuminance,
                                         const auto& tmpMinLuminance) {
-                                        error = tmpError;
+                                        error = static_cast<Error>(tmpError);
                                         if (error != Error::NONE) {
                                             return;
                                         }
@@ -606,7 +607,7 @@ Error HidlComposer::presentDisplay(Display display, int* outPresentFence) {
 
 Error HidlComposer::setActiveConfig(Display display, Config config) {
     auto ret = mClient->setActiveConfig(display, config);
-    return unwrapRet(ret);
+    return static_cast<Error>(unwrapRet(ret));
 }
 
 Error HidlComposer::setClientTarget(Display display, uint32_t slot, const sp<GraphicBuffer>& target,
@@ -625,7 +626,7 @@ Error HidlComposer::setClientTarget(Display display, uint32_t slot, const sp<Gra
 }
 
 Error HidlComposer::setColorMode(Display display, ColorMode mode, RenderIntent renderIntent) {
-    hardware::Return<Error> ret(kDefaultError);
+    hardware::Return<V2_1::Error> ret(kDefaultError);
     if (mClient_2_3) {
         ret = mClient_2_3->setColorMode_2_3(display, mode, renderIntent);
     } else if (mClient_2_2) {
@@ -634,7 +635,7 @@ Error HidlComposer::setColorMode(Display display, ColorMode mode, RenderIntent r
     } else {
         ret = mClient->setColorMode(display, static_cast<types::V1_0::ColorMode>(mode));
     }
-    return unwrapRet(ret);
+    return static_cast<Error>(unwrapRet(ret));
 }
 
 Error HidlComposer::setColorTransform(Display display, const float* matrix) {
@@ -654,25 +655,25 @@ Error HidlComposer::setOutputBuffer(Display display, const native_handle_t* buff
 }
 
 Error HidlComposer::setPowerMode(Display display, IComposerClient::PowerMode mode) {
-    Return<Error> ret(Error::UNSUPPORTED);
+    Return<V2_1::Error> ret(V2_1::Error::UNSUPPORTED);
     if (mClient_2_2) {
         ret = mClient_2_2->setPowerMode_2_2(display, mode);
     } else if (mode != IComposerClient::PowerMode::ON_SUSPEND) {
         ret = mClient->setPowerMode(display, static_cast<V2_1::IComposerClient::PowerMode>(mode));
     }
 
-    return unwrapRet(ret);
+    return static_cast<Error>(unwrapRet(ret));
 }
 
 Error HidlComposer::setVsyncEnabled(Display display, IComposerClient::Vsync enabled) {
     auto ret = mClient->setVsyncEnabled(display, enabled);
-    return unwrapRet(ret);
+    return static_cast<Error>(unwrapRet(ret));
 }
 
 Error HidlComposer::setClientTargetSlotCount(Display display) {
     const uint32_t bufferSlotCount = BufferQueue::NUM_BUFFER_SLOTS;
     auto ret = mClient->setClientTargetSlotCount(display, bufferSlotCount);
-    return unwrapRet(ret);
+    return static_cast<Error>(unwrapRet(ret));
 }
 
 Error HidlComposer::validateDisplay(Display display, nsecs_t /*expectedPresentTime*/,
@@ -903,7 +904,7 @@ Error HidlComposer::execute() {
     // set up new input command queue if necessary
     if (queueChanged) {
         auto ret = mClient->setInputCommandQueue(*mWriter.getMQDescriptor());
-        auto error = unwrapRet(ret);
+        auto error = static_cast<Error>(unwrapRet(ret));
         if (error != Error::NONE) {
             mWriter.reset();
             return error;
@@ -915,17 +916,17 @@ Error HidlComposer::execute() {
         return Error::NONE;
     }
 
-    Error error = kDefaultError;
+    Error error = static_cast<Error>(kDefaultError);
     hardware::Return<void> ret;
     auto hidl_callback = [&](const auto& tmpError, const auto& tmpOutChanged,
                              const auto& tmpOutLength, const auto& tmpOutHandles) {
-        error = tmpError;
+        error = static_cast<Error>(tmpError);
 
         // set up new output command queue if necessary
         if (error == Error::NONE && tmpOutChanged) {
-            error = kDefaultError;
+            error = static_cast<Error>(kDefaultError);
             mClient->getOutputCommandQueue([&](const auto& tmpError, const auto& tmpDescriptor) {
-                error = tmpError;
+                error = static_cast<Error>(tmpError);
                 if (error != Error::NONE) {
                     return;
                 }
@@ -1000,11 +1001,11 @@ std::vector<IComposerClient::PerFrameMetadataKey> HidlComposer::getPerFrameMetad
         return keys;
     }
 
-    Error error = kDefaultError;
+    Error error = static_cast<Error>(kDefaultError);
     if (mClient_2_3) {
         mClient_2_3->getPerFrameMetadataKeys_2_3(display,
                                                  [&](const auto& tmpError, const auto& tmpKeys) {
-                                                     error = tmpError;
+                                                     error = static_cast<Error>(tmpError);
                                                      if (error != Error::NONE) {
                                                          ALOGW("getPerFrameMetadataKeys failed "
                                                                "with %d",
@@ -1016,7 +1017,7 @@ std::vector<IComposerClient::PerFrameMetadataKey> HidlComposer::getPerFrameMetad
     } else {
         mClient_2_2
                 ->getPerFrameMetadataKeys(display, [&](const auto& tmpError, const auto& tmpKeys) {
-                    error = tmpError;
+                    error = static_cast<Error>(tmpError);
                     if (error != Error::NONE) {
                         ALOGW("getPerFrameMetadataKeys failed with %d", tmpError);
                         return;
@@ -1039,10 +1040,10 @@ Error HidlComposer::getRenderIntents(Display display, ColorMode colorMode,
         return Error::NONE;
     }
 
-    Error error = kDefaultError;
+    Error error = static_cast<Error>(kDefaultError);
 
     auto getRenderIntentsLambda = [&](const auto& tmpError, const auto& tmpKeys) {
-        error = tmpError;
+        error = static_cast<Error>(tmpError);
         if (error != Error::NONE) {
             return;
         }
@@ -1066,10 +1067,10 @@ Error HidlComposer::getDataspaceSaturationMatrix(Dataspace dataspace, mat4* outM
         return Error::NONE;
     }
 
-    Error error = kDefaultError;
+    Error error = static_cast<Error>(kDefaultError);
     mClient_2_2->getDataspaceSaturationMatrix(static_cast<types::V1_1::Dataspace>(dataspace),
                                               [&](const auto& tmpError, const auto& tmpMatrix) {
-                                                  error = tmpError;
+                                                  error = static_cast<Error>(tmpError);
                                                   if (error != Error::NONE) {
                                                       return;
                                                   }
@@ -1087,11 +1088,11 @@ Error HidlComposer::getDisplayIdentificationData(Display display, uint8_t* outPo
         return Error::UNSUPPORTED;
     }
 
-    Error error = kDefaultError;
+    Error error = static_cast<Error>(kDefaultError);
     mClient_2_3->getDisplayIdentificationData(display,
                                               [&](const auto& tmpError, const auto& tmpPort,
                                                   const auto& tmpData) {
-                                                  error = tmpError;
+                                                  error = static_cast<Error>(tmpError);
                                                   if (error != Error::NONE) {
                                                       return;
                                                   }
@@ -1123,13 +1124,13 @@ Error HidlComposer::getDisplayedContentSamplingAttributes(Display display, Pixel
     if (!mClient_2_3) {
         return Error::UNSUPPORTED;
     }
-    Error error = kDefaultError;
+    Error error = static_cast<Error>(kDefaultError);
     mClient_2_3->getDisplayedContentSamplingAttributes(display,
                                                        [&](const auto tmpError,
                                                            const auto& tmpFormat,
                                                            const auto& tmpDataspace,
                                                            const auto& tmpComponentMask) {
-                                                           error = tmpError;
+                                                           error = static_cast<Error>(tmpError);
                                                            if (error == Error::NONE) {
                                                                *outFormat = tmpFormat;
                                                                *outDataspace = tmpDataspace;
@@ -1149,8 +1150,9 @@ Error HidlComposer::setDisplayContentSamplingEnabled(Display display, bool enabl
 
     auto enable = enabled ? V2_3::IComposerClient::DisplayedContentSampling::ENABLE
                           : V2_3::IComposerClient::DisplayedContentSampling::DISABLE;
-    return mClient_2_3->setDisplayedContentSamplingEnabled(display, enable, componentMask,
-                                                           maxFrames);
+    auto ret = mClient_2_3->setDisplayedContentSamplingEnabled(display, enable, componentMask,
+                                                               maxFrames);
+    return static_cast<Error>(unwrapRet(ret));
 }
 
 Error HidlComposer::getDisplayedContentSample(Display display, uint64_t maxFrames,
@@ -1161,12 +1163,12 @@ Error HidlComposer::getDisplayedContentSample(Display display, uint64_t maxFrame
     if (!mClient_2_3) {
         return Error::UNSUPPORTED;
     }
-    Error error = kDefaultError;
+    Error error = static_cast<Error>(kDefaultError);
     mClient_2_3->getDisplayedContentSample(display, maxFrames, timestamp,
                                            [&](const auto tmpError, auto tmpNumFrames,
                                                const auto& tmpSamples0, const auto& tmpSamples1,
                                                const auto& tmpSamples2, const auto& tmpSamples3) {
-                                               error = tmpError;
+                                               error = static_cast<Error>(tmpError);
                                                if (error == Error::NONE) {
                                                    outStats->numFrames = tmpNumFrames;
                                                    outStats->component_0_sample = tmpSamples0;
@@ -1196,7 +1198,8 @@ Error HidlComposer::setDisplayBrightness(Display display, float brightness, floa
     if (!mClient_2_3) {
         return Error::UNSUPPORTED;
     }
-    return mClient_2_3->setDisplayBrightness(display, brightness);
+    auto ret = mClient_2_3->setDisplayBrightness(display, brightness);
+    return static_cast<Error>(unwrapRet(ret));
 }
 
 // Composer HAL 2.4
@@ -1273,19 +1276,18 @@ V2_4::Error HidlComposer::getDisplayVsyncPeriod(Display display, VsyncPeriodNano
     return error;
 }
 
-V2_4::Error HidlComposer::setActiveConfigWithConstraints(
+Error HidlComposer::setActiveConfigWithConstraints(
         Display display, Config config,
         const IComposerClient::VsyncPeriodChangeConstraints& vsyncPeriodChangeConstraints,
         VsyncPeriodChangeTimeline* outTimeline) {
-    using Error = V2_4::Error;
     if (!mClient_2_4) {
         return Error::UNSUPPORTED;
     }
 
-    Error error = kDefaultError_2_4;
+    Error error = static_cast<Error>(kDefaultError_2_4);
     mClient_2_4->setActiveConfigWithConstraints(display, config, vsyncPeriodChangeConstraints,
                                                 [&](const auto& tmpError, const auto& tmpTimeline) {
-                                                    error = tmpError;
+                                                    error = static_cast<Error>(tmpError);
                                                     if (error != Error::NONE) {
                                                         return;
                                                     }
@@ -1410,11 +1412,12 @@ Error HidlComposer::getClientTargetProperty(
     return Error::NONE;
 }
 
-Error HidlComposer::getRequestedLuts(Display, std::vector<DisplayLuts::LayerLut>*) {
+Error HidlComposer::getRequestedLuts(Display, std::vector<Layer>*,
+                                     std::vector<DisplayLuts::LayerLut>*) {
     return Error::NONE;
 }
 
-Error HidlComposer::setLayerLuts(Display, Layer, std::vector<Lut>&) {
+Error HidlComposer::setLayerLuts(Display, Layer, Luts&) {
     return Error::NONE;
 }
 
@@ -1443,6 +1446,18 @@ Error HidlComposer::setIdleTimerEnabled(Display, std::chrono::milliseconds) {
 Error HidlComposer::getPhysicalDisplayOrientation(Display, AidlTransform*) {
     LOG_ALWAYS_FATAL("getPhysicalDisplayOrientation should have never been called on this as "
                      "OptionalFeature::PhysicalDisplayOrientation is not supported on HIDL");
+}
+
+Error HidlComposer::getMaxLayerPictureProfiles(Display, int32_t*) {
+    return Error::UNSUPPORTED;
+}
+
+Error HidlComposer::setDisplayPictureProfileId(Display, PictureProfileId) {
+    return Error::UNSUPPORTED;
+}
+
+Error HidlComposer::setLayerPictureProfileId(Display, Layer, PictureProfileId) {
+    return Error::UNSUPPORTED;
 }
 
 void HidlComposer::registerCallback(ComposerCallback& callback) {

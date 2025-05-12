@@ -121,13 +121,21 @@ struct InputEventTimeline {
 class InputEventTimelineProcessor {
 protected:
     InputEventTimelineProcessor() {}
-    virtual ~InputEventTimelineProcessor() {}
 
 public:
+    virtual ~InputEventTimelineProcessor() {}
+
     /**
      * Process the provided timeline
      */
     virtual void processTimeline(const InputEventTimeline& timeline) = 0;
+
+    /**
+     * Trigger a push for the input event latency statistics
+     */
+    virtual void pushLatencyStatistics() = 0;
+
+    virtual std::string dump(const char* prefix) const = 0;
 };
 
 } // namespace inputdispatcher

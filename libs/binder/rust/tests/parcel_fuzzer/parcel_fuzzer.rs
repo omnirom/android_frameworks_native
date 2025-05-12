@@ -21,7 +21,8 @@ mod read_utils;
 
 use crate::read_utils::READ_FUNCS;
 use binder::binder_impl::{
-    Binder, BorrowedParcel, IBinderInternal, Parcel, Stability, TransactionCode,
+    Binder, BorrowedParcel, IBinderInternal, LocalStabilityType, Parcel, TransactionCode,
+    VintfStabilityType,
 };
 use binder::{
     declare_binder_interface, BinderFeatures, Interface, Parcelable, ParcelableHolder, SpIBinder,
@@ -121,13 +122,15 @@ fn do_read_fuzz(read_operations: Vec<ReadOperation>, data: &[u8]) {
             }
 
             ReadOperation::ReadParcelableHolder { is_vintf } => {
-                let stability = if is_vintf { Stability::Vintf } else { Stability::Local };
-                let mut holder: ParcelableHolder = ParcelableHolder::new(stability);
-                match holder.read_from_parcel(parcel.borrowed_ref()) {
-                    Ok(result) => result,
-                    Err(err) => {
-                        println!("error occurred while reading from parcel: {:?}", err)
-                    }
+                let result = if is_vintf {
+                    ParcelableHolder::<VintfStabilityType>::new()
+                        .read_from_parcel(parcel.borrowed_ref())
+                } else {
+                    ParcelableHolder::<LocalStabilityType>::new()
+                        .read_from_parcel(parcel.borrowed_ref())
+                };
+                if let Err(e) = result {
+                    println!("error occurred while reading from parcel: {e:?}")
                 }
             }
 

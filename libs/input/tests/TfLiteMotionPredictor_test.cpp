@@ -89,23 +89,23 @@ TEST(TfLiteMotionPredictorTest, BuffersCopyTo) {
     buffers.pushSample(/*timestamp=*/1,
                        {.position = {.x = 10, .y = 10},
                         .pressure = 0,
-                        .orientation = 0,
-                        .tilt = 0.2});
+                        .tilt = 0.2,
+                        .orientation = 0});
     buffers.pushSample(/*timestamp=*/2,
                        {.position = {.x = 10, .y = 50},
                         .pressure = 0.4,
-                        .orientation = M_PI / 4,
-                        .tilt = 0.3});
+                        .tilt = 0.3,
+                        .orientation = M_PI / 4});
     buffers.pushSample(/*timestamp=*/3,
                        {.position = {.x = 30, .y = 50},
                         .pressure = 0.5,
-                        .orientation = -M_PI / 4,
-                        .tilt = 0.4});
+                        .tilt = 0.4,
+                        .orientation = -M_PI / 4});
     buffers.pushSample(/*timestamp=*/3,
                        {.position = {.x = 30, .y = 60},
                         .pressure = 0,
-                        .orientation = 0,
-                        .tilt = 0.5});
+                        .tilt = 0.5,
+                        .orientation = 0});
     buffers.copyTo(*model);
 
     const int zeroPadding = model->inputLength() - 3;

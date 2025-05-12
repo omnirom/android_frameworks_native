@@ -148,9 +148,6 @@ public:
     virtual std::optional<LayerSettings> prepareClientComposition(
             ClientCompositionTargetSettings&) const = 0;
 
-    // Called after the layer is displayed to update the presentation fence
-    virtual void onLayerDisplayed(ftl::SharedFuture<FenceResult>, ui::LayerStack layerStack) = 0;
-
     // Initializes a promise for a buffer release fence and provides the future for that
     // fence. This should only be called when a promise has not yet been created, or
     // after the previous promise has already been fulfilled. Attempting to call this
@@ -163,6 +160,9 @@ public:
 
     // Checks if the buffer's release fence has been set
     virtual LayerFE::ReleaseFencePromiseStatus getReleaseFencePromiseStatus() = 0;
+
+    // Indicates that the picture profile request was applied to this layer.
+    virtual void onPictureProfileCommitted() = 0;
 
     // Gets some kind of identifier for the layer for debug purposes.
     virtual const char* getDebugName() const = 0;

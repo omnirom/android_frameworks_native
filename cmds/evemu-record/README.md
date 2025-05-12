@@ -38,10 +38,10 @@ $ adb shell uinput - < my-recording.evemu
 ### Timestamp bases
 
 By default, event timestamps are recorded relative to the time of the first event received during
-the recording. Passing `--timestamp-base=boot` causes the timestamps to be recorded relative to the
-system boot time instead. While this does not affect the playback of the recording, it can be useful
-for matching recorded events with other logs that use such timestamps, such as `dmesg` or the
-touchpad gesture debug logs emitted by `TouchpadInputMapper`.
+the recording. Passing `--timestamp-base=epoch` causes the timestamps to be recorded as Unix
+timestamps, relative to the Unix epoch (00:00:00 UTC on 1st January 1970). While this does not
+affect the playback of the recording, it can make the events in the recording easier to match up
+with those from other log sources, like logcat.
 
 [FreeDesktop]: https://gitlab.freedesktop.org/libevdev/evemu
 [format]: https://gitlab.freedesktop.org/libevdev/evemu#device-description-format

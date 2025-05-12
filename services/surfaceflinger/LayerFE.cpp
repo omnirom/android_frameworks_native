@@ -26,9 +26,7 @@
 
 #include "LayerFE.h"
 #include "SurfaceFlinger.h"
-#include "common/FlagManager.h"
 #include "ui/FenceResult.h"
-#include "ui/LayerStack.h"
 
 namespace android {
 
@@ -84,8 +82,7 @@ LayerFE::~LayerFE() {
     // Ensures that no promise is left unfulfilled before the LayerFE is destroyed.
     // An unfulfilled promise could occur when a screenshot is attempted, but the
     // render area is invalid and there is no memory for the capture result.
-    if (FlagManager::getInstance().ce_fence_promise() &&
-        mReleaseFencePromiseStatus == ReleaseFencePromiseStatus::INITIALIZED) {
+    if (mReleaseFencePromiseStatus == ReleaseFencePromiseStatus::INITIALIZED) {
         setReleaseFence(Fence::NO_FENCE);
     }
 }
@@ -176,6 +173,7 @@ std::optional<compositionengine::LayerFE::LayerSettings> LayerFE::prepareClientC
     layerSettings.edgeExtensionEffect = mSnapshot->edgeExtensionEffect;
     // Record the name of the layer for debugging further down the stack.
     layerSettings.name = mSnapshot->name;
+    layerSettings.luts = mSnapshot->luts;
 
     if (hasEffect() && !hasBufferOrSidebandStream()) {
         prepareEffectsClientComposition(layerSettings, targetSettings);
@@ -344,13 +342,15 @@ void LayerFE::prepareShadowClientComposition(LayerFE::LayerSettings& caster,
     caster.shadow = state;
 }
 
-void LayerFE::onLayerDisplayed(ftl::SharedFuture<FenceResult> futureFenceResult,
-                               ui::LayerStack layerStack) {
-    mCompositionResult.releaseFences.emplace_back(std::move(futureFenceResult), layerStack);
+void LayerFE::onPictureProfileCommitted() {
+    mCompositionResult.wasPictureProfileCommitted = true;
+    mCompositionResult.pictureProfileHandle = mSnapshot->pictureProfileHandle;
 }
 
-CompositionResult&& LayerFE::stealCompositionResult() {
-    return std::move(mCompositionResult);
+CompositionResult LayerFE::stealCompositionResult() {
+    CompositionResult result;
+    std::swap(mCompositionResult, result);
+    return result;
 }
 
 const char* LayerFE::getDebugName() const {

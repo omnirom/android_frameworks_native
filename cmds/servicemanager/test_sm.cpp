@@ -92,6 +92,11 @@ TEST(AddService, HappyHappy) {
     auto sm = getPermissiveServiceManager();
     EXPECT_TRUE(sm->addService("foo", getBinder(), false /*allowIsolated*/,
         IServiceManager::DUMP_FLAG_PRIORITY_DEFAULT).isOk());
+
+    EXPECT_TRUE(sm->addService("lazyfoo", getBinder(), false /*allowIsolated*/,
+                               IServiceManager::DUMP_FLAG_PRIORITY_DEFAULT |
+                                       IServiceManager::FLAG_IS_LAZY_SERVICE)
+                        .isOk());
 }
 
 TEST(AddService, EmptyNameDisallowed) {
@@ -156,7 +161,7 @@ TEST(AddService, OverwriteExistingService) {
 
     Service outA;
     EXPECT_TRUE(sm->getService2("foo", &outA).isOk());
-    EXPECT_EQ(serviceA, outA.get<Service::Tag::binder>());
+    EXPECT_EQ(serviceA, outA.get<Service::Tag::serviceWithMetadata>().service);
     sp<IBinder> outBinderA;
     EXPECT_TRUE(sm->getService("foo", &outBinderA).isOk());
     EXPECT_EQ(serviceA, outBinderA);
@@ -168,7 +173,7 @@ TEST(AddService, OverwriteExistingService) {
 
     Service outB;
     EXPECT_TRUE(sm->getService2("foo", &outB).isOk());
-    EXPECT_EQ(serviceB, outB.get<Service::Tag::binder>());
+    EXPECT_EQ(serviceB, outB.get<Service::Tag::serviceWithMetadata>().service);
     sp<IBinder> outBinderB;
     EXPECT_TRUE(sm->getService("foo", &outBinderB).isOk());
     EXPECT_EQ(serviceB, outBinderB);
@@ -195,7 +200,7 @@ TEST(GetService, HappyHappy) {
 
     Service out;
     EXPECT_TRUE(sm->getService2("foo", &out).isOk());
-    EXPECT_EQ(service, out.get<Service::Tag::binder>());
+    EXPECT_EQ(service, out.get<Service::Tag::serviceWithMetadata>().service);
     sp<IBinder> outBinder;
     EXPECT_TRUE(sm->getService("foo", &outBinder).isOk());
     EXPECT_EQ(service, outBinder);
@@ -206,7 +211,7 @@ TEST(GetService, NonExistant) {
 
     Service out;
     EXPECT_TRUE(sm->getService2("foo", &out).isOk());
-    EXPECT_EQ(nullptr, out.get<Service::Tag::binder>());
+    EXPECT_EQ(nullptr, out.get<Service::Tag::serviceWithMetadata>().service);
     sp<IBinder> outBinder;
     EXPECT_TRUE(sm->getService("foo", &outBinder).isOk());
     EXPECT_EQ(nullptr, outBinder);
@@ -227,7 +232,7 @@ TEST(GetService, NoPermissionsForGettingService) {
     Service out;
     // returns nullptr but has OK status for legacy compatibility
     EXPECT_TRUE(sm->getService2("foo", &out).isOk());
-    EXPECT_EQ(nullptr, out.get<Service::Tag::binder>());
+    EXPECT_EQ(nullptr, out.get<Service::Tag::serviceWithMetadata>().service);
     sp<IBinder> outBinder;
     EXPECT_TRUE(sm->getService("foo", &outBinder).isOk());
     EXPECT_EQ(nullptr, outBinder);
@@ -257,7 +262,7 @@ TEST(GetService, AllowedFromIsolated) {
 
     Service out;
     EXPECT_TRUE(sm->getService2("foo", &out).isOk());
-    EXPECT_EQ(service, out.get<Service::Tag::binder>());
+    EXPECT_EQ(service, out.get<Service::Tag::serviceWithMetadata>().service);
     sp<IBinder> outBinder;
     EXPECT_TRUE(sm->getService("foo", &outBinder).isOk());
     EXPECT_EQ(service, outBinder);
@@ -289,7 +294,7 @@ TEST(GetService, NotAllowedFromIsolated) {
     Service out;
     // returns nullptr but has OK status for legacy compatibility
     EXPECT_TRUE(sm->getService2("foo", &out).isOk());
-    EXPECT_EQ(nullptr, out.get<Service::Tag::binder>());
+    EXPECT_EQ(nullptr, out.get<Service::Tag::serviceWithMetadata>().service);
     sp<IBinder> outBinder;
     EXPECT_TRUE(sm->getService("foo", &outBinder).isOk());
     EXPECT_EQ(nullptr, outBinder);

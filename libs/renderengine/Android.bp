@@ -105,6 +105,7 @@ filegroup {
         "skia/filters/KawaseBlurDualFilter.cpp",
         "skia/filters/KawaseBlurFilter.cpp",
         "skia/filters/LinearEffect.cpp",
+        "skia/filters/LutShader.cpp",
         "skia/filters/MouriMap.cpp",
         "skia/filters/StretchShaderFactory.cpp",
         "skia/filters/EdgeExtensionShaderFactory.cpp",

@@ -243,8 +243,7 @@ enum ANativeWindow_FrameRateCompatibility {
      * There are no inherent restrictions on the frame rate of this window. When
      * the system selects a frame rate other than what the app requested, the
      * app will be able to run at the system frame rate without requiring pull
-     * down. This value should be used when displaying game content, UIs, and
-     * anything that isn't video.
+     * down. This value should be used when displaying game content.
      */
     ANATIVEWINDOW_FRAME_RATE_COMPATIBILITY_DEFAULT = 0,
     /**
@@ -256,7 +255,14 @@ enum ANativeWindow_FrameRateCompatibility {
      * stuttering) than it would be if the system had chosen the app's requested
      * frame rate. This value should be used for video content.
      */
-    ANATIVEWINDOW_FRAME_RATE_COMPATIBILITY_FIXED_SOURCE = 1
+    ANATIVEWINDOW_FRAME_RATE_COMPATIBILITY_FIXED_SOURCE = 1,
+
+    /**
+     * The window requests a frame rate that is greater than or equal to the specified frame rate.
+     * This value should be used for UIs, animations, scrolling, and anything that is not a game
+     * or video.
+     */
+    ANATIVEWINDOW_FRAME_RATE_COMPATIBILITY_GTE = 2
 };
 
 /**
@@ -366,14 +372,13 @@ int32_t ANativeWindow_setFrameRateWithChangeStrategy(ANativeWindow* window, floa
  *
  * See ANativeWindow_setFrameRateWithChangeStrategy().
  *
- * Available since API level 34.
+ * Available since API level 31.
  *
  * \param window pointer to an ANativeWindow object.
  *
  * \return 0 for success, -EINVAL if the window value is invalid.
  */
-inline int32_t ANativeWindow_clearFrameRate(ANativeWindow* window)
-        __INTRODUCED_IN(__ANDROID_API_U__) {
+inline int32_t ANativeWindow_clearFrameRate(ANativeWindow* window) __INTRODUCED_IN(31) {
     return ANativeWindow_setFrameRateWithChangeStrategy(window, 0,
             ANATIVEWINDOW_FRAME_RATE_COMPATIBILITY_DEFAULT,
             ANATIVEWINDOW_CHANGE_FRAME_RATE_ONLY_IF_SEAMLESS);

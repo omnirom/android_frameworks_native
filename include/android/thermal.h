@@ -140,45 +140,47 @@ void AThermal_releaseManager(AThermalManager* _Nonnull manager) __INTRODUCED_IN(
   * Available since API level 30.
   *
   * @param manager The manager instance to use to query the thermal status.
-  * Acquired via {@link AThermal_acquireManager}.
+  *                Acquired via {@link AThermal_acquireManager}.
   *
   * @return current thermal status, ATHERMAL_STATUS_ERROR on failure.
   */
 AThermalStatus
-AThermal_getCurrentThermalStatus(AThermalManager* _Nonnull manager) __INTRODUCED_IN(30);
+AThermal_getCurrentThermalStatus(AThermalManager *_Nonnull manager) __INTRODUCED_IN(30);
 
 /**
- * Register the thermal status listener for thermal status change.
+ * Register a thermal status listener for thermal status change.
  *
  * Available since API level 30.
  *
  * @param manager The manager instance to use to register.
- * Acquired via {@link AThermal_acquireManager}.
- * @param callback The callback function to be called when thermal status updated.
+ *                Acquired via {@link AThermal_acquireManager}.
+ * @param callback The callback function to be called on system binder thread pool when thermal
+ *                 status updated.
  * @param data The data pointer to be passed when callback is called.
  *
  * @return 0 on success
  *         EINVAL if the listener and data pointer were previously added and not removed.
- *         EPERM if the required permission is not held.
- *         EPIPE if communication with the system service has failed.
+ *         EPIPE if communication with the system service has failed, the listener will not get
+ *               removed and this call should be retried
  */
-int AThermal_registerThermalStatusListener(AThermalManager* _Nonnull manager,
+int AThermal_registerThermalStatusListener(AThermalManager *_Nonnull manager,
                                            AThermal_StatusCallback _Nullable callback,
                                            void* _Nullable data) __INTRODUCED_IN(30);
 
 /**
- * Unregister the thermal status listener previously resgistered.
+ * Unregister a thermal status listener previously registered.
+ *
+ * No subsequent invocations of the callback will occur after this function returns successfully.
  *
  * Available since API level 30.
  *
  * @param manager The manager instance to use to unregister.
- * Acquired via {@link AThermal_acquireManager}.
- * @param callback The callback function to be called when thermal status updated.
+ *                Acquired via {@link AThermal_acquireManager}.
+ * @param callback The callback function that was previously registered.
  * @param data The data pointer to be passed when callback is called.
  *
  * @return 0 on success
  *         EINVAL if the listener and data pointer were not previously added.
- *         EPERM if the required permission is not held.
  *         EPIPE if communication with the system service has failed.
  */
 int AThermal_unregisterThermalStatusListener(AThermalManager* _Nonnull manager,
@@ -254,7 +256,7 @@ typedef struct AThermalHeadroomThreshold AThermalHeadroomThreshold;
  * The headroom threshold is used to interpret the possible thermal throttling status based on
  * the headroom prediction. For example, if the headroom threshold for
  * {@link ATHERMAL_STATUS_LIGHT} is 0.7, and a headroom prediction in 10s returns 0.75
- * (or {@code AThermal_getThermalHeadroom(10)=0.75}), one can expect that in 10 seconds the system
+ * (or `AThermal_getThermalHeadroom(10)=0.75}`, one can expect that in 10 seconds the system
  * could be in lightly throttled state if the workload remains the same. The app can consider
  * taking actions according to the nearest throttling status the difference between the headroom and
  * the threshold.
@@ -262,24 +264,30 @@ typedef struct AThermalHeadroomThreshold AThermalHeadroomThreshold;
  * For new devices it's guaranteed to have a single sensor, but for older devices with multiple
  * sensors reporting different threshold values, the minimum threshold is taken to be conservative
  * on predictions. Thus, when reading real-time headroom, it's not guaranteed that a real-time value
- * of 0.75 (or {@code AThermal_getThermalHeadroom(0)}=0.75) exceeding the threshold of 0.7 above
+ * of 0.75 (or `AThermal_getThermalHeadroom(0)=0.75`) exceeding the threshold of 0.7 above
  * will always come with lightly throttled state
- * (or {@code AThermal_getCurrentThermalStatus()=ATHERMAL_STATUS_LIGHT}) but it can be lower
- * (or {@code AThermal_getCurrentThermalStatus()=ATHERMAL_STATUS_NONE}).
+ * (or `AThermal_getCurrentThermalStatus()=ATHERMAL_STATUS_LIGHT`) but it can be lower
+ * (or `AThermal_getCurrentThermalStatus()=ATHERMAL_STATUS_NONE`).
  * While it's always guaranteed that the device won't be throttled heavier than the unmet
  * threshold's state, so a real-time headroom of 0.75 will never come with
  * {@link #ATHERMAL_STATUS_MODERATE} but always lower, and 0.65 will never come with
  * {@link ATHERMAL_STATUS_LIGHT} but {@link #ATHERMAL_STATUS_NONE}.
  * <p>
- * The returned list of thresholds is cached on first successful query and owned by the thermal
- * manager, which will not change between calls to this function. The caller should only need to
- * free the manager with {@link AThermal_releaseManager}.
+ * Starting in Android 16, this polling API may return different results when called depending on
+ * the device. The new headroom listener API {@link #AThermal_HeadroomCallback} can be used to
+ * detect headroom thresholds changes.
+ * <p>
+ * Before API level 36 the returned list of thresholds is cached on first successful query and owned
+ * by the thermal manager, which will not change between calls to this function. The caller should
+ * only need to free the manager with {@link AThermal_releaseManager}.
+ * <p>
  *
  * @param manager The manager instance to use.
  *                Acquired via {@link AThermal_acquireManager}.
  * @param outThresholds non-null output pointer to null AThermalHeadroomThreshold pointer, which
- *                will be set to the cached array of thresholds if thermal thresholds are supported
- *                by the system or device, otherwise nullptr or unmodified.
+ *                will be set to a new array of thresholds if thermal thresholds are supported
+ *                by the system or device, otherwise nullptr or unmodified. The client should
+ *                clean up the thresholds by array-deleting the threshold pointer.
  * @param size non-null output pointer whose value will be set to the size of the threshold array
  *             or 0 if it's not supported.
  * @return 0 on success
@@ -291,6 +299,71 @@ int AThermal_getThermalHeadroomThresholds(AThermalManager* _Nonnull manager,
                                           const AThermalHeadroomThreshold* _Nonnull
                                           * _Nullable outThresholds,
                                           size_t* _Nonnull size) __INTRODUCED_IN(35);
+
+/**
+ * Prototype of the function that is called when thermal headroom or thresholds changes.
+ * It's passed the updated thermal headroom and thresholds as parameters, as well as the
+ * pointer provided by the client that registered a callback.
+ *
+ * @param data The data pointer to be passed when callback is called.
+ * @param headroom The current non-negative normalized headroom value, also see
+ *                 {@link AThermal_getThermalHeadroom}.
+ * @param forecastHeadroom The forecasted non-negative normalized headroom value, also see
+ *                         {@link AThermal_getThermalHeadroom}.
+ * @param forecastSeconds The seconds used for the forecast by the system.
+ * @param thresholds The current headroom thresholds. The thresholds pointer will be a constant
+ *                   shared across all callbacks registered from the same process, and it will be
+ *                   destroyed after all the callbacks are finished. If the client intents to
+ *                   persist the values, it should make a copy of it during the callback.
+ * @param thresholdsCount The count of thresholds.
+ */
+typedef void (*AThermal_HeadroomCallback)(void *_Nullable data,
+                                          float headroom,
+                                          float forecastHeadroom,
+                                          int forecastSeconds,
+                                          const AThermalHeadroomThreshold* _Nullable thresholds,
+                                          size_t thresholdsCount);
+
+/**
+ * Register a thermal headroom listener for thermal headroom or thresholds change.
+ *
+ * Available since API level 36.
+ *
+ * @param manager The manager instance to use to register.
+ *                Acquired via {@link AThermal_acquireManager}.
+ * @param callback The callback function to be called on system binder thread pool when thermal
+ *                 headroom or thresholds update.
+ * @param data The data pointer to be passed when callback is called.
+ *
+ * @return 0 on success
+ *         EINVAL if the listener and data pointer were previously added and not removed.
+ *         EPIPE if communication with the system service has failed.
+ */
+int AThermal_registerThermalHeadroomListener(AThermalManager* _Nonnull manager,
+                                             AThermal_HeadroomCallback _Nullable callback,
+                                             void* _Nullable data) __INTRODUCED_IN(36);
+
+/**
+ * Unregister a thermal headroom listener previously registered.
+ *
+ * No subsequent invocations of the callback will occur after this function returns successfully.
+ *
+ * Available since API level 36.
+ *
+ * @param manager The manager instance to use to unregister.
+ *                Acquired via {@link AThermal_acquireManager}.
+ * @param callback The callback function that was previously registered.
+ * @param data The data pointer that was previously registered.
+ *
+ * @return 0 on success
+ *         EINVAL if the listener and data pointer were not previously added.
+ *         EPIPE if communication with the system service has failed, the listener will not get
+ *               removed and this call should be retried
+ */
+
+int AThermal_unregisterThermalHeadroomListener(AThermalManager* _Nonnull manager,
+                                               AThermal_HeadroomCallback _Nullable callback,
+                                               void* _Nullable data) __INTRODUCED_IN(36);
 
 #ifdef __cplusplus
 }

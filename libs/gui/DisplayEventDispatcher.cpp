@@ -211,6 +211,9 @@ bool DisplayEventDispatcher::processPendingEvents(nsecs_t* outTimestamp,
                                               ev.hdcpLevelsChange.connectedLevel,
                                               ev.hdcpLevelsChange.maxLevel);
                     break;
+                case DisplayEventReceiver::DISPLAY_EVENT_MODE_REJECTION:
+                    dispatchModeRejected(ev.header.displayId, ev.modeRejection.modeId);
+                    break;
                 default:
                     ALOGW("dispatcher %p ~ ignoring unknown event type %#x", this, ev.header.type);
                     break;

@@ -121,6 +121,42 @@ String16 Surface::readMaybeEmptyString16(const Parcel* parcel) {
     return str.value_or(String16());
 }
 
+#if WB_LIBCAMERASERVICE_WITH_DEPENDENCIES
+Surface Surface::fromSurface(const sp<android::Surface>& surface) {
+    if (surface == nullptr) {
+        ALOGE("%s: Error: view::Surface::fromSurface failed due to null surface.", __FUNCTION__);
+        return Surface();
+    }
+    Surface s;
+    s.name = String16(surface->getConsumerName());
+    s.graphicBufferProducer = surface->getIGraphicBufferProducer();
+    s.surfaceControlHandle = surface->getSurfaceControlHandle();
+    return s;
+}
+
+sp<android::Surface> Surface::toSurface() const {
+    if (graphicBufferProducer == nullptr) return nullptr;
+    return new android::Surface(graphicBufferProducer, false, surfaceControlHandle);
+}
+
+status_t Surface::getUniqueId(uint64_t* out_id) const {
+    if (graphicBufferProducer == nullptr) {
+        ALOGE("android::viewSurface::getUniqueId() failed because it's not initialized.");
+        return UNEXPECTED_NULL;
+    }
+    status_t status = graphicBufferProducer->getUniqueId(out_id);
+    if (status != OK) {
+        ALOGE("android::viewSurface::getUniqueId() failed.");
+        return status;
+    }
+    return OK;
+}
+
+bool Surface::isEmpty() const {
+    return graphicBufferProducer == nullptr;
+}
+#endif
+
 std::string Surface::toString() const {
     std::stringstream out;
     out << name;

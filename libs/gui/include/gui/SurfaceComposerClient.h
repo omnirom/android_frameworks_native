@@ -38,6 +38,7 @@
 #include <ui/EdgeExtensionEffect.h>
 #include <ui/FrameStats.h>
 #include <ui/GraphicTypes.h>
+#include <ui/PictureProfileHandle.h>
 #include <ui/PixelFormat.h>
 #include <ui/Rotation.h>
 #include <ui/StaticDisplayInfo.h>
@@ -297,6 +298,8 @@ public:
     static status_t removeHdrLayerInfoListener(const sp<IBinder>& displayToken,
                                                const sp<gui::IHdrLayerInfoListener>& listener);
 
+    static status_t setActivePictureListener(const sp<gui::IActivePictureListener>& listener);
+
     /*
      * Sends a power boost to the composer. This function is asynchronous.
      *
@@ -341,6 +344,15 @@ public:
     getDisplayDecorationSupport(const sp<IBinder>& displayToken);
 
     static bool flagEdgeExtensionEffectUseShader();
+
+    /**
+     * Returns how many picture profiles are supported by the display.
+     *
+     * displayToken
+     *      The token of the display.
+     */
+    static status_t getMaxLayerPictureProfiles(const sp<IBinder>& displayToken,
+                                               int32_t* outMaxProfiles);
 
     // ------------------------------------------------------------------------
     // surface creation / destruction
@@ -437,6 +449,8 @@ public:
         static void mergeFrameTimelineInfo(FrameTimelineInfo& t, const FrameTimelineInfo& other);
         // Tracks registered callbacks
         sp<TransactionCompletedListener> mTransactionCompletedListener = nullptr;
+        // Prints debug logs when enabled.
+        bool mLogCallPoints = false;
 
     protected:
         std::unordered_map<sp<IBinder>, ComposerState, IBinderHash> mComposerStates;
@@ -549,6 +563,7 @@ public:
         Transaction& setMatrix(const sp<SurfaceControl>& sc,
                 float dsdx, float dtdx, float dtdy, float dsdy);
         Transaction& setCrop(const sp<SurfaceControl>& sc, const Rect& crop);
+        Transaction& setCrop(const sp<SurfaceControl>& sc, const FloatRect& crop);
         Transaction& setCornerRadius(const sp<SurfaceControl>& sc, float cornerRadius);
         Transaction& setBackgroundBlurRadius(const sp<SurfaceControl>& sc,
                                              int backgroundBlurRadius);
@@ -601,6 +616,11 @@ public:
         Transaction& setExtendedRangeBrightness(const sp<SurfaceControl>& sc,
                                                 float currentBufferRatio, float desiredRatio);
         Transaction& setDesiredHdrHeadroom(const sp<SurfaceControl>& sc, float desiredRatio);
+        Transaction& setLuts(const sp<SurfaceControl>& sc, const base::unique_fd& lutFd,
+                             const std::vector<int32_t>& offsets,
+                             const std::vector<int32_t>& dimensions,
+                             const std::vector<int32_t>& sizes,
+                             const std::vector<int32_t>& samplingKeys);
         Transaction& setCachingHint(const sp<SurfaceControl>& sc, gui::CachingHint cachingHint);
         Transaction& setHdrMetadata(const sp<SurfaceControl>& sc, const HdrMetadata& hdrMetadata);
         Transaction& setSurfaceDamageRegion(const sp<SurfaceControl>& sc,
@@ -679,7 +699,8 @@ public:
         // ONLY FOR BLAST ADAPTER
         Transaction& notifyProducerDisconnect(const sp<SurfaceControl>& sc);
 
-        Transaction& setInputWindowInfo(const sp<SurfaceControl>& sc, const gui::WindowInfo& info);
+        Transaction& setInputWindowInfo(const sp<SurfaceControl>& sc,
+                                        sp<gui::WindowInfoHandle> info);
         Transaction& setFocusedWindow(const gui::FocusRequest& request);
 
         Transaction& addWindowInfosReportedListener(
@@ -767,6 +788,20 @@ public:
                 const sp<SurfaceControl>& sc,
                 const std::shared_ptr<gui::BufferReleaseChannel::ProducerEndpoint>& channel);
 
+        /**
+         * Configures a surface control to use picture processing hardware, configured as specified
+         * by the picture profile, to enhance the quality of all subsequent buffer contents.
+         */
+        Transaction& setPictureProfileHandle(const sp<SurfaceControl>& sc,
+                                             const PictureProfileHandle& pictureProfileHandle);
+
+        /**
+         * Configures the relative importance of the contents of the layer with respect to the app's
+         * user experience. A lower priority value will give the layer preferred access to limited
+         * resources, such as picture processing, over a layer with a higher priority value.
+         */
+        Transaction& setContentPriority(const sp<SurfaceControl>& sc, int32_t contentPriority);
+
         status_t setDisplaySurface(const sp<IBinder>& token,
                 const sp<IGraphicBufferProducer>& bufferProducer);
 
@@ -803,6 +838,7 @@ public:
         static void setDefaultApplyToken(sp<IBinder> applyToken);
 
         static status_t sendSurfaceFlushJankDataTransaction(const sp<SurfaceControl>& sc);
+        void enableDebugLogCallPoints();
     };
 
     status_t clearLayerFrameStats(const sp<IBinder>& token) const;

@@ -294,6 +294,8 @@ enum class KeyboardType {
     NONE = AINPUT_KEYBOARD_TYPE_NONE,
     NON_ALPHABETIC = AINPUT_KEYBOARD_TYPE_NON_ALPHABETIC,
     ALPHABETIC = AINPUT_KEYBOARD_TYPE_ALPHABETIC,
+    ftl_first = NONE,
+    ftl_last = ALPHABETIC,
 };
 
 bool isStylusToolType(ToolType toolType);
@@ -994,6 +996,15 @@ protected:
     std::vector<PointerProperties> mPointerProperties;
     std::vector<nsecs_t> mSampleEventTimes;
     std::vector<PointerCoords> mSamplePointerCoords;
+
+private:
+    /**
+     * Create a human-readable string representation of the event's data for debugging purposes.
+     *
+     * Unlike operator<<, this method does not assume that the event data is valid or consistent, or
+     * call any accessor methods that might themselves call safeDump in the case of invalid data.
+     */
+    std::string safeDump() const;
 };
 
 std::ostream& operator<<(std::ostream& out, const MotionEvent& event);

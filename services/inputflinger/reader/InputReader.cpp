@@ -19,6 +19,7 @@
 #include "InputReader.h"
 
 #include <android-base/stringprintf.h>
+#include <com_android_input_flags.h>
 #include <errno.h>
 #include <input/Keyboard.h>
 #include <input/VirtualKeyMap.h>
@@ -122,7 +123,8 @@ status_t InputReader::start() {
         return ALREADY_EXISTS;
     }
     mThread = std::make_unique<InputThread>(
-            "InputReader", [this]() { loopOnce(); }, [this]() { mEventHub->wake(); });
+            "InputReader", [this]() { loopOnce(); }, [this]() { mEventHub->wake(); },
+            /*isInCriticalPath=*/true);
     return OK;
 }
 
@@ -583,18 +585,14 @@ int32_t InputReader::getStateLocked(int32_t deviceId, uint32_t sourceMask, int32
 
 void InputReader::toggleCapsLockState(int32_t deviceId) {
     std::scoped_lock _l(mLock);
-    InputDevice* device = findInputDeviceLocked(deviceId);
-    if (!device) {
-        ALOGW("Ignoring toggleCapsLock for unknown deviceId %" PRId32 ".", deviceId);
-        return;
+    if (mKeyboardClassifier->getKeyboardType(deviceId) == KeyboardType::ALPHABETIC) {
+        updateLedMetaStateLocked(mLedMetaState ^ AMETA_CAPS_LOCK_ON);
     }
+}
 
-    if (device->isIgnored()) {
-        ALOGW("Ignoring toggleCapsLock for ignored deviceId %" PRId32 ".", deviceId);
-        return;
-    }
-
-    device->updateMetaState(AKEYCODE_CAPS_LOCK);
+void InputReader::resetLockedModifierState() {
+    std::scoped_lock _l(mLock);
+    updateLedMetaStateLocked(0);
 }
 
 bool InputReader::hasKeys(int32_t deviceId, uint32_t sourceMask,
@@ -907,6 +905,18 @@ void InputReader::notifyMouseCursorFadedOnTyping() {
     std::scoped_lock _l(mLock);
     // disable touchpad taps when cursor has faded due to typing
     mPreventingTouchpadTaps = true;
+}
+
+bool InputReader::setKernelWakeEnabled(int32_t deviceId, bool enabled) {
+    std::scoped_lock _l(mLock);
+    if (!com::android::input::flags::set_input_device_kernel_wake()){
+        return false;
+    }
+    InputDevice* device = findInputDeviceLocked(deviceId);
+    if (device) {
+        return device->setKernelWakeEnabled(enabled);
+    }
+    return false;
 }
 
 void InputReader::dump(std::string& dump) {

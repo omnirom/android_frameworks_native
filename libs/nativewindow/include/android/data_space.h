@@ -578,6 +578,13 @@ enum ADataSpace : int32_t {
      */
     ADATASPACE_BT2020_ITU_HLG = 302383104, // ADATASPACE_STANDARD_BT2020 | ADATASPACE_TRANSFER_HLG |
                                            // ADATASPACE_RANGE_LIMITED
+    /**
+     * sRGB-encoded BT. 2020
+     *
+     * Uses full range, sRGB transfer and BT2020 standard.
+     */
+    ADATASPACE_DISPLAY_BT2020 = 142999552, // ADATASPACE_STANDARD_BT2020 | ADATASPACE_TRANSFER_SRGB
+                                           // | ADATASPACE_RANGE_FULL
 
     /**
      * Depth

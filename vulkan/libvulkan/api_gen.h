@@ -139,6 +139,7 @@ struct DeviceDispatchTable {
     PFN_vkCreateRenderPass CreateRenderPass;
     PFN_vkDestroyRenderPass DestroyRenderPass;
     PFN_vkGetRenderAreaGranularity GetRenderAreaGranularity;
+    PFN_vkGetRenderingAreaGranularity GetRenderingAreaGranularity;
     PFN_vkCreateCommandPool CreateCommandPool;
     PFN_vkDestroyCommandPool DestroyCommandPool;
     PFN_vkResetCommandPool ResetCommandPool;
@@ -196,6 +197,7 @@ struct DeviceDispatchTable {
     PFN_vkGetSwapchainImagesKHR GetSwapchainImagesKHR;
     PFN_vkAcquireNextImageKHR AcquireNextImageKHR;
     PFN_vkQueuePresentKHR QueuePresentKHR;
+    PFN_vkCmdPushDescriptorSet CmdPushDescriptorSet;
     PFN_vkTrimCommandPool TrimCommandPool;
     PFN_vkGetDeviceGroupPeerMemoryFeatures GetDeviceGroupPeerMemoryFeatures;
     PFN_vkBindBufferMemory2 BindBufferMemory2;
@@ -208,6 +210,7 @@ struct DeviceDispatchTable {
     PFN_vkCreateDescriptorUpdateTemplate CreateDescriptorUpdateTemplate;
     PFN_vkDestroyDescriptorUpdateTemplate DestroyDescriptorUpdateTemplate;
     PFN_vkUpdateDescriptorSetWithTemplate UpdateDescriptorSetWithTemplate;
+    PFN_vkCmdPushDescriptorSetWithTemplate CmdPushDescriptorSetWithTemplate;
     PFN_vkGetBufferMemoryRequirements2 GetBufferMemoryRequirements2;
     PFN_vkGetImageMemoryRequirements2 GetImageMemoryRequirements2;
     PFN_vkGetImageSparseMemoryRequirements2 GetImageSparseMemoryRequirements2;
@@ -232,11 +235,13 @@ struct DeviceDispatchTable {
     PFN_vkGetBufferOpaqueCaptureAddress GetBufferOpaqueCaptureAddress;
     PFN_vkGetBufferDeviceAddress GetBufferDeviceAddress;
     PFN_vkGetDeviceMemoryOpaqueCaptureAddress GetDeviceMemoryOpaqueCaptureAddress;
+    PFN_vkCmdSetLineStipple CmdSetLineStipple;
     PFN_vkCmdSetCullMode CmdSetCullMode;
     PFN_vkCmdSetFrontFace CmdSetFrontFace;
     PFN_vkCmdSetPrimitiveTopology CmdSetPrimitiveTopology;
     PFN_vkCmdSetViewportWithCount CmdSetViewportWithCount;
     PFN_vkCmdSetScissorWithCount CmdSetScissorWithCount;
+    PFN_vkCmdBindIndexBuffer2 CmdBindIndexBuffer2;
     PFN_vkCmdBindVertexBuffers2 CmdBindVertexBuffers2;
     PFN_vkCmdSetDepthTestEnable CmdSetDepthTestEnable;
     PFN_vkCmdSetDepthWriteEnable CmdSetDepthWriteEnable;
@@ -263,8 +268,22 @@ struct DeviceDispatchTable {
     PFN_vkCmdPipelineBarrier2 CmdPipelineBarrier2;
     PFN_vkQueueSubmit2 QueueSubmit2;
     PFN_vkCmdWriteTimestamp2 CmdWriteTimestamp2;
+    PFN_vkCopyMemoryToImage CopyMemoryToImage;
+    PFN_vkCopyImageToMemory CopyImageToMemory;
+    PFN_vkCopyImageToImage CopyImageToImage;
+    PFN_vkTransitionImageLayout TransitionImageLayout;
     PFN_vkCmdBeginRendering CmdBeginRendering;
     PFN_vkCmdEndRendering CmdEndRendering;
+    PFN_vkGetImageSubresourceLayout2 GetImageSubresourceLayout2;
+    PFN_vkGetDeviceImageSubresourceLayout GetDeviceImageSubresourceLayout;
+    PFN_vkMapMemory2 MapMemory2;
+    PFN_vkUnmapMemory2 UnmapMemory2;
+    PFN_vkCmdBindDescriptorSets2 CmdBindDescriptorSets2;
+    PFN_vkCmdPushConstants2 CmdPushConstants2;
+    PFN_vkCmdPushDescriptorSet2 CmdPushDescriptorSet2;
+    PFN_vkCmdPushDescriptorSetWithTemplate2 CmdPushDescriptorSetWithTemplate2;
+    PFN_vkCmdSetRenderingAttachmentLocations CmdSetRenderingAttachmentLocations;
+    PFN_vkCmdSetRenderingInputAttachmentIndices CmdSetRenderingInputAttachmentIndices;
     // clang-format on
 };
 

@@ -62,6 +62,7 @@ public:
         DISPLAY_EVENT_VSYNC = fourcc('v', 's', 'y', 'n'),
         DISPLAY_EVENT_HOTPLUG = fourcc('p', 'l', 'u', 'g'),
         DISPLAY_EVENT_MODE_CHANGE = fourcc('m', 'o', 'd', 'e'),
+        DISPLAY_EVENT_MODE_REJECTION = fourcc('r', 'e', 'j', 'e'),
         DISPLAY_EVENT_NULL = fourcc('n', 'u', 'l', 'l'),
         DISPLAY_EVENT_FRAME_RATE_OVERRIDE = fourcc('r', 'a', 't', 'e'),
         DISPLAY_EVENT_FRAME_RATE_OVERRIDE_FLUSH = fourcc('f', 'l', 's', 'h'),
@@ -96,6 +97,10 @@ public:
             nsecs_t vsyncPeriod __attribute__((aligned(8)));
         };
 
+        struct ModeRejection {
+            int32_t modeId;
+        };
+
         struct FrameRateOverride {
             uid_t uid __attribute__((aligned(8)));
             float frameRateHz __attribute__((aligned(8)));
@@ -117,9 +122,10 @@ public:
             ModeChange modeChange;
             FrameRateOverride frameRateOverride;
             HdcpLevelsChange hdcpLevelsChange;
+            ModeRejection modeRejection;
         };
     };
-    static_assert(sizeof(Event) == 216);
+    static_assert(sizeof(Event) == 224);
 
 public:
     /*

@@ -6,32 +6,34 @@ LIBVULKAN {
     vkAllocateDescriptorSets;
     vkAllocateMemory;
     vkBeginCommandBuffer;
-    vkBindBufferMemory;
     vkBindBufferMemory2; # introduced=28
-    vkBindImageMemory;
+    vkBindBufferMemory;
     vkBindImageMemory2; # introduced=28
+    vkBindImageMemory;
     vkCmdBeginQuery;
-    vkCmdBeginRendering; # introduced=33
-    vkCmdBeginRenderPass;
     vkCmdBeginRenderPass2; # introduced=31
+    vkCmdBeginRenderPass;
+    vkCmdBeginRendering; # introduced=33
+    vkCmdBindDescriptorSets2; #introduced=36
     vkCmdBindDescriptorSets;
+    vkCmdBindIndexBuffer2; #introduced=36
     vkCmdBindIndexBuffer;
     vkCmdBindPipeline;
-    vkCmdBindVertexBuffers;
     vkCmdBindVertexBuffers2; #introduced=33
-    vkCmdBlitImage;
+    vkCmdBindVertexBuffers;
     vkCmdBlitImage2; #introduced=33
+    vkCmdBlitImage;
     vkCmdClearAttachments;
     vkCmdClearColorImage;
     vkCmdClearDepthStencilImage;
-    vkCmdCopyBuffer;
     vkCmdCopyBuffer2; #introduced=33
-    vkCmdCopyBufferToImage;
+    vkCmdCopyBuffer;
     vkCmdCopyBufferToImage2; #introduced=33
-    vkCmdCopyImage;
+    vkCmdCopyBufferToImage;
     vkCmdCopyImage2; #introduced=33
-    vkCmdCopyImageToBuffer;
+    vkCmdCopyImage;
     vkCmdCopyImageToBuffer2; #introduced=33
+    vkCmdCopyImageToBuffer;
     vkCmdCopyQueryPoolResults;
     vkCmdDispatch;
     vkCmdDispatchBase; # introduced=28
@@ -43,21 +45,26 @@ LIBVULKAN {
     vkCmdDrawIndirect;
     vkCmdDrawIndirectCount; # introduced=31
     vkCmdEndQuery;
-    vkCmdEndRendering; #introduced=33
-    vkCmdEndRenderPass;
     vkCmdEndRenderPass2; # introduced=31
+    vkCmdEndRenderPass;
+    vkCmdEndRendering; #introduced=33
     vkCmdExecuteCommands;
     vkCmdFillBuffer;
-    vkCmdNextSubpass;
     vkCmdNextSubpass2; # introduced=31
-    vkCmdPipelineBarrier;
+    vkCmdNextSubpass;
     vkCmdPipelineBarrier2; #introduced=33
+    vkCmdPipelineBarrier;
+    vkCmdPushConstants2; #introduced=36
     vkCmdPushConstants;
-    vkCmdResetEvent;
+    vkCmdPushDescriptorSet2; #introduced=36
+    vkCmdPushDescriptorSet; #introduced=36
+    vkCmdPushDescriptorSetWithTemplate2; #introduced=36
+    vkCmdPushDescriptorSetWithTemplate; #introduced=36
     vkCmdResetEvent2; #introduced=33
+    vkCmdResetEvent;
     vkCmdResetQueryPool;
-    vkCmdResolveImage;
     vkCmdResolveImage2; #introduced=33
+    vkCmdResolveImage;
     vkCmdSetBlendConstants;
     vkCmdSetCullMode; #introduced=33
     vkCmdSetDepthBias;
@@ -68,13 +75,16 @@ LIBVULKAN {
     vkCmdSetDepthTestEnable; #introduced=33
     vkCmdSetDepthWriteEnable; #introduced=33
     vkCmdSetDeviceMask; # introduced=28
-    vkCmdSetEvent;
     vkCmdSetEvent2; #introduced=33
+    vkCmdSetEvent;
     vkCmdSetFrontFace; #introduced=33
+    vkCmdSetLineStipple; #introduced=36
     vkCmdSetLineWidth;
     vkCmdSetPrimitiveRestartEnable; #introduced=33
     vkCmdSetPrimitiveTopology; #introduced=33
     vkCmdSetRasterizerDiscardEnable; #introduced=33
+    vkCmdSetRenderingAttachmentLocations; #introduced=36
+    vkCmdSetRenderingInputAttachmentIndices; #introduced=36
     vkCmdSetScissor;
     vkCmdSetScissorWithCount; #introduced=33
     vkCmdSetStencilCompareMask;
@@ -85,10 +95,12 @@ LIBVULKAN {
     vkCmdSetViewport;
     vkCmdSetViewportWithCount; #introduced=33
     vkCmdUpdateBuffer;
-    vkCmdWaitEvents;
     vkCmdWaitEvents2; #introduced=33
-    vkCmdWriteTimestamp;
+    vkCmdWaitEvents;
     vkCmdWriteTimestamp2; #introduced=33
+    vkCmdWriteTimestamp;
+    vkCopyImageToMemory; #introduced=36
+    vkCopyMemoryToImage; #introduced=36
     vkCreateAndroidSurfaceKHR;
     vkCreateBuffer;
     vkCreateBufferView;
@@ -109,8 +121,8 @@ LIBVULKAN {
     vkCreatePipelineLayout;
     vkCreatePrivateDataSlot; #introduced=33
     vkCreateQueryPool;
-    vkCreateRenderPass;
     vkCreateRenderPass2; # introduced=31
+    vkCreateRenderPass;
     vkCreateSampler;
     vkCreateSamplerYcbcrConversion; # introduced=28
     vkCreateSemaphore;
@@ -156,8 +168,8 @@ LIBVULKAN {
     vkFreeMemory;
     vkGetAndroidHardwareBufferPropertiesANDROID; # introduced=28
     vkGetBufferDeviceAddress; # introduced=31
-    vkGetBufferMemoryRequirements;
     vkGetBufferMemoryRequirements2; # introduced=28
+    vkGetBufferMemoryRequirements;
     vkGetBufferOpaqueCaptureAddress; # introduced=31
     vkGetDescriptorSetLayoutSupport; # introduced=28
     vkGetDeviceBufferMemoryRequirements; #introduced=33
@@ -166,39 +178,41 @@ LIBVULKAN {
     vkGetDeviceGroupSurfacePresentModesKHR; # introduced=28
     vkGetDeviceImageMemoryRequirements; #introduced=33
     vkGetDeviceImageSparseMemoryRequirements; #introduced=33
+    vkGetDeviceImageSubresourceLayout; #introduced=36
     vkGetDeviceMemoryCommitment;
     vkGetDeviceMemoryOpaqueCaptureAddress; # introduced=31
     vkGetDeviceProcAddr;
-    vkGetDeviceQueue;
     vkGetDeviceQueue2; # introduced=28
+    vkGetDeviceQueue;
     vkGetEventStatus;
     vkGetFenceStatus;
-    vkGetImageMemoryRequirements;
     vkGetImageMemoryRequirements2; # introduced=28
-    vkGetImageSparseMemoryRequirements;
+    vkGetImageMemoryRequirements;
     vkGetImageSparseMemoryRequirements2; # introduced=28
-    vkGetImageSubresourceLayout;
+    vkGetImageSparseMemoryRequirements;
+    vkGetImageSubresourceLayout2; #introduced=36
     vkGetImageSubresourceLayout2EXT; # introduced=UpsideDownCake
+    vkGetImageSubresourceLayout;
     vkGetInstanceProcAddr;
     vkGetMemoryAndroidHardwareBufferANDROID; # introduced=28
     vkGetPhysicalDeviceExternalBufferProperties; # introduced=28
     vkGetPhysicalDeviceExternalFenceProperties; # introduced=28
     vkGetPhysicalDeviceExternalSemaphoreProperties; # introduced=28
-    vkGetPhysicalDeviceFeatures;
     vkGetPhysicalDeviceFeatures2; # introduced=28
-    vkGetPhysicalDeviceFormatProperties;
+    vkGetPhysicalDeviceFeatures;
     vkGetPhysicalDeviceFormatProperties2; # introduced=28
-    vkGetPhysicalDeviceImageFormatProperties;
+    vkGetPhysicalDeviceFormatProperties;
     vkGetPhysicalDeviceImageFormatProperties2; # introduced=28
-    vkGetPhysicalDeviceMemoryProperties;
+    vkGetPhysicalDeviceImageFormatProperties;
     vkGetPhysicalDeviceMemoryProperties2; # introduced=28
+    vkGetPhysicalDeviceMemoryProperties;
     vkGetPhysicalDevicePresentRectanglesKHR; # introduced=28
-    vkGetPhysicalDeviceProperties;
     vkGetPhysicalDeviceProperties2; # introduced=28
-    vkGetPhysicalDeviceQueueFamilyProperties;
+    vkGetPhysicalDeviceProperties;
     vkGetPhysicalDeviceQueueFamilyProperties2; # introduced=28
-    vkGetPhysicalDeviceSparseImageFormatProperties;
+    vkGetPhysicalDeviceQueueFamilyProperties;
     vkGetPhysicalDeviceSparseImageFormatProperties2; # introduced=28
+    vkGetPhysicalDeviceSparseImageFormatProperties;
     vkGetPhysicalDeviceSurfaceCapabilitiesKHR;
     vkGetPhysicalDeviceSurfaceFormatsKHR;
     vkGetPhysicalDeviceSurfacePresentModesKHR;
@@ -208,15 +222,17 @@ LIBVULKAN {
     vkGetPrivateData; #introduced=33
     vkGetQueryPoolResults;
     vkGetRenderAreaGranularity;
+    vkGetRenderingAreaGranularity; #introduced=36
     vkGetSemaphoreCounterValue; # introduced=31
     vkGetSwapchainImagesKHR;
     vkInvalidateMappedMemoryRanges;
+    vkMapMemory2; #introduced=36
     vkMapMemory;
     vkMergePipelineCaches;
     vkQueueBindSparse;
     vkQueuePresentKHR;
-    vkQueueSubmit;
     vkQueueSubmit2; #introduced=33
+    vkQueueSubmit;
     vkQueueWaitIdle;
     vkResetCommandBuffer;
     vkResetCommandPool;
@@ -227,10 +243,12 @@ LIBVULKAN {
     vkSetEvent;
     vkSetPrivateData; # introduced=33
     vkSignalSemaphore; # introduced=31
+    vkTransitionImageLayout; #introduced=36
     vkTrimCommandPool; # introduced=28
+    vkUnmapMemory2; #introduced=36
     vkUnmapMemory;
-    vkUpdateDescriptorSets;
     vkUpdateDescriptorSetWithTemplate; # introduced=28
+    vkUpdateDescriptorSets;
     vkWaitForFences;
     vkWaitSemaphores; # introduced=31
   local:

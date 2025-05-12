@@ -70,7 +70,11 @@ cc_test {
     static_libs: [
         "libfakeservicemanager",
     ],
-    defaults: ["libbinder_client_cache_flag"],
+    defaults: [
+        "libbinder_client_cache_flag",
+        "libbinder_addservice_cache_flag",
+        "libbinder_remove_cache_static_list_flag",
+    ],
     test_suites: ["general-tests"],
     require_root: true,
 }
@@ -532,6 +536,9 @@ cc_test {
     static_libs: [
         "libbinder_rpc_single_threaded",
     ],
+    shared_libs: [
+        "libbinder_ndk",
+    ],
 }
 
 cc_test {
@@ -727,6 +734,9 @@ cc_test {
         "libcutils",
         "liblog",
         "libutils",
+    ],
+    static_libs: [
+        "libgmock",
     ],
     test_suites: [
         "general-tests",

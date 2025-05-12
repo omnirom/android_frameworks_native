@@ -16,6 +16,8 @@
 
 package android.gui;
 
+import android.gui.LutProperties;
+
 /** @hide */
 parcelable OverlayProperties {
     parcelable SupportedBufferCombinations {
@@ -27,4 +29,6 @@ parcelable OverlayProperties {
     SupportedBufferCombinations[] combinations;
 
     boolean supportMixedColorSpaces;
+
+    @nullable LutProperties[] lutProperties;
 }

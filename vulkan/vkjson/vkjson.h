@@ -84,6 +84,11 @@ struct VkJsonCore13 {
   VkPhysicalDeviceVulkan13Features features;
 };
 
+struct VkJsonCore14 {
+  VkPhysicalDeviceVulkan14Properties properties;
+  VkPhysicalDeviceVulkan14Features features;
+};
+
 struct VkJsonDevice {
   VkJsonDevice() {
     memset(&properties, 0, sizeof(VkPhysicalDeviceProperties));
@@ -110,6 +115,7 @@ struct VkJsonDevice {
            sizeof(VkPhysicalDeviceShaderDrawParameterFeatures));
     memset(&core12, 0, sizeof(VkJsonCore12));
     memset(&core13, 0, sizeof(VkJsonCore13));
+    memset(&core14, 0, sizeof(VkJsonCore14));
   }
   VkPhysicalDeviceProperties properties;
   VkPhysicalDeviceFeatures features;
@@ -139,6 +145,7 @@ struct VkJsonDevice {
       external_semaphore_properties;
   VkJsonCore12 core12;
   VkJsonCore13 core13;
+  VkJsonCore14 core14;
 };
 
 struct VkJsonDeviceGroup {

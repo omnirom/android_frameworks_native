@@ -1,0 +1,13 @@
+package: "com.android.graphics.egl.flags"
+container: "system"
+
+flag {
+  name: "multifile_blobcache_advanced_usage"
+  namespace: "gpu"
+  description: "This flag controls new behaviors to address bugs found via advanced usage"
+  bug: "380483358"
+  is_fixed_read_only: true
+  metadata {
+    purpose: PURPOSE_BUGFIX
+  }
+}

@@ -42,6 +42,7 @@ namespace os {
 void trace_begin(uint64_t tag, const char* name);
 void trace_end(uint64_t tag);
 void trace_int(uint64_t tag, const char* name, int32_t value);
+uint64_t get_trace_enabled_tags();
 } // namespace os
 
 class LIBBINDER_EXPORTED ScopedTrace {

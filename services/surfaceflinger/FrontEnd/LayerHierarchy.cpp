@@ -166,7 +166,8 @@ void LayerHierarchy::dump(std::ostream& out, const std::string& prefix,
             }
             out << "(Mirroring) ";
         }
-        out << *mLayer;
+
+        out << *mLayer << " pid=" << mLayer->ownerPid.val() << " uid=" << mLayer->ownerUid.val();
     }
 
     for (size_t i = 0; i < mChildren.size(); i++) {

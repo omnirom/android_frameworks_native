@@ -201,6 +201,10 @@ bool DisplayDevice::isPoweredOn() const {
     return mPowerMode != hal::PowerMode::OFF;
 }
 
+bool DisplayDevice::isRefreshable() const {
+    return mPowerMode == hal::PowerMode::DOZE || mPowerMode == hal::PowerMode::ON;
+}
+
 ui::Dataspace DisplayDevice::getCompositionDataSpace() const {
     return mCompositionDisplay->getState().dataspace;
 }

@@ -379,6 +379,9 @@ def parse_vulkan_registry():
                 version_dict[cmd_name] = apiversion
 
   for feature in root.iter('feature'):
+    # hack, 'feature' element has multiple meanings.. should be more precise with path match
+    if feature.get('api') is None:
+      continue
     if 'vulkan' not in feature.get('api').split(','):
       continue
 

@@ -269,6 +269,9 @@ public:
     status_t enableDevice(int32_t deviceId) override { return mFdp->ConsumeIntegral<status_t>(); }
     status_t disableDevice(int32_t deviceId) override { return mFdp->ConsumeIntegral<status_t>(); }
     void sysfsNodeChanged(const std::string& sysfsNodePath) override {}
+    bool setKernelWakeEnabled(int32_t deviceId, bool enabled) override {
+        return mFdp->ConsumeBool();
+    }
 };
 
 class FuzzInputReaderPolicy : public InputReaderPolicyInterface {
@@ -285,6 +288,7 @@ public:
     void notifyTouchpadHardwareState(const SelfContainedHardwareState& schs,
                                      int32_t deviceId) override {}
     void notifyTouchpadGestureInfo(GestureType type, int32_t deviceId) override {}
+    void notifyTouchpadThreeFingerTap() override {}
     std::shared_ptr<KeyCharacterMap> getKeyboardLayoutOverlay(
             const InputDeviceIdentifier& identifier,
             const std::optional<KeyboardLayoutInfo> layoutInfo) override {

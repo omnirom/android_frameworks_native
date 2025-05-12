@@ -27,6 +27,7 @@
 
 #include "HWComposer.h"
 
+#include <aidl/android/hardware/graphics/composer3/IComposerClient.h>
 #include <android-base/properties.h>
 #include <common/trace.h>
 #include <compositionengine/Output.h>
@@ -335,7 +336,8 @@ std::vector<HWComposer::HWCDisplayMode> HWComposer::getModesFromDisplayConfigura
                                       .height = config.height,
                                       .vsyncPeriod = config.vsyncPeriod,
                                       .configGroup = config.configGroup,
-                                      .vrrConfig = config.vrrConfig};
+                                      .vrrConfig = config.vrrConfig,
+                                      .hdrOutputType = config.hdrOutputType};
 
         const DisplayConfiguration::Dpi estimatedDPI =
                 getEstimatedDotsPerInchFromSize(hwcDisplayId, hwcMode);
@@ -379,7 +381,7 @@ std::vector<HWComposer::HWCDisplayMode> HWComposer::getModesFromLegacyDisplayCon
         const int32_t dpiX = getAttribute(hwcDisplayId, configId, hal::Attribute::DPI_X);
         const int32_t dpiY = getAttribute(hwcDisplayId, configId, hal::Attribute::DPI_Y);
         const DisplayConfiguration::Dpi hwcDpi =
-                DisplayConfiguration::Dpi{dpiX == -1 ? dpiY : dpiX / 1000.f,
+                DisplayConfiguration::Dpi{dpiX == -1 ? dpiX : dpiX / 1000.f,
                                           dpiY == -1 ? dpiY : dpiY / 1000.f};
         const DisplayConfiguration::Dpi estimatedDPI =
                 getEstimatedDotsPerInchFromSize(hwcDisplayId, hwcMode);
@@ -587,9 +589,14 @@ status_t HWComposer::getDeviceCompositionChanges(
     error = hwcDisplay->getClientTargetProperty(&clientTargetProperty);
     RETURN_IF_HWC_ERROR_FOR("getClientTargetProperty", error, displayId, BAD_INDEX);
 
+    DeviceRequestedChanges::LayerLuts layerLuts;
+    error = hwcDisplay->getRequestedLuts(&layerLuts, mLutFileDescriptorMapper);
+    RETURN_IF_HWC_ERROR_FOR("getRequestedLuts", error, displayId, BAD_INDEX);
+
     outChanges->emplace(DeviceRequestedChanges{std::move(changedTypes), std::move(displayRequests),
                                                std::move(layerRequests),
-                                               std::move(clientTargetProperty)});
+                                               std::move(clientTargetProperty),
+                                               std::move(layerLuts)});
     error = hwcDisplay->acceptChanges();
     RETURN_IF_HWC_ERROR_FOR("acceptChanges", error, displayId, BAD_INDEX);
 
@@ -728,7 +735,11 @@ status_t HWComposer::setActiveModeWithConstraints(
     auto error = mDisplayData[displayId].hwcDisplay->setActiveConfigWithConstraints(hwcModeId,
                                                                                     constraints,
                                                                                     outTimeline);
-    RETURN_IF_HWC_ERROR(error, displayId, UNKNOWN_ERROR);
+    if (error == hal::Error::CONFIG_FAILED) {
+        RETURN_IF_HWC_ERROR_FOR("setActiveConfigWithConstraints", error, displayId,
+                                FAILED_TRANSACTION);
+    }
+    RETURN_IF_HWC_ERROR_FOR("setActiveConfigWithConstraints", error, displayId, UNKNOWN_ERROR);
     return NO_ERROR;
 }
 
@@ -978,21 +989,6 @@ status_t HWComposer::getDisplayDecorationSupport(
     return NO_ERROR;
 }
 
-status_t HWComposer::getRequestedLuts(
-        PhysicalDisplayId displayId,
-        std::vector<aidl::android::hardware::graphics::composer3::DisplayLuts::LayerLut>* outLuts) {
-    RETURN_IF_INVALID_DISPLAY(displayId, BAD_INDEX);
-    const auto error = mDisplayData[displayId].hwcDisplay->getRequestedLuts(outLuts);
-    if (error == hal::Error::UNSUPPORTED) {
-        RETURN_IF_HWC_ERROR(error, displayId, INVALID_OPERATION);
-    }
-    if (error == hal::Error::BAD_PARAMETER) {
-        RETURN_IF_HWC_ERROR(error, displayId, BAD_VALUE);
-    }
-    RETURN_IF_HWC_ERROR(error, displayId, UNKNOWN_ERROR);
-    return NO_ERROR;
-}
-
 status_t HWComposer::setAutoLowLatencyMode(PhysicalDisplayId displayId, bool on) {
     RETURN_IF_INVALID_DISPLAY(displayId, BAD_INDEX);
     const auto error = mDisplayData[displayId].hwcDisplay->setAutoLowLatencyMode(on);
@@ -1032,8 +1028,31 @@ status_t HWComposer::setContentType(PhysicalDisplayId displayId, hal::ContentTyp
     return NO_ERROR;
 }
 
+int32_t HWComposer::getMaxLayerPictureProfiles(PhysicalDisplayId displayId) {
+    int32_t maxProfiles = 0;
+    RETURN_IF_INVALID_DISPLAY(displayId, 0);
+    const auto error = mDisplayData[displayId].hwcDisplay->getMaxLayerPictureProfiles(&maxProfiles);
+    RETURN_IF_HWC_ERROR(error, displayId, 0);
+    return maxProfiles;
+}
+
+status_t HWComposer::setDisplayPictureProfileHandle(PhysicalDisplayId displayId,
+                                                    const PictureProfileHandle& handle) {
+    RETURN_IF_INVALID_DISPLAY(displayId, BAD_INDEX);
+    const auto error = mDisplayData[displayId].hwcDisplay->setPictureProfileHandle(handle);
+    if (error != hal::Error::UNSUPPORTED) {
+        RETURN_IF_HWC_ERROR(error, displayId, INVALID_OPERATION);
+    }
+    return NO_ERROR;
+}
+
 const std::unordered_map<std::string, bool>& HWComposer::getSupportedLayerGenericMetadata() const {
     return mSupportedLayerGenericMetadata;
+}
+
+ftl::SmallMap<HWC2::Layer*, ndk::ScopedFileDescriptor, 20>&
+HWComposer::getLutFileDescriptorMapper() {
+    return mLutFileDescriptorMapper;
 }
 
 void HWComposer::dumpOverlayProperties(std::string& result) const {

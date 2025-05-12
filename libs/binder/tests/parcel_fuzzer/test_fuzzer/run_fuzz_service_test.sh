@@ -39,6 +39,7 @@ for CRASH_TYPE in PLAIN KNOWN_UID AID_SYSTEM AID_ROOT BINDER DUMP SHELL_CMD; do
     else
         echo -e "${color_failed}Failed: Unable to find successful fuzzing output from test_service_fuzzer_should_crash"
         echo "${color_reset}"
+        cat "$FUZZER_OUT"
         exit 1
     fi
 done

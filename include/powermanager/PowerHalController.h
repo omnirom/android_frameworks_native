@@ -72,6 +72,7 @@ public:
     virtual HalResult<aidl::android::hardware::power::ChannelConfig> getSessionChannel(
             int tgid, int uid) override;
     virtual HalResult<void> closeSessionChannel(int tgid, int uid) override;
+    virtual HalResult<aidl::android::hardware::power::SupportInfo> getSupportInfo() override;
 
 private:
     std::mutex mConnectedHalMutex;

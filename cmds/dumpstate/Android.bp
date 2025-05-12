@@ -118,6 +118,12 @@ cc_defaults {
     ],
 }
 
+prebuilt_etc {
+    name: "default_screenshot",
+    src: "res/default_screenshot.png",
+    filename_from_src: true,
+}
+
 cc_binary {
     name: "dumpstate",
     defaults: ["dumpstate_defaults"],
@@ -130,6 +136,7 @@ cc_binary {
     required: [
         "atrace",
         "bugreport_procdump",
+        "default_screenshot",
         "dmabuf_dump",
         "ip",
         "iptables",

@@ -27,6 +27,8 @@
 #include "test_mocks.h"
 #include "test_utils.h"
 
+using aidl::android::hardware::vibrator::IVibrationSession;
+using aidl::android::hardware::vibrator::VibrationSessionConfig;
 using android::vibrator::HalController;
 
 using namespace android;
@@ -34,6 +36,7 @@ using namespace testing;
 
 static constexpr int MAX_ATTEMPTS = 2;
 static const std::vector<int32_t> VIBRATOR_IDS = {1, 2};
+static const VibrationSessionConfig SESSION_CONFIG;
 static constexpr int VIBRATOR_ID = 1;
 
 // -------------------------------------------------------------------------------------------------
@@ -52,6 +55,11 @@ public:
     MOCK_METHOD(vibrator::HalResult<void>, triggerSynced,
                 (const std::function<void()>& completionCallback), (override));
     MOCK_METHOD(vibrator::HalResult<void>, cancelSynced, (), (override));
+    MOCK_METHOD(vibrator::HalResult<std::shared_ptr<IVibrationSession>>, startSession,
+                (const std::vector<int32_t>& ids, const VibrationSessionConfig& s,
+                 const std::function<void()>& completionCallback),
+                (override));
+    MOCK_METHOD(vibrator::HalResult<void>, clearSessions, (), (override));
 };
 
 // -------------------------------------------------------------------------------------------------
@@ -79,7 +87,8 @@ protected:
     void setHalExpectations(int32_t cardinality, vibrator::HalResult<void> voidResult,
                             vibrator::HalResult<vibrator::ManagerCapabilities> capabilitiesResult,
                             vibrator::HalResult<std::vector<int32_t>> idsResult,
-                            vibrator::HalResult<std::shared_ptr<HalController>> vibratorResult) {
+                            vibrator::HalResult<std::shared_ptr<HalController>> vibratorResult,
+                            vibrator::HalResult<std::shared_ptr<IVibrationSession>> sessionResult) {
         EXPECT_CALL(*mMockHal.get(), ping())
                 .Times(Exactly(cardinality))
                 .WillRepeatedly(Return(voidResult));
@@ -101,10 +110,16 @@ protected:
         EXPECT_CALL(*mMockHal.get(), cancelSynced())
                 .Times(Exactly(cardinality))
                 .WillRepeatedly(Return(voidResult));
+        EXPECT_CALL(*mMockHal.get(), startSession(_, _, _))
+                .Times(Exactly(cardinality))
+                .WillRepeatedly(Return(sessionResult));
+        EXPECT_CALL(*mMockHal.get(), clearSessions())
+                .Times(Exactly(cardinality))
+                .WillRepeatedly(Return(voidResult));
 
         if (cardinality > 1) {
             // One reconnection for each retry.
-            EXPECT_CALL(*mMockHal.get(), tryReconnect()).Times(Exactly(7 * (cardinality - 1)));
+            EXPECT_CALL(*mMockHal.get(), tryReconnect()).Times(Exactly(9 * (cardinality - 1)));
         } else {
             EXPECT_CALL(*mMockHal.get(), tryReconnect()).Times(Exactly(0));
         }
@@ -127,7 +142,8 @@ TEST_F(VibratorManagerHalControllerTest, TestApiCallsAreForwardedToHal) {
                        vibrator::HalResult<vibrator::ManagerCapabilities>::ok(
                                vibrator::ManagerCapabilities::SYNC),
                        vibrator::HalResult<std::vector<int32_t>>::ok(VIBRATOR_IDS),
-                       vibrator::HalResult<std::shared_ptr<HalController>>::ok(nullptr));
+                       vibrator::HalResult<std::shared_ptr<HalController>>::ok(nullptr),
+                       vibrator::HalResult<std::shared_ptr<IVibrationSession>>::ok(nullptr));
 
     ASSERT_TRUE(mController->ping().isOk());
 
@@ -146,6 +162,8 @@ TEST_F(VibratorManagerHalControllerTest, TestApiCallsAreForwardedToHal) {
     ASSERT_TRUE(mController->prepareSynced(VIBRATOR_IDS).isOk());
     ASSERT_TRUE(mController->triggerSynced([]() {}).isOk());
     ASSERT_TRUE(mController->cancelSynced().isOk());
+    ASSERT_TRUE(mController->startSession(VIBRATOR_IDS, SESSION_CONFIG, []() {}).isOk());
+    ASSERT_TRUE(mController->clearSessions().isOk());
 
     ASSERT_EQ(1, mConnectCounter);
 }
@@ -154,7 +172,8 @@ TEST_F(VibratorManagerHalControllerTest, TestUnsupportedApiResultDoesNotResetHal
     setHalExpectations(/* cardinality= */ 1, vibrator::HalResult<void>::unsupported(),
                        vibrator::HalResult<vibrator::ManagerCapabilities>::unsupported(),
                        vibrator::HalResult<std::vector<int32_t>>::unsupported(),
-                       vibrator::HalResult<std::shared_ptr<HalController>>::unsupported());
+                       vibrator::HalResult<std::shared_ptr<HalController>>::unsupported(),
+                       vibrator::HalResult<std::shared_ptr<IVibrationSession>>::unsupported());
 
     ASSERT_TRUE(mController->ping().isUnsupported());
     ASSERT_TRUE(mController->getCapabilities().isUnsupported());
@@ -163,6 +182,8 @@ TEST_F(VibratorManagerHalControllerTest, TestUnsupportedApiResultDoesNotResetHal
     ASSERT_TRUE(mController->prepareSynced(VIBRATOR_IDS).isUnsupported());
     ASSERT_TRUE(mController->triggerSynced([]() {}).isUnsupported());
     ASSERT_TRUE(mController->cancelSynced().isUnsupported());
+    ASSERT_TRUE(mController->startSession(VIBRATOR_IDS, SESSION_CONFIG, []() {}).isUnsupported());
+    ASSERT_TRUE(mController->clearSessions().isUnsupported());
 
     ASSERT_EQ(1, mConnectCounter);
 }
@@ -171,7 +192,8 @@ TEST_F(VibratorManagerHalControllerTest, TestOperationFailedApiResultDoesNotRese
     setHalExpectations(/* cardinality= */ 1, vibrator::HalResult<void>::failed("msg"),
                        vibrator::HalResult<vibrator::ManagerCapabilities>::failed("msg"),
                        vibrator::HalResult<std::vector<int32_t>>::failed("msg"),
-                       vibrator::HalResult<std::shared_ptr<HalController>>::failed("msg"));
+                       vibrator::HalResult<std::shared_ptr<HalController>>::failed("msg"),
+                       vibrator::HalResult<std::shared_ptr<IVibrationSession>>::failed("msg"));
 
     ASSERT_TRUE(mController->ping().isFailed());
     ASSERT_TRUE(mController->getCapabilities().isFailed());
@@ -180,6 +202,8 @@ TEST_F(VibratorManagerHalControllerTest, TestOperationFailedApiResultDoesNotRese
     ASSERT_TRUE(mController->prepareSynced(VIBRATOR_IDS).isFailed());
     ASSERT_TRUE(mController->triggerSynced([]() {}).isFailed());
     ASSERT_TRUE(mController->cancelSynced().isFailed());
+    ASSERT_TRUE(mController->startSession(VIBRATOR_IDS, SESSION_CONFIG, []() {}).isFailed());
+    ASSERT_TRUE(mController->clearSessions().isFailed());
 
     ASSERT_EQ(1, mConnectCounter);
 }
@@ -188,7 +212,9 @@ TEST_F(VibratorManagerHalControllerTest, TestTransactionFailedApiResultResetsHal
     setHalExpectations(MAX_ATTEMPTS, vibrator::HalResult<void>::transactionFailed("m"),
                        vibrator::HalResult<vibrator::ManagerCapabilities>::transactionFailed("m"),
                        vibrator::HalResult<std::vector<int32_t>>::transactionFailed("m"),
-                       vibrator::HalResult<std::shared_ptr<HalController>>::transactionFailed("m"));
+                       vibrator::HalResult<std::shared_ptr<HalController>>::transactionFailed("m"),
+                       vibrator::HalResult<std::shared_ptr<IVibrationSession>>::transactionFailed(
+                               "m"));
 
     ASSERT_TRUE(mController->ping().isFailed());
     ASSERT_TRUE(mController->getCapabilities().isFailed());
@@ -197,6 +223,8 @@ TEST_F(VibratorManagerHalControllerTest, TestTransactionFailedApiResultResetsHal
     ASSERT_TRUE(mController->prepareSynced(VIBRATOR_IDS).isFailed());
     ASSERT_TRUE(mController->triggerSynced([]() {}).isFailed());
     ASSERT_TRUE(mController->cancelSynced().isFailed());
+    ASSERT_TRUE(mController->startSession(VIBRATOR_IDS, SESSION_CONFIG, []() {}).isFailed());
+    ASSERT_TRUE(mController->clearSessions().isFailed());
 
     ASSERT_EQ(1, mConnectCounter);
 }

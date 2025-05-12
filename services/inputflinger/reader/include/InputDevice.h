@@ -48,7 +48,7 @@ public:
     inline InputReaderContext* getContext() { return mContext; }
     inline int32_t getId() const { return mId; }
     inline int32_t getControllerNumber() const { return mControllerNumber; }
-    inline int32_t getGeneration() const { return mGeneration; }
+    inline virtual int32_t getGeneration() const { return mGeneration; }
     inline const std::string getName() const { return mIdentifier.name; }
     inline const std::string getDescriptor() { return mIdentifier.descriptor; }
     inline std::optional<std::string> getBluetoothAddress() const {
@@ -59,7 +59,7 @@ public:
     inline virtual uint32_t getSources() const { return mSources; }
     inline bool hasEventHubDevices() const { return !mDevices.empty(); }
 
-    inline bool isExternal() { return mIsExternal; }
+    inline virtual bool isExternal() { return mIsExternal; }
     inline std::optional<uint8_t> getAssociatedDisplayPort() const {
         return mAssociatedDisplayPort;
     }
@@ -79,7 +79,7 @@ public:
 
     inline bool isIgnored() { return !getMapperCount() && !mController; }
 
-    inline KeyboardType getKeyboardType() const { return mKeyboardType; }
+    inline virtual KeyboardType getKeyboardType() const { return mKeyboardType; }
 
     bool isEnabled();
 
@@ -122,11 +122,9 @@ public:
     std::optional<int32_t> getLightPlayerId(int32_t lightId);
 
     int32_t getMetaState();
-    void updateMetaState(int32_t keyCode);
-
     void setKeyboardType(KeyboardType keyboardType);
 
-    void bumpGeneration();
+    virtual void bumpGeneration();
 
     [[nodiscard]] NotifyDeviceResetArgs notifyReset(nsecs_t when);
 
@@ -140,6 +138,8 @@ public:
     size_t getMapperCount();
 
     std::optional<HardwareProperties> getTouchpadHardwareProperties();
+
+    bool setKernelWakeEnabled(bool enabled);
 
     // construct and add a mapper to the input device
     template <class T, typename... Args>
@@ -470,6 +470,9 @@ public:
     inline KeyboardType getKeyboardType() const { return mDevice.getKeyboardType(); }
     inline void setKeyboardType(KeyboardType keyboardType) {
         return mDevice.setKeyboardType(keyboardType);
+    }
+    inline bool setKernelWakeEnabled(bool enabled) {
+        return mEventHub->setKernelWakeEnabled(mId, enabled);
     }
 
 private:

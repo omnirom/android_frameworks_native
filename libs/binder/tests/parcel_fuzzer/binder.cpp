@@ -25,6 +25,8 @@
 #include <binder/ParcelableHolder.h>
 #include <binder/PersistableBundle.h>
 #include <binder/Status.h>
+#include <fuzzbinder/random_binder.h>
+#include <fuzzbinder/random_fd.h>
 #include <utils/Flattenable.h>
 
 #include "../../Utils.h"
@@ -114,14 +116,6 @@ std::vector<ParcelRead<::android::Parcel>> BINDER_PARCEL_READ_FUNCTIONS {
         FUZZ_LOG() << "about to setDataPosition: " << pos;
         p.setDataPosition(pos);
         FUZZ_LOG() << "setDataPosition done";
-    },
-    [] (const ::android::Parcel& p, FuzzedDataProvider& provider) {
-        size_t len = provider.ConsumeIntegralInRange<size_t>(0, 1024);
-        std::vector<uint8_t> bytes = provider.ConsumeBytes<uint8_t>(len);
-        FUZZ_LOG() << "about to setData: " <<(bytes.data() ? HexString(bytes.data(), bytes.size()) : "null");
-        // TODO: allow all read and write operations
-        (*const_cast<::android::Parcel*>(&p)).setData(bytes.data(), bytes.size());
-        FUZZ_LOG() << "setData done";
     },
     PARCEL_READ_NO_STATUS(size_t, allowFds),
     PARCEL_READ_NO_STATUS(size_t, hasFileDescriptors),
@@ -404,5 +398,113 @@ std::vector<ParcelRead<::android::Parcel>> BINDER_PARCEL_READ_FUNCTIONS {
         FUZZ_LOG() << " toString() result: " << toString;
     },
 };
+
+std::vector<ParcelWrite<::android::Parcel>> BINDER_PARCEL_WRITE_FUNCTIONS {
+    [] (::android::Parcel& p, FuzzedDataProvider& provider, android::RandomParcelOptions* /*options*/) {
+        FUZZ_LOG() << "about to call setDataSize";
+        size_t len = provider.ConsumeIntegralInRange<size_t>(0, 1024);
+        p.setDataSize(len);
+    },
+    [] (::android::Parcel& p, FuzzedDataProvider& provider, android::RandomParcelOptions* /*options*/) {
+        FUZZ_LOG() << "about to call setDataCapacity";
+        size_t len = provider.ConsumeIntegralInRange<size_t>(0, 1024);
+        p.setDataCapacity(len);
+    },
+    [] (::android::Parcel& p, FuzzedDataProvider& provider, android::RandomParcelOptions* /*options*/) {
+        FUZZ_LOG() << "about to call setData";
+        size_t len = provider.ConsumeIntegralInRange<size_t>(0, 1024);
+        std::vector<uint8_t> bytes = provider.ConsumeBytes<uint8_t>(len);
+        p.setData(bytes.data(), bytes.size());
+    },
+    [] (::android::Parcel& p, FuzzedDataProvider& provider, android::RandomParcelOptions* options) {
+        FUZZ_LOG() << "about to call appendFrom";
+
+        std::vector<uint8_t> bytes = provider.ConsumeBytes<uint8_t>(provider.ConsumeIntegralInRange<size_t>(0, 4096));
+        ::android::Parcel p2;
+        fillRandomParcel(&p2, FuzzedDataProvider(bytes.data(), bytes.size()), options);
+
+        int32_t start = provider.ConsumeIntegral<int32_t>();
+        int32_t len = provider.ConsumeIntegral<int32_t>();
+        p.appendFrom(&p2, start, len);
+    },
+    [] (::android::Parcel& p, FuzzedDataProvider& provider, android::RandomParcelOptions* /*options*/) {
+        FUZZ_LOG() << "about to call pushAllowFds";
+        bool val = provider.ConsumeBool();
+        p.pushAllowFds(val);
+    },
+    [] (::android::Parcel& p, FuzzedDataProvider& provider, android::RandomParcelOptions* /*options*/) {
+        FUZZ_LOG() << "about to call restoreAllowFds";
+        bool val = provider.ConsumeBool();
+        p.restoreAllowFds(val);
+    },
+    // markForBinder - covered by fillRandomParcel, aborts if called multiple times
+    // markForRpc - covered by fillRandomParcel, aborts if called multiple times
+    [] (::android::Parcel& p, FuzzedDataProvider& provider, android::RandomParcelOptions* /*options*/) {
+        FUZZ_LOG() << "about to call writeInterfaceToken";
+        std::string interface = provider.ConsumeRandomLengthString();
+        p.writeInterfaceToken(android::String16(interface.c_str()));
+    },
+    [] (::android::Parcel& p, FuzzedDataProvider& provider, android::RandomParcelOptions* /*options*/) {
+        FUZZ_LOG() << "about to call setEnforceNoDataAvail";
+        p.setEnforceNoDataAvail(provider.ConsumeBool());
+    },
+    [] (::android::Parcel& p, FuzzedDataProvider& /* provider */, android::RandomParcelOptions* /*options*/) {
+        FUZZ_LOG() << "about to call setServiceFuzzing";
+        p.setServiceFuzzing();
+    },
+    [] (::android::Parcel& p, FuzzedDataProvider& /* provider */, android::RandomParcelOptions* /*options*/) {
+        FUZZ_LOG() << "about to call freeData";
+        p.freeData();
+    },
+    [] (::android::Parcel& p, FuzzedDataProvider& provider, android::RandomParcelOptions* /*options*/) {
+        FUZZ_LOG() << "about to call write";
+        size_t len = provider.ConsumeIntegralInRange<size_t>(0, 256);
+        std::vector<uint8_t> bytes = provider.ConsumeBytes<uint8_t>(len);
+        p.write(bytes.data(), bytes.size());
+    },
+    // write* - write functions all implemented by calling 'write' itself.
+    [] (::android::Parcel& p, FuzzedDataProvider& provider, android::RandomParcelOptions* options) {
+        FUZZ_LOG() << "about to call writeStrongBinder";
+
+        // TODO: this logic is somewhat duplicated with random parcel
+       android::sp<android::IBinder> binder;
+       if (provider.ConsumeBool() && options->extraBinders.size() > 0) {
+            binder = options->extraBinders.at(
+                    provider.ConsumeIntegralInRange<size_t>(0, options->extraBinders.size() - 1));
+        } else {
+            binder = android::getRandomBinder(&provider);
+            options->extraBinders.push_back(binder);
+        }
+
+        p.writeStrongBinder(binder);
+    },
+    [] (::android::Parcel& p, FuzzedDataProvider& /* provider */, android::RandomParcelOptions* /*options*/) {
+        FUZZ_LOG() << "about to call writeFileDescriptor (no ownership)";
+        p.writeFileDescriptor(STDERR_FILENO, false /* takeOwnership */);
+    },
+    [] (::android::Parcel& p, FuzzedDataProvider& provider, android::RandomParcelOptions* options) {
+        FUZZ_LOG() << "about to call writeFileDescriptor (take ownership)";
+        std::vector<unique_fd> fds = android::getRandomFds(&provider);
+        if (fds.size() == 0) return;
+
+        p.writeDupFileDescriptor(fds.at(0).get());
+        options->extraFds.insert(options->extraFds.end(),
+             std::make_move_iterator(fds.begin() + 1),
+             std::make_move_iterator(fds.end()));
+    },
+    // TODO: writeBlob
+    // TODO: writeDupImmutableBlobFileDescriptor
+    // TODO: writeObject (or make the API private more likely)
+    [] (::android::Parcel& p, FuzzedDataProvider& /* provider */, android::RandomParcelOptions* /*options*/) {
+        FUZZ_LOG() << "about to call writeNoException";
+        p.writeNoException();
+    },
+    [] (::android::Parcel& p, FuzzedDataProvider& provider, android::RandomParcelOptions* /*options*/) {
+        FUZZ_LOG() << "about to call replaceCallingWorkSourceUid";
+        uid_t uid = provider.ConsumeIntegral<uid_t>();
+        p.replaceCallingWorkSourceUid(uid);
+    },
+};
+
 // clang-format on
 #pragma clang diagnostic pop

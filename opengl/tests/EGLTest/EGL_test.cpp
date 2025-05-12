@@ -765,6 +765,30 @@ TEST_F(EGLTest, EGLNoConfigContext) {
     }
 }
 
+// Verify that eglCreateContext works when EGL_TELEMETRY_HINT_ANDROID is used with
+// NO_HINT = 0, SKIP_TELEMETRY = 1 and an invalid of value of 2
+TEST_F(EGLTest, EGLContextTelemetryHintExt) {
+    for (int i = 0; i < 3; i++) {
+        EGLConfig config;
+        get8BitConfig(config);
+        std::vector<EGLint> contextAttributes;
+        contextAttributes.reserve(4);
+        contextAttributes.push_back(EGL_TELEMETRY_HINT_ANDROID);
+        contextAttributes.push_back(i);
+        contextAttributes.push_back(EGL_NONE);
+        contextAttributes.push_back(EGL_NONE);
+
+        EGLContext eglContext = eglCreateContext(mEglDisplay, config, EGL_NO_CONTEXT,
+                                                 contextAttributes.data());
+        EXPECT_NE(EGL_NO_CONTEXT, eglContext);
+        EXPECT_EQ(EGL_SUCCESS, eglGetError());
+
+        if (eglContext != EGL_NO_CONTEXT) {
+            eglDestroyContext(mEglDisplay, eglContext);
+        }
+    }
+}
+
 // Emulate what a native application would do to create a
 // 10:10:10:2 surface.
 TEST_F(EGLTest, EGLConfig1010102) {

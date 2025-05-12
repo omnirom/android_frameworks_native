@@ -543,6 +543,12 @@ sk_sp<SkShader> SkiaRenderEngine::createRuntimeEffectShader(
         }
     }
 
+    if (graphicBuffer && parameters.layer.luts) {
+        shader = mLutShader.lutShader(shader, parameters.layer.luts,
+                                      parameters.layer.sourceDataspace,
+                                      toSkColorSpace(parameters.outputDataSpace));
+    }
+
     if (parameters.requiresLinearEffect) {
         const auto format = targetBuffer != nullptr
                 ? std::optional<ui::PixelFormat>(
@@ -567,8 +573,10 @@ sk_sp<SkShader> SkiaRenderEngine::createRuntimeEffectShader(
         }
 
         // disable tonemapping if we already locally tonemapped
-        auto inputDataspace =
-                usingLocalTonemap ? parameters.outputDataSpace : parameters.layer.sourceDataspace;
+        // skip tonemapping if the luts is in use
+        auto inputDataspace = usingLocalTonemap || (graphicBuffer && parameters.layer.luts)
+                ? parameters.outputDataSpace
+                : parameters.layer.sourceDataspace;
         auto effect =
                 shaders::LinearEffect{.inputDataspace = inputDataspace,
                                       .outputDataspace = parameters.outputDataSpace,
@@ -1001,7 +1009,7 @@ void SkiaRenderEngine::drawLayersInternal(
             const auto& item = layer.source.buffer;
             auto imageTextureRef = getOrCreateBackendTexture(item.buffer->getBuffer(), false);
 
-            // if the layer's buffer has a fence, then we must must respect the fence prior to using
+            // if the layer's buffer has a fence, then we must respect the fence prior to using
             // the buffer.
             if (layer.source.buffer.fence != nullptr) {
                 waitFence(context, layer.source.buffer.fence->get());

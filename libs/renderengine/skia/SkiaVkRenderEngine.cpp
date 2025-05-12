@@ -169,24 +169,26 @@ int SkiaVkRenderEngine::getContextPriority() {
 }
 
 void SkiaVkRenderEngine::appendBackendSpecificInfoToDump(std::string& result) {
-    StringAppendF(&result, "\n ------------RE Vulkan----------\n");
-    StringAppendF(&result, "\n Vulkan device initialized: %d\n", sVulkanInterface.isInitialized());
-    StringAppendF(&result, "\n Vulkan protected device initialized: %d\n",
+    // Subclasses will prepend a backend-specific name / section header
+    StringAppendF(&result, "Vulkan device initialized: %d\n", sVulkanInterface.isInitialized());
+    StringAppendF(&result, "Vulkan protected device initialized: %d\n",
                   sProtectedContentVulkanInterface.isInitialized());
 
     if (!sVulkanInterface.isInitialized()) {
         return;
     }
 
-    StringAppendF(&result, "\n Instance extensions:\n");
+    StringAppendF(&result, "Instance extensions: [\n");
     for (const auto& name : sVulkanInterface.getInstanceExtensionNames()) {
-        StringAppendF(&result, "\n %s\n", name.c_str());
+        StringAppendF(&result, "  %s\n", name.c_str());
     }
+    StringAppendF(&result, "]\n");
 
-    StringAppendF(&result, "\n Device extensions:\n");
+    StringAppendF(&result, "Device extensions: [\n");
     for (const auto& name : sVulkanInterface.getDeviceExtensionNames()) {
-        StringAppendF(&result, "\n %s\n", name.c_str());
+        StringAppendF(&result, "  %s\n", name.c_str());
     }
+    StringAppendF(&result, "]\n");
 }
 
 } // namespace skia

@@ -17,6 +17,7 @@
 package android.gui;
 
 import android.gui.DisplayMode;
+import android.gui.FrameRateCategoryRate;
 import android.gui.HdrCapabilities;
 
 // Information about a physical display which may change on hotplug reconnect.
@@ -43,4 +44,13 @@ parcelable DynamicDisplayInfo {
 
     // The boot display mode preferred by the implementation.
     int preferredBootDisplayMode;
+
+    // Represents whether display supports ARR.
+    boolean hasArrSupport;
+
+    // Represents frame rate for FrameRateCategory Normal and High.
+    FrameRateCategoryRate frameRateCategoryRate;
+
+    // All the refresh rates supported for the default display mode.
+    float[] supportedRefreshRates;
 }

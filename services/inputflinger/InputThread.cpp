@@ -26,6 +26,16 @@ namespace input_flags = com::android::input::flags;
 
 namespace {
 
+bool applyInputEventProfile(const Thread& thread) {
+#if defined(__ANDROID__)
+    return SetTaskProfiles(thread.getTid(), {"InputPolicy"});
+#else
+    // Since thread information is not available and there's no benefit of
+    // applying the task profile on host, return directly.
+    return true;
+#endif
+}
+
 // Implementation of Thread from libutils.
 class InputThreadImpl : public Thread {
 public:
@@ -45,12 +55,13 @@ private:
 
 } // namespace
 
-InputThread::InputThread(std::string name, std::function<void()> loop, std::function<void()> wake)
-      : mName(name), mThreadWake(wake) {
+InputThread::InputThread(std::string name, std::function<void()> loop, std::function<void()> wake,
+                         bool isInCriticalPath)
+      : mThreadWake(wake) {
     mThread = sp<InputThreadImpl>::make(loop);
-    mThread->run(mName.c_str(), ANDROID_PRIORITY_URGENT_DISPLAY);
-    if (input_flags::enable_input_policy_profile()) {
-        if (!applyInputEventProfile()) {
+    mThread->run(name.c_str(), ANDROID_PRIORITY_URGENT_DISPLAY);
+    if (input_flags::enable_input_policy_profile() && isInCriticalPath) {
+        if (!applyInputEventProfile(*mThread)) {
             LOG(ERROR) << "Couldn't apply input policy profile for " << name;
         }
     }
@@ -71,16 +82,6 @@ bool InputThread::isCallingThread() {
     // Assume that the caller is doing everything correctly,
     // since thread information is not available on host
     return false;
-#endif
-}
-
-bool InputThread::applyInputEventProfile() {
-#if defined(__ANDROID__)
-    return SetTaskProfiles(mThread->getTid(), {"InputPolicy"});
-#else
-    // Since thread information is not available and there's no benefit of
-    // applying the task profile on host, return directly.
-    return true;
 #endif
 }
 

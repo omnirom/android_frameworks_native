@@ -456,6 +456,28 @@ cc_library_shared {
 }
 
 soong_config_module_type {
+    name: "libbinder_remove_cache_static_list_config",
+    module_type: "cc_defaults",
+    config_namespace: "libbinder",
+    bool_variables: ["release_libbinder_remove_cache_static_list"],
+    properties: [
+        "cflags",
+    ],
+}
+
+libbinder_remove_cache_static_list_config {
+    name: "libbinder_remove_cache_static_list_flag",
+    soong_config_variables: {
+        release_libbinder_remove_cache_static_list: {
+            cflags: ["-DLIBBINDER_REMOVE_CACHE_STATIC_LIST"],
+            conditions_default: {
+                cflags: ["-DNO_LIBBINDER_REMOVE_CACHE_STATIC_LIST"],
+            },
+        },
+    },
+}
+
+soong_config_module_type {
     name: "libbinder_client_cache_config",
     module_type: "cc_defaults",
     config_namespace: "libbinder",
@@ -477,9 +499,35 @@ libbinder_client_cache_config {
     },
 }
 
+soong_config_module_type {
+    name: "libbinder_addservice_cache_config",
+    module_type: "cc_defaults",
+    config_namespace: "libbinder",
+    bool_variables: ["release_libbinder_addservice_cache"],
+    properties: [
+        "cflags",
+    ],
+}
+
+libbinder_addservice_cache_config {
+    name: "libbinder_addservice_cache_flag",
+    soong_config_variables: {
+        release_libbinder_addservice_cache: {
+            cflags: ["-DLIBBINDER_ADDSERVICE_CACHE"],
+            conditions_default: {
+                cflags: ["-DNO_LIBBINDER_ADDSERVICE_CACHE"],
+            },
+        },
+    },
+}
+
 cc_defaults {
     name: "libbinder_kernel_defaults",
-    defaults: ["libbinder_client_cache_flag"],
+    defaults: [
+        "libbinder_client_cache_flag",
+        "libbinder_addservice_cache_flag",
+        "libbinder_remove_cache_static_list_flag",
+    ],
     srcs: [
         "BufferedTextOutput.cpp",
         "BackendUnifiedServiceManager.cpp",
@@ -489,6 +537,7 @@ cc_defaults {
         "ProcessState.cpp",
         "Static.cpp",
         ":libbinder_aidl",
+        ":libbinder_accessor_aidl",
         ":libbinder_device_interface_sources",
     ],
     target: {
@@ -800,8 +849,8 @@ filegroup {
         "aidl/android/os/IServiceCallback.aidl",
         "aidl/android/os/IServiceManager.aidl",
         "aidl/android/os/Service.aidl",
+        "aidl/android/os/ServiceWithMetadata.aidl",
         "aidl/android/os/ServiceDebugInfo.aidl",
-        ":libbinder_accessor_aidl",
     ],
     path: "aidl",
 }
@@ -812,26 +861,7 @@ filegroup {
         "aidl/android/os/IAccessor.aidl",
     ],
     path: "aidl",
-}
-
-// TODO(b/353492849): Make this interface private to libbinder.
-aidl_interface {
-    name: "android.os.accessor",
-    srcs: [":libbinder_accessor_aidl"],
-    unstable: true,
-    backend: {
-        rust: {
-            enabled: true,
-            apex_available: [
-                "com.android.virt",
-            ],
-        },
-    },
-    visibility: [
-        ":__subpackages__",
-        "//system/tools/aidl:__subpackages__",
-        "//packages/modules/Virtualization:__subpackages__",
-    ],
+    visibility: [":__subpackages__"],
 }
 
 aidl_interface {
@@ -848,6 +878,7 @@ aidl_interface {
     backend: {
         rust: {
             apex_available: [
+                "//apex_available:platform",
                 "com.android.virt",
             ],
             enabled: true,
@@ -890,13 +921,16 @@ cc_library {
         symbol_file: "libbinder_rpc_unstable.map.txt",
     },
 
+    header_abi_checker: {
+        enabled: false,
+    },
+
     // This library is intentionally limited to these targets, and it will be removed later.
     // Do not expand the visibility.
     visibility: [
         ":__subpackages__",
         "//packages/modules/Virtualization:__subpackages__",
         "//device/google/cuttlefish/shared/minidroid:__subpackages__",
-        "//system/software_defined_vehicle:__subpackages__",
         "//visibility:any_system_partition",
     ],
 }

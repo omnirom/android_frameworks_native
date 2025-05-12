@@ -51,6 +51,9 @@
     <!-- Feature to specify if the device supports adding device admins. -->
     <feature name="android.software.device_admin" />
 
+    <!-- Feature to specify if the device support managed users. -->
+    <feature name="android.software.managed_users" />
+
     <!-- Devices with all optimizations required to support VR Mode and
          pass all CDD requirements for this feature may include
          android.hardware.vr.high_performance -->

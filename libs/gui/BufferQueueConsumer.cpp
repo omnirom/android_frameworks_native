@@ -28,6 +28,10 @@
 #define VALIDATE_CONSISTENCY()
 #endif
 
+#define EGL_EGLEXT_PROTOTYPES
+#include <EGL/egl.h>
+#include <EGL/eglext.h>
+
 #include <gui/BufferItem.h>
 #include <gui/BufferQueueConsumer.h>
 #include <gui/BufferQueueCore.h>
@@ -297,7 +301,11 @@ status_t BufferQueueConsumer::acquireBuffer(BufferItem* outBuffer,
         // We might have freed a slot while dropping old buffers, or the producer
         // may be blocked waiting for the number of buffers in the queue to
         // decrease.
+#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(BUFFER_RELEASE_CHANNEL)
+        mCore->notifyBufferReleased();
+#else
         mCore->mDequeueCondition.notify_all();
+#endif
 
         ATRACE_INT(mCore->mConsumerName.c_str(), static_cast<int32_t>(mCore->mQueue.size()));
 #ifndef NO_BINDER
@@ -350,7 +358,12 @@ status_t BufferQueueConsumer::detachBuffer(int slot) {
         mCore->mActiveBuffers.erase(slot);
         mCore->mFreeSlots.insert(slot);
         mCore->clearBufferSlotLocked(slot);
+#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(BUFFER_RELEASE_CHANNEL)
+        mCore->notifyBufferReleased();
+#else
         mCore->mDequeueCondition.notify_all();
+#endif
+
         VALIDATE_CONSISTENCY();
     }
 
@@ -477,6 +490,27 @@ status_t BufferQueueConsumer::releaseBuffer(int slot, uint64_t frameNumber,
         return BAD_VALUE;
     }
 
+#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(BQ_GL_FENCE_CLEANUP)
+    if (eglFence != EGL_NO_SYNC_KHR) {
+        // Most platforms will be using native fences, so it's unlikely that we'll ever have to
+        // process an eglFence. Ideally we can remove this code eventually. In the mean time, do our
+        // best to wait for it so the buffer stays valid, otherwise return an error to the caller.
+        //
+        // EGL_SYNC_FLUSH_COMMANDS_BIT_KHR so that we don't wait forever on a fence that hasn't
+        // shown up on the GPU yet.
+        EGLint result = eglClientWaitSyncKHR(eglDisplay, eglFence, EGL_SYNC_FLUSH_COMMANDS_BIT_KHR,
+                                             1000000000);
+        if (result == EGL_FALSE) {
+            BQ_LOGE("releaseBuffer: error %#x waiting for fence", eglGetError());
+            return UNKNOWN_ERROR;
+        } else if (result == EGL_TIMEOUT_EXPIRED_KHR) {
+            BQ_LOGE("releaseBuffer: timeout waiting for fence");
+            return UNKNOWN_ERROR;
+        }
+        eglDestroySyncKHR(eglDisplay, eglFence);
+    }
+#endif
+
     sp<IProducerListener> listener;
     { // Autolock scope
         std::lock_guard<std::mutex> lock(mCore->mMutex);
@@ -498,8 +532,10 @@ status_t BufferQueueConsumer::releaseBuffer(int slot, uint64_t frameNumber,
             return BAD_VALUE;
         }
 
+#if !COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(BQ_GL_FENCE_CLEANUP)
         mSlots[slot].mEglDisplay = eglDisplay;
         mSlots[slot].mEglFence = eglFence;
+#endif
         mSlots[slot].mFence = releaseFence;
         mSlots[slot].mBufferState.release();
 
@@ -520,7 +556,12 @@ status_t BufferQueueConsumer::releaseBuffer(int slot, uint64_t frameNumber,
         }
         BQ_LOGV("releaseBuffer: releasing slot %d", slot);
 
+#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(BUFFER_RELEASE_CHANNEL)
+        mCore->notifyBufferReleased();
+#else
         mCore->mDequeueCondition.notify_all();
+#endif
+
         VALIDATE_CONSISTENCY();
     } // Autolock scope
 
@@ -574,7 +615,11 @@ status_t BufferQueueConsumer::disconnect() {
     mCore->mQueue.clear();
     mCore->freeAllBuffersLocked();
     mCore->mSharedBufferSlot = BufferQueueCore::INVALID_BUFFER_SLOT;
+#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(BUFFER_RELEASE_CHANNEL)
+    mCore->notifyBufferReleased();
+#else
     mCore->mDequeueCondition.notify_all();
+#endif
     return NO_ERROR;
 }
 

@@ -262,14 +262,16 @@ void BufferQueueCore::clearBufferSlotLocked(int slot) {
     mSlots[slot].mFrameNumber = 0;
     mSlots[slot].mAcquireCalled = false;
     mSlots[slot].mNeedsReallocation = true;
+    mSlots[slot].mFence = Fence::NO_FENCE;
 
+#if !COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(BQ_GL_FENCE_CLEANUP)
     // Destroy fence as BufferQueue now takes ownership
     if (mSlots[slot].mEglFence != EGL_NO_SYNC_KHR) {
         eglDestroySyncKHR(mSlots[slot].mEglDisplay, mSlots[slot].mEglFence);
         mSlots[slot].mEglFence = EGL_NO_SYNC_KHR;
     }
-    mSlots[slot].mFence = Fence::NO_FENCE;
     mSlots[slot].mEglDisplay = EGL_NO_DISPLAY;
+#endif
 
     if (mLastQueuedSlot == slot) {
         mLastQueuedSlot = INVALID_BUFFER_SLOT;
@@ -370,6 +372,12 @@ void BufferQueueCore::waitWhileAllocatingLocked(std::unique_lock<std::mutex>& lo
         mIsAllocatingCondition.wait(lock);
     }
 }
+
+#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(BUFFER_RELEASE_CHANNEL)
+void BufferQueueCore::notifyBufferReleased() const {
+    mDequeueCondition.notify_all();
+}
+#endif
 
 #if DEBUG_ONLY_CODE
 void BufferQueueCore::validateConsistencyLocked() const {

@@ -140,7 +140,7 @@ status_t BufferItemConsumer::releaseBufferSlotLocked(int slotIndex, const sp<Gra
         BI_LOGE("Failed to addReleaseFenceLocked");
     }
 
-    err = releaseBufferLocked(slotIndex, buffer, EGL_NO_DISPLAY, EGL_NO_SYNC_KHR);
+    err = releaseBufferLocked(slotIndex, buffer);
     if (err != OK && err != IGraphicBufferConsumer::STALE_BUFFER_SLOT) {
         BI_LOGE("Failed to release buffer: %s (%d)",
                 strerror(-err), err);

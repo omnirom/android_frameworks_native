@@ -22,15 +22,44 @@ package {
     default_team: "trendy_team_android_core_graphics_stack",
 }
 
+// This is a step towards pulling out the "backend" sources to clean up the
+// dependency graph between CompositionEngine and SurfaceFlinger.
+// MockNativeWindow doesn't strictly belong here, but this works for now so
+// that CompositionEngine tests can use these mocks.
+filegroup {
+    name: "libsurfaceflinger_backend_mock_sources",
+    srcs: [
+        ":poweradvisor_mock_sources",
+        "mock/DisplayHardware/MockComposer.cpp",
+        "mock/DisplayHardware/MockHWC2.cpp",
+        "mock/DisplayHardware/MockHWComposer.cpp",
+        "mock/system/window/MockNativeWindow.cpp",
+    ],
+}
+
+cc_library_headers {
+    name: "libsurfaceflinger_backend_mock_headers",
+    export_include_dirs: ["."],
+    static_libs: [
+        "libgmock",
+        "libgtest",
+    ],
+    export_static_lib_headers: [
+        "libgmock",
+        "libgtest",
+    ],
+}
+
+filegroup {
+    name: "poweradvisor_mock_sources",
+    srcs: [
+        "mock/PowerAdvisor/*.cpp",
+    ],
+}
+
 filegroup {
     name: "libsurfaceflinger_mock_sources",
     srcs: [
-        "mock/DisplayHardware/MockPowerHalController.cpp",
-        "mock/DisplayHardware/MockComposer.cpp",
-        "mock/DisplayHardware/MockHWC2.cpp",
-        "mock/DisplayHardware/MockIPower.cpp",
-        "mock/DisplayHardware/MockPowerHintSessionWrapper.cpp",
-        "mock/DisplayHardware/MockPowerAdvisor.cpp",
         "mock/MockEventThread.cpp",
         "mock/MockFrameTimeline.cpp",
         "mock/MockFrameTracer.cpp",
@@ -39,7 +68,6 @@ filegroup {
         "mock/MockVsyncController.cpp",
         "mock/MockVSyncDispatch.cpp",
         "mock/MockVSyncTracker.cpp",
-        "mock/system/window/MockNativeWindow.cpp",
     ],
 }
 
@@ -57,84 +85,12 @@ cc_test {
         "surfaceflinger_defaults",
     ],
     test_suites: ["device-tests"],
-    static_libs: ["libc++fs"],
     header_libs: ["surfaceflinger_tests_common_headers"],
     srcs: [
+        ":libsurfaceflinger_backend_mock_sources",
         ":libsurfaceflinger_mock_sources",
         ":libsurfaceflinger_sources",
-        "libsurfaceflinger_unittest_main.cpp",
-        "ActiveDisplayRotationFlagsTest.cpp",
-        "BackgroundExecutorTest.cpp",
-        "CommitTest.cpp",
-        "CompositionTest.cpp",
-        "DaltonizerTest.cpp",
-        "DisplayIdGeneratorTest.cpp",
-        "DisplayTransactionTest.cpp",
-        "DisplayDevice_GetBestColorModeTest.cpp",
-        "DisplayDevice_SetDisplayBrightnessTest.cpp",
-        "DisplayDevice_SetProjectionTest.cpp",
-        "DisplayModeControllerTest.cpp",
-        "EventThreadTest.cpp",
-        "FlagManagerTest.cpp",
-        "FpsReporterTest.cpp",
-        "FpsTest.cpp",
-        "FramebufferSurfaceTest.cpp",
-        "FrameRateOverrideMappingsTest.cpp",
-        "FrameTimelineTest.cpp",
-        "HWComposerTest.cpp",
-        "JankTrackerTest.cpp",
-        "OneShotTimerTest.cpp",
-        "LayerHistoryIntegrationTest.cpp",
-        "LayerInfoTest.cpp",
-        "LayerMetadataTest.cpp",
-        "LayerHierarchyTest.cpp",
-        "LayerLifecycleManagerTest.cpp",
-        "LayerSnapshotTest.cpp",
-        "LayerTestUtils.cpp",
-        "MessageQueueTest.cpp",
-        "PowerAdvisorTest.cpp",
-        "SmallAreaDetectionAllowMappingsTest.cpp",
-        "SurfaceFlinger_ColorMatrixTest.cpp",
-        "SurfaceFlinger_CreateDisplayTest.cpp",
-        "SurfaceFlinger_DestroyDisplayTest.cpp",
-        "SurfaceFlinger_DisplayModeSwitching.cpp",
-        "SurfaceFlinger_DisplayTransactionCommitTest.cpp",
-        "SurfaceFlinger_ExcludeDolbyVisionTest.cpp",
-        "SurfaceFlinger_FoldableTest.cpp",
-        "SurfaceFlinger_GetDisplayNativePrimariesTest.cpp",
-        "SurfaceFlinger_GetDisplayStatsTest.cpp",
-        "SurfaceFlinger_HdrOutputControlTest.cpp",
-        "SurfaceFlinger_HotplugTest.cpp",
-        "SurfaceFlinger_InitializeDisplaysTest.cpp",
-        "SurfaceFlinger_NotifyExpectedPresentTest.cpp",
-        "SurfaceFlinger_NotifyPowerBoostTest.cpp",
-        "SurfaceFlinger_PowerHintTest.cpp",
-        "SurfaceFlinger_SetDisplayStateTest.cpp",
-        "SurfaceFlinger_SetPowerModeInternalTest.cpp",
-        "SurfaceFlinger_SetupNewDisplayDeviceInternalTest.cpp",
-        "SchedulerTest.cpp",
-        "RefreshRateSelectorTest.cpp",
-        "RefreshRateStatsTest.cpp",
-        "RegionSamplingTest.cpp",
-        "TestableScheduler.cpp",
-        "TimeStatsTest.cpp",
-        "FrameTracerTest.cpp",
-        "TransactionApplicationTest.cpp",
-        "TransactionFrameTracerTest.cpp",
-        "TransactionProtoParserTest.cpp",
-        "TransactionSurfaceFrameTest.cpp",
-        "TransactionTraceWriterTest.cpp",
-        "TransactionTracingTest.cpp",
-        "TunnelModeEnabledReporterTest.cpp",
-        "VSyncCallbackRegistrationTest.cpp",
-        "VSyncDispatchTimerQueueTest.cpp",
-        "VSyncDispatchRealtimeTest.cpp",
-        "VsyncModulatorTest.cpp",
-        "VSyncPredictorTest.cpp",
-        "VSyncReactorTest.cpp",
-        "VsyncConfigurationTest.cpp",
-        "VsyncScheduleTest.cpp",
-        "WindowInfosListenerInvokerTest.cpp",
+        "*.cpp",
     ],
 }
 
@@ -199,6 +155,7 @@ cc_defaults {
         "libpowermanager",
         "libprocessgroup",
         "libprotobuf-cpp-lite",
+        "libstatslog_surfaceflinger",
         "libSurfaceFlingerProp",
         "libsync",
         "libui",

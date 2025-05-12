@@ -78,6 +78,7 @@ cc_test {
         "PreferStylusOverTouch_test.cpp",
         "PropertyProvider_test.cpp",
         "RotaryEncoderInputMapper_test.cpp",
+        "SensorInputMapper_test.cpp",
         "SlopController_test.cpp",
         "SwitchInputMapper_test.cpp",
         "SyncQueue_test.cpp",

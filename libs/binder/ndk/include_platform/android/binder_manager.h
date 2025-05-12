@@ -34,6 +34,7 @@ enum AServiceManager_AddServiceFlag : uint32_t {
     ADD_SERVICE_DUMP_FLAG_PRIORITY_HIGH = 1 << 2,
     ADD_SERVICE_DUMP_FLAG_PRIORITY_NORMAL = 1 << 3,
     ADD_SERVICE_DUMP_FLAG_PRIORITY_DEFAULT = 1 << 4,
+    // All other bits are reserved for internal usage
 };
 
 /**

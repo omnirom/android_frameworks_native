@@ -15,9 +15,13 @@
  */
 #pragma once
 
+#include <fuzzbinder/random_parcel.h>
 #include <fuzzer/FuzzedDataProvider.h>
 
 #include <functional>
 
 template <typename P>
 using ParcelRead = std::function<void(const P& p, FuzzedDataProvider& provider)>;
+template <typename P>
+using ParcelWrite = std::function<void(P& p, FuzzedDataProvider& provider,
+                                       android::RandomParcelOptions* options)>;

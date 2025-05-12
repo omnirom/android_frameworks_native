@@ -108,7 +108,7 @@ bool DropRootUser() {
 
     const uint32_t cap_syslog_mask = CAP_TO_MASK(CAP_SYSLOG);
     const uint32_t cap_syslog_index = CAP_TO_INDEX(CAP_SYSLOG);
-    bool has_cap_syslog = (capdata[cap_syslog_index].effective & cap_syslog_mask) != 0;
+    bool has_cap_syslog = (capdata[cap_syslog_index].permitted & cap_syslog_mask) != 0;
 
     memset(&capdata, 0, sizeof(capdata));
     if (has_cap_syslog) {

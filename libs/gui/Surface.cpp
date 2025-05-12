@@ -2735,8 +2735,8 @@ status_t Surface::unlockAndPost()
 
 bool Surface::waitForNextFrame(uint64_t lastFrame, nsecs_t timeout) {
     Mutex::Autolock lock(mMutex);
-    if (mNextFrameNumber > lastFrame) {
-      return true;
+    if (mLastFrameNumber > lastFrame) {
+        return true;
     }
     return mQueueBufferCondition.waitRelative(mMutex, timeout) == OK;
 }

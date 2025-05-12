@@ -69,7 +69,7 @@ using ::testing::SetArgPointee;
 using ::testing::StrictMock;
 
 struct HWComposerTest : testing::Test {
-    using HalError = hardware::graphics::composer::V2_1::Error;
+    using HalError = hal::Error;
 
     Hwc2::mock::Composer* const mHal = new StrictMock<Hwc2::mock::Composer>();
     impl::HWComposer mHwc{std::unique_ptr<Hwc2::Composer>(mHal)};
@@ -384,6 +384,7 @@ TEST_F(HWComposerTest, getModesWithDisplayConfigurations_VRR_ON) {
         const ui::Size size = info->preferredDetailedTimingDescriptor->physicalSizeInMm;
         const float expectedDpiX = (kWidth * kMmPerInch / size.width);
         const float expectedDpiY = (kHeight * kMmPerInch / size.height);
+        const OutputType hdrOutputType = OutputType::SYSTEM;
         const hal::VrrConfig vrrConfig =
                 hal::VrrConfig{.minFrameIntervalNs = static_cast<Fps>(120_Hz).getPeriodNsecs(),
                                .notifyExpectedPresentConfig = hal::VrrConfig::
@@ -394,7 +395,8 @@ TEST_F(HWComposerTest, getModesWithDisplayConfigurations_VRR_ON) {
                                                        .height = kHeight,
                                                        .configGroup = kConfigGroup,
                                                        .vsyncPeriod = kVsyncPeriod,
-                                                       .vrrConfig = vrrConfig};
+                                                       .vrrConfig = vrrConfig,
+                                                       .hdrOutputType = hdrOutputType};
 
         EXPECT_CALL(*mHal, getDisplayConfigurations(kHwcDisplayId, _, _))
                 .WillOnce(DoAll(SetArgPointee<2>(std::vector<hal::DisplayConfiguration>{
@@ -410,6 +412,7 @@ TEST_F(HWComposerTest, getModesWithDisplayConfigurations_VRR_ON) {
         EXPECT_EQ(modes.front().configGroup, kConfigGroup);
         EXPECT_EQ(modes.front().vsyncPeriod, kVsyncPeriod);
         EXPECT_EQ(modes.front().vrrConfig, vrrConfig);
+        EXPECT_EQ(modes.front().hdrOutputType, hdrOutputType);
         if (!FlagManager::getInstance().correct_dpi_with_display_size()) {
             EXPECT_EQ(modes.front().dpiX, -1);
             EXPECT_EQ(modes.front().dpiY, -1);
@@ -435,6 +438,7 @@ TEST_F(HWComposerTest, getModesWithDisplayConfigurations_VRR_ON) {
         EXPECT_EQ(modes.front().configGroup, kConfigGroup);
         EXPECT_EQ(modes.front().vsyncPeriod, kVsyncPeriod);
         EXPECT_EQ(modes.front().vrrConfig, vrrConfig);
+        EXPECT_EQ(modes.front().hdrOutputType, hdrOutputType);
         EXPECT_EQ(modes.front().dpiX, kDpi);
         EXPECT_EQ(modes.front().dpiY, kDpi);
 

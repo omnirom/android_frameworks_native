@@ -63,6 +63,7 @@ public:
     virtual HalResult<aidl::android::hardware::power::ChannelConfig> getSessionChannel(int tgid,
                                                                                        int uid) = 0;
     virtual HalResult<void> closeSessionChannel(int tgid, int uid) = 0;
+    virtual HalResult<aidl::android::hardware::power::SupportInfo> getSupportInfo() = 0;
 };
 
 // Empty Power HAL wrapper that ignores all api calls.
@@ -85,6 +86,7 @@ public:
     HalResult<aidl::android::hardware::power::ChannelConfig> getSessionChannel(int tgid,
                                                                                int uid) override;
     HalResult<void> closeSessionChannel(int tgid, int uid) override;
+    HalResult<aidl::android::hardware::power::SupportInfo> getSupportInfo() override;
 
 protected:
     virtual const char* getUnsupportedMessage();
@@ -170,6 +172,7 @@ public:
     HalResult<aidl::android::hardware::power::ChannelConfig> getSessionChannel(int tgid,
                                                                                int uid) override;
     HalResult<void> closeSessionChannel(int tgid, int uid) override;
+    HalResult<aidl::android::hardware::power::SupportInfo> getSupportInfo() override;
 
 protected:
     const char* getUnsupportedMessage() override;

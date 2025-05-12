@@ -54,7 +54,7 @@ public:
      * @param position The new position of the mouse cursor on the logical display
      */
     virtual void notifyPointerDisplayIdChanged(ui::LogicalDisplayId displayId,
-                                               const FloatPoint& position) = 0;
+                                               const vec2& position) = 0;
 
     /* Returns true if any InputConnection is currently active. */
     virtual bool isInputMethodConnectionActive() = 0;

@@ -17,6 +17,7 @@
 #pragma once
 
 #include <gui/WindowInfo.h>
+#include <input/Input.h>
 #include <utils/StrongPointer.h>
 #include <string>
 
@@ -25,8 +26,9 @@ namespace android {
 namespace inputdispatcher {
 
 struct DragState {
-    DragState(const sp<android::gui::WindowInfoHandle>& windowHandle, int32_t pointerId)
-          : dragWindow(windowHandle), pointerId(pointerId) {}
+    DragState(const sp<android::gui::WindowInfoHandle>& windowHandle, DeviceId deviceId,
+              int32_t pointerId)
+          : dragWindow(windowHandle), deviceId(deviceId), pointerId(pointerId) {}
     void dump(std::string& dump, const char* prefix = "");
 
     // The window being dragged.
@@ -37,6 +39,8 @@ struct DragState {
     bool isStartDrag = false;
     // Indicate if the stylus button is down at the start of the drag.
     bool isStylusButtonDownAtStart = false;
+    // Indicate which device started this drag and drop.
+    const DeviceId deviceId;
     // Indicate which pointer id is tracked by the drag and drop.
     const int32_t pointerId;
 };

@@ -16,6 +16,8 @@
 
 package android.os;
 
+import android.os.ServiceWithMetadata;
+
 /**
  * Service is a union of different service types that can be returned
  * by the internal {@link ServiceManager#getService(name)} API.
@@ -23,6 +25,6 @@ package android.os;
  * @hide
  */
 union Service {
-    @nullable IBinder binder;
+    ServiceWithMetadata serviceWithMetadata;
     @nullable IBinder accessor;
 }

@@ -35,109 +35,34 @@
       ]
     },
     {
-      "name": "CtsHardwareTestCases",
-      "options": [
-        {
-          "include-filter": "android.hardware.input.cts.tests"
-        },
-        {
-          "exclude-annotation": "androidx.test.filters.FlakyTest"
-        }
-      ]
+      "name": "CtsHardwareTestCases_cts_tests"
     },
     {
       "name": "CtsInputTestCases"
     },
     {
-      "name": "CtsViewTestCases",
-      "options": [
-        {
-          "include-filter": "android.view.cts.input"
-        }
-      ]
+      "name": "CtsViewTestCases_cts_input"
     },
     {
-      "name": "CtsViewTestCases",
-      "options": [
-        {
-          "include-filter": "android.view.cts.HoverTest"
-        },
-        {
-          "include-filter": "android.view.cts.MotionEventTest"
-        },
-        {
-          "include-filter": "android.view.cts.PointerCaptureTest"
-        },
-        {
-          "include-filter": "android.view.cts.TooltipTest"
-        },
-        {
-          "include-filter": "android.view.cts.TouchDelegateTest"
-        },
-        {
-          "include-filter": "android.view.cts.VerifyInputEventTest"
-        },
-        {
-          "include-filter": "android.view.cts.ViewTest"
-        },
-        {
-          "include-filter": "android.view.cts.ViewUnbufferedTest"
-        }
-      ]
+      "name": "CtsViewTestCases_input_related"
     },
     {
-      "name": "CtsWidgetTestCases",
-      "options": [
-        {
-          "include-filter": "android.widget.cts.NumberPickerTest"
-        },
-        {
-          "include-filter": "android.widget.cts.SeekBarTest"
-        }
-      ]
+      "name": "CtsWidgetTestCases_seekbar_and_numberpicker"
     },
     {
-      "name": "FrameworksCoreTests",
-      "options": [
-        {
-          "include-filter": "android.hardware.input"
-        }
-      ]
+      "name": "FrameworksCoreTests_hardware_input"
     },
     {
-      "name": "FrameworksCoreTests",
-      "options": [
-        {
-          "include-filter": "android.view.VerifiedKeyEventTest"
-        },
-        {
-          "include-filter": "android.view.VerifiedMotionEventTest"
-        }
-      ]
+      "name": "FrameworksCoreTests_view_verified"
     },
     {
-      "name": "CtsAppTestCases",
-      "options": [
-        {
-          "include-filter": "android.app.cts.ToolbarActionBarTest"
-        }
-      ]
+      "name": "CtsAppTestCases_cts_toolbaractionbartest"
     },
     {
-      "name": "FrameworksServicesTests",
-      "options": [
-        {
-          "include-filter": "com.android.server.input"
-        }
-      ]
+      "name": "FrameworksServicesTests_android_server_input"
     },
     {
-      "name": "CtsSecurityTestCases",
-      "options": [
-        {
-          "include-filter": "android.security.cts.MotionEventTest"
-        }
-      ]
+      "name": "CtsSecurityTestCases_cts_motioneventtest"
     },
     {
       "name": "CtsSecurityBulletinHostTestCases",
@@ -156,12 +81,7 @@
   ],
   "postsubmit": [
     {
-      "name": "CtsWindowManagerDeviceWindow",
-      "options": [
-        {
-          "include-filter": "android.server.wm.window.WindowInputTests"
-        }
-      ]
+      "name": "CtsWindowManagerDeviceWindow_window_windowinputtests"
     },
     {
       "name": "libinput_tests"
@@ -187,98 +107,31 @@
       ]
     },
     {
-      "name": "CtsHardwareTestCases",
-      "options": [
-        {
-          "include-filter": "android.hardware.input.cts.tests"
-        }
-      ]
+      "name": "CtsHardwareTestCases_cts_tests"
     },
     {
       "name": "CtsInputTestCases"
     },
     {
-      "name": "CtsViewTestCases",
-      "options": [
-        {
-          "include-filter": "android.view.cts.input"
-        }
-      ]
+      "name": "CtsViewTestCases_cts_input"
     },
     {
-      "name": "CtsViewTestCases",
-      "options": [
-        {
-          "include-filter": "android.view.cts.HoverTest"
-        },
-        {
-          "include-filter": "android.view.cts.MotionEventTest"
-        },
-        {
-          "include-filter": "android.view.cts.PointerCaptureTest"
-        },
-        {
-          "include-filter": "android.view.cts.TooltipTest"
-        },
-        {
-          "include-filter": "android.view.cts.TouchDelegateTest"
-        },
-        {
-          "include-filter": "android.view.cts.VerifyInputEventTest"
-        },
-        {
-          "include-filter": "android.view.cts.ViewTest"
-        },
-        {
-          "include-filter": "android.view.cts.ViewUnbufferedTest"
-        }
-      ]
+      "name": "CtsViewTestCases_input_related"
     },
     {
-      "name": "CtsWidgetTestCases",
-      "options": [
-        {
-          "include-filter": "android.widget.cts.NumberPickerTest"
-        },
-        {
-          "include-filter": "android.widget.cts.SeekBarTest"
-        }
-      ]
+      "name": "CtsWidgetTestCases_seekbar_and_numberpicker"
     },
     {
-      "name": "FrameworksCoreTests",
-      "options": [
-        {
-          "include-filter": "android.view.VerifiedKeyEventTest"
-        },
-        {
-          "include-filter": "android.view.VerifiedMotionEventTest"
-        }
-      ]
+      "name": "FrameworksCoreTests_view_verified"
     },
     {
-      "name": "CtsAppTestCases",
-      "options": [
-        {
-          "include-filter": "android.app.cts.ToolbarActionBarTest"
-        }
-      ]
+      "name": "CtsAppTestCases_cts_toolbaractionbartest"
     },
     {
-      "name": "FrameworksServicesTests",
-      "options": [
-        {
-          "include-filter": "com.android.server.input"
-        }
-      ]
+      "name": "FrameworksServicesTests_server_input"
     },
     {
-      "name": "CtsSecurityTestCases",
-      "options": [
-        {
-          "include-filter": "android.security.cts.MotionEventTest"
-        }
-      ]
+      "name": "CtsSecurityTestCases_cts_motioneventtest"
     },
     {
       "name": "CtsSecurityBulletinHostTestCases",

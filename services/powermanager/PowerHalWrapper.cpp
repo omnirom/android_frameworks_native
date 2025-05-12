@@ -18,6 +18,7 @@
 #include <aidl/android/hardware/power/Boost.h>
 #include <aidl/android/hardware/power/IPowerHintSession.h>
 #include <aidl/android/hardware/power/Mode.h>
+#include <aidl/android/hardware/power/SupportInfo.h>
 #include <powermanager/HalResult.h>
 #include <powermanager/PowerHalWrapper.h>
 #include <utils/Log.h>
@@ -71,6 +72,11 @@ HalResult<Aidl::ChannelConfig> EmptyHalWrapper::getSessionChannel(int, int) {
 HalResult<void> EmptyHalWrapper::closeSessionChannel(int, int) {
     ALOGV("Skipped closeSessionChannel because %s", getUnsupportedMessage());
     return HalResult<void>::unsupported();
+}
+
+HalResult<Aidl::SupportInfo> EmptyHalWrapper::getSupportInfo() {
+    ALOGV("Skipped getSupportInfo because %s", getUnsupportedMessage());
+    return HalResult<Aidl::SupportInfo>::unsupported();
 }
 
 const char* EmptyHalWrapper::getUnsupportedMessage() {
@@ -278,6 +284,12 @@ HalResult<Aidl::ChannelConfig> AidlHalWrapper::getSessionChannel(int tgid, int u
 
 HalResult<void> AidlHalWrapper::closeSessionChannel(int tgid, int uid) {
     return HalResult<void>::fromStatus(mHandle->closeSessionChannel(tgid, uid));
+}
+
+HalResult<Aidl::SupportInfo> AidlHalWrapper::getSupportInfo() {
+    Aidl::SupportInfo support;
+    auto result = mHandle->getSupportInfo(&support);
+    return HalResult<Aidl::SupportInfo>::fromStatus(result, std::move(support));
 }
 
 const char* AidlHalWrapper::getUnsupportedMessage() {

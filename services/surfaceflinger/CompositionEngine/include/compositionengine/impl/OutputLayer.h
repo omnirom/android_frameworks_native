@@ -25,11 +25,14 @@
 #include <compositionengine/LayerFE.h>
 #include <compositionengine/OutputLayer.h>
 #include <ui/FloatRect.h>
+#include <ui/PictureProfileHandle.h>
 #include <ui/Rect.h>
 
 #include <ui/DisplayIdentification.h>
 
 #include <aidl/android/hardware/graphics/composer3/Composition.h>
+
+using aidl::android::hardware::graphics::composer3::LutProperties;
 
 namespace android::compositionengine {
 
@@ -46,9 +49,14 @@ public:
     void setHwcLayer(std::shared_ptr<HWC2::Layer>) override;
 
     void uncacheBuffers(const std::vector<uint64_t>& bufferIdsToUncache) override;
+    int64_t getPictureProfilePriority() const override;
+    const PictureProfileHandle& getPictureProfileHandle() const override;
+    void commitPictureProfileToCompositionState() override;
 
     void updateCompositionState(bool includeGeometry, bool forceClientComposition,
-                                ui::Transform::RotationFlags) override;
+                                ui::Transform::RotationFlags,
+                                const std::optional<std::vector<std::optional<LutProperties>>>
+                                        properties = std::nullopt) override;
     void writeStateToHWC(bool includeGeometry, bool skipLayer, uint32_t z, bool zIsOverridden,
                          bool isPeekingThrough) override;
     void writeCursorPositionToHWC() const override;
@@ -60,6 +68,8 @@ public:
             aidl::android::hardware::graphics::composer3::Composition) override;
     void prepareForDeviceLayerRequests() override;
     void applyDeviceLayerRequest(Hwc2::IComposerClient::LayerRequest request) override;
+    void applyDeviceLayerLut(ndk::ScopedFileDescriptor,
+                             std::vector<std::pair<int, LutProperties>>) override;
     bool needsFiltering() const override;
     std::optional<LayerFE::LayerSettings> getOverrideCompositionSettings() const override;
 
@@ -90,10 +100,13 @@ private:
     void writeCompositionTypeToHWC(HWC2::Layer*,
                                    aidl::android::hardware::graphics::composer3::Composition,
                                    bool isPeekingThrough, bool skipLayer);
+    void writeLutToHWC(HWC2::Layer*, const LayerFECompositionState&);
     void detectDisallowedCompositionTypeChange(
             aidl::android::hardware::graphics::composer3::Composition from,
             aidl::android::hardware::graphics::composer3::Composition to) const;
     bool isClientCompositionForced(bool isPeekingThrough) const;
+    void updateLuts(const LayerFECompositionState&,
+                    const std::optional<std::vector<std::optional<LutProperties>>>& properties);
 };
 
 // This template factory function standardizes the implementation details of the

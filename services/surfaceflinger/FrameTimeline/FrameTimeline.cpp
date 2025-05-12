@@ -29,6 +29,7 @@
 #include <cinttypes>
 #include <numeric>
 #include <unordered_set>
+#include <vector>
 
 #include "../Jank/JankTracker.h"
 
@@ -376,6 +377,11 @@ void SurfaceFrame::setAcquireFenceTime(nsecs_t acquireFenceTime) {
     } else {
         mActuals.endTime = std::max(acquireFenceTime, mActualQueueTime);
     }
+}
+
+void SurfaceFrame::setDesiredPresentTime(nsecs_t desiredPresentTime) {
+    std::scoped_lock lock(mMutex);
+    mActuals.desiredPresentTime = desiredPresentTime;
 }
 
 void SurfaceFrame::setDropTime(nsecs_t dropTime) {
@@ -997,6 +1003,11 @@ void FrameTimeline::setSfPresent(nsecs_t sfPresentTime,
     finalizeCurrentDisplayFrame();
 }
 
+const std::vector<std::shared_ptr<frametimeline::SurfaceFrame>>& FrameTimeline::getPresentFrames()
+        const {
+    return mPresentFrames;
+}
+
 void FrameTimeline::onCommitNotComposited() {
     SFTRACE_CALL();
     std::scoped_lock lock(mMutex);
@@ -1456,6 +1467,30 @@ float FrameTimeline::computeFps(const std::unordered_set<int32_t>& layerIds) {
             static_cast<float>(totalPresentToPresentWalls);
 }
 
+void FrameTimeline::generateFrameStats(int32_t layer, size_t count, FrameStats* outStats) const {
+    std::scoped_lock lock(mMutex);
+
+    // TODO: Include FPS calculation here
+    for (auto displayFrame : mDisplayFrames) {
+        if (!count--) {
+            break;
+        }
+
+        if (displayFrame->getActuals().presentTime <= 0) {
+            continue;
+        }
+
+        for (const auto& surfaceFrame : displayFrame->getSurfaceFrames()) {
+            if (surfaceFrame->getLayerId() == layer) {
+                outStats->actualPresentTimesNano.push_back(surfaceFrame->getActuals().presentTime);
+                outStats->desiredPresentTimesNano.push_back(
+                        surfaceFrame->getActuals().desiredPresentTime);
+                outStats->frameReadyTimesNano.push_back(surfaceFrame->getActuals().endTime);
+            }
+        }
+    }
+}
+
 std::optional<size_t> FrameTimeline::getFirstSignalFenceIndex() const {
     for (size_t i = 0; i < mPendingPresentFences.size(); i++) {
         const auto& [fence, _] = mPendingPresentFences[i];
@@ -1492,6 +1527,7 @@ void FrameTimeline::flushPendingPresentFences() {
         mPendingPresentFences.erase(mPendingPresentFences.begin());
     }
 
+    mPresentFrames.clear();
     for (size_t i = 0; i < mPendingPresentFences.size(); i++) {
         const auto& pendingPresentFence = mPendingPresentFences[i];
         nsecs_t signalTime = Fence::SIGNAL_TIME_INVALID;
@@ -1504,6 +1540,13 @@ void FrameTimeline::flushPendingPresentFences() {
 
         auto& displayFrame = pendingPresentFence.second;
         displayFrame->onPresent(signalTime, mPreviousActualPresentTime);
+
+        // Surface frames have been jank classified and can be provided to caller
+        // to detect if buffer stuffing is occurring.
+        for (const auto& frame : displayFrame->getSurfaceFrames()) {
+            mPresentFrames.push_back(frame);
+        }
+
         mPreviousPredictionPresentTime =
                 displayFrame->trace(mSurfaceFlingerPid, monoBootOffset,
                                     mPreviousPredictionPresentTime, mFilterFramesBeforeTraceStarts);

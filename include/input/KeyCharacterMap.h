@@ -72,7 +72,7 @@ public:
     };
 
     /* Loads a key character map from a file. */
-    static base::Result<std::shared_ptr<KeyCharacterMap>> load(const std::string& filename,
+    static base::Result<std::unique_ptr<KeyCharacterMap>> load(const std::string& filename,
                                                                Format format);
 
     /* Loads a key character map from its string contents. */
@@ -136,6 +136,9 @@ public:
 
     /* Returns keycode after applying Android key code remapping defined in mKeyRemapping */
     int32_t applyKeyRemapping(int32_t fromKeyCode) const;
+
+    /** Returns list of keycodes that remap to provided keycode (@see setKeyRemapping()) */
+    std::vector<int32_t> findKeyCodesMappedToKeyCode(int32_t toKeyCode) const;
 
     /* Returns the <keyCode, metaState> pair after applying key behavior defined in the kcm file,
      * that tries to find a replacement key code based on current meta state */

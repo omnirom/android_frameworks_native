@@ -39,6 +39,7 @@
 #include "filters/BlurFilter.h"
 #include "filters/EdgeExtensionShaderFactory.h"
 #include "filters/LinearEffect.h"
+#include "filters/LutShader.h"
 #include "filters/StretchShaderFactory.h"
 
 class SkData;
@@ -184,6 +185,7 @@ private:
 
     StretchShaderFactory mStretchShaderFactory;
     EdgeExtensionShaderFactory mEdgeExtensionShaderFactory;
+    LutShader mLutShader;
 
     sp<Fence> mLastDrawFence;
     BlurFilter* mBlurFilter = nullptr;

@@ -182,7 +182,7 @@ public:
         mLifecycleManager.applyTransactions(setZTransaction(id, z));
     }
 
-    void setCrop(uint32_t id, const Rect& crop) {
+    void setCrop(uint32_t id, const FloatRect& crop) {
         std::vector<TransactionState> transactions;
         transactions.emplace_back();
         transactions.back().states.push_back({});
@@ -192,6 +192,8 @@ public:
         transactions.back().states.front().state.crop = crop;
         mLifecycleManager.applyTransactions(transactions);
     }
+
+    void setCrop(uint32_t id, const Rect& crop) { setCrop(id, crop.toFloatRect()); }
 
     void setFlags(uint32_t id, uint32_t mask, uint32_t flags) {
         std::vector<TransactionState> transactions;
@@ -213,6 +215,17 @@ public:
         transactions.back().states.front().state.what = layer_state_t::eAlphaChanged;
         transactions.back().states.front().layerId = id;
         transactions.back().states.front().state.color.a = static_cast<half>(alpha);
+        mLifecycleManager.applyTransactions(transactions);
+    }
+
+    void setAutoRefresh(uint32_t id, bool autoRefresh) {
+        std::vector<TransactionState> transactions;
+        transactions.emplace_back();
+        transactions.back().states.push_back({});
+
+        transactions.back().states.front().state.what = layer_state_t::eAutoRefreshChanged;
+        transactions.back().states.front().layerId = id;
+        transactions.back().states.front().state.autoRefresh = autoRefresh;
         mLifecycleManager.applyTransactions(transactions);
     }
 

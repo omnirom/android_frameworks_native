@@ -43,11 +43,10 @@
 #include <utils/Errors.h>
 
 #include <common/FlagManager.h>
+#include <scheduler/FrameRateMode.h>
 #include <scheduler/VsyncConfig.h>
-#include "DisplayHardware/DisplayMode.h"
 #include "FrameTimeline.h"
 #include "VSyncDispatch.h"
-#include "VSyncTracker.h"
 
 #include "EventThread.h"
 
@@ -104,6 +103,10 @@ std::string toString(const DisplayEventReceiver::Event& event) {
                                 to_string(event.header.displayId).c_str(),
                                 event.hdcpLevelsChange.connectedLevel,
                                 event.hdcpLevelsChange.maxLevel);
+        case DisplayEventReceiver::DISPLAY_EVENT_MODE_REJECTION:
+            return StringPrintf("ModeRejected{displayId=%s, modeId=%u}",
+                                to_string(event.header.displayId).c_str(),
+                                event.modeRejection.modeId);
         default:
             return "Event{}";
     }
@@ -185,6 +188,18 @@ DisplayEventReceiver::Event makeHdcpLevelsChange(PhysicalDisplayId displayId,
                     },
             .hdcpLevelsChange.connectedLevel = connectedLevel,
             .hdcpLevelsChange.maxLevel = maxLevel,
+    };
+}
+
+DisplayEventReceiver::Event makeModeRejection(PhysicalDisplayId displayId, DisplayModeId modeId) {
+    return DisplayEventReceiver::Event{
+            .header =
+                    DisplayEventReceiver::Event::Header{
+                            .type = DisplayEventReceiver::DISPLAY_EVENT_MODE_REJECTION,
+                            .displayId = displayId,
+                            .timestamp = systemTime(),
+                    },
+            .modeRejection.modeId = ftl::to_underlying(modeId),
     };
 }
 
@@ -420,14 +435,24 @@ void EventThread::enableSyntheticVsync(bool enable) {
     mCondition.notify_all();
 }
 
+void EventThread::omitVsyncDispatching(bool omitted) {
+    std::lock_guard<std::mutex> lock(mMutex);
+    if (!mVSyncState || mVSyncState->omitted == omitted) {
+        return;
+    }
+
+    mVSyncState->omitted = omitted;
+    mCondition.notify_all();
+}
+
 void EventThread::onVsync(nsecs_t vsyncTime, nsecs_t wakeupTime, nsecs_t readyTime) {
     std::lock_guard<std::mutex> lock(mMutex);
     mLastVsyncCallbackTime = TimePoint::fromNs(vsyncTime);
 
     LOG_FATAL_IF(!mVSyncState);
     mVsyncTracer = (mVsyncTracer + 1) % 2;
-    mPendingEvents.push_back(makeVSync(mVSyncState->displayId, wakeupTime, ++mVSyncState->count,
-                                       vsyncTime, readyTime));
+    mPendingEvents.push_back(makeVSync(mVsyncSchedule->getPhysicalDisplayId(), wakeupTime,
+                                       ++mVSyncState->count, vsyncTime, readyTime));
     mCondition.notify_all();
 }
 
@@ -472,6 +497,21 @@ void EventThread::onHdcpLevelsChanged(PhysicalDisplayId displayId, int32_t conne
     mCondition.notify_all();
 }
 
+void EventThread::onModeRejected(PhysicalDisplayId displayId, DisplayModeId modeId) {
+    std::lock_guard<std::mutex> lock(mMutex);
+
+    mPendingEvents.push_back(makeModeRejection(displayId, modeId));
+    mCondition.notify_all();
+}
+
+// Merge lists of buffer stuffed Uids
+void EventThread::addBufferStuffedUids(BufferStuffingMap bufferStuffedUids) {
+    std::lock_guard<std::mutex> lock(mMutex);
+    for (auto& [uid, count] : bufferStuffedUids) {
+        mBufferStuffedUids.emplace_or_replace(uid, count);
+    }
+}
+
 void EventThread::threadMain(std::unique_lock<std::mutex>& lock) {
     DisplayEventConsumers consumers;
 
@@ -486,9 +526,9 @@ void EventThread::threadMain(std::unique_lock<std::mutex>& lock) {
             if (event->header.type == DisplayEventReceiver::DISPLAY_EVENT_HOTPLUG) {
                 if (event->hotplug.connectionError == 0) {
                     if (event->hotplug.connected && !mVSyncState) {
-                        mVSyncState.emplace(event->header.displayId);
-                    } else if (!event->hotplug.connected && mVSyncState &&
-                               mVSyncState->displayId == event->header.displayId) {
+                        mVSyncState.emplace();
+                    } else if (!event->hotplug.connected &&
+                               mVsyncSchedule->getPhysicalDisplayId() == event->header.displayId) {
                         mVSyncState.reset();
                     }
                 } else {
@@ -521,7 +561,17 @@ void EventThread::threadMain(std::unique_lock<std::mutex>& lock) {
         }
 
         if (mVSyncState && vsyncRequested) {
-            mState = mVSyncState->synthetic ? State::SyntheticVSync : State::VSync;
+            const bool vsyncOmitted =
+                    FlagManager::getInstance().no_vsyncs_on_screen_off() && mVSyncState->omitted;
+            if (vsyncOmitted) {
+                mState = State::Idle;
+                SFTRACE_INT("VsyncPendingScreenOn", 1);
+            } else {
+                mState = mVSyncState->synthetic ? State::SyntheticVSync : State::VSync;
+                if (FlagManager::getInstance().no_vsyncs_on_screen_off()) {
+                    SFTRACE_INT("VsyncPendingScreenOn", 0);
+                }
+            }
         } else {
             ALOGW_IF(!mVSyncState, "Ignoring VSYNC request while display is disconnected");
             mState = State::Idle;
@@ -559,7 +609,7 @@ void EventThread::threadMain(std::unique_lock<std::mutex>& lock) {
                 const auto now = systemTime(SYSTEM_TIME_MONOTONIC);
                 const auto deadlineTimestamp = now + timeout.count();
                 const auto expectedVSyncTime = deadlineTimestamp + timeout.count();
-                mPendingEvents.push_back(makeVSync(mVSyncState->displayId, now,
+                mPendingEvents.push_back(makeVSync(mVsyncSchedule->getPhysicalDisplayId(), now,
                                                    ++mVSyncState->count, expectedVSyncTime,
                                                    deadlineTimestamp));
             }
@@ -701,6 +751,10 @@ void EventThread::generateFrameTimeline(VsyncEventData& outVsyncEventData, nsecs
 
 void EventThread::dispatchEvent(const DisplayEventReceiver::Event& event,
                                 const DisplayEventConsumers& consumers) {
+    // List of Uids that have been sent vsync data with queued buffer count.
+    // Used to keep track of which Uids can be removed from the map of
+    // buffer stuffed clients.
+    ftl::SmallVector<uid_t, 10> uidsPostedQueuedBuffers;
     for (const auto& consumer : consumers) {
         DisplayEventReceiver::Event copy = event;
         if (event.header.type == DisplayEventReceiver::DISPLAY_EVENT_VSYNC) {
@@ -709,6 +763,13 @@ void EventThread::dispatchEvent(const DisplayEventReceiver::Event& event,
             generateFrameTimeline(copy.vsync.vsyncData, frameInterval.ns(), copy.header.timestamp,
                                   event.vsync.vsyncData.preferredExpectedPresentationTime(),
                                   event.vsync.vsyncData.preferredDeadlineTimestamp());
+        }
+        auto it = mBufferStuffedUids.find(consumer->mOwnerUid);
+        if (it != mBufferStuffedUids.end()) {
+            copy.vsync.vsyncData.numberQueuedBuffers = it->second;
+            uidsPostedQueuedBuffers.emplace_back(consumer->mOwnerUid);
+        } else {
+            copy.vsync.vsyncData.numberQueuedBuffers = 0;
         }
         switch (consumer->postEvent(copy)) {
             case NO_ERROR:
@@ -725,6 +786,12 @@ void EventThread::dispatchEvent(const DisplayEventReceiver::Event& event,
                 removeDisplayEventConnectionLocked(consumer);
         }
     }
+    // The clients that have already received the queued buffer count
+    // can be removed from the buffer stuffed Uid list to avoid
+    // being sent duplicate messages.
+    for (auto uid : uidsPostedQueuedBuffers) {
+        mBufferStuffedUids.erase(uid);
+    }
     if (event.header.type == DisplayEventReceiver::DISPLAY_EVENT_VSYNC &&
         FlagManager::getInstance().vrr_config()) {
         mLastCommittedVsyncTime =
@@ -739,7 +806,7 @@ void EventThread::dump(std::string& result) const {
     StringAppendF(&result, "%s: state=%s VSyncState=", mThreadName, toCString(mState));
     if (mVSyncState) {
         StringAppendF(&result, "{displayId=%s, count=%u%s}\n",
-                      to_string(mVSyncState->displayId).c_str(), mVSyncState->count,
+                      to_string(mVsyncSchedule->getPhysicalDisplayId()).c_str(), mVSyncState->count,
                       mVSyncState->synthetic ? ", synthetic" : "");
     } else {
         StringAppendF(&result, "none\n");

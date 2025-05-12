@@ -67,6 +67,9 @@ public:
         EX_SERVICE_SPECIFIC = -8,
         EX_PARCELABLE = -9,
 
+        // See android/os/Parcel.java. We need to handle this in native code.
+        EX_HAS_NOTED_APPOPS_REPLY_HEADER = -127,
+
         // This is special and Java specific; see Parcel.java.
         EX_HAS_REPLY_HEADER = -128,
         // This is special, and indicates to C++ binder proxies that the
@@ -149,6 +152,8 @@ public:
 private:
     Status(int32_t exceptionCode, int32_t errorCode);
     Status(int32_t exceptionCode, int32_t errorCode, const String8& message);
+
+    status_t skipUnusedHeader(const Parcel& parcel);
 
     // If |mException| == EX_TRANSACTION_FAILED, generated code will return
     // |mErrorCode| as the result of the transaction rather than write an

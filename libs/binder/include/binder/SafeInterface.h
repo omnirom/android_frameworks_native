@@ -152,6 +152,14 @@ public:
         return callParcel("writeParcelableVector",
                           [&]() { return parcel->writeParcelableVector(v); });
     }
+
+    status_t read(const Parcel& parcel, std::vector<bool>* v) const {
+        return callParcel("readBoolVector", [&]() { return parcel.readBoolVector(v); });
+    }
+    status_t write(Parcel* parcel, const std::vector<bool>& v) const {
+        return callParcel("writeBoolVector", [&]() { return parcel->writeBoolVector(v); });
+    }
+
     status_t read(const Parcel& parcel, float* f) const {
         return callParcel("readFloat", [&]() { return parcel.readFloat(f); });
     }

@@ -264,6 +264,7 @@ filegroup {
         "DisplayEventDispatcher.cpp",
         "DisplayEventReceiver.cpp",
         "FenceMonitor.cpp",
+        "Flags.cpp",
         "GLConsumer.cpp",
         "IConsumerListener.cpp",
         "IGraphicBufferConsumer.cpp",
@@ -274,6 +275,7 @@ filegroup {
         "LayerMetadata.cpp",
         "LayerStatePermissions.cpp",
         "LayerState.cpp",
+        "DisplayLuts.cpp",
         "OccupancyTracker.cpp",
         "StreamSplitter.cpp",
         "ScreenCaptureResults.cpp",
@@ -339,6 +341,10 @@ cc_defaults {
     header_libs: [
         "jni_headers",
         "libgui_aidl_headers",
+    ],
+
+    static_libs: [
+        "libsurfaceflingerflags",
     ],
 
     afdo: true,

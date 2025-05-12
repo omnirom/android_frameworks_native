@@ -503,7 +503,7 @@ void RpcServer::establishConnection(
 
                 auto status = binder::os::getRandomBytes(sessionId.data(), sessionId.size());
                 if (status != OK) {
-                    ALOGE("Failed to read random session ID: %s", strerror(-status));
+                    ALOGE("Failed to read random session ID: %s", statusToString(status).c_str());
                     return;
                 }
             } while (server->mSessions.end() != server->mSessions.find(sessionId));

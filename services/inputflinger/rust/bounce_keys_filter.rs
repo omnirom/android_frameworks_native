@@ -25,6 +25,7 @@ use com_android_server_inputflinger::aidl::com::android::server::inputflinger::{
 };
 use input::KeyboardType;
 use log::debug;
+use std::any::Any;
 use std::collections::{HashMap, HashSet};
 
 #[derive(Debug)]
@@ -132,6 +133,17 @@ impl Filter for BounceKeysFilter {
 
     fn destroy(&mut self) {
         self.next.destroy();
+    }
+
+    fn save(
+        &mut self,
+        state: HashMap<&'static str, Box<dyn Any + Send + Sync>>,
+    ) -> HashMap<&'static str, Box<dyn Any + Send + Sync>> {
+        self.next.save(state)
+    }
+
+    fn restore(&mut self, state: &HashMap<&'static str, Box<dyn Any + Send + Sync>>) {
+        self.next.restore(state);
     }
 
     fn dump(&mut self, dump_str: String) -> String {
