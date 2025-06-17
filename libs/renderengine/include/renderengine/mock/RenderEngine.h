@@ -46,17 +46,16 @@ public:
                  ftl::Future<FenceResult>(const DisplaySettings&, const std::vector<LayerSettings>&,
                                           const std::shared_ptr<ExternalTexture>&,
                                           base::unique_fd&&));
-    MOCK_METHOD7(drawGainmap,
+    MOCK_METHOD6(tonemapAndDrawGainmap,
                  ftl::Future<FenceResult>(const std::shared_ptr<ExternalTexture>&,
-                                          base::borrowed_fd&&,
-                                          const std::shared_ptr<ExternalTexture>&,
                                           base::borrowed_fd&&, float, ui::Dataspace,
+                                          const std::shared_ptr<ExternalTexture>&,
                                           const std::shared_ptr<ExternalTexture>&));
-    MOCK_METHOD8(drawGainmapInternal,
+    MOCK_METHOD7(tonemapAndDrawGainmapInternal,
                  void(const std::shared_ptr<std::promise<FenceResult>>&&,
-                      const std::shared_ptr<ExternalTexture>&, base::borrowed_fd&&,
                       const std::shared_ptr<ExternalTexture>&, base::borrowed_fd&&, float,
-                      ui::Dataspace, const std::shared_ptr<ExternalTexture>&));
+                      ui::Dataspace, const std::shared_ptr<ExternalTexture>&,
+                      const std::shared_ptr<ExternalTexture>&));
     MOCK_METHOD5(drawLayersInternal,
                  void(const std::shared_ptr<std::promise<FenceResult>>&&, const DisplaySettings&,
                       const std::vector<LayerSettings>&, const std::shared_ptr<ExternalTexture>&,

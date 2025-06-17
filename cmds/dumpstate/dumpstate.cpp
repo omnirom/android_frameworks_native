@@ -57,6 +57,7 @@
 #include <log/log_read.h>
 #include <math.h>
 #include <openssl/sha.h>
+#include <perfetto_flags.h>
 #include <poll.h>
 #include <private/android_filesystem_config.h>
 #include <private/android_logger.h>
@@ -128,6 +129,9 @@ using android::os::dumpstate::PropertiesHelper;
 using android::os::dumpstate::TaskQueue;
 using android::os::dumpstate::WaitForTask;
 
+// BAD - See README.md: "Dumpstate philosophy: exec not link"
+// Do not add more complicated variables here, prefer to execute only. Don't link more code here.
+
 // Keep in sync with
 // frameworks/base/services/core/java/com/android/server/am/ActivityManagerService.java
 static const int TRACE_DUMP_TIMEOUT_MS = 10000; // 10 seconds
@@ -187,11 +191,10 @@ void add_mountinfo();
 #define SNAPSHOTCTL_LOG_DIR "/data/misc/snapshotctl_log"
 #define LINKERCONFIG_DIR "/linkerconfig"
 #define PACKAGE_DEX_USE_LIST "/data/system/package-dex-usage.list"
-#define SYSTEM_TRACE_SNAPSHOT "/data/misc/perfetto-traces/bugreport/systrace.pftrace"
+#define SYSTEM_TRACE_DIR "/data/misc/perfetto-traces/bugreport"
 #define CGROUPFS_DIR "/sys/fs/cgroup"
 #define SDK_EXT_INFO "/apex/com.android.sdkext/bin/derive_sdk"
 #define DROPBOX_DIR "/data/system/dropbox"
-#define PRINT_FLAGS "/system/bin/printflags"
 #define UWB_LOG_DIR "/data/misc/apexdata/com.android.uwb/log"
 
 // TODO(narayan): Since this information has to be kept in sync
@@ -355,6 +358,31 @@ static bool CopyFileToFile(const std::string& input_file, const std::string& out
     MYLOGD("Going to copy bugreport file (%s) to %s\n", input_file.c_str(), output_file.c_str());
     android::base::unique_fd out_fd(OpenForWrite(output_file));
     return CopyFileToFd(input_file, out_fd.get());
+}
+
+template <typename Func>
+size_t ForEachTrace(Func func) {
+    std::unique_ptr<DIR, decltype(&closedir)> traces_dir(opendir(SYSTEM_TRACE_DIR), closedir);
+
+    if (traces_dir == nullptr) {
+        MYLOGW("Unable to open directory %s: %s\n", SYSTEM_TRACE_DIR, strerror(errno));
+        return 0;
+    }
+
+    size_t traces_found = 0;
+    struct dirent* entry = nullptr;
+    while ((entry = readdir(traces_dir.get()))) {
+        if (entry->d_type != DT_REG) {
+            continue;
+        }
+        std::string trace_path = std::string(SYSTEM_TRACE_DIR) + "/" + entry->d_name;
+        if (access(trace_path.c_str(), F_OK) != 0) {
+            continue;
+        }
+        ++traces_found;
+        func(trace_path);
+    }
+    return traces_found;
 }
 
 }  // namespace
@@ -1099,20 +1127,16 @@ static void MaybeAddSystemTraceToZip() {
     // This function copies into the .zip the system trace that was snapshotted
     // by the early call to MaybeSnapshotSystemTraceAsync(), if any background
     // tracing was happening.
-    bool system_trace_exists = access(SYSTEM_TRACE_SNAPSHOT, F_OK) == 0;
-    if (!system_trace_exists) {
-        // No background trace was happening at the time MaybeSnapshotSystemTraceAsync() was invoked
-        if (!PropertiesHelper::IsUserBuild()) {
-            MYLOGI(
-                "No system traces found. Check for previously uploaded traces by looking for "
-                "go/trace-uuid in logcat")
-        }
-        return;
+    size_t traces_found = android::os::ForEachTrace([&](const std::string& trace_path) {
+        ds.AddZipEntry(ZIP_ROOT_DIR + trace_path, trace_path);
+        android::os::UnlinkAndLogOnError(trace_path);
+    });
+
+    if (traces_found == 0 && !PropertiesHelper::IsUserBuild()) {
+        MYLOGI(
+            "No system traces found. Check for previously uploaded traces by looking for "
+            "go/trace-uuid in logcat")
     }
-    ds.AddZipEntry(
-            ZIP_ROOT_DIR + SYSTEM_TRACE_SNAPSHOT,
-            SYSTEM_TRACE_SNAPSHOT);
-    android::os::UnlinkAndLogOnError(SYSTEM_TRACE_SNAPSHOT);
 }
 
 static void DumpVisibleWindowViews() {
@@ -1264,6 +1288,17 @@ static void DumpIpAddrAndRules() {
     RunCommand("IP RULES v6", {"ip", "-6", "rule", "show"});
 }
 
+static void DumpKernelMemoryAllocations() {
+    if (!access("/proc/allocinfo", F_OK)) {
+        // Print the top 100 biggest memory allocations of at least one byte.
+        // The output is sorted by size, descending.
+        RunCommand("KERNEL MEMORY ALLOCATIONS",
+                   {"alloctop", "--once", "--sort", "s", "--min", "1", "--lines", "100"});
+    }
+}
+
+// BAD - See README.md: "Dumpstate philosophy: exec not link"
+// This should all be moved into a separate binary rather than have complex logic here.
 static Dumpstate::RunStatus RunDumpsysTextByPriority(const std::string& title, int priority,
                                                      std::chrono::milliseconds timeout,
                                                      std::chrono::milliseconds service_timeout) {
@@ -1344,6 +1379,8 @@ static Dumpstate::RunStatus RunDumpsysTextNormalPriority(const std::string& titl
                                     service_timeout);
 }
 
+// BAD - See README.md: "Dumpstate philosophy: exec not link"
+// This should all be moved into a separate binary rather than have complex logic here.
 static Dumpstate::RunStatus RunDumpsysProto(const std::string& title, int priority,
                                             std::chrono::milliseconds timeout,
                                             std::chrono::milliseconds service_timeout) {
@@ -1425,6 +1462,8 @@ static Dumpstate::RunStatus RunDumpsysNormal() {
  * Dumpstate can pick up later and output to the bugreport. Using STDOUT_FILENO
  * if it's not running in the parallel task.
  */
+// BAD - See README.md: "Dumpstate philosophy: exec not link"
+// This should all be moved into a separate binary rather than have complex logic here.
 static void DumpHals(int out_fd = STDOUT_FILENO) {
     RunCommand("HARDWARE HALS", {"lshal", "--all", "--types=all"},
                CommandOptions::WithTimeout(10).AsRootIfAvailable().Build(),
@@ -1481,6 +1520,9 @@ static void DumpHals(int out_fd = STDOUT_FILENO) {
     }
 }
 
+// BAD - See README.md: "Dumpstate philosophy: exec not link"
+// This should all be moved into a separate binary rather than have complex logic here.
+//
 // Dump all of the files that make up the vendor interface.
 // See the files listed in dumpFileList() for the latest list of files.
 static void DumpVintf() {
@@ -1510,6 +1552,8 @@ static void DumpExternalFragmentationInfo() {
     printf("------ EXTERNAL FRAGMENTATION INFO ------\n");
     std::ifstream ifs("/proc/buddyinfo");
     auto unusable_index_regex = std::regex{"Node\\s+([0-9]+),\\s+zone\\s+(\\S+)\\s+(.*)"};
+    // BAD - See README.md: "Dumpstate philosophy: exec not link"
+    // This should all be moved into a separate binary rather than have complex logic here.
     for (std::string line; std::getline(ifs, line);) {
         std::smatch match_results;
         if (std::regex_match(line, match_results, unusable_index_regex)) {
@@ -1773,6 +1817,8 @@ Dumpstate::RunStatus Dumpstate::dumpstate() {
 
     DoKmsg();
 
+    DumpKernelMemoryAllocations();
+
     DumpShutdownCheckpoints();
 
     DumpIpAddrAndRules();
@@ -1798,11 +1844,7 @@ Dumpstate::RunStatus Dumpstate::dumpstate() {
     DumpFile("PRODUCT BUILD-TIME RELEASE FLAGS", "/product/etc/build_flags.json");
     DumpFile("VENDOR BUILD-TIME RELEASE FLAGS", "/vendor/etc/build_flags.json");
 
-    RunCommand("ACONFIG FLAGS", {PRINT_FLAGS},
-               CommandOptions::WithTimeout(10).Always().DropRoot().Build());
     RunCommand("ACONFIG FLAGS DUMP", {AFLAGS, "list"},
-               CommandOptions::WithTimeout(10).Always().AsRootIfAvailable().Build());
-    RunCommand("WHICH ACONFIG FLAG STORAGE", {AFLAGS, "which-backing"},
                CommandOptions::WithTimeout(10).Always().AsRootIfAvailable().Build());
 
     RunCommand("STORAGED IO INFO", {"storaged", "-u", "-p"});
@@ -1886,7 +1928,7 @@ Dumpstate::RunStatus Dumpstate::dumpstate() {
     // Add linker configuration directory
     ds.AddDir(LINKERCONFIG_DIR, true);
 
-    /* Dump frozen cgroupfs */
+    DumpFile("Cgroups", "/proc/cgroups");
     dump_frozen_cgroupfs();
 
     if (ds.dump_pool_) {
@@ -2453,6 +2495,8 @@ static dumpstate_hal_aidl::IDumpstateDevice::DumpstateMode GetDumpstateHalModeAi
     return dumpstate_hal_aidl::IDumpstateDevice::DumpstateMode::DEFAULT;
 }
 
+// BAD - See README.md: "Dumpstate philosophy: exec not link"
+// This should all be moved into a separate binary rather than have complex logic here.
 static void DoDumpstateBoardHidl(
     const sp<dumpstate_hal_hidl_1_0::IDumpstateDevice> dumpstate_hal_1_0,
     const std::vector<::ndk::ScopedFileDescriptor>& dumpstate_fds,
@@ -3390,8 +3434,8 @@ Dumpstate::RunStatus Dumpstate::RunInternal(int32_t calling_uid,
     // duration is logged into MYLOG instead.
     PrintHeader();
 
-    bool system_trace_exists = access(SYSTEM_TRACE_SNAPSHOT, F_OK) == 0;
-    if (options_->use_predumped_ui_data && !system_trace_exists) {
+    size_t trace_count = android::os::ForEachTrace([](const std::string&) {});
+    if (options_->use_predumped_ui_data && trace_count == 0) {
         MYLOGW("Ignoring 'use predumped data' flag because no predumped data is available");
         options_->use_predumped_ui_data = false;
     }
@@ -3538,20 +3582,24 @@ std::future<std::string> Dumpstate::MaybeSnapshotSystemTraceAsync() {
     }
 
     // If a stale file exists already, remove it.
-    unlink(SYSTEM_TRACE_SNAPSHOT);
+    android::os::ForEachTrace([&](const std::string& trace_path) { unlink(trace_path.c_str()); });
 
     MYLOGI("Launching async '%s'", SERIALIZE_PERFETTO_TRACE_TASK.c_str())
+
     return std::async(
         std::launch::async, [this, outPath = std::move(outPath), outFd = std::move(outFd)] {
-            // If a background system trace is happening and is marked as "suitable for
-            // bugreport" (i.e. bugreport_score > 0 in the trace config), this command
-            // will stop it and serialize into SYSTEM_TRACE_SNAPSHOT. In the (likely)
-            // case that no trace is ongoing, this command is a no-op.
+            // If one or more background system traces are happening and are marked as
+            // "suitable for bugreport" (bugreport_score > 0 in the trace config), this command
+            // will snapshot them into SYSTEM_TRACE_DIR.
+            // In the (likely) case that no trace is ongoing, this command is a no-op.
             // Note: this should not be enqueued as we need to freeze the trace before
             // dumpstate starts. Otherwise the trace ring buffers will contain mostly
             // the dumpstate's own activity which is irrelevant.
+            const char* cmd_arg = perfetto::flags::save_all_traces_in_bugreport()
+                                      ? "--save-all-for-bugreport"
+                                      : "--save-for-bugreport";
             RunCommand(
-                SERIALIZE_PERFETTO_TRACE_TASK, {"perfetto", "--save-for-bugreport"},
+                SERIALIZE_PERFETTO_TRACE_TASK, {"perfetto", cmd_arg},
                 CommandOptions::WithTimeout(30).DropRoot().CloseAllFileDescriptorsOnExec().Build(),
                 false, outFd);
             // MaybeAddSystemTraceToZip() will take care of copying the trace in the zip

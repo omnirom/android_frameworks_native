@@ -33,8 +33,6 @@
 #include "TestEventMatchers.h"
 #include "TestInputListener.h"
 
-namespace input_flags = com::android::input::flags;
-
 namespace android {
 
 using testing::AllOf;
@@ -50,8 +48,6 @@ public:
             mReader(mFakeEventHub, mFakePolicy, mFakeListener),
             mDevice(newDevice()),
             mDeviceContext(*mDevice, EVENTHUB_ID) {
-        input_flags::include_relative_axis_values_for_captured_touchpads(true);
-
         const size_t slotCount = 8;
         mFakeEventHub->addAbsoluteAxis(EVENTHUB_ID, ABS_MT_SLOT, 0, slotCount - 1, 0, 0, 0);
         mAccumulator.configure(mDeviceContext, slotCount, /*usingSlotsProtocol=*/true);

@@ -94,7 +94,7 @@ TEST_F(HWComposerTest, isHeadless) {
     constexpr hal::HWDisplayId kHwcDisplayId = 1;
     expectHotplugConnect(kHwcDisplayId);
 
-    const auto info = mHwc.onHotplug(kHwcDisplayId, hal::Connection::CONNECTED);
+    const auto info = mHwc.onHotplug(kHwcDisplayId, HWComposer::HotplugEvent::Connected);
     ASSERT_TRUE(info);
 
     ASSERT_FALSE(mHwc.isHeadless());
@@ -111,7 +111,7 @@ TEST_F(HWComposerTest, getDisplayConnectionType) {
     constexpr hal::HWDisplayId kHwcDisplayId = 1;
     expectHotplugConnect(kHwcDisplayId);
 
-    const auto info = mHwc.onHotplug(kHwcDisplayId, hal::Connection::CONNECTED);
+    const auto info = mHwc.onHotplug(kHwcDisplayId, HWComposer::HotplugEvent::Connected);
     ASSERT_TRUE(info);
 
     EXPECT_CALL(*mHal, getDisplayConnectionType(kHwcDisplayId, _))
@@ -133,7 +133,7 @@ TEST_F(HWComposerTest, getActiveMode) {
     constexpr hal::HWDisplayId kHwcDisplayId = 2;
     expectHotplugConnect(kHwcDisplayId);
 
-    const auto info = mHwc.onHotplug(kHwcDisplayId, hal::Connection::CONNECTED);
+    const auto info = mHwc.onHotplug(kHwcDisplayId, HWComposer::HotplugEvent::Connected);
     ASSERT_TRUE(info);
 
     {
@@ -164,7 +164,7 @@ TEST_F(HWComposerTest, getModesWithLegacyDisplayConfigs) {
     constexpr int32_t kMaxFrameIntervalNs = 50000000; // 20Fps
 
     expectHotplugConnect(kHwcDisplayId);
-    const auto info = mHwc.onHotplug(kHwcDisplayId, hal::Connection::CONNECTED);
+    const auto info = mHwc.onHotplug(kHwcDisplayId, HWComposer::HotplugEvent::Connected);
     ASSERT_TRUE(info);
     ASSERT_TRUE(info->preferredDetailedTimingDescriptor.has_value());
 
@@ -266,7 +266,7 @@ TEST_F(HWComposerTest, getModesWithDisplayConfigurations_VRR_OFF) {
     constexpr int32_t kMaxFrameIntervalNs = 50000000; // 20Fps
 
     expectHotplugConnect(kHwcDisplayId);
-    const auto info = mHwc.onHotplug(kHwcDisplayId, hal::Connection::CONNECTED);
+    const auto info = mHwc.onHotplug(kHwcDisplayId, HWComposer::HotplugEvent::Connected);
     ASSERT_TRUE(info);
 
     EXPECT_CALL(*mHal, isVrrSupported()).WillRepeatedly(Return(false));
@@ -364,7 +364,7 @@ TEST_F(HWComposerTest, getModesWithDisplayConfigurations_VRR_ON) {
     constexpr hal::HWConfigId kConfigId = 42;
     constexpr int32_t kMaxFrameIntervalNs = 50000000; // 20Fps
     expectHotplugConnect(kHwcDisplayId);
-    const auto info = mHwc.onHotplug(kHwcDisplayId, hal::Connection::CONNECTED);
+    const auto info = mHwc.onHotplug(kHwcDisplayId, HWComposer::HotplugEvent::Connected);
     ASSERT_TRUE(info);
 
     EXPECT_CALL(*mHal, isVrrSupported()).WillRepeatedly(Return(true));
@@ -452,7 +452,7 @@ TEST_F(HWComposerTest, onVsync) {
     constexpr hal::HWDisplayId kHwcDisplayId = 1;
     expectHotplugConnect(kHwcDisplayId);
 
-    const auto info = mHwc.onHotplug(kHwcDisplayId, hal::Connection::CONNECTED);
+    const auto info = mHwc.onHotplug(kHwcDisplayId, HWComposer::HotplugEvent::Connected);
     ASSERT_TRUE(info);
 
     const auto physicalDisplayId = info->id;

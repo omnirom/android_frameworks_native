@@ -23,6 +23,7 @@ import android.gui.Rotation;
 /** @hide */
 parcelable StaticDisplayInfo {
     DisplayConnectionType connectionType = DisplayConnectionType.Internal;
+    int port = -1;
     float density;
     boolean secure;
     @nullable DeviceProductInfo deviceProductInfo;

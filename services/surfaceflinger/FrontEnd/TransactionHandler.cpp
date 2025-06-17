@@ -28,7 +28,7 @@
 
 namespace android::surfaceflinger::frontend {
 
-void TransactionHandler::queueTransaction(TransactionState&& state) {
+void TransactionHandler::queueTransaction(QueuedTransactionState&& state) {
     mLocklessTransactionQueue.push(std::move(state));
     mPendingTransactionCount.fetch_add(1);
     SFTRACE_INT("TransactionQueue", static_cast<int>(mPendingTransactionCount.load()));
@@ -45,9 +45,9 @@ void TransactionHandler::collectTransactions() {
     }
 }
 
-std::vector<TransactionState> TransactionHandler::flushTransactions() {
+std::vector<QueuedTransactionState> TransactionHandler::flushTransactions() {
     // Collect transaction that are ready to be applied.
-    std::vector<TransactionState> transactions;
+    std::vector<QueuedTransactionState> transactions;
     TransactionFlushState flushState;
     flushState.queueProcessTime = systemTime();
     // Transactions with a buffer pending on a barrier may be on a different applyToken
@@ -76,7 +76,7 @@ std::vector<TransactionState> TransactionHandler::flushTransactions() {
 }
 
 void TransactionHandler::applyUnsignaledBufferTransaction(
-        std::vector<TransactionState>& transactions, TransactionFlushState& flushState) {
+        std::vector<QueuedTransactionState>& transactions, TransactionFlushState& flushState) {
     if (!flushState.queueWithUnsignaledBuffer) {
         return;
     }
@@ -98,9 +98,9 @@ void TransactionHandler::applyUnsignaledBufferTransaction(
     }
 }
 
-void TransactionHandler::popTransactionFromPending(std::vector<TransactionState>& transactions,
-                                                   TransactionFlushState& flushState,
-                                                   std::queue<TransactionState>& queue) {
+void TransactionHandler::popTransactionFromPending(
+        std::vector<QueuedTransactionState>& transactions, TransactionFlushState& flushState,
+        std::queue<QueuedTransactionState>& queue) {
     auto& transaction = queue.front();
     // Transaction is ready move it from the pending queue.
     flushState.firstTransaction = false;
@@ -146,8 +146,8 @@ TransactionHandler::TransactionReadiness TransactionHandler::applyFilters(
     return ready;
 }
 
-int TransactionHandler::flushPendingTransactionQueues(std::vector<TransactionState>& transactions,
-                                                      TransactionFlushState& flushState) {
+int TransactionHandler::flushPendingTransactionQueues(
+        std::vector<QueuedTransactionState>& transactions, TransactionFlushState& flushState) {
     int transactionsPendingBarrier = 0;
     auto it = mPendingTransactionQueues.begin();
     while (it != mPendingTransactionQueues.end()) {

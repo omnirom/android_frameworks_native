@@ -34,6 +34,11 @@ struct TouchedWindow {
     InputTarget::DispatchMode dispatchMode = InputTarget::DispatchMode::AS_IS;
     ftl::Flags<InputTarget::Flags> targetFlags;
 
+    // If another window has transferred touches to this window, and wants to continue sending the
+    // rest of the gesture to this window, store the token of the originating (transferred-from)
+    // window here.
+    sp<IBinder> forwardingWindowToken;
+
     // Hovering
     bool hasHoveringPointers() const;
     bool hasHoveringPointers(DeviceId deviceId) const;
@@ -76,7 +81,7 @@ struct TouchedWindow {
     };
 
     std::vector<DeviceId> eraseHoveringPointersIf(
-            std::function<bool(const PointerProperties&, float /*x*/, float /*y*/)> condition);
+            std::function<bool(const PointerProperties&, float x, float y)> condition);
 
 private:
     struct DeviceState {

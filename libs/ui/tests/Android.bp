@@ -45,16 +45,6 @@ cc_test {
 }
 
 cc_test {
-    name: "DisplayId_test",
-    shared_libs: ["libui"],
-    srcs: ["DisplayId_test.cpp"],
-    cflags: [
-        "-Wall",
-        "-Werror",
-    ],
-}
-
-cc_test {
     name: "DisplayIdentification_test",
     shared_libs: ["libui"],
     static_libs: ["libgmock"],
@@ -137,6 +127,17 @@ cc_test {
     test_suites: ["device-tests"],
     shared_libs: ["libui"],
     srcs: ["Rect_test.cpp"],
+    cflags: [
+        "-Wall",
+        "-Werror",
+    ],
+}
+
+cc_test {
+    name: "RingBuffer_test",
+    test_suites: ["device-tests"],
+    shared_libs: ["libui"],
+    srcs: ["RingBuffer_test.cpp"],
     cflags: [
         "-Wall",
         "-Werror",

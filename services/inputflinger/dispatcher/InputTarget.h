@@ -77,8 +77,8 @@ public:
     // (ignored for KeyEvents)
     float globalScaleFactor = 1.0f;
 
-    // Current display transform. Used for compatibility for raw coordinates.
-    ui::Transform displayTransform;
+    // The raw coordinate transform that's used for compatibility for MotionEvent's getRaw APIs.
+    ui::Transform rawTransform;
 
     // Event time for the first motion event (ACTION_DOWN) dispatched to this input target if
     // FLAG_SPLIT is set.

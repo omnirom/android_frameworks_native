@@ -32,7 +32,7 @@ namespace android {
 
 class StreamSplitterTest : public ::testing::Test {};
 
-struct FakeListener : public BnConsumerListener {
+struct FakeListener : public IConsumerListener {
     virtual void onFrameAvailable(const BufferItem& /* item */) {}
     virtual void onBuffersReleased() {}
     virtual void onSidebandStreamChanged() {}

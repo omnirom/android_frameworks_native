@@ -803,6 +803,28 @@ cc_test {
 }
 
 cc_test {
+    name: "binderStabilityIntegrationTest",
+    defaults: ["binder_test_defaults"],
+    srcs: [
+        "binderStabilityIntegrationTest.cpp",
+    ],
+
+    shared_libs: [
+        "libbinder",
+        "libutils",
+    ],
+    static_libs: [
+        "libprocpartition",
+    ],
+
+    test_suites: [
+        "general-tests",
+        "vts",
+    ],
+    require_root: true,
+}
+
+cc_test {
     name: "binderAllocationLimits",
     defaults: ["binder_test_defaults"],
     srcs: ["binderAllocationLimits.cpp"],

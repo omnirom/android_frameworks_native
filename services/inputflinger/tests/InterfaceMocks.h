@@ -50,6 +50,8 @@ namespace android {
 
 class MockInputReaderContext : public InputReaderContext {
 public:
+    std::string dump() override { return "(dump from MockInputReaderContext)"; }
+
     MOCK_METHOD(void, updateGlobalMetaState, (), (override));
     MOCK_METHOD(int32_t, getGlobalMetaState, (), (override));
 
@@ -68,7 +70,7 @@ public:
     MOCK_METHOD(InputReaderPolicyInterface*, getPolicy, (), (override));
     MOCK_METHOD(EventHubInterface*, getEventHub, (), (override));
 
-    int32_t getNextId() override { return 1; };
+    int32_t getNextId() const override { return 1; };
 
     MOCK_METHOD(void, updateLedMetaState, (int32_t metaState), (override));
     MOCK_METHOD(int32_t, getLedMetaState, (), (override));
@@ -179,6 +181,7 @@ public:
     MOCK_METHOD(bool, isDeviceEnabled, (int32_t deviceId), (const, override));
     MOCK_METHOD(status_t, enableDevice, (int32_t deviceId), (override));
     MOCK_METHOD(status_t, disableDevice, (int32_t deviceId), (override));
+    MOCK_METHOD(std::filesystem::path, getSysfsRootPath, (int32_t deviceId), (const, override));
     MOCK_METHOD(void, sysfsNodeChanged, (const std::string& sysfsNodePath), (override));
     MOCK_METHOD(bool, setKernelWakeEnabled, (int32_t deviceId, bool enabled), (override));
 };
@@ -191,19 +194,22 @@ public:
                 (ui::LogicalDisplayId displayId, const vec2& position), (override));
     MOCK_METHOD(bool, isInputMethodConnectionActive, (), (override));
     MOCK_METHOD(void, notifyMouseCursorFadedOnTyping, (), (override));
+    MOCK_METHOD(std::optional<vec2>, filterPointerMotionForAccessibility,
+                (const vec2& current, const vec2& delta, const ui::LogicalDisplayId& displayId),
+                (override));
 };
 
 class MockInputDevice : public InputDevice {
 public:
     MockInputDevice(InputReaderContext* context, int32_t id, int32_t generation,
-                    const InputDeviceIdentifier& identifier)
-          : InputDevice(context, id, generation, identifier) {}
+                    const InputDeviceIdentifier& identifier, bool isExternal)
+          : InputDevice(context, id, generation, identifier), mIsExternal(isExternal) {}
 
     MOCK_METHOD(uint32_t, getSources, (), (const, override));
     MOCK_METHOD(std::optional<DisplayViewport>, getAssociatedViewport, (), (const));
     MOCK_METHOD(KeyboardType, getKeyboardType, (), (const, override));
     MOCK_METHOD(bool, isEnabled, (), ());
-    MOCK_METHOD(bool, isExternal, (), (override));
+    bool isExternal() override { return mIsExternal; }
 
     MOCK_METHOD(void, dump, (std::string& dump, const std::string& eventHubDevStr), ());
     MOCK_METHOD(void, addEmptyEventHubDevice, (int32_t eventHubId), ());
@@ -266,5 +272,6 @@ public:
 
 private:
     int32_t mGeneration = 0;
+    const bool mIsExternal;
 };
 } // namespace android

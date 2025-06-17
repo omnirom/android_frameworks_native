@@ -29,9 +29,14 @@ cc_library_shared {
         "libexpresslog",
         "libhidlbase",
         "liblog",
-        "libstatslog",
         "libstatssocket",
         "libutils",
+    ],
+    generated_sources: [
+        "statslog_hidl.cpp",
+    ],
+    generated_headers: [
+        "statslog_hidl.h",
     ],
     export_include_dirs: [
         "include/",
@@ -45,5 +50,30 @@ cc_library_shared {
     ],
     vintf_fragment_modules: [
         "android.frameworks.stats-service.xml",
+    ],
+}
+
+genrule {
+    name: "statslog_hidl.h",
+    tools: ["stats-log-api-gen"],
+    cmd: "$(location stats-log-api-gen)" +
+        " --header $(genDir)/statslog_hidl.h" +
+        " --module statshidl" +
+        " --namespace android,util,statshidl",
+    out: [
+        "statslog_hidl.h",
+    ],
+}
+
+genrule {
+    name: "statslog_hidl.cpp",
+    tools: ["stats-log-api-gen"],
+    cmd: "$(location stats-log-api-gen)" +
+        " --cpp $(genDir)/statslog_hidl.cpp" +
+        " --module statshidl" +
+        " --namespace android,util,statshidl" +
+        " --importHeader statslog_hidl.h",
+    out: [
+        "statslog_hidl.cpp",
     ],
 }

@@ -58,9 +58,6 @@ static const SkString edgeShader = SkString(R"(
 )");
 
 EdgeExtensionShaderFactory::EdgeExtensionShaderFactory() {
-    if (!com::android::graphics::libgui::flags::edge_extension_shader()) {
-        return;
-    }
     mResult = std::make_unique<SkRuntimeEffect::Result>(SkRuntimeEffect::MakeForShader(edgeShader));
     LOG_ALWAYS_FATAL_IF(!mResult->errorText.isEmpty(),
                         "EdgeExtensionShaderFactory compilation "

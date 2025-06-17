@@ -15,14 +15,22 @@
  */
 #pragma once
 
+#include <android-base/file.h>
+#include <android/bitmap.h>
+#include <android/data_space.h>
+#include <android/imagedecoder.h>
 #include <gui/AidlUtil.h>
 #include <gui/SyncScreenCaptureListener.h>
 #include <private/gui/ComposerServiceAIDL.h>
 #include <ui/FenceResult.h>
+#include <ui/PixelFormat.h>
 #include <ui/Rect.h>
 #include <utils/String8.h>
 #include <functional>
 #include "TransactionUtils.h"
+
+#include <filesystem>
+#include <fstream>
 
 namespace android {
 
@@ -171,6 +179,146 @@ public:
                                         "expected [%3d, %3d, %3d], got [%3d, %3d, %3d]",
                                         x, y, r, g, b, pixel[0], pixel[1], pixel[2]));
             EXPECT_EQ(String8(), err) << err.c_str();
+        }
+    }
+
+    static void writePng(const std::filesystem::path& path, const void* pixels, uint32_t width,
+                         uint32_t height, uint32_t stride) {
+        AndroidBitmapInfo info{
+                .width = width,
+                .height = height,
+                .stride = stride,
+                .format = ANDROID_BITMAP_FORMAT_RGBA_8888,
+                .flags = ANDROID_BITMAP_FLAGS_ALPHA_OPAQUE,
+        };
+
+        std::ofstream file(path, std::ios::binary);
+        ASSERT_TRUE(file.is_open());
+
+        auto writeFunc = [](void* filePtr, const void* data, size_t size) -> bool {
+            auto file = reinterpret_cast<std::ofstream*>(filePtr);
+            file->write(reinterpret_cast<const char*>(data), size);
+            return file->good();
+        };
+
+        int compressResult = AndroidBitmap_compress(&info, ADATASPACE_SRGB, pixels,
+                                                    ANDROID_BITMAP_COMPRESS_FORMAT_PNG,
+                                                    /*(ignored) quality=*/100, &file, writeFunc);
+        ASSERT_EQ(compressResult, ANDROID_BITMAP_RESULT_SUCCESS);
+        file.close();
+    }
+
+    static void readImage(const std::filesystem::path& filename, std::vector<uint8_t>& outBytes,
+                          int& outWidth, int& outHeight) {
+        std::ifstream file(filename, std::ios::binary | std::ios::ate);
+        ASSERT_TRUE(file.is_open()) << "Failed to open " << filename;
+
+        size_t fileSize = file.tellg();
+        file.seekg(0, std::ios::beg);
+        std::vector<char> fileData(fileSize);
+        file.read(fileData.data(), fileSize);
+        file.close();
+
+        AImageDecoder* decoder = nullptr;
+        int createResult = AImageDecoder_createFromBuffer(fileData.data(), fileSize, &decoder);
+
+        ASSERT_EQ(createResult, ANDROID_IMAGE_DECODER_SUCCESS);
+
+        const AImageDecoderHeaderInfo* headerInfo = AImageDecoder_getHeaderInfo(decoder);
+        outWidth = AImageDecoderHeaderInfo_getWidth(headerInfo);
+        outHeight = AImageDecoderHeaderInfo_getHeight(headerInfo);
+        int32_t format = AImageDecoderHeaderInfo_getAndroidBitmapFormat(headerInfo);
+        ASSERT_EQ(format, ANDROID_BITMAP_FORMAT_RGBA_8888);
+
+        size_t stride = outWidth * 4; // Assuming RGBA format
+        size_t bufferSize = stride * outHeight;
+
+        outBytes.resize(bufferSize);
+        int decodeResult = AImageDecoder_decodeImage(decoder, outBytes.data(), stride, bufferSize);
+        ASSERT_EQ(decodeResult, ANDROID_IMAGE_DECODER_SUCCESS);
+        AImageDecoder_delete(decoder);
+    }
+
+    static void writeGraphicBufferToPng(const std::string& path, const sp<GraphicBuffer>& buffer) {
+        base::unique_fd fd{open(path.c_str(), O_WRONLY | O_CREAT, S_IWUSR)};
+        ASSERT_GE(fd.get(), 0);
+
+        void* pixels = nullptr;
+        int32_t stride = 0;
+        auto lockStatus = buffer->lock(GRALLOC_USAGE_SW_READ_OFTEN, &pixels,
+                                       nullptr /*outBytesPerPixel*/, &stride);
+        ASSERT_GE(lockStatus, 0);
+
+        writePng(path, pixels, buffer->getWidth(), buffer->getHeight(), stride);
+
+        auto unlockStatus = buffer->unlock();
+        ASSERT_GE(unlockStatus, 0);
+    }
+
+    // Tries to read an image from executable directory
+    // If the test fails, the screenshot is written to $TMPDIR
+    void expectBufferMatchesImageFromFile(const Rect& rect,
+                                          const std::filesystem::path& pathRelativeToExeDir) {
+        ASSERT_NE(nullptr, mOutBuffer);
+        ASSERT_EQ(HAL_PIXEL_FORMAT_RGBA_8888, mOutBuffer->getPixelFormat());
+
+        int bufferWidth = int32_t(mOutBuffer->getWidth());
+        int bufferHeight = int32_t(mOutBuffer->getHeight());
+        int bufferStride = mOutBuffer->getStride() * 4;
+
+        std::vector<uint8_t> imagePixels;
+        int imageWidth;
+        int imageHeight;
+        readImage(android::base::GetExecutableDirectory() / pathRelativeToExeDir, imagePixels,
+                  imageWidth, imageHeight);
+        int imageStride = 4 * imageWidth;
+
+        ASSERT_TRUE(rect.isValid());
+
+        ASSERT_GE(rect.left, 0);
+        ASSERT_GE(rect.bottom, 0);
+
+        ASSERT_LE(rect.right, bufferWidth);
+        ASSERT_LE(rect.bottom, bufferHeight);
+
+        ASSERT_LE(rect.right, imageWidth);
+        ASSERT_LE(rect.bottom, imageHeight);
+
+        int tolerance = 4; // arbitrary
+        for (int32_t y = rect.top; y < rect.bottom; y++) {
+            for (int32_t x = rect.left; x < rect.right; x++) {
+                const uint8_t* bufferPixel = mPixels + y * bufferStride + x * 4;
+                const uint8_t* imagePixel =
+                        imagePixels.data() + (y - rect.top) * imageStride + (x - rect.left) * 4;
+
+                int dr = bufferPixel[0] - imagePixel[0];
+                int dg = bufferPixel[1] - imagePixel[1];
+                int db = bufferPixel[2] - imagePixel[2];
+                int da = bufferPixel[3] - imagePixel[3];
+                int dist = std::abs(dr) + std::abs(dg) + std::abs(db) + std::abs(da);
+
+                bool pixelMatches = dist < tolerance;
+
+                if (!pixelMatches) {
+                    std::filesystem::path outFilename = pathRelativeToExeDir.filename();
+                    outFilename.replace_extension();
+                    outFilename += "_actual.png";
+                    std::filesystem::path outPath = std::filesystem::temp_directory_path() /
+                            "SurfaceFlinger_test_screenshots" / outFilename;
+                    writeGraphicBufferToPng(outPath, mOutBuffer);
+
+                    ASSERT_TRUE(pixelMatches)
+                            << String8::format("pixel @ (%3d, %3d): "
+                                               "expected [%3d, %3d, %3d, %3d], got [%3d, %3d, %3d, "
+                                               "%3d], "
+                                               "wrote screenshot to '%s'",
+                                               x, y, imagePixel[0], imagePixel[1], imagePixel[2],
+                                               imagePixel[3], bufferPixel[0], bufferPixel[1],
+                                               bufferPixel[2], bufferPixel[3], outPath.c_str())
+                                       .c_str();
+                    return;
+                }
+            }
         }
     }
 

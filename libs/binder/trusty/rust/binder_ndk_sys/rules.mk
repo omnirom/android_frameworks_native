@@ -30,8 +30,13 @@ MODULE_LIBRARY_DEPS += \
 	trusty/user/base/lib/trusty-sys \
 
 MODULE_RUSTFLAGS += \
-	--cfg 'android_vendor' \
 	--cfg 'trusty' \
+
+ifeq (false,$(call TOBOOL,$(USE_SYSTEM_BINDER)))
+MODULE_RUSTFLAGS += \
+	--cfg 'android_vendor' \
+
+endif
 
 MODULE_BINDGEN_SRC_HEADER := $(LIBBINDER_DIR)/rust/sys/BinderBindings.hpp
 

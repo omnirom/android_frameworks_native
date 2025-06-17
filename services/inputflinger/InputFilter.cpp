@@ -56,7 +56,7 @@ InputFilter::InputFilter(InputListenerInterface& listener, IInputFlingerRust& ru
 void InputFilter::notifyInputDevicesChanged(const NotifyInputDevicesChangedArgs& args) {
     mDeviceInfos.clear();
     mDeviceInfos.reserve(args.inputDeviceInfos.size());
-    for (auto info : args.inputDeviceInfos) {
+    for (const auto& info : args.inputDeviceInfos) {
         AidlDeviceInfo& aidlInfo = mDeviceInfos.emplace_back();
         aidlInfo.deviceId = info.getId();
         aidlInfo.external = info.isExternal();

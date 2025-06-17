@@ -615,7 +615,7 @@ std::unique_ptr<KeyCharacterMap> KeyCharacterMap::readFromParcel(Parcel* parcel)
         ALOGE("%s: Null parcel", __func__);
         return nullptr;
     }
-    std::string loadFileName = parcel->readCString();
+    std::string loadFileName = parcel->readString8().c_str();
     std::unique_ptr<KeyCharacterMap> map =
             std::make_unique<KeyCharacterMap>(KeyCharacterMap(loadFileName));
     map->mType = static_cast<KeyCharacterMap::KeyboardType>(parcel->readInt32());
@@ -704,7 +704,7 @@ void KeyCharacterMap::writeToParcel(Parcel* parcel) const {
         ALOGE("%s: Null parcel", __func__);
         return;
     }
-    parcel->writeCString(mLoadFileName.c_str());
+    parcel->writeString8(String8(mLoadFileName.c_str()));
     parcel->writeInt32(static_cast<int32_t>(mType));
     parcel->writeBool(mLayoutOverlayApplied);
 

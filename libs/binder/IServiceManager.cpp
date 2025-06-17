@@ -43,7 +43,11 @@
 #include <binder/IPermissionController.h>
 #endif
 
-#ifdef __ANDROID__
+#if !(defined(__ANDROID__) || defined(__FUCHSIA))
+#define BINDER_SERVICEMANAGEMENT_DELEGATION_SUPPORT
+#endif
+
+#if !defined(BINDER_SERVICEMANAGEMENT_DELEGATION_SUPPORT)
 #include <cutils/properties.h>
 #else
 #include "ServiceManagerHost.h"
@@ -302,6 +306,25 @@ android::binder::Status getInjectedAccessor(const std::string& name,
 
     *service = os::Service::make<os::Service::Tag::accessor>(nullptr);
     return android::binder::Status::ok();
+}
+
+void appendInjectedAccessorServices(std::vector<std::string>* list) {
+    LOG_ALWAYS_FATAL_IF(list == nullptr,
+                        "Attempted to get list of services from Accessors with nullptr");
+    std::lock_guard<std::mutex> lock(gAccessorProvidersMutex);
+    for (const auto& entry : gAccessorProviders) {
+        list->insert(list->end(), entry.mProvider->instances().begin(),
+                     entry.mProvider->instances().end());
+    }
+}
+
+void forEachInjectedAccessorService(const std::function<void(const std::string&)>& f) {
+    std::lock_guard<std::mutex> lock(gAccessorProvidersMutex);
+    for (const auto& entry : gAccessorProviders) {
+        for (const auto& instance : entry.mProvider->instances()) {
+            f(instance);
+        }
+    }
 }
 
 sp<IServiceManager> defaultServiceManager()
@@ -605,7 +628,7 @@ sp<IBinder> CppBackendShim::getService(const String16& name) const {
 
 sp<IBinder> CppBackendShim::checkService(const String16& name) const {
     Service ret;
-    if (!mUnifiedServiceManager->checkService(String8(name).c_str(), &ret).isOk()) {
+    if (!mUnifiedServiceManager->checkService2(String8(name).c_str(), &ret).isOk()) {
         return nullptr;
     }
     return ret.get<Service::Tag::serviceWithMetadata>().service;
@@ -883,7 +906,7 @@ std::vector<IServiceManager::ServiceDebugInfo> CppBackendShim::getServiceDebugIn
     return ret;
 }
 
-#ifndef __ANDROID__
+#if defined(BINDER_SERVICEMANAGEMENT_DELEGATION_SUPPORT)
 // CppBackendShim for host. Implements the old libbinder android::IServiceManager API.
 // The internal implementation of the AIDL interface android::os::IServiceManager calls into
 // on-device service manager.

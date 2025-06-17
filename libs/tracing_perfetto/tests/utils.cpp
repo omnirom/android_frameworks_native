@@ -34,36 +34,17 @@
 namespace perfetto {
 namespace shlib {
 namespace test_utils {
-namespace {
-
-std::string ToHexChars(uint8_t val) {
-  std::string ret;
-  uint8_t high_nibble = (val & 0xF0) >> 4;
-  uint8_t low_nibble = (val & 0xF);
-  static const char hex_chars[] = "0123456789ABCDEF";
-  ret.push_back(hex_chars[high_nibble]);
-  ret.push_back(hex_chars[low_nibble]);
-  return ret;
-}
-
-}  // namespace
-
 TracingSession TracingSession::Builder::Build() {
   perfetto::protos::TraceConfig trace_config;
   trace_config.add_buffers()->set_size_kb(1024);
 
-  auto* track_event_ds_config = trace_config.add_data_sources()->mutable_config();
-  auto* ftrace_ds_config = trace_config.add_data_sources()->mutable_config();
-
-  track_event_ds_config->set_name("track_event");
-  track_event_ds_config->set_target_buffer(0);
-
-  ftrace_ds_config->set_name("linux.ftrace");
-  ftrace_ds_config->set_target_buffer(0);
-
   {
-    auto* ftrace_config = ftrace_ds_config->mutable_ftrace_config();
     if (!atrace_categories_.empty()) {
+      auto* ftrace_ds_config = trace_config.add_data_sources()->mutable_config();
+      ftrace_ds_config->set_name("linux.ftrace");
+      ftrace_ds_config->set_target_buffer(0);
+
+      auto* ftrace_config = ftrace_ds_config->mutable_ftrace_config();
       ftrace_config->add_ftrace_events("ftrace/print");
       for (const std::string& cat : atrace_categories_) {
         ftrace_config->add_atrace_categories(cat);
@@ -76,8 +57,14 @@ TracingSession TracingSession::Builder::Build() {
   }
 
   {
-    auto* track_event_config = track_event_ds_config->mutable_track_event_config();
     if (!enabled_categories_.empty() || !disabled_categories_.empty()) {
+      auto* track_event_ds_config = trace_config.add_data_sources()->mutable_config();
+
+      track_event_ds_config->set_name("track_event");
+      track_event_ds_config->set_target_buffer(0);
+
+      auto* track_event_config = track_event_ds_config->mutable_track_event_config();
+
       for (const std::string& cat : enabled_categories_) {
         track_event_config->add_enabled_categories(cat);
       }
@@ -88,13 +75,17 @@ TracingSession TracingSession::Builder::Build() {
     }
   }
 
-  struct PerfettoTracingSessionImpl* ts =
-      PerfettoTracingSessionCreate(PERFETTO_BACKEND_SYSTEM);
-
   std::string trace_config_string;
   trace_config.SerializeToString(&trace_config_string);
 
-  PerfettoTracingSessionSetup(ts, trace_config_string.data(), trace_config_string.length());
+  return TracingSession::FromBytes(trace_config_string.data(), trace_config_string.length());
+}
+
+TracingSession TracingSession::FromBytes(void *buf, size_t len) {
+  struct PerfettoTracingSessionImpl* ts =
+      PerfettoTracingSessionCreate(PERFETTO_BACKEND_SYSTEM);
+
+  PerfettoTracingSessionSetup(ts, buf, len);
 
   // Fails to start here
   PerfettoTracingSessionStartBlocking(ts);
@@ -177,39 +168,3 @@ std::vector<uint8_t> TracingSession::ReadBlocking() {
 }  // namespace test_utils
 }  // namespace shlib
 }  // namespace perfetto
-
-void PrintTo(const PerfettoPbDecoderField& field, std::ostream* pos) {
-  std::ostream& os = *pos;
-  PerfettoPbDecoderStatus status =
-      static_cast<PerfettoPbDecoderStatus>(field.status);
-  switch (status) {
-    case PERFETTO_PB_DECODER_ERROR:
-      os << "MALFORMED PROTOBUF";
-      break;
-    case PERFETTO_PB_DECODER_DONE:
-      os << "DECODER DONE";
-      break;
-    case PERFETTO_PB_DECODER_OK:
-      switch (field.wire_type) {
-        case PERFETTO_PB_WIRE_TYPE_DELIMITED:
-          os << "\"";
-          for (size_t i = 0; i < field.value.delimited.len; i++) {
-            os << perfetto::shlib::test_utils::ToHexChars(
-                      field.value.delimited.start[i])
-               << " ";
-          }
-          os << "\"";
-          break;
-        case PERFETTO_PB_WIRE_TYPE_VARINT:
-          os << "varint: " << field.value.integer64;
-          break;
-        case PERFETTO_PB_WIRE_TYPE_FIXED32:
-          os << "fixed32: " << field.value.integer32;
-          break;
-        case PERFETTO_PB_WIRE_TYPE_FIXED64:
-          os << "fixed64: " << field.value.integer64;
-          break;
-      }
-      break;
-  }
-}

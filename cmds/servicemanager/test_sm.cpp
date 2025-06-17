@@ -204,6 +204,11 @@ TEST(GetService, HappyHappy) {
     sp<IBinder> outBinder;
     EXPECT_TRUE(sm->getService("foo", &outBinder).isOk());
     EXPECT_EQ(service, outBinder);
+
+    EXPECT_TRUE(sm->checkService2("foo", &out).isOk());
+    EXPECT_EQ(service, out.get<Service::Tag::serviceWithMetadata>().service);
+    EXPECT_TRUE(sm->checkService("foo", &outBinder).isOk());
+    EXPECT_EQ(service, outBinder);
 }
 
 TEST(GetService, NonExistant) {

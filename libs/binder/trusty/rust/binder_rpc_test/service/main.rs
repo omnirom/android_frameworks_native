@@ -96,6 +96,9 @@ impl IBinderRpcTest for TestService {
             None => Err(Status::from(StatusCode::BAD_VALUE)),
         }
     }
+    fn repeatBytes(&self, _bytes: &[u8]) -> Result<Vec<u8>, Status> {
+        todo!()
+    }
     fn holdBinder(&self, binder: Option<&SpIBinder>) -> Result<(), Status> {
         *HOLD_BINDER.lock().unwrap() = binder.cloned();
         Ok(())

@@ -66,11 +66,11 @@ impl KeyboardClassifier {
 
     /// Get keyboard type for a tracked keyboard in KeyboardClassifier
     pub fn get_keyboard_type(&self, device_id: DeviceId) -> KeyboardType {
-        return if let Some(keyboard) = self.device_map.get(&device_id) {
+        if let Some(keyboard) = self.device_map.get(&device_id) {
             keyboard.keyboard_type
         } else {
             KeyboardType::None
-        };
+        }
     }
 
     /// Tells if keyboard type classification is finalized. Once finalized the classification can't
@@ -79,11 +79,11 @@ impl KeyboardClassifier {
     /// Finalized devices are either "alphabetic" keyboards or keyboards in blocklist or
     /// allowlist that are explicitly categorized and won't change with future key events
     pub fn is_finalized(&self, device_id: DeviceId) -> bool {
-        return if let Some(keyboard) = self.device_map.get(&device_id) {
+        if let Some(keyboard) = self.device_map.get(&device_id) {
             keyboard.is_finalized
         } else {
             false
-        };
+        }
     }
 
     /// Process a key event and change keyboard type if required.

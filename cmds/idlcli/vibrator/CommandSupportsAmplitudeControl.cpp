@@ -42,15 +42,22 @@ class CommandSupportsAmplitudeControl : public Command {
     }
 
     Status doMain(Args && /*args*/) override {
-        auto ret = halCall(&V1_0::IVibrator::supportsAmplitudeControl);
+        auto hal = getHal();
 
-        if (!ret.isOk()) {
+        if (!hal) {
             return UNAVAILABLE;
         }
 
-        std::cout << "Result: " << std::boolalpha << ret << std::endl;
+        int32_t cap;
 
-        return OK;
+        auto status = hal->getCapabilities(&cap);
+
+        bool hasAmplitudeControl = cap & IVibrator::CAP_AMPLITUDE_CONTROL;
+
+        std::cout << "Status: " << status.getDescription() << std::endl;
+        std::cout << "Result: " << std::boolalpha << hasAmplitudeControl << std::endl;
+
+        return status.isOk() ? OK : ERROR;
     }
 };
 

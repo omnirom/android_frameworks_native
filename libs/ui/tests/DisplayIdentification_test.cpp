@@ -376,6 +376,22 @@ TEST(DisplayIdentificationTest, parseDisplayIdentificationData) {
     EXPECT_EQ(4633127902230889474, tertiaryInfo->id.value);
 }
 
+TEST(DisplayIdentificationTest, generateEdidDisplayId) {
+    const auto firstExternalDisplayEdidOpt = parseEdid(getExternalEdid());
+    ASSERT_TRUE(firstExternalDisplayEdidOpt);
+    const PhysicalDisplayId firstExternalDisplayId =
+            generateEdidDisplayId(firstExternalDisplayEdidOpt.value());
+
+    const auto secondExternalDisplayEdidOpt = parseEdid(getExternalEedid());
+    ASSERT_TRUE(secondExternalDisplayEdidOpt);
+    const PhysicalDisplayId secondExternalDisplayId =
+            generateEdidDisplayId(secondExternalDisplayEdidOpt.value());
+
+    // Display IDs should be unique.
+    EXPECT_EQ(4067182673952280501u, firstExternalDisplayId.value);
+    EXPECT_EQ(14712168404707886855u, secondExternalDisplayId.value);
+}
+
 TEST(DisplayIdentificationTest, deviceProductInfo) {
     using ManufactureYear = DeviceProductInfo::ManufactureYear;
     using ManufactureWeekAndYear = DeviceProductInfo::ManufactureWeekAndYear;
@@ -460,18 +476,6 @@ TEST(DisplayIdentificationTest, deviceProductInfo) {
         EXPECT_EQ(2013, std::get<ModelYear>(info.manufactureOrModelDate).year);
         EXPECT_TRUE(info.relativeAddress.empty());
     }
-}
-
-TEST(DisplayIdentificationTest, fromPort) {
-    // Manufacturer ID should be invalid.
-    ASSERT_FALSE(getPnpId(PhysicalDisplayId::fromPort(0)));
-    ASSERT_FALSE(getPnpId(PhysicalDisplayId::fromPort(0xffu)));
-}
-
-TEST(DisplayIdentificationTest, getVirtualDisplayId) {
-    // Manufacturer ID should be invalid.
-    ASSERT_FALSE(getPnpId(getVirtualDisplayId(0)));
-    ASSERT_FALSE(getPnpId(getVirtualDisplayId(0xffff'ffffu)));
 }
 
 } // namespace android

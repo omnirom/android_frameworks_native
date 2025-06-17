@@ -229,6 +229,7 @@ LIBBINDER_NDK_PLATFORM {
         AIBinder_fromPlatformBinder*;
         AIBinder_toPlatformBinder*;
         AParcel_viewPlatformParcel*;
+        ABinderProcess_disableBackgroundScheduling;
     };
   local:
     *;

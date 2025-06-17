@@ -77,14 +77,6 @@ flag {
 } # wb_stream_splitter
 
 flag {
-  name: "edge_extension_shader"
-  namespace: "windowing_frontend"
-  description: "Enable edge extension via shader"
-  bug: "322036393"
-  is_fixed_read_only: true
-} # edge_extension_shader
-
-flag {
   name: "buffer_release_channel"
   namespace: "window_surfaces"
   description: "Enable BufferReleaseChannel to optimize buffer releases"
@@ -139,3 +131,33 @@ flag {
   bug: "339705065"
   is_fixed_read_only: true
 } # bq_gl_fence_cleanup
+
+flag {
+  name: "wb_media_migration"
+  namespace: "core_graphics"
+  description: "Main flag for the warren buffers media migration."
+  bug: "340934031"
+  is_fixed_read_only: true
+} # wb_media_migration
+
+flag {
+  name: "allocate_buffer_priority"
+  namespace: "wear_system_health"
+  description: "Boost priority for buffer allocation"
+  bug: "399701430"
+  metadata {
+    purpose: PURPOSE_BUGFIX
+  }
+  is_fixed_read_only: true
+} # allocate_buffer_priority
+
+flag {
+  name: "bq_always_use_max_dequeued_buffer_count"
+  namespace: "core_graphics"
+  description: "BufferQueueProducer::dequeue's respects setMaxDequeuedBufferCount even before a buffer is dequeued."
+  bug: "399328309"
+  metadata {
+    purpose: PURPOSE_BUGFIX
+  }
+  is_fixed_read_only: true
+} # bq_always_use_max_dequeued_buffer_count

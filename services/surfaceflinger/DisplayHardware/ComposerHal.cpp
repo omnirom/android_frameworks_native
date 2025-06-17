@@ -26,7 +26,7 @@ namespace android::Hwc2 {
 Composer::~Composer() = default;
 
 std::unique_ptr<Composer> Composer::create(const std::string& serviceName) {
-    if (AidlComposer::isDeclared(serviceName)) {
+    if (AidlComposer::namesAnAidlComposerService(serviceName)) {
         return std::make_unique<AidlComposer>(serviceName);
     }
 

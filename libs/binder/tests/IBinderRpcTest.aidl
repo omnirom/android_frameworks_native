@@ -34,6 +34,8 @@ interface IBinderRpcTest {
     void holdBinder(@nullable IBinder binder);
     @nullable IBinder getHeldBinder();
 
+    byte[] repeatBytes(in byte[] bytes);
+
     // Idea is client creates its own instance of IBinderRpcTest and calls this,
     // and the server calls 'binder' with (calls - 1) passing itself as 'binder',
     // going back and forth until calls = 0

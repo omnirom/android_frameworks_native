@@ -67,11 +67,12 @@ public:
                     setVsyncEnabled(kHwcDisplayId, hal::IComposerClient::Vsync::DISABLE));
         EXPECT_CALL(*mComposerHal, onHotplugConnect(kHwcDisplayId));
 
-        const auto infoOpt = mComposer->onHotplug(kHwcDisplayId, hal::Connection::CONNECTED);
+        const auto infoOpt =
+                mComposer->onHotplug(kHwcDisplayId, HWComposer::HotplugEvent::Connected);
         ASSERT_TRUE(infoOpt);
 
         mDisplayId = infoOpt->id;
-        mDisplaySnapshotOpt.emplace(mDisplayId, ui::DisplayConnectionType::Internal,
+        mDisplaySnapshotOpt.emplace(mDisplayId, infoOpt->port, ui::DisplayConnectionType::Internal,
                                     makeModes(kMode60, kMode90, kMode120), ui::ColorModes{},
                                     std::nullopt);
 

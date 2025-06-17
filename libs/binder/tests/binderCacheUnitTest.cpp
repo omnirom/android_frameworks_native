@@ -74,7 +74,7 @@ class MockAidlServiceManager : public os::IServiceManagerDefault {
 public:
     MockAidlServiceManager() : innerSm() {}
 
-    binder::Status checkService(const ::std::string& name, os::Service* _out) override {
+    binder::Status checkService2(const ::std::string& name, os::Service* _out) override {
         os::ServiceWithMetadata serviceWithMetadata = os::ServiceWithMetadata();
         serviceWithMetadata.service = innerSm.getService(String16(name.c_str()));
         serviceWithMetadata.isLazyService = false;
@@ -98,7 +98,7 @@ class MockAidlServiceManager2 : public os::IServiceManagerDefault {
 public:
     MockAidlServiceManager2() : innerSm() {}
 
-    binder::Status checkService(const ::std::string& name, os::Service* _out) override {
+    binder::Status checkService2(const ::std::string& name, os::Service* _out) override {
         os::ServiceWithMetadata serviceWithMetadata = os::ServiceWithMetadata();
         serviceWithMetadata.service = innerSm.getService(String16(name.c_str()));
         serviceWithMetadata.isLazyService = true;

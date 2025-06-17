@@ -20,6 +20,8 @@
 #include "Constants.h"
 #include "MockConsumer.h"
 
+#include <EGL/egl.h>
+
 #include <gui/BufferItem.h>
 #include <gui/BufferItemConsumer.h>
 #include <gui/BufferQueue.h>
@@ -30,6 +32,7 @@
 #include <ui/PictureProfileHandle.h>
 
 #include <android-base/properties.h>
+#include <android-base/unique_fd.h>
 
 #include <binder/IPCThreadState.h>
 #include <binder/IServiceManager.h>
@@ -43,8 +46,11 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
+#include <csignal>
 #include <future>
+#include <optional>
 #include <thread>
+#include <unordered_map>
 
 #include <com_android_graphics_libgui_flags.h>
 
@@ -61,6 +67,15 @@ class BufferQueueTest : public ::testing::Test {
 
 public:
 protected:
+    void TearDown() override {
+        std::vector<std::function<void()>> teardownFns;
+        teardownFns.swap(mTeardownFns);
+
+        for (auto& fn : teardownFns) {
+            fn();
+        }
+    }
+
     void GetMinUndequeuedBufferCount(int* bufferCount) {
         ASSERT_TRUE(bufferCount != nullptr);
         ASSERT_EQ(OK, mProducer->query(NATIVE_WINDOW_MIN_UNDEQUEUED_BUFFERS,
@@ -95,6 +110,7 @@ protected:
 
     sp<IGraphicBufferProducer> mProducer;
     sp<IGraphicBufferConsumer> mConsumer;
+    std::vector<std::function<void()>> mTeardownFns;
 };
 
 static const uint32_t TEST_DATA = 0x12345678u;
@@ -102,12 +118,14 @@ static const uint32_t TEST_DATA = 0x12345678u;
 // XXX: Tests that fork a process to hold the BufferQueue must run before tests
 // that use a local BufferQueue, or else Binder will get unhappy
 //
-// In one instance this was a crash in the createBufferQueue where the
-// binder call to create a buffer allocator apparently got garbage back.
-// See b/36592665.
+// TODO(b/392945118): In one instance this was a crash in the createBufferQueue
+// where the binder call to create a buffer allocator apparently got garbage
+// back. See b/36592665.
 TEST_F(BufferQueueTest, DISABLED_BufferQueueInAnotherProcess) {
     const String16 PRODUCER_NAME = String16("BQTestProducer");
-    const String16 CONSUMER_NAME = String16("BQTestConsumer");
+
+    base::unique_fd readfd, writefd;
+    ASSERT_TRUE(base::Pipe(&readfd, &writefd));
 
     pid_t forkPid = fork();
     ASSERT_NE(forkPid, -1);
@@ -119,23 +137,51 @@ TEST_F(BufferQueueTest, DISABLED_BufferQueueInAnotherProcess) {
         BufferQueue::createBufferQueue(&producer, &consumer);
         sp<IServiceManager> serviceManager = defaultServiceManager();
         serviceManager->addService(PRODUCER_NAME, IInterface::asBinder(producer));
-        serviceManager->addService(CONSUMER_NAME, IInterface::asBinder(consumer));
+
+        class ChildConsumerListener : public IConsumerListener {
+        public:
+            ChildConsumerListener(const sp<IGraphicBufferConsumer>& consumer,
+                                  base::unique_fd&& writeFd)
+                  : mConsumer(consumer), mWriteFd(std::move(writeFd)) {}
+
+            virtual void onFrameAvailable(const BufferItem&) override {
+                BufferItem item;
+                ASSERT_EQ(OK, mConsumer->acquireBuffer(&item, 0));
+
+                uint32_t* dataOut;
+                ASSERT_EQ(OK,
+                          item.mGraphicBuffer->lock(GraphicBuffer::USAGE_SW_READ_OFTEN,
+                                                    reinterpret_cast<void**>(&dataOut)));
+                ASSERT_EQ(*dataOut, TEST_DATA);
+                ASSERT_EQ(OK, item.mGraphicBuffer->unlock());
+
+                bool isOk = true;
+                write(mWriteFd, &isOk, sizeof(bool));
+            }
+            virtual void onBuffersReleased() override {}
+            virtual void onSidebandStreamChanged() override {}
+
+        private:
+            sp<IGraphicBufferConsumer> mConsumer;
+            base::unique_fd mWriteFd;
+        };
+
+        sp<ChildConsumerListener> mc =
+                sp<ChildConsumerListener>::make(consumer, std::move(writefd));
+        ASSERT_EQ(OK, consumer->consumerConnect(mc, false));
+
         ProcessState::self()->startThreadPool();
         IPCThreadState::self()->joinThreadPool();
         LOG_ALWAYS_FATAL("Shouldn't be here");
+    } else {
+        mTeardownFns.emplace_back([forkPid]() { kill(forkPid, SIGTERM); });
     }
 
     sp<IServiceManager> serviceManager = defaultServiceManager();
     sp<IBinder> binderProducer = serviceManager->waitForService(PRODUCER_NAME);
     mProducer = interface_cast<IGraphicBufferProducer>(binderProducer);
     EXPECT_TRUE(mProducer != nullptr);
-    sp<IBinder> binderConsumer =
-        serviceManager->getService(CONSUMER_NAME);
-    mConsumer = interface_cast<IGraphicBufferConsumer>(binderConsumer);
-    EXPECT_TRUE(mConsumer != nullptr);
 
-    sp<MockConsumer> mc(new MockConsumer);
-    ASSERT_EQ(OK, mConsumer->consumerConnect(mc, false));
     IGraphicBufferProducer::QueueBufferOutput output;
     ASSERT_EQ(OK,
             mProducer->connect(nullptr, NATIVE_WINDOW_API_CPU, false, &output));
@@ -159,14 +205,9 @@ TEST_F(BufferQueueTest, DISABLED_BufferQueueInAnotherProcess) {
             NATIVE_WINDOW_SCALING_MODE_FREEZE, 0, Fence::NO_FENCE);
     ASSERT_EQ(OK, mProducer->queueBuffer(slot, input, &output));
 
-    BufferItem item;
-    ASSERT_EQ(OK, mConsumer->acquireBuffer(&item, 0));
-
-    uint32_t* dataOut;
-    ASSERT_EQ(OK, item.mGraphicBuffer->lock(GraphicBuffer::USAGE_SW_READ_OFTEN,
-            reinterpret_cast<void**>(&dataOut)));
-    ASSERT_EQ(*dataOut, TEST_DATA);
-    ASSERT_EQ(OK, item.mGraphicBuffer->unlock());
+    bool isOk;
+    read(readfd, &isOk, sizeof(bool));
+    ASSERT_TRUE(isOk);
 }
 
 TEST_F(BufferQueueTest, GetMaxBufferCountInQueueBufferOutput_Succeeds) {
@@ -1411,10 +1452,6 @@ TEST_F(BufferQueueTest, TestProducerConnectDisconnect) {
     ASSERT_EQ(NO_INIT, mProducer->disconnect(NATIVE_WINDOW_API_CPU));
 }
 
-TEST_F(BufferQueueTest, TestBqSetFrameRateFlagBuildTimeIsSet) {
-    ASSERT_EQ(flags::bq_setframerate(), COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(BQ_SETFRAMERATE));
-}
-
 struct BufferItemConsumerSetFrameRateListener : public BufferItemConsumer {
     BufferItemConsumerSetFrameRateListener() : BufferItemConsumer(GRALLOC_USAGE_SW_READ_OFTEN, 1) {}
 
@@ -1520,9 +1557,14 @@ TEST_F(BufferQueueTest, TestAdditionalOptions) {
             {.name = "android.hardware.graphics.common.Dataspace", ADATASPACE_DISPLAY_P3},
     }};
 
-    ASSERT_EQ(NO_INIT,
-              native_window_set_buffers_additional_options(surface.get(), extras.data(),
-                                                           extras.size()));
+    auto status = native_window_set_buffers_additional_options(surface.get(), extras.data(),
+                                                               extras.size());
+    if (flags::bq_extendedallocate()) {
+        ASSERT_EQ(NO_INIT, status);
+    } else {
+        ASSERT_EQ(INVALID_OPERATION, status);
+        GTEST_SKIP() << "Flag bq_extendedallocate not enabled";
+    }
 
     if (!IsCuttlefish()) {
         GTEST_SKIP() << "Not cuttlefish";
@@ -1612,4 +1654,221 @@ TEST_F(BufferQueueTest, PassesThroughPictureProfileHandle) {
     }
 }
 
+#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_UNLIMITED_SLOTS)
+struct MockUnlimitedSlotConsumer : public MockConsumer {
+    virtual void onSlotCountChanged(int size) override { mSize = size; }
+
+    std::optional<int> mSize;
+};
+
+TEST_F(BufferQueueTest, UnlimitedSlots_FailsWhenNotAllowed) {
+    createBufferQueue();
+
+    sp<MockUnlimitedSlotConsumer> mc = sp<MockUnlimitedSlotConsumer>::make();
+    EXPECT_EQ(OK, mConsumer->consumerConnect(mc, false));
+
+    EXPECT_EQ(INVALID_OPERATION, mProducer->extendSlotCount(64));
+    EXPECT_EQ(INVALID_OPERATION, mProducer->extendSlotCount(32));
+    EXPECT_EQ(INVALID_OPERATION, mProducer->extendSlotCount(128));
+
+    EXPECT_EQ(std::nullopt, mc->mSize);
+}
+
+TEST_F(BufferQueueTest, UnlimitedSlots_OnlyAllowedForExtensions) {
+    createBufferQueue();
+
+    sp<MockUnlimitedSlotConsumer> consumerListener = sp<MockUnlimitedSlotConsumer>::make();
+    EXPECT_EQ(OK, mConsumer->consumerConnect(consumerListener, false));
+    EXPECT_EQ(OK, mConsumer->allowUnlimitedSlots(true));
+
+    EXPECT_EQ(BAD_VALUE, mProducer->extendSlotCount(32));
+    EXPECT_EQ(OK, mProducer->extendSlotCount(64));
+    EXPECT_EQ(OK, mProducer->extendSlotCount(128));
+    EXPECT_EQ(128, *consumerListener->mSize);
+
+    EXPECT_EQ(OK, mProducer->extendSlotCount(128));
+    EXPECT_EQ(BAD_VALUE, mProducer->extendSlotCount(127));
+}
+
+class BufferQueueUnlimitedTest : public BufferQueueTest {
+protected:
+    static constexpr auto kMaxBufferCount = 128;
+    static constexpr auto kAcquirableBufferCount = 2;
+    static constexpr auto kDequeableBufferCount = kMaxBufferCount - kAcquirableBufferCount;
+
+    virtual void SetUp() override {
+        BufferQueueTest::SetUp();
+
+        createBufferQueue();
+        setUpConsumer();
+        setUpProducer();
+    }
+
+    void setUpConsumer() {
+        EXPECT_EQ(OK, mConsumer->consumerConnect(mConsumerListener, false));
+
+#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_UNLIMITED_SLOTS)
+        EXPECT_EQ(OK, mConsumer->allowUnlimitedSlots(true));
+#endif
+        EXPECT_EQ(OK, mConsumer->setConsumerUsageBits(GraphicBuffer::USAGE_SW_READ_OFTEN));
+        EXPECT_EQ(OK, mConsumer->setDefaultBufferSize(10, 10));
+        EXPECT_EQ(OK, mConsumer->setDefaultBufferFormat(PIXEL_FORMAT_RGBA_8888));
+        EXPECT_EQ(OK, mConsumer->setMaxAcquiredBufferCount(kAcquirableBufferCount));
+    }
+
+    void setUpProducer() {
+        EXPECT_EQ(OK, mProducer->extendSlotCount(kMaxBufferCount));
+
+        IGraphicBufferProducer::QueueBufferOutput output;
+        EXPECT_EQ(OK,
+                  mProducer->connect(mProducerListener, NATIVE_WINDOW_API_CPU,
+                                     /*producerControlledByApp*/ true, &output));
+#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_UNLIMITED_SLOTS)
+        ASSERT_TRUE(output.isSlotExpansionAllowed);
+#endif
+        ASSERT_EQ(OK, mProducer->setMaxDequeuedBufferCount(kDequeableBufferCount));
+        ASSERT_EQ(OK, mProducer->allowAllocation(true));
+    }
+
+    std::unordered_map<int, sp<Fence>> dequeueAll() {
+        std::unordered_map<int, sp<Fence>> slotsToFences;
+
+        for (int i = 0; i < kDequeableBufferCount; ++i) {
+            int slot;
+            sp<Fence> fence;
+            sp<GraphicBuffer> buffer;
+
+            status_t ret =
+                    mProducer->dequeueBuffer(&slot, &fence, /*w*/ 0, /*h*/ 0, /*format*/ 0,
+                                             /*uint64_t*/ 0,
+                                             /*outBufferAge*/ nullptr, /*outTimestamps*/ nullptr);
+            if (ret & IGraphicBufferProducer::BUFFER_NEEDS_REALLOCATION) {
+                EXPECT_EQ(OK, mProducer->requestBuffer(slot, &buffer))
+                        << "Unable to request buffer for slot " << slot;
+            }
+            EXPECT_FALSE(slotsToFences.contains(slot));
+            slotsToFences.emplace(slot, fence);
+        }
+        EXPECT_EQ(kDequeableBufferCount, (int)slotsToFences.size());
+        return slotsToFences;
+    }
+
+    sp<MockUnlimitedSlotConsumer> mConsumerListener = sp<MockUnlimitedSlotConsumer>::make();
+    sp<StubProducerListener> mProducerListener = sp<StubProducerListener>::make();
+};
+
+TEST_F(BufferQueueUnlimitedTest, ExpandOverridesConsumerMaxBuffers) {
+    createBufferQueue();
+    setUpConsumer();
+    EXPECT_EQ(OK, mConsumer->setMaxBufferCount(10));
+
+    setUpProducer();
+
+    EXPECT_EQ(kDequeableBufferCount, (int)dequeueAll().size());
+}
+
+TEST_F(BufferQueueUnlimitedTest, CanDetachAll) {
+    auto slotsToFences = dequeueAll();
+    for (auto& [slot, fence] : slotsToFences) {
+        EXPECT_EQ(OK, mProducer->detachBuffer(slot));
+    }
+}
+
+TEST_F(BufferQueueUnlimitedTest, CanCancelAll) {
+    auto slotsToFences = dequeueAll();
+    for (auto& [slot, fence] : slotsToFences) {
+        EXPECT_EQ(OK, mProducer->cancelBuffer(slot, fence));
+    }
+}
+
+TEST_F(BufferQueueUnlimitedTest, CanAcquireAndReleaseAll) {
+    auto slotsToFences = dequeueAll();
+    for (auto& [slot, fence] : slotsToFences) {
+        IGraphicBufferProducer::QueueBufferInput input;
+        input.fence = fence;
+
+        IGraphicBufferProducer::QueueBufferOutput output;
+        EXPECT_EQ(OK, mProducer->queueBuffer(slot, input, &output));
+
+        BufferItem buffer;
+        EXPECT_EQ(OK, mConsumer->acquireBuffer(&buffer, 0));
+        EXPECT_EQ(OK,
+                  mConsumer->releaseBuffer(buffer.mSlot, buffer.mFrameNumber, EGL_NO_DISPLAY,
+                                           EGL_NO_SYNC, buffer.mFence));
+    }
+}
+
+TEST_F(BufferQueueUnlimitedTest, CanAcquireAndDetachAll) {
+    auto slotsToFences = dequeueAll();
+    for (auto& [slot, fence] : slotsToFences) {
+        IGraphicBufferProducer::QueueBufferInput input;
+        input.fence = fence;
+
+        IGraphicBufferProducer::QueueBufferOutput output;
+        EXPECT_EQ(OK, mProducer->queueBuffer(slot, input, &output));
+
+        BufferItem buffer;
+        EXPECT_EQ(OK, mConsumer->acquireBuffer(&buffer, 0));
+        EXPECT_EQ(OK, mConsumer->detachBuffer(buffer.mSlot));
+    }
+}
+
+TEST_F(BufferQueueUnlimitedTest, GetReleasedBuffersExtended) {
+    // First, acquire and release all the buffers so the consumer "knows" about
+    // them
+    auto slotsToFences = dequeueAll();
+
+    std::vector<bool> releasedSlots;
+    EXPECT_EQ(OK, mConsumer->getReleasedBuffersExtended(&releasedSlots));
+    for (auto& [slot, _] : slotsToFences) {
+        EXPECT_TRUE(releasedSlots[slot])
+                << "Slots that haven't been acquired will show up as released.";
+    }
+    for (auto& [slot, fence] : slotsToFences) {
+        IGraphicBufferProducer::QueueBufferInput input;
+        input.fence = fence;
+
+        IGraphicBufferProducer::QueueBufferOutput output;
+        EXPECT_EQ(OK, mProducer->queueBuffer(slot, input, &output));
+
+        BufferItem buffer;
+        EXPECT_EQ(OK, mConsumer->acquireBuffer(&buffer, 0));
+        EXPECT_EQ(OK,
+                  mConsumer->releaseBuffer(buffer.mSlot, buffer.mFrameNumber, EGL_NO_DISPLAY,
+                                           EGL_NO_SYNC_KHR, buffer.mFence));
+    }
+
+    EXPECT_EQ(OK, mConsumer->getReleasedBuffersExtended(&releasedSlots));
+    for (auto& [slot, _] : slotsToFences) {
+        EXPECT_FALSE(releasedSlots[slot])
+                << "Slots that have been acquired will show up as not released.";
+    }
+
+    // Then, alternatively cancel and detach (release) buffers. Only detached
+    // buffers should be returned by getReleasedBuffersExtended
+    slotsToFences = dequeueAll();
+    std::set<int> cancelledSlots;
+    std::set<int> detachedSlots;
+    bool cancel;
+    for (auto& [slot, fence] : slotsToFences) {
+        if (cancel) {
+            EXPECT_EQ(OK, mProducer->cancelBuffer(slot, fence));
+            cancelledSlots.insert(slot);
+        } else {
+            EXPECT_EQ(OK, mProducer->detachBuffer(slot));
+            detachedSlots.insert(slot);
+        }
+        cancel = !cancel;
+    }
+
+    EXPECT_EQ(OK, mConsumer->getReleasedBuffersExtended(&releasedSlots));
+    for (int slot : detachedSlots) {
+        EXPECT_TRUE(releasedSlots[slot]) << "Slots that are detached are released.";
+    }
+    for (int slot : cancelledSlots) {
+        EXPECT_FALSE(releasedSlots[slot])
+                << "Slots that are still held in the queue are not released.";
+    }
+}
+#endif //  COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_UNLIMITED_SLOTS)
 } // namespace android

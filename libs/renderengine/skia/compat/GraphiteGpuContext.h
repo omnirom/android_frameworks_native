@@ -39,16 +39,10 @@ public:
     size_t getMaxRenderTargetSize() const override;
     size_t getMaxTextureSize() const override;
     bool isAbandonedOrDeviceLost() override;
-    // No-op (large resources like textures, surfaces, images, etc. created by clients don't count
-    // towards Graphite's internal caching budgets, so adjusting its limits based on display change
-    // events should be unnecessary. Additionally, Graphite doesn't expose many cache tweaking
-    // functions yet, as its design may evolve.)
-    void setResourceCacheLimit(size_t maxResourceBytes) override{};
 
-    // TODO: b/293371537 - Triple-check and validate that no cleanup is necessary when switching
-    // contexts.
-    // No-op (unnecessary during context switch for Graphite's client-budgeted memory model).
-    void purgeUnlockedScratchResources() override{};
+    void setResourceCacheLimit(size_t maxResourceBytes) override;
+    void purgeUnlockedScratchResources() override;
+
     // No-op (only applicable to GL).
     void resetContextIfApplicable() override{};
 

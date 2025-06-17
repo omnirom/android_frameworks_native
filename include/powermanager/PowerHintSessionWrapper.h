@@ -45,9 +45,11 @@ public:
     virtual HalResult<void> setMode(::aidl::android::hardware::power::SessionMode in_type,
                                     bool in_enabled);
     virtual HalResult<aidl::android::hardware::power::SessionConfig> getSessionConfig();
+    std::optional<int> getSessionId();
 
 private:
     std::shared_ptr<aidl::android::hardware::power::IPowerHintSession> mSession;
+    std::optional<int> mSessionId;
     int32_t mInterfaceVersion;
 };
 

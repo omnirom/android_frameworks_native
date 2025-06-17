@@ -82,6 +82,9 @@ impl IBinderRpcTest for MyBinderRpcSession {
     fn repeatBinder(&self, _binder: Option<&SpIBinder>) -> Result<Option<SpIBinder>, Status> {
         todo!()
     }
+    fn repeatBytes(&self, _bytes: &[u8]) -> Result<Vec<u8>, Status> {
+        todo!()
+    }
     fn holdBinder(&self, _binder: Option<&SpIBinder>) -> Result<(), Status> {
         todo!()
     }

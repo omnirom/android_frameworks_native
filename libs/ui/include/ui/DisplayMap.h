@@ -18,6 +18,7 @@
 
 #include <ftl/small_map.h>
 #include <ftl/small_vector.h>
+#include <ftl/unit.h>
 
 namespace android::ui {
 
@@ -30,6 +31,8 @@ using DisplayMap = ftl::SmallMap<Key, Value, kDisplayCapacity>;
 constexpr size_t kPhysicalDisplayCapacity = 3;
 template <typename Key, typename Value>
 using PhysicalDisplayMap = ftl::SmallMap<Key, Value, kPhysicalDisplayCapacity>;
+template <typename Key>
+using PhysicalDisplaySet = ftl::SmallMap<Key, ftl::Unit, kPhysicalDisplayCapacity>;
 
 template <typename T>
 using DisplayVector = ftl::SmallVector<T, kDisplayCapacity>;

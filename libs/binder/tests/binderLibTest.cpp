@@ -44,6 +44,7 @@
 #include <processgroup/processgroup.h>
 #include <utils/Flattenable.h>
 #include <utils/SystemClock.h>
+#include "binder/IServiceManagerUnitTestHelper.h"
 
 #include <linux/sched.h>
 #include <sys/epoll.h>
@@ -344,7 +345,12 @@ class BinderLibTest : public ::testing::Test {
         }
 
         bool checkFreezeSupport() {
-            std::ifstream freezer_file("/sys/fs/cgroup/uid_0/cgroup.freeze");
+            std::string path;
+            if (!CgroupGetAttributePathForTask("FreezerState", getpid(), &path)) {
+                return false;
+            }
+
+            std::ifstream freezer_file(path);
             // Pass test on devices where the cgroup v2 freezer is not supported
             if (freezer_file.fail()) {
                 return false;
@@ -580,14 +586,14 @@ TEST_F(BinderLibTest, AddManagerToManager) {
     EXPECT_EQ(NO_ERROR, sm->addService(String16("binderLibTest-manager"), binder));
 }
 
+class LocalRegistrationCallbackImpl : public virtual IServiceManager::LocalRegistrationCallback {
+    void onServiceRegistration(const String16&, const sp<IBinder>&) override {}
+    virtual ~LocalRegistrationCallbackImpl() {}
+};
+
 TEST_F(BinderLibTest, RegisterForNotificationsFailure) {
     auto sm = defaultServiceManager();
-    using LocalRegistrationCallback = IServiceManager::LocalRegistrationCallback;
-    class LocalRegistrationCallbackImpl : public virtual LocalRegistrationCallback {
-        void onServiceRegistration(const String16&, const sp<IBinder>&) override {}
-        virtual ~LocalRegistrationCallbackImpl() {}
-    };
-    sp<LocalRegistrationCallback> cb = sp<LocalRegistrationCallbackImpl>::make();
+    sp<IServiceManager::LocalRegistrationCallback> cb = sp<LocalRegistrationCallbackImpl>::make();
 
     EXPECT_EQ(BAD_VALUE, sm->registerForNotifications(String16("ValidName"), nullptr));
     EXPECT_EQ(UNKNOWN_ERROR, sm->registerForNotifications(String16("InvalidName!$"), cb));
@@ -595,12 +601,7 @@ TEST_F(BinderLibTest, RegisterForNotificationsFailure) {
 
 TEST_F(BinderLibTest, UnregisterForNotificationsFailure) {
     auto sm = defaultServiceManager();
-    using LocalRegistrationCallback = IServiceManager::LocalRegistrationCallback;
-    class LocalRegistrationCallbackImpl : public virtual LocalRegistrationCallback {
-        void onServiceRegistration(const String16&, const sp<IBinder>&) override {}
-        virtual ~LocalRegistrationCallbackImpl() {}
-    };
-    sp<LocalRegistrationCallback> cb = sp<LocalRegistrationCallbackImpl>::make();
+    sp<IServiceManager::LocalRegistrationCallback> cb = sp<LocalRegistrationCallbackImpl>::make();
 
     EXPECT_EQ(OK, sm->registerForNotifications(String16("ValidName"), cb));
 
@@ -1781,6 +1782,43 @@ TEST(ServiceNotifications, Unregister) {
 
     EXPECT_EQ(sm->registerForNotifications(String16("RogerRafa"), cb), OK);
     EXPECT_EQ(sm->unregisterForNotifications(String16("RogerRafa"), cb), OK);
+}
+
+// Make sure all IServiceManager APIs will function without an AIDL service
+// manager registered on the device.
+TEST(ServiceManagerNoAidlServer, SanityCheck) {
+    String16 kServiceName("no_services_exist");
+    // This is what clients will see when there is no servicemanager process
+    // that registers itself as context object 0.
+    // Can't use setDefaultServiceManager() here because these test cases run in
+    // the same process and will abort when called twice or before/after
+    // defaultServiceManager().
+    sp<IServiceManager> sm = getServiceManagerShimFromAidlServiceManagerForTests(nullptr);
+    auto status = sm->addService(kServiceName, sp<BBinder>::make());
+    // CppBackendShim returns Status::exceptionCode as the status_t
+    EXPECT_EQ(status, Status::Exception::EX_UNSUPPORTED_OPERATION) << statusToString(status);
+    auto service = sm->checkService(String16("no_services_exist"));
+    EXPECT_TRUE(service == nullptr);
+    auto list = sm->listServices(android::IServiceManager::DUMP_FLAG_PRIORITY_ALL);
+    EXPECT_TRUE(list.isEmpty());
+    bool declared = sm->isDeclared(kServiceName);
+    EXPECT_FALSE(declared);
+    list = sm->getDeclaredInstances(kServiceName);
+    EXPECT_TRUE(list.isEmpty());
+    auto updatable = sm->updatableViaApex(kServiceName);
+    EXPECT_EQ(updatable, std::nullopt);
+    list = sm->getUpdatableNames(kServiceName);
+    EXPECT_TRUE(list.isEmpty());
+    auto conInfo = sm->getConnectionInfo(kServiceName);
+    EXPECT_EQ(conInfo, std::nullopt);
+    auto cb = sp<LocalRegistrationCallbackImpl>::make();
+    status = sm->registerForNotifications(kServiceName, cb);
+    EXPECT_EQ(status, UNKNOWN_ERROR) << statusToString(status);
+    status = sm->unregisterForNotifications(kServiceName, cb);
+    EXPECT_EQ(status, BAD_VALUE) << statusToString(status);
+    auto dbgInfos = sm->getServiceDebugInfo();
+    EXPECT_TRUE(dbgInfos.empty());
+    sm->enableAddServiceCache(true);
 }
 
 TEST_F(BinderLibTest, ThreadPoolAvailableThreads) {

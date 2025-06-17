@@ -79,19 +79,17 @@ void MultiTouchInputMapper::syncTouch(nsecs_t when, RawState* outState) {
             if (id) {
                 outState->rawPointerData.canceledIdBits.markBit(id.value());
             }
-            if (DEBUG_POINTERS) {
-                ALOGI("Stop processing slot %zu for it received a palm event from device %s",
-                      inIndex, getDeviceName().c_str());
-            }
+            ALOGI_IF(DEBUG_POINTERS,
+                     "Stop processing slot %zu for it received a palm event from device %s",
+                     inIndex, getDeviceName().c_str());
             continue;
         }
 
         if (outCount >= MAX_POINTERS) {
-            if (DEBUG_POINTERS) {
-                ALOGD("MultiTouch device %s emitted more than maximum of %zu pointers; "
-                      "ignoring the rest.",
-                      getDeviceName().c_str(), MAX_POINTERS);
-            }
+            ALOGD_IF(DEBUG_POINTERS,
+                     "MultiTouch device %s emitted more than maximum of %zu pointers; ignoring the "
+                     "rest.",
+                     getDeviceName().c_str(), MAX_POINTERS);
             break; // too many fingers!
         }
 

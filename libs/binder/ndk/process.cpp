@@ -36,6 +36,10 @@ void ABinderProcess_joinThreadPool(void) {
     IPCThreadState::self()->joinThreadPool();
 }
 
+void ABinderProcess_disableBackgroundScheduling(bool disable) {
+    IPCThreadState::disableBackgroundScheduling(disable);
+}
+
 binder_status_t ABinderProcess_setupPolling(int* fd) {
     return IPCThreadState::self()->setupPolling(fd);
 }

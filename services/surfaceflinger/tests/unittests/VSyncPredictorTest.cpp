@@ -304,6 +304,53 @@ TEST_F(VSyncPredictorTest, againstOutliersDiscontinuous_500hzLowVariance) {
     EXPECT_THAT(intercept, IsCloseTo(expectedIntercept, mMaxRoundingError));
 }
 
+TEST_F(VSyncPredictorTest, recoverAfterDriftedVSyncAreReplacedWithCorrectVSync) {
+    SET_FLAG_FOR_TEST(flags::vsync_predictor_recovery, true);
+    auto constexpr idealPeriodNs = 4166666;
+    auto constexpr minFrameIntervalNs = 8333333;
+    auto constexpr idealPeriod = Fps::fromPeriodNsecs(idealPeriodNs);
+    auto constexpr minFrameRate = Fps::fromPeriodNsecs(minFrameIntervalNs);
+    hal::VrrConfig vrrConfig{.minFrameIntervalNs = minFrameIntervalNs};
+    ftl::NonNull<DisplayModePtr> mode =
+            ftl::as_non_null(createVrrDisplayMode(DisplayModeId(0), idealPeriod, vrrConfig));
+    VSyncPredictor vrrTracker{std::make_unique<ClockWrapper>(mClock), mode, kHistorySize,
+                              kMinimumSamplesForPrediction, kOutlierTolerancePercent};
+    vrrTracker.setRenderRate(minFrameRate, /*applyImmediately*/ true);
+    // Curated list of VSyncs that causes the VSync drift.
+    std::vector<nsecs_t> const simulatedVsyncs{74473665741, 74481774375, 74489911818, 74497993491,
+                                               74506000833, 74510002150, 74513904390, 74517748707,
+                                               74521550947, 74525383187, 74529165427, 74533067667,
+                                               74536751484, 74540653724, 74544282649, 74548084889,
+                                               74551917129, 74555699369, 74559601609, 74563601611,
+                                               74567503851, 74571358168, 74575260408, 74578889333,
+                                               74582691573, 74586523813, 74590306053, 74593589870,
+                                               74597492110, 74601121035, 74604923275, 74608755515,
+                                               74612537755, 74616166680, 74619795605, 74623424530,
+                                               74627043455, 74630645695, 74634245935, 74637778175,
+                                               74641291992, 74644794232, 74648275157, 74651575397,
+                                               74654807637, 74658007877, 74661176117, 74664345357};
+    for (auto const& timestamp : simulatedVsyncs) {
+        vrrTracker.addVsyncTimestamp(timestamp);
+    }
+    auto slope = vrrTracker.getVSyncPredictionModel().slope;
+    // Without using the idealPeriod for the calculation of the VSync predictor mode the
+    // the slope would be 3343031
+    EXPECT_THAT(slope, IsCloseTo(4347805, mMaxRoundingError));
+    EXPECT_FALSE(vrrTracker.needsMoreSamples());
+
+    auto lastVsync = 74664345357;
+    // Add valid VSyncs to replace the drifted VSyncs
+    for (int i = 0; i <= kHistorySize; i++) {
+        lastVsync += minFrameIntervalNs;
+        EXPECT_TRUE(vrrTracker.addVsyncTimestamp(lastVsync));
+    }
+    EXPECT_FALSE(vrrTracker.needsMoreSamples());
+    slope = vrrTracker.getVSyncPredictionModel().slope;
+    // Corrected slop is closer to the idealPeriod
+    // when valid vsync are inserted otherwise this would still be 3349673
+    EXPECT_THAT(slope, IsCloseTo(idealPeriodNs, mMaxRoundingError));
+}
+
 TEST_F(VSyncPredictorTest, handlesVsyncChange) {
     auto const fastPeriod = 100;
     auto const fastTimeBase = 100;
@@ -402,11 +449,7 @@ TEST_F(VSyncPredictorTest, doesNotPredictBeforeTimePointWithHigherIntercept) {
     std::vector<nsecs_t> const simulatedVsyncs{
             158929578733000,
             158929306806205, // oldest TS in ringbuffer
-            158929650879052,
-            158929661969209,
-            158929684198847,
-            158929695268171,
-            158929706370359,
+            158929650879052, 158929661969209, 158929684198847, 158929695268171, 158929706370359,
     };
     auto const idealPeriod = 11111111;
     auto const expectedPeriod = 11113919;
@@ -421,9 +464,9 @@ TEST_F(VSyncPredictorTest, doesNotPredictBeforeTimePointWithHigherIntercept) {
     EXPECT_THAT(slope, IsCloseTo(expectedPeriod, mMaxRoundingError));
     EXPECT_THAT(intercept, IsCloseTo(expectedIntercept, mMaxRoundingError));
 
-    // (timePoint - oldestTS) % expectedPeriod works out to be: 395334
-    // (timePoint - oldestTS) / expectedPeriod works out to be: 38.96
-    // so failure to account for the offset will floor the ordinal to 38, which was in the past.
+    // (timePoint - oldestTS) % expectedPeriod works out to be: 10702663
+    // (timePoint - oldestTS) / expectedPeriod works out to be: 37.96
+    // so failure to account for the offset will floor the ordinal to 37, which was in the past.
     auto const timePoint = 158929728723871;
     auto const prediction = tracker.nextAnticipatedVSyncTimeFrom(timePoint);
     EXPECT_THAT(prediction, Ge(timePoint));

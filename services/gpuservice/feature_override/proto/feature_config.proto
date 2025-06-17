@@ -1,0 +1,82 @@
+/*
+ * Copyright 2024 The Android Open Source Project
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+syntax = "proto3";
+
+package feature_override;
+
+option optimize_for = LITE_RUNTIME;
+
+/**
+ * GPU Vendor IDs.
+ * Taken from: external/angle/src/libANGLE/renderer/driver_utils.h
+ */
+enum GpuVendorID
+{
+    // Test ID matches every GPU Vendor ID.
+    VENDOR_ID_TEST = 0;
+    VENDOR_ID_AMD = 0x1002;
+    VENDOR_ID_ARM = 0x13B5;
+    // Broadcom devices won't use PCI, but this is their Vulkan vendor id.
+    VENDOR_ID_BROADCOM = 0x14E4;
+    VENDOR_ID_GOOGLE = 0x1AE0;
+    VENDOR_ID_INTEL = 0x8086;
+    VENDOR_ID_MESA = 0x10005;
+    VENDOR_ID_MICROSOFT = 0x1414;
+    VENDOR_ID_NVIDIA = 0x10DE;
+    VENDOR_ID_POWERVR = 0x1010;
+    // This is Qualcomm PCI Vendor ID.
+    // Android doesn't have a PCI bus, but all we need is a unique id.
+    VENDOR_ID_QUALCOMM = 0x5143;
+    VENDOR_ID_SAMSUNG = 0x144D;
+    VENDOR_ID_VIVANTE = 0x9999;
+    VENDOR_ID_VMWARE = 0x15AD;
+    VENDOR_ID_VIRTIO = 0x1AF4;
+}
+
+/**
+ * Feature Configuration
+ * feature_name: Feature name (see external/angle/include/platform/autogen/FeaturesVk_autogen.h).
+ * enabled: Either enable or disable the feature.
+ * gpu_vendor_ids: The GPU architectures this FeatureConfig applies to, if any.
+ */
+message FeatureConfig
+{
+    string feature_name         = 1;
+    bool enabled                = 2;
+    repeated GpuVendorID gpu_vendor_ids = 3;
+}
+
+/**
+ * Package Configuration
+ * feature_configs: List of features configs for the package.
+ */
+message PackageConfig
+{
+    string package_name                    = 1;
+    repeated FeatureConfig feature_configs = 2;
+}
+
+/**
+ * Feature Overrides
+ * global_features: Features to apply globally, for every package.
+ * package_features: Features to apply for individual packages.
+ */
+message FeatureOverrideProtos
+{
+    repeated FeatureConfig global_features  = 1;
+    repeated PackageConfig package_features = 2;
+}

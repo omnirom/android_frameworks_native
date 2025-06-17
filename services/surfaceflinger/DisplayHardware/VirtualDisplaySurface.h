@@ -75,7 +75,8 @@ class VirtualDisplaySurface : public compositionengine::DisplaySurface,
                               public BnGraphicBufferProducer,
                               private ConsumerBase {
 public:
-    VirtualDisplaySurface(HWComposer&, VirtualDisplayId, const sp<IGraphicBufferProducer>& sink,
+    VirtualDisplaySurface(HWComposer&, VirtualDisplayIdVariant,
+                          const sp<IGraphicBufferProducer>& sink,
                           const sp<IGraphicBufferProducer>& bqProducer,
                           const sp<IGraphicBufferConsumer>& bqConsumer,
                           const std::string& name, bool secure);
@@ -147,6 +148,7 @@ private:
     void updateQueueBufferOutput(QueueBufferOutput&&);
     void resetPerFrameState();
     status_t refreshOutputBuffer();
+    bool isBackedByGpu() const;
 
     // Both the sink and scratch buffer pools have their own set of slots
     // ("source slots", or "sslot"). We have to merge these into the single
@@ -161,7 +163,7 @@ private:
     // Immutable after construction
     //
     HWComposer& mHwc;
-    const VirtualDisplayId mDisplayId;
+    const VirtualDisplayIdVariant mVirtualIdVariant;
     const std::string mDisplayName;
     sp<IGraphicBufferProducer> mSource[2]; // indexed by SOURCE_*
     uint32_t mDefaultOutputFormat;

@@ -281,9 +281,9 @@ void generateSeedsFromRecording(borrowed_fd fd,
     // This buffer holds the bytes which will be used for fillRandomParcel API
     std::vector<uint8_t> fillParcelBuffer;
 
-    // Don't take rpc path
-    uint8_t rpcBranch = 0;
-    impl::writeReversedBuffer(fillParcelBuffer, rpcBranch);
+    // Use all default options.
+    uint8_t parcelOptions = 0;
+    impl::writeReversedBuffer(fillParcelBuffer, parcelOptions);
 
     // Implicit branch on this path -> options->writeHeader(p, provider)
     uint8_t writeHeaderInternal = 0;

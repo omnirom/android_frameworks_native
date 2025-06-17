@@ -28,6 +28,7 @@
 #include <aidl/android/hardware/graphics/common/DisplayHotplugEvent.h>
 #include <android/binder_manager.h>
 #include <android/hardware/graphics/composer/2.1/types.h>
+#include <common/FlagManager.h>
 #include <common/trace.h>
 #include <composer-command-buffer/2.2/ComposerCommandBuffer.h>
 #include <hidl/HidlTransportSupport.h>
@@ -301,7 +302,9 @@ std::string HidlComposer::dumpDebugInfo() {
 }
 
 void HidlComposer::registerCallback(const sp<IComposerCallback>& callback) {
-    android::hardware::setMinSchedulerPolicy(callback, SCHED_FIFO, 2);
+    if (!FlagManager::getInstance().disable_sched_fifo_composer_callback()) {
+        android::hardware::setMinSchedulerPolicy(callback, SCHED_FIFO, 2);
+    }
 
     auto ret = [&]() {
         if (mClient_2_4) {
@@ -588,6 +591,11 @@ Error HidlComposer::getReleaseFences(Display display, std::vector<Layer>* outLay
                                      std::vector<int>* outReleaseFences) {
     mReader.takeReleaseFences(display, outLayers, outReleaseFences);
     return Error::NONE;
+}
+
+Error HidlComposer::getLayerPresentFences(Display, std::vector<Layer>*, std::vector<int>*,
+                                          std::vector<int64_t>*) {
+    return Error::UNSUPPORTED;
 }
 
 Error HidlComposer::presentDisplay(Display display, int* outPresentFence) {
@@ -1222,15 +1230,16 @@ Error HidlComposer::getDisplayCapabilities(Display display,
                                                             translate<DisplayCapability>(tmpCaps);
                                                 });
     } else {
-        mClient_2_3
-                ->getDisplayCapabilities(display, [&](const auto& tmpError, const auto& tmpCaps) {
-                    error = static_cast<V2_4::Error>(tmpError);
-                    if (error != V2_4::Error::NONE) {
-                        return;
-                    }
+        mClient_2_3->getDisplayCapabilities(display,
+                                            [&](const auto& tmpError, const auto& tmpCaps) {
+                                                error = static_cast<V2_4::Error>(tmpError);
+                                                if (error != V2_4::Error::NONE) {
+                                                    return;
+                                                }
 
-                    *outCapabilities = translate<DisplayCapability>(tmpCaps);
-                });
+                                                *outCapabilities =
+                                                        translate<DisplayCapability>(tmpCaps);
+                                            });
     }
 
     return static_cast<Error>(error);
@@ -1449,6 +1458,15 @@ Error HidlComposer::getPhysicalDisplayOrientation(Display, AidlTransform*) {
 }
 
 Error HidlComposer::getMaxLayerPictureProfiles(Display, int32_t*) {
+    return Error::UNSUPPORTED;
+}
+
+Error HidlComposer::startHdcpNegotiation(Display, const aidl::android::hardware::drm::HdcpLevels&) {
+    return Error::UNSUPPORTED;
+}
+
+Error HidlComposer::getLuts(Display, const std::vector<sp<GraphicBuffer>>&,
+                            std::vector<aidl::android::hardware::graphics::composer3::Luts>*) {
     return Error::UNSUPPORTED;
 }
 

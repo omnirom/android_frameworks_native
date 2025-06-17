@@ -42,22 +42,19 @@ class CommandGetQFactor : public Command {
     }
 
     Status doMain(Args && /*args*/) override {
-        std::string statusStr;
-        float qFactor;
-        Status ret;
+        auto hal = getHal();
 
-        if (auto hal = getHal<aidl::IVibrator>()) {
-            auto status = hal->call(&aidl::IVibrator::getQFactor, &qFactor);
-            statusStr = status.getDescription();
-            ret = status.isOk() ? OK : ERROR;
-        } else {
+        if (!hal) {
             return UNAVAILABLE;
         }
 
-        std::cout << "Status: " << statusStr << std::endl;
+        float qFactor;
+        auto status = hal->getQFactor(&qFactor);
+
+        std::cout << "Status: " << status.getDescription() << std::endl;
         std::cout << "Q Factor: " << qFactor << std::endl;
 
-        return ret;
+        return status.isOk() ? OK : ERROR;
     }
 };
 

@@ -32,34 +32,4 @@
 #include <linux/android/binder.h>
 #include <sys/ioctl.h>
 
-struct binder_frozen_state_info {
-    binder_uintptr_t cookie;
-    __u32 is_frozen;
-};
-
-#ifndef BR_FROZEN_BINDER
-// Temporary definition of BR_FROZEN_BINDER until UAPI binder.h includes it.
-#define BR_FROZEN_BINDER _IOR('r', 21, struct binder_frozen_state_info)
-#endif // BR_FROZEN_BINDER
-
-#ifndef BR_CLEAR_FREEZE_NOTIFICATION_DONE
-// Temporary definition of BR_CLEAR_FREEZE_NOTIFICATION_DONE until UAPI binder.h includes it.
-#define BR_CLEAR_FREEZE_NOTIFICATION_DONE _IOR('r', 22, binder_uintptr_t)
-#endif // BR_CLEAR_FREEZE_NOTIFICATION_DONE
-
-#ifndef BC_REQUEST_FREEZE_NOTIFICATION
-// Temporary definition of BC_REQUEST_FREEZE_NOTIFICATION until UAPI binder.h includes it.
-#define BC_REQUEST_FREEZE_NOTIFICATION _IOW('c', 19, struct binder_handle_cookie)
-#endif // BC_REQUEST_FREEZE_NOTIFICATION
-
-#ifndef BC_CLEAR_FREEZE_NOTIFICATION
-// Temporary definition of BC_CLEAR_FREEZE_NOTIFICATION until UAPI binder.h includes it.
-#define BC_CLEAR_FREEZE_NOTIFICATION _IOW('c', 20, struct binder_handle_cookie)
-#endif // BC_CLEAR_FREEZE_NOTIFICATION
-
-#ifndef BC_FREEZE_NOTIFICATION_DONE
-// Temporary definition of BC_FREEZE_NOTIFICATION_DONE until UAPI binder.h includes it.
-#define BC_FREEZE_NOTIFICATION_DONE _IOW('c', 21, binder_uintptr_t)
-#endif // BC_FREEZE_NOTIFICATION_DONE
-
 #endif // _BINDER_MODULE_H_

@@ -16,7 +16,8 @@
 
 #pragma once
 
-#include <binder/IAppOpsCallback.h>
+#include <com/android/internal/app/IAppOpsCallback.h>
+#include <com/android/internal/app/BnAppOpsCallback.h>
 #include <binder/IInterface.h>
 
 #include <optional>
@@ -26,6 +27,8 @@
 #endif
 
 namespace android {
+
+using IAppOpsCallback = ::com::android::internal::app::IAppOpsCallback;
 
 // ----------------------------------------------------------------------
 

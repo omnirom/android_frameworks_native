@@ -141,7 +141,7 @@ TEST_F(EGLTest, EGLTerminateSucceedsWithRemainingObjects) {
     };
     EXPECT_TRUE(eglChooseConfig(mEglDisplay, attrs, &config, 1, &numConfigs));
 
-    struct MockConsumer : public BnConsumerListener {
+    struct MockConsumer : public IConsumerListener {
         void onFrameAvailable(const BufferItem& /* item */) override {}
         void onBuffersReleased() override {}
         void onSidebandStreamChanged() override {}
@@ -261,7 +261,7 @@ TEST_F(EGLTest, EGLDisplayP3) {
     EXPECT_EQ(components[2], 8);
     EXPECT_EQ(components[3], 8);
 
-    struct MockConsumer : public BnConsumerListener {
+    struct MockConsumer : public IConsumerListener {
         void onFrameAvailable(const BufferItem& /* item */) override {}
         void onBuffersReleased() override {}
         void onSidebandStreamChanged() override {}
@@ -309,7 +309,7 @@ TEST_F(EGLTest, EGLDisplayP3Passthrough) {
 
     get8BitConfig(config);
 
-    struct MockConsumer : public BnConsumerListener {
+    struct MockConsumer : public IConsumerListener {
         void onFrameAvailable(const BufferItem& /* item */) override {}
         void onBuffersReleased() override {}
         void onSidebandStreamChanged() override {}
@@ -406,7 +406,7 @@ TEST_F(EGLTest, EGLDisplayP31010102) {
     EXPECT_EQ(components[2], 10);
     EXPECT_EQ(components[3], 2);
 
-    struct MockConsumer : public BnConsumerListener {
+    struct MockConsumer : public IConsumerListener {
         void onFrameAvailable(const BufferItem& /* item */) override {}
         void onBuffersReleased() override {}
         void onSidebandStreamChanged() override {}
@@ -578,7 +578,7 @@ TEST_F(EGLTest, EGLBT2020Linear) {
 
     ASSERT_NO_FATAL_FAILURE(get8BitConfig(config));
 
-    struct MockConsumer : public BnConsumerListener {
+    struct MockConsumer : public IConsumerListener {
         void onFrameAvailable(const BufferItem& /* item */) override {}
         void onBuffersReleased() override {}
         void onSidebandStreamChanged() override {}
@@ -630,7 +630,7 @@ TEST_F(EGLTest, EGLBT2020PQ) {
 
     ASSERT_NO_FATAL_FAILURE(get8BitConfig(config));
 
-    struct MockConsumer : public BnConsumerListener {
+    struct MockConsumer : public IConsumerListener {
         void onFrameAvailable(const BufferItem& /* item */) override {}
         void onBuffersReleased() override {}
         void onSidebandStreamChanged() override {}
@@ -713,7 +713,7 @@ TEST_F(EGLTest, EGLConfigFP16) {
     EXPECT_GE(components[2], 16);
     EXPECT_GE(components[3], 16);
 
-    struct MockConsumer : public BnConsumerListener {
+    struct MockConsumer : public IConsumerListener {
         void onFrameAvailable(const BufferItem& /* item */) override {}
         void onBuffersReleased() override {}
         void onSidebandStreamChanged() override {}
@@ -742,7 +742,7 @@ TEST_F(EGLTest, EGLNoConfigContext) {
 
     ASSERT_TRUE(hasEglExtension(mEglDisplay, "EGL_KHR_no_config_context"));
 
-    struct MockConsumer : public BnConsumerListener {
+    struct MockConsumer : public IConsumerListener {
         void onFrameAvailable(const BufferItem& /* item */) override {}
         void onBuffersReleased() override {}
         void onSidebandStreamChanged() override {}
@@ -841,7 +841,7 @@ TEST_F(EGLTest, EGLConfig1010102) {
     EXPECT_EQ(components[2], 10);
     EXPECT_EQ(components[3], 2);
 
-    struct MockConsumer : public BnConsumerListener {
+    struct MockConsumer : public IConsumerListener {
         void onFrameAvailable(const BufferItem& /* item */) override {}
         void onBuffersReleased() override {}
         void onSidebandStreamChanged() override {}
@@ -867,7 +867,7 @@ TEST_F(EGLTest, EGLInvalidColorspaceAttribute) {
 
     ASSERT_NO_FATAL_FAILURE(get8BitConfig(config));
 
-    struct MockConsumer : public BnConsumerListener {
+    struct MockConsumer : public IConsumerListener {
         void onFrameAvailable(const BufferItem& /* item */) override {}
         void onBuffersReleased() override {}
         void onSidebandStreamChanged() override {}
@@ -920,7 +920,7 @@ TEST_F(EGLTest, EGLUnsupportedColorspaceFormatCombo) {
     ASSERT_EQ(EGL_UNSIGNED_TRUE, success);
     ASSERT_EQ(1, numConfigs);
 
-    struct MockConsumer : public BnConsumerListener {
+    struct MockConsumer : public IConsumerListener {
         void onFrameAvailable(const BufferItem& /* item */) override {}
         void onBuffersReleased() override {}
         void onSidebandStreamChanged() override {}
@@ -951,7 +951,7 @@ TEST_F(EGLTest, EGLCreateWindowFailAndSucceed) {
 
     ASSERT_NO_FATAL_FAILURE(get8BitConfig(config));
 
-    struct MockConsumer : public BnConsumerListener {
+    struct MockConsumer : public IConsumerListener {
         void onFrameAvailable(const BufferItem& /* item */) override {}
         void onBuffersReleased() override {}
         void onSidebandStreamChanged() override {}
@@ -997,7 +997,7 @@ TEST_F(EGLTest, EGLCreateWindowTwoColorspaces) {
 
     ASSERT_NO_FATAL_FAILURE(get8BitConfig(config));
 
-    struct MockConsumer : public BnConsumerListener {
+    struct MockConsumer : public IConsumerListener {
         void onFrameAvailable(const BufferItem& /* item */) override {}
         void onBuffersReleased() override {}
         void onSidebandStreamChanged() override {}

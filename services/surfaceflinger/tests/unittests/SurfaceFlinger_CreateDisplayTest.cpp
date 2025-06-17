@@ -27,7 +27,8 @@ namespace {
 
 class CreateDisplayTest : public DisplayTransactionTest {
 public:
-    void createDisplayWithRequestedRefreshRate(const std::string& name, uint64_t displayId,
+    void createDisplayWithRequestedRefreshRate(const std::string& name,
+                                               VirtualDisplayId::BaseId baseId,
                                                float pacesetterDisplayRefreshRate,
                                                float requestedRefreshRate,
                                                float expectedAdjustedRefreshRate) {
@@ -49,12 +50,10 @@ public:
         EXPECT_EQ(display.requestedRefreshRate, Fps::fromValue(requestedRefreshRate));
         EXPECT_EQ(name.c_str(), display.displayName);
 
-        std::optional<VirtualDisplayId> vid =
-                DisplayId::fromValue<VirtualDisplayId>(displayId | DisplayId::FLAG_VIRTUAL);
-        ASSERT_TRUE(vid.has_value());
-
         sp<DisplayDevice> device =
-                mFlinger.createVirtualDisplayDevice(displayToken, *vid, requestedRefreshRate);
+                mFlinger.createVirtualDisplayDevice(displayToken, GpuVirtualDisplayId(baseId),
+                                                    requestedRefreshRate);
+
         EXPECT_TRUE(device->isVirtual());
         device->adjustRefreshRate(Fps::fromValue(pacesetterDisplayRefreshRate));
         // verifying desired value
@@ -142,7 +141,11 @@ TEST_F(CreateDisplayTest, createDisplaySetsCurrentStateForUniqueId) {
     // --------------------------------------------------------------------
     // Invocation
 
-    sp<IBinder> displayToken = mFlinger.createVirtualDisplay(kDisplayName, false, kUniqueId);
+    sp<IBinder> displayToken =
+            mFlinger.createVirtualDisplay(kDisplayName, false,
+                                          gui::ISurfaceComposer::OptimizationPolicy::
+                                                  optimizeForPower,
+                                          kUniqueId);
 
     // --------------------------------------------------------------------
     // Postconditions

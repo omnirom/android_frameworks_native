@@ -134,9 +134,14 @@ AIBinder* ARpcSession_setupInet(ARpcSession* session, const char* address, unsig
 //
 // param will be passed to requestFd. Callers can use param to pass contexts to
 // the requestFd function.
+//
+// paramDeleteFd will be called when requestFd and param are no longer in use.
+// Callers can pass a function deleting param if necessary. Callers can set
+// paramDeleteFd to null if callers doesn't need to clean up param.
 AIBinder* ARpcSession_setupPreconnectedClient(ARpcSession* session,
                                               int (*requestFd)(void* param),
-                                              void* param);
+                                              void* param,
+                                              void (*paramDeleteFd)(void* param));
 
 // Sets the file descriptor transport mode for this session.
 void ARpcSession_setFileDescriptorTransportMode(ARpcSession* session,

@@ -39,11 +39,11 @@ __BEGIN_DECLS
  *
  * \param motionEvent The motion event. This must be released with AInputEvent_release.
  *
+ * \return true if the event is handled by the client, false otherwise.
  * Available since API level 35.
  */
 typedef bool (*AInputReceiver_onMotionEvent)(void *_Null_unspecified context,
-                                             AInputEvent *_Nonnull motionEvent)
-                                            __INTRODUCED_IN(__ANDROID_API_V__);
+                                             AInputEvent *_Nonnull motionEvent);
 /**
  * The AInputReceiver_onKeyEvent callback is invoked when the registered input channel receives
  * a key event.
@@ -53,11 +53,12 @@ typedef bool (*AInputReceiver_onMotionEvent)(void *_Null_unspecified context,
  *
  * \param keyEvent The key event. This must be released with AInputEvent_release.
  *
+ * \return true if the event is handled by the client, false otherwise. System may generate
+ * a fallback key event if the event is not handled.
  * Available since API level 35.
  */
 typedef bool (*AInputReceiver_onKeyEvent)(void *_Null_unspecified context,
-                                          AInputEvent *_Nonnull keyEvent)
-                                          __INTRODUCED_IN(__ANDROID_API_V__);
+                                          AInputEvent *_Nonnull keyEvent);
 
 typedef struct AInputReceiverCallbacks AInputReceiverCallbacks;
 

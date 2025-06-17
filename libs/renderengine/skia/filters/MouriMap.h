@@ -62,10 +62,13 @@ class MouriMap {
 public:
     MouriMap();
     // Apply the MouriMap tonemmaping operator to the input.
-    // The HDR/SDR ratio describes the luminace range of the input. 1.0 means SDR. Anything larger
-    // then 1.0 means that there is headroom above the SDR region.
-    // Similarly, the target HDR/SDR ratio describes the luminance range of the output.
-    sk_sp<SkShader> mouriMap(SkiaGpuContext* context, sk_sp<SkShader> input, float inputHdrSdrRatio,
+    // The inputMultiplier informs how to interpret the luminance encoding of the input.
+    // For a fixed point input, this is necessary to interpret what "1.0" means for the input
+    // pixels, so that the luminance can be scaled appropriately, such that the operator can
+    // transform SDR values to be within 1.0. For a floating point input, "1.0" always means SDR,
+    // so the caller must pass 1.0.
+    // The target HDR/SDR ratio describes the luminance range of the output.
+    sk_sp<SkShader> mouriMap(SkiaGpuContext* context, sk_sp<SkShader> input, float inputMultiplier,
                              float targetHdrSdrRatio);
 
 private:

@@ -36,7 +36,7 @@ enum class HdrRenderType {
  */
 inline HdrRenderType getHdrRenderType(ui::Dataspace dataspace,
                                       std::optional<ui::PixelFormat> pixelFormat,
-                                      float hdrSdrRatio = 1.f) {
+                                      float hdrSdrRatio = 1.f, bool hasHdrMetadata = false) {
     const auto transfer = dataspace & HAL_DATASPACE_TRANSFER_MASK;
     const auto range = dataspace & HAL_DATASPACE_RANGE_MASK;
 
@@ -49,7 +49,8 @@ inline HdrRenderType getHdrRenderType(ui::Dataspace dataspace,
                                                                      HAL_DATASPACE_RANGE_EXTENDED);
 
     if ((dataspace == BT2020_LINEAR_EXT || dataspace == ui::Dataspace::V0_SCRGB) &&
-        pixelFormat.has_value() && pixelFormat.value() == ui::PixelFormat::RGBA_FP16) {
+        pixelFormat.has_value() && pixelFormat.value() == ui::PixelFormat::RGBA_FP16 &&
+        hasHdrMetadata) {
         return HdrRenderType::GENERIC_HDR;
     }
 

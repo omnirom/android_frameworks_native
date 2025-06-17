@@ -100,7 +100,9 @@ public:
 };
 
 int main(int argc, char* argv[]) {
+#ifndef __ANDROID__
     __android_log_set_logger(__android_log_stderr_logger);
+#endif
 
     LOG_ALWAYS_FATAL_IF(argc != 3, "Invalid number of arguments: %d", argc);
     unique_fd writeEnd(atoi(argv[1]));

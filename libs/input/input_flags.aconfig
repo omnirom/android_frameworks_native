@@ -16,10 +16,13 @@ flag {
 }
 
 flag {
-  name: "remove_input_channel_from_windowstate"
+  name: "enable_button_state_verification"
   namespace: "input"
-  description: "Do not store a copy of input channel inside WindowState."
-  bug: "323450804"
+  description: "Set to true to enable crashing whenever bad inbound events are going into InputDispatcher"
+  bug: "392870542"
+  metadata {
+    purpose: PURPOSE_BUGFIX
+  }
 }
 
 flag {
@@ -37,9 +40,9 @@ flag {
 }
 
 flag {
-  name: "split_all_touches"
+  name: "deprecate_split_touch_apis"
   namespace: "input"
-  description: "Set FLAG_SPLIT_TOUCHES to true for all windows, regardless of what they specify. This is essentially deprecating this flag by forcefully enabling the split functionality"
+  description: "Deprecate all public APIs related to split touch because now all windows behave as if split touch is permanently enabled and there's no way for a window to disable split touch."
   bug: "239934827"
 }
 
@@ -48,20 +51,6 @@ flag {
   namespace: "accessibility"
   description: "Brings back fatal logging for inconsistent event streams originating from accessibility."
   bug: "299977100"
-}
-
-flag {
-  name: "report_palms_to_gestures_library"
-  namespace: "input"
-  description: "Report touches marked as palm by firmware to gestures library"
-  bug: "302505955"
-}
-
-flag {
-  name: "enable_touchpad_typing_palm_rejection"
-  namespace: "input"
-  description: "Enabling additional touchpad palm rejection will disable the tap to click while the user is typing on a physical keyboard"
-  bug: "301055381"
 }
 
 flag {
@@ -76,13 +65,6 @@ flag {
   namespace: "input"
   description: "Disable touch rejection when the stylus hovers the screen"
   bug: "301216095"
-}
-
-flag {
-  name: "enable_input_filter_rust_impl"
-  namespace: "input"
-  description: "Enable input filter rust implementation"
-  bug: "294546335"
 }
 
 flag {
@@ -109,13 +91,6 @@ flag {
 }
 
 flag {
-  name: "enable_touchpad_fling_stop"
-  namespace: "input"
-  description: "Enable fling scrolling to be stopped by putting a finger on the touchpad again"
-  bug: "281106755"
-}
-
-flag {
   name: "enable_prediction_pruning_via_jerk_thresholding"
   namespace: "input"
   description: "Enable prediction pruning based on jerk thresholds."
@@ -138,10 +113,13 @@ flag {
 }
 
 flag {
-  name: "hide_pointer_indicators_for_secure_windows"
+  name: "allow_transfer_of_entire_gesture"
   namespace: "input"
-  description: "Hide touch and pointer indicators if a secure window is present on display"
-  bug: "325252005"
+  description: "When calling 'transferTouchGesture', the entire gesture (including new POINTER_DOWN events from the same device) will be automatically transferred to the destination window"
+  bug: "397979572"
+  metadata {
+    purpose: PURPOSE_BUGFIX
+  }
 }
 
 flag {
@@ -156,13 +134,6 @@ flag {
   namespace: "input"
   description: "Show touch and pointer indicators when mirroring a single task"
   bug: "310179437"
-}
-
-flag {
-  name: "include_relative_axis_values_for_captured_touchpads"
-  namespace: "input"
-  description: "Include AXIS_RELATIVE_X and AXIS_RELATIVE_Y values when reporting touches from captured touchpads."
-  bug: "330522990"
 }
 
 flag {
@@ -192,6 +163,16 @@ flag {
   description: "Apply input policy profile for input threads."
   bug: "347122505"
   is_fixed_read_only: true
+}
+
+flag {
+  name: "disable_touch_input_mapper_pointer_usage"
+  namespace: "input"
+  description: "Disable the PointerUsage concept in TouchInputMapper since the old touchpad stack is no longer used."
+  bug: "281840344"
+  metadata {
+    purpose: PURPOSE_BUGFIX
+  }
 }
 
 flag {
@@ -230,4 +211,44 @@ flag {
   namespace: "lse_desktop_experience"
   description: "Allow cursor to transition across multiple connected displays"
   bug: "362719483"
+}
+
+flag {
+  name: "connected_displays_associated_display_cursor_bugfix"
+  namespace: "lse_desktop_experience"
+  description: "Apply some rules to define associated display cursor behavior in connected displays"
+  bug: "396568321"
+  metadata {
+    purpose: PURPOSE_BUGFIX
+  }
+}
+
+flag {
+  name: "use_cloned_screen_coordinates_as_raw"
+  namespace: "input"
+  description: "Use the cloned window's layer stack (screen) space as the raw coordinate space for input going to clones"
+  bug: "377846505"
+  metadata {
+    purpose: PURPOSE_BUGFIX
+  }
+}
+
+flag {
+  name: "prevent_merging_input_pointer_devices"
+  namespace: "desktop_input"
+  description: "Prevent merging input sub-devices that provide pointer input streams"
+  bug: "389689566"
+  metadata {
+    purpose: PURPOSE_BUGFIX
+  }
+}
+
+flag {
+  name: "enable_display_topology_validation"
+  namespace: "input"
+  description: "Set to true to enable display topology validation"
+  bug: "401219231"
+  metadata {
+    purpose: PURPOSE_BUGFIX
+  }
 }

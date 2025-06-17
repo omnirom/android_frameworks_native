@@ -139,8 +139,21 @@ struct InputReaderConfiguration {
     // The mouse pointer speed, as a number from -7 (slowest) to 7 (fastest).
     int32_t mousePointerSpeed;
 
-    // Displays on which an acceleration curve shouldn't be applied for pointer movements from mice.
-    std::set<ui::LogicalDisplayId> displaysWithMousePointerAccelerationDisabled;
+    // Displays on which all pointer scaling, including linear scaling based on the
+    // user's pointer speed setting, should be disabled for mice. This differs from
+    // disabling acceleration via the 'mousePointerAccelerationEnabled' setting, where
+    // the pointer speed setting still influences the scaling factor.
+    std::set<ui::LogicalDisplayId> displaysWithMouseScalingDisabled;
+
+    // True if the connected mouse should exhibit pointer acceleration. If false,
+    // a flat acceleration curve (linear scaling) is used, but the user's pointer
+    // speed setting still affects the scaling factor.
+    bool mousePointerAccelerationEnabled;
+
+    // True if the touchpad should exhibit pointer acceleration. If false,
+    // a flat acceleration curve (linear scaling) is used, but the user's pointer
+    // speed setting still affects the scaling factor.
+    bool touchpadAccelerationEnabled;
 
     // Velocity control parameters for touchpad pointer movements on the old touchpad stack (based
     // on TouchInputMapper).
@@ -274,12 +287,17 @@ struct InputReaderConfiguration {
           : virtualKeyQuietTime(0),
             defaultPointerDisplayId(ui::LogicalDisplayId::DEFAULT),
             mousePointerSpeed(0),
-            displaysWithMousePointerAccelerationDisabled(),
+            displaysWithMouseScalingDisabled(),
+            mousePointerAccelerationEnabled(true),
+            touchpadAccelerationEnabled(true),
             pointerVelocityControlParameters(1.0f, 500.0f, 3000.0f,
                                              static_cast<float>(
                                                      android::os::IInputConstants::
                                                              DEFAULT_POINTER_ACCELERATION)),
-            wheelVelocityControlParameters(1.0f, 15.0f, 50.0f, 4.0f),
+            wheelVelocityControlParameters(1.0f, 15.0f, 50.0f,
+                                           static_cast<float>(
+                                                   android::os::IInputConstants::
+                                                           DEFAULT_MOUSE_WHEEL_ACCELERATION)),
             pointerGesturesEnabled(true),
             pointerGestureQuietInterval(100 * 1000000LL),            // 100 ms
             pointerGestureDragMinSwitchSpeed(50),                    // 50 pixels per second
@@ -424,6 +442,9 @@ public:
 
     /* Get the Bluetooth address of an input device, if known. */
     virtual std::optional<std::string> getBluetoothAddress(int32_t deviceId) const = 0;
+
+    /* Gets the sysfs root path for this device. Returns an empty path if there is none. */
+    virtual std::filesystem::path getSysfsRootPath(int32_t deviceId) const = 0;
 
     /* Sysfs node change reported. Recreate device if required to incorporate the new sysfs nodes */
     virtual void sysfsNodeChanged(const std::string& sysfsNodePath) = 0;

@@ -34,10 +34,8 @@ AutomotiveDisplayProxyService::getIGraphicBufferProducer(uint64_t id) {
     sp<IBinder> displayToken = nullptr;
     sp<SurfaceControl> surfaceControl = nullptr;
     if (it == mDisplays.end()) {
-        if (const auto displayId = DisplayId::fromValue<PhysicalDisplayId>(id)) {
-            displayToken = SurfaceComposerClient::getPhysicalDisplayToken(*displayId);
-        }
-
+        displayToken =
+                SurfaceComposerClient::getPhysicalDisplayToken(PhysicalDisplayId::fromValue(id));
         if (displayToken == nullptr) {
             ALOGE("Given display id, 0x%lX, is invalid.", (unsigned long)id);
             return nullptr;
@@ -67,7 +65,7 @@ AutomotiveDisplayProxyService::getIGraphicBufferProducer(uint64_t id) {
             std::swap(displayWidth, displayHeight);
         }
 
-        sp<android::SurfaceComposerClient> surfaceClient = new SurfaceComposerClient();
+        sp<android::SurfaceComposerClient> surfaceClient = sp<SurfaceComposerClient>::make();
         err = surfaceClient->initCheck();
         if (err != NO_ERROR) {
             ALOGE("SurfaceComposerClient::initCheck error: %#x", err);
@@ -160,11 +158,8 @@ Return<void> AutomotiveDisplayProxyService::getDisplayInfo(uint64_t id, getDispl
     HwDisplayConfig activeConfig;
     HwDisplayState  activeState;
 
-    sp<IBinder> displayToken;
-    if (const auto displayId = DisplayId::fromValue<PhysicalDisplayId>(id)) {
-        displayToken = SurfaceComposerClient::getPhysicalDisplayToken(*displayId);
-    }
-
+    sp<IBinder> displayToken =
+            SurfaceComposerClient::getPhysicalDisplayToken(PhysicalDisplayId::fromValue(id));
     if (displayToken == nullptr) {
         ALOGE("Given display id, 0x%lX, is invalid.", (unsigned long)id);
     } else {
@@ -197,4 +192,3 @@ Return<void> AutomotiveDisplayProxyService::getDisplayInfo(uint64_t id, getDispl
 }  // namespace automotive
 }  // namespace frameworks
 }  // namespace android
-

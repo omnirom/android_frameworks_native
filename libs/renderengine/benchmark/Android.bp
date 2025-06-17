@@ -28,6 +28,7 @@ cc_benchmark {
         "android.hardware.graphics.composer3-ndk_shared",
         "librenderengine_deps",
         "surfaceflinger_defaults",
+        "libsurfaceflinger_common_deps",
     ],
     srcs: [
         "main.cpp",
@@ -38,7 +39,6 @@ cc_benchmark {
     static_libs: [
         "librenderengine",
         "libshaders",
-        "libsurfaceflinger_common",
         "libtonemap",
     ],
     cflags: [

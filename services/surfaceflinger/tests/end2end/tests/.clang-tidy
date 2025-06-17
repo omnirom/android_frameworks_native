@@ -1,0 +1,32 @@
+# Copyright 2025 The Android Open Source Project
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#      http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+FormatStyle:         file
+InheritParentConfig: true
+
+# Note: For tests, we are actually turning off certain checks enabled for the
+# non-test code in the parent .clang-tidy file.
+Checks:
+  - -cppcoreguidelines-avoid-magic-numbers  # Allow tests to use magic numbers.
+  - -cppcoreguidelines-avoid-goto  # Google Test macros use goto.
+  - -cppcoreguidelines-avoid-non-const-global-variables  # Google Test macros define global variables.
+  - -cppcoreguidelines-macro-usage  # Google Benchmark defines function-like macros.
+  - -cppcoreguidelines-owning-memory  # Google Test macros use operator new directly.
+  - -google-runtime-int  # Tests might intentionally use the base "short"/"long" types and not want to use "int16"/"int64".
+  - -misc-use-anonymous-namespace  # Google Test macros declare some static global variables to not export them.
+  - -modernize-use-trailing-return-type  # Google Test macros use non-trailing return types.
+  - -performance-move-const-arg  # Tests might std::move() a trivially copyable value as part of testing that moving works.
+  - -readability-function-cognitive-complexity  # Assertions turn into extra branches, increasing apparent complexity.
+  - -readability-magic-numbers  # Allow tests to use magic numbers
+

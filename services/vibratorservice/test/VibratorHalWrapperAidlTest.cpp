@@ -787,5 +787,6 @@ TEST_F(VibratorHalWrapperAidlTest, TestComposePwleV2) {
 
     result = mWrapper->composePwleV2(composite, callback);
     ASSERT_TRUE(result.isOk());
+    ASSERT_EQ(300ms, result.value());
     ASSERT_EQ(1, *callbackCounter.get());
 }

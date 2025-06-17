@@ -13,6 +13,9 @@ cc_fuzz {
         "libgpuservice",
         "liblog",
     ],
+    shared_libs: [
+        "gpuservice_multiuser_flags_c_lib",
+    ],
     fuzz_config: {
         cc: [
             "paulthomson@google.com",

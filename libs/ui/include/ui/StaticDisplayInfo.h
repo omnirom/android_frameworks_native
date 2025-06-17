@@ -28,6 +28,7 @@ enum class DisplayConnectionType { Internal, External, ftl_last = External };
 // Immutable information about physical display.
 struct StaticDisplayInfo {
     DisplayConnectionType connectionType = DisplayConnectionType::Internal;
+    uint8_t port;
     float density = 0.f;
     bool secure = false;
     std::optional<DeviceProductInfo> deviceProductInfo;

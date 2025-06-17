@@ -57,22 +57,19 @@ class CommandGetPrimitiveDuration : public Command {
     }
 
     Status doMain(Args && /*args*/) override {
-        std::string statusStr;
-        int32_t duration;
-        Status ret;
+        auto hal = getHal();
 
-        if (auto hal = getHal<aidl::IVibrator>()) {
-            auto status = hal->call(&aidl::IVibrator::getPrimitiveDuration, mPrimitive, &duration);
-            statusStr = status.getDescription();
-            ret = status.isOk() ? OK : ERROR;
-        } else {
+        if (!hal) {
             return UNAVAILABLE;
         }
 
-        std::cout << "Status: " << statusStr << std::endl;
+        int32_t duration;
+        auto status = hal->getPrimitiveDuration(mPrimitive, &duration);
+
+        std::cout << "Status: " << status.getDescription() << std::endl;
         std::cout << "Duration: " << duration << std::endl;
 
-        return ret;
+        return status.isOk() ? OK : ERROR;
     }
 
     CompositePrimitive mPrimitive;

@@ -93,6 +93,7 @@ filegroup {
         "android/gui/StalledTransactionInfo.aidl",
         "android/**/TouchOcclusionMode.aidl",
         "android/gui/TrustedOverlay.aidl",
+        "android/gui/BorderSettings.aidl",
     ],
 }
 
@@ -266,8 +267,6 @@ filegroup {
         "FenceMonitor.cpp",
         "Flags.cpp",
         "GLConsumer.cpp",
-        "IConsumerListener.cpp",
-        "IGraphicBufferConsumer.cpp",
         "IGraphicBufferProducer.cpp",
         "IProducerListener.cpp",
         "ISurfaceComposer.cpp",
@@ -283,6 +282,7 @@ filegroup {
         "SurfaceControl.cpp",
         "SurfaceComposerClient.cpp",
         "SyncFeatures.cpp",
+        "TransactionState.cpp",
         "VsyncEventData.cpp",
         "view/Surface.cpp",
         "WindowInfosListenerReporter.cpp",
@@ -296,7 +296,6 @@ filegroup {
 cc_defaults {
     name: "libgui-defaults",
     defaults: ["libgui_bufferqueue-defaults"],
-    srcs: [":libgui-sources"],
     static_libs: [
         "libgui_aidl_static",
         "libgui_window_info_static",
@@ -318,6 +317,10 @@ cc_defaults {
 
     defaults: [
         "libgui-defaults",
+    ],
+
+    srcs: [
+        ":libgui-sources",
     ],
 
     export_static_lib_headers: [

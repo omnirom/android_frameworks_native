@@ -184,7 +184,7 @@ unsafe impl AsNative<sys::AParcel> for Parcel {
 
 /// Safety: The `BorrowedParcel` constructors guarantee that a `BorrowedParcel`
 /// object will always contain a valid pointer to an `AParcel`.
-unsafe impl<'a> AsNative<sys::AParcel> for BorrowedParcel<'a> {
+unsafe impl AsNative<sys::AParcel> for BorrowedParcel<'_> {
     fn as_native(&self) -> *const sys::AParcel {
         self.ptr.as_ptr()
     }
@@ -195,7 +195,7 @@ unsafe impl<'a> AsNative<sys::AParcel> for BorrowedParcel<'a> {
 }
 
 // Data serialization methods
-impl<'a> BorrowedParcel<'a> {
+impl BorrowedParcel<'_> {
     /// Data written to parcelable is zero'd before being deleted or reallocated.
     #[cfg(not(android_ndk))]
     pub fn mark_sensitive(&mut self) {
@@ -334,7 +334,7 @@ impl<'a> BorrowedParcel<'a> {
 /// A segment of a writable parcel, used for [`BorrowedParcel::sized_write`].
 pub struct WritableSubParcel<'a>(BorrowedParcel<'a>);
 
-impl<'a> WritableSubParcel<'a> {
+impl WritableSubParcel<'_> {
     /// Write a type that implements [`Serialize`] to the sub-parcel.
     pub fn write<S: Serialize + ?Sized>(&mut self, parcelable: &S) -> Result<()> {
         parcelable.serialize(&mut self.0)
@@ -440,7 +440,7 @@ impl Parcel {
 }
 
 // Data deserialization methods
-impl<'a> BorrowedParcel<'a> {
+impl BorrowedParcel<'_> {
     /// Attempt to read a type that implements [`Deserialize`] from this parcel.
     pub fn read<D: Deserialize>(&self) -> Result<D> {
         D::deserialize(self)
@@ -565,7 +565,7 @@ pub struct ReadableSubParcel<'a> {
     end_position: i32,
 }
 
-impl<'a> ReadableSubParcel<'a> {
+impl ReadableSubParcel<'_> {
     /// Read a type that implements [`Deserialize`] from the sub-parcel.
     pub fn read<D: Deserialize>(&self) -> Result<D> {
         D::deserialize(&self.parcel)
@@ -649,7 +649,7 @@ impl Parcel {
 }
 
 // Internal APIs
-impl<'a> BorrowedParcel<'a> {
+impl BorrowedParcel<'_> {
     pub(crate) fn write_binder(&mut self, binder: Option<&SpIBinder>) -> Result<()> {
         // Safety: `BorrowedParcel` always contains a valid pointer to an
         // `AParcel`. `AsNative` for `Option<SpIBinder`> will either return
@@ -702,7 +702,7 @@ impl fmt::Debug for Parcel {
     }
 }
 
-impl<'a> fmt::Debug for BorrowedParcel<'a> {
+impl fmt::Debug for BorrowedParcel<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("BorrowedParcel").finish()
     }

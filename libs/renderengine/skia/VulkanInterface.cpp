@@ -204,10 +204,10 @@ static skgpu::VulkanGetProc sGetProc = [](const char* proc_name,
         BAIL("[%s] null", #expr); \
     }
 
-#define VK_CHECK(expr)                              \
-    if ((expr) != VK_SUCCESS) {                     \
-        BAIL("[%s] failed. err = %d", #expr, expr); \
-        return;                                     \
+#define VK_CHECK(expr)                                    \
+    if (VkResult result = (expr); result != VK_SUCCESS) { \
+        BAIL("[%s] failed. err = %d", #expr, result);     \
+        return;                                           \
     }
 
 #define VK_GET_PROC(F)                                                           \

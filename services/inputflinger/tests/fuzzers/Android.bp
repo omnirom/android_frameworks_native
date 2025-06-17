@@ -33,8 +33,8 @@ cc_defaults {
         "frameworks/native/services/inputflinger",
     ],
     shared_libs: [
-        "libinputreader",
         "libinputflinger_base",
+        "libinputreader",
     ],
     sanitize: {
         hwaddress: true,

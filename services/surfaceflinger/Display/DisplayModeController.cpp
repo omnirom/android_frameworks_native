@@ -46,11 +46,21 @@ DisplayModeController::Display::Display(DisplaySnapshotRef snapshot,
         renderRateFpsTrace(concatId("RenderRateFps")),
         hasDesiredModeTrace(concatId("HasDesiredMode"), false) {}
 
+DisplayModeController::DisplayModeController() {
+    using namespace std::string_literals;
+    mSupportsHdcp = base::GetBoolProperty("debug.sf.hdcp_support"s, false);
+}
+
 void DisplayModeController::registerDisplay(PhysicalDisplayId displayId,
                                             DisplaySnapshotRef snapshotRef,
                                             RefreshRateSelectorPtr selectorPtr) {
+    DisplayPtr displayPtr = std::make_unique<Display>(snapshotRef, selectorPtr);
+    // TODO: b/349703362 - Remove first condition when HDCP aidl APIs are enforced
+    displayPtr->setSecure(!supportsHdcp() ||
+                          snapshotRef.get().connectionType() ==
+                                  ui::DisplayConnectionType::Internal);
     std::lock_guard lock(mDisplayLock);
-    mDisplays.emplace_or_replace(displayId, std::make_unique<Display>(snapshotRef, selectorPtr));
+    mDisplays.emplace_or_replace(displayId, std::move(displayPtr));
 }
 
 void DisplayModeController::registerDisplay(DisplaySnapshotRef snapshotRef,
@@ -58,11 +68,14 @@ void DisplayModeController::registerDisplay(DisplaySnapshotRef snapshotRef,
                                             scheduler::RefreshRateSelector::Config config) {
     const auto& snapshot = snapshotRef.get();
     const auto displayId = snapshot.displayId();
-
+    DisplayPtr displayPtr =
+            std::make_unique<Display>(snapshotRef, snapshot.displayModes(), activeModeId, config);
+    // TODO: b/349703362 - Remove first condition when HDCP aidl APIs are enforced
+    displayPtr->setSecure(!supportsHdcp() ||
+                          snapshotRef.get().connectionType() ==
+                                  ui::DisplayConnectionType::Internal);
     std::lock_guard lock(mDisplayLock);
-    mDisplays.emplace_or_replace(displayId,
-                                 std::make_unique<Display>(snapshotRef, snapshot.displayModes(),
-                                                           activeModeId, config));
+    mDisplays.emplace_or_replace(displayId, std::move(displayPtr));
 }
 
 void DisplayModeController::unregisterDisplay(PhysicalDisplayId displayId) {
@@ -97,9 +110,7 @@ auto DisplayModeController::setDesiredMode(PhysicalDisplayId displayId,
             const bool force = desiredModeOpt->force;
             desiredModeOpt = std::move(desiredMode);
             desiredModeOpt->emitEvent |= emitEvent;
-            if (FlagManager::getInstance().connected_display()) {
-                desiredModeOpt->force |= force;
-            }
+            desiredModeOpt->force |= force;
             return DesiredModeAction::None;
         }
 
@@ -191,7 +202,7 @@ auto DisplayModeController::initiateModeChange(
     // cleared until the next `SF::initiateDisplayModeChanges`. However, the desired mode has been
     // consumed at this point, so clear the `force` flag to prevent an endless loop of
     // `initiateModeChange`.
-    if (FlagManager::getInstance().connected_display()) {
+    {
         std::scoped_lock lock(displayPtr->desiredModeLock);
         if (displayPtr->desiredModeOpt) {
             displayPtr->desiredModeOpt->force = false;
@@ -304,6 +315,31 @@ auto DisplayModeController::getKernelIdleTimerState(PhysicalDisplayId displayId)
                     });
 
     return {desiredModeIdOpt, displayPtr->isKernelIdleTimerEnabled};
+}
+
+bool DisplayModeController::supportsHdcp() const {
+    return mSupportsHdcp && FlagManager::getInstance().hdcp_level_hal() &&
+            FlagManager::getInstance().hdcp_negotiation();
+}
+
+void DisplayModeController::startHdcpNegotiation(PhysicalDisplayId displayId) {
+    using aidl::android::hardware::drm::HdcpLevel;
+    using aidl::android::hardware::drm::HdcpLevels;
+    constexpr HdcpLevels kLevels = {.connectedLevel = HdcpLevel::HDCP_V2_1,
+                                    .maxLevel = HdcpLevel::HDCP_V2_3};
+
+    std::lock_guard lock(mDisplayLock);
+    const auto& displayPtr = FTL_TRY(mDisplays.get(displayId).ok_or(ftl::Unit())).get();
+    if (displayPtr->hdcpState == HdcpState::Desired) {
+        const auto status = mComposerPtr->startHdcpNegotiation(displayId, kLevels);
+        displayPtr->hdcpState = (status == NO_ERROR) ? HdcpState::Enabled : HdcpState::Undesired;
+    }
+}
+
+void DisplayModeController::setSecure(PhysicalDisplayId displayId, bool secure) {
+    std::lock_guard lock(mDisplayLock);
+    const auto& displayPtr = FTL_TRY(mDisplays.get(displayId).ok_or(ftl::Unit())).get();
+    displayPtr->setSecure(secure);
 }
 
 #pragma clang diagnostic pop

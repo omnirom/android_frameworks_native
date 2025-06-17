@@ -39,6 +39,7 @@ using namespace android::hardware::power;
 using namespace std::chrono_literals;
 using namespace testing;
 using namespace android::power;
+using namespace ftl::flag_operators;
 
 namespace android::adpf::impl {
 
@@ -54,6 +55,8 @@ public:
     void setTimingTestingMode(bool testinMode);
     void allowReportActualToAcquireMutex();
     bool sessionExists();
+    ftl::Flags<Workload> getCommittedWorkload() const;
+    ftl::Flags<Workload> getQueuedWorkload() const;
     int64_t toNanos(Duration d);
 
     struct GpuTestConfig {
@@ -313,6 +316,14 @@ Duration PowerAdvisorTest::getFenceWaitDelayDuration(bool skipValidate) {
 
 Duration PowerAdvisorTest::getErrorMargin() {
     return mPowerAdvisor->sTargetSafetyMargin;
+}
+
+ftl::Flags<Workload> PowerAdvisorTest::getCommittedWorkload() const {
+    return mPowerAdvisor->mCommittedWorkload;
+}
+
+ftl::Flags<Workload> PowerAdvisorTest::getQueuedWorkload() const {
+    return ftl::Flags<Workload>{mPowerAdvisor->mQueuedWorkload.load()};
 }
 
 namespace {
@@ -840,6 +851,33 @@ TEST_F(PowerAdvisorTest, fmq_sendHint_queueFull) {
     mPowerAdvisor->notifyCpuLoadUp();
     ASSERT_EQ(mBackendFmq->availableToRead(), 2uL);
     ASSERT_EQ(hint, SessionHint::CPU_LOAD_UP);
+}
+
+TEST_F(PowerAdvisorTest, trackQueuedWorkloads) {
+    mPowerAdvisor->setQueuedWorkload(ftl::Flags<Workload>());
+    ASSERT_EQ(getQueuedWorkload(), ftl::Flags<Workload>());
+
+    // verify workloads are queued
+    mPowerAdvisor->setQueuedWorkload(ftl::Flags<Workload>(Workload::VISIBLE_REGION));
+    ASSERT_EQ(getQueuedWorkload(), ftl::Flags<Workload>(Workload::VISIBLE_REGION));
+
+    mPowerAdvisor->setQueuedWorkload(ftl::Flags<Workload>(Workload::EFFECTS));
+    ASSERT_EQ(getQueuedWorkload(), Workload::VISIBLE_REGION | Workload::EFFECTS);
+
+    // verify queued workloads are cleared after commit
+    mPowerAdvisor->setCommittedWorkload(ftl::Flags<Workload>());
+    ASSERT_EQ(getQueuedWorkload(), ftl::Flags<Workload>());
+}
+
+TEST_F(PowerAdvisorTest, trackCommittedWorkloads) {
+    // verify queued workloads are cleared after commit
+    mPowerAdvisor->setCommittedWorkload(Workload::SCREENSHOT | Workload::VISIBLE_REGION);
+    ASSERT_EQ(getCommittedWorkload(), Workload::SCREENSHOT | Workload::VISIBLE_REGION);
+
+    // on composite, verify we update the committed workload so we track workload increases for the
+    // next frame accurately
+    mPowerAdvisor->setCompositedWorkload(Workload::VISIBLE_REGION | Workload::DISPLAY_CHANGES);
+    ASSERT_EQ(getCommittedWorkload(), Workload::VISIBLE_REGION | Workload::DISPLAY_CHANGES);
 }
 
 } // namespace

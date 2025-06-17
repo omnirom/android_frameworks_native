@@ -40,6 +40,7 @@
 #include "TouchCursorInputMapperCommon.h"
 #include "TouchpadInputMapper.h"
 #include "gestures/HardwareProperties.h"
+#include "gestures/Logging.h"
 #include "gestures/TimerProvider.h"
 #include "ui/Rotation.h"
 
@@ -49,19 +50,12 @@ namespace android {
 
 namespace {
 
-/**
- * Log details of each gesture output by the gestures library.
- * Enable this via "adb shell setprop log.tag.TouchpadInputMapperGestures DEBUG" (requires
- * restarting the shell)
- */
-const bool DEBUG_TOUCHPAD_GESTURES =
-        __android_log_is_loggable(ANDROID_LOG_DEBUG, "TouchpadInputMapperGestures",
-                                  ANDROID_LOG_INFO);
-
 std::vector<double> createAccelerationCurveForSensitivity(int32_t sensitivity,
+                                                          bool accelerationEnabled,
                                                           size_t propertySize) {
-    std::vector<AccelerationCurveSegment> segments =
-            createAccelerationCurveForPointerSensitivity(sensitivity);
+    std::vector<AccelerationCurveSegment> segments = accelerationEnabled
+            ? createAccelerationCurveForPointerSensitivity(sensitivity)
+            : createFlatAccelerationCurve(sensitivity);
     LOG_ALWAYS_FATAL_IF(propertySize < 4 * segments.size());
     std::vector<double> output(propertySize, 0);
 
@@ -150,28 +144,39 @@ public:
     // records it if so.
     void processGesture(const TouchpadInputMapper::MetricsIdentifier& id, const Gesture& gesture) {
         std::scoped_lock lock(mLock);
+        Counters& counters = mCounters[id];
         switch (gesture.type) {
             case kGestureTypeFling:
                 if (gesture.details.fling.fling_state == GESTURES_FLING_START) {
                     // Indicates the end of a two-finger scroll gesture.
-                    mCounters[id].twoFingerSwipeGestures++;
+                    counters.twoFingerSwipeGestures++;
                 }
                 break;
             case kGestureTypeSwipeLift:
-                mCounters[id].threeFingerSwipeGestures++;
+                // The Gestures library occasionally outputs two lift gestures in a row, which can
+                // cause inaccurate metrics reporting. To work around this, deduplicate successive
+                // lift gestures.
+                // TODO(b/404529050): fix the Gestures library, and remove this check.
+                if (counters.lastGestureType != kGestureTypeSwipeLift) {
+                    counters.threeFingerSwipeGestures++;
+                }
                 break;
             case kGestureTypeFourFingerSwipeLift:
-                mCounters[id].fourFingerSwipeGestures++;
+                // TODO(b/404529050): fix the Gestures library, and remove this check.
+                if (counters.lastGestureType != kGestureTypeFourFingerSwipeLift) {
+                    counters.fourFingerSwipeGestures++;
+                }
                 break;
             case kGestureTypePinch:
                 if (gesture.details.pinch.zoom_state == GESTURES_ZOOM_END) {
-                    mCounters[id].pinchGestures++;
+                    counters.pinchGestures++;
                 }
                 break;
             default:
                 // We're not interested in any other gestures.
                 break;
         }
+        counters.lastGestureType = gesture.type;
     }
 
 private:
@@ -220,6 +225,10 @@ private:
         int32_t threeFingerSwipeGestures = 0;
         int32_t fourFingerSwipeGestures = 0;
         int32_t pinchGestures = 0;
+
+        // Records the last type of gesture received for this device, for deduplication purposes.
+        // TODO(b/404529050): fix the Gestures library and remove this field.
+        GestureType lastGestureType = kGestureTypeContactInitiated;
     };
 
     // Metrics are aggregated by device model and version, so if two devices of the same model and
@@ -358,12 +367,14 @@ std::list<NotifyArgs> TouchpadInputMapper::reconfigure(nsecs_t when,
         GesturesProp accelCurveProp = mPropertyProvider.getProperty("Pointer Accel Curve");
         accelCurveProp.setRealValues(
                 createAccelerationCurveForSensitivity(config.touchpadPointerSpeed,
+                                                      config.touchpadAccelerationEnabled,
                                                       accelCurveProp.getCount()));
         mPropertyProvider.getProperty("Use Custom Touchpad Scroll Accel Curve")
                 .setBoolValues({true});
         GesturesProp scrollCurveProp = mPropertyProvider.getProperty("Scroll Accel Curve");
         scrollCurveProp.setRealValues(
                 createAccelerationCurveForSensitivity(config.touchpadPointerSpeed,
+                                                      config.touchpadAccelerationEnabled,
                                                       scrollCurveProp.getCount()));
         mPropertyProvider.getProperty("Scroll X Out Scale").setRealValues({1.0});
         mPropertyProvider.getProperty("Scroll Y Out Scale").setRealValues({1.0});
@@ -466,7 +477,7 @@ void TouchpadInputMapper::updatePalmDetectionMetrics() {
 
 std::list<NotifyArgs> TouchpadInputMapper::sendHardwareState(nsecs_t when, nsecs_t readTime,
                                                              SelfContainedHardwareState schs) {
-    ALOGD_IF(DEBUG_TOUCHPAD_GESTURES, "New hardware state: %s", schs.state.String().c_str());
+    ALOGD_IF(debugTouchpadGestures(), "New hardware state: %s", schs.state.String().c_str());
     mGestureInterpreter->PushHardwareState(&schs.state);
     return processGestures(when, readTime);
 }
@@ -477,7 +488,7 @@ std::list<NotifyArgs> TouchpadInputMapper::timeoutExpired(nsecs_t when) {
 }
 
 void TouchpadInputMapper::consumeGesture(const Gesture* gesture) {
-    ALOGD_IF(DEBUG_TOUCHPAD_GESTURES, "Gesture ready: %s", gesture->String().c_str());
+    ALOGD_IF(debugTouchpadGestures(), "Gesture ready: %s", gesture->String().c_str());
     if (mResettingInterpreter) {
         // We already handle tidying up fake fingers etc. in GestureConverter::reset, so we should
         // ignore any gestures produced from the interpreter while we're resetting it.
@@ -502,12 +513,20 @@ std::list<NotifyArgs> TouchpadInputMapper::processGestures(nsecs_t when, nsecs_t
     return out;
 }
 
-std::optional<ui::LogicalDisplayId> TouchpadInputMapper::getAssociatedDisplayId() {
+std::optional<ui::LogicalDisplayId> TouchpadInputMapper::getAssociatedDisplayId() const {
     return mDisplayId;
 }
 
 std::optional<HardwareProperties> TouchpadInputMapper::getTouchpadHardwareProperties() {
     return mHardwareProperties;
+}
+
+std::optional<GesturesProp> TouchpadInputMapper::getGesturePropertyForTesting(
+        const std::string& name) {
+    if (!mPropertyProvider.hasProperty(name)) {
+        return std::nullopt;
+    }
+    return mPropertyProvider.getProperty(name);
 }
 
 } // namespace android

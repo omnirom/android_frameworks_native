@@ -80,6 +80,14 @@ public:
 
     /**
      * Register a service.
+     *
+     * Note:
+     * This status_t return value may be an exception code from an underlying
+     * Status type that doesn't have a representive error code in
+     * utils/Errors.h.
+     * One example of this is a return value of -7
+     * (Status::Exception::EX_UNSUPPORTED_OPERATION) when the service manager
+     * process is not installed on the device when addService is called.
      */
     // NOLINTNEXTLINE(google-default-arguments)
     virtual status_t addService(const String16& name, const sp<IBinder>& service,

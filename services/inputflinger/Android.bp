@@ -32,15 +32,15 @@ cc_defaults {
     host_supported: true,
     cpp_std: "c++20",
     cflags: [
+        "-DANDROID_UTILS_REF_BASE_DISABLE_IMPLICIT_CONSTRUCTION",
         "-Wall",
-        "-Wextra",
         "-Werror",
+        "-Wextra",
         "-Wno-unused-parameter",
-        "-Wthread-safety",
         "-Wshadow",
         "-Wshadow-field-in-constructor-modified",
         "-Wshadow-uncaptured-local",
-        "-DANDROID_UTILS_REF_BASE_DISABLE_IMPLICIT_CONSTRUCTION",
+        "-Wthread-safety",
     ],
     sanitize: {
         misc_undefined: [
@@ -62,8 +62,8 @@ cc_defaults {
                     memtag_heap: true,
                     undefined: true,
                     misc_undefined: [
-                        "bounds",
                         "all",
+                        "bounds",
                     ],
                 },
             },
@@ -114,16 +114,16 @@ cc_defaults {
         "liblog",
         "libprotobuf-cpp-lite",
         "libstatslog",
-        "libutils",
         "libstatspull",
         "libstatssocket",
+        "libutils",
         "packagemanager_aidl-cpp",
         "server_configurable_flags",
     ],
     static_libs: [
         "libattestation",
-        "libperfetto_client_experimental",
         "libpalmrejection",
+        "libperfetto_client_experimental",
         "libui-types",
     ],
     generated_headers: [
@@ -161,10 +161,10 @@ cc_library_shared {
     shared_libs: [
         // This should consist only of dependencies from inputflinger. Other dependencies should be
         // in cc_defaults so that they are included in the tests.
+        "libPlatformProperties",
         "libinputflinger_base",
         "libinputreader",
         "libinputreporter",
-        "libPlatformProperties",
     ],
     static_libs: [
         "libinputdispatcher",
@@ -185,8 +185,8 @@ cc_library_headers {
     name: "libinputflinger_headers",
     host_supported: true,
     export_include_dirs: [
-        "include",
         ".",
+        "include",
     ],
     header_libs: [
         "libchrome-gestures_headers",
@@ -247,49 +247,40 @@ cc_library_shared {
 phony {
     name: "checkinput",
     required: [
-        // native targets
-        "libgui_test",
-        "libinput",
-        "libinputreader_static",
-        "libinputflinger",
-        "inputflinger_tests",
-        "inputflinger_benchmarks",
-        "libinput_tests",
-        "libpalmrejection_test",
-        "libandroid_runtime",
-        "libinputservice_test",
         "Bug-115739809",
-        "StructLayout_test",
-
-        // jni
-        "libservices.core",
-
-        // rust targets
-        "libinput_rust_test",
-
-        // native fuzzers
-        "inputflinger_latencytracker_fuzzer",
-        "inputflinger_cursor_input_fuzzer",
-        "inputflinger_keyboard_input_fuzzer",
-        "inputflinger_multitouch_input_fuzzer",
-        "inputflinger_switch_input_fuzzer",
-        "inputflinger_touchpad_input_fuzzer",
-        "inputflinger_input_reader_fuzzer",
-        "inputflinger_blocking_queue_fuzzer",
-        "inputflinger_input_classifier_fuzzer",
-        "inputflinger_input_dispatcher_fuzzer",
-
-        // Java/Kotlin targets
-        "CtsWindowManagerDeviceWindow",
-        "InputTests",
         "CtsHardwareTestCases",
         "CtsInputTestCases",
+        "CtsSecurityBulletinHostTestCases",
+        "CtsSecurityTestCases",
         "CtsViewTestCases",
         "CtsWidgetTestCases",
+        "CtsWindowManagerDeviceWindow",
         "FrameworksCoreTests",
         "FrameworksServicesTests",
-        "CtsSecurityTestCases",
-        "CtsSecurityBulletinHostTestCases",
+        "InputTests",
+        "StructLayout_test",
+        "inputflinger_benchmarks",
+        "inputflinger_blocking_queue_fuzzer",
+        "inputflinger_cursor_input_fuzzer",
+        "inputflinger_input_classifier_fuzzer",
+        "inputflinger_input_dispatcher_fuzzer",
+        "inputflinger_input_reader_fuzzer",
+        "inputflinger_keyboard_input_fuzzer",
+        "inputflinger_latencytracker_fuzzer",
+        "inputflinger_multitouch_input_fuzzer",
+        "inputflinger_switch_input_fuzzer",
+        "inputflinger_tests",
+        "inputflinger_touchpad_input_fuzzer",
+        "libandroid_runtime",
+        "libgui_test",
+        "libinput",
+        "libinput_rust_test",
+        "libinput_tests",
+        "libinputflinger",
+        "libinputreader_static",
+        "libinputservice_test",
+        "libpalmrejection_test",
+        "libservices.core",
         "monkey_test",
     ],
 }

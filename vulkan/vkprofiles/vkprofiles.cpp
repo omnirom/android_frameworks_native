@@ -182,6 +182,13 @@ std::string vkVpa15GetSupport() {
                                VP_ANDROID_15_MINIMUMS_MIN_API_VERSION);
 }
 
+std::string vkVpa16GetSupport() {
+    VpProfileProperties profile{VP_ANDROID_16_MINIMUMS_NAME,
+                                VP_ANDROID_16_MINIMUMS_SPEC_VERSION};
+    return vkProfileGetSupport(&profile,
+                               VP_ANDROID_16_MINIMUMS_MIN_API_VERSION);
+}
+
 std::string vkProfiles() {
     return "{"
            "\"" + std::string(VP_ANDROID_BASELINE_2021_NAME) + "\": "
@@ -191,7 +198,9 @@ std::string vkProfiles() {
            "\"" + std::string(VP_ANDROID_BASELINE_2022_NAME) + "\": "
            "\"" + vkAbp2022GetSupport() + "\","
            "\"" + std::string(VP_ANDROID_15_MINIMUMS_NAME) + "\": "
-           "\"" + vkVpa15GetSupport() + "\""
+           "\"" + vkVpa15GetSupport() + "\","
+           "\"" + std::string(VP_ANDROID_16_MINIMUMS_NAME) + "\": "
+           "\"" + vkVpa16GetSupport() + "\""
            "}";
 }
 

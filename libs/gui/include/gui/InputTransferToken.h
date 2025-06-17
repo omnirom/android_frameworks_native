@@ -25,7 +25,7 @@
 namespace android {
 struct InputTransferToken : public RefBase, Parcelable {
 public:
-    InputTransferToken() { mToken = new BBinder(); }
+    InputTransferToken() { mToken = sp<BBinder>::make(); }
 
     InputTransferToken(const sp<IBinder>& token) { mToken = token; }
 
@@ -39,15 +39,9 @@ public:
         return NO_ERROR;
     };
 
+    bool operator==(const InputTransferToken& other) const { return mToken == other.mToken; }
+
     sp<IBinder> mToken;
 };
-
-static inline bool operator==(const sp<InputTransferToken>& token1,
-                              const sp<InputTransferToken>& token2) {
-    if (token1.get() == token2.get()) {
-        return true;
-    }
-    return token1->mToken == token2->mToken;
-}
 
 } // namespace android

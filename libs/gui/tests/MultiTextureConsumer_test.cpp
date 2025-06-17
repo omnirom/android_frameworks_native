@@ -34,8 +34,8 @@ protected:
 
     virtual void SetUp() {
         GLTest::SetUp();
-        mGlConsumer = new GLConsumer(TEX_ID, GLConsumer::TEXTURE_EXTERNAL, true, false);
-        mSurface = mGlConsumer->getSurface();
+        std::tie(mGlConsumer, mSurface) =
+                GLConsumer::create(TEX_ID, GLConsumer::TEXTURE_EXTERNAL, true, false);
         mANW = mSurface.get();
 
     }

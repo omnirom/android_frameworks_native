@@ -185,7 +185,7 @@ public:
     [[nodiscard]] std::list<NotifyArgs> timeoutExpired(nsecs_t when) override;
     [[nodiscard]] std::list<NotifyArgs> updateExternalStylusState(
             const StylusState& state) override;
-    std::optional<ui::LogicalDisplayId> getAssociatedDisplayId() override;
+    std::optional<ui::LogicalDisplayId> getAssociatedDisplayId() const override;
 
 protected:
     CursorButtonAccumulator mCursorButtonAccumulator;
@@ -215,7 +215,7 @@ protected:
         DISABLED,   // input is disabled
         DIRECT,     // direct mapping (touchscreen)
         NAVIGATION, // unscaled mapping with assist gesture (touch navigation)
-        POINTER,    // pointer mapping (e.g. uncaptured touchpad, drawing tablet)
+        POINTER,    // pointer mapping (e.g. absolute mouse, drawing tablet)
 
         ftl_last = POINTER
     };
@@ -234,8 +234,11 @@ protected:
             ftl_last = POINTER
         };
 
+        // TouchInputMapper will configure devices with INPUT_PROP_DIRECT as
+        // DeviceType::TOUCH_SCREEN, and will otherwise use DeviceType::POINTER by default.
+        // This can be overridden by IDC files, using the `touch.deviceType` config.
         DeviceType deviceType;
-        bool hasAssociatedDisplay;
+        bool hasAssociatedDisplay = false;
         bool associatedDisplayIsExternal;
         bool orientationAware;
 
@@ -344,6 +347,8 @@ protected:
 
         inline void clear() { *this = RawState(); }
     };
+
+    friend std::ostream& operator<<(std::ostream& out, const RawState& state);
 
     struct CookedState {
         // Cooked pointer sample data.
@@ -776,8 +781,9 @@ private:
                                                                      nsecs_t readTime);
     const BitSet32& findActiveIdBits(const CookedPointerData& cookedPointerData);
     void cookPointerData();
-    [[nodiscard]] std::list<NotifyArgs> abortTouches(nsecs_t when, nsecs_t readTime,
-                                                     uint32_t policyFlags);
+    [[nodiscard]] std::list<NotifyArgs> abortTouches(
+            nsecs_t when, nsecs_t readTime, uint32_t policyFlags,
+            std::optional<ui::LogicalDisplayId> gestureDisplayId);
 
     [[nodiscard]] std::list<NotifyArgs> dispatchPointerUsage(nsecs_t when, nsecs_t readTime,
                                                              uint32_t policyFlags,
@@ -833,14 +839,17 @@ private:
     // method will take care of setting the index and transmuting the action to DOWN or UP
     // it is the first / last pointer to go down / up.
     [[nodiscard]] NotifyMotionArgs dispatchMotion(
-            nsecs_t when, nsecs_t readTime, uint32_t policyFlags, uint32_t source, int32_t action,
-            int32_t actionButton, int32_t flags, int32_t metaState, int32_t buttonState,
-            int32_t edgeFlags, const PropertiesArray& properties, const CoordsArray& coords,
+            nsecs_t when, nsecs_t readTime, uint32_t policyFlags, uint32_t source,
+            ui::LogicalDisplayId displayId, int32_t action, int32_t actionButton, int32_t flags,
+            int32_t metaState, int32_t buttonState, int32_t edgeFlags,
+            const PropertiesArray& properties, const CoordsArray& coords,
             const IdToIndexArray& idToIndex, BitSet32 idBits, int32_t changedId, float xPrecision,
-            float yPrecision, nsecs_t downTime, MotionClassification classification);
+            float yPrecision, nsecs_t downTime, MotionClassification classification) const;
 
     // Returns if this touch device is a touch screen with an associated display.
     bool isTouchScreen();
+
+    ui::LogicalDisplayId resolveDisplayId() const;
 
     bool isPointInsidePhysicalFrame(int32_t x, int32_t y) const;
     const VirtualKey* findVirtualKeyHit(int32_t x, int32_t y);

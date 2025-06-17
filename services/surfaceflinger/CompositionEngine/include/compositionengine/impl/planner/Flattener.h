@@ -253,7 +253,6 @@ private:
     std::unordered_map<size_t, size_t> mFinalLayerCounts;
     size_t mCachedSetCreationCount = 0;
     size_t mCachedSetCreationCost = 0;
-    std::unordered_map<size_t, size_t> mInvalidatedCachedSetAges;
 };
 
 } // namespace compositionengine::impl::planner

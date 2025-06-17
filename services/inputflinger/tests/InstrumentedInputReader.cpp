@@ -38,13 +38,14 @@ std::shared_ptr<InputDevice> InstrumentedInputReader::newDevice(int32_t deviceId
 }
 
 std::shared_ptr<InputDevice> InstrumentedInputReader::createDeviceLocked(
-        nsecs_t when, int32_t eventHubId, const InputDeviceIdentifier& identifier) REQUIRES(mLock) {
+        nsecs_t when, int32_t eventHubId, const InputDeviceIdentifier& identifier,
+        ftl::Flags<InputDeviceClass> classes) REQUIRES(mLock) {
     if (!mNextDevices.empty()) {
         std::shared_ptr<InputDevice> device(std::move(mNextDevices.front()));
         mNextDevices.pop();
         return device;
     }
-    return InputReader::createDeviceLocked(when, eventHubId, identifier);
+    return InputReader::createDeviceLocked(when, eventHubId, identifier, classes);
 }
 
 } // namespace android

@@ -18,10 +18,16 @@
 
 namespace android {
 
-namespace {
 static constexpr int32_t MAX_RANDOM_POINTERS = 4;
 static constexpr int32_t MAX_RANDOM_DEVICES = 4;
-} // namespace
+
+// The maximum value that we use for the action button field of NotifyMotionArgs. (We allow multiple
+// bits to be set for this since we're just trying to generate a fuzzed event stream that doesn't
+// cause crashes when enum values are converted to Rust — we don't necessarily want it to be valid.)
+//
+// AMOTION_EVENT_BUTTON_STYLUS_SECONDARY should be replaced with whatever AMOTION_EVENT_BUTTON_
+// value is highest if the enum is edited.
+static constexpr int8_t MAX_ACTION_BUTTON_VALUE = (AMOTION_EVENT_BUTTON_STYLUS_SECONDARY << 1) - 1;
 
 int getFuzzedMotionAction(FuzzedDataProvider& fdp) {
     int actionMasked = fdp.PickValueInArray<int>({
@@ -187,18 +193,16 @@ NotifyMotionArgs generateFuzzedMotionArgs(IdGenerator& idGenerator, FuzzedDataPr
             fdp.ConsumeIntegralInRange<nsecs_t>(currentTime - 5E9, currentTime + 5E9);
     const nsecs_t readTime = downTime;
     const nsecs_t eventTime = fdp.ConsumeIntegralInRange<nsecs_t>(downTime, downTime + 1E9);
+    const int32_t actionButton = fdp.ConsumeIntegralInRange<int32_t>(0, MAX_ACTION_BUTTON_VALUE);
 
     const float cursorX = fdp.ConsumeIntegralInRange<int>(-10000, 10000);
     const float cursorY = fdp.ConsumeIntegralInRange<int>(-10000, 10000);
     return NotifyMotionArgs(idGenerator.nextId(), eventTime, readTime, deviceId, source, displayId,
-                            POLICY_FLAG_PASS_TO_USER, action,
-                            /*actionButton=*/fdp.ConsumeIntegral<int32_t>(),
+                            POLICY_FLAG_PASS_TO_USER, action, actionButton,
                             getFuzzedFlags(fdp, action), AMETA_NONE, getFuzzedButtonState(fdp),
                             MotionClassification::NONE, AMOTION_EVENT_EDGE_FLAG_NONE, pointerCount,
-                            pointerProperties.data(), pointerCoords.data(),
-                            /*xPrecision=*/0,
-                            /*yPrecision=*/0, cursorX, cursorY, downTime,
-                            /*videoFrames=*/{});
+                            pointerProperties.data(), pointerCoords.data(), /*xPrecision=*/0,
+                            /*yPrecision=*/0, cursorX, cursorY, downTime, /*videoFrames=*/{});
 }
 
 } // namespace android

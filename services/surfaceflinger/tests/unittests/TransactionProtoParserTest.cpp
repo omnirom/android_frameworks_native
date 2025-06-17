@@ -30,7 +30,7 @@ namespace android {
 
 TEST(TransactionProtoParserTest, parse) {
     const sp<IBinder> displayHandle = sp<BBinder>::make();
-    TransactionState t1;
+    QueuedTransactionState t1;
     t1.originPid = 1;
     t1.originUid = 2;
     t1.frameTimelineInfo.vsyncId = 3;
@@ -66,7 +66,7 @@ TEST(TransactionProtoParserTest, parse) {
             display.token = nullptr;
         }
         display.width = 85;
-        t1.displays.add(display);
+        t1.displays.push_back(display);
     }
 
     class TestMapper : public TransactionProtoParser::FlingerDataMapper {
@@ -86,7 +86,7 @@ TEST(TransactionProtoParserTest, parse) {
     TransactionProtoParser parser(std::make_unique<TestMapper>(displayHandle));
 
     perfetto::protos::TransactionState proto = parser.toProto(t1);
-    TransactionState t2 = parser.fromProto(proto);
+    QueuedTransactionState t2 = parser.fromProto(proto);
 
     ASSERT_EQ(t1.originPid, t2.originPid);
     ASSERT_EQ(t1.originUid, t2.originUid);

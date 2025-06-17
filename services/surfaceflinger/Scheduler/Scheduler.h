@@ -53,6 +53,7 @@
 #include "RefreshRateSelector.h"
 #include "SmallAreaDetectionAllowMappings.h"
 #include "Utils/Dumper.h"
+#include "VsyncConfiguration.h"
 #include "VsyncModulator.h"
 
 #include <FrontEnd/LayerHierarchy.h>
@@ -95,7 +96,7 @@ public:
 
     // TODO: b/241285191 - Remove this API by promoting pacesetter in onScreen{Acquired,Released}.
     void setPacesetterDisplay(PhysicalDisplayId) REQUIRES(kMainThreadContext)
-            EXCLUDES(mDisplayLock);
+            EXCLUDES(mDisplayLock, mVsyncConfigLock);
 
     using RefreshRateSelectorPtr = std::shared_ptr<RefreshRateSelector>;
 
@@ -188,9 +189,19 @@ public:
         }
     }
 
-    void updatePhaseConfiguration(PhysicalDisplayId, Fps);
+    void updatePhaseConfiguration(PhysicalDisplayId, Fps) EXCLUDES(mVsyncConfigLock);
+    void reloadPhaseConfiguration(Fps, Duration minSfDuration, Duration maxSfDuration,
+                                  Duration appDuration) EXCLUDES(mVsyncConfigLock);
 
-    const VsyncConfiguration& getVsyncConfiguration() const { return *mVsyncConfiguration; }
+    VsyncConfigSet getCurrentVsyncConfigs() const EXCLUDES(mVsyncConfigLock) {
+        std::scoped_lock lock{mVsyncConfigLock};
+        return mVsyncConfiguration->getCurrentConfigs();
+    }
+
+    VsyncConfigSet getVsyncConfigsForRefreshRate(Fps refreshRate) const EXCLUDES(mVsyncConfigLock) {
+        std::scoped_lock lock{mVsyncConfigLock};
+        return mVsyncConfiguration->getConfigsForRefreshRate(refreshRate);
+    }
 
     // Sets the render rate for the scheduler to run at.
     void setRenderRate(PhysicalDisplayId, Fps, bool applyImmediately);
@@ -209,7 +220,6 @@ public:
         ftl::FakeGuard guard(kMainThreadContext);
         resyncToHardwareVsyncLocked(id, allowToEnable, modePtr);
     }
-    void resync() override EXCLUDES(mDisplayLock);
     void forceNextResync() { mLastResyncTime = 0; }
 
     // Passes a vsync sample to VsyncController. Returns true if
@@ -267,7 +277,7 @@ public:
 
     bool isVsyncInPhase(TimePoint expectedVsyncTime, Fps frameRate) const;
 
-    void dump(utils::Dumper&) const;
+    void dump(utils::Dumper&) const EXCLUDES(mVsyncConfigLock);
     void dump(Cycle, std::string&) const;
     void dumpVsync(std::string&) const EXCLUDES(mDisplayLock);
 
@@ -338,10 +348,6 @@ public:
         mPacesetterFrameDurationFractionToSkip = frameDurationFraction;
     }
 
-    // Propagates a flag to the EventThread indicating that buffer stuffing
-    // recovery should begin.
-    void addBufferStuffedUids(BufferStuffingMap bufferStuffedUids);
-
     void setDebugPresentDelay(TimePoint delay) { mDebugPresentDelay = delay; }
 
 private:
@@ -353,7 +359,7 @@ private:
 
     // impl::MessageQueue overrides:
     void onFrameSignal(ICompositor&, VsyncId, TimePoint expectedVsyncTime) override
-            REQUIRES(kMainThreadContext, mDisplayLock);
+            REQUIRES(kMainThreadContext, mDisplayLock) EXCLUDES(mVsyncConfigLock);
 
     // Used to skip event dispatch before EventThread creation during boot.
     // TODO: b/241285191 - Reorder Scheduler initialization to avoid this.
@@ -387,7 +393,7 @@ private:
     // a deadlock where the main thread joins with the timer thread as the timer thread waits to
     // lock a mutex held by the main thread.
     struct PromotionParams {
-        // Whether to stop and start the idle timer. Ignored unless connected_display flag is set.
+        // Whether to stop and start the idle timer.
         bool toggleIdleTimer;
     };
 
@@ -471,6 +477,7 @@ private:
     bool throttleVsync(TimePoint, uid_t) override;
     // Get frame interval
     Period getVsyncPeriod(uid_t) override EXCLUDES(mDisplayLock);
+    void resync() override EXCLUDES(mDisplayLock);
     void onExpectedPresentTimePosted(TimePoint expectedPresentTime) override EXCLUDES(mDisplayLock);
 
     std::unique_ptr<EventThread> mRenderEventThread;
@@ -480,8 +487,9 @@ private:
 
     const FeatureFlags mFeatures;
 
+    mutable std::mutex mVsyncConfigLock;
     // Stores phase offsets configured per refresh rate.
-    const std::unique_ptr<VsyncConfiguration> mVsyncConfiguration;
+    std::unique_ptr<VsyncConfiguration> mVsyncConfiguration GUARDED_BY(mVsyncConfigLock);
 
     // Shifts the VSYNC phase during certain transactions and refresh rate changes.
     const sp<VsyncModulator> mVsyncModulator;

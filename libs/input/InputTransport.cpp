@@ -327,8 +327,8 @@ std::unique_ptr<InputChannel> InputChannel::create(const std::string& name,
                                                    android::base::unique_fd fd, sp<IBinder> token) {
     const int result = fcntl(fd, F_SETFL, O_NONBLOCK);
     if (result != 0) {
-        LOG_ALWAYS_FATAL("channel '%s' ~ Could not make socket non-blocking: %s", name.c_str(),
-                         strerror(errno));
+        LOG_ALWAYS_FATAL("channel '%s' ~ Could not make socket (%d) non-blocking: %s", name.c_str(),
+                         fd.get(), strerror(errno));
         return nullptr;
     }
     // using 'new' to access a non-public constructor
@@ -436,16 +436,29 @@ android::base::Result<InputMessage> InputChannel::receiveMessage() {
         if (error == EAGAIN || error == EWOULDBLOCK) {
             return android::base::Error(WOULD_BLOCK);
         }
-        if (error == EPIPE || error == ENOTCONN || error == ECONNREFUSED) {
-            return android::base::Error(DEAD_OBJECT);
+        if (error == EPIPE) {
+            return android::base::ResultError("Got EPIPE", DEAD_OBJECT);
+        }
+        if (error == ENOTCONN) {
+            return android::base::ResultError("Got ENOTCONN", DEAD_OBJECT);
+        }
+        if (error == ECONNREFUSED) {
+            return android::base::ResultError("Got ECONNREFUSED", DEAD_OBJECT);
+        }
+        if (error == ECONNRESET) {
+            // This means that the client has closed the channel while there was
+            // still some data in the buffer. In most cases, subsequent reads
+            // would result in more data. However, that is not guaranteed, so we
+            // should not return WOULD_BLOCK here to try again.
+            return android::base::ResultError("Got ECONNRESET", DEAD_OBJECT);
         }
         return android::base::Error(-error);
     }
 
     if (nRead == 0) { // check for EOF
-        ALOGD_IF(DEBUG_CHANNEL_MESSAGES,
-                 "channel '%s' ~ receive message failed because peer was closed", name.c_str());
-        return android::base::Error(DEAD_OBJECT);
+        LOG_IF(INFO, DEBUG_CHANNEL_MESSAGES)
+                << "channel '" << name << "' ~ receive message failed because peer was closed";
+        return android::base::ResultError("::recv returned 0", DEAD_OBJECT);
     }
 
     if (!msg.isValid(nRead)) {
@@ -651,9 +664,9 @@ status_t InputPublisher::publishMotionEvent(
     const status_t status = mChannel->sendMessage(&msg);
 
     if (status == OK && verifyEvents()) {
-        Result<void> result =
-                mInputVerifier.processMovement(deviceId, source, action, pointerCount,
-                                               pointerProperties, pointerCoords, flags);
+        Result<void> result = mInputVerifier.processMovement(deviceId, source, action, actionButton,
+                                                             pointerCount, pointerProperties,
+                                                             pointerCoords, flags, buttonState);
         if (!result.ok()) {
             LOG(ERROR) << "Bad stream: " << result.error();
             return BAD_VALUE;
@@ -764,6 +777,11 @@ android::base::Result<InputPublisher::ConsumerResponse> InputPublisher::receiveC
     ALOGE("channel '%s' publisher ~ Received unexpected %s message from consumer",
           mChannel->getName().c_str(), ftl::enum_string(msg.header.type).c_str());
     return android::base::Error(UNKNOWN_ERROR);
+}
+
+std::ostream& operator<<(std::ostream& out, const InputMessage& msg) {
+    out << ftl::enum_string(msg.header.type);
+    return out;
 }
 
 } // namespace android

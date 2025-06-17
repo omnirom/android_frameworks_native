@@ -1,7 +1,7 @@
 {
     "uuid": "87e424e5-69d7-4bbd-8b7c-7e24812cbc94",
     "app_name": "binderRpcTestService",
-    "min_heap": 65536,
+    "min_heap": 4194304,
     "min_stack": 20480,
     "mgmt_flags": {
         "restart_on_exit": true,

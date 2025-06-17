@@ -30,7 +30,7 @@ static constexpr uint32_t INVALID_MASK = 0x10;
 class DisplayedContentSamplingTest : public ::testing::Test {
 protected:
     void SetUp() {
-        mComposerClient = new SurfaceComposerClient;
+        mComposerClient = sp<SurfaceComposerClient>::make();
         ASSERT_EQ(OK, mComposerClient->initCheck());
         const auto ids = SurfaceComposerClient::getPhysicalDisplayIds();
         ASSERT_FALSE(ids.empty());

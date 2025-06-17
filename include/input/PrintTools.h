@@ -19,12 +19,17 @@
 #include <bitset>
 #include <map>
 #include <optional>
-#include <set>
+#include <ranges>
 #include <sstream>
 #include <string>
 #include <vector>
 
 namespace android {
+
+namespace internal {
+template <typename T>
+concept Container = std::ranges::range<T>;
+}
 
 template <size_t N>
 std::string bitsetToString(const std::bitset<N>& bitset) {
@@ -72,10 +77,12 @@ inline std::string toString(const std::optional<T>& optional,
 /**
  * Convert a set of integral types to string.
  */
-template <typename T>
-std::string dumpSet(const std::set<T>& v, std::string (*toString)(const T&) = constToString) {
+template <internal::Container T>
+std::string dumpContainer(
+        const T& container,
+        std::string (*toString)(const std::ranges::range_value_t<T>&) = constToString) {
     std::string out;
-    for (const T& entry : v) {
+    for (const auto& entry : container) {
         out += out.empty() ? "{" : ", ";
         out += toString(entry);
     }

@@ -22,7 +22,7 @@
 
 #include <scheduler/interface/ICompositor.h>
 
-#include "FrameTimeline.h"
+#include "FrameTimeline/FrameTimeline.h"
 #include "Scheduler/MessageQueue.h"
 #include "mock/MockVSyncDispatch.h"
 #include "utils/Timers.h"

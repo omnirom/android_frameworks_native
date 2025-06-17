@@ -119,6 +119,10 @@ ftl::Optional<DisplayId> Output::getDisplayId() const {
     return {};
 }
 
+ftl::Optional<DisplayIdVariant> Output::getDisplayIdVariant() const {
+    return {};
+}
+
 const std::string& Output::getName() const {
     return mName;
 }
@@ -437,8 +441,8 @@ void Output::prepare(const compositionengine::CompositionRefreshArgs& refreshArg
 ftl::Future<std::monostate> Output::present(
         const compositionengine::CompositionRefreshArgs& refreshArgs) {
     const auto stringifyExpectedPresentTime = [this, &refreshArgs]() -> std::string {
-        return getDisplayId()
-                .and_then(PhysicalDisplayId::tryCast)
+        return getDisplayIdVariant()
+                .and_then(asPhysicalDisplayId)
                 .and_then([&refreshArgs](PhysicalDisplayId id) {
                     return refreshArgs.frameTargets.get(id);
                 })
@@ -811,7 +815,7 @@ void Output::commitPictureProfilesToCompositionState() {
     }
     auto compare = [](const ::android::compositionengine::OutputLayer* lhs,
                       const ::android::compositionengine::OutputLayer* rhs) {
-        return lhs->getPictureProfilePriority() > rhs->getPictureProfilePriority();
+        return lhs->getPictureProfilePriority() < rhs->getPictureProfilePriority();
     };
     std::priority_queue<::android::compositionengine::OutputLayer*,
                         std::vector<::android::compositionengine::OutputLayer*>, decltype(compare)>
@@ -891,8 +895,8 @@ void Output::writeCompositionState(const compositionengine::CompositionRefreshAr
         return;
     }
 
-    if (auto frameTargetPtrOpt = getDisplayId()
-                                         .and_then(PhysicalDisplayId::tryCast)
+    if (auto frameTargetPtrOpt = getDisplayIdVariant()
+                                         .and_then(asPhysicalDisplayId)
                                          .and_then([&refreshArgs](PhysicalDisplayId id) {
                                              return refreshArgs.frameTargets.get(id);
                                          })) {
@@ -909,6 +913,9 @@ void Output::writeCompositionState(const compositionengine::CompositionRefreshAr
     editState().powerCallback = refreshArgs.powerCallback;
 
     applyPictureProfile();
+
+    auto* properties = getOverlaySupport();
+    bool hasLutsProperties = properties && properties->lutProperties.has_value();
 
     compositionengine::OutputLayer* peekThroughLayer = nullptr;
     sp<GraphicBuffer> previousOverride = nullptr;
@@ -941,7 +948,7 @@ void Output::writeCompositionState(const compositionengine::CompositionRefreshAr
                     includeGeometry = true;
                     constexpr bool isPeekingThrough = true;
                     peekThroughLayer->writeStateToHWC(includeGeometry, false, z++, overrideZ,
-                                                      isPeekingThrough);
+                                                      isPeekingThrough, hasLutsProperties);
                     outputLayerHash ^= android::hashCombine(
                             reinterpret_cast<uint64_t>(&peekThroughLayer->getLayerFE()),
                             z, includeGeometry, overrideZ, isPeekingThrough,
@@ -953,7 +960,8 @@ void Output::writeCompositionState(const compositionengine::CompositionRefreshAr
         }
 
         constexpr bool isPeekingThrough = false;
-        layer->writeStateToHWC(includeGeometry, skipLayer, z++, overrideZ, isPeekingThrough);
+        layer->writeStateToHWC(includeGeometry, skipLayer, z++, overrideZ, isPeekingThrough,
+                               hasLutsProperties);
         if (!skipLayer) {
             outputLayerHash ^= android::hashCombine(
                     reinterpret_cast<uint64_t>(&layer->getLayerFE()),
@@ -1399,7 +1407,8 @@ std::optional<base::unique_fd> Output::composeSurfaces(
     // or complex GPU shaders and it's expensive. We boost the GPU frequency so that
     // GPU composition can finish in time. We must reset GPU frequency afterwards,
     // because high frequency consumes extra battery.
-    const bool expensiveRenderingExpected =
+    const bool expensiveBlurs = mLayerRequestingBackgroundBlur != nullptr;
+    const bool expensiveRenderingExpected = expensiveBlurs ||
             std::any_of(clientCompositionLayers.begin(), clientCompositionLayers.end(),
                         [outputDataspace =
                                  clientCompositionDisplay.outputDataspace](const auto& layer) {
@@ -1574,7 +1583,9 @@ std::vector<LayerFE::LayerSettings> Output::generateClientCompositionRequests(
                                        .clearContent = !clientComposition,
                                        .blurSetting = blurSetting,
                                        .whitePointNits = layerState.whitePointNits,
-                                       .treat170mAsSrgb = outputState.treat170mAsSrgb};
+                                       .treat170mAsSrgb = outputState.treat170mAsSrgb,
+                                       .luts = layer->getState().hwc ? layer->getState().hwc->luts
+                                                                     : nullptr};
                 if (auto clientCompositionSettings =
                             layerFE.prepareClientComposition(targetSettings)) {
                     clientCompositionLayers.push_back(std::move(*clientCompositionSettings));
@@ -1679,6 +1690,7 @@ void Output::presentFrameAndReleaseLayers(bool flushEvenWhenDisabled) {
                     Fence::merge("LayerRelease", releaseFence, frame.clientTargetAcquireFence);
         }
         layer->getLayerFE().setReleaseFence(releaseFence);
+        layer->getLayerFE().setReleasedBuffer(layer->getLayerFE().getCompositionState()->buffer);
     }
 
     // We've got a list of layers needing fences, that are disjoint with
@@ -1848,7 +1860,7 @@ void Output::applyPictureProfile() {
     if (!getDisplayId()) {
         return;
     }
-    if (auto displayId = PhysicalDisplayId::tryCast(*getDisplayId())) {
+    if (auto displayId = getDisplayIdVariant().and_then(asPhysicalDisplayId)) {
         auto& hwc = getCompositionEngine().getHwComposer();
         const status_t error =
                 hwc.setDisplayPictureProfileHandle(*displayId, getState().pictureProfileHandle);

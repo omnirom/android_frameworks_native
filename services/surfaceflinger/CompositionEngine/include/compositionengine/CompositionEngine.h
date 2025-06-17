@@ -53,7 +53,7 @@ public:
     createLayerFECompositionState() = 0;
 
     virtual HWComposer& getHwComposer() const = 0;
-    virtual void setHwComposer(std::unique_ptr<HWComposer>) = 0;
+    virtual void setHwComposer(HWComposer*) = 0;
 
     virtual renderengine::RenderEngine& getRenderEngine() const = 0;
     virtual void setRenderEngine(renderengine::RenderEngine*) = 0;

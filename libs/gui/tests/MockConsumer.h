@@ -18,7 +18,7 @@
 
 namespace android {
 
-struct MockConsumer : public BnConsumerListener {
+struct MockConsumer : public IConsumerListener {
     void onFrameAvailable(const BufferItem& /* item */) override {}
     void onBuffersReleased() override {}
     void onSidebandStreamChanged() override {}

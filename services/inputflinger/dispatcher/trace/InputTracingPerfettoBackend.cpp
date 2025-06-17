@@ -34,6 +34,11 @@ namespace {
 
 constexpr auto INPUT_EVENT_TRACE_DATA_SOURCE_NAME = "android.input.inputevent";
 
+using ProtoConverter =
+        AndroidInputEventProtoConverter<proto::AndroidMotionEvent, proto::AndroidKeyEvent,
+                                        proto::AndroidWindowInputDispatchEvent,
+                                        proto::AndroidInputEventConfig::Decoder>;
+
 bool isPermanentlyAllowed(gui::Uid uid) {
     switch (uid.val()) {
         case AID_SYSTEM:
@@ -85,7 +90,7 @@ void PerfettoBackend::InputEventDataSource::OnSetup(const InputEventDataSource::
     const auto rawConfig = args.config->android_input_event_config_raw();
     auto protoConfig = perfetto::protos::pbzero::AndroidInputEventConfig::Decoder{rawConfig};
 
-    mConfig = AndroidInputEventProtoConverter::parseConfig(protoConfig);
+    mConfig = ProtoConverter::parseConfig(protoConfig);
 }
 
 void PerfettoBackend::InputEventDataSource::OnStart(const InputEventDataSource::StartArgs&) {
@@ -238,7 +243,7 @@ void PerfettoBackend::traceMotionEvent(const TracedMotionEvent& event,
         auto* inputEvent = winscopeExtensions->set_android_input_event();
         auto* dispatchMotion = isRedacted ? inputEvent->set_dispatcher_motion_event_redacted()
                                           : inputEvent->set_dispatcher_motion_event();
-        AndroidInputEventProtoConverter::toProtoMotionEvent(event, *dispatchMotion, isRedacted);
+        ProtoConverter::toProtoMotionEvent(event, *dispatchMotion, isRedacted);
     });
 }
 
@@ -266,7 +271,7 @@ void PerfettoBackend::traceKeyEvent(const TracedKeyEvent& event,
         auto* inputEvent = winscopeExtensions->set_android_input_event();
         auto* dispatchKey = isRedacted ? inputEvent->set_dispatcher_key_event_redacted()
                                        : inputEvent->set_dispatcher_key_event();
-        AndroidInputEventProtoConverter::toProtoKeyEvent(event, *dispatchKey, isRedacted);
+        ProtoConverter::toProtoKeyEvent(event, *dispatchKey, isRedacted);
     });
 }
 
@@ -295,8 +300,7 @@ void PerfettoBackend::traceWindowDispatch(const WindowDispatchArgs& dispatchArgs
         auto* dispatchEvent = isRedacted
                 ? inputEvent->set_dispatcher_window_dispatch_event_redacted()
                 : inputEvent->set_dispatcher_window_dispatch_event();
-        AndroidInputEventProtoConverter::toProtoWindowDispatchEvent(dispatchArgs, *dispatchEvent,
-                                                                    isRedacted);
+        ProtoConverter::toProtoWindowDispatchEvent(dispatchArgs, *dispatchEvent, isRedacted);
     });
 }
 

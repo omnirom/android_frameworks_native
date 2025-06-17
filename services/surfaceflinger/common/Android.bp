@@ -16,12 +16,13 @@ cc_defaults {
     ],
     shared_libs: [
         "libSurfaceFlingerProp",
-        "server_configurable_flags",
         "libaconfig_storage_read_api_cc",
         "libtracing_perfetto",
+        "server_configurable_flags",
     ],
     static_libs: [
         "librenderengine_includes",
+        "libgui_window_info_static",
     ],
     srcs: [
         "FlagManager.cpp",
@@ -37,11 +38,12 @@ cc_library_static {
         "libsurfaceflinger_common_defaults",
     ],
     static_libs: [
-        "libsurfaceflingerflags",
         "aconfig_hardware_flags_c_lib",
+        "android.companion.virtualdevice.flags-aconfig-cc",
         "android.os.flags-aconfig-cc",
         "android.server.display.flags-aconfig-cc",
         "libguiflags_no_apex",
+        "libsurfaceflingerflags",
     ],
 }
 
@@ -51,44 +53,47 @@ cc_library_static {
         "libsurfaceflinger_common_defaults",
     ],
     static_libs: [
-        "libsurfaceflingerflags_test",
         "aconfig_hardware_flags_c_lib",
+        "android.companion.virtualdevice.flags-aconfig-cc",
         "android.os.flags-aconfig-cc-test",
         "android.server.display.flags-aconfig-cc",
         "libguiflags_no_apex",
+        "libsurfaceflingerflags_test",
     ],
 }
 
 cc_defaults {
     name: "libsurfaceflinger_common_deps",
     shared_libs: [
-        "server_configurable_flags",
         "libaconfig_storage_read_api_cc",
         "libtracing_perfetto",
+        "server_configurable_flags",
     ],
     static_libs: [
-        "libsurfaceflinger_common",
-        "libsurfaceflingerflags",
         "aconfig_hardware_flags_c_lib",
+        "android.companion.virtualdevice.flags-aconfig-cc",
         "android.os.flags-aconfig-cc",
         "android.server.display.flags-aconfig-cc",
         "libguiflags_no_apex",
+        "libsurfaceflinger_common",
+        "libsurfaceflingerflags",
     ],
 }
 
 cc_defaults {
     name: "libsurfaceflinger_common_test_deps",
     shared_libs: [
-        "server_configurable_flags",
         "libaconfig_storage_read_api_cc",
         "libtracing_perfetto",
+        "server_configurable_flags",
     ],
     static_libs: [
-        "libsurfaceflinger_common_test",
-        "libsurfaceflingerflags_test",
         "aconfig_hardware_flags_c_lib",
+        "android.companion.virtualdevice.flags-aconfig-cc",
         "android.os.flags-aconfig-cc-test",
         "android.server.display.flags-aconfig-cc",
         "libguiflags_no_apex",
+        "libsurfaceflinger_common_test",
+        "libsurfaceflingerflags_test",
     ],
 }

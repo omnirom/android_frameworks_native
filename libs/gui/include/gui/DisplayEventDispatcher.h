@@ -23,12 +23,6 @@ using FrameRateOverride = DisplayEventReceiver::Event::FrameRateOverride;
 
 class DisplayEventDispatcher : public LooperCallback {
 public:
-    explicit DisplayEventDispatcher(const sp<Looper>& looper,
-                                    gui::ISurfaceComposer::VsyncSource vsyncSource =
-                                            gui::ISurfaceComposer::VsyncSource::eVsyncSourceApp,
-                                    EventRegistrationFlags eventRegistration = {},
-                                    const sp<IBinder>& layerHandle = nullptr);
-
     status_t initialize();
     void dispose();
     status_t scheduleVsync();
@@ -38,6 +32,14 @@ public:
     status_t getLatestVsyncEventData(ParcelableVsyncEventData* outVsyncEventData) const;
 
 protected:
+    explicit DisplayEventDispatcher(const sp<Looper>& looper,
+                                    gui::ISurfaceComposer::VsyncSource vsyncSource =
+                                            gui::ISurfaceComposer::VsyncSource::eVsyncSourceApp,
+                                    EventRegistrationFlags eventRegistration = {},
+                                    const sp<IBinder>& layerHandle = nullptr);
+
+    friend class sp<DisplayEventDispatcher>;
+
     virtual ~DisplayEventDispatcher() = default;
 
 private:

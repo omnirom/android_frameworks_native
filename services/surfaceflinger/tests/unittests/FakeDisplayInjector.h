@@ -24,12 +24,15 @@
 
 namespace android {
 
+static constexpr uint8_t kDefaultPort = 255u;
+
 using FakeDisplayDeviceInjector = TestableSurfaceFlinger::FakeDisplayDeviceInjector;
 using android::adpf::mock::PowerAdvisor;
 using android::hardware::graphics::composer::hal::HWDisplayId;
 
 struct FakeDisplayInjectorArgs {
-    PhysicalDisplayId displayId = PhysicalDisplayId::fromPort(255u);
+    PhysicalDisplayId displayId = PhysicalDisplayId::fromPort(kDefaultPort);
+    uint8_t port = kDefaultPort;
     HWDisplayId hwcDisplayId = 0;
     bool isPrimary = true;
 };
@@ -73,7 +76,7 @@ public:
                                       .build());
 
         auto injector = FakeDisplayDeviceInjector(mFlinger, compositionDisplay,
-                                                  ui::DisplayConnectionType::Internal,
+                                                  ui::DisplayConnectionType::Internal, args.port,
                                                   args.hwcDisplayId, args.isPrimary);
 
         injector.setNativeWindow(mNativeWindow);

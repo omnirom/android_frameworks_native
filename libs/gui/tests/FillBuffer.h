@@ -30,6 +30,8 @@ void fillYV12BufferRect(uint8_t* buf, int w, int h, int stride,
         const android_native_rect_t& rect);
 
 void fillRGBA8Buffer(uint8_t* buf, int w, int h, int stride);
+void fillRGBA8Buffer(uint8_t* buf, int w, int h, int stride, uint8_t r, uint8_t g, uint8_t b,
+                     uint8_t a);
 
 // Produce a single RGBA8 frame by filling a buffer with a checkerboard pattern
 // using the CPU.  This assumes that the ANativeWindow is already configured to

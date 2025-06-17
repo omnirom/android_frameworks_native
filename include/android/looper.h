@@ -106,7 +106,7 @@ enum {
     /**
      * Result from ALooper_pollOnce() and ALooper_pollAll():
      * An error occurred. The poll may also have been explicitly woken by
-     * ALooper_wake(()).
+     * ALooper_wake().
      */
     ALOOPER_POLL_ERROR = -4,
 };
@@ -224,11 +224,11 @@ int ALooper_pollOnce(int timeoutMillis, int* outFd, int* outEvents, void** outDa
  * hidden and callers should migrate to ALooper_pollOnce. Binary compatibility
  * is preserved to support already-compiled apps.
  *
- * \bug ALooper_pollAll will not wake in response to ALooper_wake calls if it
+ * \bug ALooper_pollAll() will not wake in response to ALooper_wake() calls if it
  * also handles another event at the same time.
  *
- * \deprecated Calls to ALooper_pollAll should be replaced with
- * ALooper_pollOnce. If you call ALooper_pollOnce in a loop, you *must* treat
+ * \deprecated Calls to ALooper_pollAll() should be replaced with
+ * ALooper_pollOnce(). If you call ALooper_pollOnce() in a loop, you *must* treat
  * all return values as if they also indicate ALOOPER_POLL_WAKE.
  */
 int ALooper_pollAll(int timeoutMillis, int* outFd, int* outEvents, void** outData)
@@ -242,7 +242,7 @@ int ALooper_pollAll(int timeoutMillis, int* outFd, int* outEvents, void** outDat
  * This method can be called on any thread.
  * This method returns immediately.
  *
- * \bug ALooper_pollAll will not reliably wake in response to ALooper_wake.
+ * \bug ALooper_pollAll() will not reliably wake in response to ALooper_wake().
  */
 void ALooper_wake(ALooper* looper);
 

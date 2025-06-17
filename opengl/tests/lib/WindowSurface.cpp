@@ -29,7 +29,7 @@ using namespace android;
 WindowSurface::WindowSurface() {
     status_t err;
 
-    sp<SurfaceComposerClient> surfaceComposerClient = new SurfaceComposerClient;
+    sp<SurfaceComposerClient> surfaceComposerClient = sp<SurfaceComposerClient>::make();
     err = surfaceComposerClient->initCheck();
     if (err != NO_ERROR) {
         fprintf(stderr, "SurfaceComposerClient::initCheck error: %#x\n", err);

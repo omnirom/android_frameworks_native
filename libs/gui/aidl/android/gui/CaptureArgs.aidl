@@ -69,10 +69,5 @@ parcelable CaptureArgs {
     // exact colorspace is not an appropriate intermediate result.
     // Note that if the caller is requesting a specific dataspace, this hint does nothing.
     boolean hintForSeamlessTransition = false;
-
-    // Allows the screenshot to attach a gainmap, which allows for a per-pixel
-    // transformation of the screenshot to another luminance range, typically
-    // mapping an SDR base image into HDR.
-    boolean attachGainmap = false;
 }
 

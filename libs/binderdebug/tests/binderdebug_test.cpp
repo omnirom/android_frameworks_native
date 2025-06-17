@@ -60,8 +60,15 @@ TEST(BinderDebugTests, BinderThreads) {
     EXPECT_GE(pidInfo.threadCount, 1);
 }
 
-extern "C" {
+} // namespace  test
+} // namespace  binderdebug
+} // namespace  android
+
 int main(int argc, char** argv) {
+    using namespace android;
+    using namespace android::binderdebug;
+    using namespace android::binderdebug::test;
+
     ::testing::InitGoogleTest(&argc, argv);
 
     // Create a child/client process to call into the main process so we can ensure
@@ -84,7 +91,3 @@ int main(int argc, char** argv) {
 
     return RUN_ALL_TESTS();
 }
-} // extern "C"
-} // namespace  test
-} // namespace  binderdebug
-} // namespace  android

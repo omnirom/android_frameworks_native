@@ -19,11 +19,11 @@
 #include <android-base/thread_annotations.h>
 #include <android/gui/IHdrLayerInfoListener.h>
 #include <binder/IBinder.h>
+#include <ui/RingBuffer.h>
 #include <utils/Timers.h>
 
 #include <unordered_map>
 
-#include "Utils/RingBuffer.h"
 #include "WpHash.h"
 
 namespace android {
@@ -102,7 +102,7 @@ private:
         EventHistoryEntry(const HdrLayerInfo& info) : info(info) { timestamp = systemTime(); }
     };
 
-    utils::RingBuffer<EventHistoryEntry, 32> mHdrInfoHistory;
+    ui::RingBuffer<EventHistoryEntry, 32> mHdrInfoHistory;
 };
 
 } // namespace android

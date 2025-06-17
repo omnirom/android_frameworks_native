@@ -27,11 +27,7 @@
 
 namespace android {
 
-namespace {
-
 using ::testing::Matcher;
-
-} // namespace
 
 /**
  * This file contains a copy of Matchers from .../inputflinger/tests/TestEventMatchers.h. Ideally,

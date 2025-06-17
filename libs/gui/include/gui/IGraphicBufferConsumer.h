@@ -16,6 +16,7 @@
 
 #pragma once
 
+#include <com_android_graphics_libgui_flags.h>
 #include <gui/OccupancyTracker.h>
 
 #include <binder/IInterface.h>
@@ -35,15 +36,12 @@ class Fence;
 class GraphicBuffer;
 class IConsumerListener;
 class NativeHandle;
-#ifndef NO_BINDER
-class IGraphicBufferConsumer : public IInterface {
-public:
-    DECLARE_META_INTERFACE(GraphicBufferConsumer)
-#else
+
+/*
+ * See IGraphicBufferProducer for details on SLOT_COUNT.
+ */
 class IGraphicBufferConsumer : public RefBase {
 public:
-#endif
-
     enum {
         // Returned by releaseBuffer, after which the consumer must free any references to the
         // just-released buffer that it might have.
@@ -92,7 +90,7 @@ public:
     //
     // Return of a value other than NO_ERROR means an error has occurred:
     // * BAD_VALUE - the given slot number is invalid, either because it is out of the range
-    //               [0, NUM_BUFFER_SLOTS) or because the slot it refers to is not
+    //               [0, SLOT_COUNT) or because the slot it refers to is not
     //               currently acquired.
     virtual status_t detachBuffer(int slot) = 0;
 
@@ -134,12 +132,17 @@ public:
     //               * the buffer slot was invalid
     //               * the fence was NULL
     //               * the buffer slot specified is not in the acquired state
+#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(BQ_GL_FENCE_CLEANUP)
+    virtual status_t releaseBuffer(int buf, uint64_t frameNumber,
+                                   const sp<Fence>& releaseFence) = 0;
+#else
     virtual status_t releaseBuffer(int buf, uint64_t frameNumber, EGLDisplay display,
                                    EGLSyncKHR fence, const sp<Fence>& releaseFence) = 0;
 
     status_t releaseBuffer(int buf, uint64_t frameNumber, const sp<Fence>& releaseFence) {
         return releaseBuffer(buf, frameNumber, EGL_NO_DISPLAY, EGL_NO_SYNC_KHR, releaseFence);
     }
+#endif
 
     // consumerConnect connects a consumer to the BufferQueue. Only one consumer may be connected,
     // and when that consumer disconnects the BufferQueue is placed into the "abandoned" state,
@@ -173,12 +176,45 @@ public:
     // * NO_INIT - the BufferQueue has been abandoned.
     virtual status_t getReleasedBuffers(uint64_t* slotMask) = 0;
 
+#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_UNLIMITED_SLOTS)
+    // getReleasedBuffersExtended for each slot, sets slotMask[slot] to 1 if it
+    // corresponds to a released buffer slot. In particular, a released buffer
+    // is one that has been released by the BufferQueue but has not yet been
+    // released by the consumer.
+    //
+    // This should be called from the onBuffersReleased() callback.
+    //
+    // Return of a value other than NO_ERROR means an error has occurred:
+    // * NO_INIT - the BufferQueue has been abandoned.
+    virtual status_t getReleasedBuffersExtended(std::vector<bool>* slotMask) = 0;
+#endif
+
     // setDefaultBufferSize is used to set the size of buffers returned by dequeueBuffer when a
     // width and height of zero is requested. Default is 1x1.
     //
     // Return of a value other than NO_ERROR means an error has occurred:
     // * BAD_VALUE - either w or h was zero
     virtual status_t setDefaultBufferSize(uint32_t w, uint32_t h) = 0;
+
+#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_UNLIMITED_SLOTS)
+    // allowUnlimitedSlots allows the producer to set the upper bound on slots.
+    //
+    // Must be called before the producer is connected. If the producer
+    // increases the slot count, an IConsumerListener::onSlotCountChanged
+    // update is sent.
+    //
+    // This can not be used with setMaxBufferCount. Calls after
+    // setMaxBufferCount will fail and calls to setMaxBufferCount after setting
+    // this to true will fail.
+    //
+    // Return of a value other than NO_ERROR means an error has occurred:
+    // * NO_INIT - the BufferQueue has been abandoned
+    // * INVALID_OPERATION - one of the following errors has occurred:
+    //                       * Producer has been connected
+    //                       * setMaxBufferCount has been called and shrunk the
+    //                         BufferQueue.
+    virtual status_t allowUnlimitedSlots(bool allowUnlimitedSlots) = 0;
+#endif
 
     // setMaxBufferCount sets the maximum value for the number of buffers used in the BufferQueue
     // (the initial default is NUM_BUFFER_SLOTS). If a call to setMaxAcquiredBufferCount (by the
@@ -207,6 +243,9 @@ public:
     // maxAcquiredBuffers must be (inclusive) between 1 and MAX_MAX_ACQUIRED_BUFFERS. It also cannot
     // cause the maxBufferCount value to be exceeded.
     //
+    // If called with onBuffersReleasedCallback, that call back will be called in lieu of
+    // IConsumerListener::onBuffersReleased.
+    //
     // Return of a value other than NO_ERROR means an error has occurred:
     // * NO_INIT - the BufferQueue has been abandoned
     // * BAD_VALUE - one of the below conditions occurred:
@@ -216,6 +255,11 @@ public:
     //                 this call
     // * INVALID_OPERATION - attempting to call this after a producer connected.
     virtual status_t setMaxAcquiredBufferCount(int maxAcquiredBuffers) = 0;
+
+    using OnBufferReleasedCallback = std::function<void(void)>;
+    virtual status_t setMaxAcquiredBufferCount(
+            int maxAcquiredBuffers,
+            std::optional<OnBufferReleasedCallback> onBuffersReleasedCallback) = 0;
 
     // setConsumerName sets the name used in logging
     virtual status_t setConsumerName(const String8& name) = 0;
@@ -278,19 +322,5 @@ public:
         result.append(returned);
     }
 };
-
-#ifndef NO_BINDER
-class BnGraphicBufferConsumer : public SafeBnInterface<IGraphicBufferConsumer> {
-public:
-    BnGraphicBufferConsumer()
-          : SafeBnInterface<IGraphicBufferConsumer>("BnGraphicBufferConsumer") {}
-
-    status_t onTransact(uint32_t code, const Parcel& data, Parcel* reply,
-                        uint32_t flags = 0) override;
-};
-#else
-class BnGraphicBufferConsumer : public IGraphicBufferConsumer {
-};
-#endif
 
 } // namespace android

@@ -22,6 +22,8 @@
 #include <chrono>
 #include <thread>
 
+#include <scheduler/Time.h>
+
 #include "Scheduler/VsyncConfiguration.h"
 
 using namespace testing;
@@ -39,6 +41,10 @@ public:
           : impl::WorkDuration(currentFps, sfDuration, appDuration, sfEarlyDuration,
                                appEarlyDuration, sfEarlyGlDuration, appEarlyGlDuration,
                                hwcMinWorkDuration) {}
+
+    TestableWorkDuration(Fps currentFps, Duration minSfDuration, Duration maxSfDuration,
+                         Duration appDuration)
+          : impl::WorkDuration(currentFps, minSfDuration, maxSfDuration, appDuration) {}
 };
 
 class WorkDurationTest : public testing::Test {
@@ -166,6 +172,35 @@ TEST_F(WorkDurationTest, getConfigsForRefreshRate_unknownRefreshRate) {
 
 TEST_F(WorkDurationTest, minHwcWorkDuration) {
     EXPECT_EQ(mWorkDuration.getCurrentConfigs().hwcMinWorkDuration, 1234ns);
+}
+
+TEST_F(WorkDurationTest, workDurationIsARange) {
+    const Duration minSfDuration = Duration::fromNs(10'500'000);
+    const Duration maxSfDuration = Duration::fromNs(20'500'000);
+    const Duration appDuration = Duration::fromNs(16'000'000);
+    const TestableWorkDuration workDuration{60_Hz, minSfDuration, maxSfDuration, appDuration};
+
+    auto currentOffsets = workDuration.getCurrentConfigs();
+    auto offsets = workDuration.getConfigsForRefreshRate(60_Hz);
+
+    EXPECT_EQ(currentOffsets, offsets);
+    EXPECT_EQ(offsets.late.sfOffset, 6'166'667);
+    EXPECT_EQ(offsets.late.appOffset, 6'833'334);
+
+    EXPECT_EQ(offsets.late.sfWorkDuration, 10'500'000ns);
+    EXPECT_EQ(offsets.late.appWorkDuration, 16'000'000ns);
+
+    EXPECT_EQ(offsets.early.sfOffset, -3'833'333);
+    EXPECT_EQ(offsets.early.appOffset, 13'500'001);
+
+    EXPECT_EQ(offsets.early.sfWorkDuration, 20'500'000ns);
+    EXPECT_EQ(offsets.early.appWorkDuration, 16'000'000ns);
+
+    EXPECT_EQ(offsets.earlyGpu.sfOffset, -3'833'333);
+    EXPECT_EQ(offsets.earlyGpu.appOffset, 13'500'001);
+
+    EXPECT_EQ(offsets.earlyGpu.sfWorkDuration, 20'500'000ns);
+    EXPECT_EQ(offsets.earlyGpu.appWorkDuration, 16'000'000ns);
 }
 
 class TestablePhaseOffsets : public impl::PhaseOffsets {

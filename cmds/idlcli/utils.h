@@ -18,7 +18,6 @@
 #define FRAMEWORK_NATIVE_CMDS_IDLCLI_UTILS_H_
 
 #include <android/binder_enums.h>
-#include <hidl/HidlSupport.h>
 
 #include <iomanip>
 #include <iostream>

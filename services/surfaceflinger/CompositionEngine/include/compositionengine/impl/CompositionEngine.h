@@ -31,7 +31,7 @@ public:
             override;
 
     HWComposer& getHwComposer() const override;
-    void setHwComposer(std::unique_ptr<HWComposer>) override;
+    void setHwComposer(HWComposer*) override;
 
     renderengine::RenderEngine& getRenderEngine() const override;
     void setRenderEngine(renderengine::RenderEngine*) override;
@@ -59,7 +59,7 @@ public:
     void setNeedsAnotherUpdateForTest(bool);
 
 private:
-    std::unique_ptr<HWComposer> mHwComposer;
+    HWComposer* mHwComposer;
     renderengine::RenderEngine* mRenderEngine;
     std::shared_ptr<TimeStats> mTimeStats;
     bool mNeedsAnotherUpdate = false;

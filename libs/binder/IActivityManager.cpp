@@ -147,9 +147,11 @@ public:
          data.writeInterfaceToken(IActivityManager::getInterfaceDescriptor());
          data.writeInt32(uid);
          data.writeString16(callingPackage);
-         remote()->transact(IS_UID_ACTIVE_TRANSACTION, data, &reply);
+         status_t err = remote()->transact(IS_UID_ACTIVE_TRANSACTION, data, &reply);
          // fail on exception
-         if (reply.readExceptionCode() != 0) return false;
+         if (err != NO_ERROR || ((err = reply.readExceptionCode()) != NO_ERROR)) {
+             return false;
+         }
          return reply.readInt32() == 1;
     }
 
@@ -159,9 +161,9 @@ public:
         data.writeInterfaceToken(IActivityManager::getInterfaceDescriptor());
         data.writeInt32(uid);
         data.writeString16(callingPackage);
-        remote()->transact(GET_UID_PROCESS_STATE_TRANSACTION, data, &reply);
+        status_t err = remote()->transact(GET_UID_PROCESS_STATE_TRANSACTION, data, &reply);
         // fail on exception
-        if (reply.readExceptionCode() != 0) {
+        if (err != NO_ERROR || ((err = reply.readExceptionCode()) != NO_ERROR)) {
             return ActivityManager::PROCESS_STATE_UNKNOWN;
         }
         return reply.readInt32();
@@ -192,7 +194,7 @@ public:
         data.writeInt32(appPid);
         status_t err = remote()->transact(LOG_FGS_API_BEGIN_TRANSACTION, data, &reply,
                                           IBinder::FLAG_ONEWAY);
-        if (err != NO_ERROR || ((err = reply.readExceptionCode()) != NO_ERROR)) {
+        if (err != NO_ERROR) {
             ALOGD("%s: FGS Logger Transaction failed, %d", __func__, err);
             return err;
         }
@@ -207,7 +209,7 @@ public:
         data.writeInt32(appPid);
         status_t err =
                 remote()->transact(LOG_FGS_API_END_TRANSACTION, data, &reply, IBinder::FLAG_ONEWAY);
-        if (err != NO_ERROR || ((err = reply.readExceptionCode()) != NO_ERROR)) {
+        if (err != NO_ERROR) {
             ALOGD("%s: FGS Logger Transaction failed, %d", __func__, err);
             return err;
         }
@@ -224,7 +226,7 @@ public:
         data.writeInt32(appPid);
         status_t err = remote()->transact(LOG_FGS_API_STATE_CHANGED_TRANSACTION, data, &reply,
                                           IBinder::FLAG_ONEWAY);
-        if (err != NO_ERROR || ((err = reply.readExceptionCode()) != NO_ERROR)) {
+        if (err != NO_ERROR) {
             ALOGD("%s: FGS Logger Transaction failed, %d", __func__, err);
             return err;
         }

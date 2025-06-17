@@ -28,8 +28,7 @@ namespace android {
 
 class BufferQueueCore;
 
-class BufferQueueConsumer : public BnGraphicBufferConsumer {
-
+class BufferQueueConsumer : public IGraphicBufferConsumer {
 public:
     explicit BufferQueueConsumer(const sp<BufferQueueCore>& core);
     ~BufferQueueConsumer() override;
@@ -65,13 +64,14 @@ public:
     // any references to the just-released buffer that it might have, as if it
     // had received a onBuffersReleased() call with a mask set for the released
     // buffer.
-    //
-    // Note that the dependencies on EGL will be removed once we switch to using
-    // the Android HW Sync HAL.
+#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(BQ_GL_FENCE_CLEANUP)
+    virtual status_t releaseBuffer(int slot, uint64_t frameNumber,
+                                   const sp<Fence>& releaseFence) override;
+#else
     virtual status_t releaseBuffer(int slot, uint64_t frameNumber,
             const sp<Fence>& releaseFence, EGLDisplay display,
             EGLSyncKHR fence);
-
+#endif
     // connect connects a consumer to the BufferQueue.  Only one
     // consumer may be connected, and when that consumer disconnects the
     // BufferQueue is placed into the "abandoned" state, causing most
@@ -96,10 +96,25 @@ public:
     // This should be called from the onBuffersReleased() callback.
     virtual status_t getReleasedBuffers(uint64_t* outSlotMask);
 
+#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_UNLIMITED_SLOTS)
+    // getReleasedBuffers sets the values pointed to by outSlotMask to the bits
+    // indicating which buffer slots have been released by the BufferQueue
+    // but have not yet been released by the consumer.
+    //
+    // This should be called from the onBuffersReleased() callback when
+    // allowUnlimitedSlots has been called.
+    virtual status_t getReleasedBuffersExtended(std::vector<bool>* outSlotMask) override;
+#endif
+
     // setDefaultBufferSize is used to set the size of buffers returned by
     // dequeueBuffer when a width and height of zero is requested.  Default
     // is 1x1.
     virtual status_t setDefaultBufferSize(uint32_t width, uint32_t height);
+
+#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_UNLIMITED_SLOTS)
+    // see IGraphicBufferConsumer::allowUnlimitedSlots
+    virtual status_t allowUnlimitedSlots(bool allowUnlimitedSlots) override;
+#endif
 
     // see IGraphicBufferConsumer::setMaxBufferCount
     virtual status_t setMaxBufferCount(int bufferCount);
@@ -107,7 +122,10 @@ public:
     // setMaxAcquiredBufferCount sets the maximum number of buffers that can
     // be acquired by the consumer at one time (default 1).  This call will
     // fail if a producer is connected to the BufferQueue.
-    virtual status_t setMaxAcquiredBufferCount(int maxAcquiredBuffers);
+    virtual status_t setMaxAcquiredBufferCount(int maxAcquiredBuffers) override;
+    virtual status_t setMaxAcquiredBufferCount(
+            int maxAcquiredBuffers,
+            std::optional<OnBufferReleasedCallback> onBuffersReleasedCallback) override;
 
     // setConsumerName sets the name used in logging
     status_t setConsumerName(const String8& name) override;
@@ -152,6 +170,7 @@ public:
     // dump our state in a String
     status_t dumpState(const String8& prefix, String8* outResult) const override;
 
+#if !COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(BQ_GL_FENCE_CLEANUP)
     // Functions required for backwards compatibility.
     // These will be modified/renamed in IGraphicBufferConsumer and will be
     // removed from this class at that time. See b/13306289.
@@ -161,6 +180,7 @@ public:
             const sp<Fence>& releaseFence) {
         return releaseBuffer(buf, frameNumber, releaseFence, display, fence);
     }
+#endif
 
     virtual status_t consumerConnect(const sp<IConsumerListener>& consumer,
             bool controlledByApp) {

@@ -1,0 +1,90 @@
+# Copyright (C) 2024 The Android Open Source Project
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+# Feature Configuration Test Data
+#
+# proto-file: services/gpuservice/feature_override/proto/feature_config.proto
+# proto-message: FeatureOverrideProtos
+
+# The 'feature_name' entries correspond to the FeatureOverrideParserTest() unit test name.
+global_features [
+    {
+        feature_name: "globalOverrides1"
+        enabled: False
+    },
+    {
+        feature_name: "globalOverrides2"
+        enabled: True
+        gpu_vendor_ids: [
+            VENDOR_ID_TEST, # Match every GPU Vendor ID, so the feature isn't dropped when parsed.
+            VENDOR_ID_ARM
+        ]
+    },
+    {
+        feature_name: "globalOverrides3"
+        enabled: True
+        gpu_vendor_ids: [
+            VENDOR_ID_TEST, # Match every GPU Vendor ID, so the feature isn't dropped when parsed.
+            VENDOR_ID_INTEL
+        ]
+    }
+]
+
+# The 'package_name' and 'feature_name' entries correspond to the
+# FeatureOverrideParserTest() unit test name.
+package_features [
+    {
+        package_name: "com.gpuservice_unittest.packageOverrides1"
+        feature_configs: [
+            {
+                feature_name: "packageOverrides1"
+                enabled: True
+            }
+        ]
+    },
+    {
+        package_name: "com.gpuservice_unittest.packageOverrides2"
+        feature_configs: [
+            {
+                feature_name: "packageOverrides2"
+                enabled: False
+                gpu_vendor_ids: [
+                    VENDOR_ID_TEST, # Match every GPU Vendor ID, so the feature isn't dropped when parsed.
+                    VENDOR_ID_INTEL
+                ]
+            }
+        ]
+    },
+    {
+        package_name: "com.gpuservice_unittest.packageOverrides3"
+        feature_configs: [
+            {
+                feature_name: "packageOverrides3_1"
+                enabled: False
+                gpu_vendor_ids: [
+                    VENDOR_ID_TEST, # Match every GPU Vendor ID, so the feature isn't dropped when parsed.
+                    VENDOR_ID_ARM
+                ]
+            },
+            {
+                feature_name: "packageOverrides3_2"
+                enabled: True
+                gpu_vendor_ids: [
+                    VENDOR_ID_TEST, # Match every GPU Vendor ID, so the feature isn't dropped when parsed.
+                    VENDOR_ID_INTEL
+                ]
+            }
+        ]
+    }
+]

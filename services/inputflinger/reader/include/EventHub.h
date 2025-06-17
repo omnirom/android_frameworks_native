@@ -21,6 +21,7 @@
 #include <filesystem>
 #include <functional>
 #include <map>
+#include <memory>
 #include <optional>
 #include <ostream>
 #include <string>
@@ -30,6 +31,7 @@
 
 #include <batteryservice/BatteryService.h>
 #include <ftl/flags.h>
+#include <input/BlockingQueue.h>
 #include <input/Input.h>
 #include <input/InputDevice.h>
 #include <input/KeyCharacterMap.h>
@@ -87,6 +89,7 @@ std::ostream& operator<<(std::ostream& out, const std::optional<RawAbsoluteAxisI
  * If any new classes are added, we need to add them in rust input side too.
  */
 enum class InputDeviceClass : uint32_t {
+    // LINT.IfChange
     /* The input device is a keyboard or has buttons. */
     KEYBOARD = android::os::IInputConstants::DEVICE_CLASS_KEYBOARD,
 
@@ -143,6 +146,7 @@ enum class InputDeviceClass : uint32_t {
 
     /* The input device is external (not built-in). */
     EXTERNAL = android::os::IInputConstants::DEVICE_CLASS_EXTERNAL,
+    // LINT.ThenChange(frameworks/native/services/inputflinger/tests/fuzzers/MapperHelpers.h)
 };
 
 enum class SysfsClass : uint32_t {
@@ -395,6 +399,9 @@ public:
     /* Disable an input device. Closes file descriptor to that device. */
     virtual status_t disableDevice(int32_t deviceId) = 0;
 
+    /* Gets the sysfs root path for this device. Returns an empty path if there is none. */
+    virtual std::filesystem::path getSysfsRootPath(int32_t deviceId) const = 0;
+
     /* Sysfs node changed. Reopen the Eventhub device if any new Peripheral like Light, Battery,
      * etc. is detected. */
     virtual void sysfsNodeChanged(const std::string& sysfsNodePath) = 0;
@@ -610,6 +617,8 @@ public:
 
     status_t disableDevice(int32_t deviceId) override final;
 
+    std::filesystem::path getSysfsRootPath(int32_t deviceId) const override final;
+
     void sysfsNodeChanged(const std::string& sysfsNodePath) override final;
 
     bool setKernelWakeEnabled(int32_t deviceId, bool enabled) override final;
@@ -619,13 +628,16 @@ public:
 private:
     // Holds information about the sysfs device associated with the Device.
     struct AssociatedDevice {
+        AssociatedDevice(const std::filesystem::path& sysfsRootPath,
+                         std::shared_ptr<PropertyMap> baseDevConfig);
         // The sysfs root path of the misc device.
         std::filesystem::path sysfsRootPath;
+        // The configuration of the base device.
+        std::shared_ptr<PropertyMap> baseDevConfig;
         std::unordered_map<int32_t /*batteryId*/, RawBatteryInfo> batteryInfos;
         std::unordered_map<int32_t /*lightId*/, RawLightInfo> lightInfos;
         std::optional<RawLayoutInfo> layoutInfo;
 
-        bool isChanged() const;
         bool operator==(const AssociatedDevice&) const = default;
         bool operator!=(const AssociatedDevice&) const = default;
         std::string dump() const;
@@ -658,7 +670,7 @@ private:
         std::map<int /*axis*/, AxisState> absState;
 
         std::string configurationFile;
-        std::unique_ptr<PropertyMap> configuration;
+        std::shared_ptr<PropertyMap> configuration;
         std::unique_ptr<VirtualKeyMap> virtualKeyMap;
         KeyMap keyMap;
 
@@ -672,7 +684,7 @@ private:
         int32_t controllerNumber;
 
         Device(int fd, int32_t id, std::string path, InputDeviceIdentifier identifier,
-               std::shared_ptr<const AssociatedDevice> assocDev);
+               std::shared_ptr<PropertyMap> config);
         ~Device();
 
         void close();
@@ -692,7 +704,6 @@ private:
         void populateAbsoluteAxisStates();
         bool hasKeycodeLocked(int keycode) const;
         bool hasKeycodeInternalLocked(int keycode) const;
-        void loadConfigurationLocked();
         bool loadVirtualKeyMapLocked();
         status_t loadKeyMapLocked();
         bool isExternalDeviceLocked();
@@ -724,7 +735,8 @@ private:
     void addDeviceLocked(std::unique_ptr<Device> device) REQUIRES(mLock);
     void assignDescriptorLocked(InputDeviceIdentifier& identifier) REQUIRES(mLock);
     std::shared_ptr<const AssociatedDevice> obtainAssociatedDeviceLocked(
-            const std::filesystem::path& devicePath) const REQUIRES(mLock);
+            const std::filesystem::path& devicePath,
+            const std::shared_ptr<PropertyMap>& config) const REQUIRES(mLock);
 
     void closeDeviceByPathLocked(const std::string& devicePath) REQUIRES(mLock);
     void closeVideoDeviceByPathLocked(const std::string& devicePath) REQUIRES(mLock);
@@ -769,6 +781,8 @@ private:
     void addDeviceInputInotify();
     void addDeviceInotify();
 
+    void handleSysfsNodeChangeNotificationsLocked() REQUIRES(mLock);
+
     // Protect all internal state.
     mutable std::mutex mLock;
 
@@ -801,6 +815,7 @@ private:
     bool mNeedToReopenDevices;
     bool mNeedToScanDevices;
     std::vector<std::string> mExcludedDevices;
+    std::vector<int32_t> mDeviceIdsToReopen;
 
     int mEpollFd;
     int mINotifyFd;
@@ -818,6 +833,10 @@ private:
     size_t mPendingEventCount;
     size_t mPendingEventIndex;
     bool mPendingINotify;
+
+    // The sysfs node change notifications that have been sent to EventHub.
+    // Enqueuing notifications does not require the lock to be held.
+    BlockingQueue<std::string> mChangedSysfsNodeNotifications;
 };
 
 } // namespace android

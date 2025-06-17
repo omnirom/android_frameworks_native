@@ -40,10 +40,10 @@ using namespace android;
 using namespace std::chrono_literals;
 
 // Values from Boost.aidl and Mode.aidl.
-static constexpr int64_t FIRST_BOOST = static_cast<int64_t>(Boost::INTERACTION);
-static constexpr int64_t LAST_BOOST = static_cast<int64_t>(Boost::CAMERA_SHOT);
-static constexpr int64_t FIRST_MODE = static_cast<int64_t>(Mode::DOUBLE_TAP_TO_WAKE);
-static constexpr int64_t LAST_MODE = static_cast<int64_t>(Mode::CAMERA_STREAMING_HIGH);
+static constexpr int64_t FIRST_BOOST = static_cast<int64_t>(*ndk::enum_range<Boost>().begin());
+static constexpr int64_t LAST_BOOST = static_cast<int64_t>(*(ndk::enum_range<Boost>().end()-1));
+static constexpr int64_t FIRST_MODE = static_cast<int64_t>(*ndk::enum_range<Mode>().begin());
+static constexpr int64_t LAST_MODE = static_cast<int64_t>(*(ndk::enum_range<Mode>().end()-1));
 
 class DurationWrapper : public WorkDuration {
 public:
@@ -81,14 +81,17 @@ static void runBenchmark(benchmark::State& state, microseconds delay, R (IPower:
         return;
     }
 
-    while (state.KeepRunning()) {
+    for (auto _ : state) {
         ret = (*hal.*fn)(std::forward<Args1>(args1)...);
-        state.PauseTiming();
-        if (!ret.isOk()) state.SkipWithError(ret.getDescription().c_str());
-        if (delay > 0us) {
-            testDelaySpin(std::chrono::duration_cast<std::chrono::duration<float>>(delay).count());
+        if (!ret.isOk()) {
+            state.SkipWithError(ret.getDescription().c_str());
+            break;
         }
-        state.ResumeTiming();
+        if (delay > 0us) {
+            state.PauseTiming();
+            testDelaySpin(std::chrono::duration_cast<std::chrono::duration<float>>(delay).count());
+            state.ResumeTiming();
+        }
     }
 }
 
@@ -123,14 +126,15 @@ static void runSessionBenchmark(benchmark::State& state, R (IPowerHintSession::*
         return;
     }
 
-    while (state.KeepRunning()) {
+    for (auto _ : state) {
         ret = (*session.*fn)(std::forward<Args1>(args1)...);
-        state.PauseTiming();
-        if (!ret.isOk()) state.SkipWithError(ret.getDescription().c_str());
-        if (ONEWAY_API_DELAY > 0us) {
-            testDelaySpin(std::chrono::duration_cast<std::chrono::duration<float>>(ONEWAY_API_DELAY)
-                                  .count());
+        if (!ret.isOk()) {
+            state.SkipWithError(ret.getDescription().c_str());
+            break;
         }
+        state.PauseTiming();
+        testDelaySpin(std::chrono::duration_cast<std::chrono::duration<float>>(ONEWAY_API_DELAY)
+                                .count());
         state.ResumeTiming();
     }
     session->close();
@@ -150,11 +154,41 @@ static void BM_PowerHalAidlBenchmarks_isModeSupported(benchmark::State& state) {
 
 static void BM_PowerHalAidlBenchmarks_setBoost(benchmark::State& state) {
     Boost boost = static_cast<Boost>(state.range(0));
+    bool isSupported;
+    std::shared_ptr<IPower> hal = PowerHalLoader::loadAidl();
+
+    if (hal == nullptr) {
+        ALOGV("Power HAL not available, skipping test...");
+        state.SkipWithMessage("Power HAL unavailable");
+        return;
+    }
+
+    ndk::ScopedAStatus ret = hal->isBoostSupported(boost, &isSupported);
+    if (!ret.isOk() || !isSupported) {
+        state.SkipWithMessage("operation unsupported");
+        return;
+    }
+
     runBenchmark(state, ONEWAY_API_DELAY, &IPower::setBoost, boost, 1);
 }
 
 static void BM_PowerHalAidlBenchmarks_setMode(benchmark::State& state) {
     Mode mode = static_cast<Mode>(state.range(0));
+    bool isSupported;
+    std::shared_ptr<IPower> hal = PowerHalLoader::loadAidl();
+
+    if (hal == nullptr) {
+        ALOGV("Power HAL not available, skipping test...");
+        state.SkipWithMessage("Power HAL unavailable");
+        return;
+    }
+
+    ndk::ScopedAStatus ret = hal->isModeSupported(mode, &isSupported);
+    if (!ret.isOk() || !isSupported) {
+        state.SkipWithMessage("operation unsupported");
+        return;
+    }
+
     runBenchmark(state, ONEWAY_API_DELAY, &IPower::setMode, mode, false);
 }
 
@@ -178,12 +212,20 @@ static void BM_PowerHalAidlBenchmarks_createHintSession(benchmark::State& state)
         ALOGV("Power HAL does not support this operation, skipping test...");
         state.SkipWithMessage("operation unsupported");
         return;
+    } else if (!ret.isOk()) {
+        state.SkipWithError(ret.getDescription().c_str());
+        return;
+    } else {
+        appSession->close();
     }
 
-    while (state.KeepRunning()) {
+    for (auto _ : state) {
         ret = hal->createHintSession(tgid, uid, threadIds, durationNanos, &appSession);
+        if (!ret.isOk()) {
+            state.SkipWithError(ret.getDescription().c_str());
+            break;
+        }
         state.PauseTiming();
-        if (!ret.isOk()) state.SkipWithError(ret.getDescription().c_str());
         appSession->close();
         state.ResumeTiming();
     }

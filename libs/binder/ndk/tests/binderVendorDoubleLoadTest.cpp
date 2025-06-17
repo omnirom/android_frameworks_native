@@ -30,6 +30,8 @@
 #include <gtest/gtest.h>
 #include <sys/prctl.h>
 
+static_assert(FLAG_PRIVATE_LOCAL != 0, "Build system configuration breaks stability");
+
 using namespace android;
 using ::android::binder::Status;
 using ::android::internal::Stability;

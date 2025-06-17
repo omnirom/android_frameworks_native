@@ -22,9 +22,9 @@
 
 #include <inttypes.h>
 
-namespace android {
+int main() {
+    using namespace android;
 
-extern "C" int main() {
     // ignore args - we only print csv
 
     // we should use a csv library here for escaping, because
@@ -58,5 +58,3 @@ extern "C" int main() {
     }
     return 0;
 }
-
-} // namespace android

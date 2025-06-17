@@ -27,6 +27,8 @@ namespace procpartition {
 enum class Partition {
     UNKNOWN = 0,
     SYSTEM,
+    SYSTEM_EXT,
+    PRODUCT,
     VENDOR,
     ODM
 };

@@ -41,8 +41,6 @@ namespace {
 const bool ENABLE_INPUT_DEVICE_USAGE_METRICS =
         sysprop::InputProperties::enable_input_device_usage_metrics().value_or(true);
 
-const bool ENABLE_INPUT_FILTER_RUST = input_flags::enable_input_filter_rust_impl();
-
 int32_t exceptionCodeFromStatusT(status_t status) {
     switch (status) {
         case OK:
@@ -134,12 +132,10 @@ InputManager::InputManager(const sp<InputReaderPolicyInterface>& readerPolicy,
     mTracingStages.emplace_back(
             std::make_unique<TracedInputListener>("InputDispatcher", *mDispatcher));
 
-    if (ENABLE_INPUT_FILTER_RUST) {
-        mInputFilter = std::make_unique<InputFilter>(*mTracingStages.back(), *mInputFlingerRust,
-                                                     inputFilterPolicy);
-        mTracingStages.emplace_back(
-                std::make_unique<TracedInputListener>("InputFilter", *mInputFilter));
-    }
+    mInputFilter = std::make_unique<InputFilter>(*mTracingStages.back(), *mInputFlingerRust,
+                                                 inputFilterPolicy);
+    mTracingStages.emplace_back(
+            std::make_unique<TracedInputListener>("InputFilter", *mInputFilter));
 
     if (ENABLE_INPUT_DEVICE_USAGE_METRICS) {
         mCollector = std::make_unique<InputDeviceMetricsCollector>(*mTracingStages.back());
@@ -250,10 +246,8 @@ void InputManager::dump(std::string& dump) {
         mCollector->dump(dump);
         dump += '\n';
     }
-    if (ENABLE_INPUT_FILTER_RUST) {
-        mInputFilter->dump(dump);
-        dump += '\n';
-    }
+    mInputFilter->dump(dump);
+    dump += '\n';
     mDispatcher->dump(dump);
     dump += '\n';
 }

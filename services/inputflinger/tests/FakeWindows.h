@@ -144,10 +144,6 @@ public:
         mInfo.setInputConfig(InputConfig::PAUSE_DISPATCHING, paused);
     }
 
-    inline void setPreventSplitting(bool preventSplitting) {
-        mInfo.setInputConfig(InputConfig::PREVENT_SPLITTING, preventSplitting);
-    }
-
     inline void setSlippery(bool slippery) {
         mInfo.setInputConfig(InputConfig::SLIPPERY, slippery);
     }

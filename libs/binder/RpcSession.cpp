@@ -188,7 +188,9 @@ status_t RpcSession::setupInetClient(const char* addr, unsigned int port) {
 }
 
 status_t RpcSession::setupPreconnectedClient(unique_fd fd, std::function<unique_fd()>&& request) {
-    return setupClient([&](const std::vector<uint8_t>& sessionId, bool incoming) -> status_t {
+    return setupClient([&, fd = std::move(fd),
+                        request = std::move(request)](const std::vector<uint8_t>& sessionId,
+                                                      bool incoming) mutable -> status_t {
         if (!fd.ok()) {
             fd = request();
             if (!fd.ok()) return BAD_VALUE;
@@ -476,8 +478,10 @@ sp<RpcServer> RpcSession::server() {
     return server;
 }
 
-status_t RpcSession::setupClient(const std::function<status_t(const std::vector<uint8_t>& sessionId,
-                                                              bool incoming)>& connectAndInit) {
+template <typename Fn,
+          typename /* = std::enable_if_t<std::is_invocable_r_v<
+                      status_t, Fn, const std::vector<uint8_t>&, bool>> */>
+status_t RpcSession::setupClient(Fn&& connectAndInit) {
     {
         RpcMutexLockGuard _l(mMutex);
         LOG_ALWAYS_FATAL_IF(mStartedSetup, "Must only setup session once");

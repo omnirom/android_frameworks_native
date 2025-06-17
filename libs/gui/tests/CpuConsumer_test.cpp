@@ -66,10 +66,9 @@ protected:
                 test_info->name(),
                 params.width, params.height,
                 params.maxLockedBuffers, params.format);
-        mCC = new CpuConsumer(params.maxLockedBuffers);
+        std::tie(mCC, mSTC) = CpuConsumer::create(params.maxLockedBuffers);
         String8 name("CpuConsumer_Under_Test");
         mCC->setName(name);
-        mSTC = mCC->getSurface();
         mANW = mSTC;
     }
 
@@ -803,6 +802,27 @@ INSTANTIATE_TEST_CASE_P(Rgba8888Tests,
         ::testing::ValuesIn(rgba8888TestSets));
 #endif
 
+#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_UNLIMITED_SLOTS)
+TEST(CpuConsumerSlotTest, UnlimitedSlots_AcquireReleaseAll) {
+    sp<CpuConsumer> cpuConsumer = sp<CpuConsumer>::make(3);
+    sp<Surface> surface = cpuConsumer->getSurface();
+    sp<SurfaceListener> listener = sp<StubSurfaceListener>::make();
 
+    ASSERT_EQ(OK, surface->connect(NATIVE_WINDOW_API_CPU, listener));
+    ASSERT_EQ(OK, surface->setMaxDequeuedBufferCount(256));
 
+    std::vector<Surface::BatchBuffer> buffers(256);
+    EXPECT_EQ(OK, surface->dequeueBuffers(&buffers));
+
+    for (auto& buffer : buffers) {
+        sp<GraphicBuffer> graphicBuffer = GraphicBuffer::from(buffer.buffer);
+        sp<Fence> fence = sp<Fence>::make(buffer.fenceFd);
+        EXPECT_EQ(OK, surface->queueBuffer(graphicBuffer, fence));
+
+        CpuConsumer::LockedBuffer nativeBuffer;
+        EXPECT_EQ(OK, cpuConsumer->lockNextBuffer(&nativeBuffer));
+        EXPECT_EQ(OK, cpuConsumer->unlockBuffer(nativeBuffer));
+    }
+}
+#endif
 } // namespace android

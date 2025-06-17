@@ -66,9 +66,11 @@ public:
     using MetricsIdentifier = std::tuple<uint16_t /*busId*/, uint16_t /*vendorId*/,
                                          uint16_t /*productId*/, uint16_t /*version*/>;
 
-    std::optional<ui::LogicalDisplayId> getAssociatedDisplayId() override;
+    std::optional<ui::LogicalDisplayId> getAssociatedDisplayId() const override;
 
     std::optional<HardwareProperties> getTouchpadHardwareProperties() override;
+
+    std::optional<GesturesProp> getGesturePropertyForTesting(const std::string& name);
 
 private:
     void resetGestureInterpreter(nsecs_t when);

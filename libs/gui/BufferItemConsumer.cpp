@@ -17,6 +17,7 @@
 //#define LOG_NDEBUG 0
 #define LOG_TAG "BufferItemConsumer"
 //#define ATRACE_TAG ATRACE_TAG_GRAPHICS
+#include <utils/Errors.h>
 #include <utils/Log.h>
 
 #include <inttypes.h>
@@ -24,6 +25,7 @@
 #include <com_android_graphics_libgui_flags.h>
 #include <gui/BufferItem.h>
 #include <gui/BufferItemConsumer.h>
+#include <gui/Surface.h>
 #include <ui/BufferQueueDefs.h>
 #include <ui/GraphicBuffer.h>
 
@@ -34,6 +36,30 @@
 #define BI_LOGE(x, ...) ALOGE("[%s] " x, mName.c_str(), ##__VA_ARGS__)
 
 namespace android {
+
+std::tuple<sp<BufferItemConsumer>, sp<Surface>> BufferItemConsumer::create(
+        uint64_t consumerUsage, int bufferCount, bool controlledByApp,
+        bool isConsumerSurfaceFlinger) {
+#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
+    sp<BufferItemConsumer> bufferItemConsumer =
+            sp<BufferItemConsumer>::make(consumerUsage, bufferCount, controlledByApp,
+                                         isConsumerSurfaceFlinger);
+    return {bufferItemConsumer, bufferItemConsumer->getSurface()};
+#else
+    sp<IGraphicBufferProducer> igbp;
+    sp<IGraphicBufferConsumer> igbc;
+    BufferQueue::createBufferQueue(&igbp, &igbc, isConsumerSurfaceFlinger);
+    sp<BufferItemConsumer> bufferItemConsumer =
+            sp<BufferItemConsumer>::make(igbc, consumerUsage, bufferCount, controlledByApp);
+    return {bufferItemConsumer, sp<Surface>::make(igbp, controlledByApp)};
+#endif
+}
+
+sp<BufferItemConsumer> BufferItemConsumer::create(const sp<IGraphicBufferConsumer>& consumer,
+                                                  uint64_t consumerUsage, int bufferCount,
+                                                  bool controlledByApp) {
+    return sp<BufferItemConsumer>::make(consumer, consumerUsage, bufferCount, controlledByApp);
+}
 
 #if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
 BufferItemConsumer::BufferItemConsumer(uint64_t consumerUsage, int bufferCount,
@@ -107,13 +133,36 @@ status_t BufferItemConsumer::acquireBuffer(BufferItem *item,
     return OK;
 }
 
+status_t BufferItemConsumer::attachBuffer(const sp<GraphicBuffer>& buffer) {
+    if (!buffer) {
+        BI_LOGE("BufferItemConsumer::attachBuffer no input buffer specified.");
+        return BAD_VALUE;
+    }
+
+    Mutex::Autolock _l(mMutex);
+
+    int slot = INVALID_BUFFER_SLOT;
+    status_t status = mConsumer->attachBuffer(&slot, buffer);
+    if (status != OK) {
+        BI_LOGE("BufferItemConsumer::attachBuffer unable to attach buffer %d", status);
+        return status;
+    }
+
+    mSlots[slot] = {
+            .mGraphicBuffer = buffer,
+            .mFence = nullptr,
+            .mFrameNumber = 0,
+    };
+
+    return OK;
+}
+
 status_t BufferItemConsumer::releaseBuffer(const BufferItem &item,
         const sp<Fence>& releaseFence) {
     Mutex::Autolock _l(mMutex);
     return releaseBufferSlotLocked(item.mSlot, item.mGraphicBuffer, releaseFence);
 }
 
-#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_PLATFORM_API_IMPROVEMENTS)
 status_t BufferItemConsumer::releaseBuffer(const sp<GraphicBuffer>& buffer,
                                            const sp<Fence>& releaseFence) {
     Mutex::Autolock _l(mMutex);
@@ -129,7 +178,6 @@ status_t BufferItemConsumer::releaseBuffer(const sp<GraphicBuffer>& buffer,
 
     return releaseBufferSlotLocked(slotIndex, buffer, releaseFence);
 }
-#endif // COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_PLATFORM_API_IMPROVEMENTS)
 
 status_t BufferItemConsumer::releaseBufferSlotLocked(int slotIndex, const sp<GraphicBuffer>& buffer,
                                                      const sp<Fence>& releaseFence) {

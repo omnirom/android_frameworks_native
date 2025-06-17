@@ -383,11 +383,13 @@ public:
     LIBBINDER_EXPORTED status_t
     writeUniqueFileDescriptorVector(const std::optional<std::vector<binder::unique_fd>>& val);
     LIBBINDER_EXPORTED status_t
-    writeUniqueFileDescriptorVector(const std::unique_ptr<std::vector<binder::unique_fd>>& val)
-            __attribute__((deprecated("use std::optional version instead")));
-    LIBBINDER_EXPORTED status_t
     writeUniqueFileDescriptorVector(const std::vector<binder::unique_fd>& val);
 
+    // WARNING: deprecated and incompatible with AIDL. You should use Parcelable
+    // definitions outside of Parcel to represent shared memory, such as
+    // IMemory or with ParcelFileDescriptor. We should remove this, or move it to be
+    // external to Parcel, it's not a very encapsulated API.
+    //
     // Writes a blob to the parcel.
     // If the blob is small, then it is stored in-place, otherwise it is
     // transferred by way of an anonymous shared memory region.  Prefer sending
@@ -400,8 +402,6 @@ public:
     // This allows the client to send the same blob to multiple processes
     // as long as it keeps a dup of the blob file descriptor handy for later.
     LIBBINDER_EXPORTED status_t writeDupImmutableBlobFileDescriptor(int fd);
-
-    LIBBINDER_EXPORTED status_t writeObject(const flat_binder_object& val, bool nullMetaData);
 
     // Like Parcel.java's writeNoException().  Just writes a zero int32.
     // Currently the native implementation doesn't do any of the StrictMode
@@ -627,11 +627,13 @@ public:
     LIBBINDER_EXPORTED status_t
     readUniqueFileDescriptorVector(std::optional<std::vector<binder::unique_fd>>* val) const;
     LIBBINDER_EXPORTED status_t
-    readUniqueFileDescriptorVector(std::unique_ptr<std::vector<binder::unique_fd>>* val) const
-            __attribute__((deprecated("use std::optional version instead")));
-    LIBBINDER_EXPORTED status_t
     readUniqueFileDescriptorVector(std::vector<binder::unique_fd>* val) const;
 
+    // WARNING: deprecated and incompatible with AIDL. You should use Parcelable
+    // definitions outside of Parcel to represent shared memory, such as
+    // IMemory or with ParcelFileDescriptor. We should remove this, or move it to be
+    // external to Parcel, it's not a very encapsulated API.
+    //
     // Reads a blob from the parcel.
     // The caller should call release() on the blob after reading its contents.
     LIBBINDER_EXPORTED status_t readBlob(size_t len, ReadableBlob* outBlob) const;
@@ -649,6 +651,11 @@ public:
 
     LIBBINDER_EXPORTED void print(std::ostream& to, uint32_t flags = 0) const;
 
+    // This API is to quickly become a view of another Parcel, so that we can also
+    // test 'owner' paths quickly. It's extremely dangerous to use this API in
+    // practice, and you should never ever do it.
+    LIBBINDER_EXPORTED void makeDangerousViewOf(Parcel* p);
+
 private:
     // Close all file descriptors in the parcel at object positions >= newObjectsSize.
     void closeFileDescriptors(size_t newObjectsSize);
@@ -664,7 +671,7 @@ private:
     void ipcSetDataReference(const uint8_t* data, size_t dataSize, const binder_size_t* objects,
                              size_t objectsCount, release_func relFunc);
     // Takes ownership even when an error is returned.
-    status_t rpcSetDataReference(
+    [[nodiscard]] status_t rpcSetDataReference(
             const sp<RpcSession>& session, const uint8_t* data, size_t dataSize,
             const uint32_t* objectTable, size_t objectTableSize,
             std::vector<std::variant<binder::unique_fd, binder::borrowed_fd>>&& ancillaryFds,
@@ -672,7 +679,7 @@ private:
 
     status_t            finishWrite(size_t len);
     void                releaseObjects();
-    void                acquireObjects();
+    void reacquireObjects(size_t objectSize);
     status_t            growData(size_t len);
     // Clear the Parcel and set the capacity to `desired`.
     // Doesn't reset the RPC session association.
@@ -680,6 +687,7 @@ private:
     // Set the capacity to `desired`, truncating the Parcel if necessary.
     status_t            continueWrite(size_t desired);
     status_t truncateRpcObjects(size_t newObjectsSize);
+    status_t writeObject(const flat_binder_object& val, bool nullMetaData);
     status_t            writePointer(uintptr_t val);
     status_t            readPointer(uintptr_t *pArg) const;
     uintptr_t           readPointer() const;
@@ -1480,14 +1488,15 @@ public:
      * Note: for historical reasons, this does not include ashmem memory which
      * is referenced by this Parcel, but which this parcel doesn't own (e.g.
      * writeFileDescriptor is called without 'takeOwnership' true).
+     *
+     * WARNING: you should not use this, but rather, unparcel, and inspect
+     * each FD independently. This counts ashmem size, but there may be
+     * other resources used for non-ashmem FDs, such as other types of
+     * shared memory, files, etc..
      */
     LIBBINDER_EXPORTED size_t getOpenAshmemSize() const;
 
 private:
-    // TODO(b/202029388): Remove 'getBlobAshmemSize' once no prebuilts reference
-    // this
-    LIBBINDER_EXPORTED size_t getBlobAshmemSize() const;
-
     // Needed so that we can save object metadata to the disk
     friend class android::binder::debug::RecordedTransaction;
 };

@@ -1,0 +1,9 @@
+package: "com.android.graphics.graphicsenv.flags"
+container: "system"
+
+flag {
+  name: "angle_feature_overrides"
+  namespace: "gpu"
+  description: "This flag controls the ANGLE Feature Overrides in GraphicsEnv."
+  bug: "372694741"
+}

@@ -31,6 +31,30 @@ static const int HW_TIMEOUT_MULTIPLIER = base::GetIntProperty("ro.hw_timeout_mul
 
 } // namespace
 
+DisplayViewport createViewport(ui::LogicalDisplayId displayId, int32_t width, int32_t height,
+                               ui::Rotation orientation, bool isActive, const std::string& uniqueId,
+                               std::optional<uint8_t> physicalPort, ViewportType type) {
+    const bool isRotated = orientation == ui::ROTATION_90 || orientation == ui::ROTATION_270;
+    DisplayViewport v;
+    v.displayId = displayId;
+    v.orientation = orientation;
+    v.logicalLeft = 0;
+    v.logicalTop = 0;
+    v.logicalRight = isRotated ? height : width;
+    v.logicalBottom = isRotated ? width : height;
+    v.physicalLeft = 0;
+    v.physicalTop = 0;
+    v.physicalRight = isRotated ? height : width;
+    v.physicalBottom = isRotated ? width : height;
+    v.deviceWidth = isRotated ? height : width;
+    v.deviceHeight = isRotated ? width : height;
+    v.isActive = isActive;
+    v.uniqueId = uniqueId;
+    v.physicalPort = physicalPort;
+    v.type = type;
+    return v;
+};
+
 void FakeInputReaderPolicy::assertInputDevicesChanged() {
     waitForInputDevices(
             [](bool devicesChanged) {
@@ -113,33 +137,6 @@ std::optional<DisplayViewport> FakeInputReaderPolicy::getDisplayViewportByPort(
 void FakeInputReaderPolicy::addDisplayViewport(DisplayViewport viewport) {
     mViewports.push_back(std::move(viewport));
     mConfig.setDisplayViewports(mViewports);
-}
-
-void FakeInputReaderPolicy::addDisplayViewport(ui::LogicalDisplayId displayId, int32_t width,
-                                               int32_t height, ui::Rotation orientation,
-                                               bool isActive, const std::string& uniqueId,
-                                               std::optional<uint8_t> physicalPort,
-                                               ViewportType type) {
-    const bool isRotated = orientation == ui::ROTATION_90 || orientation == ui::ROTATION_270;
-    DisplayViewport v;
-    v.displayId = displayId;
-    v.orientation = orientation;
-    v.logicalLeft = 0;
-    v.logicalTop = 0;
-    v.logicalRight = isRotated ? height : width;
-    v.logicalBottom = isRotated ? width : height;
-    v.physicalLeft = 0;
-    v.physicalTop = 0;
-    v.physicalRight = isRotated ? height : width;
-    v.physicalBottom = isRotated ? width : height;
-    v.deviceWidth = isRotated ? height : width;
-    v.deviceHeight = isRotated ? width : height;
-    v.isActive = isActive;
-    v.uniqueId = uniqueId;
-    v.physicalPort = physicalPort;
-    v.type = type;
-
-    addDisplayViewport(v);
 }
 
 bool FakeInputReaderPolicy::updateViewport(const DisplayViewport& viewport) {

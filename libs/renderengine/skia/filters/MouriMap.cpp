@@ -30,12 +30,12 @@ sk_sp<SkRuntimeEffect> makeEffect(const SkString& sksl) {
 }
 const SkString kCrosstalkAndChunk16x16(R"(
     uniform shader bitmap;
-    uniform float hdrSdrRatio;
+    uniform float inputMultiplier;
     vec4 main(vec2 xy) {
         float maximum = 0.0;
         for (int y = 0; y < 16; y++) {
             for (int x = 0; x < 16; x++) {
-                float3 linear = toLinearSrgb(bitmap.eval((xy - 0.5) * 16 + 0.5 + vec2(x, y)).rgb) * hdrSdrRatio;
+                float3 linear = toLinearSrgb(bitmap.eval((xy - 0.5) * 16 + 0.5 + vec2(x, y)).rgb) * inputMultiplier;
                 float maxRGB = max(linear.r, max(linear.g, linear.b));
                 maximum = max(maximum, log2(max(maxRGB, 1.0)));
             }
@@ -77,12 +77,12 @@ const SkString kTonemap(R"(
     uniform shader image;
     uniform shader lux;
     uniform float scaleFactor;
-    uniform float hdrSdrRatio;
+    uniform float inputMultiplier;
     uniform float targetHdrSdrRatio;
     vec4 main(vec2 xy) {
         float localMax = lux.eval(xy * scaleFactor).r;
         float4 rgba = image.eval(xy);
-        float3 linear = toLinearSrgb(rgba.rgb) * hdrSdrRatio;
+        float3 linear = toLinearSrgb(rgba.rgb) * inputMultiplier;
 
         if (localMax <= targetHdrSdrRatio) {
             return float4(fromLinearSrgb(linear), rgba.a);
@@ -104,7 +104,7 @@ sk_sp<SkImage> makeImage(SkSurface* surface, const SkRuntimeShaderBuilder& build
     paint.setShader(std::move(shader));
     paint.setBlendMode(SkBlendMode::kSrc);
     surface->getCanvas()->drawPaint(paint);
-    return surface->makeImageSnapshot();
+    return surface->makeTemporaryImage();
 }
 
 } // namespace
@@ -116,19 +116,19 @@ MouriMap::MouriMap()
         mTonemap(makeEffect(kTonemap)) {}
 
 sk_sp<SkShader> MouriMap::mouriMap(SkiaGpuContext* context, sk_sp<SkShader> input,
-                                   float hdrSdrRatio, float targetHdrSdrRatio) {
-    auto downchunked = downchunk(context, input, hdrSdrRatio);
+                                   float inputMultiplier, float targetHdrSdrRatio) {
+    auto downchunked = downchunk(context, input, inputMultiplier);
     auto localLux = blur(context, downchunked.get());
-    return tonemap(input, localLux.get(), hdrSdrRatio, targetHdrSdrRatio);
+    return tonemap(input, localLux.get(), inputMultiplier, targetHdrSdrRatio);
 }
 
 sk_sp<SkImage> MouriMap::downchunk(SkiaGpuContext* context, sk_sp<SkShader> input,
-                                   float hdrSdrRatio) const {
+                                   float inputMultiplier) const {
     SkMatrix matrix;
     SkImage* image = input->isAImage(&matrix, (SkTileMode*)nullptr);
     SkRuntimeShaderBuilder crosstalkAndChunk16x16Builder(mCrosstalkAndChunk16x16);
     crosstalkAndChunk16x16Builder.child("bitmap") = input;
-    crosstalkAndChunk16x16Builder.uniform("hdrSdrRatio") = hdrSdrRatio;
+    crosstalkAndChunk16x16Builder.uniform("inputMultiplier") = inputMultiplier;
     // TODO: fp16 might be overkill. Most practical surfaces use 8-bit RGB for HDR UI and 10-bit YUV
     // for HDR video. These downsample operations compute log2(max(linear RGB, 1.0)). So we don't
     // care about LDR precision since they all resolve to LDR-max. For appropriately mastered HDR
@@ -168,7 +168,7 @@ sk_sp<SkImage> MouriMap::blur(SkiaGpuContext* context, SkImage* input) const {
     LOG_ALWAYS_FATAL_IF(!blurSurface, "%s: Failed to create surface!", __func__);
     return makeImage(blurSurface.get(), blurBuilder);
 }
-sk_sp<SkShader> MouriMap::tonemap(sk_sp<SkShader> input, SkImage* localLux, float hdrSdrRatio,
+sk_sp<SkShader> MouriMap::tonemap(sk_sp<SkShader> input, SkImage* localLux, float inputMultiplier,
                                   float targetHdrSdrRatio) const {
     static constexpr float kScaleFactor = 1.0f / 128.0f;
     SkRuntimeShaderBuilder tonemapBuilder(mTonemap);
@@ -177,7 +177,7 @@ sk_sp<SkShader> MouriMap::tonemap(sk_sp<SkShader> input, SkImage* localLux, floa
             localLux->makeRawShader(SkTileMode::kClamp, SkTileMode::kClamp,
                                     SkSamplingOptions(SkFilterMode::kLinear, SkMipmapMode::kNone));
     tonemapBuilder.uniform("scaleFactor") = kScaleFactor;
-    tonemapBuilder.uniform("hdrSdrRatio") = hdrSdrRatio;
+    tonemapBuilder.uniform("inputMultiplier") = inputMultiplier;
     tonemapBuilder.uniform("targetHdrSdrRatio") = targetHdrSdrRatio;
     return tonemapBuilder.makeShader();
 }

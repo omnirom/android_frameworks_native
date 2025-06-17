@@ -52,6 +52,7 @@ cc_library_shared {
     ],
 
     whole_static_libs: [
+        "android.adpf.sessionmanager_aidl-ndk",
         "android.os.hintmanager_aidl-ndk",
     ],
 

@@ -46,6 +46,7 @@ public:
 
     // compositionengine::Output overrides
     ftl::Optional<DisplayId> getDisplayId() const override;
+    ftl::Optional<DisplayIdVariant> getDisplayIdVariant() const override;
     bool isValid() const override;
     void dump(std::string&) const override;
     using compositionengine::impl::Output::setReleasedLayers;
@@ -67,7 +68,9 @@ public:
 
     // compositionengine::Display overrides
     DisplayId getId() const override;
+    bool hasSecureLayers() const override;
     bool isSecure() const override;
+    void setSecure(bool secure) override;
     bool isVirtual() const override;
     void disconnect() override;
     void createDisplayColorProfile(
@@ -75,7 +78,6 @@ public:
     void createRenderSurface(const compositionengine::RenderSurfaceCreationArgs&) override;
     void createClientCompositionCache(uint32_t cacheSize) override;
     void applyDisplayBrightness(bool applyImmediately) override;
-    void setSecure(bool secure) override;
 
     // Internal helpers used by chooseCompositionStrategy()
     using ChangedTypes = android::HWComposer::DeviceRequestedChanges::ChangedTypes;
@@ -104,8 +106,11 @@ private:
             override;
     bool hasPictureProcessing() const override;
     int32_t getMaxLayerPictureProfiles() const override;
+    bool isGpuVirtualDisplay() const {
+        return std::holds_alternative<GpuVirtualDisplayId>(mIdVariant);
+    }
 
-    DisplayId mId;
+    DisplayIdVariant mIdVariant;
     bool mIsDisconnected = false;
     adpf::PowerAdvisor* mPowerAdvisor = nullptr;
     bool mHasPictureProcessing = false;

@@ -32,6 +32,7 @@ public:
     virtual ~Display();
 
     MOCK_CONST_METHOD0(getId, DisplayId());
+    MOCK_CONST_METHOD0(hasSecureLayers, bool());
     MOCK_CONST_METHOD0(isSecure, bool());
     MOCK_METHOD1(setSecure, void(bool));
     MOCK_CONST_METHOD0(isVirtual, bool());

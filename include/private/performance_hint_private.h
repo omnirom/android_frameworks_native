@@ -125,8 +125,10 @@ APerformanceHintSession* APerformanceHint_createSessionInternal(APerformanceHint
 /**
  * Creates a session using ASessionCreationConfig
  */
-APerformanceHintSession* APerformanceHint_createSessionUsingConfigInternal(
-        APerformanceHintManager* manager, ASessionCreationConfig* sessionCreationConfig,
+int APerformanceHint_createSessionUsingConfigInternal(
+        APerformanceHintManager* manager,
+        ASessionCreationConfig* config,
+        APerformanceHintSession** sessionOut,
         SessionTag tag);
 
 /**

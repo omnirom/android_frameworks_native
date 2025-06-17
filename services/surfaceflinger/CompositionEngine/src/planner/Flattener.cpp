@@ -243,17 +243,9 @@ void Flattener::resetActivities(NonBufferHash hash, time_point now) {
 
     mCurrentGeometry = hash;
     mLastGeometryUpdate = now;
-
-    for (const CachedSet& cachedSet : mLayers) {
-        if (cachedSet.getLayerCount() > 1) {
-            ++mInvalidatedCachedSetAges[cachedSet.getAge()];
-        }
-    }
-
     mLayers.clear();
 
     if (mNewCachedSet) {
-        ++mInvalidatedCachedSetAges[mNewCachedSet->getAge()];
         mNewCachedSet = std::nullopt;
     }
 }
@@ -312,7 +304,6 @@ bool Flattener::mergeWithCachedSets(const std::vector<const LayerState*>& layers
             mNewCachedSet->getFirstLayer().getState()->getId() == (*incomingLayerIter)->getId()) {
             if (mNewCachedSet->hasBufferUpdate()) {
                 ALOGV("[%s] Dropping new cached set", __func__);
-                ++mInvalidatedCachedSetAges[0];
                 mNewCachedSet = std::nullopt;
             } else if (mNewCachedSet->hasReadyBuffer()) {
                 ALOGV("[%s] Found ready buffer", __func__);
@@ -325,6 +316,7 @@ bool Flattener::mergeWithCachedSets(const std::vector<const LayerState*>& layers
                                 priorBlurLayer == (*incomingLayerIter)->getOutputLayer();
                         OutputLayer::CompositionState& state =
                                 (*incomingLayerIter)->getOutputLayer()->editState();
+
                         state.overrideInfo = {
                                 .buffer = mNewCachedSet->getBuffer(),
                                 .acquireFence = mNewCachedSet->getDrawFence(),
@@ -337,10 +329,6 @@ bool Flattener::mergeWithCachedSets(const std::vector<const LayerState*>& layers
                                 .disableBackgroundBlur = disableBlur,
                         };
                         ++incomingLayerIter;
-                    }
-
-                    if (currentLayerIter->getLayerCount() > 1) {
-                        ++mInvalidatedCachedSetAges[currentLayerIter->getAge()];
                     }
                     ++currentLayerIter;
 
@@ -378,9 +366,9 @@ bool Flattener::mergeWithCachedSets(const std::vector<const LayerState*>& layers
                 };
                 ++incomingLayerIter;
             }
+            priorBlurLayer = currentLayerIter->getBlurLayer();
         } else if (currentLayerIter->getLayerCount() > 1) {
             // Break the current layer into its constituent layers
-            ++mInvalidatedCachedSetAges[currentLayerIter->getAge()];
             for (CachedSet& layer : currentLayerIter->decompose()) {
                 bool disableBlur =
                         priorBlurLayer && priorBlurLayer == (*incomingLayerIter)->getOutputLayer();
@@ -400,8 +388,8 @@ bool Flattener::mergeWithCachedSets(const std::vector<const LayerState*>& layers
             currentLayerIter->updateAge(now);
             merged.emplace_back(*currentLayerIter);
             ++incomingLayerIter;
+          priorBlurLayer = currentLayerIter->getBlurLayer();
         }
-        priorBlurLayer = currentLayerIter->getBlurLayer();
         ++currentLayerIter;
     }
 

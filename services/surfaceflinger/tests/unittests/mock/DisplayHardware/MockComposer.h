@@ -190,6 +190,13 @@ public:
     MOCK_METHOD(Error, getMaxLayerPictureProfiles, (Display, int32_t*));
     MOCK_METHOD(Error, setDisplayPictureProfileId, (Display, PictureProfileId id));
     MOCK_METHOD(Error, setLayerPictureProfileId, (Display, Layer, PictureProfileId id));
+    MOCK_METHOD(Error, startHdcpNegotiation,
+                (Display, const aidl::android::hardware::drm::HdcpLevels& levels));
+    MOCK_METHOD(Error, getLuts,
+                (Display, const std::vector<sp<GraphicBuffer>>&,
+                 std::vector<aidl::android::hardware::graphics::composer3::Luts>*));
+    MOCK_METHOD4(getLayerPresentFences,
+                 Error(Display, std::vector<Layer>*, std::vector<int>*, std::vector<int64_t>*));
 };
 
 } // namespace Hwc2::mock

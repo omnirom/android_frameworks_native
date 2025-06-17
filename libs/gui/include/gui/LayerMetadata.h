@@ -44,6 +44,10 @@ struct LayerMetadata : public Parcelable {
     LayerMetadata& operator=(const LayerMetadata& other);
     LayerMetadata& operator=(LayerMetadata&& other);
 
+    // Note: `default` is not feasible because Parcelable does not provide ==.
+    bool operator==(const LayerMetadata& rhs) const { return mMap == rhs.mMap; }
+    bool operator!=(const LayerMetadata&) const = default;
+
     // Merges other into this LayerMetadata. If eraseEmpty is true, any entries in
     // in this whose keys are paired with empty values in other will be erased.
     bool merge(const LayerMetadata& other, bool eraseEmpty = false);

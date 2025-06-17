@@ -31,6 +31,10 @@
 
 namespace android {
 
+DisplayViewport createViewport(ui::LogicalDisplayId displayId, int32_t width, int32_t height,
+                               ui::Rotation orientation, bool isActive, const std::string& uniqueId,
+                               std::optional<uint8_t> physicalPort, ViewportType type);
+
 class FakeInputReaderPolicy : public InputReaderPolicyInterface {
 protected:
     virtual ~FakeInputReaderPolicy() {}
@@ -50,9 +54,6 @@ public:
     std::optional<DisplayViewport> getDisplayViewportByType(ViewportType type) const;
     std::optional<DisplayViewport> getDisplayViewportByPort(uint8_t displayPort) const;
     void addDisplayViewport(DisplayViewport viewport);
-    void addDisplayViewport(ui::LogicalDisplayId displayId, int32_t width, int32_t height,
-                            ui::Rotation orientation, bool isActive, const std::string& uniqueId,
-                            std::optional<uint8_t> physicalPort, ViewportType type);
     bool updateViewport(const DisplayViewport& viewport);
     void addExcludedDeviceName(const std::string& deviceName);
     void addInputPortAssociation(const std::string& inputPort, uint8_t displayPort);

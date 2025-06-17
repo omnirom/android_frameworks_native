@@ -21,6 +21,7 @@
 #include <log/log.h>
 #include <poll.h>
 #include <trusty/tipc.h>
+#include <type_traits>
 
 #include "FdTrigger.h"
 #include "RpcState.h"
@@ -31,6 +32,9 @@ using android::binder::borrowed_fd;
 using android::binder::unique_fd;
 
 namespace android {
+
+// Corresponds to IPC_MAX_MSG_HANDLES in the Trusty kernel
+constexpr size_t kMaxTipcHandles = 8;
 
 // RpcTransport for writing Trusty IPC clients in Android.
 class RpcTransportTipcAndroid : public RpcTransport {
@@ -78,12 +82,28 @@ public:
             FdTrigger* fdTrigger, iovec* iovs, int niovs,
             const std::optional<SmallFunction<status_t()>>& altPoll,
             const std::vector<std::variant<unique_fd, borrowed_fd>>* ancillaryFds) override {
+        bool sentFds = false;
         auto writeFn = [&](iovec* iovs, size_t niovs) -> ssize_t {
-            // TODO: send ancillaryFds. For now, we just abort if anyone tries
-            // to send any.
-            LOG_ALWAYS_FATAL_IF(ancillaryFds != nullptr && !ancillaryFds->empty(),
-                                "File descriptors are not supported on Trusty yet");
-            return TEMP_FAILURE_RETRY(tipc_send(mSocket.fd.get(), iovs, niovs, nullptr, 0));
+            trusty_shm shms[kMaxTipcHandles] = {{0}};
+            ssize_t shm_count = 0;
+
+            if (!sentFds && ancillaryFds != nullptr && !ancillaryFds->empty()) {
+                if (ancillaryFds->size() > kMaxTipcHandles) {
+                    ALOGE("Too many file descriptors for TIPC: %zu", ancillaryFds->size());
+                    errno = EINVAL;
+                    return -1;
+                }
+                for (const auto& fdVariant : *ancillaryFds) {
+                    shms[shm_count++] = {std::visit([](const auto& fd) { return fd.get(); },
+                                                    fdVariant),
+                                         TRUSTY_SEND_SECURE_OR_SHARE};
+                }
+            }
+
+            auto ret = TEMP_FAILURE_RETRY(tipc_send(mSocket.fd.get(), iovs, niovs,
+                                                    (shm_count == 0) ? nullptr : shms, shm_count));
+            sentFds |= ret >= 0;
+            return ret;
         };
 
         status_t status = interruptableReadOrWrite(mSocket, fdTrigger, iovs, niovs, writeFn,

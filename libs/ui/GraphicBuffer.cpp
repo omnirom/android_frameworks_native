@@ -27,6 +27,8 @@
 #include <ui/GraphicBufferMapper.h>
 #include <utils/Trace.h>
 
+#include <string>
+
 namespace android {
 
 // ===========================================================================
@@ -104,6 +106,7 @@ GraphicBuffer::GraphicBuffer()
     usage  = 0;
     layerCount = 0;
     handle = nullptr;
+    mDependencyMonitor.setToken(std::to_string(mId));
 }
 
 // deprecated
@@ -155,6 +158,8 @@ GraphicBuffer::GraphicBuffer(const GraphicBufferAllocator::AllocationRequest& re
         layerCount = request.layerCount;
         usage = request.usage;
         usage_deprecated = int(usage);
+        std::string name = request.requestorName;
+        mDependencyMonitor.setToken(name.append(":").append(std::to_string(mId)));
     }
 }
 
@@ -252,6 +257,7 @@ status_t GraphicBuffer::initWithSize(uint32_t inWidth, uint32_t inHeight,
         usage = inUsage;
         usage_deprecated = int(usage);
         stride = static_cast<int>(outStride);
+        mDependencyMonitor.setToken(requestorName.append(":").append(std::to_string(mId)));
     }
     return err;
 }
@@ -596,6 +602,8 @@ status_t GraphicBuffer::unflatten(void const*& buffer, size_t& size, int const*&
             width = height = stride = format = usage_deprecated = 0;
             layerCount = 0;
             usage = 0;
+            native_handle_close(handle);
+            native_handle_delete(const_cast<native_handle_t*>(handle));
             handle = nullptr;
             ALOGE("unflatten: registerBuffer failed: %s (%d)", strerror(-err), err);
             return err;
@@ -606,6 +614,14 @@ status_t GraphicBuffer::unflatten(void const*& buffer, size_t& size, int const*&
         handle = importedHandle;
         mBufferMapper.getTransportSize(handle, &mTransportNumFds, &mTransportNumInts);
     }
+
+    std::string name;
+    status_t err = mBufferMapper.getName(handle, &name);
+    if (err != NO_ERROR) {
+        name = "<Unknown>";
+    }
+
+    mDependencyMonitor.setToken(name.append(":").append(std::to_string(mId)));
 
     buffer = static_cast<void const*>(static_cast<uint8_t const*>(buffer) + sizeNeeded);
     size -= sizeNeeded;

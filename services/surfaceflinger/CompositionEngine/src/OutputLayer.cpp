@@ -238,6 +238,16 @@ Rect OutputLayer::calculateOutputDisplayFrame() const {
         geomLayerBounds.bottom += outset;
     }
 
+    // Similar to above
+    if (layerState.forceClientComposition && layerState.borderSettings.strokeWidth > 0.0f) {
+        // Antialiasing should never add more than 2 pixels.
+        const auto outset = layerState.borderSettings.strokeWidth + 2;
+        geomLayerBounds.left -= outset;
+        geomLayerBounds.top -= outset;
+        geomLayerBounds.right += outset;
+        geomLayerBounds.bottom += outset;
+    }
+
     geomLayerBounds = layerTransform.transform(geomLayerBounds);
     FloatRect frame = reduce(geomLayerBounds, activeTransparentRegion);
     frame = frame.intersect(outputState.layerStackSpace.getContent().toFloatRect());
@@ -370,8 +380,11 @@ void OutputLayer::updateCompositionState(
                                                       layerFEState->buffer->getPixelFormat()))
                                             : std::nullopt;
 
-    auto hdrRenderType =
-            getHdrRenderType(outputState.dataspace, pixelFormat, layerFEState->desiredHdrSdrRatio);
+    // prefer querying this from gralloc instead to catch 2094-10 metadata
+    const bool hasHdrMetadata = layerFEState->hdrMetadata.validTypes != 0;
+
+    auto hdrRenderType = getHdrRenderType(outputState.dataspace, pixelFormat,
+                                          layerFEState->desiredHdrSdrRatio, hasHdrMetadata);
 
     // Determine the output dependent dataspace for this layer. If it is
     // colorspace agnostic, it just uses the dataspace chosen for the output to
@@ -394,8 +407,8 @@ void OutputLayer::updateCompositionState(
     }
 
     // re-get HdrRenderType after the dataspace gets changed.
-    hdrRenderType =
-            getHdrRenderType(state.dataspace, pixelFormat, layerFEState->desiredHdrSdrRatio);
+    hdrRenderType = getHdrRenderType(state.dataspace, pixelFormat, layerFEState->desiredHdrSdrRatio,
+                                     hasHdrMetadata);
 
     // For hdr content, treat the white point as the display brightness - HDR content should not be
     // boosted or dimmed.
@@ -417,12 +430,20 @@ void OutputLayer::updateCompositionState(
         state.dimmingRatio = std::min(idealizedMaxHeadroom / deviceHeadroom, 1.0f);
         state.whitePointNits = getOutput().getState().displayBrightnessNits * state.dimmingRatio;
     } else {
+        const bool isLayerFp16 = pixelFormat && *pixelFormat == ui::PixelFormat::RGBA_FP16;
         float layerBrightnessNits = getOutput().getState().sdrWhitePointNits;
         // RANGE_EXTENDED can "self-promote" to HDR, but is still rendered for a particular
         // range that we may need to re-adjust to the current display conditions
+        // Do NOT do this when we may render fp16 to an fp16 client target, to avoid applying
+        // and additional gain to the layer. This is because the fp16 client target should
+        // already be adapted to remap 1.0 to the SDR white point in the panel's luminance
+        // space.
         if (hdrRenderType == HdrRenderType::DISPLAY_HDR) {
-            layerBrightnessNits *= layerFEState->currentHdrSdrRatio;
+            if (!FlagManager::getInstance().fp16_client_target() || !isLayerFp16) {
+                layerBrightnessNits *= layerFEState->currentHdrSdrRatio;
+            }
         }
+
         state.dimmingRatio =
                 std::clamp(layerBrightnessNits / getOutput().getState().displayBrightnessNits, 0.f,
                            1.f);
@@ -450,7 +471,8 @@ void OutputLayer::commitPictureProfileToCompositionState() {
 }
 
 void OutputLayer::writeStateToHWC(bool includeGeometry, bool skipLayer, uint32_t z,
-                                  bool zIsOverridden, bool isPeekingThrough) {
+                                  bool zIsOverridden, bool isPeekingThrough,
+                                  bool hasLutsProperties) {
     const auto& state = getState();
     // Skip doing this if there is no HWC interface
     if (!state.hwc) {
@@ -492,8 +514,9 @@ void OutputLayer::writeStateToHWC(bool includeGeometry, bool skipLayer, uint32_t
 
     writeCompositionTypeToHWC(hwcLayer.get(), requestedCompositionType, isPeekingThrough,
                               skipLayer);
-
-    writeLutToHWC(hwcLayer.get(), *outputIndependentState);
+    if (hasLutsProperties) {
+        writeLutToHWC(hwcLayer.get(), *outputIndependentState);
+    }
 
     if (requestedCompositionType == Composition::SOLID_COLOR) {
         writeSolidColorStateToHWC(hwcLayer.get(), *outputIndependentState);
@@ -501,6 +524,15 @@ void OutputLayer::writeStateToHWC(bool includeGeometry, bool skipLayer, uint32_t
 
     editState().hwc->stateOverridden = isOverridden;
     editState().hwc->layerSkipped = skipLayer;
+
+
+    // Save the final HWC state for debugging purposes, e.g. perfetto tracing, dumpsys.
+    getLayerFE().setLastHwcState({.lastCompositionType = editState().hwc->hwcCompositionType,
+                                  .wasSkipped = skipLayer,
+                                  .wasOverridden = isOverridden,
+                                  .overrideBufferId = editState().overrideInfo.buffer
+                                          ? editState().overrideInfo.buffer.get()->getId()
+                                          : 0});
 }
 
 void OutputLayer::writeOutputDependentGeometryStateToHWC(HWC2::Layer* hwcLayer,
@@ -600,28 +632,29 @@ void OutputLayer::writeOutputIndependentGeometryStateToHWC(
 
 void OutputLayer::writeLutToHWC(HWC2::Layer* hwcLayer,
                                 const LayerFECompositionState& outputIndependentState) {
-    if (!outputIndependentState.luts) {
-        return;
-    }
-    auto& lutFileDescriptor = outputIndependentState.luts->getLutFileDescriptor();
-    auto lutOffsets = outputIndependentState.luts->offsets;
-    auto& lutProperties = outputIndependentState.luts->lutProperties;
-
-    std::vector<LutProperties> aidlProperties;
-    aidlProperties.reserve(lutProperties.size());
-    for (size_t i = 0; i < lutOffsets.size(); i++) {
-        LutProperties properties;
-        properties.dimension = static_cast<LutProperties::Dimension>(lutProperties[i].dimension);
-        properties.size = lutProperties[i].size;
-        properties.samplingKeys = {
-                static_cast<LutProperties::SamplingKey>(lutProperties[i].samplingKey)};
-        aidlProperties.emplace_back(properties);
-    }
-
     Luts luts;
-    luts.pfd = ndk::ScopedFileDescriptor(dup(lutFileDescriptor.get()));
-    luts.offsets = lutOffsets;
-    luts.lutProperties = std::move(aidlProperties);
+    // if outputIndependentState.luts is nullptr, it means we want to clear the LUTs
+    // and we pass an empty Luts object to the HWC.
+    if (outputIndependentState.luts) {
+        auto& lutFileDescriptor = outputIndependentState.luts->getLutFileDescriptor();
+        auto lutOffsets = outputIndependentState.luts->offsets;
+        auto& lutProperties = outputIndependentState.luts->lutProperties;
+
+        std::vector<LutProperties> aidlProperties;
+        aidlProperties.reserve(lutProperties.size());
+        for (size_t i = 0; i < lutOffsets.size(); i++) {
+            aidlProperties.emplace_back(
+                    LutProperties{.dimension = static_cast<LutProperties::Dimension>(
+                                          lutProperties[i].dimension),
+                                  .size = lutProperties[i].size,
+                                  .samplingKeys = {static_cast<LutProperties::SamplingKey>(
+                                          lutProperties[i].samplingKey)}});
+        }
+
+        luts.pfd.set(dup(lutFileDescriptor.get()));
+        luts.offsets = lutOffsets;
+        luts.lutProperties = std::move(aidlProperties);
+    }
 
     switch (auto error = hwcLayer->setLuts(luts)) {
         case hal::Error::NONE:
@@ -972,6 +1005,13 @@ void OutputLayer::applyDeviceCompositionTypeChange(Composition compositionType) 
     }
 
     hwcState.hwcCompositionType = compositionType;
+
+    getLayerFE().setLastHwcState({.lastCompositionType = hwcState.hwcCompositionType,
+                                  .wasSkipped = hwcState.layerSkipped,
+                                  .wasOverridden = hwcState.stateOverridden,
+                                  .overrideBufferId = state.overrideInfo.buffer
+                                          ? state.overrideInfo.buffer.get()->getId()
+                                          : 0});
 }
 
 void OutputLayer::prepareForDeviceLayerRequests() {
@@ -994,7 +1034,7 @@ void OutputLayer::applyDeviceLayerRequest(hal::LayerRequest request) {
 }
 
 void OutputLayer::applyDeviceLayerLut(
-        ndk::ScopedFileDescriptor lutFileDescriptor,
+        ::android::base::unique_fd lutFd,
         std::vector<std::pair<int, LutProperties>> lutOffsetsAndProperties) {
     auto& state = editState();
     LOG_FATAL_IF(!state.hwc);
@@ -1013,9 +1053,9 @@ void OutputLayer::applyDeviceLayerLut(
             samplingKeys.emplace_back(static_cast<int32_t>(properties.samplingKeys[0]));
         }
     }
-    hwcState.luts = std::make_shared<gui::DisplayLuts>(base::unique_fd(lutFileDescriptor.release()),
-                                                       std::move(offsets), std::move(dimensions),
-                                                       std::move(sizes), std::move(samplingKeys));
+    hwcState.luts = std::make_shared<gui::DisplayLuts>(std::move(lutFd), std::move(offsets),
+                                                       std::move(dimensions), std::move(sizes),
+                                                       std::move(samplingKeys));
 }
 
 bool OutputLayer::needsFiltering() const {

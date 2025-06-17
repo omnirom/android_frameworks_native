@@ -278,7 +278,7 @@ TEST_F(DisplayCreationTest, createGpuVirtualDisplay) {
             impl::createDisplay(mCompositionEngine, getDisplayCreationArgsForGpuVirtualDisplay());
     EXPECT_FALSE(display->isSecure());
     EXPECT_TRUE(display->isVirtual());
-    EXPECT_TRUE(GpuVirtualDisplayId::tryCast(display->getId()));
+    EXPECT_TRUE(display->getDisplayIdVariant().and_then(asDisplayIdOfType<GpuVirtualDisplayId>));
 }
 
 /*
@@ -318,6 +318,7 @@ TEST_F(DisplaySetConfigurationTest, configuresHalVirtualDisplay) {
     EXPECT_EQ(HAL_VIRTUAL_DISPLAY_ID, mDisplay->getId());
     EXPECT_FALSE(mDisplay->isSecure());
     EXPECT_TRUE(mDisplay->isVirtual());
+    EXPECT_TRUE(mDisplay->getDisplayIdVariant().and_then(asDisplayIdOfType<HalVirtualDisplayId>));
     EXPECT_FALSE(mDisplay->isValid());
 
     const auto& filter = mDisplay->getState().layerFilter;
@@ -337,6 +338,7 @@ TEST_F(DisplaySetConfigurationTest, configuresGpuVirtualDisplay) {
     EXPECT_EQ(GPU_VIRTUAL_DISPLAY_ID, mDisplay->getId());
     EXPECT_FALSE(mDisplay->isSecure());
     EXPECT_TRUE(mDisplay->isVirtual());
+    EXPECT_TRUE(mDisplay->getDisplayIdVariant().and_then(asDisplayIdOfType<GpuVirtualDisplayId>));
     EXPECT_FALSE(mDisplay->isValid());
 
     const auto& filter = mDisplay->getState().layerFilter;
@@ -572,7 +574,7 @@ TEST_F(DisplayChooseCompositionStrategyTest, takesEarlyOutIfGpuDisplay) {
     auto args = getDisplayCreationArgsForGpuVirtualDisplay();
     std::shared_ptr<Display> gpuDisplay =
             createPartialMockDisplay<Display>(mCompositionEngine, args);
-    EXPECT_TRUE(GpuVirtualDisplayId::tryCast(gpuDisplay->getId()));
+    EXPECT_TRUE(gpuDisplay->getDisplayIdVariant().and_then(asDisplayIdOfType<GpuVirtualDisplayId>));
 
     chooseCompositionStrategy(gpuDisplay.get());
 

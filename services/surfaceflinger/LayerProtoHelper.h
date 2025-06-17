@@ -98,8 +98,8 @@ public:
 
 private:
     void writeHierarchyToProto(const frontend::LayerHierarchy& root,
-                               frontend::LayerHierarchy::TraversalPath& path);
-    frontend::LayerSnapshot* getSnapshot(frontend::LayerHierarchy::TraversalPath& path,
+                               const frontend::LayerHierarchy::TraversalPath& path);
+    frontend::LayerSnapshot* getSnapshot(const frontend::LayerHierarchy::TraversalPath& path,
                                          const frontend::RequestedLayerState& layer);
 
     const frontend::LayerSnapshotBuilder& mSnapshotBuilder;

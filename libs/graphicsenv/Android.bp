@@ -21,10 +21,27 @@ package {
     default_applicable_licenses: ["frameworks_native_license"],
 }
 
+aconfig_declarations {
+    name: "graphicsenv_flags",
+    package: "com.android.graphics.graphicsenv.flags",
+    container: "system",
+    srcs: ["graphicsenv_flags.aconfig"],
+}
+
+cc_aconfig_library {
+    name: "graphicsenv_flags_c_lib",
+    aconfig_declarations: "graphicsenv_flags",
+}
+
 cc_library_shared {
     name: "libgraphicsenv",
 
+    defaults: [
+        "aconfig_lib_cc_static_link.defaults",
+    ],
+
     srcs: [
+        "FeatureOverrides.cpp",
         "GpuStatsInfo.cpp",
         "GraphicsEnv.cpp",
         "IGpuService.cpp",
@@ -35,6 +52,10 @@ cc_library_shared {
         "-Werror",
     ],
 
+    static_libs: [
+        "graphicsenv_flags_c_lib",
+    ],
+
     shared_libs: [
         "libbase",
         "libbinder",
@@ -42,6 +63,7 @@ cc_library_shared {
         "libdl_android",
         "liblog",
         "libutils",
+        "server_configurable_flags",
     ],
 
     header_libs: [

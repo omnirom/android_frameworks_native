@@ -178,13 +178,21 @@ status_t SurfaceTexture::acquireBufferLocked(BufferItem* item, nsecs_t presentWh
     return NO_ERROR;
 }
 
+#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(BQ_GL_FENCE_CLEANUP)
+status_t SurfaceTexture::releaseBufferLocked(int buf, sp<GraphicBuffer> graphicBuffer) {
+#else
 status_t SurfaceTexture::releaseBufferLocked(int buf, sp<GraphicBuffer> graphicBuffer,
                                              EGLDisplay display, EGLSyncKHR eglFence) {
+#endif
     // release the buffer if it hasn't already been discarded by the
     // BufferQueue. This can happen, for example, when the producer of this
     // buffer has reallocated the original buffer slot after this buffer
     // was acquired.
+#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(BQ_GL_FENCE_CLEANUP)
+    status_t err = ConsumerBase::releaseBufferLocked(buf, graphicBuffer);
+#else
     status_t err = ConsumerBase::releaseBufferLocked(buf, graphicBuffer, display, eglFence);
+#endif
     // We could be releasing an EGL/Vulkan buffer, even if not currently
     // attached to a GL context.
     mImageConsumer.onReleaseBufferLocked(buf);

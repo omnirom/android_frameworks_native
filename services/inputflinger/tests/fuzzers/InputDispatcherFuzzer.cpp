@@ -48,9 +48,9 @@ public:
         auto [it, _] = mVerifiers.emplace(args.displayId, "Fuzz Verifier");
         InputVerifier& verifier = it->second;
         const Result<void> result =
-                verifier.processMovement(args.deviceId, args.source, args.action,
+                verifier.processMovement(args.deviceId, args.source, args.action, args.actionButton,
                                          args.getPointerCount(), args.pointerProperties.data(),
-                                         args.pointerCoords.data(), args.flags);
+                                         args.pointerCoords.data(), args.flags, args.buttonState);
         if (result.ok()) {
             return args;
         }
@@ -76,7 +76,6 @@ void scrambleWindow(FuzzedDataProvider& fdp, FakeWindowHandle& window) {
     window.setDupTouchToWallpaper(fdp.ConsumeBool());
     window.setIsWallpaper(fdp.ConsumeBool());
     window.setVisible(fdp.ConsumeBool());
-    window.setPreventSplitting(fdp.ConsumeBool());
     const bool isTrustedOverlay = fdp.ConsumeBool();
     window.setTrustedOverlay(isTrustedOverlay);
     if (isTrustedOverlay) {

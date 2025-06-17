@@ -35,6 +35,7 @@ public:
 
     VirtualDisplayId displayId() const { return mVirtualId; }
     bool isGpu() const { return mIsGpu; }
+    const std::string& uniqueId() const { return mUniqueId; }
 
     void dump(utils::Dumper& dumper) const {
         using namespace std::string_view_literals;

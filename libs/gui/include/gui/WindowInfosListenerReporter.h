@@ -40,6 +40,9 @@ public:
     void reconnect(const sp<gui::ISurfaceComposer>&);
 
 private:
+    WindowInfosListenerReporter() = default;
+    friend class sp<WindowInfosListenerReporter>;
+
     std::mutex mListenersMutex;
     std::unordered_set<sp<gui::WindowInfosListener>, gui::SpHash<gui::WindowInfosListener>>
             mWindowInfosListeners GUARDED_BY(mListenersMutex);

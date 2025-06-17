@@ -17,6 +17,7 @@
 #ifndef ANDROID_IAUDIOMANAGER_H
 #define ANDROID_IAUDIOMANAGER_H
 
+#include <android/media/IAudioManagerNative.h>
 #include <audiomanager/AudioManager.h>
 #include <utils/Errors.h>
 #include <binder/IInterface.h>
@@ -34,19 +35,22 @@ public:
     // These transaction IDs must be kept in sync with the method order from
     // IAudioService.aidl.
     enum {
-        TRACK_PLAYER                          = IBinder::FIRST_CALL_TRANSACTION,
-        PLAYER_ATTRIBUTES                     = IBinder::FIRST_CALL_TRANSACTION + 1,
-        PLAYER_EVENT                          = IBinder::FIRST_CALL_TRANSACTION + 2,
-        RELEASE_PLAYER                        = IBinder::FIRST_CALL_TRANSACTION + 3,
-        TRACK_RECORDER                        = IBinder::FIRST_CALL_TRANSACTION + 4,
-        RECORDER_EVENT                        = IBinder::FIRST_CALL_TRANSACTION + 5,
-        RELEASE_RECORDER                      = IBinder::FIRST_CALL_TRANSACTION + 6,
-        PLAYER_SESSION_ID                     = IBinder::FIRST_CALL_TRANSACTION + 7,
-        PORT_EVENT                            = IBinder::FIRST_CALL_TRANSACTION + 8,
-        PERMISSION_UPDATE_BARRIER             = IBinder::FIRST_CALL_TRANSACTION + 9,
+        GET_NATIVE_INTERFACE                  = IBinder::FIRST_CALL_TRANSACTION,
+        TRACK_PLAYER                          = IBinder::FIRST_CALL_TRANSACTION + 1,
+        PLAYER_ATTRIBUTES                     = IBinder::FIRST_CALL_TRANSACTION + 2,
+        PLAYER_EVENT                          = IBinder::FIRST_CALL_TRANSACTION + 3,
+        RELEASE_PLAYER                        = IBinder::FIRST_CALL_TRANSACTION + 4,
+        TRACK_RECORDER                        = IBinder::FIRST_CALL_TRANSACTION + 5,
+        RECORDER_EVENT                        = IBinder::FIRST_CALL_TRANSACTION + 6,
+        RELEASE_RECORDER                      = IBinder::FIRST_CALL_TRANSACTION + 7,
+        PLAYER_SESSION_ID                     = IBinder::FIRST_CALL_TRANSACTION + 8,
+        PORT_EVENT                            = IBinder::FIRST_CALL_TRANSACTION + 9,
+        PERMISSION_UPDATE_BARRIER             = IBinder::FIRST_CALL_TRANSACTION + 10,
     };
 
     DECLARE_META_INTERFACE(AudioManager)
+
+    virtual sp<media::IAudioManagerNative> getNativeInterface() = 0;
 
     // The parcels created by these methods must be kept in sync with the
     // corresponding methods from IAudioService.aidl and objects it imports.

@@ -31,8 +31,8 @@
 #include "FrontEnd/LayerCreationArgs.h"
 #include "FrontEnd/RequestedLayerState.h"
 #include "LayerProtoHelper.h"
+#include "QueuedTransactionState.h"
 #include "Tracing/LayerTracing.h"
-#include "TransactionState.h"
 #include "cutils/properties.h"
 
 #include "LayerTraceGenerator.h"
@@ -95,18 +95,17 @@ bool LayerTraceGenerator::generate(const perfetto::protos::TransactionTraceFile&
             addedLayers.emplace_back(std::make_unique<frontend::RequestedLayerState>(args));
         }
 
-        std::vector<TransactionState> transactions;
+        std::vector<QueuedTransactionState> transactions;
         transactions.reserve((size_t)entry.transactions_size());
         for (int j = 0; j < entry.transactions_size(); j++) {
             // apply transactions
-            TransactionState transaction = parser.fromProto(entry.transactions(j));
+            QueuedTransactionState transaction = parser.fromProto(entry.transactions(j));
             for (auto& resolvedComposerState : transaction.states) {
                 if (resolvedComposerState.state.what & layer_state_t::eInputInfoChanged) {
-                    if (!resolvedComposerState.state.windowInfoHandle->getInfo()->inputConfig.test(
+                    if (!resolvedComposerState.state.getWindowInfo().inputConfig.test(
                                 gui::WindowInfo::InputConfig::NO_INPUT_CHANNEL)) {
                         // create a fake token since the FE expects a valid token
-                        resolvedComposerState.state.windowInfoHandle->editInfo()->token =
-                                sp<BBinder>::make();
+                        resolvedComposerState.state.editWindowInfo()->token = sp<BBinder>::make();
                     }
                 }
             }

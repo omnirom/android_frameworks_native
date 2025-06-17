@@ -173,6 +173,21 @@ HalResult<aidl::android::hardware::power::SupportInfo> PowerHalController::getSu
     return CACHE_SUPPORT(6, processHalResult(handle->getSupportInfo(), "getSupportInfo"));
 }
 
+HalResult<void> PowerHalController::sendCompositionData(
+        const std::vector<hal::CompositionData>& data) {
+    std::shared_ptr<HalWrapper> handle = initHal();
+    return CACHE_SUPPORT(6,
+                         processHalResult(handle->sendCompositionData(data),
+                                          "sendCompositionData"));
+}
+
+HalResult<void> PowerHalController::sendCompositionUpdate(const hal::CompositionUpdate& update) {
+    std::shared_ptr<HalWrapper> handle = initHal();
+    return CACHE_SUPPORT(6,
+                         processHalResult(handle->sendCompositionUpdate(update),
+                                          "sendCompositionUpdate"));
+}
+
 } // namespace power
 
 } // namespace android

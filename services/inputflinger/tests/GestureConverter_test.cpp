@@ -15,11 +15,15 @@
  */
 
 #include <memory>
+#include <tuple>
 
+#include <android-base/result-gmock.h>
+#include <android-base/result.h>
 #include <com_android_input_flags.h>
 #include <flag_macros.h>
 #include <gestures/GestureConverter.h>
 #include <gtest/gtest.h>
+#include <input/InputVerifier.h>
 
 #include "FakeEventHub.h"
 #include "FakeInputReaderPolicy.h"
@@ -38,13 +42,15 @@ namespace input_flags = com::android::input::flags;
 
 namespace {
 
-const auto TOUCHPAD_PALM_REJECTION =
-        ACONFIG_FLAG(input_flags, enable_touchpad_typing_palm_rejection);
 const auto TOUCHPAD_PALM_REJECTION_V2 =
         ACONFIG_FLAG(input_flags, enable_v2_touchpad_typing_palm_rejection);
 
+constexpr stime_t ARBITRARY_GESTURE_TIME = 1.2;
+constexpr stime_t GESTURE_TIME = ARBITRARY_GESTURE_TIME;
+
 } // namespace
 
+using android::base::testing::Ok;
 using testing::AllOf;
 using testing::Each;
 using testing::ElementsAre;
@@ -55,9 +61,8 @@ class GestureConverterTest : public testing::Test {
 protected:
     static constexpr int32_t DEVICE_ID = END_RESERVED_ID + 1000;
     static constexpr int32_t EVENTHUB_ID = 1;
-    static constexpr stime_t ARBITRARY_GESTURE_TIME = 1.2;
 
-    void SetUp() {
+    GestureConverterTest() {
         mFakeEventHub = std::make_unique<FakeEventHub>();
         mFakePolicy = sp<FakeInputReaderPolicy>::make();
         mFakeListener = std::make_unique<TestInputListener>();
@@ -1297,7 +1302,6 @@ TEST_F(GestureConverterTest, FlingTapDown) {
 
 TEST_F(GestureConverterTest, FlingTapDownAfterScrollStopsFling) {
     InputDeviceContext deviceContext(*mDevice, EVENTHUB_ID);
-    input_flags::enable_touchpad_fling_stop(true);
     GestureConverter converter(*mReader->getContext(), deviceContext, DEVICE_ID);
     converter.setDisplayId(ui::LogicalDisplayId::DEFAULT);
 
@@ -1455,7 +1459,6 @@ TEST_F(GestureConverterTest, Click) {
 }
 
 TEST_F_WITH_FLAGS(GestureConverterTest, TapWithTapToClickDisabled,
-                  REQUIRES_FLAGS_ENABLED(TOUCHPAD_PALM_REJECTION),
                   REQUIRES_FLAGS_DISABLED(TOUCHPAD_PALM_REJECTION_V2)) {
     nsecs_t currentTime = ARBITRARY_GESTURE_TIME;
 
@@ -1568,8 +1571,7 @@ TEST_F_WITH_FLAGS(GestureConverterTest, TapWithTapToClickDisabledWithDelay,
     ASSERT_THAT(args, Each(VariantWith<NotifyMotionArgs>(WithRelativeMotion(0.f, 0.f))));
 }
 
-TEST_F_WITH_FLAGS(GestureConverterTest, ClickWithTapToClickDisabled,
-                  REQUIRES_FLAGS_ENABLED(TOUCHPAD_PALM_REJECTION)) {
+TEST_F(GestureConverterTest, ClickWithTapToClickDisabled) {
     // Click should still produce button press/release events
     mReader->getContext()->setPreventingTouchpadTaps(true);
 
@@ -1638,8 +1640,7 @@ TEST_F_WITH_FLAGS(GestureConverterTest, ClickWithTapToClickDisabled,
     ASSERT_FALSE(mReader->getContext()->isPreventingTouchpadTaps());
 }
 
-TEST_F_WITH_FLAGS(GestureConverterTest, MoveEnablesTapToClick,
-                  REQUIRES_FLAGS_ENABLED(TOUCHPAD_PALM_REJECTION)) {
+TEST_F(GestureConverterTest, MoveEnablesTapToClick) {
     // initially disable tap-to-click
     mReader->getContext()->setPreventingTouchpadTaps(true);
 
@@ -1698,5 +1699,137 @@ TEST_F_WITH_FLAGS(GestureConverterTest, KeypressCancelsHoverMove,
                             VariantWith<NotifyMotionArgs>(
                                     WithMotionAction(AMOTION_EVENT_ACTION_HOVER_MOVE))));
 }
+
+/**
+ * Tests that the event stream output by the converter remains consistent when converting sequences
+ * of Gestures interleaved with button presses in various ways. Takes tuples of three Gestures: one
+ * that starts the gesture sequence, one that continues it (which may or may not be used in a
+ * particular test case), and one that ends it.
+ */
+class GestureConverterConsistencyTest
+      : public GestureConverterTest,
+        public testing::WithParamInterface<std::tuple<Gesture, Gesture, Gesture>> {
+protected:
+    GestureConverterConsistencyTest()
+          : GestureConverterTest(),
+            mParamStartGesture(std::get<0>(GetParam())),
+            mParamContinueGesture(std::get<1>(GetParam())),
+            mParamEndGesture(std::get<2>(GetParam())),
+            mDeviceContext(*mDevice, EVENTHUB_ID),
+            mConverter(*mReader->getContext(), mDeviceContext, DEVICE_ID) {
+        mConverter.setDisplayId(ui::LogicalDisplayId::DEFAULT);
+        input_flags::enable_button_state_verification(true);
+        mVerifier = std::make_unique<InputVerifier>("Test verifier");
+    }
+
+    base::Result<void> processMotionArgs(NotifyMotionArgs arg) {
+        return mVerifier->processMovement(arg.deviceId, arg.source, arg.action, arg.actionButton,
+                                          arg.getPointerCount(), arg.pointerProperties.data(),
+                                          arg.pointerCoords.data(), arg.flags, arg.buttonState);
+    }
+
+    void verifyArgsFromGesture(const Gesture& gesture, size_t gestureIndex) {
+        std::list<NotifyArgs> args =
+                mConverter.handleGesture(ARBITRARY_TIME, READ_TIME, ARBITRARY_TIME, gesture);
+        for (const NotifyArgs& notifyArg : args) {
+            const NotifyMotionArgs& arg = std::get<NotifyMotionArgs>(notifyArg);
+            ASSERT_THAT(processMotionArgs(arg), Ok())
+                    << "when processing " << arg.dump() << "\nfrom gesture " << gestureIndex << ": "
+                    << gesture.String();
+        }
+    }
+
+    void verifyArgsFromGestures(const std::vector<Gesture>& gestures) {
+        for (size_t i = 0; i < gestures.size(); i++) {
+            ASSERT_NO_FATAL_FAILURE(verifyArgsFromGesture(gestures[i], i));
+        }
+    }
+
+    Gesture mParamStartGesture;
+    Gesture mParamContinueGesture;
+    Gesture mParamEndGesture;
+
+    InputDeviceContext mDeviceContext;
+    GestureConverter mConverter;
+    std::unique_ptr<InputVerifier> mVerifier;
+};
+
+TEST_P(GestureConverterConsistencyTest, ButtonChangesDuringGesture) {
+    verifyArgsFromGestures({
+            mParamStartGesture,
+            Gesture(kGestureButtonsChange, GESTURE_TIME, GESTURE_TIME,
+                    /*down=*/GESTURES_BUTTON_LEFT, /*up=*/GESTURES_BUTTON_NONE, /*is_tap=*/false),
+            mParamContinueGesture,
+            Gesture(kGestureButtonsChange, GESTURE_TIME, GESTURE_TIME,
+                    /*down=*/GESTURES_BUTTON_NONE, /*up=*/GESTURES_BUTTON_LEFT, /*is_tap=*/false),
+            mParamEndGesture,
+    });
+}
+
+TEST_P(GestureConverterConsistencyTest, ButtonDownDuringGestureAndUpAfterEnd) {
+    verifyArgsFromGestures({
+            mParamStartGesture,
+            Gesture(kGestureButtonsChange, GESTURE_TIME, GESTURE_TIME,
+                    /*down=*/GESTURES_BUTTON_LEFT, /*up=*/GESTURES_BUTTON_NONE, /*is_tap=*/false),
+            mParamContinueGesture,
+            mParamEndGesture,
+            Gesture(kGestureButtonsChange, GESTURE_TIME, GESTURE_TIME,
+                    /*down=*/GESTURES_BUTTON_NONE, /*up=*/GESTURES_BUTTON_LEFT, /*is_tap=*/false),
+    });
+}
+
+TEST_P(GestureConverterConsistencyTest, GestureStartAndEndDuringButtonDown) {
+    verifyArgsFromGestures({
+            Gesture(kGestureButtonsChange, GESTURE_TIME, GESTURE_TIME,
+                    /*down=*/GESTURES_BUTTON_LEFT, /*up=*/GESTURES_BUTTON_NONE, /*is_tap=*/false),
+            mParamStartGesture,
+            mParamContinueGesture,
+            mParamEndGesture,
+            Gesture(kGestureButtonsChange, GESTURE_TIME, GESTURE_TIME,
+                    /*down=*/GESTURES_BUTTON_NONE, /*up=*/GESTURES_BUTTON_LEFT, /*is_tap=*/false),
+    });
+}
+
+TEST_P(GestureConverterConsistencyTest, GestureStartsWhileButtonDownAndEndsAfterUp) {
+    verifyArgsFromGestures({
+            Gesture(kGestureButtonsChange, GESTURE_TIME, GESTURE_TIME,
+                    /*down=*/GESTURES_BUTTON_LEFT, /*up=*/GESTURES_BUTTON_NONE, /*is_tap=*/false),
+            mParamStartGesture,
+            mParamContinueGesture,
+            Gesture(kGestureButtonsChange, GESTURE_TIME, GESTURE_TIME,
+                    /*down=*/GESTURES_BUTTON_NONE, /*up=*/GESTURES_BUTTON_LEFT, /*is_tap=*/false),
+            mParamEndGesture,
+    });
+}
+
+TEST_P(GestureConverterConsistencyTest, TapToClickDuringGesture) {
+    verifyArgsFromGestures({
+            mParamStartGesture,
+            Gesture(kGestureButtonsChange, GESTURE_TIME, GESTURE_TIME,
+                    /*down=*/GESTURES_BUTTON_LEFT, /*up=*/GESTURES_BUTTON_LEFT, /*is_tap=*/false),
+            mParamEndGesture,
+    });
+}
+
+INSTANTIATE_TEST_SUITE_P(
+        GestureAndButtonInterleavings, GestureConverterConsistencyTest,
+        testing::Values(
+                std::make_tuple(Gesture(kGestureScroll, GESTURE_TIME, GESTURE_TIME, 0, -10),
+                                Gesture(kGestureScroll, GESTURE_TIME, GESTURE_TIME, 0, -5),
+                                Gesture(kGestureFling, GESTURE_TIME, GESTURE_TIME, 1, 1,
+                                        GESTURES_FLING_START)),
+                std::make_tuple(Gesture(kGestureSwipe, GESTURE_TIME, GESTURE_TIME, 0, -10),
+                                Gesture(kGestureSwipe, GESTURE_TIME, GESTURE_TIME, 0, 5),
+                                Gesture(kGestureSwipeLift, GESTURE_TIME, GESTURE_TIME)),
+                std::make_tuple(Gesture(kGestureFourFingerSwipe, GESTURE_TIME, GESTURE_TIME, 0,
+                                        -10),
+                                Gesture(kGestureFourFingerSwipe, GESTURE_TIME, GESTURE_TIME, 0, 5),
+                                Gesture(kGestureFourFingerSwipeLift, GESTURE_TIME, GESTURE_TIME)),
+                std::make_tuple(Gesture(kGesturePinch, GESTURE_TIME, GESTURE_TIME,
+                                        /*dz=*/1, GESTURES_ZOOM_START),
+                                Gesture(kGesturePinch, GESTURE_TIME, GESTURE_TIME,
+                                        /*dz=*/0.8, GESTURES_ZOOM_UPDATE),
+                                Gesture(kGesturePinch, GESTURE_TIME, GESTURE_TIME,
+                                        /*dz=*/1, GESTURES_ZOOM_END))));
 
 } // namespace android

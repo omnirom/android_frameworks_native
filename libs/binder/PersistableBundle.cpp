@@ -119,6 +119,9 @@ status_t PersistableBundle::writeToParcel(Parcel* parcel) const {
     }
     RETURN_IF_FAILED(parcel->writeInt32(static_cast<int32_t>(length)));
     parcel->setDataPosition(end_pos);
+    // write mHasIntent to be consistent with BaseBundle.writeToBundle. But it would always be
+    // false since PersistableBundle won't contain an intent.
+    RETURN_IF_FAILED(parcel->writeBool(false));
     return NO_ERROR;
 }
 
@@ -473,6 +476,8 @@ status_t PersistableBundle::readFromParcelInner(const Parcel* parcel, size_t len
             }
         }
     }
+    // result intentional ignored since it will always be false;
+    RETURN_IF_FAILED(parcel->readBool());
 
     return NO_ERROR;
 }

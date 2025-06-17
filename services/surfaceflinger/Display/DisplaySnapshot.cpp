@@ -26,11 +26,12 @@
 
 namespace android::display {
 
-DisplaySnapshot::DisplaySnapshot(PhysicalDisplayId displayId,
+DisplaySnapshot::DisplaySnapshot(PhysicalDisplayId displayId, uint8_t port,
                                  ui::DisplayConnectionType connectionType,
                                  DisplayModes&& displayModes, ui::ColorModes&& colorModes,
                                  std::optional<DeviceProductInfo>&& deviceProductInfo)
       : mDisplayId(displayId),
+        mPort(port),
         mConnectionType(connectionType),
         mDisplayModes(std::move(displayModes)),
         mColorModes(std::move(colorModes)),
@@ -61,6 +62,8 @@ ui::ColorModes DisplaySnapshot::filterColorModes(bool supportsWideColor) const {
 
 void DisplaySnapshot::dump(utils::Dumper& dumper) const {
     using namespace std::string_view_literals;
+
+    dumper.dump("port"sv, mPort);
 
     dumper.dump("connectionType"sv, ftl::enum_string(mConnectionType));
 

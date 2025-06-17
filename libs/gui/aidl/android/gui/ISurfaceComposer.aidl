@@ -67,6 +67,11 @@ interface ISurfaceComposer {
         frameRateOverride = 1 << 1,
     }
 
+    enum OptimizationPolicy {
+        optimizeForPower = 0,
+        optimizeForPerformance = 1,
+    }
+
     /**
      * Signal that we're done booting.
      * Requires ACCESS_SURFACE_FLINGER permission
@@ -97,6 +102,10 @@ interface ISurfaceComposer {
      *     The name of the virtual display.
      * isSecure
      *     Whether this virtual display is secure.
+     * optimizationPolicy
+     *     Whether to optimize for power or performance. Displays that are optimizing for power may
+     *     be dependent on a different display that optimizes for performance when they are on,
+     *     which will guarantee performance for all of the other displays.
      * uniqueId
      *     The unique ID for the display.
      * requestedRefreshRate
@@ -108,7 +117,7 @@ interface ISurfaceComposer {
      * requires ACCESS_SURFACE_FLINGER permission.
      */
     @nullable IBinder createVirtualDisplay(@utf8InCpp String displayName, boolean isSecure,
-            @utf8InCpp String uniqueId, float requestedRefreshRate);
+            OptimizationPolicy optimizationPolicy, @utf8InCpp String uniqueId, float requestedRefreshRate);
 
     /**
      * Destroy a virtual display.
@@ -607,8 +616,14 @@ interface ISurfaceComposer {
     oneway void removeJankListener(int layerId, IJankListener listener, long afterVsync);
 
     /**
-     * Sets the listener used to monitor visible content that is being processed with picture
+     * Adds a listener used to monitor visible content that is being processed with picture
      * profiles.
      */
-    oneway void setActivePictureListener(IActivePictureListener listener);
+    oneway void addActivePictureListener(IActivePictureListener listener);
+
+    /**
+     * Removes a listener used to monitor visible content that is being processed with picture
+     * profiles.
+     */
+    oneway void removeActivePictureListener(IActivePictureListener listener);
 }

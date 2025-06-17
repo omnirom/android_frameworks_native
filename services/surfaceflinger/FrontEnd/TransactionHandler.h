@@ -22,7 +22,7 @@
 #include <vector>
 
 #include <LocklessQueue.h>
-#include <TransactionState.h>
+#include <QueuedTransactionState.h>
 #include <android-base/thread_annotations.h>
 #include <ftl/small_map.h>
 #include <ftl/small_vector.h>
@@ -35,7 +35,7 @@ namespace surfaceflinger::frontend {
 class TransactionHandler {
 public:
     struct TransactionFlushState {
-        TransactionState* transaction;
+        QueuedTransactionState* transaction;
         bool firstTransaction = true;
         nsecs_t queueProcessTime = 0;
         // Layer handles that have transactions with buffers that are ready to be applied.
@@ -61,9 +61,9 @@ public:
     bool hasPendingTransactions();
     // Moves transactions from the lockless queue.
     void collectTransactions();
-    std::vector<TransactionState> flushTransactions();
+    std::vector<QueuedTransactionState> flushTransactions();
     void addTransactionReadyFilter(TransactionFilter&&);
-    void queueTransaction(TransactionState&&);
+    void queueTransaction(QueuedTransactionState&&);
 
     struct StalledTransactionInfo {
         pid_t pid;
@@ -81,14 +81,15 @@ private:
     // For unit tests
     friend class ::android::TestableSurfaceFlinger;
 
-    int flushPendingTransactionQueues(std::vector<TransactionState>&, TransactionFlushState&);
-    void applyUnsignaledBufferTransaction(std::vector<TransactionState>&, TransactionFlushState&);
-    void popTransactionFromPending(std::vector<TransactionState>&, TransactionFlushState&,
-                                   std::queue<TransactionState>&);
+    int flushPendingTransactionQueues(std::vector<QueuedTransactionState>&, TransactionFlushState&);
+    void applyUnsignaledBufferTransaction(std::vector<QueuedTransactionState>&,
+                                          TransactionFlushState&);
+    void popTransactionFromPending(std::vector<QueuedTransactionState>&, TransactionFlushState&,
+                                   std::queue<QueuedTransactionState>&);
     TransactionReadiness applyFilters(TransactionFlushState&);
-    std::unordered_map<sp<IBinder>, std::queue<TransactionState>, IListenerHash>
+    std::unordered_map<sp<IBinder>, std::queue<QueuedTransactionState>, IListenerHash>
             mPendingTransactionQueues;
-    LocklessQueue<TransactionState> mLocklessTransactionQueue;
+    LocklessQueue<QueuedTransactionState> mLocklessTransactionQueue;
     std::atomic<size_t> mPendingTransactionCount = 0;
     ftl::SmallVector<TransactionFilter, 2> mTransactionReadyFilters;
 

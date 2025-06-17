@@ -1,0 +1,50 @@
+package: "com.android.frameworks.sensorservice.flags"
+container: "system"
+
+flag {
+  name: "dynamic_sensor_hal_reconnect_handling"
+  namespace: "sensors"
+  description: "This flag controls if the dynamic sensor data will be clean up after HAL is disconnected."
+  bug: "307782607"
+}
+
+flag {
+  name: "sensor_device_on_dynamic_sensor_disconnected"
+  namespace: "sensors"
+  description: "This flag controls if the callback onDynamicSensorsDisconnected is implemented or not."
+  bug: "316958439"
+}
+
+flag {
+  name: "sensor_event_connection_send_event_require_nonnull_scratch"
+  namespace: "sensors"
+  description: "This flag controls we allow to pass in nullptr as scratch in SensorEventConnection::sendEvents()"
+  bug: "339306599"
+}
+
+flag {
+  name: "sensor_service_clear_dynamic_sensor_data_at_the_end"
+  namespace: "sensors"
+  description: "When this flag is enabled, sensor service will only erase dynamic sensor data at the end of the threadLoop to prevent race condition."
+  bug: "329020894"
+}
+
+flag {
+  name: "enforce_permissions_for_all_target_sdk"
+  namespace: "sensors"
+  description: "When this flag is enabled, sensor service will enforce permissions for all target sdks."
+  bug: "389176817"
+  metadata {
+    purpose: PURPOSE_BUGFIX
+  }
+}
+
+flag {
+  name: "disable_vndk_forged_name"
+  namespace: "sensors"
+  description: "When this flag is enabled, sensor manager will not use forged name to determine if an access is from VNDK"
+  bug: "398253250"
+  metadata {
+    purpose: PURPOSE_BUGFIX
+  }
+}

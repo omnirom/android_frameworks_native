@@ -55,7 +55,6 @@ public:
     MOCK_METHOD(void, onHdcpLevelsChanged,
                 (PhysicalDisplayId displayId, int32_t connectedLevel, int32_t maxLevel),
                 (override));
-    MOCK_METHOD(void, addBufferStuffedUids, (BufferStuffingMap), (override));
 };
 
 } // namespace android::mock

@@ -202,26 +202,13 @@ bool GLHelper::getShaderProgram(const char* name, GLuint* outPgm) {
 }
 
 bool GLHelper::createNamedSurfaceTexture(GLuint name, uint32_t w, uint32_t h,
-        sp<GLConsumer>* glConsumer, EGLSurface* surface) {
-#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
-    sp<GLConsumer> glc = new GLConsumer(name, GL_TEXTURE_EXTERNAL_OES, false, true);
+                                         sp<GLConsumer>* glConsumer, EGLSurface* surface) {
+    auto [glc, surf] = GLConsumer::create(name, GL_TEXTURE_EXTERNAL_OES, false, true);
     glc->setDefaultBufferSize(w, h);
-    glc->getSurface()->setMaxDequeuedBufferCount(2);
     glc->setConsumerUsageBits(GRALLOC_USAGE_HW_COMPOSER);
+    surf->setMaxDequeuedBufferCount(2);
+    sp<ANativeWindow> anw = surf;
 
-    sp<ANativeWindow> anw = glc->getSurface();
-#else
-    sp<IGraphicBufferProducer> producer;
-    sp<IGraphicBufferConsumer> consumer;
-    BufferQueue::createBufferQueue(&producer, &consumer);
-    sp<GLConsumer> glc = new GLConsumer(consumer, name,
-            GL_TEXTURE_EXTERNAL_OES, false, true);
-    glc->setDefaultBufferSize(w, h);
-    producer->setMaxDequeuedBufferCount(2);
-    glc->setConsumerUsageBits(GRALLOC_USAGE_HW_COMPOSER);
-
-    sp<ANativeWindow> anw = new Surface(producer);
-#endif // COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
     EGLSurface s = eglCreateWindowSurface(mDisplay, mConfig, anw.get(), nullptr);
     if (s == EGL_NO_SURFACE) {
         fprintf(stderr, "eglCreateWindowSurface error: %#x\n", eglGetError());
@@ -254,7 +241,7 @@ bool GLHelper::createWindowSurface(uint32_t w, uint32_t h,
     status_t err;
 
     if (mSurfaceComposerClient == nullptr) {
-        mSurfaceComposerClient = new SurfaceComposerClient;
+        mSurfaceComposerClient = sp<SurfaceComposerClient>::make();
     }
     err = mSurfaceComposerClient->initCheck();
     if (err != NO_ERROR) {

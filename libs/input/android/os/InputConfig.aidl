@@ -57,16 +57,9 @@ enum InputConfig {
     NOT_TOUCHABLE                = 1 << 3,
 
     /**
-     * Indicates that this window will not accept a touch event that is split between
-     * more than one window. When set:
-     *  - If this window receives a DOWN event with the first pointer, all successive
-     *    pointers that go down, regardless of their location on the screen, will be
-     *    directed to this window;
-     *  - If the DOWN event lands outside the touchable bounds of this window, no
-     *    successive pointers that go down, regardless of their location on the screen,
-     *    will be directed to this window.
+     * This flag is now deprecated and should not be used.
      */
-    PREVENT_SPLITTING            = 1 << 4,
+    DEPRECATED_PREVENT_SPLITTING = 1 << 4,
 
     /**
      * Indicates that this window shows the wallpaper behind it, so all touch events

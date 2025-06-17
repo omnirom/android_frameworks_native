@@ -225,4 +225,6 @@ using NotifyArgs =
 
 const char* toString(const NotifyArgs& args);
 
+std::ostream& operator<<(std::ostream& out, const NotifyArgs& args);
+
 } // namespace android

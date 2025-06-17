@@ -39,11 +39,8 @@
 #include <string>
 
 #include "DisplayDevice.h"
-#include "DisplayRenderArea.h"
 #include "FrontEnd/LayerCreationArgs.h"
 #include "Layer.h"
-#include "RenderAreaBuilder.h"
-#include "Scheduler/VsyncController.h"
 #include "SurfaceFlinger.h"
 
 namespace android {
@@ -259,6 +256,7 @@ void RegionSamplingThread::captureSample() {
     ui::LayerStack layerStack;
     ui::Transform::RotationFlags orientation;
     ui::Size displaySize;
+    Rect layerStackSpaceRect;
 
     {
         // TODO(b/159112860): Don't keep sp<DisplayDevice> outside of SF main thread
@@ -267,6 +265,7 @@ void RegionSamplingThread::captureSample() {
         layerStack = display->getLayerStack();
         orientation = ui::Transform::toRotationFlags(display->getOrientation());
         displaySize = display->getSize();
+        layerStackSpaceRect = display->getLayerStackSpaceRect();
     }
 
     std::vector<RegionSamplingThread::Descriptor> descriptors;
@@ -346,20 +345,21 @@ void RegionSamplingThread::captureSample() {
     constexpr bool kRegionSampling = true;
     constexpr bool kGrayscale = false;
     constexpr bool kIsProtected = false;
-    constexpr bool kAttachGainmap = false;
 
-    SurfaceFlinger::RenderAreaBuilderVariant
-            renderAreaBuilder(std::in_place_type<DisplayRenderAreaBuilder>, sampledBounds,
-                              sampledBounds.getSize(), ui::Dataspace::V0_SRGB, displayWeak,
-                              RenderArea::Options::CAPTURE_SECURE_LAYERS);
+    SurfaceFlinger::ScreenshotArgs screenshotArgs;
+    screenshotArgs.captureTypeVariant = displayWeak;
+    screenshotArgs.displayIdVariant = std::nullopt;
+    screenshotArgs.sourceCrop = sampledBounds.isEmpty() ? layerStackSpaceRect : sampledBounds;
+    screenshotArgs.reqSize = sampledBounds.getSize();
+    screenshotArgs.dataspace = ui::Dataspace::V0_SRGB;
+    screenshotArgs.isSecure = true;
+    screenshotArgs.seamlessTransition = false;
 
     std::vector<std::pair<Layer*, sp<LayerFE>>> layers;
-    auto displayState =
-            mFlinger.getSnapshotsFromMainThread(renderAreaBuilder, getLayerSnapshotsFn, layers);
-    FenceResult fenceResult =
-            mFlinger.captureScreenshot(renderAreaBuilder, buffer, kRegionSampling, kGrayscale,
-                                       kIsProtected, kAttachGainmap, nullptr, displayState, layers)
-                    .get();
+    mFlinger.getSnapshotsFromMainThread(screenshotArgs, getLayerSnapshotsFn, layers);
+    FenceResult fenceResult = mFlinger.captureScreenshot(screenshotArgs, buffer, kRegionSampling,
+                                                         kGrayscale, kIsProtected, nullptr, layers)
+                                      .get();
     if (fenceResult.ok()) {
         fenceResult.value()->waitForever(LOG_TAG);
     }

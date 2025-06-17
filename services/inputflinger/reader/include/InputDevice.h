@@ -81,6 +81,8 @@ public:
 
     inline virtual KeyboardType getKeyboardType() const { return mKeyboardType; }
 
+    inline std::filesystem::path getSysfsRootPath() const { return mSysfsRootPath; }
+
     bool isEnabled();
 
     void dump(std::string& dump, const std::string& eventHubDevStr);
@@ -209,6 +211,7 @@ private:
     bool mHasMic;
     bool mDropUntilNextSync;
     std::optional<bool> mShouldSmoothScroll;
+    std::filesystem::path mSysfsRootPath;
 
     typedef int32_t (InputMapper::*GetStateFunc)(uint32_t sourceMask, int32_t code);
     int32_t getState(uint32_t sourceMask, int32_t code, GetStateFunc getStateFunc);
@@ -470,6 +473,9 @@ public:
     inline KeyboardType getKeyboardType() const { return mDevice.getKeyboardType(); }
     inline void setKeyboardType(KeyboardType keyboardType) {
         return mDevice.setKeyboardType(keyboardType);
+    }
+    inline std::filesystem::path getSysfsRootPath() const {
+        return mEventHub->getSysfsRootPath(mId);
     }
     inline bool setKernelWakeEnabled(bool enabled) {
         return mEventHub->setKernelWakeEnabled(mId, enabled);

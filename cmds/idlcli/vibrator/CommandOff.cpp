@@ -42,24 +42,17 @@ class CommandOff : public Command {
     }
 
     Status doMain(Args && /*args*/) override {
-        std::string statusStr;
-        Status ret;
+        auto hal = getHal();
 
-        if (auto hal = getHal<aidl::IVibrator>()) {
-            auto status = hal->call(&aidl::IVibrator::off);
-            statusStr = status.getDescription();
-            ret = status.isOk() ? OK : ERROR;
-        } else if (auto hal = getHal<V1_0::IVibrator>()) {
-            auto status = hal->call(&V1_0::IVibrator::off);
-            statusStr = toString(status);
-            ret = status.isOk() && status == V1_0::Status::OK ? OK : ERROR;
-        } else {
+        if (!hal) {
             return UNAVAILABLE;
         }
 
-        std::cout << "Status: " << statusStr << std::endl;
+        auto status = hal->off();
 
-        return ret;
+        std::cout << "Status: " << status.getDescription() << std::endl;
+
+        return status.isOk() ? OK : ERROR;
     }
 };
 

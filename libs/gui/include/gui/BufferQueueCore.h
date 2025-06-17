@@ -32,10 +32,11 @@
 #include <utils/Trace.h>
 #include <utils/Vector.h>
 
-#include <list>
-#include <set>
-#include <mutex>
 #include <condition_variable>
+#include <list>
+#include <mutex>
+#include <set>
+#include <vector>
 
 #define ATRACE_BUFFER_INDEX(index)                                                        \
     do {                                                                                  \
@@ -91,6 +92,10 @@ private:
     // Dump our state in a string
     void dumpState(const String8& prefix, String8* outResult) const;
 
+    // getTotalSlotCountLocked returns the total number of slots in use by the
+    // buffer queue at this time.
+    int getTotalSlotCountLocked() const;
+
     // getMinUndequeuedBufferCountLocked returns the minimum number of buffers
     // that must remain in a state other than DEQUEUED. The async parameter
     // tells whether we're in asynchronous mode.
@@ -120,6 +125,10 @@ private:
     int getMaxBufferCountLocked(bool asyncMode,
             bool dequeueBufferCannotBlock, int maxBufferCount) const;
 
+#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_UNLIMITED_SLOTS)
+    // This resizes mSlots to the given size, but only if it's increasing.
+    status_t extendSlotCountLocked(int size);
+#endif
     // clearBufferSlotLocked frees the GraphicBuffer and sync resources for the
     // given slot.
     void clearBufferSlotLocked(int slot);
@@ -204,7 +213,7 @@ private:
     // mConnectedProducerListener will not trigger onBufferAttached() callback.
     bool mBufferAttachedCbEnabled;
 
-    // mSlots is an array of buffer slots that must be mirrored on the producer
+    // mSlots is a collection of buffer slots that must be mirrored on the producer
     // side. This allows buffer ownership to be transferred between the producer
     // and consumer without sending a GraphicBuffer over Binder. The entire
     // array is initialized to NULL at construction time, and buffers are
@@ -266,8 +275,14 @@ private:
     // is specified.
     android_dataspace mDefaultBufferDataSpace;
 
+#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_UNLIMITED_SLOTS)
+    // mAllowExtendedSlotCount is set by the consumer to permit the producer to
+    // request an unlimited number of slots.
+    bool mAllowExtendedSlotCount;
+#endif
+
     // mMaxBufferCount is the limit on the number of buffers that will be
-    // allocated at one time. This limit can be set by the consumer.
+    // allocated at one time.
     int mMaxBufferCount;
 
     // mMaxAcquiredBufferCount is the number of buffers that the consumer may

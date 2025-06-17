@@ -92,10 +92,22 @@ enum {
             static_cast<int32_t>(android::os::MotionEventFlag::NO_FOCUS_CHANGE),
 
     /**
-     * This event was generated or modified by accessibility service.
+     * This event was injected from some AccessibilityService, which may be either an
+     * Accessibility Tool OR a service using that API for purposes other than assisting users
+     * with disabilities.
      */
     AMOTION_EVENT_FLAG_IS_ACCESSIBILITY_EVENT =
             static_cast<int32_t>(android::os::MotionEventFlag::IS_ACCESSIBILITY_EVENT),
+
+    /**
+     * This event was injected from an AccessibilityService with the
+     * AccessibilityServiceInfo#isAccessibilityTool property set to true. These services (known as
+     * "Accessibility Tools") are used to assist users with disabilities, so events from these
+     * services should be able to reach all Views including Views which set
+     * View#isAccessibilityDataSensitive to true.
+     */
+    AMOTION_EVENT_FLAG_INJECTED_FROM_ACCESSIBILITY_TOOL =
+            static_cast<int32_t>(android::os::MotionEventFlag::INJECTED_FROM_ACCESSIBILITY_TOOL),
 
     AMOTION_EVENT_FLAG_TARGET_ACCESSIBILITY_FOCUS =
             static_cast<int32_t>(android::os::MotionEventFlag::TARGET_ACCESSIBILITY_FOCUS),
@@ -304,6 +316,19 @@ struct PointerProperties;
 
 bool isStylusEvent(uint32_t source, const std::vector<PointerProperties>& properties);
 
+bool isStylusHoverEvent(uint32_t source, const std::vector<PointerProperties>& properties,
+                        int32_t action);
+
+bool isFromMouse(uint32_t source, ToolType tooltype);
+
+bool isFromTouchpad(uint32_t source, ToolType tooltype);
+
+bool isFromDrawingTablet(uint32_t source, ToolType tooltype);
+
+bool isHoverAction(int32_t action);
+
+bool isMouseOrTouchpad(uint32_t sources);
+
 /*
  * Flags that flow alongside events in the input dispatch system to help with certain
  * policy decisions such as waking from device sleep.
@@ -346,6 +371,9 @@ enum {
 
     POLICY_FLAG_INJECTED_FROM_ACCESSIBILITY =
             android::os::IInputConstants::POLICY_FLAG_INJECTED_FROM_ACCESSIBILITY,
+
+    POLICY_FLAG_INJECTED_FROM_ACCESSIBILITY_TOOL =
+            android::os::IInputConstants::POLICY_FLAG_INJECTED_FROM_ACCESSIBILITY_TOOL,
 
     /* These flags are set by the input dispatcher. */
 

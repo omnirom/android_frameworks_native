@@ -90,6 +90,8 @@ void BlurFilter::drawBlurRegion(SkCanvas* canvas, const SkRRect& effectRegion,
                                                      linearSampling, &blurMatrix);
 
     if (blurRadius < mMaxCrossFadeRadius) {
+        LOG_ALWAYS_FATAL_IF(!input);
+
         // For sampling Skia's API expects the inverse of what logically seems appropriate. In this
         // case you might expect the matrix to simply be the canvas matrix.
         SkMatrix inputMatrix;

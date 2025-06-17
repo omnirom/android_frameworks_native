@@ -99,12 +99,14 @@ mod binder_async;
 mod error;
 mod native;
 mod parcel;
+#[cfg(not(trusty))]
+mod persistable_bundle;
 mod proxy;
 #[cfg(not(any(trusty, android_ndk)))]
 mod service;
 #[cfg(not(any(trusty, android_ndk)))]
 mod state;
-#[cfg(not(any(android_vendor, android_ndk, android_vndk)))]
+#[cfg(not(any(android_vendor, android_ndk, android_vndk, trusty)))]
 mod system_only;
 
 use binder_ndk_sys as sys;
@@ -113,6 +115,8 @@ pub use crate::binder_async::{BinderAsyncPool, BoxFuture};
 pub use binder::{BinderFeatures, FromIBinder, IBinder, Interface, Strong, Weak};
 pub use error::{ExceptionCode, IntoBinderResult, Status, StatusCode};
 pub use parcel::{ParcelFileDescriptor, Parcelable, ParcelableHolder};
+#[cfg(not(trusty))]
+pub use persistable_bundle::{PersistableBundle, ValueType};
 pub use proxy::{DeathRecipient, SpIBinder, WpIBinder};
 #[cfg(not(any(trusty, android_ndk)))]
 pub use service::{
@@ -125,7 +129,7 @@ pub use service::{
 pub use service::{get_interface, get_service};
 #[cfg(not(any(trusty, android_ndk)))]
 pub use state::{ProcessState, ThreadState};
-#[cfg(not(any(android_vendor, android_vndk, android_ndk)))]
+#[cfg(not(any(android_vendor, android_vndk, android_ndk, trusty)))]
 pub use system_only::{delegate_accessor, Accessor, AccessorProvider, ConnectionInfo};
 
 /// Binder result containing a [`Status`] on error.

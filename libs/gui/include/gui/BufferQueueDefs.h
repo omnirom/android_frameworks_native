@@ -17,6 +17,7 @@
 #ifndef ANDROID_GUI_BUFFERQUEUECOREDEFS_H
 #define ANDROID_GUI_BUFFERQUEUECOREDEFS_H
 
+#include <com_android_graphics_libgui_flags.h>
 #include <gui/BufferSlot.h>
 #include <ui/BufferQueueDefs.h>
 
@@ -24,7 +25,11 @@ namespace android {
     class BufferQueueCore;
 
     namespace BufferQueueDefs {
-        typedef BufferSlot SlotsType[NUM_BUFFER_SLOTS];
+#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_UNLIMITED_SLOTS)
+    typedef std::vector<BufferSlot> SlotsType;
+#else
+    typedef BufferSlot SlotsType[NUM_BUFFER_SLOTS];
+#endif
     } // namespace BufferQueueDefs
 } // namespace android
 

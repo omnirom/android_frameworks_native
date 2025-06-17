@@ -1,0 +1,12 @@
+package: "com.android.frameworks.gpuservice.flags"
+container: "system"
+
+flag {
+    name: "multiuser_permission_check"
+    namespace: "gpu"
+    description: "Whether to consider headless system user mode/multiuser when checking toggleAngleAsSystemDriver permission."
+    bug: "389867658"
+    metadata {
+        purpose: PURPOSE_BUGFIX
+    }
+}

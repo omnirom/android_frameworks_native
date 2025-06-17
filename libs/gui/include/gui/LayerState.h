@@ -17,10 +17,11 @@
 #ifndef ANDROID_SF_LAYER_STATE_H
 #define ANDROID_SF_LAYER_STATE_H
 
-
 #include <stdint.h>
 #include <sys/types.h>
+#include <span>
 
+#include <android/gui/BorderSettings.h>
 #include <android/gui/DisplayCaptureArgs.h>
 #include <android/gui/IWindowInfosReportedListener.h>
 #include <android/gui/LayerCaptureArgs.h>
@@ -69,21 +70,39 @@ struct client_cache_t {
     uint64_t id;
 
     bool operator==(const client_cache_t& other) const { return id == other.id; }
+    bool operator!=(const client_cache_t&) const = default;
 
     bool isValid() const { return token != nullptr; }
 };
 
 class TrustedPresentationListener : public Parcelable {
 public:
-    sp<ITransactionCompletedListener> callbackInterface;
-    int callbackId = -1;
+    struct State {
+        sp<ITransactionCompletedListener> callbackInterface;
+        int callbackId = -1;
+        bool operator==(const State&) const = default;
+        bool operator!=(const State&) const = default;
+    };
 
     void invoke(bool presentedWithinThresholds) {
-        callbackInterface->onTrustedPresentationChanged(callbackId, presentedWithinThresholds);
+        mState.callbackInterface->onTrustedPresentationChanged(mState.callbackId,
+                                                               presentedWithinThresholds);
+    }
+    void configure(State&& state) { mState = std::move(state); }
+    const sp<ITransactionCompletedListener>& getCallback() { return mState.callbackInterface; }
+    void clear() {
+        mState.callbackInterface = nullptr;
+        mState.callbackId = -1;
     }
 
     status_t writeToParcel(Parcel* parcel) const;
     status_t readFromParcel(const Parcel* parcel);
+
+    bool operator==(const TrustedPresentationListener& rhs) const { return mState == rhs.mState; }
+    bool operator!=(const TrustedPresentationListener&) const = default;
+
+private:
+    State mState;
 };
 
 class BufferData : public Parcelable {
@@ -231,6 +250,8 @@ struct layer_state_t {
         eBufferReleaseChannelChanged = 0x40000'00000000,
         ePictureProfileHandleChanged = 0x80000'00000000,
         eAppContentPriorityChanged = 0x100000'00000000,
+        eClientDrawnCornerRadiusChanged = 0x200000'00000000,
+        eBorderSettingsChanged = 0x400000'00000000,
     };
 
     layer_state_t();
@@ -251,9 +272,9 @@ struct layer_state_t {
     // Geometry updates.
     static constexpr uint64_t GEOMETRY_CHANGES = layer_state_t::eBufferCropChanged |
             layer_state_t::eBufferTransformChanged | layer_state_t::eCornerRadiusChanged |
-            layer_state_t::eCropChanged | layer_state_t::eDestinationFrameChanged |
-            layer_state_t::eMatrixChanged | layer_state_t::ePositionChanged |
-            layer_state_t::eTransformToDisplayInverseChanged |
+            layer_state_t::eClientDrawnCornerRadiusChanged | layer_state_t::eCropChanged |
+            layer_state_t::eDestinationFrameChanged | layer_state_t::eMatrixChanged |
+            layer_state_t::ePositionChanged | layer_state_t::eTransformToDisplayInverseChanged |
             layer_state_t::eTransparentRegionChanged | layer_state_t::eEdgeExtensionChanged;
 
     // Buffer and related updates.
@@ -275,7 +296,7 @@ struct layer_state_t {
             layer_state_t::eCornerRadiusChanged | layer_state_t::eDimmingEnabledChanged |
             layer_state_t::eHdrMetadataChanged | layer_state_t::eShadowRadiusChanged |
             layer_state_t::eStretchChanged | layer_state_t::ePictureProfileHandleChanged |
-            layer_state_t::eAppContentPriorityChanged;
+            layer_state_t::eAppContentPriorityChanged | layer_state_t::eBorderSettingsChanged;
 
     // Changes which invalidates the layer's visible region in CE.
     static constexpr uint64_t CONTENT_DIRTY = layer_state_t::CONTENT_CHANGES |
@@ -300,8 +321,40 @@ struct layer_state_t {
     static constexpr uint64_t VISIBLE_REGION_CHANGES = layer_state_t::GEOMETRY_CHANGES |
             layer_state_t::HIERARCHY_CHANGES | layer_state_t::eAlphaChanged;
 
+    // Changes that force GPU composition.
+    static constexpr uint64_t COMPOSITION_EFFECTS = layer_state_t::eBackgroundBlurRadiusChanged |
+            layer_state_t::eBlurRegionsChanged | layer_state_t::eCornerRadiusChanged |
+            layer_state_t::eShadowRadiusChanged | layer_state_t::eStretchChanged |
+            layer_state_t::eBorderSettingsChanged;
+
     bool hasValidBuffer() const;
     void sanitize(int32_t permissions);
+
+    void updateTransparentRegion(const Region& transparentRegion);
+    const Region& getTransparentRegion() const { return mNotDefCmpState.transparentRegion; }
+    void updateSurfaceDamageRegion(const Region& surfaceDamageRegion);
+    const Region& getSurfaceDamageRegion() const { return mNotDefCmpState.surfaceDamageRegion; }
+    // Do not update state flags.  Used to set up test state.
+    void setSurfaceDamageRegion(Region&& surfaceDamageRegion) {
+        mNotDefCmpState.surfaceDamageRegion = std::move(surfaceDamageRegion);
+    }
+    void updateRelativeLayer(const sp<SurfaceControl>& relativeTo, int32_t z);
+    void updateParentLayer(const sp<SurfaceControl>& newParent);
+    void updateInputWindowInfo(sp<gui::WindowInfoHandle>&& info);
+    const gui::WindowInfo& getWindowInfo() const {
+        return *mNotDefCmpState.windowInfoHandle->getInfo();
+    }
+    gui::WindowInfo* editWindowInfo() { return mNotDefCmpState.windowInfoHandle->editInfo(); }
+
+    const sp<SurfaceControl>& getParentSurfaceControlForChild() const {
+        return mNotDefCmpState.parentSurfaceControlForChild;
+    }
+    const sp<SurfaceControl>& getRelativeLayerSurfaceControl() const {
+        return mNotDefCmpState.relativeLayerSurfaceControl;
+    }
+
+    bool operator==(const layer_state_t&) const = default;
+    bool operator!=(const layer_state_t&) const = default;
 
     struct matrix22_t {
         float dsdx{0};
@@ -328,29 +381,22 @@ struct layer_state_t {
     uint8_t reserved;
     matrix22_t matrix;
     float cornerRadius;
+    float clientDrawnCornerRadius;
     uint32_t backgroundBlurRadius;
-
-    sp<SurfaceControl> relativeLayerSurfaceControl;
-
-    sp<SurfaceControl> parentSurfaceControlForChild;
 
     half4 color;
 
     // non POD must be last. see write/read
-    Region transparentRegion;
     uint32_t bufferTransform;
     bool transformToDisplayInverse;
     FloatRect crop;
     std::shared_ptr<BufferData> bufferData = nullptr;
     ui::Dataspace dataspace;
     HdrMetadata hdrMetadata;
-    Region surfaceDamageRegion;
     int32_t api;
     sp<NativeHandle> sidebandStream;
     mat4 colorTransform;
     std::vector<BlurRegion> blurRegions;
-
-    sp<gui::WindowInfoHandle> windowInfoHandle = sp<gui::WindowInfoHandle>::make();
 
     LayerMetadata metadata;
 
@@ -367,6 +413,9 @@ struct layer_state_t {
 
     // Draws a shadow around the surface.
     float shadowRadius;
+
+    // Draws an outline around the layer.
+    gui::BorderSettings borderSettings;
 
     // Priority of the layer assigned by Window Manager.
     int32_t frameRateSelectionPriority;
@@ -425,7 +474,7 @@ struct layer_state_t {
     PictureProfileHandle pictureProfileHandle{PictureProfileHandle::NONE};
 
     // A value indicating the significance of the layer's content to the app's desired user
-    // experience. A lower priority will result in more likelihood of getting access to limited
+    // experience. A higher value will result in more likelihood of getting access to limited
     // resources, such as picture processing hardware.
     int32_t appContentPriority = 0;
 
@@ -437,6 +486,18 @@ struct layer_state_t {
     std::shared_ptr<gui::BufferReleaseChannel::ProducerEndpoint> bufferReleaseChannel;
 
     std::shared_ptr<gui::DisplayLuts> luts;
+
+protected:
+    struct NotDefaultComparableState {
+        Region transparentRegion;
+        Region surfaceDamageRegion;
+        sp<gui::WindowInfoHandle> windowInfoHandle = sp<gui::WindowInfoHandle>::make();
+        sp<SurfaceControl> relativeLayerSurfaceControl;
+        sp<SurfaceControl> parentSurfaceControlForChild;
+
+        bool operator==(const NotDefaultComparableState& rhs) const;
+        bool operator!=(const NotDefaultComparableState& rhs) const = default;
+    } mNotDefCmpState;
 };
 
 class ComposerState {
@@ -444,6 +505,9 @@ public:
     layer_state_t state;
     status_t write(Parcel& output) const;
     status_t read(const Parcel& input);
+
+    bool operator==(const ComposerState&) const = default;
+    bool operator!=(const ComposerState&) const = default;
 };
 
 struct DisplayState {
@@ -495,28 +559,49 @@ struct DisplayState {
     Rect layerStackSpaceRect = Rect::EMPTY_RECT;
     Rect orientedDisplaySpaceRect = Rect::EMPTY_RECT;
 
-    // Exclusive to virtual displays: The sink surface into which the virtual display is rendered,
-    // and an optional resolution that overrides its default dimensions.
-    sp<IGraphicBufferProducer> surface;
+    // For physical displays, this is the resolution, which must match the active display mode. To
+    // change the resolution, the client must first call SurfaceControl.setDesiredDisplayModeSpecs
+    // with the new DesiredDisplayModeSpecs#defaultMode, then commit the matching width and height.
+    //
+    // For virtual displays, this is an optional resolution that overrides its default dimensions.
+    //
     uint32_t width = 0;
     uint32_t height = 0;
 
+    // For virtual displays, this is the sink surface into which the virtual display is rendered.
+    sp<IGraphicBufferProducer> surface;
+
     status_t write(Parcel& output) const;
     status_t read(const Parcel& input);
+
+    bool operator==(const DisplayState&) const = default;
+    bool operator!=(const DisplayState&) const = default;
 };
 
 struct InputWindowCommands {
-    std::vector<gui::FocusRequest> focusRequests;
-    std::unordered_set<sp<gui::IWindowInfosReportedListener>,
-                       SpHash<gui::IWindowInfosReportedListener>>
-            windowInfosReportedListeners;
-
+    using Listener = gui::IWindowInfosReportedListener;
+    using ListenerSet = std::unordered_set<sp<Listener>, SpHash<Listener>>;
     // Merges the passed in commands and returns true if there were any changes.
     bool merge(const InputWindowCommands& other);
     bool empty() const;
     void clear();
+    void addFocusRequest(const gui::FocusRequest& request) { focusRequests.push_back(request); }
+    void addWindowInfosReportedListener(const sp<Listener>& listener) {
+        windowInfosReportedListeners.insert(listener);
+    }
+    ListenerSet&& releaseListeners() { return std::move(windowInfosReportedListeners); }
+
     status_t write(Parcel& output) const;
     status_t read(const Parcel& input);
+
+    std::span<const gui::FocusRequest> getFocusRequests() const { return focusRequests; }
+    const ListenerSet& getListeners() const { return windowInfosReportedListeners; }
+    bool operator==(const InputWindowCommands&) const = default;
+    bool operator!=(const InputWindowCommands&) const = default;
+
+private:
+    std::vector<gui::FocusRequest> focusRequests;
+    ListenerSet windowInfosReportedListeners;
 };
 
 static inline int compare_type(const ComposerState& lhs, const ComposerState& rhs) {

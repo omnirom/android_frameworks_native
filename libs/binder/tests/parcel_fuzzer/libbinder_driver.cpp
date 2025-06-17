@@ -13,6 +13,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
+#include <aidl/transaction_ids.h>
 #include <fuzzbinder/libbinder_driver.h>
 
 #include <fuzzbinder/random_parcel.h>
@@ -29,6 +31,28 @@ namespace android {
 
 void fuzzService(const sp<IBinder>& binder, FuzzedDataProvider&& provider) {
     fuzzService(std::vector<sp<IBinder>>{binder}, std::move(provider));
+}
+
+uint32_t getCode(FuzzedDataProvider& provider) {
+    if (provider.ConsumeBool()) {
+        return provider.ConsumeIntegral<uint32_t>();
+    }
+
+    // Most of the AIDL services will have small set of transaction codes.
+    if (provider.ConsumeBool()) {
+        return provider.ConsumeIntegralInRange<uint32_t>(0, 100);
+    }
+
+    if (provider.ConsumeBool()) {
+        return provider.PickValueInArray<uint32_t>(
+                {IBinder::DUMP_TRANSACTION, IBinder::PING_TRANSACTION,
+                 IBinder::SHELL_COMMAND_TRANSACTION, IBinder::INTERFACE_TRANSACTION,
+                 IBinder::SYSPROPS_TRANSACTION, IBinder::EXTENSION_TRANSACTION,
+                 IBinder::TWEET_TRANSACTION, IBinder::LIKE_TRANSACTION});
+    }
+
+    return provider.ConsumeIntegralInRange<uint32_t>(aidl::kLastMetaMethodId,
+                                                     aidl::kFirstMetaMethodId);
 }
 
 void fuzzService(const std::vector<sp<IBinder>>& binders, FuzzedDataProvider&& provider) {
@@ -61,16 +85,7 @@ void fuzzService(const std::vector<sp<IBinder>>& binders, FuzzedDataProvider&& p
     }
 
     while (provider.remaining_bytes() > 0) {
-        // Most of the AIDL services will have small set of transaction codes.
-        // TODO(b/295942369) : Add remaining transact codes from IBinder.h
-        uint32_t code = provider.ConsumeBool() ? provider.ConsumeIntegral<uint32_t>()
-                : provider.ConsumeBool()
-                ? provider.ConsumeIntegralInRange<uint32_t>(0, 100)
-                : provider.PickValueInArray<uint32_t>(
-                          {IBinder::DUMP_TRANSACTION, IBinder::PING_TRANSACTION,
-                           IBinder::SHELL_COMMAND_TRANSACTION, IBinder::INTERFACE_TRANSACTION,
-                           IBinder::SYSPROPS_TRANSACTION, IBinder::EXTENSION_TRANSACTION,
-                           IBinder::TWEET_TRANSACTION, IBinder::LIKE_TRANSACTION});
+        uint32_t code = getCode(provider);
         uint32_t flags = provider.ConsumeIntegral<uint32_t>();
         Parcel data;
         // for increased fuzz coverage

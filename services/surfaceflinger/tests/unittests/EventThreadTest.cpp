@@ -23,14 +23,13 @@
 
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
-#include <gui/DisplayEventReceiver.h>
 #include <log/log.h>
 #include <scheduler/VsyncConfig.h>
 #include <utils/Errors.h>
 
 #include "AsyncCallRecorder.h"
 #include "DisplayHardware/DisplayMode.h"
-#include "FrameTimeline.h"
+#include "FrameTimeline/FrameTimeline.h"
 #include "Scheduler/EventThread.h"
 #include "mock/MockVSyncDispatch.h"
 #include "mock/MockVSyncTracker.h"
@@ -112,8 +111,6 @@ protected:
     void expectOnExpectedPresentTimePosted(nsecs_t expectedPresentTime);
     void expectUidFrameRateMappingEventReceivedByConnection(PhysicalDisplayId expectedDisplayId,
                                                             std::vector<FrameRateOverride>);
-    void expectQueuedBufferCountReceivedByConnection(
-            ConnectionEventRecorder& connectionEventRecorder, uint32_t expectedBufferCount);
 
     void onVSyncEvent(nsecs_t timestamp, nsecs_t expectedPresentationTime,
                       nsecs_t deadlineTimestamp) {
@@ -147,7 +144,6 @@ protected:
     sp<MockEventThreadConnection> mConnection;
     sp<MockEventThreadConnection> mThrottledConnection;
     std::unique_ptr<frametimeline::impl::TokenManager> mTokenManager;
-    std::vector<ConnectionEventRecorder*> mBufferStuffedConnectionRecorders;
 
     std::chrono::nanoseconds mVsyncPeriod;
 
@@ -270,7 +266,7 @@ void EventThreadTest::expectVsyncEventReceivedByConnection(
     ASSERT_TRUE(args.has_value()) << name << " did not receive an event for timestamp "
                                   << expectedTimestamp;
     const auto& event = std::get<0>(args.value());
-    EXPECT_EQ(DisplayEventReceiver::DISPLAY_EVENT_VSYNC, event.header.type)
+    EXPECT_EQ(DisplayEventType::DISPLAY_EVENT_VSYNC, event.header.type)
             << name << " did not get the correct event for timestamp " << expectedTimestamp;
     EXPECT_EQ(expectedTimestamp, event.header.timestamp)
             << name << " did not get the expected timestamp for timestamp " << expectedTimestamp;
@@ -344,7 +340,7 @@ void EventThreadTest::expectHotplugEventReceivedByConnection(PhysicalDisplayId e
     auto args = mConnectionEventCallRecorder.waitForCall();
     ASSERT_TRUE(args.has_value());
     const auto& event = std::get<0>(args.value());
-    EXPECT_EQ(DisplayEventReceiver::DISPLAY_EVENT_HOTPLUG, event.header.type);
+    EXPECT_EQ(DisplayEventType::DISPLAY_EVENT_HOTPLUG, event.header.type);
     EXPECT_EQ(expectedDisplayId, event.header.displayId);
     EXPECT_EQ(expectedConnected, event.hotplug.connected);
 }
@@ -355,7 +351,7 @@ void EventThreadTest::expectConfigChangedEventReceivedByConnection(
     auto args = mConnectionEventCallRecorder.waitForCall();
     ASSERT_TRUE(args.has_value());
     const auto& event = std::get<0>(args.value());
-    EXPECT_EQ(DisplayEventReceiver::DISPLAY_EVENT_MODE_CHANGE, event.header.type);
+    EXPECT_EQ(DisplayEventType::DISPLAY_EVENT_MODE_CHANGE, event.header.type);
     EXPECT_EQ(expectedDisplayId, event.header.displayId);
     EXPECT_EQ(expectedConfigId, event.modeChange.modeId);
     EXPECT_EQ(expectedVsyncPeriod, event.modeChange.vsyncPeriod);
@@ -367,7 +363,7 @@ void EventThreadTest::expectUidFrameRateMappingEventReceivedByConnection(
         auto args = mConnectionEventCallRecorder.waitForCall();
         ASSERT_TRUE(args.has_value());
         const auto& event = std::get<0>(args.value());
-        EXPECT_EQ(DisplayEventReceiver::DISPLAY_EVENT_FRAME_RATE_OVERRIDE, event.header.type);
+        EXPECT_EQ(DisplayEventType::DISPLAY_EVENT_FRAME_RATE_OVERRIDE, event.header.type);
         EXPECT_EQ(expectedDisplayId, event.header.displayId);
         EXPECT_EQ(uid, event.frameRateOverride.uid);
         EXPECT_EQ(frameRateHz, event.frameRateOverride.frameRateHz);
@@ -376,16 +372,8 @@ void EventThreadTest::expectUidFrameRateMappingEventReceivedByConnection(
     auto args = mConnectionEventCallRecorder.waitForCall();
     ASSERT_TRUE(args.has_value());
     const auto& event = std::get<0>(args.value());
-    EXPECT_EQ(DisplayEventReceiver::DISPLAY_EVENT_FRAME_RATE_OVERRIDE_FLUSH, event.header.type);
+    EXPECT_EQ(DisplayEventType::DISPLAY_EVENT_FRAME_RATE_OVERRIDE_FLUSH, event.header.type);
     EXPECT_EQ(expectedDisplayId, event.header.displayId);
-}
-
-void EventThreadTest::expectQueuedBufferCountReceivedByConnection(
-        ConnectionEventRecorder& connectionEventRecorder, uint32_t expectedBufferCount) {
-    auto args = connectionEventRecorder.waitForCall();
-    ASSERT_TRUE(args.has_value());
-    const auto& event = std::get<0>(args.value());
-    EXPECT_EQ(expectedBufferCount, event.vsync.vsyncData.numberQueuedBuffers);
 }
 
 namespace {
@@ -874,67 +862,10 @@ TEST_F(EventThreadTest, postHcpLevelsChanged) {
     auto args = mConnectionEventCallRecorder.waitForCall();
     ASSERT_TRUE(args.has_value());
     const auto& event = std::get<0>(args.value());
-    EXPECT_EQ(DisplayEventReceiver::DISPLAY_EVENT_HDCP_LEVELS_CHANGE, event.header.type);
+    EXPECT_EQ(DisplayEventType::DISPLAY_EVENT_HDCP_LEVELS_CHANGE, event.header.type);
     EXPECT_EQ(EXTERNAL_DISPLAY_ID, event.header.displayId);
     EXPECT_EQ(HDCP_V1, event.hdcpLevelsChange.connectedLevel);
     EXPECT_EQ(HDCP_V2, event.hdcpLevelsChange.maxLevel);
-}
-
-TEST_F(EventThreadTest, connectionReceivesBufferStuffing) {
-    setupEventThread();
-
-    // Create a connection that will experience buffer stuffing.
-    ConnectionEventRecorder stuffedConnectionEventRecorder{0};
-    sp<MockEventThreadConnection> stuffedConnection =
-            createConnection(stuffedConnectionEventRecorder,
-                             gui::ISurfaceComposer::EventRegistration::modeChanged |
-                                     gui::ISurfaceComposer::EventRegistration::frameRateOverride,
-                             111);
-
-    // Add a connection and buffer count to the list of stuffed Uids that will receive
-    // data in the next vsync event.
-    BufferStuffingMap bufferStuffedUids;
-    bufferStuffedUids.try_emplace(stuffedConnection->mOwnerUid, 3);
-    mThread->addBufferStuffedUids(bufferStuffedUids);
-    mBufferStuffedConnectionRecorders.emplace_back(&stuffedConnectionEventRecorder);
-
-    // Signal that we want the next vsync event to be posted to two connections.
-    mThread->requestNextVsync(mConnection);
-    mThread->requestNextVsync(stuffedConnection);
-    onVSyncEvent(123, 456, 789);
-
-    // Vsync event data contains number of queued buffers.
-    expectQueuedBufferCountReceivedByConnection(mConnectionEventCallRecorder, 0);
-    expectQueuedBufferCountReceivedByConnection(stuffedConnectionEventRecorder, 3);
-}
-
-TEST_F(EventThreadTest, connectionsWithSameUidReceiveBufferStuffing) {
-    setupEventThread();
-
-    // Create a connection with the same Uid as another connection.
-    ConnectionEventRecorder secondConnectionEventRecorder{0};
-    sp<MockEventThreadConnection> secondConnection =
-            createConnection(secondConnectionEventRecorder,
-                             gui::ISurfaceComposer::EventRegistration::modeChanged |
-                                     gui::ISurfaceComposer::EventRegistration::frameRateOverride,
-                             mConnectionUid);
-
-    // Add connection Uid and buffer count to the list of stuffed Uids that will receive
-    // data in the next vsync event.
-    BufferStuffingMap bufferStuffedUids;
-    bufferStuffedUids.try_emplace(mConnectionUid, 3);
-    mThread->addBufferStuffedUids(bufferStuffedUids);
-    mBufferStuffedConnectionRecorders.emplace_back(&mConnectionEventCallRecorder);
-    mBufferStuffedConnectionRecorders.emplace_back(&secondConnectionEventRecorder);
-
-    // Signal that we want the next vsync event to be posted to two connections.
-    mThread->requestNextVsync(mConnection);
-    mThread->requestNextVsync(secondConnection);
-    onVSyncEvent(123, 456, 789);
-
-    // Vsync event data contains number of queued buffers.
-    expectQueuedBufferCountReceivedByConnection(mConnectionEventCallRecorder, 3);
-    expectQueuedBufferCountReceivedByConnection(secondConnectionEventRecorder, 3);
 }
 
 } // namespace

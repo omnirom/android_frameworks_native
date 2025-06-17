@@ -81,6 +81,7 @@ public:
 
     explicit Choreographer(const sp<Looper>& looper, const sp<IBinder>& layerHandle = nullptr)
             EXCLUDES(gChoreographers.lock);
+
     void postFrameCallbackDelayed(AChoreographer_frameCallback cb,
                                   AChoreographer_frameCallback64 cb64,
                                   AChoreographer_vsyncCallback vsyncCallback, void* data,
@@ -103,7 +104,7 @@ public:
     virtual void handleMessage(const Message& message) override;
 
     static void initJVM(JNIEnv* env);
-    static Choreographer* getForThread();
+    static sp<Choreographer> getForThread();
     static void signalRefreshRateCallbacks(nsecs_t vsyncPeriod) EXCLUDES(gChoreographers.lock);
     static int64_t getStartTimeNanosForVsyncId(AVsyncId vsyncId) EXCLUDES(gChoreographers.lock);
     virtual ~Choreographer() override EXCLUDES(gChoreographers.lock);

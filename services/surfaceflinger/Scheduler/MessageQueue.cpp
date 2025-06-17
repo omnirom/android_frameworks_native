@@ -24,7 +24,7 @@
 #include <scheduler/interface/ICompositor.h>
 
 #include "EventThread.h"
-#include "FrameTimeline.h"
+#include "FrameTimeline/FrameTimeline.h"
 #include "MessageQueue.h"
 
 namespace android::impl {

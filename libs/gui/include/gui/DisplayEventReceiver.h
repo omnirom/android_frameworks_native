@@ -55,20 +55,20 @@ static inline constexpr uint32_t fourcc(char c1, char c2, char c3, char c4) {
         static_cast<uint32_t>(c4);
 }
 
+enum class DisplayEventType : uint32_t {
+    DISPLAY_EVENT_VSYNC = fourcc('v', 's', 'y', 'n'),
+    DISPLAY_EVENT_HOTPLUG = fourcc('p', 'l', 'u', 'g'),
+    DISPLAY_EVENT_MODE_CHANGE = fourcc('m', 'o', 'd', 'e'),
+    DISPLAY_EVENT_MODE_REJECTION = fourcc('r', 'e', 'j', 'e'),
+    DISPLAY_EVENT_NULL = fourcc('n', 'u', 'l', 'l'),
+    DISPLAY_EVENT_FRAME_RATE_OVERRIDE = fourcc('r', 'a', 't', 'e'),
+    DISPLAY_EVENT_FRAME_RATE_OVERRIDE_FLUSH = fourcc('f', 'l', 's', 'h'),
+    DISPLAY_EVENT_HDCP_LEVELS_CHANGE = fourcc('h', 'd', 'c', 'p'),
+};
+
 // ----------------------------------------------------------------------------
 class DisplayEventReceiver {
 public:
-    enum {
-        DISPLAY_EVENT_VSYNC = fourcc('v', 's', 'y', 'n'),
-        DISPLAY_EVENT_HOTPLUG = fourcc('p', 'l', 'u', 'g'),
-        DISPLAY_EVENT_MODE_CHANGE = fourcc('m', 'o', 'd', 'e'),
-        DISPLAY_EVENT_MODE_REJECTION = fourcc('r', 'e', 'j', 'e'),
-        DISPLAY_EVENT_NULL = fourcc('n', 'u', 'l', 'l'),
-        DISPLAY_EVENT_FRAME_RATE_OVERRIDE = fourcc('r', 'a', 't', 'e'),
-        DISPLAY_EVENT_FRAME_RATE_OVERRIDE_FLUSH = fourcc('f', 'l', 's', 'h'),
-        DISPLAY_EVENT_HDCP_LEVELS_CHANGE = fourcc('h', 'd', 'c', 'p'),
-    };
-
     struct Event {
         // We add __attribute__((aligned(8))) for nsecs_t fields because
         // we need to make sure all fields are aligned the same with x86
@@ -77,7 +77,7 @@ public:
         // https://en.wikipedia.org/wiki/Data_structure_alignment
 
         struct Header {
-            uint32_t type;
+            DisplayEventType type;
             PhysicalDisplayId displayId __attribute__((aligned(8)));
             nsecs_t timestamp __attribute__((aligned(8)));
         };

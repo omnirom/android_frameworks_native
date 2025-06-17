@@ -30,7 +30,7 @@ namespace skia {
 
 void CaptureTimer::setTimeout(TimeoutCallback function, std::chrono::milliseconds delay) {
     this->clear = false;
-    CommonPool::post([=]() {
+    CommonPool::post([=,this]() {
         if (this->clear) return;
         std::this_thread::sleep_for(delay);
         if (this->clear) return;

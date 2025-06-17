@@ -195,11 +195,13 @@ impl RpcSessionRef {
     /// take ownership of) file descriptors already connected to it.
     pub fn setup_preconnected_client<T: FromIBinder + ?Sized>(
         &self,
-        mut request_fd: impl FnMut() -> Option<RawFd>,
+        request_fd: impl FnMut() -> Option<RawFd>,
     ) -> Result<Strong<T>, StatusCode> {
-        // Double reference the factory because trait objects aren't FFI safe.
-        let mut request_fd_ref: RequestFd = &mut request_fd;
-        let param = &mut request_fd_ref as *mut RequestFd as *mut c_void;
+        // Trait objects aren't FFI safe, so *mut c_void can't be converted back to
+        // *mut dyn FnMut() -> Option<RawFd>>. Double box the factory to make it possible to get
+        // the factory from *mut c_void (to *mut Box<dyn<...>>) in the callbacks.
+        let request_fd_box: Box<dyn FnMut() -> Option<RawFd>> = Box::new(request_fd);
+        let param = Box::into_raw(Box::new(request_fd_box)) as *mut c_void;
 
         // SAFETY: AIBinder returned by RpcPreconnectedClient has correct reference count, and the
         // ownership can be safely taken by new_spibinder. RpcPreconnectedClient does not take ownership
@@ -209,6 +211,7 @@ impl RpcSessionRef {
                 self.as_ptr(),
                 Some(request_fd_wrapper),
                 param,
+                Some(param_delete_fd_wrapper),
             ))
         };
         Self::get_interface(service)
@@ -225,13 +228,18 @@ impl RpcSessionRef {
     }
 }
 
-type RequestFd<'a> = &'a mut dyn FnMut() -> Option<RawFd>;
-
 unsafe extern "C" fn request_fd_wrapper(param: *mut c_void) -> c_int {
-    let request_fd_ptr = param as *mut RequestFd;
+    let request_fd_ptr = param as *mut Box<dyn FnMut() -> Option<RawFd>>;
     // SAFETY: This is only ever called by RpcPreconnectedClient, within the lifetime of the
     // BinderFdFactory reference, with param being a properly aligned non-null pointer to an
     // initialized instance.
     let request_fd = unsafe { request_fd_ptr.as_mut().unwrap() };
     request_fd().unwrap_or(-1)
+}
+
+unsafe extern "C" fn param_delete_fd_wrapper(param: *mut c_void) {
+    // SAFETY: This is only ever called by RpcPreconnectedClient, with param being the
+    // pointer returned from Box::into_raw.
+    let request_fd_box = unsafe { Box::from_raw(param as *mut Box<dyn FnMut() -> Option<RawFd>>) };
+    drop(request_fd_box);
 }

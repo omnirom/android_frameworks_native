@@ -14,11 +14,15 @@
  * limitations under the License.
  */
 
+#include "../Macros.h"
+
 #include "gestures/GestureConverter.h"
 
+#include <ios>
 #include <optional>
 #include <sstream>
 
+#include <android-base/logging.h>
 #include <android-base/stringprintf.h>
 #include <com_android_input_flags.h>
 #include <ftl/enum.h>
@@ -34,9 +38,6 @@ namespace input_flags = com::android::input::flags;
 namespace android {
 
 namespace {
-
-// This will disable the tap to click while the user is typing on a physical keyboard
-const bool ENABLE_TOUCHPAD_PALM_REJECTION = input_flags::enable_touchpad_typing_palm_rejection();
 
 // In addition to v1, v2 will also cancel ongoing move gestures while typing and add delay in
 // re-enabling the tap to click.
@@ -81,7 +82,6 @@ GestureConverter::GestureConverter(InputReaderContext& readerContext,
                                    const InputDeviceContext& deviceContext, int32_t deviceId)
       : mDeviceId(deviceId),
         mReaderContext(readerContext),
-        mEnableFlingStop(input_flags::enable_touchpad_fling_stop()),
         mEnableNoFocusChange(input_flags::enable_touchpad_no_focus_change()),
         // We can safely assume that ABS_MT_POSITION_X and _Y axes will be available, as EventHub
         // won't classify a device as a touchpad if they're not present.
@@ -223,8 +223,7 @@ std::list<NotifyArgs> GestureConverter::handleMove(nsecs_t when, nsecs_t readTim
     if (!mIsHoverCancelled) {
         // handleFling calls hoverMove with zero delta on FLING_TAP_DOWN. Don't enable tap to click
         // for this case as subsequent handleButtonsChange may choose to ignore this tap.
-        if ((ENABLE_TOUCHPAD_PALM_REJECTION || ENABLE_TOUCHPAD_PALM_REJECTION_V2) &&
-            (std::abs(deltaX) > 0 || std::abs(deltaY) > 0)) {
+        if (std::abs(deltaX) > 0 || std::abs(deltaY) > 0) {
             enableTapToClick(when);
         }
     }
@@ -251,6 +250,18 @@ std::list<NotifyArgs> GestureConverter::handleButtonsChange(nsecs_t when, nsecs_
                                                             const Gesture& gesture) {
     std::list<NotifyArgs> out = {};
 
+    if (mCurrentClassification != MotionClassification::NONE) {
+        // Handling button changes during an ongoing gesture would be tricky, as we'd have to avoid
+        // sending duplicate DOWN events or premature UP events (e.g. if the gesture ended but the
+        // button was still down). It would also make handling touchpad events more difficult for
+        // apps, which would have to handle cases where e.g. a scroll gesture ends (and therefore
+        // the event lose the TWO_FINGER_SWIPE classification) but there isn't an UP because the
+        // button's still down. It's unclear how one should even handle button changes during most
+        // gestures, and they're probably accidental anyway. So, instead, just ignore them.
+        LOG(INFO) << "Ignoring button change because a gesture is ongoing.";
+        return out;
+    }
+
     PointerCoords coords;
     coords.clear();
     coords.setAxisValue(AMOTION_EVENT_AXIS_RELATIVE_X, 0);
@@ -263,7 +274,7 @@ std::list<NotifyArgs> GestureConverter::handleButtonsChange(nsecs_t when, nsecs_
             // return early to prevent this tap
             return out;
         }
-    } else if (ENABLE_TOUCHPAD_PALM_REJECTION && mReaderContext.isPreventingTouchpadTaps()) {
+    } else if (mReaderContext.isPreventingTouchpadTaps()) {
         enableTapToClick(when);
         if (gesture.details.buttons.is_tap) {
             // return early to prevent this tap
@@ -313,6 +324,15 @@ std::list<NotifyArgs> GestureConverter::handleButtonsChange(nsecs_t when, nsecs_
     for (uint32_t button = 1; button <= GESTURES_BUTTON_FORWARD; button <<= 1) {
         if (buttonsReleased & button) {
             uint32_t actionButton = gesturesButtonToMotionEventButton(button);
+            if (!(newButtonState & actionButton)) {
+                // We must have received the ButtonsChange gesture that put this button down during
+                // another gesture, and therefore dropped the BUTTON_PRESS action for it, or
+                // released the button when another gesture began during its press. Drop the
+                // BUTTON_RELEASE too to keep the stream consistent.
+                LOG(INFO) << "Dropping release event for button 0x" << std::hex << actionButton
+                          << " as it wasn't in the button state.";
+                continue;
+            }
             newButtonState &= ~actionButton;
             out.push_back(makeMotionArgs(when, readTime, AMOTION_EVENT_ACTION_BUTTON_RELEASE,
                                          actionButton, newButtonState, /* pointerCount= */ 1,
@@ -363,7 +383,7 @@ std::list<NotifyArgs> GestureConverter::handleScroll(nsecs_t when, nsecs_t readT
     std::list<NotifyArgs> out;
     PointerCoords& coords = mFakeFingerCoords[0];
     if (mCurrentClassification != MotionClassification::TWO_FINGER_SWIPE) {
-        out += exitHover(when, readTime);
+        out += prepareForFakeFingerGesture(when, readTime);
 
         mCurrentClassification = MotionClassification::TWO_FINGER_SWIPE;
         coords.clear();
@@ -406,7 +426,7 @@ std::list<NotifyArgs> GestureConverter::handleFling(nsecs_t when, nsecs_t readTi
             break;
         case GESTURES_FLING_TAP_DOWN:
             if (mCurrentClassification == MotionClassification::NONE) {
-                if (mEnableFlingStop && mFlingMayBeInProgress) {
+                if (mFlingMayBeInProgress) {
                     // The user has just touched the pad again after ending a two-finger scroll
                     // motion, which might have started a fling. We want to stop the fling, but
                     // unfortunately there's currently no API for doing so. Instead, send and
@@ -422,7 +442,7 @@ std::list<NotifyArgs> GestureConverter::handleFling(nsecs_t when, nsecs_t readTi
                     std::list<NotifyArgs> out;
                     mDownTime = when;
                     mCurrentClassification = MotionClassification::TWO_FINGER_SWIPE;
-                    out += exitHover(when, readTime);
+                    out += prepareForFakeFingerGesture(when, readTime);
                     out.push_back(makeMotionArgs(when, readTime, AMOTION_EVENT_ACTION_DOWN,
                                                  /*actionButton=*/0, /*buttonState=*/0,
                                                  /*pointerCount=*/1, &coords));
@@ -480,7 +500,7 @@ std::list<NotifyArgs> GestureConverter::endScroll(nsecs_t when, nsecs_t readTime
         // separate swipes with an appropriate lift event between them, so we don't have to worry
         // about the finger count changing mid-swipe.
 
-        out += exitHover(when, readTime);
+        out += prepareForFakeFingerGesture(when, readTime);
 
         mCurrentClassification = MotionClassification::MULTI_FINGER_SWIPE;
 
@@ -568,9 +588,7 @@ std::list<NotifyArgs> GestureConverter::endScroll(nsecs_t when, nsecs_t readTime
         LOG_ALWAYS_FATAL_IF(gesture.details.pinch.zoom_state != GESTURES_ZOOM_START,
                             "First pinch gesture does not have the START zoom state (%d instead).",
                             gesture.details.pinch.zoom_state);
-        std::list<NotifyArgs> out;
-
-        out += exitHover(when, readTime);
+        std::list<NotifyArgs> out = prepareForFakeFingerGesture(when, readTime);
 
         mCurrentClassification = MotionClassification::PINCH;
         mPinchFingerSeparation = INITIAL_PINCH_SEPARATION_PX;
@@ -643,6 +661,16 @@ std::list<NotifyArgs> GestureConverter::exitHover(nsecs_t when, nsecs_t readTime
     } else {
         return {};
     }
+}
+
+std::list<NotifyArgs> GestureConverter::prepareForFakeFingerGesture(nsecs_t when,
+                                                                    nsecs_t readTime) {
+    std::list<NotifyArgs> out;
+    if (isPointerDown(mButtonState)) {
+        out += releaseAllButtons(when, readTime);
+    }
+    out += exitHover(when, readTime);
+    return out;
 }
 
 NotifyMotionArgs GestureConverter::makeHoverEvent(nsecs_t when, nsecs_t readTime, int32_t action) {

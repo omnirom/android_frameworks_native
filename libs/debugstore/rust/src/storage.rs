@@ -32,14 +32,18 @@ impl<T, const N: usize> Storage<T, N> {
         self.insertion_buffer.force_push(value);
     }
 
-    /// Folds over the elements in the storage using the provided function.
-    pub fn fold<U, F>(&self, init: U, mut func: F) -> U
+    /// Folds over the elements in the storage in reverse order using the provided function.
+    pub fn rfold<U, F>(&self, init: U, mut func: F) -> U
     where
         F: FnMut(U, &T) -> U,
     {
-        let mut acc = init;
+        let mut items = Vec::new();
         while let Some(value) = self.insertion_buffer.pop() {
-            acc = func(acc, &value);
+            items.push(value);
+        }
+        let mut acc = init;
+        for value in items.iter().rev() {
+            acc = func(acc, value);
         }
         acc
     }
@@ -59,18 +63,18 @@ mod tests {
         let storage = Storage::<i32, 10>::new();
         storage.insert(7);
 
-        let sum = storage.fold(0, |acc, &x| acc + x);
+        let sum = storage.rfold(0, |acc, &x| acc + x);
         assert_eq!(sum, 7, "The sum of the elements should be equal to the inserted value.");
     }
 
     #[test]
-    fn test_fold_functionality() {
+    fn test_rfold_functionality() {
         let storage = Storage::<i32, 5>::new();
         storage.insert(1);
         storage.insert(2);
         storage.insert(3);
 
-        let sum = storage.fold(0, |acc, &x| acc + x);
+        let sum = storage.rfold(0, |acc, &x| acc + x);
         assert_eq!(
             sum, 6,
             "The sum of the elements should be equal to the sum of inserted values."
@@ -84,13 +88,13 @@ mod tests {
         storage.insert(2);
         storage.insert(5);
 
-        let first_sum = storage.fold(0, |acc, &x| acc + x);
+        let first_sum = storage.rfold(0, |acc, &x| acc + x);
         assert_eq!(first_sum, 8, "The sum of the elements should be equal to the inserted values.");
 
         storage.insert(30);
         storage.insert(22);
 
-        let second_sum = storage.fold(0, |acc, &x| acc + x);
+        let second_sum = storage.rfold(0, |acc, &x| acc + x);
         assert_eq!(
             second_sum, 52,
             "The sum of the elements should be equal to the inserted values."
@@ -103,7 +107,7 @@ mod tests {
         storage.insert(1);
         // This value should overwrite the previously inserted value (1).
         storage.insert(4);
-        let sum = storage.fold(0, |acc, &x| acc + x);
+        let sum = storage.rfold(0, |acc, &x| acc + x);
         assert_eq!(sum, 4, "The sum of the elements should be equal to the inserted values.");
     }
 
@@ -128,7 +132,24 @@ mod tests {
             thread.join().expect("Thread should finish without panicking");
         }
 
-        let count = storage.fold(0, |acc, _| acc + 1);
+        let count = storage.rfold(0, |acc, _| acc + 1);
         assert_eq!(count, 100, "Storage should be filled to its limit with concurrent insertions.");
+    }
+
+    #[test]
+    fn test_rfold_order() {
+        let storage = Storage::<i32, 5>::new();
+        storage.insert(1);
+        storage.insert(2);
+        storage.insert(3);
+
+        let mut result = Vec::new();
+        storage.rfold((), |_, &x| result.push(x));
+
+        assert_eq!(
+            result,
+            vec![3, 2, 1],
+            "Elements should be processed in reverse order of insertion"
+        );
     }
 }

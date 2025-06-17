@@ -70,6 +70,9 @@ void LayerFECompositionState::dump(std::string& out) const {
     out.append("      ");
     dumpVal(out, "shadowLength", shadowSettings.length);
 
+    out.append("      ");
+    dumpVal(out, "borderSettings", borderSettings.toString());
+
     out.append("\n      ");
     dumpVal(out, "blend", toString(blendMode), blendMode);
     dumpVal(out, "alpha", alpha);

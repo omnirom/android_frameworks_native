@@ -304,6 +304,26 @@ int AThermal_getThermalHeadroomThresholds(AThermalManager* _Nonnull manager,
  * Prototype of the function that is called when thermal headroom or thresholds changes.
  * It's passed the updated thermal headroom and thresholds as parameters, as well as the
  * pointer provided by the client that registered a callback.
+ * <p>
+ * This may not be used to fully replace the {@link AThermal_getThermalHeadroom} API as it will
+ * only notify on one of the conditions below that will significantly change one or both
+ * values of current headroom and headroom thresholds since previous callback:
+ *   1. thermal throttling events: when the skin temperature has cross any of the thresholds
+ *      and there isn't a previous callback in a short time ago with similar values.
+ *   2. skin temperature threshold change events: note that if the absolute °C threshold
+ *      values change in a way that does not significantly change the current headroom nor
+ *      headroom thresholds, it will not trigger any callback. The client should not
+ *      need to take action in such case since the difference from temperature vs threshold
+ *      hasn't changed.
+ * <p>
+ * By API version 36, it provides a forecast in the same call for developer's convenience
+ * based on a {@code forecastSeconds} defined by the device, which can be static or dynamic
+ * varied by OEM. Be aware that it will not notify on forecast temperature change but the
+ * events mentioned above. So periodically polling against {@link AThermal_getThermalHeadroom}
+ * API should still be used to actively monitor temperature forecast in advance.
+ * <p>
+ * This serves as a more advanced option compared to thermal status listener, where the
+ * latter will only notify on thermal throttling events with status update.
  *
  * @param data The data pointer to be passed when callback is called.
  * @param headroom The current non-negative normalized headroom value, also see

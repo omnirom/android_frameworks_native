@@ -21,6 +21,18 @@ Example:
 mmm -j frameworks/native/cmds/dumpstate device/acme/secret_device/dumpstate/ hardware/interfaces/dumpstate
 ```
 
+## Dumpstate philosophy: exec not link
+
+Never link code directly into dumpstate. Dumpstate should execute many
+binaries and collect the results. In general, code should fail hard fail fast,
+but dumpstate is the last to solve many Android bugs. Oftentimes, failures
+in core Android infrastructure or tools are issues that cause problems in
+bugreport directly, so bugreport should not rely on these tools working.
+We want dumpstate to have as minimal of code loaded in process so that
+only that core subset needs to be bugfree for bugreport to work. Even if
+many pieces of Android break, that should not prevent dumpstate from
+working.
+
 ## To build, deploy, and take a bugreport
 
 ```

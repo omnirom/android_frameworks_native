@@ -39,28 +39,8 @@ import java.util.stream.Collectors;
 @RunWith(DeviceJUnit4ClassRunner.class)
 public class GpuWorkTracepointTest extends BaseHostJUnit4Test {
 
-    private static final String CPU_FREQUENCY_TRACEPOINT_FORMAT_PATH =
-            "/sys/kernel/tracing/events/power/cpu_frequency/format";
     private static final String GPU_WORK_PERIOD_TRACEPOINT_FORMAT_PATH =
             "/sys/kernel/tracing/events/power/gpu_work_period/format";
-
-    @Test
-    public void testReadTracingEvents() throws Exception {
-        // Test |testGpuWorkPeriodTracepointFormat| is dependent on whether certain tracepoint
-        // paths exist. This means the test will vacuously pass if the tracepoint file system is
-        // inaccessible. Thus, as a basic check, we make sure the CPU frequency tracepoint format
-        // is accessible. If not, something is probably fundamentally broken about the tracing
-        // file system.
-        CommandResult commandResult = getDevice().executeShellV2Command(
-                String.format("cat %s", CPU_FREQUENCY_TRACEPOINT_FORMAT_PATH));
-
-        assertEquals(String.format(
-                        "Failed to read \"%s\". This probably means that the tracing file system "
-                                + "is fundamentally broken in some way, possibly due to bad "
-                                + "permissions.",
-                        CPU_FREQUENCY_TRACEPOINT_FORMAT_PATH),
-                commandResult.getStatus(), CommandStatus.SUCCESS);
-    }
 
     @VsrTest(requirements={"VSR-3.3-004"})
     @RequiresDevice

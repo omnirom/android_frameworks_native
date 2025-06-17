@@ -40,8 +40,8 @@ class InputMapperUnitTest : public testing::Test {
 protected:
     static constexpr int32_t EVENTHUB_ID = 1;
     static constexpr int32_t DEVICE_ID = END_RESERVED_ID + 1000;
-    virtual void SetUp() override { SetUpWithBus(0); }
-    virtual void SetUpWithBus(int bus);
+    virtual void SetUp() override { SetUp(/*bus=*/0, /*isExternal=*/false); }
+    virtual void SetUp(int bus, bool isExternal);
 
     void setupAxis(int axis, bool valid, int32_t min, int32_t max, int32_t resolution,
                    int32_t flat = 0, int32_t fuzz = 0);

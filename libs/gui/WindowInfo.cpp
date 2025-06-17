@@ -59,6 +59,32 @@ std::ostream& operator<<(std::ostream& out, const Region& region) {
     return out;
 }
 
+status_t writeTransform(android::Parcel* parcel, const ui::Transform& transform) {
+    return parcel->writeFloat(transform.dsdx()) ?:
+            parcel->writeFloat(transform.dtdx()) ?:
+            parcel->writeFloat(transform.tx()) ?:
+            parcel->writeFloat(transform.dtdy()) ?:
+            parcel->writeFloat(transform.dsdy()) ?:
+            parcel->writeFloat(transform.ty());
+}
+
+status_t readTransform(const android::Parcel* parcel, ui::Transform& transform) {
+    float dsdx, dtdx, tx, dtdy, dsdy, ty;
+
+    const status_t status = parcel->readFloat(&dsdx) ?:
+            parcel->readFloat(&dtdx) ?:
+            parcel->readFloat(&tx) ?:
+            parcel->readFloat(&dtdy) ?:
+            parcel->readFloat(&dsdy) ?:
+            parcel->readFloat(&ty);
+    if (status != OK) {
+        return status;
+    }
+
+    transform.set({dsdx, dtdx, tx, dtdy, dsdy, ty, 0, 0, 1});
+    return OK;
+}
+
 } // namespace
 
 void WindowInfo::setInputConfig(ftl::Flags<InputConfig> config, bool value) {
@@ -71,10 +97,6 @@ void WindowInfo::setInputConfig(ftl::Flags<InputConfig> config, bool value) {
 
 void WindowInfo::addTouchableRegion(const Rect& region) {
     touchableRegion.orSelf(region);
-}
-
-bool WindowInfo::supportsSplitTouch() const {
-    return !inputConfig.test(InputConfig::PREVENT_SPLITTING);
 }
 
 bool WindowInfo::isSpy() const {
@@ -135,12 +157,7 @@ status_t WindowInfo::writeToParcel(android::Parcel* parcel) const {
         parcel->writeInt32(surfaceInset) ?:
         parcel->writeFloat(globalScaleFactor) ?:
         parcel->writeFloat(alpha) ?:
-        parcel->writeFloat(transform.dsdx()) ?:
-        parcel->writeFloat(transform.dtdx()) ?:
-        parcel->writeFloat(transform.tx()) ?:
-        parcel->writeFloat(transform.dtdy()) ?:
-        parcel->writeFloat(transform.dsdy()) ?:
-        parcel->writeFloat(transform.ty()) ?:
+        writeTransform(parcel, transform) ?:
         parcel->writeInt32(static_cast<int32_t>(touchOcclusionMode)) ?:
         parcel->writeInt32(ownerPid.val()) ?:
         parcel->writeInt32(ownerUid.val()) ?:
@@ -153,8 +170,12 @@ status_t WindowInfo::writeToParcel(android::Parcel* parcel) const {
         parcel->writeStrongBinder(touchableRegionCropHandle.promote()) ?:
         parcel->writeStrongBinder(windowToken) ?:
         parcel->writeStrongBinder(focusTransferTarget) ?:
-        parcel->writeBool(canOccludePresentation);
+        parcel->writeBool(canOccludePresentation) ?:
+        parcel->writeBool(cloneLayerStackTransform.has_value());
     // clang-format on
+    if (cloneLayerStackTransform) {
+        status = status ?: writeTransform(parcel, *cloneLayerStackTransform);
+    }
     return status;
 }
 
@@ -174,10 +195,10 @@ status_t WindowInfo::readFromParcel(const android::Parcel* parcel) {
         return status;
     }
 
-    float dsdx, dtdx, tx, dtdy, dsdy, ty;
     int32_t lpFlags, lpType, touchOcclusionModeInt, inputConfigInt, ownerPidInt, ownerUidInt,
             displayIdInt;
     sp<IBinder> touchableRegionCropHandleSp;
+    bool hasCloneLayerStackTransform = false;
 
     // clang-format off
     status = parcel->readInt32(&lpFlags) ?:
@@ -188,12 +209,7 @@ status_t WindowInfo::readFromParcel(const android::Parcel* parcel) {
         parcel->readInt32(&surfaceInset) ?:
         parcel->readFloat(&globalScaleFactor) ?:
         parcel->readFloat(&alpha) ?:
-        parcel->readFloat(&dsdx) ?:
-        parcel->readFloat(&dtdx) ?:
-        parcel->readFloat(&tx) ?:
-        parcel->readFloat(&dtdy) ?:
-        parcel->readFloat(&dsdy) ?:
-        parcel->readFloat(&ty) ?:
+        readTransform(parcel, /*byRef*/ transform) ?:
         parcel->readInt32(&touchOcclusionModeInt) ?:
         parcel->readInt32(&ownerPidInt) ?:
         parcel->readInt32(&ownerUidInt) ?:
@@ -206,8 +222,8 @@ status_t WindowInfo::readFromParcel(const android::Parcel* parcel) {
         parcel->readNullableStrongBinder(&touchableRegionCropHandleSp) ?:
         parcel->readNullableStrongBinder(&windowToken) ?:
         parcel->readNullableStrongBinder(&focusTransferTarget) ?:
-        parcel->readBool(&canOccludePresentation);
-
+        parcel->readBool(&canOccludePresentation)?:
+        parcel->readBool(&hasCloneLayerStackTransform);
     // clang-format on
 
     if (status != OK) {
@@ -216,13 +232,21 @@ status_t WindowInfo::readFromParcel(const android::Parcel* parcel) {
 
     layoutParamsFlags = ftl::Flags<Flag>(lpFlags);
     layoutParamsType = static_cast<Type>(lpType);
-    transform.set({dsdx, dtdx, tx, dtdy, dsdy, ty, 0, 0, 1});
     touchOcclusionMode = static_cast<TouchOcclusionMode>(touchOcclusionModeInt);
     inputConfig = ftl::Flags<InputConfig>(inputConfigInt);
     ownerPid = Pid{ownerPidInt};
     ownerUid = Uid{static_cast<uid_t>(ownerUidInt)};
     touchableRegionCropHandle = touchableRegionCropHandleSp;
     displayId = ui::LogicalDisplayId{displayIdInt};
+
+    cloneLayerStackTransform =
+            hasCloneLayerStackTransform ? std::make_optional<ui::Transform>() : std::nullopt;
+    if (cloneLayerStackTransform) {
+        status = readTransform(parcel, /*byRef*/ *cloneLayerStackTransform);
+        if (status != OK) {
+            return status;
+        }
+    }
 
     return OK;
 }

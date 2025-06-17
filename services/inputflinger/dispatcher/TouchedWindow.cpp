@@ -331,9 +331,9 @@ std::string TouchedWindow::dump() const {
     std::string out;
     std::string deviceStates =
             dumpMap(mDeviceStates, constToString, TouchedWindow::deviceStateToString);
-    out += StringPrintf("name='%s', targetFlags=%s, mDeviceStates=%s\n",
+    out += StringPrintf("name='%s', targetFlags=%s, forwardingWindowToken=%p, mDeviceStates=%s\n",
                         windowHandle->getName().c_str(), targetFlags.string().c_str(),
-                        deviceStates.c_str());
+                        forwardingWindowToken.get(), deviceStates.c_str());
     return out;
 }
 

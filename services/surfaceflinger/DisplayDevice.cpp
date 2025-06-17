@@ -26,7 +26,6 @@
 
 #include <common/trace.h>
 #include <compositionengine/CompositionEngine.h>
-#include <compositionengine/Display.h>
 #include <compositionengine/DisplayColorProfile.h>
 #include <compositionengine/DisplayColorProfileCreationArgs.h>
 #include <compositionengine/DisplayCreationArgs.h>
@@ -50,6 +49,17 @@
 namespace android {
 
 namespace hal = hardware::graphics::composer::hal;
+
+namespace gui {
+inline std::string_view to_string(ISurfaceComposer::OptimizationPolicy optimizationPolicy) {
+    switch (optimizationPolicy) {
+        case ISurfaceComposer::OptimizationPolicy::optimizeForPower:
+            return "optimizeForPower";
+        case ISurfaceComposer::OptimizationPolicy::optimizeForPerformance:
+            return "optimizeForPerformance";
+    }
+}
+} // namespace gui
 
 DisplayDeviceCreationArgs::DisplayDeviceCreationArgs(
         const sp<SurfaceFlinger>& flinger, HWComposer& hwComposer, const wp<IBinder>& displayToken,
@@ -169,8 +179,7 @@ auto DisplayDevice::getFrontEndInfo() const -> frontend::DisplayInfo {
 }
 
 void DisplayDevice::setPowerMode(hal::PowerMode mode) {
-    // TODO(b/241285876): Skip this for virtual displays.
-    if (mode == hal::PowerMode::OFF || mode == hal::PowerMode::ON) {
+    if (!isVirtual() && (mode == hal::PowerMode::OFF || mode == hal::PowerMode::ON)) {
         if (mStagedBrightness && mBrightness != mStagedBrightness) {
             getCompositionDisplay()->setNextBrightness(*mStagedBrightness);
             mBrightness = *mStagedBrightness;
@@ -223,9 +232,7 @@ void DisplayDevice::setFlags(uint32_t flags) {
     mFlags = flags;
 }
 
-void DisplayDevice::setDisplaySize(int width, int height) {
-    LOG_FATAL_IF(!isVirtual(), "Changing the display size is supported only for virtual displays.");
-    const auto size = ui::Size(width, height);
+void DisplayDevice::setDisplaySize(ui::Size size) {
     mCompositionDisplay->setDisplaySize(size);
     if (mRefreshRateOverlay) {
         mRefreshRateOverlay->setViewport(size);
@@ -285,6 +292,7 @@ void DisplayDevice::dump(utils::Dumper& dumper) const {
 
     dumper.dump("name"sv, '"' + mDisplayName + '"');
     dumper.dump("powerMode"sv, mPowerMode);
+    dumper.dump("optimizationPolicy"sv, mOptimizationPolicy);
 
     if (mRefreshRateSelector) {
         mRefreshRateSelector->dump(dumper);
@@ -299,12 +307,25 @@ DisplayId DisplayDevice::getId() const {
     return mCompositionDisplay->getId();
 }
 
+bool DisplayDevice::isVirtual() const {
+    return mCompositionDisplay->isVirtual();
+}
+
 bool DisplayDevice::isSecure() const {
     return mCompositionDisplay->isSecure();
 }
 
 void DisplayDevice::setSecure(bool secure) {
     mCompositionDisplay->setSecure(secure);
+}
+
+gui::ISurfaceComposer::OptimizationPolicy DisplayDevice::getOptimizationPolicy() const {
+    return mOptimizationPolicy;
+}
+
+void DisplayDevice::setOptimizationPolicy(
+        gui::ISurfaceComposer::OptimizationPolicy optimizationPolicy) {
+    mOptimizationPolicy = optimizationPolicy;
 }
 
 const Rect DisplayDevice::getBounds() const {

@@ -53,7 +53,6 @@ binder::Status Client::createSurface(const std::string& name, int32_t flags,
                                      const sp<IBinder>& parent, const gui::LayerMetadata& metadata,
                                      gui::CreateSurfaceResult* outResult) {
     // We rely on createLayer to check permissions.
-    sp<IBinder> handle;
     LayerCreationArgs args(mFlinger.get(), sp<Client>::fromExisting(this), name.c_str(),
                            static_cast<uint32_t>(flags), std::move(metadata));
     args.parentHandle = parent;
@@ -101,7 +100,6 @@ binder::Status Client::getLayerFrameStats(const sp<IBinder>& handle, gui::FrameS
 
 binder::Status Client::mirrorSurface(const sp<IBinder>& mirrorFromHandle,
                                      gui::CreateSurfaceResult* outResult) {
-    sp<IBinder> handle;
     LayerCreationArgs args(mFlinger.get(), sp<Client>::fromExisting(this), "MirrorRoot",
                            0 /* flags */, gui::LayerMetadata());
     status_t status = mFlinger->mirrorLayer(args, mirrorFromHandle, *outResult);
@@ -109,12 +107,11 @@ binder::Status Client::mirrorSurface(const sp<IBinder>& mirrorFromHandle,
 }
 
 binder::Status Client::mirrorDisplay(int64_t displayId, gui::CreateSurfaceResult* outResult) {
-    sp<IBinder> handle;
     LayerCreationArgs args(mFlinger.get(), sp<Client>::fromExisting(this),
                            "MirrorRoot-" + std::to_string(displayId), 0 /* flags */,
                            gui::LayerMetadata());
-    std::optional<DisplayId> id = DisplayId::fromValue(static_cast<uint64_t>(displayId));
-    status_t status = mFlinger->mirrorDisplay(*id, args, *outResult);
+    const DisplayId id = DisplayId::fromValue(static_cast<uint64_t>(displayId));
+    status_t status = mFlinger->mirrorDisplay(id, args, *outResult);
     return binderStatusFromStatusT(status);
 }
 

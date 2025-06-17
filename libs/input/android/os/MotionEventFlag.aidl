@@ -118,11 +118,22 @@ enum MotionEventFlag {
     PRIVATE_FLAG_SUPPORTS_DIRECTIONAL_ORIENTATION = 0x100,
 
     /**
-     * The input event was generated or modified by accessibility service.
-     * Shared by both KeyEvent and MotionEvent flags, so this value should not overlap with either
-     * set of flags, including in input/Input.h and in android/input.h.
+     * The input event was injected from some AccessibilityService, which may be either an
+     * Accessibility Tool OR a service using that API for purposes other than assisting users with
+     * disabilities. Shared by both KeyEvent and MotionEvent flags, so this value should not
+     * overlap with either set of flags, including in input/Input.h and in android/input.h.
      */
     IS_ACCESSIBILITY_EVENT = IInputConstants.INPUT_EVENT_FLAG_IS_ACCESSIBILITY_EVENT,
+
+    /**
+     * The input event was injected from an AccessibilityService with the
+     * AccessibilityServiceInfo#isAccessibilityTool property set to true. These services (known as
+     * "Accessibility Tools") are used to assist users with disabilities, so events from these
+     * services should be able to reach all Views including Views which set
+     * View#isAccessibilityDataSensitive to true. Only used by MotionEvent flags.
+     */
+    INJECTED_FROM_ACCESSIBILITY_TOOL =
+        IInputConstants.INPUT_EVENT_FLAG_INJECTED_FROM_ACCESSIBILITY_TOOL,
 
     /**
      * Private flag that indicates when the system has detected that this motion event

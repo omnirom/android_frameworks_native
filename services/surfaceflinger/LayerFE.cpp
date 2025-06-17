@@ -113,6 +113,8 @@ std::optional<compositionengine::LayerFE::LayerSettings> LayerFE::prepareClientC
     // set the shadow for the layer if needed
     prepareShadowClientComposition(*layerSettings, targetSettings.viewport);
 
+    layerSettings->borderSettings = mSnapshot->borderSettings;
+
     return layerSettings;
 }
 
@@ -120,6 +122,7 @@ std::optional<compositionengine::LayerFE::LayerSettings> LayerFE::prepareClientC
         compositionengine::LayerFE::ClientCompositionTargetSettings& targetSettings) const {
     SFTRACE_CALL();
     compositionengine::LayerFE::LayerSettings layerSettings;
+    layerSettings.geometry.originalBounds = mSnapshot->geomLayerBounds;
     layerSettings.geometry.boundaries =
             reduce(mSnapshot->geomLayerBounds, mSnapshot->transparentRegionHint);
     layerSettings.geometry.positionTransform = mSnapshot->geomLayerTransform.asMatrix4();
@@ -173,7 +176,7 @@ std::optional<compositionengine::LayerFE::LayerSettings> LayerFE::prepareClientC
     layerSettings.edgeExtensionEffect = mSnapshot->edgeExtensionEffect;
     // Record the name of the layer for debugging further down the stack.
     layerSettings.name = mSnapshot->name;
-    layerSettings.luts = mSnapshot->luts;
+    layerSettings.luts = mSnapshot->luts ? mSnapshot->luts : targetSettings.luts;
 
     if (hasEffect() && !hasBufferOrSidebandStream()) {
         prepareEffectsClientComposition(layerSettings, targetSettings);
@@ -191,6 +194,7 @@ void LayerFE::prepareClearClientComposition(LayerFE::LayerSettings& layerSetting
     layerSettings.disableBlending = true;
     layerSettings.bufferId = 0;
     layerSettings.frameNumber = 0;
+    layerSettings.sequence = -1;
 
     // If layer is blacked out, force alpha to 1 so that we draw a black color layer.
     layerSettings.alpha = blackout ? 1.0f : 0.0f;
@@ -204,7 +208,7 @@ void LayerFE::prepareEffectsClientComposition(
     if (targetSettings.realContentIsVisible && fillsColor()) {
         // Set color for color fill settings.
         layerSettings.source.solidColor = mSnapshot->color.rgb;
-    } else if (hasBlur() || drawShadows()) {
+    } else if (hasBlur() || drawShadows() || hasOutline()) {
         layerSettings.skipContentDraw = true;
     }
 }
@@ -262,6 +266,7 @@ void LayerFE::prepareBufferStateClientComposition(
     layerSettings.source.buffer.maxLuminanceNits = maxLuminance;
     layerSettings.frameNumber = mSnapshot->frameNumber;
     layerSettings.bufferId = mSnapshot->externalTexture->getId();
+    layerSettings.sequence = mSnapshot->sequence;
 
     const bool useFiltering = targetSettings.needsFiltering ||
                               mSnapshot->geomLayerTransform.needsBilinearFiltering();
@@ -390,6 +395,10 @@ bool LayerFE::hasBlur() const {
     return mSnapshot->backgroundBlurRadius > 0 || mSnapshot->blurRegions.size() > 0;
 }
 
+bool LayerFE::hasOutline() const {
+    return mSnapshot->borderSettings.strokeWidth > 0;
+}
+
 bool LayerFE::drawShadows() const {
     return mSnapshot->shadowSettings.length > 0.f &&
             (mSnapshot->shadowSettings.ambientColor.a > 0 ||
@@ -408,6 +417,15 @@ void LayerFE::setReleaseFence(const FenceResult& releaseFence) {
     if (mReleaseFencePromiseStatus == ReleaseFencePromiseStatus::FULFILLED) {
         return;
     }
+
+    if (releaseFence.has_value()) {
+        if (FlagManager::getInstance().monitor_buffer_fences()) {
+            if (auto strongBuffer = mReleasedBuffer.promote()) {
+                strongBuffer->getDependencyMonitor()
+                        .addAccessCompletion(FenceTime::makeValid(releaseFence.value()), "HWC");
+            }
+        }
+    }
     mReleaseFence.set_value(releaseFence);
     mReleaseFencePromiseStatus = ReleaseFencePromiseStatus::FULFILLED;
 }
@@ -425,4 +443,17 @@ ftl::Future<FenceResult> LayerFE::createReleaseFenceFuture() {
 LayerFE::ReleaseFencePromiseStatus LayerFE::getReleaseFencePromiseStatus() {
     return mReleaseFencePromiseStatus;
 }
+
+void LayerFE::setReleasedBuffer(sp<GraphicBuffer> buffer) {
+    mReleasedBuffer = std::move(buffer);
+}
+
+void LayerFE::setLastHwcState(const LayerFE::HwcLayerDebugState &state) {
+    mLastHwcState = state;
+}
+
+const LayerFE::HwcLayerDebugState& LayerFE::getLastHwcState() const {
+    return mLastHwcState;
+};
+
 } // namespace android

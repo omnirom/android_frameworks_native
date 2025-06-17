@@ -75,6 +75,19 @@ bool ABinderProcess_isThreadPoolStarted(void);
 void ABinderProcess_joinThreadPool(void);
 
 /**
+ * Disables (or enables) background scheduling.
+ *
+ * By default, binder threads execute at a lower priority. However, this can cause
+ * priority inversion, so it is recommended to be disabled in high priority
+ * or in system processes.
+ *
+ * See also AIBinder_setMinSchedulerPolicy, which overrides this setting.
+ *
+ * \param disable whether to disable background scheduling
+ */
+void ABinderProcess_disableBackgroundScheduling(bool disable);
+
+/**
  * This gives you an fd to wait on. Whenever data is available on the fd,
  * ABinderProcess_handlePolledCommands can be called to handle binder queries.
  * This is expected to be used in a single threaded process which waits on

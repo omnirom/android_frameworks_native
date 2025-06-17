@@ -50,7 +50,7 @@ pub enum SourceClass {
 
 bitflags! {
     /// Source of the input device or input events.
-    #[derive(Debug, PartialEq)]
+    #[derive(Clone, Copy, Debug, PartialEq)]
     pub struct Source: u32 {
         // Constants from SourceClass, added here for compatibility reasons
         /// SourceClass::Button
@@ -101,6 +101,7 @@ bitflags! {
 
 /// A rust enum representation of a MotionEvent action.
 #[repr(u32)]
+#[derive(Clone, Copy, Eq, PartialEq)]
 pub enum MotionAction {
     /// ACTION_DOWN
     Down = input_bindgen::AMOTION_EVENT_ACTION_DOWN,
@@ -131,9 +132,15 @@ pub enum MotionAction {
     /// ACTION_SCROLL
     Scroll = input_bindgen::AMOTION_EVENT_ACTION_SCROLL,
     /// ACTION_BUTTON_PRESS
-    ButtonPress = input_bindgen::AMOTION_EVENT_ACTION_BUTTON_PRESS,
+    ButtonPress {
+        /// The button being pressed.
+        action_button: MotionButton,
+    } = input_bindgen::AMOTION_EVENT_ACTION_BUTTON_PRESS,
     /// ACTION_BUTTON_RELEASE
-    ButtonRelease = input_bindgen::AMOTION_EVENT_ACTION_BUTTON_RELEASE,
+    ButtonRelease {
+        /// The button being released.
+        action_button: MotionButton,
+    } = input_bindgen::AMOTION_EVENT_ACTION_BUTTON_RELEASE,
 }
 
 impl fmt::Display for MotionAction {
@@ -152,14 +159,20 @@ impl fmt::Display for MotionAction {
             MotionAction::Scroll => write!(f, "SCROLL"),
             MotionAction::HoverEnter => write!(f, "HOVER_ENTER"),
             MotionAction::HoverExit => write!(f, "HOVER_EXIT"),
-            MotionAction::ButtonPress => write!(f, "BUTTON_PRESS"),
-            MotionAction::ButtonRelease => write!(f, "BUTTON_RELEASE"),
+            MotionAction::ButtonPress { action_button } => {
+                write!(f, "BUTTON_PRESS({action_button:?})")
+            }
+            MotionAction::ButtonRelease { action_button } => {
+                write!(f, "BUTTON_RELEASE({action_button:?})")
+            }
         }
     }
 }
 
-impl From<u32> for MotionAction {
-    fn from(action: u32) -> Self {
+impl MotionAction {
+    /// Creates a [`MotionAction`] from an `AMOTION_EVENT_ACTION_…` constant and an action button
+    /// (which should be empty for all actions except `BUTTON_PRESS` and `…_RELEASE`).
+    pub fn from_code(action: u32, action_button: MotionButton) -> Self {
         let (action_masked, action_index) = MotionAction::breakdown_action(action);
         match action_masked {
             input_bindgen::AMOTION_EVENT_ACTION_DOWN => MotionAction::Down,
@@ -177,14 +190,16 @@ impl From<u32> for MotionAction {
             input_bindgen::AMOTION_EVENT_ACTION_HOVER_MOVE => MotionAction::HoverMove,
             input_bindgen::AMOTION_EVENT_ACTION_HOVER_EXIT => MotionAction::HoverExit,
             input_bindgen::AMOTION_EVENT_ACTION_SCROLL => MotionAction::Scroll,
-            input_bindgen::AMOTION_EVENT_ACTION_BUTTON_PRESS => MotionAction::ButtonPress,
-            input_bindgen::AMOTION_EVENT_ACTION_BUTTON_RELEASE => MotionAction::ButtonRelease,
+            input_bindgen::AMOTION_EVENT_ACTION_BUTTON_PRESS => {
+                MotionAction::ButtonPress { action_button }
+            }
+            input_bindgen::AMOTION_EVENT_ACTION_BUTTON_RELEASE => {
+                MotionAction::ButtonRelease { action_button }
+            }
             _ => panic!("Unknown action: {}", action),
         }
     }
-}
 
-impl MotionAction {
     fn breakdown_action(action: u32) -> (u32, usize) {
         let action_masked = action & input_bindgen::AMOTION_EVENT_ACTION_MASK;
         let index = (action & input_bindgen::AMOTION_EVENT_ACTION_POINTER_INDEX_MASK)
@@ -194,10 +209,31 @@ impl MotionAction {
 }
 
 bitflags! {
+    /// MotionEvent buttons.
+    #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+    pub struct MotionButton: u32 {
+        /// Primary button (e.g. the left mouse button)
+        const Primary = input_bindgen::AMOTION_EVENT_BUTTON_PRIMARY;
+        /// Secondary button (e.g. the right mouse button)
+        const Secondary = input_bindgen::AMOTION_EVENT_BUTTON_SECONDARY;
+        /// Tertiary button (e.g. the middle mouse button)
+        const Tertiary = input_bindgen::AMOTION_EVENT_BUTTON_TERTIARY;
+        /// Back button
+        const Back = input_bindgen::AMOTION_EVENT_BUTTON_BACK;
+        /// Forward button
+        const Forward = input_bindgen::AMOTION_EVENT_BUTTON_FORWARD;
+        /// Primary stylus button
+        const StylusPrimary = input_bindgen::AMOTION_EVENT_BUTTON_STYLUS_PRIMARY;
+        /// Secondary stylus button
+        const StylusSecondary = input_bindgen::AMOTION_EVENT_BUTTON_STYLUS_SECONDARY;
+    }
+}
+
+bitflags! {
     /// MotionEvent flags.
     /// The source of truth for the flag definitions are the MotionEventFlag AIDL enum.
     /// The flag values are redefined here as a bitflags API.
-    #[derive(Debug)]
+    #[derive(Clone, Copy, Debug)]
     pub struct MotionFlags: u32 {
         /// FLAG_WINDOW_IS_OBSCURED
         const WINDOW_IS_OBSCURED = MotionEventFlag::WINDOW_IS_OBSCURED.0 as u32;
@@ -219,6 +255,9 @@ bitflags! {
                 MotionEventFlag::PRIVATE_FLAG_SUPPORTS_DIRECTIONAL_ORIENTATION.0 as u32;
         /// FLAG_IS_ACCESSIBILITY_EVENT
         const IS_ACCESSIBILITY_EVENT = MotionEventFlag::IS_ACCESSIBILITY_EVENT.0 as u32;
+        /// FLAG_INJECTED_FROM_ACCESSIBILITY_TOOL
+        const INJECTED_FROM_ACCESSIBILITY_TOOL =
+                MotionEventFlag::INJECTED_FROM_ACCESSIBILITY_TOOL.0 as u32;
         /// FLAG_TAINTED
         const TAINTED = MotionEventFlag::TAINTED.0 as u32;
         /// FLAG_TARGET_ACCESSIBILITY_FOCUS

@@ -61,6 +61,16 @@ public:
 
     /* Notifies that mouse cursor faded due to typing. */
     virtual void notifyMouseCursorFadedOnTyping() = 0;
+
+    /**
+     * Give accessibility a chance to filter motion event by pointer devices.
+     * The return values denotes the delta x and y after filtering it.
+     *
+     * This call happens on the input hot path and it is extremely performance sensitive.
+     * This also must not call back into native code.
+     */
+    virtual std::optional<vec2> filterPointerMotionForAccessibility(
+            const vec2& current, const vec2& delta, const ui::LogicalDisplayId& displayId) = 0;
 };
 
 } // namespace android

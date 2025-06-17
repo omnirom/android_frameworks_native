@@ -82,6 +82,11 @@ props {
     prop_name: "ro.surface_flinger.ignore_hdr_camera_layers"
   }
   prop {
+    api_name: "max_acquired_buffers"
+    type: Long
+    prop_name: "ro.surface_flinger.max_acquired_buffers"
+  }
+  prop {
     api_name: "max_frame_buffer_acquired_buffers"
     type: Long
     prop_name: "ro.surface_flinger.max_frame_buffer_acquired_buffers"

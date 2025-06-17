@@ -30,6 +30,8 @@ MODULE_LIBRARY_DEPS += \
 	trusty/user/base/lib/libstdc++-trusty \
 	trusty/user/base/lib/trusty-sys \
 
+MODULE_SRCDEPS := $(LIBBINDER_DIR)/include_rpc_unstable/binder_rpc_unstable.hpp
+
 MODULE_BINDGEN_SRC_HEADER := $(LOCAL_DIR)/BinderBindings.hpp
 
 MODULE_BINDGEN_FLAGS += \

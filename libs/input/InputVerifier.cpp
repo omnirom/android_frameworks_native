@@ -17,6 +17,7 @@
 #define LOG_TAG "InputVerifier"
 
 #include <android-base/logging.h>
+#include <com_android_input_flags.h>
 #include <input/InputVerifier.h>
 #include "input_cxx_bridge.rs.h"
 
@@ -26,17 +27,23 @@ using android::input::RustPointerProperties;
 
 using DeviceId = int32_t;
 
+namespace input_flags = com::android::input::flags;
+
 namespace android {
 
 // --- InputVerifier ---
 
 InputVerifier::InputVerifier(const std::string& name)
-      : mVerifier(android::input::verifier::create(rust::String::lossy(name))){};
+      : mVerifier(
+                android::input::verifier::create(rust::String::lossy(name),
+                                                 input_flags::enable_button_state_verification())) {
+}
 
 Result<void> InputVerifier::processMovement(DeviceId deviceId, int32_t source, int32_t action,
-                                            uint32_t pointerCount,
+                                            int32_t actionButton, uint32_t pointerCount,
                                             const PointerProperties* pointerProperties,
-                                            const PointerCoords* pointerCoords, int32_t flags) {
+                                            const PointerCoords* pointerCoords, int32_t flags,
+                                            int32_t buttonState) {
     std::vector<RustPointerProperties> rpp;
     for (size_t i = 0; i < pointerCount; i++) {
         rpp.emplace_back(RustPointerProperties{.id = pointerProperties[i].id});
@@ -44,7 +51,9 @@ Result<void> InputVerifier::processMovement(DeviceId deviceId, int32_t source, i
     rust::Slice<const RustPointerProperties> properties{rpp.data(), rpp.size()};
     rust::String errorMessage =
             android::input::verifier::process_movement(*mVerifier, deviceId, source, action,
-                                                       properties, static_cast<uint32_t>(flags));
+                                                       actionButton, properties,
+                                                       static_cast<uint32_t>(flags),
+                                                       static_cast<uint32_t>(buttonState));
     if (errorMessage.empty()) {
         return {};
     } else {

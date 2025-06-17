@@ -382,7 +382,7 @@ std::unique_ptr<ProcessSession> BinderRpc::createRpcTestSocketServerProcessEtc(
                 sockaddr_un addr_un{};
                 addr_un.sun_family = AF_UNIX;
                 strcpy(addr_un.sun_path, serverConfig.addr.c_str());
-                addr = *reinterpret_cast<sockaddr_storage*>(&addr_un);
+                std::memcpy(&addr, &addr_un, sizeof(sockaddr_un));
                 addrLen = sizeof(sockaddr_un);
 
                 status = session->setupPreconnectedClient({}, [=]() {
@@ -394,7 +394,7 @@ std::unique_ptr<ProcessSession> BinderRpc::createRpcTestSocketServerProcessEtc(
                 sockaddr_un addr_un{};
                 addr_un.sun_family = AF_UNIX;
                 strcpy(addr_un.sun_path, serverConfig.addr.c_str());
-                addr = *reinterpret_cast<sockaddr_storage*>(&addr_un);
+                std::memcpy(&addr, &addr_un, sizeof(sockaddr_un));
                 addrLen = sizeof(sockaddr_un);
 
                 status = session->setupUnixDomainClient(serverConfig.addr.c_str());
@@ -409,7 +409,7 @@ std::unique_ptr<ProcessSession> BinderRpc::createRpcTestSocketServerProcessEtc(
                         .svm_port = static_cast<unsigned int>(serverInfo.port),
                         .svm_cid = VMADDR_CID_LOCAL,
                 };
-                addr = *reinterpret_cast<sockaddr_storage*>(&addr_vm);
+                std::memcpy(&addr, &addr_vm, sizeof(sockaddr_vm));
                 addrLen = sizeof(sockaddr_vm);
 
                 status = session->setupVsockClient(VMADDR_CID_LOCAL, serverInfo.port);
@@ -420,7 +420,7 @@ std::unique_ptr<ProcessSession> BinderRpc::createRpcTestSocketServerProcessEtc(
                 addr_in.sin_family = AF_INET;
                 addr_in.sin_port = htons(serverInfo.port);
                 inet_aton(ip_addr.c_str(), &addr_in.sin_addr);
-                addr = *reinterpret_cast<sockaddr_storage*>(&addr_in);
+                std::memcpy(&addr, &addr_in, sizeof(sockaddr_in));
                 addrLen = sizeof(sockaddr_in);
 
                 status = session->setupInetClient(ip_addr.c_str(), serverInfo.port);
@@ -708,6 +708,35 @@ TEST_P(BinderRpc, OnewayCallExhaustion) {
     // any pending commands). We need to erase this session from the record
     // here, so that the destructor for our session won't check that this
     // session is valid, but we still want it to test the other session.
+    proc.proc->sessions.erase(proc.proc->sessions.begin() + 1);
+}
+
+// TODO(b/392717039): can we move this to universal tests?
+TEST_P(BinderRpc, SendTooLargeVector) {
+    if (GetParam().singleThreaded) {
+        GTEST_SKIP() << "Requires multi-threaded server to test one of the sessions crashing.";
+    }
+
+    auto proc = createRpcTestSocketServerProcess({.numSessions = 2});
+
+    // need a working transaction
+    EXPECT_EQ(OK, proc.rootBinder->pingBinder());
+
+    // see libbinder internal Constants.h
+    const size_t kTooLargeSize = 650 * 1024;
+    const std::vector<uint8_t> kTestValue(kTooLargeSize / sizeof(uint8_t), 42);
+
+    // TODO(b/392717039): Telling a server to allocate too much data currently causes the session to
+    // close since RpcServer treats any transaction error as a failure. We likely want to change
+    // this behavior to be a soft failure, since it isn't hard to keep track of this state.
+    sp<IBinderRpcTest> rootIface2 = interface_cast<IBinderRpcTest>(proc.proc->sessions.at(1).root);
+    std::vector<uint8_t> result;
+    status_t res = rootIface2->repeatBytes(kTestValue, &result).transactionError();
+
+    // TODO(b/392717039): consistent error results always
+    EXPECT_TRUE(res == -ECONNRESET || res == DEAD_OBJECT) << statusToString(res);
+
+    // died, so remove it for checks in destructor of proc
     proc.proc->sessions.erase(proc.proc->sessions.begin() + 1);
 }
 
@@ -1323,6 +1352,109 @@ TEST_P(BinderRpcAccessor, InjectNoSockaddrProvided) {
 
     sp<IBinder> binder = defaultServiceManager()->checkService(kInstanceName);
     EXPECT_EQ(binder, nullptr);
+
+    status_t status = removeAccessorProvider(receipt);
+    EXPECT_EQ(status, OK);
+}
+
+class BinderRpcAccessorNoConnection : public ::testing::Test {};
+
+TEST_F(BinderRpcAccessorNoConnection, listServices) {
+    const String16 kInstanceName("super.cool.service/better_than_default");
+    const String16 kInstanceName2("super.cool.service/better_than_default2");
+
+    auto receipt =
+            addAccessorProvider({String8(kInstanceName).c_str(), String8(kInstanceName2).c_str()},
+                                [&](const String16&) -> sp<IBinder> { return nullptr; });
+    EXPECT_FALSE(receipt.expired());
+    Vector<String16> list =
+            defaultServiceManager()->listServices(IServiceManager::DUMP_FLAG_PRIORITY_ALL);
+    bool name1 = false;
+    bool name2 = false;
+    for (auto name : list) {
+        if (name == kInstanceName) name1 = true;
+        if (name == kInstanceName2) name2 = true;
+    }
+    EXPECT_TRUE(name1);
+    EXPECT_TRUE(name2);
+    status_t status = removeAccessorProvider(receipt);
+    EXPECT_EQ(status, OK);
+}
+
+TEST_F(BinderRpcAccessorNoConnection, isDeclared) {
+    const String16 kInstanceName("super.cool.service/default");
+    const String16 kInstanceName2("still_counts_as_declared");
+
+    auto receipt =
+            addAccessorProvider({String8(kInstanceName).c_str(), String8(kInstanceName2).c_str()},
+                                [&](const String16&) -> sp<IBinder> { return nullptr; });
+    EXPECT_FALSE(receipt.expired());
+    EXPECT_TRUE(defaultServiceManager()->isDeclared(kInstanceName));
+    EXPECT_TRUE(defaultServiceManager()->isDeclared(kInstanceName2));
+    EXPECT_FALSE(defaultServiceManager()->isDeclared(String16("doesnt_exist")));
+    status_t status = removeAccessorProvider(receipt);
+    EXPECT_EQ(status, OK);
+}
+
+TEST_F(BinderRpcAccessorNoConnection, getDeclaredInstances) {
+    const String16 kInstanceName("super.cool.service.IFoo/default");
+    const String16 kInstanceName2("super.cool.service.IFoo/extra/default");
+    const String16 kInstanceName3("super.cool.service.IFoo");
+
+    auto receipt =
+            addAccessorProvider({String8(kInstanceName).c_str(), String8(kInstanceName2).c_str(),
+                                 String8(kInstanceName3).c_str()},
+                                [&](const String16&) -> sp<IBinder> { return nullptr; });
+    EXPECT_FALSE(receipt.expired());
+    Vector<String16> list =
+            defaultServiceManager()->getDeclaredInstances(String16("super.cool.service.IFoo"));
+    // We would prefer ASSERT_EQ here, but we must call removeAccessorProvider
+    EXPECT_EQ(list.size(), 3u);
+    if (list.size() == 3) {
+        bool name1 = false;
+        bool name2 = false;
+        bool name3 = false;
+        for (auto name : list) {
+            if (name == String16("default")) name1 = true;
+            if (name == String16("extra/default")) name2 = true;
+            if (name == String16()) name3 = true;
+        }
+        EXPECT_TRUE(name1) << String8(list[0]);
+        EXPECT_TRUE(name2) << String8(list[1]);
+        EXPECT_TRUE(name3) << String8(list[2]);
+    }
+
+    status_t status = removeAccessorProvider(receipt);
+    EXPECT_EQ(status, OK);
+}
+
+TEST_F(BinderRpcAccessorNoConnection, getDeclaredWrongInstances) {
+    const String16 kInstanceName("super.cool.service.IFoo");
+
+    auto receipt = addAccessorProvider({String8(kInstanceName).c_str()},
+                                       [&](const String16&) -> sp<IBinder> { return nullptr; });
+    EXPECT_FALSE(receipt.expired());
+    Vector<String16> list = defaultServiceManager()->getDeclaredInstances(String16("unknown"));
+    EXPECT_TRUE(list.empty());
+
+    status_t status = removeAccessorProvider(receipt);
+    EXPECT_EQ(status, OK);
+}
+
+TEST_F(BinderRpcAccessorNoConnection, getDeclaredInstancesSlash) {
+    // This is treated as if there were no '/' and the declared instance is ""
+    const String16 kInstanceName("super.cool.service.IFoo/");
+
+    auto receipt = addAccessorProvider({String8(kInstanceName).c_str()},
+                                       [&](const String16&) -> sp<IBinder> { return nullptr; });
+    EXPECT_FALSE(receipt.expired());
+    Vector<String16> list =
+            defaultServiceManager()->getDeclaredInstances(String16("super.cool.service.IFoo"));
+    bool name1 = false;
+    for (auto name : list) {
+        if (name == String16("")) name1 = true;
+    }
+    EXPECT_TRUE(name1);
 
     status_t status = removeAccessorProvider(receipt);
     EXPECT_EQ(status, OK);
@@ -2639,7 +2771,9 @@ INSTANTIATE_TEST_SUITE_P(
 
 int main(int argc, char** argv) {
     ::testing::InitGoogleTest(&argc, argv);
+#ifndef __ANDROID__
     __android_log_set_logger(__android_log_stderr_logger);
+#endif
 
     return RUN_ALL_TESTS();
 }

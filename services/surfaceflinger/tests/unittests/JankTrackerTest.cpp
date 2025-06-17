@@ -213,4 +213,33 @@ TEST_F(JankTrackerTest, listenerCountIsAccurateOnDuplicateRegistration) {
     EXPECT_EQ(listenerCount(), 0u);
 }
 
+TEST_F(JankTrackerTest, multipleLayersAreTrackedIndependently) {
+    size_t jankDataReceived = 0;
+    size_t numBatchesReceived = 0;
+
+    EXPECT_CALL(*mListener.get(), onJankData(_))
+            .WillRepeatedly([&](const std::vector<gui::JankData>& jankData) {
+                jankDataReceived += jankData.size();
+                numBatchesReceived++;
+                return binder::Status::ok();
+            });
+    addJankListener(123);
+    addJankListener(321);
+    addJankData(123, 1);
+    addJankData(123, 2);
+    addJankData(123, 3);
+    addJankData(321, 4);
+    addJankData(321, 5);
+
+    JankTracker::flushJankData(123);
+    flushBackgroundThread();
+    EXPECT_EQ(numBatchesReceived, 1u);
+    EXPECT_EQ(jankDataReceived, 3u);
+
+    JankTracker::flushJankData(321);
+    flushBackgroundThread();
+    EXPECT_EQ(numBatchesReceived, 2u);
+    EXPECT_EQ(jankDataReceived, 5u);
+}
+
 } // namespace android

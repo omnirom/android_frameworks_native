@@ -20,6 +20,8 @@
 #include <binder/IBinder.h>
 #include <string>
 
+class BinderStabilityIntegrationTest_ExpectedStabilityForItsPartition_Test;
+
 namespace android {
 
 class BpBinder;
@@ -127,6 +129,8 @@ private:
     // through Parcel)
     friend ::android::ProcessState;
 
+    friend ::BinderStabilityIntegrationTest_ExpectedStabilityForItsPartition_Test;
+
     static void tryMarkCompilationUnit(IBinder* binder);
 
     // Currently, we use int16_t for Level so that it can fit in BBinder.
@@ -156,11 +160,11 @@ private:
                                                                 uint32_t flags);
 
     // get stability information as encoded on the wire
-    static int16_t getRepr(IBinder* binder);
+    LIBBINDER_EXPORTED static int16_t getRepr(IBinder* binder);
 
     // whether a transaction on binder is allowed, if the transaction
     // is done from a context with a specific stability level
-    static bool check(int16_t provided, Level required);
+    LIBBINDER_EXPORTED static bool check(int16_t provided, Level required);
 
     static bool isDeclaredLevel(int32_t level);
     static std::string levelString(int32_t level);

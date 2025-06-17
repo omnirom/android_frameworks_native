@@ -28,11 +28,13 @@
 #include <optional>
 #include <queue>
 #include <string>
+#include <variant>
 #include <vector>
 
 #include <android-base/logging.h>
 #include <android-base/thread_annotations.h>
 #include <binder/IBinder.h>
+#include <dispatcher/Entry.h>
 #include <gui/PidUid.h>
 #include <gui/WindowInfo.h>
 #include <input/BlockingQueue.h>
@@ -94,10 +96,6 @@ public:
     void assertDropTargetEquals(const InputDispatcherInterface& dispatcher,
                                 const sp<IBinder>& targetToken);
     void assertNotifyInputChannelBrokenWasCalled(const sp<IBinder>& token);
-    /**
-     * Set policy timeout. A value of zero means next key will not be intercepted.
-     */
-    void setInterceptKeyTimeout(std::chrono::milliseconds timeout);
     std::chrono::nanoseconds getKeyWaitingForEventsTimeout() override;
     void setStaleEventTimeout(std::chrono::nanoseconds timeout);
     void assertUserActivityNotPoked();
@@ -114,7 +112,12 @@ public:
     void setUnhandledKeyHandler(std::function<std::optional<KeyEvent>(const KeyEvent&)> handler);
     void assertUnhandledKeyReported(int32_t keycode);
     void assertUnhandledKeyNotReported();
-    void setConsumeKeyBeforeDispatching(bool consumeKeyBeforeDispatching);
+    /**
+     * Set policy timeout or the interception result.
+     * A timeout value of zero means next key will not be intercepted.
+     */
+    void setInterceptKeyBeforeDispatchingResult(
+            std::variant<nsecs_t, inputdispatcher::KeyEntry::InterceptKeyResult> result);
     void assertFocusedDisplayNotified(ui::LogicalDisplayId expectedDisplay);
 
 private:
@@ -143,11 +146,10 @@ private:
     std::condition_variable mNotifyUserActivity;
     std::queue<UserActivityPokeEvent> mUserActivityPokeEvents;
 
-    std::chrono::milliseconds mInterceptKeyTimeout = 0ms;
-
     std::chrono::nanoseconds mStaleEventTimeout = 1000ms;
 
-    bool mConsumeKeyBeforeDispatching = false;
+    std::variant<nsecs_t, inputdispatcher::KeyEntry::InterceptKeyResult>
+            mInterceptKeyBeforeDispatchingResult;
 
     BlockingQueue<std::pair<int32_t /*deviceId*/, std::set<gui::Uid>>> mNotifiedInteractions;
 
@@ -189,7 +191,8 @@ private:
     void interceptKeyBeforeQueueing(const KeyEvent& inputEvent, uint32_t&) override;
     void interceptMotionBeforeQueueing(ui::LogicalDisplayId, uint32_t, int32_t, nsecs_t,
                                        uint32_t&) override;
-    nsecs_t interceptKeyBeforeDispatching(const sp<IBinder>&, const KeyEvent&, uint32_t) override;
+    std::variant<nsecs_t, inputdispatcher::KeyEntry::InterceptKeyResult>
+    interceptKeyBeforeDispatching(const sp<IBinder>&, const KeyEvent&, uint32_t) override;
     std::optional<KeyEvent> dispatchUnhandledKey(const sp<IBinder>&, const KeyEvent& event,
                                                  uint32_t) override;
     void notifySwitch(nsecs_t when, uint32_t switchValues, uint32_t switchMask,

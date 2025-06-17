@@ -143,7 +143,7 @@ TEST_F(SchedulerTest, registerDisplay) FTL_FAKE_GUARD(kMainThreadContext) {
                                                                       kDisplay1Mode60->getId()));
 
     // TODO(b/241285191): Restore once VsyncSchedule::getPendingHardwareVsyncState is called by
-    // Scheduler::setDisplayPowerMode rather than SF::setPowerModeInternal.
+    // Scheduler::setDisplayPowerMode rather than SF::setPhysicalDisplayPowerMode.
 #if 0
     // Hardware VSYNC should be disabled for newly registered displays.
     EXPECT_CALL(mSchedulerCallback, requestHardwareVsync(kDisplayId2, false)).Times(1);
@@ -254,18 +254,43 @@ TEST_F(SchedulerTest, emitModeChangeEvent) {
 }
 
 TEST_F(SchedulerTest, calculateMaxAcquiredBufferCount) {
-    EXPECT_EQ(1, mFlinger.calculateMaxAcquiredBufferCount(60_Hz, 30ms));
-    EXPECT_EQ(2, mFlinger.calculateMaxAcquiredBufferCount(90_Hz, 30ms));
-    EXPECT_EQ(3, mFlinger.calculateMaxAcquiredBufferCount(120_Hz, 30ms));
+    struct TestCase {
+        Fps refreshRate;
+        std::chrono::nanoseconds presentLatency;
+        int expectedBufferCount;
+    };
 
-    EXPECT_EQ(2, mFlinger.calculateMaxAcquiredBufferCount(60_Hz, 40ms));
+    const auto verifyTestCases = [&](std::vector<TestCase> tests) {
+        for (const auto testCase : tests) {
+            EXPECT_EQ(testCase.expectedBufferCount,
+                      mFlinger.calculateMaxAcquiredBufferCount(testCase.refreshRate,
+                                                               testCase.presentLatency));
+        }
+    };
 
-    EXPECT_EQ(1, mFlinger.calculateMaxAcquiredBufferCount(60_Hz, 10ms));
+    std::vector<TestCase> testCases{{60_Hz, 30ms, 1},
+                                    {90_Hz, 30ms, 2},
+                                    {120_Hz, 30ms, 3},
+                                    {60_Hz, 40ms, 2},
+                                    {60_Hz, 10ms, 1}};
+    verifyTestCases(testCases);
 
     const auto savedMinAcquiredBuffers = mFlinger.mutableMinAcquiredBuffers();
     mFlinger.mutableMinAcquiredBuffers() = 2;
-    EXPECT_EQ(2, mFlinger.calculateMaxAcquiredBufferCount(60_Hz, 10ms));
+    verifyTestCases({{60_Hz, 10ms, 2}});
     mFlinger.mutableMinAcquiredBuffers() = savedMinAcquiredBuffers;
+
+    const auto savedMaxAcquiredBuffers = mFlinger.mutableMaxAcquiredBuffers();
+    mFlinger.mutableMaxAcquiredBuffers() = 2;
+    testCases = {{60_Hz, 30ms, 1},
+                 {90_Hz, 30ms, 2},
+                 {120_Hz, 30ms, 2}, // max buffers allowed is 2
+                 {60_Hz, 40ms, 2},
+                 {60_Hz, 10ms, 1}};
+    verifyTestCases(testCases);
+    mFlinger.mutableMaxAcquiredBuffers() = 3; // max buffers allowed is 3
+    verifyTestCases({{120_Hz, 30ms, 3}});
+    mFlinger.mutableMaxAcquiredBuffers() = savedMaxAcquiredBuffers;
 }
 
 MATCHER(Is120Hz, "") {
@@ -716,34 +741,10 @@ TEST_F(SchedulerTest, resyncAllDoNotAllow) FTL_FAKE_GUARD(kMainThreadContext) {
 }
 
 TEST_F(SchedulerTest, resyncAllSkipsOffDisplays) FTL_FAKE_GUARD(kMainThreadContext) {
-    SET_FLAG_FOR_TEST(flags::multithreaded_present, true);
-
     // resyncAllToHardwareVsync will result in requesting hardware VSYNC on display 1, which is on,
     // but not on display 2, which is off.
     EXPECT_CALL(mScheduler->mockRequestHardwareVsync, Call(kDisplayId1, true)).Times(1);
     EXPECT_CALL(mScheduler->mockRequestHardwareVsync, Call(kDisplayId2, _)).Times(0);
-
-    mScheduler->setDisplayPowerMode(kDisplayId1, hal::PowerMode::ON);
-
-    mScheduler->registerDisplay(kDisplayId2,
-                                std::make_shared<RefreshRateSelector>(kDisplay2Modes,
-                                                                      kDisplay2Mode60->getId()));
-    ASSERT_EQ(hal::PowerMode::OFF, mScheduler->getDisplayPowerMode(kDisplayId2));
-
-    static constexpr bool kDisallow = true;
-    mScheduler->disableHardwareVsync(kDisplayId1, kDisallow);
-    mScheduler->disableHardwareVsync(kDisplayId2, kDisallow);
-
-    static constexpr bool kAllowToEnable = true;
-    mScheduler->resyncAllToHardwareVsync(kAllowToEnable);
-}
-
-TEST_F(SchedulerTest, resyncAllLegacyAppliesToOffDisplays) FTL_FAKE_GUARD(kMainThreadContext) {
-    SET_FLAG_FOR_TEST(flags::multithreaded_present, false);
-
-    // In the legacy code, prior to the flag, resync applied to OFF displays.
-    EXPECT_CALL(mScheduler->mockRequestHardwareVsync, Call(kDisplayId1, true)).Times(1);
-    EXPECT_CALL(mScheduler->mockRequestHardwareVsync, Call(kDisplayId2, true)).Times(1);
 
     mScheduler->setDisplayPowerMode(kDisplayId1, hal::PowerMode::ON);
 

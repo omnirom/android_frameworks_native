@@ -20,7 +20,7 @@
 #include "StatsHal.h"
 
 #include <log/log.h>
-#include <statslog.h>
+#include <statslog_hidl.h>
 
 namespace android {
 namespace frameworks {
@@ -32,24 +32,27 @@ StatsHal::StatsHal() {
 }
 
 hardware::Return<void> StatsHal::reportSpeakerImpedance(const SpeakerImpedance& speakerImpedance) {
-    android::util::stats_write(android::util::SPEAKER_IMPEDANCE_REPORTED,
-                               speakerImpedance.speakerLocation, speakerImpedance.milliOhms);
+    android::util::statshidl::stats_write(android::util::statshidl::SPEAKER_IMPEDANCE_REPORTED,
+                                          speakerImpedance.speakerLocation,
+                                          speakerImpedance.milliOhms);
 
     return hardware::Void();
 }
 
 hardware::Return<void> StatsHal::reportHardwareFailed(const HardwareFailed& hardwareFailed) {
-    android::util::stats_write(android::util::HARDWARE_FAILED, int32_t(hardwareFailed.hardwareType),
-                               hardwareFailed.hardwareLocation, int32_t(hardwareFailed.errorCode));
+    android::util::statshidl::stats_write(
+            android::util::statshidl::HARDWARE_FAILED, int32_t(hardwareFailed.hardwareType),
+            hardwareFailed.hardwareLocation, int32_t(hardwareFailed.errorCode));
 
     return hardware::Void();
 }
 
 hardware::Return<void> StatsHal::reportPhysicalDropDetected(
         const PhysicalDropDetected& physicalDropDetected) {
-    android::util::stats_write(
-            android::util::PHYSICAL_DROP_DETECTED, int32_t(physicalDropDetected.confidencePctg),
-            physicalDropDetected.accelPeak, physicalDropDetected.freefallDuration);
+    android::util::statshidl::stats_write(android::util::statshidl::PHYSICAL_DROP_DETECTED,
+                                          int32_t(physicalDropDetected.confidencePctg),
+                                          physicalDropDetected.accelPeak,
+                                          physicalDropDetected.freefallDuration);
 
     return hardware::Void();
 }
@@ -60,19 +63,19 @@ hardware::Return<void> StatsHal::reportChargeCycles(const ChargeCycles& chargeCy
     for (int i = 0; i < 10 - initialSize; i++) {
         buckets.push_back(0);  // Push 0 for buckets that do not exist.
     }
-    android::util::stats_write(android::util::CHARGE_CYCLES_REPORTED, buckets[0], buckets[1],
-                               buckets[2], buckets[3], buckets[4], buckets[5], buckets[6],
-                               buckets[7], buckets[8], buckets[9]);
+    android::util::statshidl::stats_write(
+            android::util::statshidl::CHARGE_CYCLES_REPORTED, buckets[0], buckets[1], buckets[2],
+            buckets[3], buckets[4], buckets[5], buckets[6], buckets[7], buckets[8], buckets[9]);
 
     return hardware::Void();
 }
 
 hardware::Return<void> StatsHal::reportBatteryHealthSnapshot(
         const BatteryHealthSnapshotArgs& batteryHealthSnapshotArgs) {
-    android::util::stats_write(
-            android::util::BATTERY_HEALTH_SNAPSHOT, int32_t(batteryHealthSnapshotArgs.type),
-            batteryHealthSnapshotArgs.temperatureDeciC, batteryHealthSnapshotArgs.voltageMicroV,
-            batteryHealthSnapshotArgs.currentMicroA,
+    android::util::statshidl::stats_write(
+            android::util::statshidl::BATTERY_HEALTH_SNAPSHOT,
+            int32_t(batteryHealthSnapshotArgs.type), batteryHealthSnapshotArgs.temperatureDeciC,
+            batteryHealthSnapshotArgs.voltageMicroV, batteryHealthSnapshotArgs.currentMicroA,
             batteryHealthSnapshotArgs.openCircuitVoltageMicroV,
             batteryHealthSnapshotArgs.resistanceMicroOhm, batteryHealthSnapshotArgs.levelPercent);
 
@@ -80,23 +83,24 @@ hardware::Return<void> StatsHal::reportBatteryHealthSnapshot(
 }
 
 hardware::Return<void> StatsHal::reportSlowIo(const SlowIo& slowIo) {
-    android::util::stats_write(android::util::SLOW_IO, int32_t(slowIo.operation), slowIo.count);
+    android::util::statshidl::stats_write(android::util::statshidl::SLOW_IO,
+                                          int32_t(slowIo.operation), slowIo.count);
 
     return hardware::Void();
 }
 
 hardware::Return<void> StatsHal::reportBatteryCausedShutdown(
         const BatteryCausedShutdown& batteryCausedShutdown) {
-    android::util::stats_write(android::util::BATTERY_CAUSED_SHUTDOWN,
-                               batteryCausedShutdown.voltageMicroV);
+    android::util::statshidl::stats_write(android::util::statshidl::BATTERY_CAUSED_SHUTDOWN,
+                                          batteryCausedShutdown.voltageMicroV);
 
     return hardware::Void();
 }
 
 hardware::Return<void> StatsHal::reportUsbPortOverheatEvent(
         const UsbPortOverheatEvent& usbPortOverheatEvent) {
-    android::util::stats_write(
-            android::util::USB_PORT_OVERHEAT_EVENT_REPORTED,
+    android::util::statshidl::stats_write(
+            android::util::statshidl::USB_PORT_OVERHEAT_EVENT_REPORTED,
             usbPortOverheatEvent.plugTemperatureDeciC, usbPortOverheatEvent.maxTemperatureDeciC,
             usbPortOverheatEvent.timeToOverheat, usbPortOverheatEvent.timeToHysteresis,
             usbPortOverheatEvent.timeToInactive);
@@ -105,9 +109,10 @@ hardware::Return<void> StatsHal::reportUsbPortOverheatEvent(
 }
 
 hardware::Return<void> StatsHal::reportSpeechDspStat(const SpeechDspStat& speechDspStat) {
-    android::util::stats_write(android::util::SPEECH_DSP_STAT_REPORTED,
-                               speechDspStat.totalUptimeMillis, speechDspStat.totalDowntimeMillis,
-                               speechDspStat.totalCrashCount, speechDspStat.totalRecoverCount);
+    android::util::statshidl::stats_write(
+            android::util::statshidl::SPEECH_DSP_STAT_REPORTED, speechDspStat.totalUptimeMillis,
+            speechDspStat.totalDowntimeMillis, speechDspStat.totalCrashCount,
+            speechDspStat.totalRecoverCount);
 
     return hardware::Void();
 }

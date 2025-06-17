@@ -34,6 +34,28 @@ constexpr size_t kValidTypes[] = {EV_SW,
                                   android::EventHubInterface::DEVICE_ADDED,
                                   android::EventHubInterface::DEVICE_REMOVED};
 
+static const android::InputDeviceClass kInputDeviceClasses[] = {
+        android::InputDeviceClass::KEYBOARD,
+        android::InputDeviceClass::ALPHAKEY,
+        android::InputDeviceClass::TOUCH,
+        android::InputDeviceClass::CURSOR,
+        android::InputDeviceClass::TOUCH_MT,
+        android::InputDeviceClass::DPAD,
+        android::InputDeviceClass::GAMEPAD,
+        android::InputDeviceClass::SWITCH,
+        android::InputDeviceClass::JOYSTICK,
+        android::InputDeviceClass::VIBRATOR,
+        android::InputDeviceClass::MIC,
+        android::InputDeviceClass::EXTERNAL_STYLUS,
+        android::InputDeviceClass::ROTARY_ENCODER,
+        android::InputDeviceClass::SENSOR,
+        android::InputDeviceClass::BATTERY,
+        android::InputDeviceClass::LIGHT,
+        android::InputDeviceClass::TOUCHPAD,
+        android::InputDeviceClass::VIRTUAL,
+        android::InputDeviceClass::EXTERNAL,
+};
+
 constexpr size_t kValidCodes[] = {
         SYN_REPORT,
         ABS_MT_SLOT,
@@ -105,7 +127,13 @@ public:
     void addProperty(std::string key, std::string value) { mFuzzConfig.addProperty(key, value); }
 
     ftl::Flags<InputDeviceClass> getDeviceClasses(int32_t deviceId) const override {
-        return ftl::Flags<InputDeviceClass>(mFdp->ConsumeIntegral<uint32_t>());
+        uint32_t flags = 0;
+        for (auto inputDeviceClass : kInputDeviceClasses) {
+            if (mFdp->ConsumeBool()) {
+                flags |= static_cast<uint32_t>(inputDeviceClass);
+            }
+        }
+        return ftl::Flags<InputDeviceClass>(flags);
     }
     InputDeviceIdentifier getDeviceIdentifier(int32_t deviceId) const override {
         return mIdentifier;
@@ -268,6 +296,7 @@ public:
     bool isDeviceEnabled(int32_t deviceId) const override { return mFdp->ConsumeBool(); }
     status_t enableDevice(int32_t deviceId) override { return mFdp->ConsumeIntegral<status_t>(); }
     status_t disableDevice(int32_t deviceId) override { return mFdp->ConsumeIntegral<status_t>(); }
+    std::filesystem::path getSysfsRootPath(int32_t deviceId) const override { return {}; }
     void sysfsNodeChanged(const std::string& sysfsNodePath) override {}
     bool setKernelWakeEnabled(int32_t deviceId, bool enabled) override {
         return mFdp->ConsumeBool();
@@ -332,6 +361,7 @@ public:
                            std::shared_ptr<ThreadSafeFuzzedDataProvider> fdp)
           : mEventHub(eventHub), mPolicy(sp<FuzzInputReaderPolicy>::make(fdp)), mFdp(fdp) {}
     ~FuzzInputReaderContext() {}
+    std::string dump() { return "(dump from FuzzInputReaderContext)"; }
     void updateGlobalMetaState() override {}
     int32_t getGlobalMetaState() { return mFdp->ConsumeIntegral<int32_t>(); }
     void disableVirtualKeysUntil(nsecs_t time) override {}
@@ -346,7 +376,7 @@ public:
     }
     InputReaderPolicyInterface* getPolicy() override { return mPolicy.get(); }
     EventHubInterface* getEventHub() override { return mEventHub.get(); }
-    int32_t getNextId() override { return mFdp->ConsumeIntegral<int32_t>(); }
+    int32_t getNextId() const override { return mFdp->ConsumeIntegral<int32_t>(); }
 
     void updateLedMetaState(int32_t metaState) override{};
     int32_t getLedMetaState() override { return mFdp->ConsumeIntegral<int32_t>(); };
@@ -367,8 +397,8 @@ private:
 template <class Fdp>
 InputDevice getFuzzedInputDevice(Fdp& fdp, FuzzInputReaderContext* context) {
     InputDeviceIdentifier identifier;
-    identifier.name = fdp.ConsumeRandomLengthString(16);
-    identifier.location = fdp.ConsumeRandomLengthString(12);
+    identifier.name = fdp.ConsumeRandomLengthUtf8String(16);
+    identifier.location = fdp.ConsumeRandomLengthUtf8String(12);
     int32_t deviceID = fdp.ConsumeIntegralInRange(0, 5);
     int32_t deviceGeneration = fdp.ConsumeIntegralInRange(0, 5);
     return InputDevice(context, deviceID, deviceGeneration, identifier);

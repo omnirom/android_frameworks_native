@@ -17,6 +17,8 @@
 #include <fuzzer/FuzzedDataProvider.h>
 #include <linux/input.h>
 
+#include <vector>
+
 #include "../../InputDeviceMetricsSource.h"
 #include "../InputEventTimeline.h"
 #include "NotifyArgsBuilders.h"
@@ -58,7 +60,8 @@ extern "C" int LLVMFuzzerTestOneInput(uint8_t* data, size_t size) {
     FuzzedDataProvider fdp(data, size);
 
     EmptyProcessor emptyProcessor;
-    LatencyTracker tracker(emptyProcessor);
+    std::vector<InputDeviceInfo> emptyDevices;
+    LatencyTracker tracker(emptyProcessor, emptyDevices);
 
     // Make some pre-defined tokens to ensure that some timelines are complete.
     std::array<sp<IBinder> /*token*/, 10> predefinedTokens;

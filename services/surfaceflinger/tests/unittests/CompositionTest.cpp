@@ -36,7 +36,6 @@
 #include <system/window.h>
 #include <utils/String8.h>
 
-#include "DisplayRenderArea.h"
 #include "Layer.h"
 #include "TestableSurfaceFlinger.h"
 #include "mock/DisplayHardware/MockComposer.h"
@@ -76,7 +75,8 @@ constexpr hal::HWDisplayId HWC_DISPLAY = FakeHwcDisplayInjector::DEFAULT_HWC_DIS
 constexpr hal::HWLayerId HWC_LAYER = 5000;
 constexpr Transform DEFAULT_TRANSFORM = static_cast<Transform>(0);
 
-constexpr PhysicalDisplayId DEFAULT_DISPLAY_ID = PhysicalDisplayId::fromPort(42u);
+constexpr uint8_t DEFAULT_DISPLAY_PORT = 42u;
+constexpr PhysicalDisplayId DEFAULT_DISPLAY_ID = PhysicalDisplayId::fromPort(DEFAULT_DISPLAY_PORT);
 constexpr int DEFAULT_DISPLAY_WIDTH = 1920;
 constexpr int DEFAULT_DISPLAY_HEIGHT = 1024;
 
@@ -198,25 +198,21 @@ void CompositionTest::captureScreenComposition() {
     const Rect sourceCrop(0, 0, DEFAULT_DISPLAY_WIDTH, DEFAULT_DISPLAY_HEIGHT);
     constexpr bool regionSampling = false;
 
-    auto renderArea =
-            DisplayRenderArea::create(mDisplay, sourceCrop, sourceCrop.getSize(),
-                                      ui::Dataspace::V0_SRGB,
-                                      RenderArea::Options::CAPTURE_SECURE_LAYERS |
-                                              RenderArea::Options::HINT_FOR_SEAMLESS_TRANSITION);
-
     auto getLayerSnapshotsFn = mFlinger.getLayerSnapshotsForScreenshotsFn(mDisplay->getLayerStack(),
                                                                           CaptureArgs::UNSET_UID);
 
     const uint32_t usage = GRALLOC_USAGE_SW_READ_OFTEN | GRALLOC_USAGE_SW_WRITE_OFTEN |
             GRALLOC_USAGE_HW_RENDER | GRALLOC_USAGE_HW_TEXTURE;
     mCaptureScreenBuffer =
-            std::make_shared<renderengine::mock::FakeExternalTexture>(renderArea->getReqWidth(),
-                                                                      renderArea->getReqHeight(),
+            std::make_shared<renderengine::mock::FakeExternalTexture>(sourceCrop.getSize().width,
+                                                                      sourceCrop.getSize().height,
                                                                       HAL_PIXEL_FORMAT_RGBA_8888, 1,
                                                                       usage);
 
-    auto future = mFlinger.renderScreenImpl(mDisplay, std::move(renderArea), getLayerSnapshotsFn,
-                                            mCaptureScreenBuffer, regionSampling);
+    auto future = mFlinger.renderScreenImpl(mDisplay, sourceCrop, ui::Dataspace::V0_SRGB,
+                                            getLayerSnapshotsFn, mCaptureScreenBuffer,
+                                            regionSampling, mDisplay->isSecure(),
+                                            /* seamlessTransition */ true);
     ASSERT_TRUE(future.valid());
     const auto fenceResult = future.get();
 
@@ -276,7 +272,8 @@ struct BaseDisplayVariant {
 
         test->mDisplay =
                 FakeDisplayDeviceInjector(test->mFlinger, compositionDisplay,
-                                          kDisplayConnectionType, HWC_DISPLAY, kIsPrimary)
+                                          kDisplayConnectionType, DEFAULT_DISPLAY_PORT, HWC_DISPLAY,
+                                          kIsPrimary)
                         .setDisplaySurface(test->mDisplaySurface)
                         .setNativeWindow(test->mNativeWindow)
                         .setSecure(Derived::IS_SECURE)
@@ -471,7 +468,7 @@ struct BaseLayerProperties {
         layer.externalTexture = buffer;
         layer.bufferData->acquireFence = Fence::NO_FENCE;
         layer.dataspace = ui::Dataspace::UNKNOWN;
-        layer.surfaceDamageRegion = Region(Rect(LayerProperties::HEIGHT, LayerProperties::WIDTH));
+        layer.setSurfaceDamageRegion(Region(Rect(LayerProperties::HEIGHT, LayerProperties::WIDTH)));
         Mock::VerifyAndClear(test->mRenderEngine);
     }
 

@@ -32,8 +32,14 @@ MODULE_LIBRARY_DEPS += \
 	trusty/user/base/lib/trusty-sys \
 
 MODULE_RUSTFLAGS += \
-	--cfg 'android_vendor' \
 	--cfg 'trusty' \
+
+ifeq (false,$(call TOBOOL,$(USE_SYSTEM_BINDER)))
+MODULE_RUSTFLAGS += \
+	--cfg 'android_vendor' \
+
+endif
+
 
 # Trusty does not have `ProcessState`, so there are a few
 # doc links in `IBinder` that are still broken.

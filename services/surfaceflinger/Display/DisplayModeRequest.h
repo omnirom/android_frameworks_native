@@ -26,7 +26,8 @@ namespace android::display {
 struct DisplayModeRequest {
     scheduler::FrameRateMode mode;
 
-    // Whether to emit DisplayEventReceiver::DISPLAY_EVENT_MODE_CHANGE.
+    // Whether to emit DisplayEventReceiver::DISPLAY_EVENT_MODE_CHANGE for a change in refresh rate
+    // or render rate. Ignored for resolution changes, which always emit the event.
     bool emitEvent = false;
 
     // Whether to force the request to be applied, even if the mode is unchanged.

@@ -58,7 +58,7 @@ public:
                                 const std::optional<std::vector<std::optional<LutProperties>>>
                                         properties = std::nullopt) override;
     void writeStateToHWC(bool includeGeometry, bool skipLayer, uint32_t z, bool zIsOverridden,
-                         bool isPeekingThrough) override;
+                         bool isPeekingThrough, bool hasLutsProperties) override;
     void writeCursorPositionToHWC() const override;
 
     HWC2::Layer* getHwcLayer() const override;
@@ -68,7 +68,7 @@ public:
             aidl::android::hardware::graphics::composer3::Composition) override;
     void prepareForDeviceLayerRequests() override;
     void applyDeviceLayerRequest(Hwc2::IComposerClient::LayerRequest request) override;
-    void applyDeviceLayerLut(ndk::ScopedFileDescriptor,
+    void applyDeviceLayerLut(::android::base::unique_fd,
                              std::vector<std::pair<int, LutProperties>>) override;
     bool needsFiltering() const override;
     std::optional<LayerFE::LayerSettings> getOverrideCompositionSettings() const override;

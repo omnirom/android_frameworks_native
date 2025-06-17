@@ -43,8 +43,9 @@ public:
     using InputReader::loopOnce;
 
 protected:
-    virtual std::shared_ptr<InputDevice> createDeviceLocked(
-            nsecs_t when, int32_t eventHubId, const InputDeviceIdentifier& identifier);
+    virtual std::shared_ptr<InputDevice> createDeviceLocked(nsecs_t when, int32_t eventHubId,
+                                                            const InputDeviceIdentifier& identifier,
+                                                            ftl::Flags<InputDeviceClass> classes);
 
     class FakeInputReaderContext : public ContextImpl {
     public:

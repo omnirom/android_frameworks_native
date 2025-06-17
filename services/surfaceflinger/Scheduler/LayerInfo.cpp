@@ -504,7 +504,7 @@ FrameRateCompatibility LayerInfo::FrameRate::convertCompatibility(int8_t compati
             return FrameRateCompatibility::Exact;
         case ANATIVEWINDOW_FRAME_RATE_MIN:
             return FrameRateCompatibility::Min;
-        case ANATIVEWINDOW_FRAME_RATE_COMPATIBILITY_GTE:
+        case ANATIVEWINDOW_FRAME_RATE_COMPATIBILITY_AT_LEAST:
             return FrameRateCompatibility::Gte;
         case ANATIVEWINDOW_FRAME_RATE_NO_VOTE:
             return FrameRateCompatibility::NoVote;

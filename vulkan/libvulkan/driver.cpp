@@ -50,22 +50,6 @@ using namespace com::android::graphics::libvulkan;
 
 extern "C" android_namespace_t* android_get_exported_namespace(const char*);
 
-// #define ENABLE_ALLOC_CALLSTACKS 1
-#if ENABLE_ALLOC_CALLSTACKS
-#include <utils/CallStack.h>
-#define ALOGD_CALLSTACK(...)                             \
-    do {                                                 \
-        ALOGD(__VA_ARGS__);                              \
-        android::CallStack callstack;                    \
-        callstack.update();                              \
-        callstack.log(LOG_TAG, ANDROID_LOG_DEBUG, "  "); \
-    } while (false)
-#else
-#define ALOGD_CALLSTACK(...) \
-    do {                     \
-    } while (false)
-#endif
-
 namespace vulkan {
 namespace driver {
 
@@ -455,6 +439,19 @@ VkResult CreateInfoWrapper::SanitizeApiVersion() {
     if (!is_instance_ || !instance_info_.pApplicationInfo)
         return VK_SUCCESS;
 
+    // certain 1.3 icds in the wild may misbehave if the app requests
+    // the 1.4 instance api. since there are no actual instance api
+    // differences between these versions, downgrade the instance api
+    // to 1.3 for such icds.
+    if (icd_api_version_ >= VK_API_VERSION_1_3 &&
+            icd_api_version_ < VK_API_VERSION_1_4 &&
+            instance_info_.pApplicationInfo->apiVersion >= VK_API_VERSION_1_4) {
+        application_info_ = *instance_info_.pApplicationInfo;
+        application_info_.apiVersion = icd_api_version_;
+        instance_info_.pApplicationInfo = &application_info_;
+        return VK_SUCCESS;
+    }
+
     if (icd_api_version_ > VK_API_VERSION_1_0 ||
         instance_info_.pApplicationInfo->apiVersion < VK_API_VERSION_1_1)
         return VK_SUCCESS;
@@ -829,54 +826,6 @@ void CreateInfoWrapper::FilterExtension(const char* name) {
     }
 }
 
-VKAPI_ATTR void* DefaultAllocate(void*,
-                                 size_t size,
-                                 size_t alignment,
-                                 VkSystemAllocationScope) {
-    void* ptr = nullptr;
-    // Vulkan requires 'alignment' to be a power of two, but posix_memalign
-    // additionally requires that it be at least sizeof(void*).
-    int ret = posix_memalign(&ptr, std::max(alignment, sizeof(void*)), size);
-    ALOGD_CALLSTACK("Allocate: size=%zu align=%zu => (%d) %p", size, alignment,
-                    ret, ptr);
-    return ret == 0 ? ptr : nullptr;
-}
-
-VKAPI_ATTR void* DefaultReallocate(void*,
-                                   void* ptr,
-                                   size_t size,
-                                   size_t alignment,
-                                   VkSystemAllocationScope) {
-    if (size == 0) {
-        free(ptr);
-        return nullptr;
-    }
-
-    // TODO(b/143295633): Right now we never shrink allocations; if the new
-    // request is smaller than the existing chunk, we just continue using it.
-    // Right now the loader never reallocs, so this doesn't matter. If that
-    // changes, or if this code is copied into some other project, this should
-    // probably have a heuristic to allocate-copy-free when doing so will save
-    // "enough" space.
-    size_t old_size = ptr ? malloc_usable_size(ptr) : 0;
-    if (size <= old_size)
-        return ptr;
-
-    void* new_ptr = nullptr;
-    if (posix_memalign(&new_ptr, std::max(alignment, sizeof(void*)), size) != 0)
-        return nullptr;
-    if (ptr) {
-        memcpy(new_ptr, ptr, std::min(old_size, size));
-        free(ptr);
-    }
-    return new_ptr;
-}
-
-VKAPI_ATTR void DefaultFree(void*, void* ptr) {
-    ALOGD_CALLSTACK("Free: %p", ptr);
-    free(ptr);
-}
-
 InstanceData* AllocateInstanceData(const VkAllocationCallbacks& allocator) {
     void* data_mem = allocator.pfnAllocation(
         allocator.pUserData, sizeof(InstanceData), alignof(InstanceData),
@@ -914,17 +863,6 @@ void FreeDeviceData(DeviceData* data, const VkAllocationCallbacks& allocator) {
 
 bool OpenHAL() {
     return Hal::Open();
-}
-
-const VkAllocationCallbacks& GetDefaultAllocator() {
-    static const VkAllocationCallbacks kDefaultAllocCallbacks = {
-        .pUserData = nullptr,
-        .pfnAllocation = DefaultAllocate,
-        .pfnReallocation = DefaultReallocate,
-        .pfnFree = DefaultFree,
-    };
-
-    return kDefaultAllocCallbacks;
 }
 
 PFN_vkVoidFunction GetInstanceProcAddr(VkInstance instance, const char* pName) {

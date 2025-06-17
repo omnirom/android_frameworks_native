@@ -43,8 +43,9 @@ interface IInputConstants
     const int INVALID_INPUT_DEVICE_ID = -2;
 
     /**
-     * The input event was injected from accessibility. Used in policyFlags for input event
-     * injection.
+     * The input event was injected from some AccessibilityService, which may be either an
+     * Accessibility Tool OR a service using that API for purposes other than assisting users with
+     * disabilities. Used in policyFlags for input event injection.
      */
     const int POLICY_FLAG_INJECTED_FROM_ACCESSIBILITY = 0x20000;
 
@@ -55,16 +56,31 @@ interface IInputConstants
     const int POLICY_FLAG_KEY_GESTURE_TRIGGERED = 0x40000;
 
     /**
+     * The input event was injected from an AccessibilityService with the
+     * AccessibilityServiceInfo#isAccessibilityTool property set to true. These services (known as
+     * "Accessibility Tools") are used to assist users with disabilities, so events from these
+     * services should be able to reach all Views including Views which set
+     * View#isAccessibilityDataSensitive to true. Used in policyFlags for input event injection.
+     */
+    const int POLICY_FLAG_INJECTED_FROM_ACCESSIBILITY_TOOL = 0x80000;
+
+    /**
      * Common input event flag used for both motion and key events for a gesture or pointer being
      * canceled.
      */
     const int INPUT_EVENT_FLAG_CANCELED = 0x20;
 
     /**
-     * Common input event flag used for both motion and key events, indicating that the event
-     * was generated or modified by accessibility service.
+     * Input event flag used for both motion and key events.
+     * See POLICY_FLAG_INJECTED_FROM_ACCESSIBILITY for more information.
      */
     const int INPUT_EVENT_FLAG_IS_ACCESSIBILITY_EVENT = 0x800;
+
+    /**
+     * Input event flag used for motion events.
+     * See POLICY_FLAG_INJECTED_FROM_ACCESSIBILITY_TOOL for more information.
+     */
+    const int INPUT_EVENT_FLAG_INJECTED_FROM_ACCESSIBILITY_TOOL = 0x1000;
 
     /**
      * Common input event flag used for both motion and key events, indicating that the system has
@@ -75,6 +91,9 @@ interface IInputConstants
 
     /* The default pointer acceleration value. */
     const int DEFAULT_POINTER_ACCELERATION = 3;
+
+    /* The default mouse wheel acceleration value. */
+    const int DEFAULT_MOUSE_WHEEL_ACCELERATION = 4;
 
     /**
      * Use the default Velocity Tracker Strategy. Different axes may use different default

@@ -272,7 +272,7 @@ Return<void> B2HGraphicBufferProducer::connect(
         HConnectionType hConnectionType,
         bool producerControlledByApp,
         connect_cb _hidl_cb) {
-    sp<BProducerListener> bListener = new H2BProducerListener(hListener);
+    sp<BProducerListener> bListener = sp<H2BProducerListener>::make(hListener);
     int bConnectionType{};
     if (!bListener || !h2b(hConnectionType, &bConnectionType)) {
         _hidl_cb(HStatus::UNKNOWN_ERROR, QueueBufferOutput{});

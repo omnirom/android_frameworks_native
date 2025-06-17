@@ -727,7 +727,7 @@ std::vector<NotifyMotionArgs> PalmRejector::processMotion(const NotifyMotionArgs
     if (!std::includes(oldSuppressedIds.begin(), oldSuppressedIds.end(),
                        mSuppressedPointerIds.begin(), mSuppressedPointerIds.end())) {
         ALOGI("Palm detected, removing pointer ids %s after %" PRId64 "ms from %s",
-              dumpSet(mSuppressedPointerIds).c_str(), ns2ms(args.eventTime - args.downTime),
+              dumpContainer(mSuppressedPointerIds).c_str(), ns2ms(args.eventTime - args.downTime),
               args.dump().c_str());
     }
 
@@ -748,7 +748,7 @@ std::string PalmRejector::dump() const {
     out += "mSlotState:\n";
     out += addLinePrefix(mSlotState.dump(), "  ");
     out += "mSuppressedPointerIds: ";
-    out += dumpSet(mSuppressedPointerIds) + "\n";
+    out += dumpContainer(mSuppressedPointerIds) + "\n";
     std::stringstream state;
     state << *mSharedPalmState;
     out += "mSharedPalmState: " + state.str() + "\n";

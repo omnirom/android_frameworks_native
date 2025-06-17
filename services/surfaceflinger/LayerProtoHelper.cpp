@@ -278,10 +278,9 @@ LayerProtoFromSnapshotGenerator& LayerProtoFromSnapshotGenerator::with(
             stackIdsToSkip.find(child->getLayer()->layerStack.id) != stackIdsToSkip.end()) {
             continue;
         }
-        frontend::LayerHierarchy::ScopedAddToTraversalPath addChildToPath(path,
-                                                                          child->getLayer()->id,
-                                                                          variant);
-        LayerProtoFromSnapshotGenerator::writeHierarchyToProto(*child, path);
+        LayerProtoFromSnapshotGenerator::writeHierarchyToProto(*child,
+                                                               path.makeChild(child->getLayer()->id,
+                                                                              variant));
     }
 
     // fill in relative and parent info
@@ -338,7 +337,8 @@ LayerProtoFromSnapshotGenerator& LayerProtoFromSnapshotGenerator::withOffscreenL
 }
 
 frontend::LayerSnapshot* LayerProtoFromSnapshotGenerator::getSnapshot(
-        frontend::LayerHierarchy::TraversalPath& path, const frontend::RequestedLayerState& layer) {
+        const frontend::LayerHierarchy::TraversalPath& path,
+        const frontend::RequestedLayerState& layer) {
     frontend::LayerSnapshot* snapshot = mSnapshotBuilder.getSnapshot(path);
     if (snapshot) {
         return snapshot;
@@ -349,7 +349,7 @@ frontend::LayerSnapshot* LayerProtoFromSnapshotGenerator::getSnapshot(
 }
 
 void LayerProtoFromSnapshotGenerator::writeHierarchyToProto(
-        const frontend::LayerHierarchy& root, frontend::LayerHierarchy::TraversalPath& path) {
+        const frontend::LayerHierarchy& root, const frontend::LayerHierarchy::TraversalPath& path) {
     using Variant = frontend::LayerHierarchy::Variant;
     perfetto::protos::LayerProto* layerProto = mLayersProto.add_layers();
     const frontend::RequestedLayerState& layer = *root.getLayer();
@@ -362,10 +362,8 @@ void LayerProtoFromSnapshotGenerator::writeHierarchyToProto(
     LayerProtoHelper::writeSnapshotToProto(layerProto, layer, *snapshot, mTraceFlags);
 
     for (const auto& [child, variant] : root.mChildren) {
-        frontend::LayerHierarchy::ScopedAddToTraversalPath addChildToPath(path,
-                                                                          child->getLayer()->id,
-                                                                          variant);
-        frontend::LayerSnapshot* childSnapshot = getSnapshot(path, layer);
+        frontend::LayerSnapshot* childSnapshot =
+                getSnapshot(path.makeChild(child->getLayer()->id, variant), layer);
         if (variant == Variant::Attached || variant == Variant::Detached ||
             frontend::LayerHierarchy::isMirror(variant)) {
             mChildToParent[childSnapshot->uniqueSequence] = snapshot->uniqueSequence;
@@ -388,10 +386,7 @@ void LayerProtoFromSnapshotGenerator::writeHierarchyToProto(
         if (variant == Variant::Detached) {
             continue;
         }
-        frontend::LayerHierarchy::ScopedAddToTraversalPath addChildToPath(path,
-                                                                          child->getLayer()->id,
-                                                                          variant);
-        writeHierarchyToProto(*child, path);
+        writeHierarchyToProto(*child, path.makeChild(child->getLayer()->id, variant));
     }
 }
 
@@ -447,7 +442,7 @@ void LayerProtoHelper::writeSnapshotToProto(perfetto::protos::LayerProto* layerI
     }
     layerInfo->set_type("Layer");
 
-    LayerProtoHelper::writeToProto(requestedState.transparentRegion,
+    LayerProtoHelper::writeToProto(requestedState.getTransparentRegion(),
                                    [&]() { return layerInfo->mutable_transparent_region(); });
 
     layerInfo->set_layer_stack(snapshot.outputFilter.layerStack.id);

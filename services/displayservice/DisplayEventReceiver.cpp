@@ -22,6 +22,7 @@
 #include <android/frameworks/displayservice/1.0/BpHwEventCallback.h>
 
 #include <thread>
+#include <ftl/enum.h>
 
 namespace android {
 namespace frameworks {
@@ -97,11 +98,11 @@ int DisplayEventReceiver::AttachedEvent::handleEvent(int fd, int events, void* /
         for (size_t i = 0; i < static_cast<size_t>(n); ++i) {
             const FwkReceiver::Event &event = buf[i];
 
-            uint32_t type = event.header.type;
+            android::DisplayEventType type = event.header.type;
             uint64_t timestamp = event.header.timestamp;
 
             switch(buf[i].header.type) {
-                case FwkReceiver::DISPLAY_EVENT_VSYNC: {
+                case DisplayEventType::DISPLAY_EVENT_VSYNC: {
                     auto ret = mCallback->onVsync(timestamp, event.vsync.count);
                     if (!ret.isOk()) {
                         LOG(ERROR) << "AttachedEvent handleEvent fails on onVsync callback"
@@ -109,7 +110,7 @@ int DisplayEventReceiver::AttachedEvent::handleEvent(int fd, int events, void* /
                         return 0;  // remove the callback
                     }
                 } break;
-                case FwkReceiver::DISPLAY_EVENT_HOTPLUG: {
+                case DisplayEventType::DISPLAY_EVENT_HOTPLUG: {
                     auto ret = mCallback->onHotplug(timestamp, event.hotplug.connected);
                     if (!ret.isOk()) {
                         LOG(ERROR) << "AttachedEvent handleEvent fails on onHotplug callback"
@@ -118,7 +119,8 @@ int DisplayEventReceiver::AttachedEvent::handleEvent(int fd, int events, void* /
                     }
                 } break;
                 default: {
-                    LOG(ERROR) << "AttachedEvent handleEvent unknown type: " << type;
+                    LOG(ERROR) << "AttachedEvent handleEvent unknown type: "
+                                << ftl::to_underlying(type);
                 }
             }
         }

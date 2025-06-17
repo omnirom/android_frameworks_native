@@ -483,6 +483,16 @@ prop {
     prop_name: "ro.surface_flinger.min_acquired_buffers"
 }
 
+# Defines the maximum acquired buffers SurfaceFlinger will suggest via
+# ISurfaceComposer.getMaxAcquiredBufferCount().
+prop {
+    api_name: "max_acquired_buffers"
+    type: Long
+    scope: Public
+    access: Readonly
+    prop_name: "ro.surface_flinger.max_acquired_buffers"
+}
+
 # When enabled, SurfaceFlinger will attempt to clear the per-layer HAL buffer cache slots for
 # buffers when they are evicted from the app cache by using additional setLayerBuffer commands.
 # Ideally, this behavior would always be enabled to reduce graphics memory consumption. However,

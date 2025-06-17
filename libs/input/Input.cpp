@@ -284,6 +284,36 @@ bool isStylusEvent(uint32_t source, const std::vector<PointerProperties>& proper
     return false;
 }
 
+bool isStylusHoverEvent(uint32_t source, const std::vector<PointerProperties>& properties,
+                        int32_t action) {
+    return isStylusEvent(source, properties) && isHoverAction(action);
+}
+
+bool isFromMouse(uint32_t source, ToolType toolType) {
+    return isFromSource(source, AINPUT_SOURCE_MOUSE) && toolType == ToolType::MOUSE;
+}
+
+bool isFromTouchpad(uint32_t source, ToolType toolType) {
+    return isFromSource(source, AINPUT_SOURCE_MOUSE) && toolType == ToolType::FINGER;
+}
+
+bool isFromDrawingTablet(uint32_t source, ToolType toolType) {
+    return isFromSource(source, AINPUT_SOURCE_MOUSE | AINPUT_SOURCE_STYLUS) &&
+            isStylusToolType(toolType);
+}
+
+bool isHoverAction(int32_t action) {
+    return action == AMOTION_EVENT_ACTION_HOVER_ENTER ||
+            action == AMOTION_EVENT_ACTION_HOVER_MOVE || action == AMOTION_EVENT_ACTION_HOVER_EXIT;
+}
+
+bool isMouseOrTouchpad(uint32_t sources) {
+    // Check if this is a mouse or touchpad, but not a drawing tablet.
+    return isFromSource(sources, AINPUT_SOURCE_MOUSE_RELATIVE) ||
+            (isFromSource(sources, AINPUT_SOURCE_MOUSE) &&
+             !isFromSource(sources, AINPUT_SOURCE_STYLUS));
+}
+
 VerifiedKeyEvent verifiedKeyEventFromKeyEvent(const KeyEvent& event) {
     return {{VerifiedInputEvent::Type::KEY, event.getDeviceId(), event.getEventTime(),
              event.getSource(), event.getDisplayId()},

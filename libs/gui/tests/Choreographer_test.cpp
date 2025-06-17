@@ -50,7 +50,7 @@ static void vsyncCallback(const AChoreographerFrameCallbackData* callbackData, v
 
 TEST_F(ChoreographerTest, InputCallbackBeforeAnimation) {
     sp<Looper> looper = Looper::prepare(0);
-    Choreographer* choreographer = Choreographer::getForThread();
+    sp<Choreographer> choreographer = Choreographer::getForThread();
     VsyncCallback animationCb;
     choreographer->postFrameCallbackDelayed(nullptr, nullptr, vsyncCallback, &animationCb, 0,
                                             CALLBACK_ANIMATION);

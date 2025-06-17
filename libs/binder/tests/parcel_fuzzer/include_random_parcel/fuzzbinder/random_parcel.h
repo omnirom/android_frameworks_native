@@ -28,6 +28,9 @@ struct RandomParcelOptions {
     std::function<void(Parcel* p, FuzzedDataProvider& provider)> writeHeader;
     std::vector<sp<IBinder>> extraBinders;
     std::vector<binder::unique_fd> extraFds;
+
+    // internal state owned by fillRandomParcel, for Parcel views
+    std::vector<std::unique_ptr<Parcel>> extraParcels;
 };
 
 /**

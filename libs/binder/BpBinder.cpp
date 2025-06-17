@@ -28,6 +28,7 @@
 #include <stdio.h>
 
 #include "BuildFlags.h"
+#include "Constants.h"
 #include "file.h"
 
 //#undef ALOGV
@@ -63,9 +64,6 @@ std::atomic<uint32_t> BpBinder::sBinderProxyCountWarned(0);
 
 static constexpr uint32_t kBinderProxyCountWarnInterval = 5000;
 
-// Log any transactions for which the data exceeds this size
-#define LOG_TRANSACTIONS_OVER_SIZE (300 * 1024)
-
 enum {
     LIMIT_REACHED_MASK = 0x80000000,        // A flag denoting that the limit has been reached
     WARNING_REACHED_MASK = 0x40000000,      // A flag denoting that the warning has been reached
@@ -78,7 +76,16 @@ BpBinder::ObjectManager::ObjectManager()
 
 BpBinder::ObjectManager::~ObjectManager()
 {
-    kill();
+    const size_t N = mObjects.size();
+    ALOGV("Killing %zu objects in manager %p", N, this);
+    for (auto i : mObjects) {
+        const entry_t& e = i.second;
+        if (e.func != nullptr) {
+            e.func(i.first, e.object, e.cleanupCookie);
+        }
+    }
+
+    mObjects.clear();
 }
 
 void* BpBinder::ObjectManager::attach(const void* objectID, void* object, void* cleanupCookie,
@@ -142,20 +149,6 @@ sp<IBinder> BpBinder::ObjectManager::lookupOrCreateWeak(const void* objectID, ob
     e.func = cleanWeak;
 
     return newObj;
-}
-
-void BpBinder::ObjectManager::kill()
-{
-    const size_t N = mObjects.size();
-    ALOGV("Killing %zu objects in manager %p", N, this);
-    for (auto i : mObjects) {
-        const entry_t& e = i.second;
-        if (e.func != nullptr) {
-            e.func(i.first, e.object, e.cleanupCookie);
-        }
-    }
-
-    mObjects.clear();
 }
 
 // ---------------------------------------------------------------------------
@@ -408,9 +401,11 @@ status_t BpBinder::transact(
 
             status = IPCThreadState::self()->transact(binderHandle(), code, data, reply, flags);
         }
-        if (data.dataSize() > LOG_TRANSACTIONS_OVER_SIZE) {
+
+        if (data.dataSize() > binder::kLogTransactionsOverBytes) {
             RpcMutexUniqueLock _l(mLock);
-            ALOGW("Large outgoing transaction of %zu bytes, interface descriptor %s, code %d",
+            ALOGW("Large outgoing transaction of %zu bytes, interface descriptor %s, code %d was "
+                  "sent",
                   data.dataSize(), String8(mDescriptorCache).c_str(), code);
         }
 
@@ -697,19 +692,19 @@ void BpBinder::reportOneDeath(const Obituary& obit)
 void* BpBinder::attachObject(const void* objectID, void* object, void* cleanupCookie,
                              object_cleanup_func func) {
     RpcMutexUniqueLock _l(mLock);
-    ALOGV("Attaching object %p to binder %p (manager=%p)", object, this, &mObjects);
-    return mObjects.attach(objectID, object, cleanupCookie, func);
+    ALOGV("Attaching object %p to binder %p (manager=%p)", object, this, &mObjectMgr);
+    return mObjectMgr.attach(objectID, object, cleanupCookie, func);
 }
 
 void* BpBinder::findObject(const void* objectID) const
 {
     RpcMutexUniqueLock _l(mLock);
-    return mObjects.find(objectID);
+    return mObjectMgr.find(objectID);
 }
 
 void* BpBinder::detachObject(const void* objectID) {
     RpcMutexUniqueLock _l(mLock);
-    return mObjects.detach(objectID);
+    return mObjectMgr.detach(objectID);
 }
 
 void BpBinder::withLock(const std::function<void()>& doWithLock) {
@@ -720,7 +715,7 @@ void BpBinder::withLock(const std::function<void()>& doWithLock) {
 sp<IBinder> BpBinder::lookupOrCreateWeak(const void* objectID, object_make_func make,
                                          const void* makeArgs) {
     RpcMutexUniqueLock _l(mLock);
-    return mObjects.lookupOrCreateWeak(objectID, make, makeArgs);
+    return mObjectMgr.lookupOrCreateWeak(objectID, make, makeArgs);
 }
 
 BpBinder* BpBinder::remoteBinder()

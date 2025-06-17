@@ -35,6 +35,24 @@ public:
     {
     }
 
+    virtual sp<media::IAudioManagerNative> getNativeInterface() {
+        Parcel data, reply;
+        data.writeInterfaceToken(IAudioManager::getInterfaceDescriptor());
+        const status_t res = remote()->transact(GET_NATIVE_INTERFACE, data, &reply, 0);
+        if (res == DEAD_OBJECT) return nullptr;
+        LOG_ALWAYS_FATAL_IF(res != OK, "%s failed with result %d", __func__, res);
+        const int ex = reply.readExceptionCode();
+        LOG_ALWAYS_FATAL_IF(ex != binder::Status::EX_NONE, "%s failed with exception %d",
+                            __func__,
+                            ex);
+        sp<IBinder> binder;
+        const status_t err = reply.readNullableStrongBinder(&binder);
+        LOG_ALWAYS_FATAL_IF(binder == nullptr, "%s failed unexpected nullptr %d", __func__, err);
+        const auto iface = checked_interface_cast<media::IAudioManagerNative>(binder);
+        LOG_ALWAYS_FATAL_IF(iface == nullptr, "%s failed unexpected interface", __func__);
+        return iface;
+    }
+
     virtual audio_unique_id_t trackPlayer(player_type_t playerType, audio_usage_t usage,
             audio_content_type_t content, const sp<IBinder>& player, audio_session_t sessionId) {
         Parcel data, reply;

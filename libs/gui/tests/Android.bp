@@ -51,10 +51,6 @@ cc_test {
         "-Werror",
         "-Wextra",
         "-Wthread-safety",
-        "-DCOM_ANDROID_GRAPHICS_LIBGUI_FLAGS_BQ_SETFRAMERATE=true",
-        "-DCOM_ANDROID_GRAPHICS_LIBGUI_FLAGS_BQ_EXTENDEDALLOCATE=true",
-        "-DCOM_ANDROID_GRAPHICS_LIBGUI_FLAGS_WB_CONSUMER_BASE_OWNS_BQ=true",
-        "-DCOM_ANDROID_GRAPHICS_LIBGUI_FLAGS_WB_PLATFORM_API_IMPROVEMENTS=true",
     ],
 
     srcs: [
@@ -89,6 +85,7 @@ cc_test {
         "testserver/TestServerClient.cpp",
         "testserver/TestServerHost.cpp",
         "TextureRenderer.cpp",
+        "TransactionState_test.cpp",
         "VsyncEventData_test.cpp",
         "WindowInfo_test.cpp",
     ],
@@ -98,6 +95,7 @@ cc_test {
         "android.hardware.configstore-utils",
         "libSurfaceFlingerProp",
         "libGLESv1_CM",
+        "libgui",
         "libgui_test_server_aidl-cpp",
         "libinput",
         "libnativedisplay",

@@ -789,7 +789,7 @@ TEST_F(SafeInterfaceTest, TestCallMeBack) {
         std::optional<int32_t> waitForCallback() {
             std::unique_lock<decltype(mMutex)> lock(mMutex);
             bool success =
-                    mCondition.wait_for(lock, 100ms, [&]() { return static_cast<bool>(mValue); });
+                    mCondition.wait_for(lock, 1000ms, [&]() { return static_cast<bool>(mValue); });
             return success ? mValue : std::nullopt;
         }
 
@@ -858,7 +858,13 @@ TEST_F(SafeInterfaceTest, TestIncrementTwo) {
     ASSERT_EQ(b + 1, bPlusOne);
 }
 
-extern "C" int main(int argc, char **argv) {
+} // namespace tests
+} // namespace android
+
+int main(int argc, char** argv) {
+    using namespace android;
+    using namespace android::tests;
+
     testing::InitGoogleTest(&argc, argv);
 
     if (fork() == 0) {
@@ -875,6 +881,3 @@ extern "C" int main(int argc, char **argv) {
 
     return RUN_ALL_TESTS();
 }
-
-} // namespace tests
-} // namespace android

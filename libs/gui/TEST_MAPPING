@@ -60,5 +60,34 @@
         }
       ]
     }
+  ],
+  "postsubmit": [
+    {
+      "name": "libgui_test",
+      "keywords": [ "primary-device" ],
+      "options": [
+        // TODO(b/397776630): Failing on real devices.
+        {
+          "exclude-filter": "InputSurfacesTest#input_respects_scaled_touchable_region_overflow"
+        },
+	// TODO(b/233363648): Failing on real devices.
+        {
+          "exclude-filter": "SurfaceTextureGLTest#TexturingFromCpuFilledYV12BufferNpot"
+        },
+        {
+          "exclude-filter": "SurfaceTextureGLTest#TexturingFromCpuFilledYV12BufferPow2"
+        },
+        {
+          "exclude-filter": "SurfaceTextureGLTest#TexturingFromCpuFilledYV12BufferWithCrop"
+        },
+	// TODO(b/233363648): Flaky on real devices.
+        {
+          "exclude-filter": "SurfaceTextureGLToGLTest#EglMakeCurrentBeforeConsumerDeathUnrefsBuffers"
+        },
+        {
+          "exclude-filter": "SurfaceTextureGLToGLTest#EglMakeCurrentAfterConsumerDeathUnrefsBuffers"
+        }
+      ]
+    }
   ]
 }

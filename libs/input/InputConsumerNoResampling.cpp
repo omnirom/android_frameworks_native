@@ -18,6 +18,7 @@
 #define ATRACE_TAG ATRACE_TAG_INPUT
 
 #include <inttypes.h>
+#include <set>
 
 #include <android-base/logging.h>
 #include <android-base/properties.h>
@@ -168,11 +169,6 @@ InputMessage createTimelineMessage(int32_t inputEventId, nsecs_t gpuCompletedTim
     msg.body.timeline.graphicsTimeline[GraphicsTimeline::GPU_COMPLETED_TIME] = gpuCompletedTime;
     msg.body.timeline.graphicsTimeline[GraphicsTimeline::PRESENT_TIME] = presentTime;
     return msg;
-}
-
-std::ostream& operator<<(std::ostream& out, const InputMessage& msg) {
-    out << ftl::enum_string(msg.header.type);
-    return out;
 }
 
 } // namespace

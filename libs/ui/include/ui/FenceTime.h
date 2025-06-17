@@ -17,6 +17,7 @@
 #ifndef ANDROID_FENCE_TIME_H
 #define ANDROID_FENCE_TIME_H
 
+#include <stddef.h>
 #include <ui/Fence.h>
 #include <utils/Flattenable.h>
 #include <utils/Mutex.h>
@@ -30,6 +31,8 @@
 namespace android {
 
 class FenceToFenceTimeMap;
+class FenceTime;
+using FenceTimePtr = std::shared_ptr<FenceTime>;
 
 // A wrapper around fence that only implements isValid and getSignalTime.
 // It automatically closes the fence in a thread-safe manner once the signal
@@ -95,6 +98,10 @@ public:
     FenceTime& operator=(const FenceTime&) = delete;
     FenceTime& operator=(FenceTime&&) = delete;
 
+    // Constructs a FenceTime, falling back to a timestamp if the fence is
+    // invalid.
+    static FenceTimePtr makeValid(const sp<Fence>& fence);
+
     // This method should only be called when replacing the fence with
     // a signalTime. Since this is an indirect way of setting the signal time
     // of a fence, the snapshot should come from a trusted source.
@@ -142,8 +149,6 @@ private:
     std::atomic<nsecs_t> mSignalTime{Fence::SIGNAL_TIME_INVALID};
 };
 
-using FenceTimePtr = std::shared_ptr<FenceTime>;
-
 // A queue of FenceTimes that are expected to signal in FIFO order.
 // Only maintains a queue of weak pointers so it doesn't keep references
 // to Fences on its own.
@@ -162,8 +167,6 @@ using FenceTimePtr = std::shared_ptr<FenceTime>;
 // different threads.
 class FenceTimeline {
 public:
-    static constexpr size_t MAX_ENTRIES = 64;
-
     void push(const std::shared_ptr<FenceTime>& fence);
     void updateSignalTimes();
 

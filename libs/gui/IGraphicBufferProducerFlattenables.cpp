@@ -105,7 +105,7 @@ status_t IGraphicBufferProducer::QueueBufferInput::unflatten(
             : std::nullopt;
 #endif // COM_ANDROID_GRAPHICS_LIBUI_FLAGS_APPLY_PICTURE_PROFILES
 
-    fence = new Fence();
+    fence = sp<Fence>::make();
     status_t result = fence->unflatten(buffer, size, fds, count);
     if (result != NO_ERROR) {
         return result;
@@ -128,7 +128,7 @@ status_t IGraphicBufferProducer::QueueBufferInput::unflatten(
 constexpr size_t IGraphicBufferProducer::QueueBufferOutput::minFlattenedSize() {
     return sizeof(width) + sizeof(height) + sizeof(transformHint) + sizeof(numPendingBuffers) +
             sizeof(nextFrameNumber) + sizeof(bufferReplaced) + sizeof(maxBufferCount) +
-            sizeof(result);
+            sizeof(result) + sizeof(isSlotExpansionAllowed);
 }
 size_t IGraphicBufferProducer::QueueBufferOutput::getFlattenedSize() const {
     return minFlattenedSize() + frameTimestamps.getFlattenedSize();
@@ -152,6 +152,7 @@ status_t IGraphicBufferProducer::QueueBufferOutput::flatten(
     FlattenableUtils::write(buffer, size, nextFrameNumber);
     FlattenableUtils::write(buffer, size, bufferReplaced);
     FlattenableUtils::write(buffer, size, maxBufferCount);
+    FlattenableUtils::write(buffer, size, isSlotExpansionAllowed);
 
     status_t result = frameTimestamps.flatten(buffer, size, fds, count);
     if (result != NO_ERROR) {
@@ -175,6 +176,7 @@ status_t IGraphicBufferProducer::QueueBufferOutput::unflatten(
     FlattenableUtils::read(buffer, size, nextFrameNumber);
     FlattenableUtils::read(buffer, size, bufferReplaced);
     FlattenableUtils::read(buffer, size, maxBufferCount);
+    FlattenableUtils::read(buffer, size, isSlotExpansionAllowed);
 
     status_t result = frameTimestamps.unflatten(buffer, size, fds, count);
     if (result != NO_ERROR) {
@@ -226,7 +228,7 @@ status_t IGraphicBufferProducer::RequestBufferOutput::unflatten(
     FlattenableUtils::read(fBuffer, size, result);
     int32_t isBufferNull = 0;
     FlattenableUtils::read(fBuffer, size, isBufferNull);
-    buffer = new GraphicBuffer();
+    buffer = sp<GraphicBuffer>::make();
     if (!isBufferNull) {
         status_t status = buffer->unflatten(fBuffer, size, fds, count);
         if (status != NO_ERROR) {
@@ -321,7 +323,7 @@ status_t IGraphicBufferProducer::DequeueBufferOutput::unflatten(
     FlattenableUtils::read(buffer, size, slot);
     FlattenableUtils::read(buffer, size, bufferAge);
 
-    fence = new Fence();
+    fence = sp<Fence>::make();
     status_t status = fence->unflatten(buffer, size, fds, count);
     if (status != NO_ERROR) {
         return status;
@@ -393,7 +395,7 @@ status_t IGraphicBufferProducer::CancelBufferInput::unflatten(
 
     FlattenableUtils::read(buffer, size, slot);
 
-    fence = new Fence();
+    fence = sp<Fence>::make();
     return fence->unflatten(buffer, size, fds, count);
 }
 

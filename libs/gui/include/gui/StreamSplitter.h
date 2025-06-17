@@ -37,7 +37,7 @@ class IGraphicBufferProducer;
 // BufferQueue, where each buffer queued to the input is available to be
 // acquired by each of the outputs, and is able to be dequeued by the input
 // again only once all of the outputs have released it.
-class StreamSplitter : public BnConsumerListener {
+class StreamSplitter : public IConsumerListener {
 public:
     // createSplitter creates a new splitter, outSplitter, using inputQueue as
     // the input BufferQueue. Output BufferQueues must be added using addOutput
@@ -152,6 +152,8 @@ private:
         sp<Fence> mMergedFence;
         size_t mReleaseCount;
     };
+
+    friend class sp<StreamSplitter>;
 
     // Only called from createSplitter
     explicit StreamSplitter(const sp<IGraphicBufferConsumer>& inputQueue);

@@ -136,6 +136,8 @@ void InputDevice::dump(std::string& dump, const std::string& eventHubDevStr) {
     } else {
         dump += "<none>\n";
     }
+    dump += StringPrintf(INDENT2 "SysfsRootPath:     %s\n",
+                         mSysfsRootPath.empty() ? "<none>" : mSysfsRootPath.c_str());
     dump += StringPrintf(INDENT2 "HasMic:     %s\n", toString(mHasMic));
     dump += StringPrintf(INDENT2 "Sources: %s\n",
                          inputEventSourceToString(deviceInfo.getSources()).c_str());
@@ -194,6 +196,10 @@ void InputDevice::addEmptyEventHubDevice(int32_t eventHubId) {
 
     DevicePair& devicePair = mDevices[eventHubId];
     devicePair.second = createMappers(*devicePair.first, readerConfig);
+
+    if (mSysfsRootPath.empty()) {
+        mSysfsRootPath = devicePair.first->getSysfsRootPath();
+    }
 
     // Must change generation to flag this device as changed
     bumpGeneration();

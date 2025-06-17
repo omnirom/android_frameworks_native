@@ -38,6 +38,10 @@
 #include "Utils.h"
 #include "binder_module.h"
 
+#if (defined(__ANDROID__) || defined(__Fuchsia__)) && !defined(BINDER_WITH_KERNEL_IPC)
+#error Android and Fuchsia are expected to have BINDER_WITH_KERNEL_IPC
+#endif
+
 #if LOG_NDEBUG
 
 #define IF_LOG_TRANSACTIONS() if (false)
@@ -626,12 +630,22 @@ void IPCThreadState::flushCommands()
 {
     if (mProcess->mDriverFD < 0)
         return;
-    talkWithDriver(false);
+
+    if (status_t res = talkWithDriver(false); res != OK) {
+        // TODO: we may want to abort for some of these cases
+        ALOGW("1st call to talkWithDriver returned error in flushCommands: %s",
+              statusToString(res).c_str());
+    }
+
     // The flush could have caused post-write refcount decrements to have
     // been executed, which in turn could result in BC_RELEASE/BC_DECREFS
     // being queued in mOut. So flush again, if we need to.
     if (mOut.dataSize() > 0) {
-        talkWithDriver(false);
+        if (status_t res = talkWithDriver(false); res != OK) {
+            // TODO: we may want to abort for some of these cases
+            ALOGW("2nd call to talkWithDriver returned error in flushCommands: %s",
+                  statusToString(res).c_str());
+        }
     }
     if (mOut.dataSize() > 0) {
         ALOGW("mOut.dataSize() > 0 after flushCommands()");
@@ -775,6 +789,7 @@ void IPCThreadState::joinThreadPool(bool isMain)
 {
     LOG_THREADPOOL("**** THREAD %p (PID %d) IS JOINING THE THREAD POOL\n", (void*)pthread_self(),
                    getpid());
+    mProcess->checkExpectingThreadPoolStart();
     mProcess->mCurrentThreads++;
     mOut.writeInt32(isMain ? BC_ENTER_LOOPER : BC_REGISTER_LOOPER);
 
@@ -802,7 +817,11 @@ void IPCThreadState::joinThreadPool(bool isMain)
 
     mOut.writeInt32(BC_EXIT_LOOPER);
     mIsLooper = false;
-    talkWithDriver(false);
+    if (status_t res = talkWithDriver(false); res != OK) {
+        // TODO: we may want to abort for some of these cases
+        ALOGW("call to talkWithDriver in joinThreadPool returned error: %s, FD: %d",
+              statusToString(res).c_str(), mProcess->mDriverFD);
+    }
     size_t oldCount = mProcess->mCurrentThreads.fetch_sub(1);
     LOG_ALWAYS_FATAL_IF(oldCount == 0,
                         "Threadpool thread count underflowed. Thread cannot exist and exit in "
@@ -839,7 +858,7 @@ status_t IPCThreadState::handlePolledCommands()
 void IPCThreadState::stopProcess(bool /*immediate*/)
 {
     //ALOGI("**** STOPPING PROCESS");
-    flushCommands();
+    (void)flushCommands();
     int fd = mProcess->mDriverFD;
     mProcess->mDriverFD = -1;
     close(fd);
@@ -1214,7 +1233,7 @@ status_t IPCThreadState::talkWithDriver(bool doReceive)
             std::string message = logStream.str();
             ALOGI("%s", message.c_str());
         }
-#if defined(__ANDROID__)
+#if defined(BINDER_WITH_KERNEL_IPC)
         if (ioctl(mProcess->mDriverFD, BINDER_WRITE_READ, &bwr) >= 0)
             err = NO_ERROR;
         else
@@ -1493,7 +1512,14 @@ status_t IPCThreadState::executeCommand(int32_t cmd)
                 buffer.setDataSize(0);
 
                 constexpr uint32_t kForwardReplyFlags = TF_CLEAR_BUF;
-                sendReply(reply, (tr.flags & kForwardReplyFlags));
+
+                // TODO: we may want to abort if there is an error here, or return as 'error'
+                // from this function, but the impact needs to be measured
+                status_t error2 = sendReply(reply, (tr.flags & kForwardReplyFlags));
+                if (error2 != OK) {
+                    ALOGE("error in sendReply for synchronous call: %s",
+                          statusToString(error2).c_str());
+                }
             } else {
                 if (error != OK) {
                     std::ostringstream logStream;
@@ -1603,7 +1629,7 @@ void IPCThreadState::threadDestructor(void *st)
         IPCThreadState* const self = static_cast<IPCThreadState*>(st);
         if (self) {
                 self->flushCommands();
-#if defined(__ANDROID__)
+#if defined(BINDER_WITH_KERNEL_IPC)
         if (self->mProcess->mDriverFD >= 0) {
             ioctl(self->mProcess->mDriverFD, BINDER_THREAD_EXIT, 0);
         }
@@ -1619,7 +1645,7 @@ status_t IPCThreadState::getProcessFreezeInfo(pid_t pid, uint32_t *sync_received
     binder_frozen_status_info info = {};
     info.pid = pid;
 
-#if defined(__ANDROID__)
+#if defined(BINDER_WITH_KERNEL_IPC)
     if (ioctl(self()->mProcess->mDriverFD, BINDER_GET_FROZEN_INFO, &info) < 0)
         ret = -errno;
 #endif
@@ -1638,7 +1664,7 @@ status_t IPCThreadState::freeze(pid_t pid, bool enable, uint32_t timeout_ms) {
     info.timeout_ms = timeout_ms;
 
 
-#if defined(__ANDROID__)
+#if defined(BINDER_WITH_KERNEL_IPC)
     if (ioctl(self()->mProcess->mDriverFD, BINDER_FREEZE, &info) < 0)
         ret = -errno;
 #endif
@@ -1656,7 +1682,7 @@ void IPCThreadState::logExtendedError() {
     if (!ProcessState::isDriverFeatureEnabled(ProcessState::DriverFeature::EXTENDED_ERROR))
         return;
 
-#if defined(__ANDROID__)
+#if defined(BINDER_WITH_KERNEL_IPC)
     if (ioctl(self()->mProcess->mDriverFD, BINDER_GET_EXTENDED_ERROR, &ee) < 0) {
         ALOGE("Failed to get extended error: %s", strerror(errno));
         return;

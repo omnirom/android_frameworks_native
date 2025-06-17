@@ -22,6 +22,7 @@
 
 #include <android-base/thread_annotations.h>
 #include <gui/WindowInfosListener.h>
+#include <input/DisplayTopologyGraph.h>
 #include <type_traits>
 #include <unordered_set>
 
@@ -80,10 +81,20 @@ public:
      */
     virtual void setFocusedDisplay(ui::LogicalDisplayId displayId) = 0;
 
+    /*
+     * Used by InputManager to notify changes in the DisplayTopology
+     */
+    virtual void setDisplayTopology(const DisplayTopologyGraph& displayTopologyGraph) = 0;
+
     /**
      * This method may be called on any thread (usually by the input manager on a binder thread).
      */
     virtual void dump(std::string& dump) = 0;
+
+    /**
+     * Enables motion event filter before pointer coordinates are determined.
+     */
+    virtual void setAccessibilityPointerMotionFilterEnabled(bool enabled) = 0;
 };
 
 class PointerChoreographer : public PointerChoreographerInterface {
@@ -103,6 +114,8 @@ public:
                         ui::LogicalDisplayId displayId, DeviceId deviceId) override;
     void setPointerIconVisibility(ui::LogicalDisplayId displayId, bool visible) override;
     void setFocusedDisplay(ui::LogicalDisplayId displayId) override;
+    void setDisplayTopology(const DisplayTopologyGraph& displayTopologyGraph);
+    void setAccessibilityPointerMotionFilterEnabled(bool enabled) override;
 
     void notifyInputDevicesChanged(const NotifyInputDevicesChangedArgs& args) override;
     void notifyKey(const NotifyKeyArgs& args) override;
@@ -112,24 +125,6 @@ public:
     void notifyVibratorState(const NotifyVibratorStateArgs& args) override;
     void notifyDeviceReset(const NotifyDeviceResetArgs& args) override;
     void notifyPointerCaptureChanged(const NotifyPointerCaptureChangedArgs& args) override;
-
-    // TODO(b/362719483) remove these when real topology is available
-    enum class DisplayPosition {
-        RIGHT,
-        TOP,
-        LEFT,
-        BOTTOM,
-        ftl_last = BOTTOM,
-    };
-
-    struct AdjacentDisplay {
-        ui::LogicalDisplayId displayId;
-        DisplayPosition position;
-        float offsetPx;
-    };
-    void setDisplayTopology(
-            const std::unordered_map<ui::LogicalDisplayId, std::vector<AdjacentDisplay>>&
-                    displayTopology);
 
     void dump(std::string& dump) override;
 
@@ -174,18 +169,20 @@ private:
     void handleUnconsumedDeltaLocked(PointerControllerInterface& pc, const vec2& unconsumedDelta)
             REQUIRES(getLock());
 
-    void populateFakeDisplayTopologyLocked(const std::vector<gui::DisplayInfo>& displayInfos)
+    std::optional<std::pair<const DisplayViewport*, float /*offsetPx*/>>
+    findDestinationDisplayLocked(const ui::LogicalDisplayId sourceDisplayId,
+                                 const DisplayTopologyPosition sourceBoundary,
+                                 int32_t sourceCursorOffsetPx) const REQUIRES(getLock());
+
+    vec2 filterPointerMotionForAccessibilityLocked(const vec2& current, const vec2& delta,
+                                                   const ui::LogicalDisplayId& displayId)
             REQUIRES(getLock());
 
-    std::optional<std::pair<const DisplayViewport*, float /*offset*/>> findDestinationDisplayLocked(
-            const ui::LogicalDisplayId sourceDisplayId, const DisplayPosition sourceBoundary,
-            float cursorOffset) const REQUIRES(getLock());
-
-    static vec2 calculateDestinationPosition(const DisplayViewport& destinationViewport,
-                                             float pointerOffset, DisplayPosition sourceBoundary);
-
-    std::unordered_map<ui::LogicalDisplayId, std::vector<AdjacentDisplay>> mTopology
-            GUARDED_BY(getLock());
+    /* Topology is initialized with default-constructed value, which is an empty topology. Till we
+     * receive setDisplayTopology call.
+     * Meanwhile Choreographer will treat every display as independent disconnected display.
+     */
+    DisplayTopologyGraph mTopology GUARDED_BY(getLock());
 
     /* This listener keeps tracks of visible privacy sensitive displays and updates the
      * choreographer if there are any changes.
@@ -234,13 +231,19 @@ private:
     std::map<DeviceId, std::shared_ptr<PointerControllerInterface>> mDrawingTabletPointersByDevice
             GUARDED_BY(getLock());
 
-    ui::LogicalDisplayId mDefaultMouseDisplayId GUARDED_BY(getLock());
+    // In connected displays scenario, this tracks the latest display the cursor is at, within the
+    // DisplayTopology. By default, this will be set to topology primary display, and updated when
+    // mouse crossed to another display.
+    // In non-connected displays scenario, this will be treated as the default display cursor
+    // will be on, when mouse doesn't have associated display.
+    ui::LogicalDisplayId mCurrentMouseDisplayId GUARDED_BY(getLock());
     ui::LogicalDisplayId mNotifiedPointerDisplayId GUARDED_BY(getLock());
     std::vector<InputDeviceInfo> mInputDeviceInfos GUARDED_BY(getLock());
     std::set<DeviceId> mMouseDevices GUARDED_BY(getLock());
     std::vector<DisplayViewport> mViewports GUARDED_BY(getLock());
     bool mShowTouchesEnabled GUARDED_BY(getLock());
     bool mStylusPointerIconEnabled GUARDED_BY(getLock());
+    bool mPointerMotionFilterEnabled GUARDED_BY(getLock());
     std::set<ui::LogicalDisplayId /*displayId*/> mDisplaysWithPointersHidden;
     ui::LogicalDisplayId mCurrentFocusedDisplay GUARDED_BY(getLock());
 

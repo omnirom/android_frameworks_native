@@ -22,7 +22,9 @@
         <option name="cleanup" value="true" />
         <option name="push" value="dumpstate_smoke_test->/data/local/tmp/dumpstate_smoke_test" />
     </target_preparer>
-
+    <target_preparer class="com.android.tradefed.targetprep.FeatureFlagTargetPreparer">
+        <option name="flag-value" value="perfetto/perfetto.flags.save_all_traces_in_bugreport=true" />
+    </target_preparer>
     <test class="com.android.tradefed.testtype.GTest" >
         <option name="native-test-device-path" value="/data/local/tmp" />
         <option name="module-name" value="dumpstate_smoke_test" />

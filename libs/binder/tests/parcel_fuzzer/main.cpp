@@ -70,7 +70,7 @@ void doTransactFuzz(const char* backend, const sp<B>& binder, FuzzedDataProvider
     uint32_t code = provider.ConsumeIntegral<uint32_t>();
     uint32_t flag = provider.ConsumeIntegral<uint32_t>();
 
-    FUZZ_LOG() << "backend: " << backend;
+    FUZZ_LOG() << "doTransactFuzz backend: " << backend;
 
     RandomParcelOptions options;
 
@@ -101,7 +101,7 @@ void doReadFuzz(const char* backend, const std::vector<ParcelRead<P>>& reads,
     // since we are only using a byte to index
     CHECK_LE(reads.size(), 255u) << reads.size();
 
-    FUZZ_LOG() << "backend: " << backend;
+    FUZZ_LOG() << "doReadFuzz backend: " << backend;
     FUZZ_LOG() << "input: " << HexString(p.data(), p.dataSize());
     FUZZ_LOG() << "instructions: " << HexString(instructions.data(), instructions.size());
 
@@ -122,10 +122,15 @@ void doReadWriteFuzz(const char* backend, const std::vector<ParcelRead<P>>& read
     RandomParcelOptions options;
     P p;
 
+    // small amount of initial Parcel data, since fillRandomParcel uses makeDangerousViewOf
+    std::vector<uint8_t> parcelData =
+            provider.ConsumeBytes<uint8_t>(provider.ConsumeIntegralInRange<size_t>(0, 20));
+    fillRandomParcel(&p, FuzzedDataProvider(parcelData.data(), parcelData.size()), &options);
+
     // since we are only using a byte to index
     CHECK_LE(reads.size() + writes.size(), 255u) << reads.size();
 
-    FUZZ_LOG() << "backend: " << backend;
+    FUZZ_LOG() << "doReadWriteFuzz backend: " << backend;
 
     while (provider.remaining_bytes() > 0) {
         uint8_t idx = provider.ConsumeIntegralInRange<uint8_t>(0, reads.size() + writes.size() - 1);

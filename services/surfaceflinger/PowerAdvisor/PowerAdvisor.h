@@ -23,6 +23,7 @@
 
 #include <ui/DisplayId.h>
 #include <ui/FenceTime.h>
+#include <ui/RingBuffer.h>
 #include <utils/Mutex.h>
 
 // FMQ library in IPower does questionable conversions
@@ -32,9 +33,14 @@
 #include <fmq/AidlMessageQueue.h>
 #pragma clang diagnostic pop
 
+#include <common/trace.h>
+#include <ftl/flags.h>
 #include <scheduler/Time.h>
 #include <ui/DisplayIdentification.h>
 #include "../Scheduler/OneShotTimer.h"
+#include "Workload.h"
+
+#include "SessionManager.h"
 
 using namespace std::chrono_literals;
 
@@ -46,6 +52,8 @@ class PowerHintSessionWrapper;
 } // namespace power
 
 namespace adpf {
+
+namespace hal = aidl::android::hardware::power;
 
 class PowerAdvisor {
 public:
@@ -102,12 +110,38 @@ public:
     virtual void setDisplays(std::vector<DisplayId>& displayIds) = 0;
     // Sets the target duration for the entire pipeline including the gpu
     virtual void setTotalFrameTargetWorkDuration(Duration targetDuration) = 0;
+    // Get the session manager, if it exists
+    virtual std::shared_ptr<SessionManager> getSessionManager() = 0;
+
+    // --- Track per frame workloads to use for load up hint heuristics
+    // Track queued workload from transactions as they are queued from the binder thread.
+    // The workload is accumulated and reset on frame commit. The queued workload may be
+    // relevant for the next frame so can be used as an early load up hint. Note this is
+    // only a hint because the transaction can remain in the queue and not be applied on
+    // the next frame.
+    virtual void setQueuedWorkload(ftl::Flags<Workload> workload) = 0;
+    // Track additional workload dur to a screenshot request for load up hint heuristics. This
+    // would indicate an immediate increase in GPU workload.
+    virtual void setScreenshotWorkload() = 0;
+    // Track committed workload from transactions that are applied on the main thread.
+    // This workload is determined from the applied transactions. This can provide a high
+    // confidence that the CPU and or GPU workload will increase immediately.
+    virtual void setCommittedWorkload(ftl::Flags<Workload> workload) = 0;
+    // Update committed workload with the actual workload from post composition. This is
+    // used to update the baseline workload so we can detect increases in workloads on the
+    // next commit. We use composite instead of commit to update the baseline to account
+    // for optimizations like caching which may reduce the workload.
+    virtual void setCompositedWorkload(ftl::Flags<Workload> workload) = 0;
 
     // --- The following methods may run on threads besides SF main ---
     // Send a hint about an upcoming increase in the CPU workload
     virtual void notifyCpuLoadUp() = 0;
     // Send a hint about the imminent start of a new CPU workload
     virtual void notifyDisplayUpdateImminentAndCpuReset() = 0;
+
+    // --- The following methods specifically run on binder threads ---
+    // Retrieve  a SessionManager for HintManagerService to call
+    virtual sp<IBinder> getOrCreateSessionManagerForBinder(uid_t uid) = 0;
 };
 
 namespace impl {
@@ -146,10 +180,19 @@ public:
     void setCompositeEnd(TimePoint compositeEndTime) override;
     void setDisplays(std::vector<DisplayId>& displayIds) override;
     void setTotalFrameTargetWorkDuration(Duration targetDuration) override;
+    std::shared_ptr<SessionManager> getSessionManager() override;
+
+    void setQueuedWorkload(ftl::Flags<Workload> workload) override;
+    void setScreenshotWorkload() override;
+    void setCommittedWorkload(ftl::Flags<Workload> workload) override;
+    void setCompositedWorkload(ftl::Flags<Workload> workload) override;
 
     // --- The following methods may run on threads besides SF main ---
     void notifyCpuLoadUp() override;
     void notifyDisplayUpdateImminentAndCpuReset() override;
+
+    // --- The following methods specifically run on binder threads ---
+    sp<IBinder> getOrCreateSessionManagerForBinder(uid_t uid) override;
 
 private:
     friend class PowerAdvisorTest;
@@ -205,27 +248,6 @@ private:
         std::optional<GpuTimeline> estimateGpuTiming(std::optional<TimePoint> previousEndTime);
     };
 
-    template <class T, size_t N>
-    class RingBuffer {
-        std::array<T, N> elements = {};
-        size_t mIndex = 0;
-        size_t numElements = 0;
-
-    public:
-        void append(T item) {
-            mIndex = (mIndex + 1) % N;
-            numElements = std::min(N, numElements + 1);
-            elements[mIndex] = item;
-        }
-        bool isFull() const { return numElements == N; }
-        // Allows access like [0] == current, [-1] = previous, etc..
-        T& operator[](int offset) {
-            size_t positiveOffset =
-                    static_cast<size_t>((offset % static_cast<int>(N)) + static_cast<int>(N));
-            return elements[(mIndex + positiveOffset) % N];
-        }
-    };
-
     // Filter and sort the display ids by a given property
     std::vector<DisplayId> getOrderedDisplayIds(
             std::optional<TimePoint> DisplayTimingData::*sortBy);
@@ -245,9 +267,9 @@ private:
     // Last frame's post-composition duration
     Duration mLastPostcompDuration{0ns};
     // Buffer of recent commit start times
-    RingBuffer<TimePoint, 2> mCommitStartTimes;
+    ui::RingBuffer<TimePoint, 2> mCommitStartTimes;
     // Buffer of recent expected present times
-    RingBuffer<TimePoint, 2> mExpectedPresentTimes;
+    ui::RingBuffer<TimePoint, 2> mExpectedPresentTimes;
     // Most recent present fence time, provided by SF after composition engine finishes presenting
     TimePoint mLastPresentFenceTime;
     // Most recent composition engine present end time, returned with the present fence from SF
@@ -318,11 +340,18 @@ private:
     static constexpr const Duration kFenceWaitStartDelayValidated{150us};
     static constexpr const Duration kFenceWaitStartDelaySkippedValidate{250us};
 
+    // Track queued and committed workloads per frame. Queued workload is atomic because it's
+    // updated on both binder and the main thread.
+    std::atomic<uint32_t> mQueuedWorkload;
+    ftl::Flags<Workload> mCommittedWorkload;
+
     void sendHintSessionHint(aidl::android::hardware::power::SessionHint hint);
 
     template <aidl::android::hardware::power::ChannelMessage::ChannelMessageContents::Tag T,
               class In>
     bool writeHintSessionMessage(In* elements, size_t count) REQUIRES(mHintSessionMutex);
+
+    std::shared_ptr<SessionManager> mSessionManager;
 };
 
 } // namespace impl

@@ -206,4 +206,9 @@ const char* toString(const NotifyArgs& args) {
     return std::visit(toStringVisitor, args);
 }
 
+std::ostream& operator<<(std::ostream& out, const NotifyArgs& args) {
+    out << toString(args);
+    return out;
+}
+
 } // namespace android

@@ -63,6 +63,9 @@ binder_exception_t AServiceManager_addServiceWithFlags(AIBinder* binder, const c
     if (flags & AServiceManager_AddServiceFlag::ADD_SERVICE_DUMP_FLAG_PRIORITY_DEFAULT) {
         dumpFlags |= IServiceManager::DUMP_FLAG_PRIORITY_DEFAULT;
     }
+    if (flags & AServiceManager_AddServiceFlag::ADD_SERVICE_DUMP_FLAG_PROTO) {
+        dumpFlags |= IServiceManager::DUMP_FLAG_PROTO;
+    }
     if (dumpFlags == 0) {
         dumpFlags = IServiceManager::DUMP_FLAG_PRIORITY_DEFAULT;
     }

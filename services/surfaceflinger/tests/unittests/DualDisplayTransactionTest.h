@@ -48,8 +48,10 @@ struct DualDisplayTransactionTest : DisplayTransactionTest {
         }
     }
 
-    static inline PhysicalDisplayId kInnerDisplayId = InnerDisplayVariant::DISPLAY_ID::get();
-    static inline PhysicalDisplayId kOuterDisplayId = OuterDisplayVariant::DISPLAY_ID::get();
+    static inline PhysicalDisplayId kInnerDisplayId =
+            asPhysicalDisplayId(InnerDisplayVariant::DISPLAY_ID::get()).value();
+    static inline PhysicalDisplayId kOuterDisplayId =
+            asPhysicalDisplayId(OuterDisplayVariant::DISPLAY_ID::get()).value();
 
     sp<DisplayDevice> mInnerDisplay, mOuterDisplay;
 };

@@ -25,6 +25,7 @@
 #include <ftl/future.h>
 #include <gui/BufferReleaseChannel.h>
 #include <gui/ITransactionCompletedListener.h>
+#include <renderengine/ExternalTexture.h>
 #include <ui/Fence.h>
 #include <ui/FenceResult.h>
 
@@ -55,6 +56,7 @@ public:
     uint64_t previousFrameNumber = 0;
     ReleaseCallbackId previousReleaseCallbackId = ReleaseCallbackId::INVALID_ID;
     std::shared_ptr<gui::BufferReleaseChannel::ProducerEndpoint> bufferReleaseChannel;
+    std::weak_ptr<renderengine::ExternalTexture> previousBuffer;
 };
 
 class TransactionCallbackInvoker {

@@ -40,6 +40,18 @@ static_assert(kSegments.back().maxPointerSpeedMmPerS == std::numeric_limits<doub
 constexpr std::array<double, 15> kSensitivityFactors = {1,  2,  4,  6,  7,  8,  9, 10,
                                                         11, 12, 13, 14, 16, 18, 20};
 
+// Calculates the base gain for a given pointer sensitivity value.
+//
+// The base gain is a scaling factor that is applied to the pointer movement.
+// Higher sensitivity values result in larger base gains, which in turn result
+// in faster pointer movements.
+//
+// The base gain is calculated using a linear mapping function that maps the
+// sensitivity range [-7, 7] to a base gain range [1.0, 3.5].
+double calculateBaseGain(int32_t sensitivity) {
+    return 1.0 + (sensitivity + 7) * (3.5 - 1.0) / (7 + 7);
+}
+
 } // namespace
 
 std::vector<AccelerationCurveSegment> createAccelerationCurveForPointerSensitivity(
@@ -57,6 +69,15 @@ std::vector<AccelerationCurveSegment> createAccelerationCurveForPointerSensitivi
                                                   commonFactor * seg.reciprocal});
     }
 
+    return output;
+}
+
+std::vector<AccelerationCurveSegment> createFlatAccelerationCurve(int32_t sensitivity) {
+    LOG_ALWAYS_FATAL_IF(sensitivity < -7 || sensitivity > 7, "Invalid pointer sensitivity value");
+    std::vector<AccelerationCurveSegment> output = {
+            AccelerationCurveSegment{std::numeric_limits<double>::infinity(),
+                                     calculateBaseGain(sensitivity),
+                                     /* reciprocal = */ 0}};
     return output;
 }
 

@@ -35,6 +35,7 @@ public:
 
     MOCK_CONST_METHOD0(isValid, bool());
     MOCK_CONST_METHOD0(getDisplayId, ftl::Optional<DisplayId>());
+    MOCK_CONST_METHOD0(getDisplayIdVariant, ftl::Optional<DisplayIdVariant>());
 
     MOCK_METHOD1(setCompositionEnabled, void(bool));
     MOCK_METHOD1(setLayerCachingEnabled, void(bool));

@@ -246,7 +246,7 @@ static nsecs_t processEventTimestamp(const struct input_event& event) {
 /**
  * Returns the sysfs root path of the input device.
  */
-static std::optional<std::filesystem::path> getSysfsRootPath(const char* devicePath) {
+static std::optional<std::filesystem::path> getSysfsRootForEvdevDevicePath(const char* devicePath) {
     std::error_code errorCode;
 
     // Stat the device path to get the major and minor number of the character file
@@ -351,6 +351,22 @@ static std::optional<std::array<LightColor, COLOR_NUM>> getColorIndexArray(
     return colors;
 }
 
+static base::Result<std::shared_ptr<PropertyMap>> loadConfiguration(
+        const InputDeviceIdentifier& ident) {
+    std::string configurationFile =
+            getInputDeviceConfigurationFilePathByDeviceIdentifier(ident,
+                                                                  InputDeviceConfigurationFileType::
+                                                                          CONFIGURATION);
+    if (configurationFile.empty()) {
+        ALOGD("No input device configuration file found for device '%s'.", ident.name.c_str());
+        return base::Result<std::shared_ptr<PropertyMap>>(nullptr);
+    }
+    base::Result<std::shared_ptr<PropertyMap>> propertyMap =
+            PropertyMap::load(configurationFile.c_str());
+
+    return propertyMap;
+}
+
 /**
  * Read country code information exposed through the sysfs path and convert it to Layout info.
  */
@@ -409,11 +425,22 @@ static std::unordered_map<int32_t /*batteryId*/, RawBatteryInfo> readBatteryConf
  *  Read information about lights exposed through the sysfs path.
  */
 static std::unordered_map<int32_t /*lightId*/, RawLightInfo> readLightsConfiguration(
-        const std::filesystem::path& sysfsRootPath) {
+        const std::filesystem::path& sysfsRootPath, const std::shared_ptr<PropertyMap>& config) {
     std::unordered_map<int32_t, RawLightInfo> lightInfos;
     int32_t nextLightId = 0;
-    // Check if device has any lights.
-    const auto& paths = findSysfsNodes(sysfsRootPath, SysfsClass::LEDS);
+    // Check if device has any lights.  If the Input Device Configuration file specifies any lights,
+    // use those in addition to searching the device node itself for lights.
+    std::vector<std::filesystem::path> paths = findSysfsNodes(sysfsRootPath, SysfsClass::LEDS);
+
+    if (config) {
+        auto additionalLights = config->getString("device.additionalSysfsLedsNode");
+        if (additionalLights) {
+            ALOGI("IDC specifies additional path for lights at '%s'",
+                  additionalLights.value().c_str());
+            paths.push_back(std::filesystem::path(additionalLights.value()));
+        }
+    }
+
     for (const auto& nodePath : paths) {
         RawLightInfo info;
         info.id = ++nextLightId;
@@ -532,17 +559,16 @@ std::ostream& operator<<(std::ostream& out, const std::optional<RawAbsoluteAxisI
 // --- EventHub::Device ---
 
 EventHub::Device::Device(int fd, int32_t id, std::string path, InputDeviceIdentifier identifier,
-                         std::shared_ptr<const AssociatedDevice> assocDev)
+                         std::shared_ptr<PropertyMap> config)
       : fd(fd),
         id(id),
         path(std::move(path)),
         identifier(std::move(identifier)),
         classes(0),
-        configuration(nullptr),
+        configuration(std::move(config)),
         virtualKeyMap(nullptr),
         ffEffectPlaying(false),
         ffEffectId(-1),
-        associatedDevice(std::move(assocDev)),
         controllerNumber(0),
         enabled(true),
         isVirtual(fd < 0),
@@ -694,26 +720,6 @@ bool EventHub::Device::hasKeycodeInternalLocked(int keycode) const {
         return true;
     }
     return false;
-}
-
-void EventHub::Device::loadConfigurationLocked() {
-    configurationFile =
-            getInputDeviceConfigurationFilePathByDeviceIdentifier(identifier,
-                                                                  InputDeviceConfigurationFileType::
-                                                                          CONFIGURATION);
-    if (configurationFile.empty()) {
-        ALOGD("No input device configuration file found for device '%s'.", identifier.name.c_str());
-    } else {
-        android::base::Result<std::unique_ptr<PropertyMap>> propertyMap =
-                PropertyMap::load(configurationFile.c_str());
-        if (!propertyMap.ok()) {
-            ALOGE("Error loading input device configuration file for device '%s'.  "
-                  "Using default configuration.",
-                  identifier.name.c_str());
-        } else {
-            configuration = std::move(*propertyMap);
-        }
-    }
 }
 
 bool EventHub::Device::loadVirtualKeyMapLocked() {
@@ -1611,50 +1617,59 @@ void EventHub::assignDescriptorLocked(InputDeviceIdentifier& identifier) {
 }
 
 std::shared_ptr<const EventHub::AssociatedDevice> EventHub::obtainAssociatedDeviceLocked(
-        const std::filesystem::path& devicePath) const {
+        const std::filesystem::path& devicePath, const std::shared_ptr<PropertyMap>& config) const {
     const std::optional<std::filesystem::path> sysfsRootPathOpt =
-            getSysfsRootPath(devicePath.c_str());
+            getSysfsRootForEvdevDevicePath(devicePath.c_str());
     if (!sysfsRootPathOpt) {
         return nullptr;
     }
 
     const auto& path = *sysfsRootPathOpt;
 
-    std::shared_ptr<const AssociatedDevice> associatedDevice = std::make_shared<AssociatedDevice>(
-            AssociatedDevice{.sysfsRootPath = path,
-                             .batteryInfos = readBatteryConfiguration(path),
-                             .lightInfos = readLightsConfiguration(path),
-                             .layoutInfo = readLayoutConfiguration(path)});
-
-    bool associatedDeviceChanged = false;
+    std::shared_ptr<const AssociatedDevice> associatedDevice;
     for (const auto& [id, dev] : mDevices) {
-        if (dev->associatedDevice && dev->associatedDevice->sysfsRootPath == path) {
-            if (*associatedDevice != *dev->associatedDevice) {
-                associatedDeviceChanged = true;
-                dev->associatedDevice = associatedDevice;
-            }
-            associatedDevice = dev->associatedDevice;
+        if (!dev->associatedDevice || dev->associatedDevice->sysfsRootPath != path) {
+            continue;
         }
+        if (!associatedDevice) {
+            // Found matching associated device for the first time.
+            associatedDevice = dev->associatedDevice;
+            // Reload this associated device if needed.  Use the base device
+            // config.  Note that this will essentially arbitrarily pick one
+            // Device as the base for the AssociatedDevice configuration.  If
+            // there are multiple Device's that have a configuration for the
+            // AssociatedDevice, only one configuration will be chosen and will
+            // be used for all other AssociatedDevices for the same sysfs path.
+            const auto reloadedDevice = AssociatedDevice(path, associatedDevice->baseDevConfig);
+            if (reloadedDevice != *dev->associatedDevice) {
+                ALOGI("The AssociatedDevice changed for path '%s'. Using new AssociatedDevice: %s",
+                      path.c_str(), associatedDevice->dump().c_str());
+                associatedDevice = std::make_shared<AssociatedDevice>(std::move(reloadedDevice));
+            }
+        }
+        // Update the associatedDevice.
+        dev->associatedDevice = associatedDevice;
     }
-    ALOGI_IF(associatedDeviceChanged,
-             "The AssociatedDevice changed for path '%s'. Using new AssociatedDevice: %s",
-             path.c_str(), associatedDevice->dump().c_str());
+
+    if (!associatedDevice) {
+        // No existing associated device found for this path, so create a new one.
+        associatedDevice = std::make_shared<AssociatedDevice>(path, config);
+    }
 
     return associatedDevice;
 }
 
-bool EventHub::AssociatedDevice::isChanged() const {
-    std::unordered_map<int32_t, RawBatteryInfo> newBatteryInfos =
-            readBatteryConfiguration(sysfsRootPath);
-    std::unordered_map<int32_t, RawLightInfo> newLightInfos =
-            readLightsConfiguration(sysfsRootPath);
-    std::optional<RawLayoutInfo> newLayoutInfo = readLayoutConfiguration(sysfsRootPath);
+EventHub::AssociatedDevice::AssociatedDevice(const std::filesystem::path& sysfsRootPath,
+                                             std::shared_ptr<PropertyMap> config)
+      : sysfsRootPath(sysfsRootPath),
+        baseDevConfig(std::move(config)),
+        batteryInfos(readBatteryConfiguration(sysfsRootPath)),
+        lightInfos(readLightsConfiguration(sysfsRootPath, baseDevConfig)),
+        layoutInfo(readLayoutConfiguration(sysfsRootPath)) {}
 
-    if (newBatteryInfos == batteryInfos && newLightInfos == lightInfos &&
-        newLayoutInfo == layoutInfo) {
-        return false;
-    }
-    return true;
+std::string EventHub::AssociatedDevice::dump() const {
+    return StringPrintf("path=%s, numBatteries=%zu, numLight=%zu", sysfsRootPath.c_str(),
+                        batteryInfos.size(), lightInfos.size());
 }
 
 void EventHub::vibrate(int32_t deviceId, const VibrationElement& element) {
@@ -1882,58 +1897,89 @@ std::vector<RawEvent> EventHub::getEvents(int timeoutMillis) {
             break; // return to the caller before we actually rescan
         }
 
-        // Report any devices that had last been added/removed.
-        for (auto it = mClosingDevices.begin(); it != mClosingDevices.end();) {
-            std::unique_ptr<Device> device = std::move(*it);
-            ALOGV("Reporting device closed: id=%d, name=%s\n", device->id, device->path.c_str());
-            const int32_t deviceId = (device->id == mBuiltInKeyboardId)
-                    ? ReservedInputDeviceId::BUILT_IN_KEYBOARD_ID
-                    : device->id;
-            events.push_back({
-                    .when = now,
-                    .deviceId = deviceId,
-                    .type = DEVICE_REMOVED,
-            });
-            it = mClosingDevices.erase(it);
-            if (events.size() == EVENT_BUFFER_SIZE) {
-                break;
+        handleSysfsNodeChangeNotificationsLocked();
+
+        // Use a do-while loop to ensure that we drain the closing and opening devices loop
+        // at least once, even if there are no devices to re-open.
+        do {
+            if (!mDeviceIdsToReopen.empty()) {
+                // If there are devices that need to be re-opened, ensure that we re-open them
+                // one at a time to send the DEVICE_REMOVED and DEVICE_ADDED notifications for
+                // each before moving on to the next. This is to avoid notifying all device
+                // removals and additions in one batch, which could cause additional unnecessary
+                // device added/removed notifications for merged InputDevices from InputReader.
+                const int32_t deviceId = mDeviceIdsToReopen.back();
+                mDeviceIdsToReopen.erase(mDeviceIdsToReopen.end() - 1);
+                if (auto it = mDevices.find(deviceId); it != mDevices.end()) {
+                    ALOGI("Reopening input device: id=%d, name=%s", it->second->id,
+                          it->second->identifier.name.c_str());
+                    const auto path = it->second->path;
+                    closeDeviceLocked(*it->second);
+                    openDeviceLocked(path);
+                }
             }
-        }
 
-        if (mNeedToScanDevices) {
-            mNeedToScanDevices = false;
-            scanDevicesLocked();
-        }
-
-        while (!mOpeningDevices.empty()) {
-            std::unique_ptr<Device> device = std::move(*mOpeningDevices.rbegin());
-            mOpeningDevices.pop_back();
-            ALOGV("Reporting device opened: id=%d, name=%s\n", device->id, device->path.c_str());
-            const int32_t deviceId = device->id == mBuiltInKeyboardId ? 0 : device->id;
-            events.push_back({
-                    .when = now,
-                    .deviceId = deviceId,
-                    .type = DEVICE_ADDED,
-            });
-
-            // Try to find a matching video device by comparing device names
-            for (auto it = mUnattachedVideoDevices.begin(); it != mUnattachedVideoDevices.end();
-                 it++) {
-                std::unique_ptr<TouchVideoDevice>& videoDevice = *it;
-                if (tryAddVideoDeviceLocked(*device, videoDevice)) {
-                    // videoDevice was transferred to 'device'
-                    it = mUnattachedVideoDevices.erase(it);
+            // Report any devices that had last been added/removed.
+            for (auto it = mClosingDevices.begin(); it != mClosingDevices.end();) {
+                std::unique_ptr<Device> device = std::move(*it);
+                ALOGV("Reporting device closed: id=%d, name=%s\n", device->id,
+                      device->path.c_str());
+                const int32_t deviceId = (device->id == mBuiltInKeyboardId)
+                        ? ReservedInputDeviceId::BUILT_IN_KEYBOARD_ID
+                        : device->id;
+                events.push_back({
+                        .when = now,
+                        .deviceId = deviceId,
+                        .type = DEVICE_REMOVED,
+                });
+                it = mClosingDevices.erase(it);
+                if (events.size() == EVENT_BUFFER_SIZE) {
                     break;
                 }
             }
 
-            auto [dev_it, inserted] = mDevices.insert_or_assign(device->id, std::move(device));
-            if (!inserted) {
-                ALOGW("Device id %d exists, replaced.", device->id);
+            if (mNeedToScanDevices) {
+                mNeedToScanDevices = false;
+                scanDevicesLocked();
             }
-            if (events.size() == EVENT_BUFFER_SIZE) {
-                break;
+
+            while (!mOpeningDevices.empty()) {
+                std::unique_ptr<Device> device = std::move(*mOpeningDevices.rbegin());
+                mOpeningDevices.pop_back();
+                ALOGV("Reporting device opened: id=%d, name=%s\n", device->id,
+                      device->path.c_str());
+                const int32_t deviceId = device->id == mBuiltInKeyboardId ? 0 : device->id;
+                events.push_back({
+                        .when = now,
+                        .deviceId = deviceId,
+                        .type = DEVICE_ADDED,
+                });
+
+                // Try to find a matching video device by comparing device names
+                for (auto it = mUnattachedVideoDevices.begin(); it != mUnattachedVideoDevices.end();
+                     it++) {
+                    std::unique_ptr<TouchVideoDevice>& videoDevice = *it;
+                    if (tryAddVideoDeviceLocked(*device, videoDevice)) {
+                        // videoDevice was transferred to 'device'
+                        it = mUnattachedVideoDevices.erase(it);
+                        break;
+                    }
+                }
+
+                auto [dev_it, inserted] = mDevices.insert_or_assign(device->id, std::move(device));
+                if (!inserted) {
+                    ALOGW("Device id %d exists, replaced.", device->id);
+                }
+                if (events.size() == EVENT_BUFFER_SIZE) {
+                    break;
+                }
             }
+
+            // Perform this loop of re-opening devices so that we re-open one device at a time.
+        } while (!mDeviceIdsToReopen.empty());
+
+        if (events.size() == EVENT_BUFFER_SIZE) {
+            break;
         }
 
         // Grab the next input event.
@@ -2335,11 +2381,21 @@ void EventHub::openDeviceLocked(const std::string& devicePath) {
     // Fill in the descriptor.
     assignDescriptorLocked(identifier);
 
+    // Load the configuration file for the device.
+    std::shared_ptr<PropertyMap> configuration = nullptr;
+    base::Result<std::shared_ptr<PropertyMap>> propertyMapResult = loadConfiguration(identifier);
+    if (!propertyMapResult.ok()) {
+        ALOGE("Error loading input device configuration file for device '%s'. "
+              "Using default configuration. Error: %s",
+              identifier.name.c_str(), propertyMapResult.error().message().c_str());
+    } else {
+        configuration = propertyMapResult.value();
+    }
+
     // Allocate device.  (The device object takes ownership of the fd at this point.)
     int32_t deviceId = mNextDeviceId++;
     std::unique_ptr<Device> device =
-            std::make_unique<Device>(fd, deviceId, devicePath, identifier,
-                                     obtainAssociatedDeviceLocked(devicePath));
+            std::make_unique<Device>(fd, deviceId, devicePath, identifier, configuration);
 
     ALOGV("add device %d: %s\n", deviceId, devicePath.c_str());
     ALOGV("  bus:        %04x\n"
@@ -2354,8 +2410,8 @@ void EventHub::openDeviceLocked(const std::string& devicePath) {
     ALOGV("  driver:     v%d.%d.%d\n", driverVersion >> 16, (driverVersion >> 8) & 0xff,
           driverVersion & 0xff);
 
-    // Load the configuration file for the device.
-    device->loadConfigurationLocked();
+    // Obtain the associated device, if any.
+    device->associatedDevice = obtainAssociatedDeviceLocked(devicePath, device->configuration);
 
     // Figure out the kinds of events the device reports.
     device->readDeviceBitMask(EVIOCGBIT(EV_KEY, 0), device->keyBitmask);
@@ -2639,40 +2695,91 @@ status_t EventHub::disableDevice(int32_t deviceId) {
     return device->disable();
 }
 
+std::filesystem::path EventHub::getSysfsRootPath(int32_t deviceId) const {
+    std::scoped_lock _l(mLock);
+    Device* device = getDeviceLocked(deviceId);
+    if (device == nullptr) {
+        ALOGE("Invalid device id=%" PRId32 " provided to %s", deviceId, __func__);
+        return {};
+    }
+
+    return device->associatedDevice ? device->associatedDevice->sysfsRootPath
+                                    : std::filesystem::path{};
+}
+
 // TODO(b/274755573): Shift to uevent handling on native side and remove this method
 // Currently using Java UEventObserver to trigger this which uses UEvent infrastructure that uses a
 // NETLINK socket to observe UEvents. We can create similar infrastructure on Eventhub side to
 // directly observe UEvents instead of triggering from Java side.
 void EventHub::sysfsNodeChanged(const std::string& sysfsNodePath) {
-    std::scoped_lock _l(mLock);
+    mChangedSysfsNodeNotifications.emplace(sysfsNodePath);
+}
 
-    // Check in opening devices
-    for (auto it = mOpeningDevices.begin(); it != mOpeningDevices.end(); it++) {
-        std::unique_ptr<Device>& device = *it;
-        if (device->associatedDevice &&
-            sysfsNodePath.find(device->associatedDevice->sysfsRootPath.string()) !=
-                    std::string::npos &&
-            device->associatedDevice->isChanged()) {
-            it = mOpeningDevices.erase(it);
-            openDeviceLocked(device->path);
+void EventHub::handleSysfsNodeChangeNotificationsLocked() {
+    // Use a set to de-dup any repeated notifications.
+    std::set<std::string> changedNodes;
+    while (true) {
+        auto node = mChangedSysfsNodeNotifications.popWithTimeout(std::chrono::nanoseconds(0));
+        if (!node.has_value()) break;
+        changedNodes.emplace(*node);
+    }
+    if (changedNodes.empty()) {
+        return;
+    }
+
+    // Testing whether a sysfs node changed involves several syscalls, so use a cache to avoid
+    // testing the same node multiple times.
+    // TODO(b/281822656): Notify InputReader separately when an AssociatedDevice changes,
+    //  instead of needing to re-open all of Devices that are associated with it.
+    std::map<std::shared_ptr<const AssociatedDevice>, bool /*changed*/> testedDevices;
+    auto shouldReopenDevice = [&testedDevices, &changedNodes](const Device& dev) {
+        if (!dev.associatedDevice) {
+            return false;
+        }
+        if (auto testedIt = testedDevices.find(dev.associatedDevice);
+            testedIt != testedDevices.end()) {
+            return testedIt->second;
+        }
+        // Cache miss
+        const bool anyNodesChanged =
+                std::any_of(changedNodes.begin(), changedNodes.end(), [&](const std::string& node) {
+                    return node.find(dev.associatedDevice->sysfsRootPath.string()) !=
+                            std::string::npos;
+                });
+        if (!anyNodesChanged) {
+            testedDevices.emplace(dev.associatedDevice, false);
+            return false;
+        }
+        auto reloadedDevice = AssociatedDevice(dev.associatedDevice->sysfsRootPath,
+                                               dev.associatedDevice->baseDevConfig);
+        const bool changed = *dev.associatedDevice != reloadedDevice;
+        if (changed) {
+            ALOGI("sysfsNodeChanged: Identified change in sysfs nodes for device: %s",
+                  dev.identifier.name.c_str());
+        }
+        testedDevices.emplace(dev.associatedDevice, changed);
+        return changed;
+    };
+
+    // Check in opening devices. These can be re-opened directly because we have not yet notified
+    // the Reader about these devices.
+    for (const auto& dev : mOpeningDevices) {
+        if (shouldReopenDevice(*dev)) {
+            ALOGI("Reopening input device from mOpeningDevices: id=%d, name=%s", dev->id,
+                  dev->identifier.name.c_str());
+            const auto path = dev->path;
+            closeDeviceLocked(*dev); // The Device object is deleted by this function.
+            openDeviceLocked(path);
         }
     }
 
-    // Check in already added device
-    std::vector<Device*> devicesToReopen;
-    for (const auto& [id, device] : mDevices) {
-        if (device->associatedDevice &&
-            sysfsNodePath.find(device->associatedDevice->sysfsRootPath.string()) !=
-                    std::string::npos &&
-            device->associatedDevice->isChanged()) {
-            devicesToReopen.push_back(device.get());
+    // Check in already added devices. Add them to the re-opening list so they can be
+    // re-opened serially.
+    for (const auto& [id, dev] : mDevices) {
+        if (shouldReopenDevice(*dev)) {
+            mDeviceIdsToReopen.emplace_back(dev->id);
         }
     }
-    for (const auto& device : devicesToReopen) {
-        closeDeviceLocked(*device);
-        openDeviceLocked(device->path);
-    }
-    devicesToReopen.clear();
 }
 
 void EventHub::createVirtualKeyboardLocked() {
@@ -2768,9 +2875,23 @@ void EventHub::closeDeviceLocked(Device& device) {
     releaseControllerNumberLocked(device.controllerNumber);
     device.controllerNumber = 0;
     device.close();
-    mClosingDevices.push_back(std::move(mDevices[device.id]));
 
-    mDevices.erase(device.id);
+    // Try to remove this device from mDevices.
+    if (auto it = mDevices.find(device.id); it != mDevices.end()) {
+        mClosingDevices.push_back(std::move(mDevices[device.id]));
+        mDevices.erase(device.id);
+        return;
+    }
+
+    // Try to remove this device from mOpeningDevices.
+    if (auto it = std::find_if(mOpeningDevices.begin(), mOpeningDevices.end(),
+                               [&device](auto& d) { return d->id == device.id; });
+        it != mOpeningDevices.end()) {
+        mOpeningDevices.erase(it);
+        return;
+    }
+
+    LOG_ALWAYS_FATAL("%s: Device with id %d was not found!", __func__, device.id);
 }
 
 base::Result<void> EventHub::readNotifyLocked() {
@@ -2970,11 +3091,6 @@ void EventHub::dump(std::string& dump) const {
 void EventHub::monitor() const {
     // Acquire and release the lock to ensure that the event hub has not deadlocked.
     std::unique_lock<std::mutex> lock(mLock);
-}
-
-std::string EventHub::AssociatedDevice::dump() const {
-    return StringPrintf("path=%s, numBatteries=%zu, numLight=%zu", sysfsRootPath.c_str(),
-                        batteryInfos.size(), lightInfos.size());
 }
 
 } // namespace android

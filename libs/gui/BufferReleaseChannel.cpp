@@ -108,7 +108,7 @@ status_t BufferReleaseChannel::Message::flatten(void*& buffer, size_t& size, int
 
 status_t BufferReleaseChannel::Message::unflatten(void const*& buffer, size_t& size,
                                                   int const*& fds, size_t& count) {
-    releaseFence = new Fence();
+    releaseFence = sp<Fence>::make();
     if (status_t err = releaseFence->unflatten(buffer, size, fds, count); err != OK) {
         return err;
     }

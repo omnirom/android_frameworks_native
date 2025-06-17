@@ -28,25 +28,25 @@
 #include <optional>
 
 #include <android-base/properties.h>
+#include <android/binder_libbinder.h>
+#include <common/WorkloadTracer.h>
 #include <common/trace.h>
+#include <ftl/concat.h>
 #include <utils/Log.h>
 #include <utils/Mutex.h>
 
 #include <binder/IServiceManager.h>
 
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wconversion"
 #include <powermanager/PowerHalController.h>
 #include <powermanager/PowerHintSessionWrapper.h>
-#pragma clang diagnostic pop
 
 #include <common/FlagManager.h>
 #include "PowerAdvisor.h"
-
-namespace hal = aidl::android::hardware::power;
+#include "SessionManager.h"
 
 namespace android::adpf::impl {
 
+using namespace android::ftl::flag_operators;
 using aidl::android::hardware::common::fmq::SynchronizedReadWrite;
 using android::hardware::EventFlag;
 
@@ -65,6 +65,8 @@ void traceExpensiveRendering(bool enabled) {
     }
 }
 
+static constexpr ftl::Flags<Workload> TRIGGER_LOAD_CHANGE_HINTS = Workload::EFFECTS |
+        Workload::VISIBLE_REGION | Workload::DISPLAY_CHANGES | Workload::SCREENSHOT;
 } // namespace
 
 PowerAdvisor::PowerAdvisor(std::function<void()>&& sfDisableExpensiveFn,
@@ -513,7 +515,7 @@ void PowerAdvisor::setRequiresRenderEngine(DisplayId displayId, bool requiresRen
 }
 
 void PowerAdvisor::setExpectedPresentTime(TimePoint expectedPresentTime) {
-    mExpectedPresentTimes.append(expectedPresentTime);
+    mExpectedPresentTimes.next() = expectedPresentTime;
 }
 
 void PowerAdvisor::setSfPresentTiming(TimePoint presentFenceTime, TimePoint presentEndTime) {
@@ -530,7 +532,7 @@ void PowerAdvisor::setHwcPresentDelayedTime(DisplayId displayId, TimePoint earli
 }
 
 void PowerAdvisor::setCommitStart(TimePoint commitStartTime) {
-    mCommitStartTimes.append(commitStartTime);
+    mCommitStartTimes.next() = commitStartTime;
 }
 
 void PowerAdvisor::setCompositeEnd(TimePoint compositeEndTime) {
@@ -543,6 +545,18 @@ void PowerAdvisor::setDisplays(std::vector<DisplayId>& displayIds) {
 
 void PowerAdvisor::setTotalFrameTargetWorkDuration(Duration targetDuration) {
     mTotalFrameTargetDuration = targetDuration;
+}
+
+std::shared_ptr<SessionManager> PowerAdvisor::getSessionManager() {
+    return mSessionManager;
+}
+
+sp<IBinder> PowerAdvisor::getOrCreateSessionManagerForBinder(uid_t uid) {
+    // Flag guards the creation of SessionManager
+    if (mSessionManager == nullptr && FlagManager::getInstance().adpf_native_session_manager()) {
+        mSessionManager = ndk::SharedRefBase::make<SessionManager>(uid);
+    }
+    return AIBinder_toPlatformBinder(mSessionManager->asBinder().get());
 }
 
 std::vector<DisplayId> PowerAdvisor::getOrderedDisplayIds(
@@ -565,7 +579,7 @@ std::optional<hal::WorkDuration> PowerAdvisor::estimateWorkDuration() {
     }
 
     // Tracks when we finish presenting to hwc
-    TimePoint estimatedHwcEndTime = mCommitStartTimes[0];
+    TimePoint estimatedHwcEndTime = mCommitStartTimes.back();
 
     // How long we spent this frame not doing anything, waiting for fences or vsync
     Duration idleDuration = 0ns;
@@ -629,13 +643,13 @@ std::optional<hal::WorkDuration> PowerAdvisor::estimateWorkDuration() {
     // Also add the frame delay duration since the target did not move while we were delayed
     Duration totalDuration = mFrameDelayDuration +
             std::max(estimatedHwcEndTime, estimatedGpuEndTime.value_or(TimePoint{0ns})) -
-            mCommitStartTimes[0];
+            mCommitStartTimes.back();
     Duration totalDurationWithoutGpu =
-            mFrameDelayDuration + estimatedHwcEndTime - mCommitStartTimes[0];
+            mFrameDelayDuration + estimatedHwcEndTime - mCommitStartTimes.back();
 
     // We finish SurfaceFlinger when post-composition finishes, so add that in here
     Duration flingerDuration =
-            estimatedFlingerEndTime + mLastPostcompDuration - mCommitStartTimes[0];
+            estimatedFlingerEndTime + mLastPostcompDuration - mCommitStartTimes.back();
     Duration estimatedGpuDuration = firstGpuTimeline.has_value()
             ? estimatedGpuEndTime.value_or(TimePoint{0ns}) - firstGpuTimeline->startTime
             : Duration::fromNs(0);
@@ -647,7 +661,7 @@ std::optional<hal::WorkDuration> PowerAdvisor::estimateWorkDuration() {
     hal::WorkDuration duration{
             .timeStampNanos = TimePoint::now().ns(),
             .durationNanos = combinedDuration.ns(),
-            .workPeriodStartTimestampNanos = mCommitStartTimes[0].ns(),
+            .workPeriodStartTimestampNanos = mCommitStartTimes.back().ns(),
             .cpuDurationNanos = supportsGpuReporting() ? cpuDuration.ns() : 0,
             .gpuDurationNanos = supportsGpuReporting() ? estimatedGpuDuration.ns() : 0,
     };
@@ -747,4 +761,58 @@ power::PowerHalController& PowerAdvisor::getPowerHal() {
     return *mPowerHal;
 }
 
+void PowerAdvisor::setQueuedWorkload(ftl::Flags<Workload> queued) {
+    queued &= TRIGGER_LOAD_CHANGE_HINTS;
+    if (!(queued).get()) return;
+    uint32_t previousQueuedWorkload = mQueuedWorkload.fetch_or(queued.get());
+
+    uint32_t newHints = (previousQueuedWorkload ^ queued.get()) & queued.get();
+    if (newHints) {
+        SFTRACE_INSTANT_FOR_TRACK(WorkloadTracer::TRACK_NAME,
+                                  ftl::Concat("QueuedWorkload: ",
+                                              ftl::truncated<20>(ftl::Flags<Workload>(newHints)
+                                                                         .string()
+                                                                         .c_str()))
+                                          .c_str());
+    }
+    if (!previousQueuedWorkload) {
+        // TODO(b/385028458) maybe load up hint if close to wake up
+    }
+}
+
+void PowerAdvisor::setScreenshotWorkload() {
+    mCommittedWorkload |= Workload::SCREENSHOT;
+}
+
+void PowerAdvisor::setCommittedWorkload(ftl::Flags<Workload> workload) {
+    workload &= TRIGGER_LOAD_CHANGE_HINTS;
+    uint32_t queued = mQueuedWorkload.exchange(0);
+    mCommittedWorkload |= workload;
+
+    bool cancelLoadupHint = queued && !mCommittedWorkload.get();
+    if (cancelLoadupHint) {
+        SFTRACE_INSTANT_FOR_TRACK(WorkloadTracer::TRACK_NAME,
+                                  ftl::Concat("UncommittedQueuedWorkload: ",
+                                              ftl::truncated<20>(ftl::Flags<Workload>(queued)
+                                                                         .string()
+                                                                         .c_str()))
+                                          .c_str());
+        // TODO(b/385028458) cancel load up hint
+    }
+
+    bool increasedWorkload = queued == 0 && mCommittedWorkload.get() != 0;
+    if (increasedWorkload) {
+        SFTRACE_INSTANT_FOR_TRACK(WorkloadTracer::TRACK_NAME,
+                                  ftl::Concat("CommittedWorkload: ",
+                                              ftl::truncated<20>(mCommittedWorkload.string()))
+                                          .c_str());
+
+        // TODO(b/385028458) load up hint
+    }
+}
+
+void PowerAdvisor::setCompositedWorkload(ftl::Flags<Workload> composited) {
+    composited &= TRIGGER_LOAD_CHANGE_HINTS;
+    mCommittedWorkload = composited;
+}
 } // namespace android::adpf::impl

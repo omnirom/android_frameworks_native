@@ -133,10 +133,11 @@ void LatencyAggregatorWithHistograms::addSampleToHistogram(
 }
 
 void LatencyAggregatorWithHistograms::processStatistics(const InputEventTimeline& timeline) {
-    // Only gather data for Down, Move and Up motion events and Key events
+    // Only gather data for Down, Move, Up and Scroll motion events and Key events
     if (!(timeline.inputEventActionType == InputEventActionType::MOTION_ACTION_DOWN ||
           timeline.inputEventActionType == InputEventActionType::MOTION_ACTION_MOVE ||
           timeline.inputEventActionType == InputEventActionType::MOTION_ACTION_UP ||
+          timeline.inputEventActionType == InputEventActionType::MOTION_ACTION_SCROLL ||
           timeline.inputEventActionType == InputEventActionType::KEY))
         return;
 

@@ -23,20 +23,15 @@ use std::ffi::{c_void, CStr, CString};
 use std::os::raw::c_char;
 
 use libc::{sockaddr, sockaddr_un, sockaddr_vm, socklen_t};
-use std::sync::Arc;
-use std::{fmt, mem, ptr};
+use std::boxed::Box;
+use std::{mem, ptr};
 
 /// Rust wrapper around ABinderRpc_Accessor objects for RPC binder service management.
 ///
 /// Dropping the `Accessor` will drop the underlying object and the binder it owns.
+#[derive(Debug)]
 pub struct Accessor {
     accessor: *mut sys::ABinderRpc_Accessor,
-}
-
-impl fmt::Debug for Accessor {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "ABinderRpc_Accessor({:p})", self.accessor)
-    }
 }
 
 /// Socket connection info required for libbinder to connect to a service.
@@ -70,7 +65,7 @@ impl Accessor {
     where
         F: Fn(&str) -> Option<ConnectionInfo> + Send + Sync + 'static,
     {
-        let callback: *mut c_void = Arc::into_raw(Arc::new(callback)) as *mut c_void;
+        let callback: *mut c_void = Box::into_raw(Box::new(callback)) as *mut c_void;
         let inst = CString::new(instance).unwrap();
 
         // Safety: The function pointer is a valid connection_info callback.
@@ -154,7 +149,7 @@ impl Accessor {
     ///   the string within isize::MAX from the pointer. The memory must not be mutated for
     ///   the duration of this function  call and must be valid for reads from the pointer
     ///   to the null terminator.
-    /// - The `cookie` parameter must be the cookie for an `Arc<F>` and
+    /// - The `cookie` parameter must be the cookie for a `Box<F>` and
     ///   the caller must hold a ref-count to it.
     unsafe extern "C" fn connection_info<F>(
         instance: *const c_char,
@@ -167,7 +162,7 @@ impl Accessor {
             log::error!("Cookie({cookie:p}) or instance({instance:p}) is null!");
             return ptr::null_mut();
         }
-        // Safety: The caller promises that `cookie` is for an Arc<F>.
+        // Safety: The caller promises that `cookie` is for a Box<F>.
         let callback = unsafe { (cookie as *const F).as_ref().unwrap() };
 
         // Safety: The caller in libbinder_ndk will have already verified this is a valid
@@ -212,19 +207,19 @@ impl Accessor {
         }
     }
 
-    /// Callback that decrements the ref-count.
+    /// Callback that drops the `Box<F>`.
     /// This is invoked from C++ when a binder is unlinked.
     ///
     /// # Safety
     ///
-    /// - The `cookie` parameter must be the cookie for an `Arc<F>` and
+    /// - The `cookie` parameter must be the cookie for a `Box<F>` and
     ///   the owner must give up a ref-count to it.
     unsafe extern "C" fn cookie_decr_refcount<F>(cookie: *mut c_void)
     where
         F: Fn(&str) -> Option<ConnectionInfo> + Send + Sync + 'static,
     {
-        // Safety: The caller promises that `cookie` is for an Arc<F>.
-        unsafe { Arc::decrement_strong_count(cookie as *const F) };
+        // Safety: The caller promises that `cookie` is for a Box<F>.
+        unsafe { std::mem::drop(Box::from_raw(cookie as *mut F)) };
     }
 }
 
@@ -301,7 +296,7 @@ impl AccessorProvider {
     where
         F: Fn(&str) -> Option<Accessor> + Send + Sync + 'static,
     {
-        let callback: *mut c_void = Arc::into_raw(Arc::new(provider)) as *mut c_void;
+        let callback: *mut c_void = Box::into_raw(Box::new(provider)) as *mut c_void;
         let c_str_instances: Vec<CString> =
             instances.iter().map(|s| CString::new(s.as_bytes()).unwrap()).collect();
         let mut c_instances: Vec<*const c_char> =
@@ -351,7 +346,7 @@ impl AccessorProvider {
             log::error!("Cookie({cookie:p}) or instance({instance:p}) is null!");
             return ptr::null_mut();
         }
-        // Safety: The caller promises that `cookie` is for an Arc<F>.
+        // Safety: The caller promises that `cookie` is for a Box<F>.
         let callback = unsafe { (cookie as *const F).as_ref().unwrap() };
 
         let inst = {
@@ -382,14 +377,14 @@ impl AccessorProvider {
     ///
     /// # Safety
     ///
-    /// - The `cookie` parameter must be the cookie for an `Arc<F>` and
+    /// - The `cookie` parameter must be the cookie for a `Box<F>` and
     ///   the owner must give up a ref-count to it.
     unsafe extern "C" fn accessor_cookie_decr_refcount<F>(cookie: *mut c_void)
     where
         F: Fn(&str) -> Option<Accessor> + Send + Sync + 'static,
     {
-        // Safety: The caller promises that `cookie` is for an Arc<F>.
-        unsafe { Arc::decrement_strong_count(cookie as *const F) };
+        // Safety: The caller promises that `cookie` is for a Box<F>.
+        unsafe { std::mem::drop(Box::from_raw(cookie as *mut F)) };
     }
 }
 

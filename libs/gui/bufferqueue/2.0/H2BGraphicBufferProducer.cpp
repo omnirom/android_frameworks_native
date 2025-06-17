@@ -325,7 +325,7 @@ status_t H2BGraphicBufferProducer::connect(
     }
     sp<HProducerListener> hListener = nullptr;
     if (listener && listener->needsReleaseNotify()) {
-        hListener = new B2HProducerListener(listener);
+        hListener = sp<B2HProducerListener>::make(listener);
         if (!hListener) {
             LOG(ERROR) << "connect: failed to wrap listener.";
             return UNKNOWN_ERROR;

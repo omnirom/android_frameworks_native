@@ -17,6 +17,7 @@
 #include <android/binder_ibinder.h>
 #include <android/binder_parcel.h>
 #include <android/binder_status.h>
+#include <android/persistable_bundle.h>
 
 /* Platform only */
 #if defined(ANDROID_PLATFORM) || defined(__ANDROID_VENDOR__)
@@ -89,6 +90,11 @@ enum {
     FLAG_CLEAR_BUF = FLAG_CLEAR_BUF,
     FLAG_PRIVATE_LOCAL = FLAG_PRIVATE_LOCAL,
 #endif
+};
+
+enum {
+    APERSISTABLEBUNDLE_KEY_NOT_FOUND = APERSISTABLEBUNDLE_KEY_NOT_FOUND,
+    APERSISTABLEBUNDLE_ALLOCATOR_FAILED = APERSISTABLEBUNDLE_ALLOCATOR_FAILED,
 };
 
 } // namespace consts

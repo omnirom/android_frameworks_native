@@ -19,15 +19,15 @@
 #include <gui/DisplayInfo.h>
 
 #include "FrontEnd/LayerCreationArgs.h"
+#include "QueuedTransactionState.h"
 #include "RequestedLayerState.h"
-#include "TransactionState.h"
 
 namespace android::surfaceflinger::frontend {
 
 // Atomic set of changes affecting layer state. These changes are queued in binder threads and
 // applied every vsync.
 struct Update {
-    std::vector<TransactionState> transactions;
+    std::vector<QueuedTransactionState> transactions;
     std::vector<sp<Layer>> legacyLayers;
     std::vector<std::unique_ptr<frontend::RequestedLayerState>> newLayers;
     std::vector<LayerCreationArgs> layerCreationArgs;

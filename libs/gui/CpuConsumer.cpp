@@ -20,7 +20,11 @@
 
 #include <com_android_graphics_libgui_flags.h>
 #include <gui/BufferItem.h>
+#include <gui/BufferQueue.h>
 #include <gui/CpuConsumer.h>
+#include <gui/IGraphicBufferConsumer.h>
+#include <gui/IGraphicBufferProducer.h>
+#include <gui/Surface.h>
 #include <utils/Log.h>
 
 #define CC_LOGV(x, ...) ALOGV("[%s] " x, mName.c_str(), ##__VA_ARGS__)
@@ -30,6 +34,28 @@
 #define CC_LOGE(x, ...) ALOGE("[%s] " x, mName.c_str(), ##__VA_ARGS__)
 
 namespace android {
+
+std::tuple<sp<CpuConsumer>, sp<Surface>> CpuConsumer::create(size_t maxLockedBuffers,
+                                                             bool controlledByApp,
+                                                             bool isConsumerSurfaceFlinger) {
+#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
+    sp<CpuConsumer> consumer =
+            sp<CpuConsumer>::make(maxLockedBuffers, controlledByApp, isConsumerSurfaceFlinger);
+    return {consumer, consumer->getSurface()};
+#else
+    sp<IGraphicBufferProducer> igbp;
+    sp<IGraphicBufferConsumer> igbc;
+    BufferQueue::createBufferQueue(&igbp, &igbc, isConsumerSurfaceFlinger);
+
+    return {sp<CpuConsumer>::make(igbc, maxLockedBuffers, controlledByApp),
+            sp<Surface>::make(igbp, controlledByApp)};
+#endif
+}
+
+sp<CpuConsumer> CpuConsumer::create(const sp<IGraphicBufferConsumer>& bq, size_t maxLockedBuffers,
+                                    bool controlledByApp) {
+    return sp<CpuConsumer>::make(bq, maxLockedBuffers, controlledByApp);
+}
 
 #if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
 CpuConsumer::CpuConsumer(size_t maxLockedBuffers, bool controlledByApp,
@@ -230,7 +256,7 @@ status_t CpuConsumer::unlockBuffer(const LockedBuffer &nativeBuffer) {
         return err;
     }
 
-    sp<Fence> fence(fenceFd >= 0 ? new Fence(fenceFd) : Fence::NO_FENCE);
+    sp<Fence> fence(fenceFd >= 0 ? sp<Fence>::make(fenceFd) : Fence::NO_FENCE);
     addReleaseFenceLocked(ab.mSlot, ab.mGraphicBuffer, fence);
     releaseBufferLocked(ab.mSlot, ab.mGraphicBuffer);
 

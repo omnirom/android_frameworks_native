@@ -20,6 +20,7 @@
 #include <time.h>
 #include <errno.h>
 
+#include <android-base/logging.h>
 #include <binder/Binder.h>
 #include <binder/Parcel.h>
 #include <gtest/gtest.h>
@@ -43,6 +44,39 @@ bool operator==(const InputChannel& left, const InputChannel& right) {
     return left.getName() == right.getName() &&
             left.getConnectionToken() == right.getConnectionToken() && lhs.st_ino == rhs.st_ino;
 }
+
+/**
+ * Read a message from the provided channel. Read will continue until there's data, so only call
+ * this if there's data in the channel, or it's closed. If there's no data, this will loop forever.
+ */
+android::base::Result<InputMessage> readMessage(InputChannel& channel) {
+    while (true) {
+        // Keep reading until we get something other than 'WOULD_BLOCK'
+        android::base::Result<InputMessage> result = channel.receiveMessage();
+        if (!result.ok() && result.error().code() == WOULD_BLOCK) {
+            // The data is not available yet.
+            continue; // try again
+        }
+        return result;
+    }
+}
+
+InputMessage createFinishedMessage(uint32_t seq) {
+    InputMessage finish{};
+    finish.header.type = InputMessage::Type::FINISHED;
+    finish.header.seq = seq;
+    finish.body.finished.handled = true;
+    return finish;
+}
+
+InputMessage createKeyMessage(uint32_t seq) {
+    InputMessage key{};
+    key.header.type = InputMessage::Type::KEY;
+    key.header.seq = seq;
+    key.body.key.action = AKEY_EVENT_ACTION_DOWN;
+    return key;
+}
+
 } // namespace
 
 class InputChannelTest : public testing::Test {
@@ -225,6 +259,120 @@ TEST_F(InputChannelTest, SendAndReceive_MotionClassification) {
         EXPECT_EQ(classification, clientMsg.body.motion.classification)
                 << "Expected to receive " << motionClassificationToString(classification);
     }
+}
+
+/**
+ * In this test, server writes 3 key events to the client. The client, upon receiving the first key,
+ * sends a "finished" signal back to server, and then closes the fd.
+ *
+ * Next, we check what the server receives.
+ *
+ * In most cases, the server will receive the finish event, and then an 'fd closed' event.
+ *
+ * However, sometimes, the 'finish' event will not be delivered to the server. This is communicated
+ * to the server via 'ECONNRESET', which the InputChannel converts into DEAD_OBJECT.
+ *
+ * The server needs to be aware of this behaviour and correctly clean up any state associated with
+ * the  client, even if the client did not end up finishing some of the messages.
+ *
+ * This test is written to expose a behaviour on the linux side - occasionally, the
+ * last events written to the fd by the consumer are not delivered to the server.
+ *
+ * When tested on 2025 hardware, ECONNRESET was received  approximately 1 out of 40 tries.
+ * In vast majority (~ 29999 / 30000) of cases, after receiving ECONNRESET, the server could still
+ * read the client data after receiving ECONNRESET.
+ */
+TEST_F(InputChannelTest, ReceiveAfterCloseMultiThreaded) {
+    std::unique_ptr<InputChannel> serverChannel, clientChannel;
+    status_t result =
+            InputChannel::openInputChannelPair("channel name", serverChannel, clientChannel);
+    ASSERT_EQ(OK, result) << "should have successfully opened a channel pair";
+
+    // Sender / publisher: publish 3 keys
+    InputMessage key1 = createKeyMessage(/*seq=*/1);
+    serverChannel->sendMessage(&key1);
+    // The client should close the fd after it reads this one, but we will send 2 more here.
+    InputMessage key2 = createKeyMessage(/*seq=*/2);
+    serverChannel->sendMessage(&key2);
+    InputMessage key3 = createKeyMessage(/*seq=*/3);
+    serverChannel->sendMessage(&key3);
+
+    std::thread consumer = std::thread([clientChannel = std::move(clientChannel)]() mutable {
+        // Read the first key
+        android::base::Result<InputMessage> firstKey = readMessage(*clientChannel);
+        if (!firstKey.ok()) {
+            FAIL() << "Did not receive the first key";
+        }
+
+        // Send finish
+        const InputMessage finish = createFinishedMessage(firstKey->header.seq);
+        clientChannel->sendMessage(&finish);
+        // Now close the fd
+        clientChannel.reset();
+    });
+
+    // Now try to read the finish message, even though client closed the fd
+    android::base::Result<InputMessage> response = readMessage(*serverChannel);
+    consumer.join();
+    if (response.ok()) {
+        ASSERT_EQ(response->header.type, InputMessage::Type::FINISHED);
+    } else {
+        // It's possible that after the client closes the fd, server will receive ECONNRESET.
+        // In those situations, this error code will be translated into DEAD_OBJECT by the
+        // InputChannel.
+        ASSERT_EQ(response.error().code(), DEAD_OBJECT);
+        // In most cases, subsequent attempts to read the client channel at this
+        // point would succeed. However, for simplicity, we exit here (since
+        // it's not guaranteed).
+        return;
+    }
+
+    // There should not be any more events from the client, since the client closed fd after the
+    // first key.
+    android::base::Result<InputMessage> noEvent = serverChannel->receiveMessage();
+    ASSERT_FALSE(noEvent.ok()) << "Got event " << *noEvent;
+}
+
+/**
+ * Similar test as above, but single-threaded.
+ */
+TEST_F(InputChannelTest, ReceiveAfterCloseSingleThreaded) {
+    std::unique_ptr<InputChannel> serverChannel, clientChannel;
+    status_t result =
+            InputChannel::openInputChannelPair("channel name", serverChannel, clientChannel);
+    ASSERT_EQ(OK, result) << "should have successfully opened a channel pair";
+
+    // Sender / publisher: publish 3 keys
+    InputMessage key1 = createKeyMessage(/*seq=*/1);
+    serverChannel->sendMessage(&key1);
+    // The client should close the fd after it reads this one, but we will send 2 more here.
+    InputMessage key2 = createKeyMessage(/*seq=*/2);
+    serverChannel->sendMessage(&key2);
+    InputMessage key3 = createKeyMessage(/*seq=*/3);
+    serverChannel->sendMessage(&key3);
+
+    // Read the first key
+    android::base::Result<InputMessage> firstKey = readMessage(*clientChannel);
+    if (!firstKey.ok()) {
+        FAIL() << "Did not receive the first key";
+    }
+
+    // Send finish
+    const InputMessage finish = createFinishedMessage(firstKey->header.seq);
+    clientChannel->sendMessage(&finish);
+    // Now close the fd
+    clientChannel.reset();
+
+    // Now try to read the finish message, even though client closed the fd
+    android::base::Result<InputMessage> response = readMessage(*serverChannel);
+    ASSERT_FALSE(response.ok());
+    ASSERT_EQ(response.error().code(), DEAD_OBJECT);
+
+    // We can still read the finish event (but in practice, the expectation is that the server will
+    // not be doing this after getting DEAD_OBJECT).
+    android::base::Result<InputMessage> finishEvent = serverChannel->receiveMessage();
+    ASSERT_TRUE(finishEvent.ok());
+    ASSERT_EQ(finishEvent->header.type, InputMessage::Type::FINISHED);
 }
 
 TEST_F(InputChannelTest, DuplicateChannelAndAssertEqual) {

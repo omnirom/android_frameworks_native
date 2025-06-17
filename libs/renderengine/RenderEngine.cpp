@@ -107,16 +107,15 @@ ftl::Future<FenceResult> RenderEngine::drawLayers(const DisplaySettings& display
     return resultFuture;
 }
 
-ftl::Future<FenceResult> RenderEngine::drawGainmap(
-        const std::shared_ptr<ExternalTexture>& sdr, base::borrowed_fd&& sdrFence,
+ftl::Future<FenceResult> RenderEngine::tonemapAndDrawGainmap(
         const std::shared_ptr<ExternalTexture>& hdr, base::borrowed_fd&& hdrFence,
-        float hdrSdrRatio, ui::Dataspace dataspace,
+        float hdrSdrRatio, ui::Dataspace dataspace, const std::shared_ptr<ExternalTexture>& sdr,
         const std::shared_ptr<ExternalTexture>& gainmap) {
     const auto resultPromise = std::make_shared<std::promise<FenceResult>>();
     std::future<FenceResult> resultFuture = resultPromise->get_future();
     updateProtectedContext({}, {sdr.get(), hdr.get(), gainmap.get()});
-    drawGainmapInternal(std::move(resultPromise), sdr, std::move(sdrFence), hdr,
-                        std::move(hdrFence), hdrSdrRatio, dataspace, gainmap);
+    tonemapAndDrawGainmapInternal(std::move(resultPromise), hdr, std::move(hdrFence), hdrSdrRatio,
+                                  dataspace, sdr, gainmap);
     return resultFuture;
 }
 

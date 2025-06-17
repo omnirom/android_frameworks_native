@@ -20,7 +20,10 @@
 
 #include <vibratorservice/VibratorManagerHalController.h>
 
-namespace Aidl = aidl::android::hardware::vibrator;
+using aidl::android::hardware::vibrator::IVibrationSession;
+using aidl::android::hardware::vibrator::IVibrator;
+using aidl::android::hardware::vibrator::IVibratorManager;
+using aidl::android::hardware::vibrator::VibrationSessionConfig;
 
 namespace android {
 
@@ -29,9 +32,9 @@ namespace vibrator {
 std::shared_ptr<ManagerHalWrapper> connectManagerHal(std::shared_ptr<CallbackScheduler> scheduler) {
     static bool gHalExists = true;
     if (gHalExists) {
-        auto serviceName = std::string(Aidl::IVibratorManager::descriptor) + "/default";
+        auto serviceName = std::string(IVibratorManager::descriptor) + "/default";
         if (AServiceManager_isDeclared(serviceName.c_str())) {
-            std::shared_ptr<Aidl::IVibratorManager> hal = Aidl::IVibratorManager::fromBinder(
+            std::shared_ptr<IVibratorManager> hal = IVibratorManager::fromBinder(
                     ndk::SpAIBinder(AServiceManager_checkService(serviceName.c_str())));
             if (hal) {
                 ALOGV("Successfully connected to VibratorManager HAL AIDL service.");
@@ -41,6 +44,7 @@ std::shared_ptr<ManagerHalWrapper> connectManagerHal(std::shared_ptr<CallbackSch
         }
     }
 
+    ALOGV("VibratorManager HAL service not available.");
     gHalExists = false;
     return std::make_shared<LegacyManagerHalWrapper>();
 }
@@ -150,10 +154,10 @@ HalResult<void> ManagerHalController::cancelSynced() {
     return apply(cancelSyncedFn, "cancelSynced");
 }
 
-HalResult<std::shared_ptr<Aidl::IVibrationSession>> ManagerHalController::startSession(
-        const std::vector<int32_t>& ids, const Aidl::VibrationSessionConfig& config,
+HalResult<std::shared_ptr<IVibrationSession>> ManagerHalController::startSession(
+        const std::vector<int32_t>& ids, const VibrationSessionConfig& config,
         const std::function<void()>& completionCallback) {
-    hal_fn<std::shared_ptr<Aidl::IVibrationSession>> startSessionFn =
+    hal_fn<std::shared_ptr<IVibrationSession>> startSessionFn =
             [&](std::shared_ptr<ManagerHalWrapper> hal) {
                 return hal->startSession(ids, config, completionCallback);
             };

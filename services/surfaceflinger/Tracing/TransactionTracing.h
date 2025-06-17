@@ -134,7 +134,7 @@ public:
     // Flush event from perfetto data source
     void onFlush(Mode mode);
 
-    void addQueuedTransaction(const TransactionState&);
+    void addQueuedTransaction(const QueuedTransactionState&);
     void addCommittedTransactions(int64_t vsyncId, nsecs_t commitTime, frontend::Update& update,
                                   const frontend::DisplayInfos&, bool displayInfoChanged);
     status_t writeToFile(const std::string& filename = FILE_PATH);

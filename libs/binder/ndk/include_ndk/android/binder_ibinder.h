@@ -419,6 +419,9 @@ binder_status_t AIBinder_unlinkToDeath(AIBinder* binder, AIBinder_DeathRecipient
  * This can be used with higher-level system services to determine the caller's identity and check
  * permissions.
  *
+ * Warning do not use this as a security identifier! PID is unreliable as it may be re-used. This
+ * should mostly be used for debugging.
+ *
  * Available since API level 29.
  *
  * \return calling uid or the current process's UID if this thread isn't processing a transaction.

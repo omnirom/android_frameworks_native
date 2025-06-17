@@ -167,7 +167,7 @@ bool DisplayEventDispatcher::processPendingEvents(nsecs_t* outTimestamp,
         for (ssize_t i = 0; i < n; i++) {
             const DisplayEventReceiver::Event& ev = buf[i];
             switch (ev.header.type) {
-                case DisplayEventReceiver::DISPLAY_EVENT_VSYNC:
+                case DisplayEventType::DISPLAY_EVENT_VSYNC:
                     // Later vsync events will just overwrite the info from earlier
                     // ones. That's fine, we only care about the most recent.
                     gotVsync = true;
@@ -183,7 +183,7 @@ bool DisplayEventDispatcher::processPendingEvents(nsecs_t* outTimestamp,
                         ATRACE_INT("RenderRate", fps);
                     }
                     break;
-                case DisplayEventReceiver::DISPLAY_EVENT_HOTPLUG:
+                case DisplayEventType::DISPLAY_EVENT_HOTPLUG:
                     if (ev.hotplug.connectionError == 0) {
                         dispatchHotplug(ev.header.timestamp, ev.header.displayId,
                                         ev.hotplug.connected);
@@ -192,30 +192,27 @@ bool DisplayEventDispatcher::processPendingEvents(nsecs_t* outTimestamp,
                                                        ev.hotplug.connectionError);
                     }
                     break;
-                case DisplayEventReceiver::DISPLAY_EVENT_MODE_CHANGE:
+                case DisplayEventType::DISPLAY_EVENT_MODE_CHANGE:
                     dispatchModeChanged(ev.header.timestamp, ev.header.displayId,
                                         ev.modeChange.modeId, ev.modeChange.vsyncPeriod);
                     break;
-                case DisplayEventReceiver::DISPLAY_EVENT_NULL:
+                case DisplayEventType::DISPLAY_EVENT_NULL:
                     dispatchNullEvent(ev.header.timestamp, ev.header.displayId);
                     break;
-                case DisplayEventReceiver::DISPLAY_EVENT_FRAME_RATE_OVERRIDE:
+                case DisplayEventType::DISPLAY_EVENT_FRAME_RATE_OVERRIDE:
                     mFrameRateOverrides.emplace_back(ev.frameRateOverride);
                     break;
-                case DisplayEventReceiver::DISPLAY_EVENT_FRAME_RATE_OVERRIDE_FLUSH:
+                case DisplayEventType::DISPLAY_EVENT_FRAME_RATE_OVERRIDE_FLUSH:
                     dispatchFrameRateOverrides(ev.header.timestamp, ev.header.displayId,
                                                std::move(mFrameRateOverrides));
                     break;
-                case DisplayEventReceiver::DISPLAY_EVENT_HDCP_LEVELS_CHANGE:
+                case DisplayEventType::DISPLAY_EVENT_HDCP_LEVELS_CHANGE:
                     dispatchHdcpLevelsChanged(ev.header.displayId,
                                               ev.hdcpLevelsChange.connectedLevel,
                                               ev.hdcpLevelsChange.maxLevel);
                     break;
-                case DisplayEventReceiver::DISPLAY_EVENT_MODE_REJECTION:
+                case DisplayEventType::DISPLAY_EVENT_MODE_REJECTION:
                     dispatchModeRejected(ev.header.displayId, ev.modeRejection.modeId);
-                    break;
-                default:
-                    ALOGW("dispatcher %p ~ ignoring unknown event type %#x", this, ev.header.type);
                     break;
             }
         }

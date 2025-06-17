@@ -1,0 +1,7 @@
+lpique@google.com  # primary POC
+bwidawsk@google.com
+ddavenport@google.com
+markyacoub@google.com
+sukoo@google.com
+
+include platform/frameworks/native:/services/surfaceflinger/OWNERS

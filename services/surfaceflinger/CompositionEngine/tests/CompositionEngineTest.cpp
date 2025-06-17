@@ -43,6 +43,10 @@ using ::testing::ReturnRef;
 using ::testing::SaveArg;
 using ::testing::StrictMock;
 
+static constexpr PhysicalDisplayId kDisplayId1 = PhysicalDisplayId::fromPort(123u);
+static constexpr PhysicalDisplayId kDisplayId2 = PhysicalDisplayId::fromPort(234u);
+static constexpr PhysicalDisplayId kDisplayId3 = PhysicalDisplayId::fromPort(567u);
+
 struct CompositionEngineTest : public testing::Test {
     std::shared_ptr<TimeStats> mTimeStats;
 
@@ -52,6 +56,31 @@ struct CompositionEngineTest : public testing::Test {
     std::shared_ptr<mock::Output> mOutput1{std::make_shared<StrictMock<mock::Output>>()};
     std::shared_ptr<mock::Output> mOutput2{std::make_shared<StrictMock<mock::Output>>()};
     std::shared_ptr<mock::Output> mOutput3{std::make_shared<StrictMock<mock::Output>>()};
+
+    std::array<impl::OutputCompositionState, 3> mOutputStates;
+
+    void SetUp() override {
+        EXPECT_CALL(*mOutput1, getDisplayId)
+                .WillRepeatedly(Return(std::make_optional<DisplayId>(kDisplayId1)));
+        EXPECT_CALL(*mOutput1, getDisplayIdVariant).WillRepeatedly(Return(kDisplayId1));
+
+        EXPECT_CALL(*mOutput2, getDisplayId)
+                .WillRepeatedly(Return(std::make_optional<DisplayId>(kDisplayId2)));
+        EXPECT_CALL(*mOutput2, getDisplayIdVariant).WillRepeatedly(Return(kDisplayId2));
+
+        EXPECT_CALL(*mOutput3, getDisplayId)
+                .WillRepeatedly(Return(std::make_optional<DisplayId>(kDisplayId3)));
+        EXPECT_CALL(*mOutput3, getDisplayIdVariant).WillRepeatedly(Return(kDisplayId3));
+
+        // Most tests will depend on the outputs being enabled.
+        for (auto& state : mOutputStates) {
+            state.isEnabled = true;
+        }
+
+        EXPECT_CALL(*mOutput1, getState).WillRepeatedly(ReturnRef(mOutputStates[0]));
+        EXPECT_CALL(*mOutput2, getState).WillRepeatedly(ReturnRef(mOutputStates[1]));
+        EXPECT_CALL(*mOutput3, getState).WillRepeatedly(ReturnRef(mOutputStates[2]));
+    }
 };
 
 TEST_F(CompositionEngineTest, canInstantiateCompositionEngine) {
@@ -61,7 +90,7 @@ TEST_F(CompositionEngineTest, canInstantiateCompositionEngine) {
 
 TEST_F(CompositionEngineTest, canSetHWComposer) {
     android::mock::HWComposer* hwc = new StrictMock<android::mock::HWComposer>();
-    mEngine.setHwComposer(std::unique_ptr<android::HWComposer>(hwc));
+    mEngine.setHwComposer(static_cast<android::HWComposer*>(hwc));
 
     EXPECT_EQ(hwc, &mEngine.getHwComposer());
 }
@@ -94,7 +123,7 @@ struct CompositionEnginePresentTest : public CompositionEngineTest {
     StrictMock<CompositionEnginePartialMock> mEngine;
 };
 
-TEST_F(CompositionEnginePresentTest, worksWithEmptyRequest) {
+TEST_F(CompositionEnginePresentTest, zeroOutputs) {
     // present() always calls preComposition() and postComposition()
     EXPECT_CALL(mEngine, preComposition(Ref(mRefreshArgs)));
     EXPECT_CALL(mEngine, postComposition(Ref(mRefreshArgs)));
@@ -102,7 +131,7 @@ TEST_F(CompositionEnginePresentTest, worksWithEmptyRequest) {
     mEngine.present(mRefreshArgs);
 }
 
-TEST_F(CompositionEnginePresentTest, worksAsExpected) {
+TEST_F(CompositionEnginePresentTest, threeOutputs) {
     // Expect calls to in a certain sequence
     InSequence seq;
 
@@ -114,9 +143,7 @@ TEST_F(CompositionEnginePresentTest, worksAsExpected) {
     EXPECT_CALL(*mOutput2, prepare(Ref(mRefreshArgs), _));
     EXPECT_CALL(*mOutput3, prepare(Ref(mRefreshArgs), _));
 
-    // All of mOutput<i> are StrictMocks. If the flag is true, it will introduce
-    // calls to getDisplayId, which are not relevant to this test.
-    SET_FLAG_FOR_TEST(flags::multithreaded_present, false);
+    EXPECT_CALL(*mOutput1, supportsOffloadPresent).WillOnce(Return(false));
 
     // The last step is to actually present each output.
     EXPECT_CALL(*mOutput1, present(Ref(mRefreshArgs)))
@@ -284,8 +311,6 @@ struct CompositionEngineOffloadTest : public testing::Test {
     std::shared_ptr<mock::Output> mVirtualDisplay{std::make_shared<StrictMock<mock::Output>>()};
     std::shared_ptr<mock::Output> mHalVirtualDisplay{std::make_shared<StrictMock<mock::Output>>()};
 
-    static constexpr PhysicalDisplayId kDisplayId1 = PhysicalDisplayId::fromPort(123u);
-    static constexpr PhysicalDisplayId kDisplayId2 = PhysicalDisplayId::fromPort(234u);
     static constexpr GpuVirtualDisplayId kGpuVirtualDisplayId{789u};
     static constexpr HalVirtualDisplayId kHalVirtualDisplayId{456u};
 
@@ -294,12 +319,23 @@ struct CompositionEngineOffloadTest : public testing::Test {
     void SetUp() override {
         EXPECT_CALL(*mDisplay1, getDisplayId)
                 .WillRepeatedly(Return(std::make_optional<DisplayId>(kDisplayId1)));
+        EXPECT_CALL(*mDisplay1, getDisplayIdVariant).WillRepeatedly(Return(kDisplayId1));
+
         EXPECT_CALL(*mDisplay2, getDisplayId)
                 .WillRepeatedly(Return(std::make_optional<DisplayId>(kDisplayId2)));
+        EXPECT_CALL(*mDisplay2, getDisplayIdVariant).WillRepeatedly(Return(kDisplayId2));
+
         EXPECT_CALL(*mVirtualDisplay, getDisplayId)
                 .WillRepeatedly(Return(std::make_optional<DisplayId>(kGpuVirtualDisplayId)));
+        const DisplayIdVariant gpuVariant =
+                GpuVirtualDisplayId::fromValue(kGpuVirtualDisplayId.value);
+        EXPECT_CALL(*mVirtualDisplay, getDisplayIdVariant).WillRepeatedly(Return(gpuVariant));
+
         EXPECT_CALL(*mHalVirtualDisplay, getDisplayId)
                 .WillRepeatedly(Return(std::make_optional<DisplayId>(kHalVirtualDisplayId)));
+        const DisplayIdVariant halVariant =
+                HalVirtualDisplayId::fromValue(kHalVirtualDisplayId.value);
+        EXPECT_CALL(*mHalVirtualDisplay, getDisplayIdVariant).WillRepeatedly(Return(halVariant));
 
         // Most tests will depend on the outputs being enabled.
         for (auto& state : mOutputStates) {
@@ -332,7 +368,6 @@ TEST_F(CompositionEngineOffloadTest, basic) {
     EXPECT_CALL(*mDisplay1, offloadPresentNextFrame).Times(1);
     EXPECT_CALL(*mDisplay2, offloadPresentNextFrame).Times(0);
 
-    SET_FLAG_FOR_TEST(flags::multithreaded_present, true);
     setOutputs({mDisplay1, mDisplay2});
 
     mEngine.present(mRefreshArgs);
@@ -345,7 +380,6 @@ TEST_F(CompositionEngineOffloadTest, dependsOnSupport) {
     EXPECT_CALL(*mDisplay1, offloadPresentNextFrame).Times(0);
     EXPECT_CALL(*mDisplay2, offloadPresentNextFrame).Times(0);
 
-    SET_FLAG_FOR_TEST(flags::multithreaded_present, true);
     setOutputs({mDisplay1, mDisplay2});
 
     mEngine.present(mRefreshArgs);
@@ -358,20 +392,6 @@ TEST_F(CompositionEngineOffloadTest, dependsOnSupport2) {
     EXPECT_CALL(*mDisplay1, offloadPresentNextFrame).Times(0);
     EXPECT_CALL(*mDisplay2, offloadPresentNextFrame).Times(0);
 
-    SET_FLAG_FOR_TEST(flags::multithreaded_present, true);
-    setOutputs({mDisplay1, mDisplay2});
-
-    mEngine.present(mRefreshArgs);
-}
-
-TEST_F(CompositionEngineOffloadTest, dependsOnFlag) {
-    EXPECT_CALL(*mDisplay1, supportsOffloadPresent).Times(0);
-    EXPECT_CALL(*mDisplay2, supportsOffloadPresent).Times(0);
-
-    EXPECT_CALL(*mDisplay1, offloadPresentNextFrame).Times(0);
-    EXPECT_CALL(*mDisplay2, offloadPresentNextFrame).Times(0);
-
-    SET_FLAG_FOR_TEST(flags::multithreaded_present, false);
     setOutputs({mDisplay1, mDisplay2});
 
     mEngine.present(mRefreshArgs);
@@ -382,7 +402,6 @@ TEST_F(CompositionEngineOffloadTest, oneDisplay) {
 
     EXPECT_CALL(*mDisplay1, offloadPresentNextFrame).Times(0);
 
-    SET_FLAG_FOR_TEST(flags::multithreaded_present, true);
     setOutputs({mDisplay1});
 
     mEngine.present(mRefreshArgs);
@@ -397,7 +416,6 @@ TEST_F(CompositionEngineOffloadTest, virtualDisplay) {
     EXPECT_CALL(*mDisplay2, offloadPresentNextFrame).Times(0);
     EXPECT_CALL(*mVirtualDisplay, offloadPresentNextFrame).Times(0);
 
-    SET_FLAG_FOR_TEST(flags::multithreaded_present, true);
     setOutputs({mDisplay1, mDisplay2, mVirtualDisplay});
 
     mEngine.present(mRefreshArgs);
@@ -410,7 +428,6 @@ TEST_F(CompositionEngineOffloadTest, virtualDisplay2) {
     EXPECT_CALL(*mDisplay1, offloadPresentNextFrame).Times(0);
     EXPECT_CALL(*mVirtualDisplay, offloadPresentNextFrame).Times(0);
 
-    SET_FLAG_FOR_TEST(flags::multithreaded_present, true);
     setOutputs({mDisplay1, mVirtualDisplay});
 
     mEngine.present(mRefreshArgs);
@@ -423,7 +440,6 @@ TEST_F(CompositionEngineOffloadTest, halVirtual) {
     EXPECT_CALL(*mDisplay1, offloadPresentNextFrame).Times(1);
     EXPECT_CALL(*mHalVirtualDisplay, offloadPresentNextFrame).Times(0);
 
-    SET_FLAG_FOR_TEST(flags::multithreaded_present, true);
     setOutputs({mDisplay1, mHalVirtualDisplay});
 
     mEngine.present(mRefreshArgs);
@@ -440,7 +456,6 @@ TEST_F(CompositionEngineOffloadTest, ordering) {
     EXPECT_CALL(*mDisplay1, offloadPresentNextFrame).Times(1);
     EXPECT_CALL(*mDisplay2, offloadPresentNextFrame).Times(0);
 
-    SET_FLAG_FOR_TEST(flags::multithreaded_present, true);
     setOutputs({mVirtualDisplay, mHalVirtualDisplay, mDisplay1, mDisplay2});
 
     mEngine.present(mRefreshArgs);
@@ -458,7 +473,6 @@ TEST_F(CompositionEngineOffloadTest, dependsOnEnabled) {
     EXPECT_CALL(*mDisplay1, offloadPresentNextFrame).Times(0);
     EXPECT_CALL(*mDisplay2, offloadPresentNextFrame).Times(0);
 
-    SET_FLAG_FOR_TEST(flags::multithreaded_present, true);
     setOutputs({mDisplay1, mDisplay2});
 
     mEngine.present(mRefreshArgs);
@@ -478,7 +492,6 @@ TEST_F(CompositionEngineOffloadTest, disabledDisplaysDoNotPreventOthersFromOfflo
     EXPECT_CALL(*mDisplay2, offloadPresentNextFrame).Times(0);
     EXPECT_CALL(*mHalVirtualDisplay, offloadPresentNextFrame).Times(0);
 
-    SET_FLAG_FOR_TEST(flags::multithreaded_present, true);
     setOutputs({mDisplay1, mDisplay2, mHalVirtualDisplay});
 
     mEngine.present(mRefreshArgs);

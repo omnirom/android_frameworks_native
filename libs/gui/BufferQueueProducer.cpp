@@ -40,6 +40,7 @@
 #include <gui/TraceUtils.h>
 #include <private/gui/BufferQueueThreadState.h>
 
+#include <utils/Errors.h>
 #include <utils/Log.h>
 #include <utils/Trace.h>
 
@@ -108,9 +109,9 @@ status_t BufferQueueProducer::requestBuffer(int slot, sp<GraphicBuffer>* buf) {
         return NO_INIT;
     }
 
-    if (slot < 0 || slot >= BufferQueueDefs::NUM_BUFFER_SLOTS) {
-        BQ_LOGE("requestBuffer: slot index %d out of range [0, %d)",
-                slot, BufferQueueDefs::NUM_BUFFER_SLOTS);
+    int maxSlot = mCore->getTotalSlotCountLocked();
+    if (slot < 0 || slot >= maxSlot) {
+        BQ_LOGE("requestBuffer: slot index %d out of range [0, %d)", slot, maxSlot);
         return BAD_VALUE;
     } else if (!mSlots[slot].mBufferState.isDequeued()) {
         BQ_LOGE("requestBuffer: slot %d is not owned by the producer "
@@ -122,6 +123,49 @@ status_t BufferQueueProducer::requestBuffer(int slot, sp<GraphicBuffer>* buf) {
     *buf = mSlots[slot].mGraphicBuffer;
     return NO_ERROR;
 }
+
+#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_UNLIMITED_SLOTS)
+status_t BufferQueueProducer::extendSlotCount(int size) {
+    ATRACE_CALL();
+
+    sp<IConsumerListener> listener;
+    {
+        std::lock_guard<std::mutex> lock(mCore->mMutex);
+        BQ_LOGV("extendSlotCount: size %d", size);
+
+        if (mCore->mIsAbandoned) {
+            BQ_LOGE("extendSlotCount: BufferQueue has been abandoned");
+            return NO_INIT;
+        }
+
+        if (!mCore->mAllowExtendedSlotCount) {
+            BQ_LOGE("extendSlotCount: Consumer did not allow unlimited slots");
+            return INVALID_OPERATION;
+        }
+
+        int maxBeforeExtension = mCore->mMaxBufferCount;
+
+        if (size == maxBeforeExtension) {
+            return NO_ERROR;
+        }
+
+        if (size < maxBeforeExtension) {
+            return BAD_VALUE;
+        }
+
+        if (status_t ret = mCore->extendSlotCountLocked(size); ret != OK) {
+            return ret;
+        }
+        listener = mCore->mConsumerListener;
+    }
+
+    if (listener) {
+        listener->onSlotCountChanged(size);
+    }
+
+    return NO_ERROR;
+}
+#endif
 
 status_t BufferQueueProducer::setMaxDequeuedBufferCount(
         int maxDequeuedBuffers) {
@@ -170,11 +214,13 @@ status_t BufferQueueProducer::setMaxDequeuedBufferCount(int maxDequeuedBuffers,
         int minUndequedBufferCount = mCore->getMinUndequeuedBufferCountLocked();
         int bufferCount = minUndequedBufferCount + maxDequeuedBuffers;
 
-        if (bufferCount > BufferQueueDefs::NUM_BUFFER_SLOTS) {
+        if (bufferCount > mCore->getTotalSlotCountLocked()) {
             BQ_LOGE("setMaxDequeuedBufferCount: bufferCount %d too large "
-                    "(max %d)", bufferCount, BufferQueueDefs::NUM_BUFFER_SLOTS);
-            bufferCount = BufferQueueDefs::NUM_BUFFER_SLOTS;
-            maxDequeuedBuffers = bufferCount - minUndequedBufferCount;
+                    "(max %d)",
+                    bufferCount, mCore->getTotalSlotCountLocked());
+                    bufferCount = mCore->getTotalSlotCountLocked();
+                    maxDequeuedBuffers = bufferCount - minUndequedBufferCount;
+            return BAD_VALUE;
         }
 
         const int minBufferSlots = mCore->getMinMaxBufferCountLocked();
@@ -320,8 +366,10 @@ status_t BufferQueueProducer::waitForFreeSlotThenRelock(FreeSlotCaller caller,
         // Producers are not allowed to dequeue more than
         // mMaxDequeuedBufferCount buffers.
         // This check is only done if a buffer has already been queued
-        if (mCore->mBufferHasBeenQueued &&
-                dequeuedCount >= mCore->mMaxDequeuedBufferCount) {
+        using namespace com::android::graphics::libgui::flags;
+        bool flagGatedBufferHasBeenQueued =
+                bq_always_use_max_dequeued_buffer_count() || mCore->mBufferHasBeenQueued;
+        if (flagGatedBufferHasBeenQueued && dequeuedCount >= mCore->mMaxDequeuedBufferCount) {
             // Supress error logs when timeout is non-negative.
             if (mDequeueTimeout < 0) {
                 BQ_LOGE("%s: attempting to exceed the max dequeued buffer "
@@ -649,11 +697,11 @@ status_t BufferQueueProducer::dequeueBuffer(int* outSlot, sp<android::Fence>* ou
                 .requestorName = {mConsumerName.c_str(), mConsumerName.size()},
                 .extras = std::move(tempOptions),
         };
-        sp<GraphicBuffer> graphicBuffer = new GraphicBuffer(allocRequest);
+        sp<GraphicBuffer> graphicBuffer = sp<GraphicBuffer>::make(allocRequest);
 #else
         sp<GraphicBuffer> graphicBuffer =
-                new GraphicBuffer(width, height, format, BQ_LAYER_COUNT, usage,
-                                  {mConsumerName.c_str(), mConsumerName.size()});
+                sp<GraphicBuffer>::make(width, height, format, BQ_LAYER_COUNT, usage,
+                                        std::string{mConsumerName.c_str(), mConsumerName.size()});
 #endif
 
         status_t error = graphicBuffer->initCheck();
@@ -757,9 +805,9 @@ status_t BufferQueueProducer::detachBuffer(int slot) {
             return BAD_VALUE;
         }
 
-        if (slot < 0 || slot >= BufferQueueDefs::NUM_BUFFER_SLOTS) {
-            BQ_LOGE("detachBuffer: slot index %d out of range [0, %d)",
-                    slot, BufferQueueDefs::NUM_BUFFER_SLOTS);
+        const int totalSlotCount = mCore->getTotalSlotCountLocked();
+        if (slot < 0 || slot >= totalSlotCount) {
+            BQ_LOGE("detachBuffer: slot index %d out of range [0, %d)", slot, totalSlotCount);
             return BAD_VALUE;
         } else if (!mSlots[slot].mBufferState.isDequeued()) {
             // TODO(http://b/140581935): This message is BQ_LOGW because it
@@ -994,9 +1042,9 @@ status_t BufferQueueProducer::queueBuffer(int slot,
             return NO_INIT;
         }
 
-        if (slot < 0 || slot >= BufferQueueDefs::NUM_BUFFER_SLOTS) {
-            BQ_LOGE("queueBuffer: slot index %d out of range [0, %d)",
-                    slot, BufferQueueDefs::NUM_BUFFER_SLOTS);
+        const int totalSlotCount = mCore->getTotalSlotCountLocked();
+        if (slot < 0 || slot >= totalSlotCount) {
+            BQ_LOGE("queueBuffer: slot index %d out of range [0, %d)", slot, totalSlotCount);
             return BAD_VALUE;
         } else if (!mSlots[slot].mBufferState.isDequeued()) {
             BQ_LOGE("queueBuffer: slot %d is not owned by the producer "
@@ -1240,9 +1288,9 @@ status_t BufferQueueProducer::cancelBuffer(int slot, const sp<Fence>& fence) {
             return BAD_VALUE;
         }
 
-        if (slot < 0 || slot >= BufferQueueDefs::NUM_BUFFER_SLOTS) {
-            BQ_LOGE("cancelBuffer: slot index %d out of range [0, %d)", slot,
-                    BufferQueueDefs::NUM_BUFFER_SLOTS);
+        const int totalSlotCount = mCore->getTotalSlotCountLocked();
+        if (slot < 0 || slot >= totalSlotCount) {
+            BQ_LOGE("cancelBuffer: slot index %d out of range [0, %d)", slot, totalSlotCount);
             return BAD_VALUE;
         } else if (!mSlots[slot].mBufferState.isDequeued()) {
             BQ_LOGE("cancelBuffer: slot %d is not owned by the producer "
@@ -1410,6 +1458,9 @@ status_t BufferQueueProducer::connect(const sp<IProducerListener>& listener,
             output->nextFrameNumber = mCore->mFrameCounter + 1;
             output->bufferReplaced = false;
             output->maxBufferCount = mCore->mMaxBufferCount;
+#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_UNLIMITED_SLOTS)
+            output->isSlotExpansionAllowed = mCore->mAllowExtendedSlotCount;
+#endif
 
             if (listener != nullptr) {
                 // Set up a death notification so that we can disconnect
@@ -1417,7 +1468,7 @@ status_t BufferQueueProducer::connect(const sp<IProducerListener>& listener,
 #ifndef NO_BINDER
                 if (IInterface::asBinder(listener)->remoteBinder() != nullptr) {
                     status = IInterface::asBinder(listener)->linkToDeath(
-                            static_cast<IBinder::DeathRecipient*>(this));
+                            sp<IBinder::DeathRecipient>::fromExisting(this));
                     if (status != NO_ERROR) {
                         BQ_LOGE("connect: linkToDeath failed: %s (%d)",
                                 strerror(-status), status);
@@ -1506,8 +1557,7 @@ status_t BufferQueueProducer::disconnect(int api, DisconnectMode mode) {
                                 IInterface::asBinder(mCore->mLinkedToDeath);
                         // This can fail if we're here because of the death
                         // notification, but we just ignore it
-                        token->unlinkToDeath(
-                                static_cast<IBinder::DeathRecipient*>(this));
+                        token->unlinkToDeath(static_cast<IBinder::DeathRecipient*>(this));
                     }
 #endif
                     mCore->mSharedBufferSlot =
@@ -1638,11 +1688,11 @@ void BufferQueueProducer::allocateBuffers(uint32_t width, uint32_t height,
 #endif
 
 #if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(BQ_EXTENDEDALLOCATE)
-        sp<GraphicBuffer> graphicBuffer = new GraphicBuffer(allocRequest);
+        sp<GraphicBuffer> graphicBuffer = sp<GraphicBuffer>::make(allocRequest);
 #else
-        sp<GraphicBuffer> graphicBuffer = new GraphicBuffer(
-                allocWidth, allocHeight, allocFormat, BQ_LAYER_COUNT,
-                allocUsage, allocName);
+        sp<GraphicBuffer> graphicBuffer =
+                sp<GraphicBuffer>::make(allocWidth, allocHeight, allocFormat, BQ_LAYER_COUNT,
+                                        allocUsage, allocName);
 #endif
 
         status_t result = graphicBuffer->initCheck();

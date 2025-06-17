@@ -16,6 +16,7 @@
 
 #pragma once
 
+#include <input/PrintTools.h>
 #include <condition_variable>
 #include <functional>
 #include <list>
@@ -126,9 +127,19 @@ public:
      * Primary used for debugging.
      * Does not block.
      */
-    size_t size() {
+    size_t size() const {
         std::scoped_lock lock(mLock);
         return mQueue.size();
+    }
+
+    bool empty() const {
+        std::scoped_lock lock(mLock);
+        return mQueue.empty();
+    }
+
+    std::string dump(std::string (*toString)(const T&) = constToString) const {
+        std::scoped_lock lock(mLock);
+        return dumpContainer(mQueue, toString);
     }
 
 private:
@@ -140,7 +151,7 @@ private:
     /**
      * Lock for accessing and waiting on elements.
      */
-    std::mutex mLock;
+    mutable std::mutex mLock;
     std::list<T> mQueue GUARDED_BY(mLock);
 };
 

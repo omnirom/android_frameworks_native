@@ -17,6 +17,7 @@
 #include <fuzzbinder/random_parcel.h>
 
 #include <android-base/logging.h>
+#include <binder/Functional.h>
 #include <binder/RpcSession.h>
 #include <binder/RpcTransportRaw.h>
 #include <fuzzbinder/random_binder.h>
@@ -32,10 +33,39 @@ static void fillRandomParcelData(Parcel* p, FuzzedDataProvider&& provider) {
     CHECK(OK == p->write(data.data(), data.size()));
 }
 
-void fillRandomParcel(Parcel* p, FuzzedDataProvider&& provider, RandomParcelOptions* options) {
+void fillRandomParcel(Parcel* outputParcel, FuzzedDataProvider&& provider,
+                      RandomParcelOptions* options) {
     CHECK_NE(options, nullptr);
 
-    if (provider.ConsumeBool()) {
+    const uint8_t fuzzerParcelOptions = provider.ConsumeIntegral<uint8_t>();
+    const bool resultShouldBeView = fuzzerParcelOptions & 1;
+    const bool resultShouldBeRpc = fuzzerParcelOptions & 2;
+    const bool resultShouldMarkSensitive = fuzzerParcelOptions & 4;
+
+    auto sensitivity_guard = binder::impl::make_scope_guard([&]() {
+        if (resultShouldMarkSensitive) {
+            outputParcel->markSensitive();
+        }
+    });
+
+    Parcel* p;
+    if (resultShouldBeView) {
+        options->extraParcels.push_back(std::make_unique<Parcel>());
+        // held for duration of test, so that view will be valid
+        p = options->extraParcels[options->extraParcels.size() - 1].get();
+    } else {
+        p = outputParcel; // directly fill out the output Parcel
+    }
+
+    // must be last guard, so outputParcel gets setup as view before
+    // other guards
+    auto viewify_guard = binder::impl::make_scope_guard([&]() {
+        if (resultShouldBeView) {
+            outputParcel->makeDangerousViewOf(p);
+        }
+    });
+
+    if (resultShouldBeRpc) {
         auto session = RpcSession::make(RpcTransportCtxFactoryRaw::make());
         CHECK_EQ(OK, session->addNullDebuggingClient());
         // Set the protocol version so that we don't crash if the session

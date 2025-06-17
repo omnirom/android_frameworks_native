@@ -109,6 +109,9 @@ cc_library_static {
         "libcutils",
         "libutils",
     ],
+    header_libs: [
+        "libaidl_transactions",
+    ],
     local_include_dirs: ["include_random_parcel"],
     export_include_dirs: ["include_random_parcel"],
 }

@@ -29,7 +29,7 @@ namespace android {
 // no way to forward the events.  This DisconnectWaiter will not let the
 // disconnect finish until finishDisconnect() is called.  It will
 // also block until a disconnect is called
-class DisconnectWaiter : public BnConsumerListener {
+class DisconnectWaiter : public IConsumerListener {
 public:
     DisconnectWaiter () :
         mWaitForDisconnect(false),

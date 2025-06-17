@@ -47,6 +47,16 @@ class BufferItemConsumer: public ConsumerBase
     enum { INVALID_BUFFER_SLOT = BufferQueue::INVALID_BUFFER_SLOT };
     enum { NO_BUFFER_AVAILABLE = BufferQueue::NO_BUFFER_AVAILABLE };
 
+    static std::tuple<sp<BufferItemConsumer>, sp<Surface>> create(
+            uint64_t consumerUsage, int bufferCount = DEFAULT_MAX_BUFFERS,
+            bool controlledByApp = false, bool isConsumerSurfaceFlinger = false);
+
+    static sp<BufferItemConsumer> create(const sp<IGraphicBufferConsumer>& consumer,
+                                         uint64_t consumerUsage,
+                                         int bufferCount = DEFAULT_MAX_BUFFERS,
+                                         bool controlledByApp = false)
+            __attribute((deprecated("Prefer ctors that create their own surface and consumer.")));
+
     // Create a new buffer item consumer. The consumerUsage parameter determines
     // the consumer usage flags passed to the graphics allocator. The
     // bufferCount parameter specifies how many buffers can be locked for user
@@ -86,6 +96,14 @@ class BufferItemConsumer: public ConsumerBase
     status_t acquireBuffer(BufferItem* item, nsecs_t presentWhen,
             bool waitForFence = true);
 
+    // Transfer ownership of a buffer to the BufferQueue. On NO_ERROR, the buffer
+    // is considered as if it were acquired. Buffer must not be null.
+    //
+    // Returns
+    //  - BAD_VALUE if buffer is null
+    //  - INVALID_OPERATION if too many buffers have already been acquired
+    status_t attachBuffer(const sp<GraphicBuffer>& buffer);
+
     // Returns an acquired buffer to the queue, allowing it to be reused. Since
     // only a fixed number of buffers may be acquired at a time, old buffers
     // must be released by calling releaseBuffer to ensure new buffers can be
@@ -95,10 +113,8 @@ class BufferItemConsumer: public ConsumerBase
     status_t releaseBuffer(const BufferItem &item,
             const sp<Fence>& releaseFence = Fence::NO_FENCE);
 
-#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_PLATFORM_API_IMPROVEMENTS)
     status_t releaseBuffer(const sp<GraphicBuffer>& buffer,
                            const sp<Fence>& releaseFence = Fence::NO_FENCE);
-#endif // COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_PLATFORM_API_IMPROVEMENTS)
 
 protected:
 #if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)

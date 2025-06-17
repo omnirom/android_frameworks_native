@@ -16,6 +16,7 @@ aidl_interface {
     double_loadable: true,
     srcs: [
         "aidl/android/content/AttributionSourceState.aidl",
+        "aidl/com/android/internal/app/IAppOpsCallback.aidl",
         "aidl/android/permission/IPermissionChecker.aidl",
     ],
 }
@@ -36,7 +37,6 @@ cc_library {
     ],
     srcs: [
         "AppOpsManager.cpp",
-        "IAppOpsCallback.cpp",
         "IAppOpsService.cpp",
         "android/permission/PermissionChecker.cpp",
     ],

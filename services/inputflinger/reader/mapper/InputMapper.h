@@ -66,11 +66,12 @@ public:
 
     virtual ~InputMapper();
 
-    inline int32_t getDeviceId() { return mDeviceContext.getId(); }
+    inline int32_t getDeviceId() const { return mDeviceContext.getId(); }
     inline InputDeviceContext& getDeviceContext() { return mDeviceContext; }
     inline InputDeviceContext& getDeviceContext() const { return mDeviceContext; };
     inline const std::string getDeviceName() const { return mDeviceContext.getName(); }
     inline InputReaderContext* getContext() { return mDeviceContext.getContext(); }
+    inline const InputReaderContext* getContext() const { return mDeviceContext.getContext(); }
     inline InputReaderPolicyInterface* getPolicy() { return getContext()->getPolicy(); }
 
     virtual uint32_t getSources() const = 0;
@@ -114,7 +115,9 @@ public:
 
     [[nodiscard]] virtual std::list<NotifyArgs> updateExternalStylusState(const StylusState& state);
 
-    virtual std::optional<ui::LogicalDisplayId> getAssociatedDisplayId() { return std::nullopt; }
+    virtual std::optional<ui::LogicalDisplayId> getAssociatedDisplayId() const {
+        return std::nullopt;
+    }
     virtual void updateLedState(bool reset) {}
 
     virtual std::optional<HardwareProperties> getTouchpadHardwareProperties();

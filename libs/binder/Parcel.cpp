@@ -156,7 +156,7 @@ enum {
 
 #ifdef BINDER_WITH_KERNEL_IPC
 static void acquire_object(const sp<ProcessState>& proc, const flat_binder_object& obj,
-                           const void* who) {
+                           const void* who, bool tagFds) {
     switch (obj.hdr.type) {
         case BINDER_TYPE_BINDER:
             if (obj.binder) {
@@ -173,7 +173,7 @@ static void acquire_object(const sp<ProcessState>& proc, const flat_binder_objec
             return;
         }
         case BINDER_TYPE_FD: {
-            if (obj.cookie != 0) { // owned
+            if (tagFds && obj.cookie != 0) { // owned
                 FdTag(obj.handle, nullptr, who);
             }
             return;
@@ -299,8 +299,13 @@ status_t Parcel::flattenBinder(const sp<IBinder>& binder) {
             obj.handle = handle;
             obj.cookie = 0;
         } else {
+#if __linux__
             int policy = local->getMinSchedulerPolicy();
             int priority = local->getMinSchedulerPriority();
+#else
+            int policy = 0;
+            int priority = 0;
+#endif
 
             if (policy != 0 || priority != 0) {
                 // override value, since it is set explicitly
@@ -537,7 +542,7 @@ status_t Parcel::appendFrom(const Parcel* parcel, size_t offset, size_t len) {
         return BAD_VALUE;
     }
 
-    if ((mDataSize+len) > mDataCapacity) {
+    if ((mDataPos + len) > mDataCapacity) {
         // grow data
         err = growData(len);
         if (err != NO_ERROR) {
@@ -611,11 +616,12 @@ status_t Parcel::appendFrom(const Parcel* parcel, size_t offset, size_t len) {
                     }
                 }
 
-                acquire_object(proc, *flat, this);
+                acquire_object(proc, *flat, this, true /*tagFds*/);
             }
         }
 #else
         LOG_ALWAYS_FATAL("Binder kernel driver disabled at build time");
+        (void)kernelFields;
         return INVALID_OPERATION;
 #endif // BINDER_WITH_KERNEL_IPC
     } else {
@@ -797,6 +803,7 @@ std::vector<int> Parcel::debugReadAllFileDescriptors() const {
         setDataPosition(initPosition);
 #else
         LOG_ALWAYS_FATAL("Binder kernel driver disabled at build time");
+        (void)kernelFields;
 #endif
     } else if (const auto* rpcFields = maybeRpcFields(); rpcFields && rpcFields->mFds) {
         for (const auto& fd : *rpcFields->mFds) {
@@ -839,9 +846,10 @@ status_t Parcel::hasBindersInRange(size_t offset, size_t len, bool* result) cons
         }
 #else
         LOG_ALWAYS_FATAL("Binder kernel driver disabled at build time");
+        (void)kernelFields;
         return INVALID_OPERATION;
 #endif // BINDER_WITH_KERNEL_IPC
-    } else if (const auto* rpcFields = maybeRpcFields()) {
+    } else if (maybeRpcFields()) {
         return INVALID_OPERATION;
     }
     return NO_ERROR;
@@ -879,6 +887,7 @@ status_t Parcel::hasFileDescriptorsInRange(size_t offset, size_t len, bool* resu
         }
 #else
         LOG_ALWAYS_FATAL("Binder kernel driver disabled at build time");
+        (void)kernelFields;
         return INVALID_OPERATION;
 #endif // BINDER_WITH_KERNEL_IPC
     } else if (const auto* rpcFields = maybeRpcFields()) {
@@ -971,6 +980,7 @@ status_t Parcel::writeInterfaceToken(const char16_t* str, size_t len) {
         writeInt32(kHeader);
 #else  // BINDER_WITH_KERNEL_IPC
         LOG_ALWAYS_FATAL("Binder kernel driver disabled at build time");
+        (void)kernelFields;
         return INVALID_OPERATION;
 #endif // BINDER_WITH_KERNEL_IPC
     }
@@ -1061,6 +1071,7 @@ bool Parcel::enforceInterface(const char16_t* interface,
 #else  // BINDER_WITH_KERNEL_IPC
         LOG_ALWAYS_FATAL("Binder kernel driver disabled at build time");
         (void)threadState;
+        (void)kernelFields;
         return false;
 #endif // BINDER_WITH_KERNEL_IPC
     }
@@ -1293,10 +1304,6 @@ status_t Parcel::writeUniqueFileDescriptorVector(const std::vector<unique_fd>& v
 status_t Parcel::writeUniqueFileDescriptorVector(const std::optional<std::vector<unique_fd>>& val) {
     return writeData(val);
 }
-status_t Parcel::writeUniqueFileDescriptorVector(
-        const std::unique_ptr<std::vector<unique_fd>>& val) {
-    return writeData(val);
-}
 
 status_t Parcel::writeStrongBinderVector(const std::vector<sp<IBinder>>& val) { return writeData(val); }
 status_t Parcel::writeStrongBinderVector(const std::optional<std::vector<sp<IBinder>>>& val) { return writeData(val); }
@@ -1350,10 +1357,6 @@ status_t Parcel::readUtf8VectorFromUtf16Vector(
 status_t Parcel::readUtf8VectorFromUtf16Vector(std::vector<std::string>* val) const { return readData(val); }
 
 status_t Parcel::readUniqueFileDescriptorVector(std::optional<std::vector<unique_fd>>* val) const {
-    return readData(val);
-}
-status_t Parcel::readUniqueFileDescriptorVector(
-        std::unique_ptr<std::vector<unique_fd>>* val) const {
     return readData(val);
 }
 status_t Parcel::readUniqueFileDescriptorVector(std::vector<unique_fd>* val) const {
@@ -1797,11 +1800,20 @@ restart_write:
         // Need to write meta-data?
         if (nullMetaData || val.binder != 0) {
             kernelFields->mObjects[kernelFields->mObjectsSize] = mDataPos;
-            acquire_object(ProcessState::self(), val, this);
+            acquire_object(ProcessState::self(), val, this, true /*tagFds*/);
             kernelFields->mObjectsSize++;
         }
 
         return finishWrite(sizeof(flat_binder_object));
+    }
+
+    if (mOwner) {
+        // continueWrite does have the logic to convert this from an
+        // owned to an unowned Parcel. However, this is pretty inefficient,
+        // and it's really strange to need to do so, so prefer to avoid
+        // these paths than try to support them.
+        ALOGE("writing objects not supported on owned Parcels");
+        return PERMISSION_DENIED;
     }
 
     if (!enoughData) {
@@ -2687,6 +2699,7 @@ void Parcel::closeFileDescriptors(size_t newObjectsSize) {
 #else  // BINDER_WITH_KERNEL_IPC
         (void)newObjectsSize;
         LOG_ALWAYS_FATAL("Binder kernel driver disabled at build time");
+        (void)kernelFields;
 #endif // BINDER_WITH_KERNEL_IPC
     } else if (auto* rpcFields = maybeRpcFields()) {
         rpcFields->mFds.reset();
@@ -2719,6 +2732,65 @@ size_t Parcel::ipcObjectsCount() const
     return 0;
 }
 
+static void do_nothing_release_func(const uint8_t* data, size_t dataSize,
+                                    const binder_size_t* objects, size_t objectsCount) {
+    (void)data;
+    (void)dataSize;
+    (void)objects;
+    (void)objectsCount;
+}
+static void delete_data_release_func(const uint8_t* data, size_t dataSize,
+                                     const binder_size_t* objects, size_t objectsCount) {
+    delete[] data;
+    (void)dataSize;
+    (void)objects;
+    (void)objectsCount;
+}
+
+void Parcel::makeDangerousViewOf(Parcel* p) {
+    if (p->isForRpc()) {
+        // warning: this must match the logic in rpcSetDataReference
+        auto* rf = p->maybeRpcFields();
+        LOG_ALWAYS_FATAL_IF(rf == nullptr);
+        std::vector<std::variant<binder::unique_fd, binder::borrowed_fd>> fds;
+        if (rf->mFds) {
+            fds.reserve(rf->mFds->size());
+            for (const auto& fd : *rf->mFds) {
+                fds.push_back(binder::borrowed_fd(toRawFd(fd)));
+            }
+        }
+        status_t result =
+                rpcSetDataReference(rf->mSession, p->mData, p->mDataSize,
+                                    rf->mObjectPositions.data(), rf->mObjectPositions.size(),
+                                    std::move(fds), do_nothing_release_func);
+        LOG_ALWAYS_FATAL_IF(result != OK, "Failed: %s", statusToString(result).c_str());
+    } else {
+#ifdef BINDER_WITH_KERNEL_IPC
+        // warning: this must match the logic in ipcSetDataReference
+        auto* kf = p->maybeKernelFields();
+        LOG_ALWAYS_FATAL_IF(kf == nullptr);
+
+        // Ownership of FDs is passed to the Parcel from kernel binder. This should be refactored
+        // to move this ownership out of Parcel and into release_func. However, today, Parcel
+        // always assums it can own and close FDs today. So, for purposes of testing consistency,
+        // , create new FDs it can own.
+
+        uint8_t* newData = new uint8_t[p->mDataSize]; // deleted by delete_data_release_func
+        memcpy(newData, p->mData, p->mDataSize);
+        for (size_t i = 0; i < kf->mObjectsSize; i++) {
+            flat_binder_object* flat =
+                    reinterpret_cast<flat_binder_object*>(newData + kf->mObjects[i]);
+            if (flat->hdr.type == BINDER_TYPE_FD) {
+                flat->handle = fcntl(flat->handle, F_DUPFD_CLOEXEC, 0);
+            }
+        }
+
+        ipcSetDataReference(newData, p->mDataSize, kf->mObjects, kf->mObjectsSize,
+                            delete_data_release_func);
+#endif // BINDER_WITH_KERNEL_IPC
+    }
+}
+
 void Parcel::ipcSetDataReference(const uint8_t* data, size_t dataSize, const binder_size_t* objects,
                                  size_t objectsCount, release_func relFunc) {
     // this code uses 'mOwner == nullptr' to understand whether it owns memory
@@ -2729,6 +2801,7 @@ void Parcel::ipcSetDataReference(const uint8_t* data, size_t dataSize, const bin
     auto* kernelFields = maybeKernelFields();
     LOG_ALWAYS_FATAL_IF(kernelFields == nullptr); // guaranteed by freeData.
 
+    // must match makeDangerousViewOf
     mData = const_cast<uint8_t*>(data);
     mDataSize = mDataCapacity = dataSize;
     kernelFields->mObjects = const_cast<binder_size_t*>(objects);
@@ -2807,6 +2880,7 @@ status_t Parcel::rpcSetDataReference(
     auto* rpcFields = maybeRpcFields();
     LOG_ALWAYS_FATAL_IF(rpcFields == nullptr); // guaranteed by markForRpc.
 
+    // must match makeDangerousViewOf
     mData = const_cast<uint8_t*>(data);
     mDataSize = mDataCapacity = dataSize;
     mOwner = relFunc;
@@ -2874,15 +2948,17 @@ void Parcel::releaseObjects()
 #endif // BINDER_WITH_KERNEL_IPC
 }
 
-void Parcel::acquireObjects()
-{
+void Parcel::reacquireObjects(size_t objectsSize) {
     auto* kernelFields = maybeKernelFields();
     if (kernelFields == nullptr) {
         return;
     }
 
 #ifdef BINDER_WITH_KERNEL_IPC
-    size_t i = kernelFields->mObjectsSize;
+    LOG_ALWAYS_FATAL_IF(objectsSize > kernelFields->mObjectsSize,
+                        "Object size %zu out of range of %zu", objectsSize,
+                        kernelFields->mObjectsSize);
+    size_t i = objectsSize;
     if (i == 0) {
         return;
     }
@@ -2892,8 +2968,10 @@ void Parcel::acquireObjects()
     while (i > 0) {
         i--;
         const flat_binder_object* flat = reinterpret_cast<flat_binder_object*>(data + objects[i]);
-        acquire_object(proc, *flat, this);
+        acquire_object(proc, *flat, this, false /*tagFds*/); // they are already tagged
     }
+#else
+    (void) objectsSize;
 #endif // BINDER_WITH_KERNEL_IPC
 }
 
@@ -3110,12 +3188,8 @@ status_t Parcel::continueWrite(size_t desired)
                 return NO_MEMORY;
             }
 
-            // Little hack to only acquire references on objects
-            // we will be keeping.
-            size_t oldObjectsSize = kernelFields->mObjectsSize;
-            kernelFields->mObjectsSize = objectsSize;
-            acquireObjects();
-            kernelFields->mObjectsSize = oldObjectsSize;
+            // only acquire references on objects we are keeping
+            reacquireObjects(objectsSize);
         }
         if (rpcFields) {
             if (status_t status = truncateRpcObjects(objectsSize); status != OK) {
@@ -3327,14 +3401,6 @@ void Parcel::scanForFds() const {
 }
 
 #ifdef BINDER_WITH_KERNEL_IPC
-size_t Parcel::getBlobAshmemSize() const
-{
-    // This used to return the size of all blobs that were written to ashmem, now we're returning
-    // the ashmem currently referenced by this Parcel, which should be equivalent.
-    // TODO(b/202029388): Remove method once ABI can be changed.
-    return getOpenAshmemSize();
-}
-
 size_t Parcel::getOpenAshmemSize() const
 {
     auto* kernelFields = maybeKernelFields();

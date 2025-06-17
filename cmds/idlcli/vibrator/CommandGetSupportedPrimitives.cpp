@@ -44,25 +44,22 @@ class CommandGetSupportedPrimitives : public Command {
     }
 
     Status doMain(Args && /*args*/) override {
-        std::string statusStr;
-        std::vector<CompositePrimitive> primitives;
-        Status ret;
+        auto hal = getHal();
 
-        if (auto hal = getHal<aidl::IVibrator>()) {
-            auto status = hal->call(&aidl::IVibrator::getSupportedPrimitives, &primitives);
-            statusStr = status.getDescription();
-            ret = status.isOk() ? OK : ERROR;
-        } else {
+        if (!hal) {
             return UNAVAILABLE;
         }
 
-        std::cout << "Status: " << statusStr << std::endl;
+        std::vector<CompositePrimitive> primitives;
+        auto status = hal->getSupportedPrimitives(&primitives);
+
+        std::cout << "Status: " << status.getDescription() << std::endl;
         std::cout << "Primitives:" << std::endl;
         for (auto &e : primitives) {
             std::cout << "  " << toString(e) << std::endl;
         }
 
-        return ret;
+        return status.isOk() ? OK : ERROR;
     }
 };
 

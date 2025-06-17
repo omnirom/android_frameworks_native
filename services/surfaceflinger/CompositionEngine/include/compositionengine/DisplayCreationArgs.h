@@ -34,7 +34,7 @@ class CompositionEngine;
  * A parameter object for creating Display instances
  */
 struct DisplayCreationArgs {
-    DisplayId id;
+    DisplayIdVariant idVariant;
 
     // Size of the display in pixels
     ui::Size pixels = ui::kInvalidSize;
@@ -68,8 +68,8 @@ class DisplayCreationArgsBuilder {
 public:
     DisplayCreationArgs build() { return std::move(mArgs); }
 
-    DisplayCreationArgsBuilder& setId(DisplayId id) {
-        mArgs.id = id;
+    DisplayCreationArgsBuilder& setId(DisplayIdVariant idVariant) {
+        mArgs.idVariant = idVariant;
         return *this;
     }
 

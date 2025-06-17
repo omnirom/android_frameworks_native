@@ -772,8 +772,8 @@ int main(int argc, char** argv) {
             break;
 
             case 'i':
-                displayId = DisplayId::fromValue<PhysicalDisplayId>(atoll(optarg));
-                if (!displayId) {
+                displayId = PhysicalDisplayId::fromValue(atoll(optarg));
+                if (std::find(ids.begin(), ids.end(), displayId) == ids.end()) {
                     fprintf(stderr, "Invalid display ID: %s.\n", optarg);
                     exit(4);
                 }

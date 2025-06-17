@@ -47,7 +47,7 @@ public:
                 (bool, bool, ui::Transform::RotationFlags,
                  (const std::optional<std::vector<std::optional<
                           aidl::android::hardware::graphics::composer3::LutProperties>>>)));
-    MOCK_METHOD5(writeStateToHWC, void(bool, bool, uint32_t, bool, bool));
+    MOCK_METHOD(void, writeStateToHWC, (bool, bool, uint32_t, bool, bool, bool));
     MOCK_CONST_METHOD0(writeCursorPositionToHWC, void());
 
     MOCK_CONST_METHOD0(getHwcLayer, HWC2::Layer*());
@@ -60,7 +60,7 @@ public:
     MOCK_CONST_METHOD0(needsFiltering, bool());
     MOCK_CONST_METHOD0(getOverrideCompositionSettings, std::optional<LayerFE::LayerSettings>());
     MOCK_METHOD(void, applyDeviceLayerLut,
-                (ndk::ScopedFileDescriptor,
+                (::android::base::unique_fd,
                  (std::vector<std::pair<
                           int, aidl::android::hardware::graphics::composer3::LutProperties>>)));
     MOCK_METHOD(int64_t, getPictureProfilePriority, (), (const));

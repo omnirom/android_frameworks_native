@@ -46,6 +46,7 @@
 #include <aidl/android/hardware/graphics/composer3/DisplayConfiguration.h>
 #include <aidl/android/hardware/graphics/composer3/DisplayLuts.h>
 #include <aidl/android/hardware/graphics/composer3/IComposerCallback.h>
+#include <aidl/android/hardware/graphics/composer3/Luts.h>
 #include <aidl/android/hardware/graphics/composer3/OverlayProperties.h>
 
 #include <optional>
@@ -156,6 +157,10 @@ public:
     virtual Error getReleaseFences(Display display, std::vector<Layer>* outLayers,
                                    std::vector<int>* outReleaseFences) = 0;
 
+    virtual Error getLayerPresentFences(Display display, std::vector<Layer>* outLayers,
+                                        std::vector<int>* outFences,
+                                        std::vector<int64_t>* outLatenciesNanos) = 0;
+
     virtual Error presentDisplay(Display display, int* outPresentFence) = 0;
 
     virtual Error setActiveConfig(Display display, Config config) = 0;
@@ -224,14 +229,13 @@ public:
     virtual std::vector<IComposerClient::PerFrameMetadataKey> getPerFrameMetadataKeys(
             Display display) = 0;
     virtual Error getRenderIntents(Display display, ColorMode colorMode,
-            std::vector<RenderIntent>* outRenderIntents) = 0;
+                                   std::vector<RenderIntent>* outRenderIntents) = 0;
     virtual Error getDataspaceSaturationMatrix(Dataspace dataspace, mat4* outMatrix) = 0;
 
     // Composer HAL 2.3
     virtual Error getDisplayIdentificationData(Display display, uint8_t* outPort,
                                                std::vector<uint8_t>* outData) = 0;
-    virtual Error setLayerColorTransform(Display display, Layer layer,
-                                         const float* matrix) = 0;
+    virtual Error setLayerColorTransform(Display display, Layer layer, const float* matrix) = 0;
     virtual Error getDisplayedContentSamplingAttributes(Display display, PixelFormat* outFormat,
                                                         Dataspace* outDataspace,
                                                         uint8_t* outComponentMask) = 0;
@@ -313,6 +317,10 @@ public:
     virtual Error getMaxLayerPictureProfiles(Display display, int32_t* outMaxProfiles) = 0;
     virtual Error setDisplayPictureProfileId(Display display, PictureProfileId id) = 0;
     virtual Error setLayerPictureProfileId(Display display, Layer layer, PictureProfileId id) = 0;
+    virtual Error startHdcpNegotiation(Display display,
+                                       const aidl::android::hardware::drm::HdcpLevels& levels) = 0;
+    virtual Error getLuts(Display display, const std::vector<sp<GraphicBuffer>>&,
+                          std::vector<V3_0::Luts>*) = 0;
 };
 
 } // namespace Hwc2

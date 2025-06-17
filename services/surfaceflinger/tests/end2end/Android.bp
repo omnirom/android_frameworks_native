@@ -1,0 +1,68 @@
+package {
+    // See: http://go/android-license-faq
+    // A large-scale-change added 'default_applicable_licenses' to import
+    // all of the 'license_kinds' from "frameworks_native_license"
+    // to get the below license kinds:
+    //   SPDX-license-identifier-Apache-2.0
+    default_applicable_licenses: ["frameworks_native_license"],
+}
+
+cc_test {
+    name: "surfaceflinger_end2end_tests",
+    test_suites: ["device-tests"],
+    require_root: true,
+
+    cpp_std: "experimental",
+    cflags: [
+        "-DANDROID_UTILS_REF_BASE_DISABLE_IMPLICIT_CONSTRUCTION",
+        "-DNODISCARD_EXPECTED",
+        "-D_LIBCPP_ENABLE_THREAD_SAFETY_ANNOTATIONS",
+        "-Wall",
+        "-Wconversion",
+        "-Werror",
+        "-Wextra",
+        "-Wformat",
+        "-Wno-non-virtual-dtor",
+        "-Wno-sign-compare",
+        "-Wno-sign-conversion",
+        "-Wshadow",
+        "-Wthread-safety",
+        "-Wunreachable-code",
+        "-Wunused",
+    ],
+    srcs: [
+        "main.cpp",
+        "test_framework/core/TestService.cpp",
+        "test_framework/fake_hwc3/Hwc3Composer.cpp",
+        "test_framework/fake_hwc3/Hwc3Controller.cpp",
+        "test_framework/surfaceflinger/SFController.cpp",
+        "tests/Placeholder_test.cpp",
+    ],
+    tidy: true,
+    tidy_flags: [
+        "--config=", // Use the .clang-tidy closest to each source file for the configuration
+    ],
+    tidy_checks_as_errors: [
+        "*",
+    ],
+    include_dirs: [
+        "frameworks/native/include",
+    ],
+    local_include_dirs: ["."],
+    shared_libs: [
+        "libbase",
+        "libbinder",
+        "libbinder_ndk",
+        "libcutils",
+        "libgui",
+        "libsync",
+        "libui",
+        "libutils",
+    ],
+    static_libs: [
+        "android.hardware.common-V2-ndk",
+        "android.hardware.graphics.common-V6-ndk",
+        "android.hardware.graphics.composer3-V3-ndk",
+        "libgtest",
+    ],
+}

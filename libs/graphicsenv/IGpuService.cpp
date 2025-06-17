@@ -119,6 +119,21 @@ public:
         }
         return driverPath;
     }
+
+    FeatureOverrides getFeatureOverrides() override {
+        Parcel data, reply;
+        data.writeInterfaceToken(IGpuService::getInterfaceDescriptor());
+
+        FeatureOverrides featureOverrides;
+        status_t error =
+                remote()->transact(BnGpuService::GET_FEATURE_CONFIG_OVERRIDES, data, &reply);
+        if (error != OK) {
+            return featureOverrides;
+        }
+
+        featureOverrides.readFromParcel(&reply);
+        return featureOverrides;
+    }
 };
 
 IMPLEMENT_META_INTERFACE(GpuService, "android.graphicsenv.IGpuService");
@@ -269,6 +284,15 @@ status_t BnGpuService::onTransact(uint32_t code, const Parcel& data, Parcel* rep
             if ((status = data.readBool(&enableAngleAsSystemDriver)) != OK) return status;
 
             toggleAngleAsSystemDriver(enableAngleAsSystemDriver);
+            return OK;
+        }
+        case GET_FEATURE_CONFIG_OVERRIDES: {
+            CHECK_INTERFACE(IGpuService, data, reply);
+
+            // Get the FeatureOverrides from gpuservice, which implements the IGpuService interface
+            // with GpuService::getFeatureOverrides().
+            FeatureOverrides featureOverrides = getFeatureOverrides();
+            featureOverrides.writeToParcel(reply);
             return OK;
         }
         default:

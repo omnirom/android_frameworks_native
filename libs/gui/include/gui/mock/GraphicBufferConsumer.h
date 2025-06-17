@@ -18,6 +18,7 @@
 
 #include <gmock/gmock.h>
 
+#include <com_android_graphics_libgui_flags.h>
 #include <gui/IGraphicBufferConsumer.h>
 
 #include <utils/RefBase.h>
@@ -25,21 +26,28 @@
 namespace android {
 namespace mock {
 
-class GraphicBufferConsumer : public BnGraphicBufferConsumer, public virtual android::RefBase {
+class GraphicBufferConsumer : public IGraphicBufferConsumer {
 public:
     GraphicBufferConsumer();
-    ~GraphicBufferConsumer() override;
+    ~GraphicBufferConsumer();
 
     MOCK_METHOD3(acquireBuffer, status_t(BufferItem*, nsecs_t, uint64_t));
     MOCK_METHOD1(detachBuffer, status_t(int));
     MOCK_METHOD2(attachBuffer, status_t(int*, const sp<GraphicBuffer>&));
+#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(BQ_GL_FENCE_CLEANUP)
+    MOCK_METHOD3(releaseBuffer, status_t(int, uint64_t, const sp<Fence>&));
+#else
     MOCK_METHOD5(releaseBuffer, status_t(int, uint64_t, EGLDisplay, EGLSyncKHR, const sp<Fence>&));
+#endif
     MOCK_METHOD2(consumerConnect, status_t(const sp<IConsumerListener>&, bool));
     MOCK_METHOD0(consumerDisconnect, status_t());
+    MOCK_METHOD1(allowUnlimitedSlots, status_t(bool));
     MOCK_METHOD1(getReleasedBuffers, status_t(uint64_t*));
+    MOCK_METHOD1(getReleasedBuffersExtended, status_t(std::vector<bool>*));
     MOCK_METHOD2(setDefaultBufferSize, status_t(uint32_t, uint32_t));
     MOCK_METHOD1(setMaxBufferCount, status_t(int));
     MOCK_METHOD1(setMaxAcquiredBufferCount, status_t(int));
+    MOCK_METHOD2(setMaxAcquiredBufferCount, status_t(int, std::optional<OnBufferReleasedCallback>));
     MOCK_METHOD1(setConsumerName, status_t(const String8&));
     MOCK_METHOD1(setDefaultBufferFormat, status_t(PixelFormat));
     MOCK_METHOD1(setDefaultBufferDataSpace, status_t(android_dataspace));

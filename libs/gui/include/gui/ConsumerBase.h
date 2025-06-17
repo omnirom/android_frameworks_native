@@ -98,6 +98,8 @@ public:
     status_t detachBuffer(const sp<GraphicBuffer>& buffer);
 #endif // COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_PLATFORM_API_IMPROVEMENTS)
 
+    status_t addReleaseFence(const sp<GraphicBuffer> buffer, const sp<Fence>& fence);
+
     // See IGraphicBufferConsumer::setDefaultBufferSize
     status_t setDefaultBufferSize(uint32_t width, uint32_t height);
 
@@ -121,9 +123,7 @@ public:
     // See IGraphicBufferConsumer::setMaxAcquiredBufferCount
     status_t setMaxAcquiredBufferCount(int maxAcquiredBuffers);
 
-#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
     status_t setConsumerIsProtected(bool isProtected);
-#endif // COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
 
     // See IGraphicBufferConsumer::getSidebandStream
     sp<NativeHandle> getSidebandStream() const;
@@ -185,8 +185,12 @@ protected:
     virtual void onFrameDetached(const uint64_t bufferId) override;
     virtual void onBuffersReleased() override;
     virtual void onSidebandStreamChanged() override;
-
+#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_UNLIMITED_SLOTS)
+    virtual void onSlotCountChanged(int slotCount) override;
+#endif
     virtual int getSlotForBufferLocked(const sp<GraphicBuffer>& buffer);
+
+    virtual void onBuffersReleasedLocked();
 
     virtual status_t detachBufferLocked(int slotIndex);
 
@@ -243,10 +247,13 @@ protected:
     // must take place when a buffer is released back to the BufferQueue.  If
     // it is overridden the derived class's implementation must call
     // ConsumerBase::releaseBufferLocked.
+#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(BQ_GL_FENCE_CLEANUP)
+    virtual status_t releaseBufferLocked(int slot, const sp<GraphicBuffer> graphicBuffer);
+#else
     virtual status_t releaseBufferLocked(int slot,
             const sp<GraphicBuffer> graphicBuffer,
             EGLDisplay display = EGL_NO_DISPLAY, EGLSyncKHR eglFence = EGL_NO_SYNC_KHR);
-
+#endif
     // returns true iff the slot still has the graphicBuffer in it.
     bool stillTracking(int slot, const sp<GraphicBuffer> graphicBuffer);
 
@@ -284,7 +291,11 @@ protected:
     // slot that has not yet been used. The buffer allocated to a slot will also
     // be replaced if the requested buffer usage or geometry differs from that
     // of the buffer allocated to a slot.
+#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_UNLIMITED_SLOTS)
+    std::vector<Slot> mSlots;
+#else
     Slot mSlots[BufferQueueDefs::NUM_BUFFER_SLOTS];
+#endif
 
     // mAbandoned indicates that the BufferQueue will no longer be used to
     // consume images buffers pushed to it using the IGraphicBufferProducer

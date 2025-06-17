@@ -79,6 +79,16 @@ HalResult<Aidl::SupportInfo> EmptyHalWrapper::getSupportInfo() {
     return HalResult<Aidl::SupportInfo>::unsupported();
 }
 
+HalResult<void> EmptyHalWrapper::sendCompositionData(const std::vector<hal::CompositionData>&) {
+    ALOGV("Skipped sendCompositionData because %s", getUnsupportedMessage());
+    return HalResult<void>::unsupported();
+}
+
+HalResult<void> EmptyHalWrapper::sendCompositionUpdate(const hal::CompositionUpdate&) {
+    ALOGV("Skipped sendCompositionUpdate because %s", getUnsupportedMessage());
+    return HalResult<void>::unsupported();
+}
+
 const char* EmptyHalWrapper::getUnsupportedMessage() {
     return "Power HAL is not supported";
 }
@@ -290,6 +300,14 @@ HalResult<Aidl::SupportInfo> AidlHalWrapper::getSupportInfo() {
     Aidl::SupportInfo support;
     auto result = mHandle->getSupportInfo(&support);
     return HalResult<Aidl::SupportInfo>::fromStatus(result, std::move(support));
+}
+
+HalResult<void> AidlHalWrapper::sendCompositionData(const std::vector<hal::CompositionData>& data) {
+    return HalResult<void>::fromStatus(mHandle->sendCompositionData(data));
+}
+
+HalResult<void> AidlHalWrapper::sendCompositionUpdate(const hal::CompositionUpdate& update) {
+    return HalResult<void>::fromStatus(mHandle->sendCompositionUpdate(update));
 }
 
 const char* AidlHalWrapper::getUnsupportedMessage() {

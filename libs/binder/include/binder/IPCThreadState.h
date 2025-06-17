@@ -64,7 +64,10 @@ public:
      * Returns the PID of the process which has made the current binder
      * call. If not in a binder call, this will return getpid.
      *
-     * Warning: oneway transactions do not receive PID. Even if you expect
+     * Warning do not use this as a security identifier! PID is unreliable
+     * as it may be re-used. This should mostly be used for debugging.
+     *
+     * oneway transactions do not receive PID. Even if you expect
      * a transaction to be synchronous, a misbehaving client could send it
      * as an asynchronous call and result in a 0 PID here. Additionally, if
      * there is a race and the calling process dies, the PID may still be

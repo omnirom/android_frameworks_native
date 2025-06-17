@@ -11,7 +11,7 @@ aconfig_declarations {
     name: "sensorservice_flags",
     package: "com.android.frameworks.sensorservice.flags",
     container: "system",
-    srcs: ["senserservice_flags.aconfig"],
+    srcs: ["sensorservice_flags.aconfig"],
 }
 
 cc_aconfig_library {
@@ -61,38 +61,38 @@ cc_library {
     ],
 
     shared_libs: [
-        "libcutils",
-        "libhardware",
-        "libhardware_legacy",
-        "libutils",
-        "liblog",
-        "libactivitymanager_aidl",
-        "libbatterystats_aidl",
-        "libbinder",
-        "libsensor",
-        "libsensorprivacy",
-        "libpermission",
-        "libprotoutil",
-        "libcrypto",
-        "libbase",
-        "libhidlbase",
-        "libfmq",
-        "libbinder_ndk",
-        "packagemanager_aidl-cpp",
+        "android.hardware.common-V2-ndk",
+        "android.hardware.common.fmq-V1-ndk",
         "android.hardware.sensors@1.0",
         "android.hardware.sensors@2.0",
         "android.hardware.sensors@2.1",
-        "android.hardware.common-V2-ndk",
-        "android.hardware.common.fmq-V1-ndk",
-        "server_configurable_flags",
         "libaconfig_storage_read_api_cc",
+        "libactivitymanager_aidl",
+        "libbase",
+        "libbatterystats_aidl",
+        "libbinder",
+        "libbinder_ndk",
+        "libcrypto",
+        "libcutils",
+        "libfmq",
+        "libhardware",
+        "libhardware_legacy",
+        "libhidlbase",
+        "liblog",
+        "libpermission",
+        "libprotoutil",
+        "libsensor",
+        "libsensorprivacy",
+        "libutils",
+        "packagemanager_aidl-cpp",
+        "server_configurable_flags",
     ],
 
     static_libs: [
-        "libaidlcommonsupport",
-        "android.hardware.sensors@1.0-convert",
         "android.hardware.sensors-V1-convert",
         "android.hardware.sensors-V3-ndk",
+        "android.hardware.sensors@1.0-convert",
+        "libaidlcommonsupport",
         "sensorservice_flags_c_lib",
     ],
 
@@ -100,9 +100,9 @@ cc_library {
 
     export_shared_lib_headers: [
         "libactivitymanager_aidl",
+        "libpermission",
         "libsensor",
         "libsensorprivacy",
-        "libpermission",
     ],
 
     afdo: true,
@@ -120,9 +120,9 @@ cc_binary {
     srcs: ["main_sensorservice.cpp"],
 
     shared_libs: [
-        "libsensorservice",
-        "libsensorprivacy",
         "libbinder",
+        "libsensorprivacy",
+        "libsensorservice",
         "libutils",
     ],
 

@@ -21,7 +21,7 @@
 
 #include "FrontEnd/LayerLifecycleManager.h"
 #include "LayerHierarchyTest.h"
-#include "TransactionState.h"
+#include "QueuedTransactionState.h"
 
 using namespace android::surfaceflinger;
 
@@ -104,7 +104,7 @@ TEST_F(LayerLifecycleManagerTest, updateLayerStates) {
     EXPECT_FALSE(managedLayers.front()->changes.test(RequestedLayerState::Changes::Z));
 
     // apply transactions that do not affect the hierarchy
-    std::vector<TransactionState> transactions;
+    std::vector<QueuedTransactionState> transactions;
     transactions.emplace_back();
     transactions.back().states.push_back({});
     transactions.back().states.front().state.backgroundBlurRadius = 22;
@@ -297,7 +297,7 @@ TEST_F(LayerLifecycleManagerTest, canAddBackgroundLayer) {
     layers.emplace_back(rootLayer(1));
     lifecycleManager.addLayers(std::move(layers));
 
-    std::vector<TransactionState> transactions;
+    std::vector<QueuedTransactionState> transactions;
     transactions.emplace_back();
     transactions.back().states.push_back({});
     transactions.back().states.front().state.bgColor.a = 0.5;
@@ -326,7 +326,7 @@ TEST_F(LayerLifecycleManagerTest, canDestroyBackgroundLayer) {
     layers.emplace_back(rootLayer(1));
     lifecycleManager.addLayers(std::move(layers));
 
-    std::vector<TransactionState> transactions;
+    std::vector<QueuedTransactionState> transactions;
     transactions.emplace_back();
     transactions.back().states.push_back({});
     transactions.back().states.front().state.bgColor.a = 0.5;
@@ -360,7 +360,7 @@ TEST_F(LayerLifecycleManagerTest, onParentDestroyDestroysBackgroundLayer) {
     layers.emplace_back(rootLayer(1));
     lifecycleManager.addLayers(std::move(layers));
 
-    std::vector<TransactionState> transactions;
+    std::vector<QueuedTransactionState> transactions;
     transactions.emplace_back();
     transactions.back().states.push_back({});
     transactions.back().states.front().state.bgColor.a = 0.5;

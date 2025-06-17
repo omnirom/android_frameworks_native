@@ -627,6 +627,14 @@ void FakeEventHub::setSysfsRootPath(int32_t deviceId, std::string sysfsRootPath)
     device->sysfsRootPath = sysfsRootPath;
 }
 
+std::filesystem::path FakeEventHub::getSysfsRootPath(int32_t deviceId) const {
+    Device* device = getDevice(deviceId);
+    if (device == nullptr) {
+        return {};
+    }
+    return device->sysfsRootPath;
+}
+
 void FakeEventHub::sysfsNodeChanged(const std::string& sysfsNodePath) {
     int32_t foundDeviceId = -1;
     Device* foundDevice = nullptr;

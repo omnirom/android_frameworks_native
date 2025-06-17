@@ -23,11 +23,8 @@
 
 #ifndef __TRUSTY__
 #include <cutils/sockets.h>
-#endif
-
-#ifdef __linux__
-#include <linux/vm_sockets.h>
-#endif // __linux__
+#include "vm_sockets.h"
+#endif  // !__TRUSTY__
 
 using android::OK;
 using android::RpcServer;
@@ -251,9 +248,18 @@ AIBinder* ARpcSession_setupInet(ARpcSession* handle, const char* address, unsign
 #endif // __TRUSTY__
 
 AIBinder* ARpcSession_setupPreconnectedClient(ARpcSession* handle, int (*requestFd)(void* param),
-                                              void* param) {
+                                              void* param, void (*paramDeleteFd)(void* param)) {
     auto session = handleToStrongPointer<RpcSession>(handle);
-    auto request = [=] { return unique_fd{requestFd(param)}; };
+    auto deleter = [=](void* param) {
+        if (paramDeleteFd) {
+            paramDeleteFd(param);
+        }
+    };
+    // TODO: use unique_ptr once setupPreconnectedClient uses std::move_only_function.
+    std::shared_ptr<void> sharedParam(param, deleter);
+    auto request = [=, sharedParam = std::move(sharedParam)] {
+        return unique_fd{requestFd(sharedParam.get())};
+    };
     if (status_t status = session->setupPreconnectedClient(unique_fd{}, request); status != OK) {
         ALOGE("Failed to set up preconnected client. error: %s", statusToString(status).c_str());
         return nullptr;

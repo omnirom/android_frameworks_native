@@ -19,6 +19,7 @@
 #include <optional>
 #include <ostream>
 #include <unordered_set>
+#include "aidl/android/hardware/graphics/composer3/Composition.h"
 #include "ui/LayerStack.h"
 
 // TODO(b/129481165): remove the #pragma below and fix conversion issues
@@ -121,6 +122,8 @@ public:
 
         // True if layers with 170M dataspace should be overridden to sRGB.
         const bool treat170mAsSrgb;
+
+        std::shared_ptr<gui::DisplayLuts> luts;
     };
 
     // A superset of LayerSettings required by RenderEngine to compose a layer
@@ -131,6 +134,9 @@ public:
 
         // Currently latched frame number, 0 if invalid.
         uint64_t frameNumber = 0;
+
+        // layer serial number, -1 if invalid.
+        int32_t sequence = -1;
     };
 
     // Describes the states of the release fence. Checking the states allows checks
@@ -161,6 +167,8 @@ public:
     // Checks if the buffer's release fence has been set
     virtual LayerFE::ReleaseFencePromiseStatus getReleaseFencePromiseStatus() = 0;
 
+    virtual void setReleasedBuffer(sp<GraphicBuffer> buffer) = 0;
+
     // Indicates that the picture profile request was applied to this layer.
     virtual void onPictureProfileCommitted() = 0;
 
@@ -173,6 +181,28 @@ public:
     // Whether the layer should be rendered with rounded corners.
     virtual bool hasRoundedCorners() const = 0;
     virtual void setWasClientComposed(const sp<Fence>&) {}
+
+    // These fields are all copied from the last written HWC state.
+    // This state is only used for debugging purposes.
+    struct HwcLayerDebugState {
+        aidl::android::hardware::graphics::composer3::Composition lastCompositionType =
+                aidl::android::hardware::graphics::composer3::Composition::INVALID;
+        // Corresponds to passing an alpha of 0 to HWC2::Layer::setPlaneAlpha.
+        bool wasSkipped = false;
+
+        // Indicates whether the compositionengine::OutputLayer had properties overwritten.
+        // Not directly passed to HWC.
+        bool wasOverridden = false;
+
+        // Corresponds to the GraphicBuffer ID of the buffer passed to HWC2::Layer::setBuffer.
+        // This buffer corresponds to a CachedSet that the LayerFE was flattened to.
+        uint64_t overrideBufferId = 0;
+    };
+
+    // Used for debugging purposes, e.g. perfetto tracing, dumpsys.
+    virtual void setLastHwcState(const LayerFE::HwcLayerDebugState &hwcState) = 0;
+    virtual const HwcLayerDebugState &getLastHwcState() const = 0;
+
     virtual const gui::LayerMetadata* getMetadata() const = 0;
     virtual const gui::LayerMetadata* getRelativeMetadata() const = 0;
 };

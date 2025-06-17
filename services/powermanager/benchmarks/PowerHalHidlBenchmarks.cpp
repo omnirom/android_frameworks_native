@@ -54,14 +54,17 @@ static void runBenchmark(benchmark::State& state, microseconds delay, Return<R> 
         return;
     }
 
-    while (state.KeepRunning()) {
+    for (auto _ : state) {
         Return<R> ret = (*hal.*fn)(std::forward<Args1>(args1)...);
-        state.PauseTiming();
-        if (!ret.isOk()) state.SkipWithError(ret.description().c_str());
-        if (delay > 0us) {
-            testDelaySpin(std::chrono::duration_cast<std::chrono::duration<float>>(delay).count());
+        if (!ret.isOk()) {
+            state.SkipWithError(ret.description().c_str());
+            break;
         }
-        state.ResumeTiming();
+        if (delay > 0us) {
+            state.PauseTiming();
+            testDelaySpin(std::chrono::duration_cast<std::chrono::duration<float>>(delay).count());
+            state.ResumeTiming();
+        }
     }
 }
 

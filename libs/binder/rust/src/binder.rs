@@ -1160,6 +1160,12 @@ macro_rules! declare_binder_enum {
             pub const fn enum_values() -> [Self; $size] {
                 [$(Self::$name),*]
             }
+
+            #[inline(always)]
+            #[allow(missing_docs)]
+            pub const fn get(&self) -> $backing {
+                self.0
+            }
         }
 
         impl std::fmt::Debug for $enum {
@@ -1201,5 +1207,45 @@ macro_rules! declare_binder_enum {
                 Ok(v.map(|v| v.into_iter().map(Self).collect()))
             }
         }
+
+        impl std::ops::BitOr for $enum {
+            type Output = Self;
+            fn bitor(self, rhs: Self) -> Self {
+                Self(self.0 | rhs.0)
+            }
+        }
+
+        impl std::ops::BitOrAssign for $enum {
+            fn bitor_assign(&mut self, rhs: Self) {
+                self.0 = self.0 | rhs.0;
+            }
+        }
+
+        impl std::ops::BitAnd for $enum {
+            type Output = Self;
+            fn bitand(self, rhs: Self) -> Self {
+                Self(self.0 & rhs.0)
+            }
+        }
+
+        impl std::ops::BitAndAssign for $enum {
+            fn bitand_assign(&mut self, rhs: Self) {
+                self.0 = self.0 & rhs.0;
+            }
+        }
+
+        impl std::ops::BitXor for $enum {
+            type Output = Self;
+            fn bitxor(self, rhs: Self) -> Self {
+                Self(self.0 ^ rhs.0)
+            }
+        }
+
+        impl std::ops::BitXorAssign for $enum {
+            fn bitxor_assign(&mut self, rhs: Self) {
+                self.0 = self.0 ^ rhs.0;
+            }
+        }
+
     };
 }

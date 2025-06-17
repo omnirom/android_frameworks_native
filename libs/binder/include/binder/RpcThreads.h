@@ -20,6 +20,7 @@
 #include <condition_variable>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <thread>
 
 #include <binder/Common.h>

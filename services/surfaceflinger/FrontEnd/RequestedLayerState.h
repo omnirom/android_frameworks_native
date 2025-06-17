@@ -23,7 +23,7 @@
 #include "Scheduler/LayerInfo.h"
 
 #include "LayerCreationArgs.h"
-#include "TransactionState.h"
+#include "QueuedTransactionState.h"
 
 namespace android::surfaceflinger::frontend {
 using namespace ftl::flag_operators;
@@ -115,6 +115,7 @@ struct RequestedLayerState : layer_state_t {
     const gui::Pid ownerPid;
     bool dataspaceRequested;
     bool hasColorTransform;
+    bool transformIsValid = true;
     bool premultipliedAlpha{true};
     // This layer can be a cursor on some displays.
     bool potentialCursor{false};

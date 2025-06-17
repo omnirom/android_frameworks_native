@@ -147,7 +147,7 @@ public:
                 << "Timeout waiting for vsync event";
         DisplayEventReceiver::Event event;
         while (mDisplayEventReceiver.getEvents(&event, 1) > 0) {
-            if (event.header.type != DisplayEventReceiver::DISPLAY_EVENT_VSYNC) {
+            if (event.header.type != DisplayEventType::DISPLAY_EVENT_VSYNC) {
                 continue;
             }
 

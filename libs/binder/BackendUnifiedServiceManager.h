@@ -122,7 +122,8 @@ public:
 
     binder::Status getService(const ::std::string& name, sp<IBinder>* _aidl_return) override;
     binder::Status getService2(const ::std::string& name, os::Service* out) override;
-    binder::Status checkService(const ::std::string& name, os::Service* out) override;
+    binder::Status checkService(const ::std::string& name, sp<IBinder>* _aidl_return) override;
+    binder::Status checkService2(const ::std::string& name, os::Service* out) override;
     binder::Status addService(const ::std::string& name, const sp<IBinder>& service,
                               bool allowIsolated, int32_t dumpPriority) override;
     binder::Status listServices(int32_t dumpPriority,
@@ -167,5 +168,9 @@ private:
 sp<BackendUnifiedServiceManager> getBackendUnifiedServiceManager();
 
 android::binder::Status getInjectedAccessor(const std::string& name, android::os::Service* service);
+void appendInjectedAccessorServices(std::vector<std::string>* list);
+// Do not call any other service manager APIs that might take the accessor
+// mutex because this will be holding it!
+void forEachInjectedAccessorService(const std::function<void(const std::string&)>& f);
 
 } // namespace android

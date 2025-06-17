@@ -348,6 +348,10 @@ public:
         *out = binder;
         return Status::ok();
     }
+    Status repeatBytes(const std::vector<uint8_t>& bytes, std::vector<uint8_t>* out) override {
+        *out = bytes;
+        return Status::ok();
+    }
     static sp<IBinder> mHeldBinder;
     Status holdBinder(const sp<IBinder>& binder) override {
         mHeldBinder = binder;

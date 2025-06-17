@@ -65,6 +65,8 @@
 #define SFTRACE_NAME(name) ::android::ScopedTrace PASTE(___tracer, __LINE__)(name)
 // SFTRACE_CALL is an SFTRACE_NAME that uses the current function name.
 #define SFTRACE_CALL() SFTRACE_NAME(__FUNCTION__)
+#define SFTRACE_NAME_FOR_TRACK(trackName, name) \
+    ::android::ScopedTraceForTrack PASTE(___tracer, __LINE__)(trackName, name)
 
 #define SFTRACE_FORMAT(fmt, ...) \
     ::android::ScopedTrace PASTE(___tracer, __LINE__)(fmt, ##__VA_ARGS__)
@@ -85,6 +87,23 @@ public:
     }
     inline ScopedTrace(const char* name) { SFTRACE_BEGIN(name); }
     inline ~ScopedTrace() { SFTRACE_END(); }
+};
+
+class ScopedTraceForTrack {
+public:
+    inline ScopedTraceForTrack(const char* trackName, const char* name)
+          : mCookie(getUniqueCookie()), mTrackName(trackName) {
+        SFTRACE_ASYNC_FOR_TRACK_BEGIN(mTrackName, name, mCookie);
+    }
+    inline ~ScopedTraceForTrack() { SFTRACE_ASYNC_FOR_TRACK_END(mTrackName, mCookie); }
+
+private:
+    static int32_t getUniqueCookie() {
+        static std::atomic<int32_t> sUniqueCookie = 1000;
+        return sUniqueCookie++;
+    }
+    int32_t mCookie;
+    const char* mTrackName;
 };
 
 } // namespace android

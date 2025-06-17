@@ -26,9 +26,8 @@
 #include <log/log.h>
 #include <stats_annotations.h>
 #include <stats_event.h>
-#include <statslog.h>
 
-#include <unordered_map>
+#include <map>
 
 namespace {
     static const char* g_AtomErrorMetricName =
@@ -118,8 +117,8 @@ ndk::ScopedAStatus StatsHal::reportVendorAtom(const VendorAtom& vendorAtom) {
         }
     }
 
-    // populate map for quickier access for VendorAtomValue associated annotations by value index
-    std::unordered_map<int, int> fieldIndexToAnnotationSetMap;
+    // populate map for quicker access for VendorAtomValue associated annotations by value index
+    std::map<int, int> fieldIndexToAnnotationSetMap;
     if (vendorAtom.valuesAnnotations) {
         const std::vector<std::optional<AnnotationSet>>& valuesAnnotations =
                 *vendorAtom.valuesAnnotations;

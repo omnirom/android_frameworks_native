@@ -26,6 +26,7 @@
 #ifndef ANDROID_CONFIGURATION_H
 #define ANDROID_CONFIGURATION_H
 
+#include <stdint.h>
 #include <sys/cdefs.h>
 
 #include <android/asset_manager.h>

@@ -45,7 +45,7 @@
 namespace android {
 
 namespace {
-class TestConsumerListener : public BnConsumerListener {
+class TestConsumerListener : public IConsumerListener {
     virtual void onFrameAvailable(const BufferItem&) override {}
     virtual void onBuffersReleased() override {}
     virtual void onSidebandStreamChanged() override {}

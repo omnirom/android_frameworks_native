@@ -121,6 +121,11 @@ std::vector<ParcelRead<::android::Parcel>> BINDER_PARCEL_READ_FUNCTIONS {
     PARCEL_READ_NO_STATUS(size_t, hasFileDescriptors),
     PARCEL_READ_NO_STATUS(std::vector<android::sp<android::IBinder>>, debugReadAllStrongBinders),
     PARCEL_READ_NO_STATUS(std::vector<int>, debugReadAllFileDescriptors),
+    [] (const ::android::Parcel& p, FuzzedDataProvider&) {
+        FUZZ_LOG() << "about to markSensitive";
+        p.markSensitive();
+        FUZZ_LOG() << "markSensitive done";
+    },
     [] (const ::android::Parcel& p, FuzzedDataProvider& provider) {
         std::string interface = provider.ConsumeRandomLengthString();
         FUZZ_LOG() << "about to enforceInterface: " << interface;
@@ -312,8 +317,6 @@ std::vector<ParcelRead<::android::Parcel>> BINDER_PARCEL_READ_FUNCTIONS {
     PARCEL_READ_NO_STATUS(int, readParcelFileDescriptor),
     PARCEL_READ_WITH_STATUS(unique_fd, readUniqueFileDescriptor),
 
-    PARCEL_READ_WITH_STATUS(std::unique_ptr<std::vector<unique_fd>>,
-            readUniqueFileDescriptorVector),
     PARCEL_READ_WITH_STATUS(std::optional<std::vector<unique_fd>>, readUniqueFileDescriptorVector),
     PARCEL_READ_WITH_STATUS(std::vector<unique_fd>, readUniqueFileDescriptorVector),
 

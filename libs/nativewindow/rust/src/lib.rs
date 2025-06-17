@@ -541,7 +541,7 @@ pub struct HardwareBufferGuard<'a> {
     pub address: NonNull<c_void>,
 }
 
-impl<'a> Drop for HardwareBufferGuard<'a> {
+impl Drop for HardwareBufferGuard<'_> {
     fn drop(&mut self) {
         self.buffer
             .unlock()

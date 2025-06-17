@@ -454,4 +454,6 @@ private:
     InputVerifier mInputVerifier;
 };
 
+std::ostream& operator<<(std::ostream& out, const InputMessage& msg);
+
 } // namespace android

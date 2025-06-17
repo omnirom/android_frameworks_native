@@ -27,6 +27,7 @@
 #include <vulkan/vulkan.h>
 #include <hardware/hwvulkan.h>
 
+#include "allocator.h"
 #include "api_gen.h"
 #include "driver_gen.h"
 #include "debug_report.h"
@@ -102,7 +103,6 @@ struct DeviceData {
 };
 
 bool OpenHAL();
-const VkAllocationCallbacks& GetDefaultAllocator();
 
 void QueryPresentationProperties(
     VkPhysicalDevice physicalDevice,

@@ -47,6 +47,71 @@ public:
         return mHaveMessage ? OK : WOULD_BLOCK;
     }
 
+    void moveMsgStart(ipc_msg_t* msg, size_t msg_size, size_t offset) {
+        LOG_ALWAYS_FATAL_IF(offset > msg_size, "tried to move message past its end %zd>%zd", offset,
+                            msg_size);
+        while (true) {
+            if (offset == 0) {
+                break;
+            }
+            if (offset >= msg->iov[0].iov_len) {
+                // Move to the next iov, this one was sent already
+                offset -= msg->iov[0].iov_len;
+                msg->iov++;
+                msg->num_iov -= 1;
+            } else {
+                // We need to move the base of the current iov
+                msg->iov[0].iov_len -= offset;
+                msg->iov[0].iov_base = static_cast<char*>(msg->iov[0].iov_base) + offset;
+                offset = 0;
+            }
+        }
+        // We only send handles on the first message. This can be changed in the future if we want
+        // to send more handles than the maximum per message limit (which would require sending
+        // multiple messages). The current code makes sure that we send less handles than the
+        // maximum trusty allows.
+        msg->num_handles = 0;
+    }
+
+    status_t sendTrustyMsg(ipc_msg_t* msg, size_t msg_size) {
+        do {
+            ssize_t rc = send_msg(mSocket.fd.get(), msg);
+            if (rc == ERR_NOT_ENOUGH_BUFFER) {
+                // Peer is blocked, wait until it unblocks.
+                // TODO: when tipc supports a send-unblocked handler,
+                // save the message here in a queue and retry it asynchronously
+                // when the handler gets called by the library
+                uevent uevt;
+                do {
+                    rc = ::wait(mSocket.fd.get(), &uevt, INFINITE_TIME);
+                    if (rc < 0) {
+                        return statusFromTrusty(rc);
+                    }
+                    if (uevt.event & IPC_HANDLE_POLL_HUP) {
+                        return DEAD_OBJECT;
+                    }
+                } while (!(uevt.event & IPC_HANDLE_POLL_SEND_UNBLOCKED));
+
+                // Retry the send, it should go through this time because
+                // sending is now unblocked
+                rc = send_msg(mSocket.fd.get(), msg);
+            }
+            if (rc < 0) {
+                return statusFromTrusty(rc);
+            }
+            size_t sent_bytes = static_cast<size_t>(rc);
+            if (sent_bytes < msg_size) {
+                moveMsgStart(msg, msg_size, static_cast<size_t>(sent_bytes));
+                msg_size -= sent_bytes;
+            } else {
+                LOG_ALWAYS_FATAL_IF(static_cast<size_t>(rc) != msg_size,
+                                    "Sent the wrong number of bytes %zd!=%zu", rc, msg_size);
+                break;
+            }
+        } while (true);
+        return OK;
+    }
+
     status_t interruptableWriteFully(
             FdTrigger* /*fdTrigger*/, iovec* iovs, int niovs,
             const std::optional<SmallFunction<status_t()>>& /*altPoll*/,
@@ -86,34 +151,7 @@ public:
             msg.handles = msgHandles;
         }
 
-        ssize_t rc = send_msg(mSocket.fd.get(), &msg);
-        if (rc == ERR_NOT_ENOUGH_BUFFER) {
-            // Peer is blocked, wait until it unblocks.
-            // TODO: when tipc supports a send-unblocked handler,
-            // save the message here in a queue and retry it asynchronously
-            // when the handler gets called by the library
-            uevent uevt;
-            do {
-                rc = ::wait(mSocket.fd.get(), &uevt, INFINITE_TIME);
-                if (rc < 0) {
-                    return statusFromTrusty(rc);
-                }
-                if (uevt.event & IPC_HANDLE_POLL_HUP) {
-                    return DEAD_OBJECT;
-                }
-            } while (!(uevt.event & IPC_HANDLE_POLL_SEND_UNBLOCKED));
-
-            // Retry the send, it should go through this time because
-            // sending is now unblocked
-            rc = send_msg(mSocket.fd.get(), &msg);
-        }
-        if (rc < 0) {
-            return statusFromTrusty(rc);
-        }
-        LOG_ALWAYS_FATAL_IF(static_cast<size_t>(rc) != size,
-                            "Sent the wrong number of bytes %zd!=%zu", rc, size);
-
-        return OK;
+        return sendTrustyMsg(&msg, size);
     }
 
     status_t interruptableReadFully(

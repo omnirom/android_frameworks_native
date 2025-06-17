@@ -356,7 +356,7 @@ void MultifileBlobCache::set(const void* key, EGLsizeiANDROID keySize, const voi
 
     // If we're going to be over the cache limit, kick off a trim to clear space
     if (getTotalSize() + fileSize > mMaxTotalSize || getTotalEntries() + 1 > mMaxTotalEntries) {
-        ALOGV("SET: Cache is full, calling trimCache to clear space");
+        ALOGW("SET: Cache is full, calling trimCache to clear space");
         trimCache();
     }
 

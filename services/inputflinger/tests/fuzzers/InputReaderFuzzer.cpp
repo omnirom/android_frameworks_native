@@ -165,6 +165,10 @@ public:
         return reader->getBluetoothAddress(deviceId);
     }
 
+    std::filesystem::path getSysfsRootPath(int32_t deviceId) const {
+        return reader->getSysfsRootPath(deviceId);
+    }
+
     void sysfsNodeChanged(const std::string& sysfsNodePath) {
         reader->sysfsNodeChanged(sysfsNodePath);
     }
@@ -297,6 +301,7 @@ extern "C" int LLVMFuzzerTestOneInput(uint8_t* data, size_t size) {
                                          std::chrono::microseconds(fdp->ConsumeIntegral<size_t>()));
                 },
                 [&]() -> void { reader->getBluetoothAddress(fdp->ConsumeIntegral<int32_t>()); },
+                [&]() -> void { reader->getSysfsRootPath(fdp->ConsumeIntegral<int32_t>()); },
         })();
     }
 

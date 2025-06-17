@@ -64,7 +64,7 @@ sk_sp<SkImage> GaussianBlurFilter::generate(SkiaGpuContext* context, const uint3
             SkSamplingOptions{SkFilterMode::kLinear, SkMipmapMode::kNone},
             &paint,
             SkCanvas::SrcRectConstraint::kFast_SrcRectConstraint);
-    return surface->makeImageSnapshot();
+    return surface->makeTemporaryImage();
 }
 
 } // namespace skia

@@ -20,6 +20,15 @@ use crate::input::KeyboardType;
 //  key events at all. (Requires setup allowing InputDevice to dynamically add/remove
 //  KeyboardInputMapper based on blocklist and KeyEvents in case a KeyboardType::None device ends
 //  up producing a key event)
+
+/// This list pre-classifies a device into Alphabetic/Non-Alphabetic keyboard and tells us whether
+/// further re-classification should be allowed or not (using is_finalized value).
+/// This list DOES NOT change the source of the device or change the input mappers associated with
+/// the device. It only changes the "KeyboardType" classification. This list should be primarily
+/// used to pre-classify devices that are NOT keyboards(like mice, game pads, etc.) but generate
+/// evdev nodes that say that they are alphabetic keyboards.
+///
+/// NOTE: Pls keep the list sorted by vendor id and product id for easy searching.
 pub static CLASSIFIED_DEVICES: &[(
     /* vendorId */ u16,
     /* productId */ u16,
@@ -96,6 +105,8 @@ pub static CLASSIFIED_DEVICES: &[(
     (0x056e, 0x0159, KeyboardType::NonAlphabetic, true),
     // Zebra LS2208 barcode scanner
     (0x05e0, 0x1200, KeyboardType::NonAlphabetic, true),
+    // Glorious O2 Wireless
+    (0x093a, 0x822d, KeyboardType::NonAlphabetic, true),
     // RDing FootSwitch1F1
     (0x0c45, 0x7403, KeyboardType::NonAlphabetic, true),
     // SteelSeries Sensei RAW Frost Blue
@@ -108,6 +119,8 @@ pub static CLASSIFIED_DEVICES: &[(
     (0x1050, 0x0010, KeyboardType::NonAlphabetic, true),
     // Yubico.com Yubikey 4 OTP+U2F+CCID
     (0x1050, 0x0407, KeyboardType::NonAlphabetic, true),
+    // Razer DeathAdder Essential
+    (0x1532, 0x0098, KeyboardType::NonAlphabetic, true),
     // Lenovo USB-C Wired Compact Mouse
     (0x17ef, 0x6123, KeyboardType::NonAlphabetic, true),
     // Corsair Katar Pro Wireless (USB dongle)

@@ -141,6 +141,8 @@ public:
 private:
     static sp<ProcessState> init(const char* defaultDriver, bool requireDefault);
 
+    void checkExpectingThreadPoolStart() const;
+
     static void onFork();
     static void parentPostFork();
     static void childPostFork();

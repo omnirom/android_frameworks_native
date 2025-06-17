@@ -269,6 +269,7 @@ cc_defaults {
         "-Wzero-as-null-pointer-constant",
         "-Wreorder-init-list",
         "-Wunused-const-variable",
+        "-Wunused-result",
         "-DANDROID_BASE_UNIQUE_FD_DISABLE_IMPLICIT_CONVERSION",
         "-DANDROID_UTILS_REF_BASE_DISABLE_IMPLICIT_CONSTRUCTION",
         // Hide symbols by default and set the BUILDING_LIBBINDER macro so that
@@ -276,15 +277,6 @@ cc_defaults {
         "-fvisibility=hidden",
         "-DBUILDING_LIBBINDER",
     ],
-
-    target: {
-        vendor: {
-            // Trimming the exported symbols reveals a bug in vendor code, so
-            // disable it for the vendor variant for now. http://b/349657329
-            // TODO: Fix the issue and remove this override.
-            cflags: ["-fvisibility=default"],
-        },
-    },
 }
 
 cc_defaults {
@@ -826,6 +818,7 @@ cc_library {
     // so we restrict its visibility to the Trusty-specific packages.
     visibility: [
         ":__subpackages__",
+        "//hardware/interfaces/security/see:__subpackages__",
         "//system/core/trusty:__subpackages__",
         "//vendor:__subpackages__",
     ],

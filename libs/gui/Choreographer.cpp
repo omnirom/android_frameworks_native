@@ -20,6 +20,7 @@
 #include <gui/Choreographer.h>
 #include <gui/TraceUtils.h>
 #include <jni.h>
+#include <utils/Looper.h>
 
 #undef LOG_TAG
 #define LOG_TAG "AChoreographer"
@@ -69,7 +70,7 @@ namespace android {
 
 Choreographer::Context Choreographer::gChoreographers;
 
-static thread_local Choreographer* gChoreographer;
+static thread_local sp<Choreographer> gChoreographer;
 
 void Choreographer::initJVM(JNIEnv* env) {
     env->GetJavaVM(&gJni.jvm);
@@ -86,14 +87,14 @@ void Choreographer::initJVM(JNIEnv* env) {
                              "()V");
 }
 
-Choreographer* Choreographer::getForThread() {
+sp<Choreographer> Choreographer::getForThread() {
     if (gChoreographer == nullptr) {
         sp<Looper> looper = Looper::getForThread();
         if (!looper.get()) {
             ALOGW("No looper prepared for thread");
             return nullptr;
         }
-        gChoreographer = new Choreographer(looper);
+        gChoreographer = sp<Choreographer>::make(looper);
         status_t result = gChoreographer->initialize();
         if (result != OK) {
             ALOGW("Failed to initialize");
@@ -238,7 +239,7 @@ void Choreographer::scheduleLatestConfigRequest() {
         // socket should be atomic across processes.
         DisplayEventReceiver::Event event;
         event.header =
-                DisplayEventReceiver::Event::Header{DisplayEventReceiver::DISPLAY_EVENT_NULL,
+                DisplayEventReceiver::Event::Header{DisplayEventType::DISPLAY_EVENT_NULL,
                                                     PhysicalDisplayId::fromPort(0), systemTime()};
         injectEvent(event);
     }

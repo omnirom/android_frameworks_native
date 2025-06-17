@@ -44,7 +44,8 @@ public:
     MOCK_METHOD(bool, allocateVirtualDisplay, (HalVirtualDisplayId, ui::Size, ui::PixelFormat*),
                 (override));
     MOCK_METHOD(void, allocatePhysicalDisplay,
-                (hal::HWDisplayId, PhysicalDisplayId, std::optional<ui::Size>), (override));
+                (hal::HWDisplayId, PhysicalDisplayId, uint8_t port, std::optional<ui::Size>),
+                (override));
 
     MOCK_METHOD(std::shared_ptr<HWC2::Layer>, createLayer, (HalDisplayId), (override));
     MOCK_METHOD(status_t, getDeviceCompositionChanges,
@@ -81,7 +82,7 @@ public:
                 (PhysicalDisplayId, float, float, const Hwc2::Composer::DisplayBrightnessOptions&),
                 (override));
     MOCK_METHOD(std::optional<DisplayIdentificationInfo>, onHotplug,
-                (hal::HWDisplayId, hal::Connection), (override));
+                (hal::HWDisplayId, HWComposer::HotplugEvent), (override));
     MOCK_METHOD(bool, updatesDeviceProductInfoOnHotplugReconnect, (), (const, override));
     MOCK_METHOD(std::optional<PhysicalDisplayId>, onVsync, (hal::HWDisplayId, int64_t));
     MOCK_METHOD(void, setVsyncEnabled, (PhysicalDisplayId, hal::Vsync), (override));
@@ -151,6 +152,11 @@ public:
     MOCK_METHOD(int32_t, getMaxLayerPictureProfiles, (PhysicalDisplayId));
     MOCK_METHOD(status_t, setDisplayPictureProfileHandle,
                 (PhysicalDisplayId, const PictureProfileHandle&));
+    MOCK_METHOD(status_t, startHdcpNegotiation,
+                (PhysicalDisplayId, const aidl::android::hardware::drm::HdcpLevels&));
+    MOCK_METHOD(status_t, getLuts,
+                (PhysicalDisplayId, const std::vector<sp<GraphicBuffer>>&,
+                 std::vector<aidl::android::hardware::graphics::composer3::Luts>*));
 };
 
 } // namespace android::mock

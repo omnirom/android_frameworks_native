@@ -17,6 +17,8 @@
 #define LOG_TAG "SurfaceTextureGL_test"
 //#define LOG_NDEBUG 0
 
+#include <gmock/gmock.h>
+
 #include "SurfaceTextureGL.h"
 
 #include "DisconnectWaiter.h"
@@ -735,4 +737,30 @@ TEST_F(SurfaceTextureGLTest, InvalidWidthOrHeightFails) {
     ASSERT_NE(NO_ERROR, mST->updateTexImage());
 }
 
+#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
+TEST_F(SurfaceTextureGLTest, TestUnlimitedSlots) {
+    ASSERT_EQ(OK, mSTC->connect(NATIVE_WINDOW_API_CPU, sp<StubSurfaceListener>::make()));
+    ASSERT_EQ(OK, mSTC->setMaxDequeuedBufferCount(256));
+
+    std::vector<Surface::BatchBuffer> buffers(256);
+    ASSERT_EQ(OK, mSTC->dequeueBuffers(&buffers));
+    ASSERT_EQ(256u, buffers.size());
+    ASSERT_THAT(buffers, Each(Field(&Surface::BatchBuffer::buffer, ::testing::NotNull())));
+
+    for (size_t i = 0; i < buffers.size(); ++i) {
+        sp<GraphicBuffer> graphicBuffer = GraphicBuffer::from(buffers[i].buffer);
+        sp<Fence> fence = sp<Fence>::make(buffers[i].fenceFd);
+
+        void* buf;
+        ASSERT_EQ(OK, graphicBuffer->lock(AHARDWAREBUFFER_USAGE_CPU_WRITE_OFTEN, &buf));
+        fillRGBA8Buffer((uint8_t*)buf, graphicBuffer->getWidth(), graphicBuffer->getHeight(),
+                        graphicBuffer->getStride(), i, i, i, i);
+        graphicBuffer->unlock();
+
+        ASSERT_EQ(OK, mSTC->queueBuffer(graphicBuffer, fence));
+        ASSERT_EQ(OK, mST->updateTexImage());
+        checkPixel(0, 0, i, i, i, i);
+    }
+}
+#endif
 } // namespace android

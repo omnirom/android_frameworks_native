@@ -89,8 +89,8 @@ TEST(UtilsHost, ExecuteLongRunning2) {
     }
 
     // ~CommandResult() called, child process is killed.
-    // Assert that the second sleep does not finish.
-    EXPECT_LT(millisSince(start), 6000);
+    // Assert that the last sleep does not finish.
+    EXPECT_LT(millisSince(start), 8000);
 }
 
 TEST(UtilsHost, KillWithSigKill) {

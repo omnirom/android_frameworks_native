@@ -28,6 +28,7 @@
 #include "ui/GraphicTypes.h"
 
 #include <com_android_graphics_libgui_flags.h>
+#include <cmath>
 
 #define UPDATE_AND_VERIFY(BUILDER, ...)                                    \
     ({                                                                     \
@@ -260,6 +261,40 @@ TEST_F(LayerSnapshotTest, AlphaInheritedByChildren) {
     EXPECT_EQ(getSnapshot(1221)->alpha, 0.25f);
 }
 
+TEST_F(LayerSnapshotTest, AlphaInheritedByChildWhenParentIsHiddenByInvalidTransform) {
+    setMatrix(1, 0, 0, 0, 0);
+    update(mSnapshotBuilder);
+    mLifecycleManager.commitChanges();
+
+    setAlpha(1, 0.5);
+    update(mSnapshotBuilder);
+    mLifecycleManager.commitChanges();
+
+    setMatrix(1, 1, 0, 0, 1);
+    update(mSnapshotBuilder);
+    mLifecycleManager.commitChanges();
+
+    EXPECT_EQ(getSnapshot(1)->alpha, 0.5f);
+    EXPECT_EQ(getSnapshot(11)->alpha, 0.5f);
+}
+
+TEST_F(LayerSnapshotTest, AlphaInheritedByChildWhenParentIsHidden) {
+    hideLayer(1);
+    update(mSnapshotBuilder);
+    mLifecycleManager.commitChanges();
+
+    setAlpha(1, 0.5);
+    update(mSnapshotBuilder);
+    mLifecycleManager.commitChanges();
+
+    showLayer(1);
+    update(mSnapshotBuilder);
+    mLifecycleManager.commitChanges();
+
+    EXPECT_EQ(getSnapshot(1)->alpha, 0.5f);
+    EXPECT_EQ(getSnapshot(11)->alpha, 0.5f);
+}
+
 // Change states
 TEST_F(LayerSnapshotTest, UpdateClearsPreviousChangeStates) {
     setCrop(1, Rect(1, 2, 3, 4));
@@ -329,7 +364,7 @@ TEST_F(LayerSnapshotTest, ReparentingUpdatesGameMode) {
 }
 
 TEST_F(LayerSnapshotTest, UpdateMetadata) {
-    std::vector<TransactionState> transactions;
+    std::vector<QueuedTransactionState> transactions;
     transactions.emplace_back();
     transactions.back().states.push_back({});
     transactions.back().states.front().state.what = layer_state_t::eMetadataChanged;
@@ -374,7 +409,7 @@ TEST_F(LayerSnapshotTest, UpdateMetadata) {
 TEST_F(LayerSnapshotTest, UpdateMetadataOfHiddenLayers) {
     hideLayer(1);
 
-    std::vector<TransactionState> transactions;
+    std::vector<QueuedTransactionState> transactions;
     transactions.emplace_back();
     transactions.back().states.push_back({});
     transactions.back().states.front().state.what = layer_state_t::eMetadataChanged;
@@ -1425,11 +1460,98 @@ TEST_F(LayerSnapshotTest, setBufferCrop) {
     EXPECT_EQ(getSnapshot(1)->geomContentCrop, Rect(0, 0, 100, 100));
 }
 
+TEST_F(LayerSnapshotTest, setCornerRadius) {
+    static constexpr float RADIUS = 123.f;
+    setRoundedCorners(1, RADIUS);
+    setCrop(1, Rect{1000, 1000});
+    UPDATE_AND_VERIFY(mSnapshotBuilder, STARTING_ZORDER);
+    EXPECT_EQ(getSnapshot({.id = 1})->roundedCorner.radius.x, RADIUS);
+}
+
+TEST_F(LayerSnapshotTest, ignoreCornerRadius) {
+    static constexpr float RADIUS = 123.f;
+    setClientDrawnCornerRadius(1, RADIUS);
+    setRoundedCorners(1, RADIUS);
+    setCrop(1, Rect{1000, 1000});
+    UPDATE_AND_VERIFY(mSnapshotBuilder, STARTING_ZORDER);
+    EXPECT_TRUE(getSnapshot({.id = 1})->roundedCorner.hasClientDrawnRadius());
+    EXPECT_EQ(getSnapshot({.id = 1})->roundedCorner.radius.x, 0.f);
+}
+
+TEST_F(LayerSnapshotTest, childInheritsParentScaledSettings) {
+    // ROOT
+    // ├── 1 (crop rect set to contain child layer)
+    // │   ├── 11
+    static constexpr float RADIUS = 123.f;
+
+    setRoundedCorners(1, RADIUS);
+    FloatRect parentCropRect(1, 1, 999, 999);
+    setCrop(1, parentCropRect);
+    // Rotate surface by 90
+    setMatrix(11, 0.f, -1.f, 1.f, 0.f);
+
+    UPDATE_AND_VERIFY(mSnapshotBuilder, STARTING_ZORDER);
+
+    ui::Transform t = getSnapshot({.id = 11})->localTransform.inverse();
+
+    UPDATE_AND_VERIFY(mSnapshotBuilder, STARTING_ZORDER);
+    EXPECT_EQ(getSnapshot({.id = 11})->roundedCorner.cropRect, t.transform(parentCropRect));
+    EXPECT_EQ(getSnapshot({.id = 11})->roundedCorner.radius.x, RADIUS * t.getScaleX());
+    EXPECT_EQ(getSnapshot({.id = 11})->roundedCorner.radius.y, RADIUS * t.getScaleY());
+    EXPECT_EQ(getSnapshot({.id = 11})->roundedCorner.requestedRadius.x, RADIUS * t.getScaleX());
+    EXPECT_EQ(getSnapshot({.id = 11})->roundedCorner.requestedRadius.y, RADIUS * t.getScaleY());
+}
+
+TEST_F(LayerSnapshotTest, childInheritsParentClientDrawnCornerRadius) {
+    // ROOT
+    // ├── 1 (crop rect set to contain child layers )
+    // │   ├── 11
+    // │   │   └── 111
+
+    static constexpr float RADIUS = 123.f;
+
+    setClientDrawnCornerRadius(1, RADIUS);
+    setRoundedCorners(1, RADIUS);
+    setCrop(1, Rect(1, 1, 999, 999));
+
+    UPDATE_AND_VERIFY(mSnapshotBuilder, STARTING_ZORDER);
+    EXPECT_TRUE(getSnapshot({.id = 1})->roundedCorner.hasClientDrawnRadius());
+    EXPECT_TRUE(getSnapshot({.id = 11})->roundedCorner.hasRoundedCorners());
+    EXPECT_EQ(getSnapshot({.id = 11})->roundedCorner.radius.x, RADIUS);
+}
+
+TEST_F(LayerSnapshotTest, childIgnoreCornerRadiusOverridesParent) {
+    // ROOT
+    // ├── 1 (crop rect set to contain child layers )
+    // │   ├── 11
+    // │   │   └── 111
+
+    static constexpr float RADIUS = 123.f;
+
+    setRoundedCorners(1, RADIUS);
+    setCrop(1, Rect(1, 1, 999, 999));
+
+    setClientDrawnCornerRadius(11, RADIUS);
+
+    UPDATE_AND_VERIFY(mSnapshotBuilder, STARTING_ZORDER);
+    EXPECT_EQ(getSnapshot({.id = 1})->roundedCorner.radius.x, RADIUS);
+    EXPECT_EQ(getSnapshot({.id = 11})->roundedCorner.radius.x, 0.f);
+    EXPECT_EQ(getSnapshot({.id = 111})->roundedCorner.radius.x, RADIUS);
+}
+
 TEST_F(LayerSnapshotTest, setShadowRadius) {
     static constexpr float SHADOW_RADIUS = 123.f;
     setShadowRadius(1, SHADOW_RADIUS);
     UPDATE_AND_VERIFY(mSnapshotBuilder, STARTING_ZORDER);
     EXPECT_EQ(getSnapshot(1)->shadowSettings.length, SHADOW_RADIUS);
+}
+
+TEST_F(LayerSnapshotTest, setBorderSettings) {
+    gui::BorderSettings settings;
+    settings.strokeWidth = 5;
+    setBorderSettings(1, settings);
+    UPDATE_AND_VERIFY(mSnapshotBuilder, STARTING_ZORDER);
+    EXPECT_EQ(getSnapshot(1)->borderSettings.strokeWidth, settings.strokeWidth);
 }
 
 TEST_F(LayerSnapshotTest, setTrustedOverlayForNonVisibleInput) {
@@ -1557,13 +1679,13 @@ TEST_F(LayerSnapshotTest, NonVisibleLayerWithInput) {
     setColor(3, {-1._hf, -1._hf, -1._hf});
     UPDATE_AND_VERIFY(mSnapshotBuilder, STARTING_ZORDER);
 
-    std::vector<TransactionState> transactions;
+    std::vector<QueuedTransactionState> transactions;
     transactions.emplace_back();
     transactions.back().states.push_back({});
     transactions.back().states.front().state.what = layer_state_t::eInputInfoChanged;
     transactions.back().states.front().layerId = 3;
-    transactions.back().states.front().state.windowInfoHandle = sp<gui::WindowInfoHandle>::make();
-    auto inputInfo = transactions.back().states.front().state.windowInfoHandle->editInfo();
+    auto inputInfo = transactions.back().states.front().state.editWindowInfo();
+    *inputInfo = {};
     inputInfo->token = sp<BBinder>::make();
     mLifecycleManager.applyTransactions(transactions);
 
@@ -1586,13 +1708,13 @@ TEST_F(LayerSnapshotTest, NonVisibleLayerWithInputShouldNotBeIncluded) {
     setColor(3, {-1._hf, -1._hf, -1._hf});
     UPDATE_AND_VERIFY(mSnapshotBuilder, STARTING_ZORDER);
 
-    std::vector<TransactionState> transactions;
+    std::vector<QueuedTransactionState> transactions;
     transactions.emplace_back();
     transactions.back().states.push_back({});
     transactions.back().states.front().state.what = layer_state_t::eInputInfoChanged;
     transactions.back().states.front().layerId = 3;
-    transactions.back().states.front().state.windowInfoHandle = sp<gui::WindowInfoHandle>::make();
-    auto inputInfo = transactions.back().states.front().state.windowInfoHandle->editInfo();
+    auto inputInfo = transactions.back().states.front().state.editWindowInfo();
+    *inputInfo = {};
     inputInfo->token = sp<BBinder>::make();
     hideLayer(3);
     mLifecycleManager.applyTransactions(transactions);
@@ -1799,9 +1921,6 @@ TEST_F(LayerSnapshotTest, hideLayerWithNanMatrix) {
 }
 
 TEST_F(LayerSnapshotTest, edgeExtensionPropagatesInHierarchy) {
-    if (!com::android::graphics::libgui::flags::edge_extension_shader()) {
-        GTEST_SKIP() << "Skipping test because edge_extension_shader is off";
-    }
     setCrop(1, Rect(0, 0, 20, 20));
     setBuffer(1221,
               std::make_shared<renderengine::mock::FakeExternalTexture>(20 /* width */,
@@ -1840,9 +1959,6 @@ TEST_F(LayerSnapshotTest, edgeExtensionPropagatesInHierarchy) {
 
 TEST_F(LayerSnapshotTest, leftEdgeExtensionIncreaseBoundSizeWithinCrop) {
     // The left bound is extended when shifting to the right
-    if (!com::android::graphics::libgui::flags::edge_extension_shader()) {
-        GTEST_SKIP() << "Skipping test because edge_extension_shader is off";
-    }
     setCrop(1, Rect(0, 0, 20, 20));
     const int texSize = 10;
     setBuffer(1221,
@@ -1862,9 +1978,6 @@ TEST_F(LayerSnapshotTest, leftEdgeExtensionIncreaseBoundSizeWithinCrop) {
 
 TEST_F(LayerSnapshotTest, rightEdgeExtensionIncreaseBoundSizeWithinCrop) {
     // The right bound is extended when shifting to the left
-    if (!com::android::graphics::libgui::flags::edge_extension_shader()) {
-        GTEST_SKIP() << "Skipping test because edge_extension_shader is off";
-    }
     const int crop = 20;
     setCrop(1, Rect(0, 0, crop, crop));
     const int texSize = 10;
@@ -1885,9 +1998,6 @@ TEST_F(LayerSnapshotTest, rightEdgeExtensionIncreaseBoundSizeWithinCrop) {
 
 TEST_F(LayerSnapshotTest, topEdgeExtensionIncreaseBoundSizeWithinCrop) {
     // The top bound is extended when shifting to the bottom
-    if (!com::android::graphics::libgui::flags::edge_extension_shader()) {
-        GTEST_SKIP() << "Skipping test because edge_extension_shader is off";
-    }
     setCrop(1, Rect(0, 0, 20, 20));
     const int texSize = 10;
     setBuffer(1221,
@@ -1907,9 +2017,6 @@ TEST_F(LayerSnapshotTest, topEdgeExtensionIncreaseBoundSizeWithinCrop) {
 
 TEST_F(LayerSnapshotTest, bottomEdgeExtensionIncreaseBoundSizeWithinCrop) {
     // The bottom bound is extended when shifting to the top
-    if (!com::android::graphics::libgui::flags::edge_extension_shader()) {
-        GTEST_SKIP() << "Skipping test because edge_extension_shader is off";
-    }
     const int crop = 20;
     setCrop(1, Rect(0, 0, crop, crop));
     const int texSize = 10;
@@ -1930,9 +2037,6 @@ TEST_F(LayerSnapshotTest, bottomEdgeExtensionIncreaseBoundSizeWithinCrop) {
 
 TEST_F(LayerSnapshotTest, multipleEdgeExtensionIncreaseBoundSizeWithinCrop) {
     // The left bound is extended when shifting to the right
-    if (!com::android::graphics::libgui::flags::edge_extension_shader()) {
-        GTEST_SKIP() << "Skipping test because edge_extension_shader is off";
-    }
     const int crop = 20;
     setCrop(1, Rect(0, 0, crop, crop));
     const int texSize = 10;
@@ -2021,16 +2125,13 @@ TEST_F(LayerSnapshotTest, contentDirtyWhenParentGeometryChanges) {
     EXPECT_FALSE(getSnapshot(1)->contentDirty);
 }
 TEST_F(LayerSnapshotTest, shouldUpdatePictureProfileHandle) {
-    if (!com_android_graphics_libgui_flags_apply_picture_profiles()) {
-        GTEST_SKIP() << "Flag disabled, skipping test";
-    }
-    std::vector<TransactionState> transactions;
+    std::vector<QueuedTransactionState> transactions;
     transactions.emplace_back();
     transactions.back().states.push_back({});
-    transactions.back().states.front().layerId = 1;
-    transactions.back().states.front().state.layerId = 1;
-    transactions.back().states.front().state.what = layer_state_t::ePictureProfileHandleChanged;
-    transactions.back().states.front().state.pictureProfileHandle = PictureProfileHandle(3);
+    transactions.back().states.back().layerId = 1;
+    transactions.back().states.back().state.layerId = 1;
+    transactions.back().states.back().state.what = layer_state_t::ePictureProfileHandleChanged;
+    transactions.back().states.back().state.pictureProfileHandle = PictureProfileHandle(3);
 
     mLifecycleManager.applyTransactions(transactions);
     EXPECT_EQ(mLifecycleManager.getGlobalChanges(), RequestedLayerState::Changes::Content);
@@ -2042,23 +2143,50 @@ TEST_F(LayerSnapshotTest, shouldUpdatePictureProfileHandle) {
 }
 
 TEST_F(LayerSnapshotTest, shouldUpdatePictureProfilePriorityFromAppContentPriority) {
-    if (!com_android_graphics_libgui_flags_apply_picture_profiles()) {
-        GTEST_SKIP() << "Flag disabled, skipping test";
+    {
+        std::vector<QueuedTransactionState> transactions;
+        transactions.emplace_back();
+        transactions.back().states.push_back({});
+        transactions.back().states.back().layerId = 1;
+        transactions.back().states.back().state.layerId = 1;
+        transactions.back().states.back().state.what = layer_state_t::eAppContentPriorityChanged;
+        transactions.back().states.back().state.appContentPriority = 1;
+        transactions.back().states.push_back({});
+        transactions.back().states.back().layerId = 2;
+        transactions.back().states.back().state.layerId = 2;
+        transactions.back().states.back().state.what = layer_state_t::eAppContentPriorityChanged;
+        transactions.back().states.back().state.appContentPriority = -1;
+
+        mLifecycleManager.applyTransactions(transactions);
+        EXPECT_EQ(mLifecycleManager.getGlobalChanges(), RequestedLayerState::Changes::Content);
+
+        update(mSnapshotBuilder);
+
+        EXPECT_GT(getSnapshot(1)->pictureProfilePriority, getSnapshot(2)->pictureProfilePriority);
+        EXPECT_EQ(getSnapshot(1)->pictureProfilePriority - getSnapshot(2)->pictureProfilePriority,
+                  2);
     }
-    std::vector<TransactionState> transactions;
-    transactions.emplace_back();
-    transactions.back().states.push_back({});
-    transactions.back().states.front().layerId = 1;
-    transactions.back().states.front().state.layerId = 1;
-    transactions.back().states.front().state.what = layer_state_t::eAppContentPriorityChanged;
-    transactions.back().states.front().state.appContentPriority = 3;
+    {
+        std::vector<QueuedTransactionState> transactions;
+        transactions.emplace_back();
+        transactions.back().states.push_back({});
+        transactions.back().states.back().layerId = 1;
+        transactions.back().states.back().state.layerId = 1;
+        transactions.back().states.back().state.what = layer_state_t::eAppContentPriorityChanged;
+        transactions.back().states.back().state.appContentPriority = INT_MIN;
+        transactions.back().states.push_back({});
+        transactions.back().states.back().layerId = 2;
+        transactions.back().states.back().state.layerId = 2;
+        transactions.back().states.back().state.what = layer_state_t::eAppContentPriorityChanged;
+        transactions.back().states.back().state.appContentPriority = INT_MAX;
 
-    mLifecycleManager.applyTransactions(transactions);
-    EXPECT_EQ(mLifecycleManager.getGlobalChanges(), RequestedLayerState::Changes::Content);
+        mLifecycleManager.applyTransactions(transactions);
+        EXPECT_EQ(mLifecycleManager.getGlobalChanges(), RequestedLayerState::Changes::Content);
 
-    update(mSnapshotBuilder);
+        update(mSnapshotBuilder);
 
-    EXPECT_EQ(getSnapshot(1)->pictureProfilePriority, 3);
+        EXPECT_GT(getSnapshot(2)->pictureProfilePriority, getSnapshot(1)->pictureProfilePriority);
+    }
 }
 
 } // namespace android::surfaceflinger::frontend

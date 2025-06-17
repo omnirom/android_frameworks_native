@@ -104,14 +104,14 @@ uint32_t KeyboardInputMapper::getSources() const {
     return mMapperSource;
 }
 
-ui::Rotation KeyboardInputMapper::getOrientation() {
+ui::Rotation KeyboardInputMapper::getOrientation() const {
     if (mViewport) {
         return mViewport->orientation;
     }
     return ui::ROTATION_0;
 }
 
-ui::LogicalDisplayId KeyboardInputMapper::getDisplayId() {
+ui::LogicalDisplayId KeyboardInputMapper::getDisplayId() const {
     if (mViewport) {
         return mViewport->displayId;
     }
@@ -471,7 +471,7 @@ void KeyboardInputMapper::updateLedStateForModifier(LedState& ledState, int32_t 
     }
 }
 
-std::optional<ui::LogicalDisplayId> KeyboardInputMapper::getAssociatedDisplayId() {
+std::optional<ui::LogicalDisplayId> KeyboardInputMapper::getAssociatedDisplayId() const {
     if (mViewport) {
         return std::make_optional(mViewport->displayId);
     }

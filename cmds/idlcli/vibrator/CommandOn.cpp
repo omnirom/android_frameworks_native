@@ -67,34 +67,27 @@ class CommandOn : public Command {
     }
 
     Status doMain(Args && /*args*/) override {
-        std::string statusStr;
-        Status ret;
-        std::shared_ptr<VibratorCallback> callback;
+        auto hal = getHal();
 
-        if (auto hal = getHal<aidl::IVibrator>()) {
-            ABinderProcess_setThreadPoolMaxThreadCount(1);
-            ABinderProcess_startThreadPool();
-
-            int32_t cap;
-            hal->call(&aidl::IVibrator::getCapabilities, &cap);
-
-            if (mBlocking && (cap & aidl::IVibrator::CAP_ON_CALLBACK)) {
-                callback = ndk::SharedRefBase::make<VibratorCallback>();
-            }
-
-            auto status = hal->call(&aidl::IVibrator::on, mDuration, callback);
-
-            statusStr = status.getDescription();
-            ret = status.isOk() ? OK : ERROR;
-        } else if (auto hal = getHal<V1_0::IVibrator>()) {
-            auto status = hal->call(&V1_0::IVibrator::on, mDuration);
-            statusStr = toString(status);
-            ret = status.isOk() && status == V1_0::Status::OK ? OK : ERROR;
-        } else {
+        if (!hal) {
             return UNAVAILABLE;
         }
 
-        if (ret == OK && mBlocking) {
+        std::shared_ptr<VibratorCallback> callback;
+
+        ABinderProcess_setThreadPoolMaxThreadCount(1);
+        ABinderProcess_startThreadPool();
+
+        int32_t cap;
+        hal->getCapabilities(&cap);
+
+        if (mBlocking && (cap & aidl::IVibrator::CAP_ON_CALLBACK)) {
+            callback = ndk::SharedRefBase::make<VibratorCallback>();
+        }
+
+        auto status = hal->on(mDuration, callback);
+
+        if (status.isOk() && mBlocking) {
             if (callback) {
                 callback->waitForComplete();
             } else {
@@ -102,9 +95,9 @@ class CommandOn : public Command {
             }
         }
 
-        std::cout << "Status: " << statusStr << std::endl;
+        std::cout << "Status: " << status.getDescription() << std::endl;
 
-        return ret;
+        return status.isOk() ? OK : ERROR;
     }
 
     bool mBlocking;

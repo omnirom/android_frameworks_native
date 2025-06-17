@@ -22,6 +22,7 @@ cc_fuzz {
         "android.hardware.sensors-V1-convert",
         "android.hardware.sensors-V3-ndk",
         "android.hardware.common-V2-ndk",
+        "framework-permission-aidl-cpp",
         "libsensor",
         "libfakeservicemanager",
         "libcutils",

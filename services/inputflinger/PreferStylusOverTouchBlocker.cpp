@@ -216,10 +216,10 @@ static std::string dumpArgs(const NotifyMotionArgs& args) {
 
 std::string PreferStylusOverTouchBlocker::dump() const {
     std::string out;
-    out += "mActiveStyli: " + dumpSet(mActiveStyli) + "\n";
+    out += "mActiveStyli: " + dumpContainer(mActiveStyli) + "\n";
     out += "mLastTouchEvents: " + dumpMap(mLastTouchEvents, constToString, dumpArgs) + "\n";
-    out += "mDevicesWithMixedToolType: " + dumpSet(mDevicesWithMixedToolType) + "\n";
-    out += "mCanceledDevices: " + dumpSet(mCanceledDevices) + "\n";
+    out += "mDevicesWithMixedToolType: " + dumpContainer(mDevicesWithMixedToolType) + "\n";
+    out += "mCanceledDevices: " + dumpContainer(mCanceledDevices) + "\n";
     return out;
 }
 

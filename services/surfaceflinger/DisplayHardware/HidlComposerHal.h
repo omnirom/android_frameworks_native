@@ -214,6 +214,10 @@ public:
     Error getReleaseFences(Display display, std::vector<Layer>* outLayers,
                            std::vector<int>* outReleaseFences) override;
 
+    Error getLayerPresentFences(Display display, std::vector<Layer>* outLayers,
+                                std::vector<int>* outFences,
+                                std::vector<int64_t>* outLatenciesNanos) override;
+
     Error presentDisplay(Display display, int* outPresentFence) override;
 
     Error setActiveConfig(Display display, Config config) override;
@@ -359,6 +363,9 @@ public:
     Error getMaxLayerPictureProfiles(Display, int32_t* outMaxProfiles) override;
     Error setDisplayPictureProfileId(Display, PictureProfileId) override;
     Error setLayerPictureProfileId(Display, Layer, PictureProfileId) override;
+    Error startHdcpNegotiation(Display, const aidl::android::hardware::drm::HdcpLevels&) override;
+    Error getLuts(Display, const std::vector<sp<GraphicBuffer>>&,
+                  std::vector<aidl::android::hardware::graphics::composer3::Luts>*) override;
 
 private:
     class CommandWriter : public CommandWriterBase {

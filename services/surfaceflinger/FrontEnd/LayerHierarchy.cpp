@@ -54,7 +54,8 @@ LayerHierarchy::LayerHierarchy(const LayerHierarchy& hierarchy, bool childrenOnl
     mChildren = hierarchy.mChildren;
 }
 
-void LayerHierarchy::traverse(const Visitor& visitor, LayerHierarchy::TraversalPath& traversalPath,
+void LayerHierarchy::traverse(const Visitor& visitor,
+                              const LayerHierarchy::TraversalPath& traversalPath,
                               uint32_t depth) const {
     LLOG_ALWAYS_FATAL_WITH_TRACE_IF(depth > 50,
                                     "Cycle detected in LayerHierarchy::traverse. See "
@@ -70,14 +71,13 @@ void LayerHierarchy::traverse(const Visitor& visitor, LayerHierarchy::TraversalP
     LLOG_ALWAYS_FATAL_WITH_TRACE_IF(traversalPath.hasRelZLoop(), "Found relative z loop layerId:%d",
                                     traversalPath.invalidRelativeRootId);
     for (auto& [child, childVariant] : mChildren) {
-        ScopedAddToTraversalPath addChildToTraversalPath(traversalPath, child->mLayer->id,
-                                                         childVariant);
-        child->traverse(visitor, traversalPath, depth + 1);
+        child->traverse(visitor, traversalPath.makeChild(child->mLayer->id, childVariant),
+                        depth + 1);
     }
 }
 
 void LayerHierarchy::traverseInZOrder(const Visitor& visitor,
-                                      LayerHierarchy::TraversalPath& traversalPath) const {
+                                      const LayerHierarchy::TraversalPath& traversalPath) const {
     bool traverseThisLayer = (mLayer != nullptr);
     for (auto it = mChildren.begin(); it < mChildren.end(); it++) {
         auto& [child, childVariant] = *it;
@@ -91,9 +91,7 @@ void LayerHierarchy::traverseInZOrder(const Visitor& visitor,
         if (childVariant == LayerHierarchy::Variant::Detached) {
             continue;
         }
-        ScopedAddToTraversalPath addChildToTraversalPath(traversalPath, child->mLayer->id,
-                                                         childVariant);
-        child->traverseInZOrder(visitor, traversalPath);
+        child->traverseInZOrder(visitor, traversalPath.makeChild(child->mLayer->id, childVariant));
     }
 
     if (traverseThisLayer) {
@@ -568,42 +566,23 @@ std::string LayerHierarchy::TraversalPath::toString() const {
     return ss.str();
 }
 
-// Helper class to update a passed in TraversalPath when visiting a child. When the object goes out
-// of scope the TraversalPath is reset to its original state.
-LayerHierarchy::ScopedAddToTraversalPath::ScopedAddToTraversalPath(TraversalPath& traversalPath,
-                                                                   uint32_t layerId,
-                                                                   LayerHierarchy::Variant variant)
-      : mTraversalPath(traversalPath), mParentPath(traversalPath) {
-    // Update the traversal id with the child layer id and variant. Parent id and variant are
-    // stored to reset the id upon destruction.
-    traversalPath.id = layerId;
-    traversalPath.variant = variant;
+LayerHierarchy::TraversalPath LayerHierarchy::TraversalPath::makeChild(
+        uint32_t layerId, LayerHierarchy::Variant variant) const {
+    TraversalPath child{*this};
+    child.id = layerId;
+    child.variant = variant;
     if (LayerHierarchy::isMirror(variant)) {
-        traversalPath.mirrorRootIds.emplace_back(mParentPath.id);
+        child.mirrorRootIds.emplace_back(id);
     } else if (variant == LayerHierarchy::Variant::Relative) {
-        if (std::find(traversalPath.relativeRootIds.begin(), traversalPath.relativeRootIds.end(),
-                      layerId) != traversalPath.relativeRootIds.end()) {
-            traversalPath.invalidRelativeRootId = layerId;
+        if (std::find(relativeRootIds.begin(), relativeRootIds.end(), layerId) !=
+            relativeRootIds.end()) {
+            child.invalidRelativeRootId = layerId;
         }
-        traversalPath.relativeRootIds.emplace_back(layerId);
+        child.relativeRootIds.emplace_back(layerId);
     } else if (variant == LayerHierarchy::Variant::Detached) {
-        traversalPath.detached = true;
+        child.detached = true;
     }
-}
-LayerHierarchy::ScopedAddToTraversalPath::~ScopedAddToTraversalPath() {
-    // Reset the traversal id to its original parent state using the state that was saved in
-    // the constructor.
-    if (LayerHierarchy::isMirror(mTraversalPath.variant)) {
-        mTraversalPath.mirrorRootIds.pop_back();
-    } else if (mTraversalPath.variant == LayerHierarchy::Variant::Relative) {
-        mTraversalPath.relativeRootIds.pop_back();
-    }
-    if (mTraversalPath.invalidRelativeRootId == mTraversalPath.id) {
-        mTraversalPath.invalidRelativeRootId = UNASSIGNED_LAYER_ID;
-    }
-    mTraversalPath.id = mParentPath.id;
-    mTraversalPath.variant = mParentPath.variant;
-    mTraversalPath.detached = mParentPath.detached;
+    return child;
 }
 
 } // namespace android::surfaceflinger::frontend

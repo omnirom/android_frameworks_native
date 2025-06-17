@@ -18,6 +18,10 @@
 #include <android-base/unique_fd.h>
 #include <binder/Parcel.h>
 #include <binder/Parcelable.h>
+#include <cutils/ashmem.h>
+#include <sys/mman.h>
+#include <algorithm>
+#include <ostream>
 #include <vector>
 
 namespace android::gui {
@@ -61,5 +65,100 @@ public:
 private:
     base::unique_fd fd;
 }; // struct DisplayLuts
+
+static inline void PrintTo(const std::vector<int32_t>& offsets, ::std::ostream* os) {
+    *os << "\n    .offsets = {";
+    for (size_t i = 0; i < offsets.size(); i++) {
+        *os << offsets[i];
+        if (i != offsets.size() - 1) {
+            *os << ", ";
+        }
+    }
+    *os << "}";
+}
+
+static inline void PrintTo(const std::vector<DisplayLuts::Entry>& entries, ::std::ostream* os) {
+    *os << "\n    .lutProperties = {\n";
+    for (auto& [dimension, size, samplingKey] : entries) {
+        *os << "        Entry{"
+            << "dimension: " << dimension << ", size: " << size << ", samplingKey: " << samplingKey
+            << "}\n";
+    }
+    *os << "    }";
+}
+
+static constexpr size_t kMaxPrintCount = 100;
+
+static inline void PrintTo(const std::vector<float>& buffer, size_t offset, int32_t dimension,
+                           size_t size, ::std::ostream* os) {
+    size_t range = std::min(size, kMaxPrintCount);
+    *os << "{";
+    if (dimension == 1) {
+        for (size_t i = 0; i < range; i++) {
+            *os << buffer[offset + i];
+            if (i != range - 1) {
+                *os << ", ";
+            }
+        }
+    } else {
+        *os << "\n        {R channel:";
+        for (size_t i = 0; i < range; i++) {
+            *os << buffer[offset + i];
+            if (i != range - 1) {
+                *os << ", ";
+            }
+        }
+        *os << "}\n        {G channel:";
+        for (size_t i = 0; i < range; i++) {
+            *os << buffer[offset + size + i];
+            if (i != range - 1) {
+                *os << ", ";
+            }
+        }
+        *os << "}\n        {B channel:";
+        for (size_t i = 0; i < range; i++) {
+            *os << buffer[offset + 2 * size + i];
+            if (i != range - 1) {
+                *os << ", ";
+            }
+        }
+    }
+    *os << "}";
+}
+
+static inline void PrintTo(const std::shared_ptr<DisplayLuts> luts, ::std::ostream* os) {
+    *os << "gui::DisplayLuts {";
+    auto& fd = luts->getLutFileDescriptor();
+    *os << "\n    .pfd = " << fd.get();
+    if (fd.ok()) {
+        PrintTo(luts->offsets, os);
+        PrintTo(luts->lutProperties, os);
+        // decode luts
+        int32_t fullLength = luts->offsets[luts->offsets.size() - 1];
+        if (luts->lutProperties[luts->offsets.size() - 1].dimension == 1) {
+            fullLength += luts->lutProperties[luts->offsets.size() - 1].size;
+        } else {
+            fullLength += (luts->lutProperties[luts->offsets.size() - 1].size *
+                           luts->lutProperties[luts->offsets.size() - 1].size *
+                           luts->lutProperties[luts->offsets.size() - 1].size * 3);
+        }
+        size_t bufferSize = static_cast<size_t>(fullLength) * sizeof(float);
+        float* ptr = (float*)mmap(NULL, bufferSize, PROT_READ, MAP_SHARED, fd.get(), 0);
+        if (ptr == MAP_FAILED) {
+            *os << "\n    .bufferdata cannot mmap!";
+            return;
+        }
+        std::vector<float> buffers(ptr, ptr + fullLength);
+        munmap(ptr, bufferSize);
+
+        *os << "\n    .bufferdata = ";
+        for (size_t i = 0; i < luts->offsets.size(); i++) {
+            PrintTo(buffers, static_cast<size_t>(luts->offsets[i]),
+                    luts->lutProperties[i].dimension,
+                    static_cast<size_t>(luts->lutProperties[i].size), os);
+        }
+    }
+    *os << "\n    }";
+}
 
 } // namespace android::gui

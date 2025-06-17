@@ -138,14 +138,14 @@ bool HWComposer::hasDisplayCapability(HalDisplayId displayId, DisplayCapability 
 }
 
 std::optional<DisplayIdentificationInfo> HWComposer::onHotplug(hal::HWDisplayId hwcDisplayId,
-                                                               hal::Connection connection) {
-    switch (connection) {
-        case hal::Connection::CONNECTED:
+                                                               HotplugEvent event) {
+    switch (event) {
+        case HotplugEvent::Connected:
             return onHotplugConnect(hwcDisplayId);
-        case hal::Connection::DISCONNECTED:
+        case HotplugEvent::Disconnected:
             return onHotplugDisconnect(hwcDisplayId);
-        case hal::Connection::INVALID:
-            return {};
+        case HotplugEvent::LinkUnstable:
+            return onHotplugLinkTrainingFailure(hwcDisplayId);
     }
 }
 
@@ -225,7 +225,11 @@ bool HWComposer::allocateVirtualDisplay(HalVirtualDisplayId displayId, ui::Size 
 }
 
 void HWComposer::allocatePhysicalDisplay(hal::HWDisplayId hwcDisplayId, PhysicalDisplayId displayId,
-                                         std::optional<ui::Size> physicalSize) {
+                                         uint8_t port, std::optional<ui::Size> physicalSize) {
+    LOG_ALWAYS_FATAL_IF(!mActivePorts.try_emplace(port).second,
+                        "Cannot attach display %" PRIu64 " to an already active port %" PRIu8 ".",
+                        hwcDisplayId, port);
+
     mPhysicalDisplayIdMap[hwcDisplayId] = displayId;
 
     if (!mPrimaryHwcDisplayId) {
@@ -239,6 +243,7 @@ void HWComposer::allocatePhysicalDisplay(hal::HWDisplayId hwcDisplayId, Physical
     newDisplay->setConnected(true);
     newDisplay->setPhysicalSizeInMm(physicalSize);
     displayData.hwcDisplay = std::move(newDisplay);
+    displayData.port = port;
 }
 
 int32_t HWComposer::getAttribute(hal::HWDisplayId hwcDisplayId, hal::HWConfigId configId,
@@ -555,7 +560,7 @@ status_t HWComposer::getDeviceCompositionChanges(
         if (!hasChangesError(error)) {
             RETURN_IF_HWC_ERROR_FOR("presentOrValidate", error, displayId, UNKNOWN_ERROR);
         }
-        if (state == 1) { //Present Succeeded.
+        if (state == 1) { // Present Succeeded.
             std::unordered_map<HWC2::Layer*, sp<Fence>> releaseFences;
             error = hwcDisplay->getReleaseFences(&releaseFences);
             displayData.releaseFences = std::move(releaseFences);
@@ -758,6 +763,9 @@ void HWComposer::disconnectDisplay(HalDisplayId displayId) {
     const auto hwcDisplayId = displayData.hwcDisplay->getId();
 
     mPhysicalDisplayIdMap.erase(hwcDisplayId);
+    if (const auto port = displayData.port) {
+        mActivePorts.erase(port.value());
+    }
     mDisplayData.erase(displayId);
 
     // Reset the primary display ID if we're disconnecting it.
@@ -816,8 +824,8 @@ mat4 HWComposer::getDataspaceSaturationMatrix(HalDisplayId displayId, ui::Datasp
     RETURN_IF_INVALID_DISPLAY(displayId, {});
 
     mat4 matrix;
-    auto error = mDisplayData[displayId].hwcDisplay->getDataspaceSaturationMatrix(dataspace,
-            &matrix);
+    auto error =
+            mDisplayData[displayId].hwcDisplay->getDataspaceSaturationMatrix(dataspace, &matrix);
     RETURN_IF_HWC_ERROR(error, displayId, {});
     return matrix;
 }
@@ -1046,11 +1054,30 @@ status_t HWComposer::setDisplayPictureProfileHandle(PhysicalDisplayId displayId,
     return NO_ERROR;
 }
 
+status_t HWComposer::startHdcpNegotiation(PhysicalDisplayId displayId,
+                                          const aidl::android::hardware::drm::HdcpLevels& levels) {
+    RETURN_IF_INVALID_DISPLAY(displayId, BAD_INDEX);
+    auto& hwcDisplay = mDisplayData[displayId].hwcDisplay;
+    auto error = hwcDisplay->startHdcpNegotiation(levels);
+    RETURN_IF_HWC_ERROR(error, displayId, UNKNOWN_ERROR);
+    return NO_ERROR;
+}
+
+status_t HWComposer::getLuts(
+        PhysicalDisplayId displayId, const std::vector<sp<GraphicBuffer>>& buffers,
+        std::vector<aidl::android::hardware::graphics::composer3::Luts>* luts) {
+    RETURN_IF_INVALID_DISPLAY(displayId, BAD_INDEX);
+    auto& hwcDisplay = mDisplayData[displayId].hwcDisplay;
+    auto error = hwcDisplay->getLuts(buffers, luts);
+    RETURN_IF_HWC_ERROR(error, displayId, UNKNOWN_ERROR);
+    return NO_ERROR;
+}
+
 const std::unordered_map<std::string, bool>& HWComposer::getSupportedLayerGenericMetadata() const {
     return mSupportedLayerGenericMetadata;
 }
 
-ftl::SmallMap<HWC2::Layer*, ndk::ScopedFileDescriptor, 20>&
+ftl::SmallMap<HWC2::Layer*, ::android::base::unique_fd, 20>&
 HWComposer::getLutFileDescriptorMapper() {
     return mLutFileDescriptorMapper;
 }
@@ -1113,8 +1140,15 @@ std::optional<hal::HWDisplayId> HWComposer::fromPhysicalDisplayId(
     return {};
 }
 
-bool HWComposer::shouldIgnoreHotplugConnect(hal::HWDisplayId hwcDisplayId,
+bool HWComposer::shouldIgnoreHotplugConnect(hal::HWDisplayId hwcDisplayId, uint8_t port,
                                             bool hasDisplayIdentificationData) const {
+    if (mActivePorts.contains(port)) {
+        ALOGE("Ignoring connection of display %" PRIu64 ". Port %" PRIu8
+              " is already in active use.",
+              hwcDisplayId, port);
+        return true;
+    }
+
     if (mHasMultiDisplaySupport && !hasDisplayIdentificationData) {
         ALOGE("Ignoring connection of display %" PRIu64 " without identification data",
               hwcDisplayId);
@@ -1160,7 +1194,7 @@ std::optional<DisplayIdentificationInfo> HWComposer::onHotplugConnect(
                   mHasMultiDisplaySupport ? "generalized" : "legacy");
         }
 
-        if (shouldIgnoreHotplugConnect(hwcDisplayId, hasDisplayIdentificationData)) {
+        if (shouldIgnoreHotplugConnect(hwcDisplayId, port, hasDisplayIdentificationData)) {
             return {};
         }
 
@@ -1180,6 +1214,7 @@ std::optional<DisplayIdentificationInfo> HWComposer::onHotplugConnect(
             return DisplayIdentificationInfo{.id = PhysicalDisplayId::fromPort(port),
                                              .name = isPrimary ? "Primary display"
                                                                : "Secondary display",
+                                             .port = port,
                                              .deviceProductInfo = std::nullopt};
         }();
 
@@ -1191,7 +1226,7 @@ std::optional<DisplayIdentificationInfo> HWComposer::onHotplugConnect(
         if (info->preferredDetailedTimingDescriptor) {
             size = info->preferredDetailedTimingDescriptor->physicalSizeInMm;
         }
-        allocatePhysicalDisplay(hwcDisplayId, info->id, size);
+        allocatePhysicalDisplay(hwcDisplayId, info->id, info->port, size);
     }
     return info;
 }
@@ -1216,6 +1251,16 @@ std::optional<DisplayIdentificationInfo> HWComposer::onHotplugDisconnect(
     // it as disconnected.
     mDisplayData.at(*displayId).hwcDisplay->setConnected(false);
     mComposer->onHotplugDisconnect(hwcDisplayId);
+    return DisplayIdentificationInfo{.id = *displayId};
+}
+
+std::optional<DisplayIdentificationInfo> HWComposer::onHotplugLinkTrainingFailure(
+        hal::HWDisplayId hwcDisplayId) {
+    const auto displayId = toPhysicalDisplayId(hwcDisplayId);
+    if (!displayId) {
+        LOG_HWC_DISPLAY_ERROR(hwcDisplayId, "Invalid HWC display");
+        return {};
+    }
     return DisplayIdentificationInfo{.id = *displayId};
 }
 

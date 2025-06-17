@@ -50,7 +50,7 @@ struct TracedKeyEvent {
     uint32_t policyFlags;
     int32_t deviceId;
     uint32_t source;
-    ui::LogicalDisplayId displayId;
+    ui::LogicalDisplayId displayId = ui::LogicalDisplayId::INVALID;
     int32_t action;
     int32_t keyCode;
     int32_t scanCode;
@@ -70,7 +70,7 @@ struct TracedMotionEvent {
     uint32_t policyFlags;
     int32_t deviceId;
     uint32_t source;
-    ui::LogicalDisplayId displayId;
+    ui::LogicalDisplayId displayId = ui::LogicalDisplayId::INVALID;
     int32_t action;
     int32_t actionButton;
     int32_t flags;
@@ -108,7 +108,7 @@ struct WindowDispatchArgs {
     TracedEvent eventEntry;
     nsecs_t deliveryTime;
     int32_t resolvedFlags;
-    gui::Uid targetUid;
+    gui::Uid targetUid = gui::Uid::INVALID;
     int64_t vsyncId;
     int32_t windowId;
     ui::Transform transform;

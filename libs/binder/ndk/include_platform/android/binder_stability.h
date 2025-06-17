@@ -27,6 +27,10 @@ constexpr binder_flags_t FLAG_PRIVATE_VENDOR = 0x10000000;
 
 #if defined(__ANDROID_VENDOR__)
 
+#if defined(__ANDROID_PRODUCT__)
+#error "build bug: product is not part of the vendor half of the Treble system/vendor split"
+#endif
+
 /**
  * Private addition to binder_flag_t.
  */

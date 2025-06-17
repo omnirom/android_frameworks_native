@@ -57,7 +57,7 @@ public:
     // reference in the BufferQueue class is because we're planning to expose the
     // consumer side of a BufferQueue as a binder interface, which doesn't support
     // weak references.
-    class ProxyConsumerListener : public BnConsumerListener {
+    class ProxyConsumerListener : public IConsumerListener {
     public:
         explicit ProxyConsumerListener(const wp<ConsumerListener>& consumerListener);
         ~ProxyConsumerListener() override;
@@ -75,6 +75,9 @@ public:
 #if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(BQ_SETFRAMERATE)
         void onSetFrameRate(float frameRate, int8_t compatibility,
                             int8_t changeFrameRateStrategy) override;
+#endif
+#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_UNLIMITED_SLOTS)
+        void onSlotCountChanged(int slotCount) override;
 #endif
     private:
         // mConsumerListener is a weak reference to the IConsumerListener.  This is

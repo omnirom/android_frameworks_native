@@ -16,6 +16,7 @@
 
 #include <fcntl.h>
 #include <linux/unistd.h>
+#include <sched.h>
 #include <sys/mount.h>
 #include <sys/stat.h>
 #include <sys/wait.h>

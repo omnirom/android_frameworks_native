@@ -18,10 +18,13 @@
 
 #include <android-base/logging.h>
 #include <gtest/gtest.h>
+#include <input/AccelerationCurve.h>
 
+#include <log/log.h>
 #include <thread>
 #include "InputMapperTest.h"
 #include "InterfaceMocks.h"
+#include "TestConstants.h"
 #include "TestEventMatchers.h"
 
 #define TAG "TouchpadInputMapper_test"
@@ -121,9 +124,10 @@ protected:
  */
 TEST_F(TouchpadInputMapperTest, HoverAndLeftButtonPress) {
     mFakePolicy->setDefaultPointerDisplayId(DISPLAY_ID);
-    mFakePolicy->addDisplayViewport(DISPLAY_ID, DISPLAY_WIDTH, DISPLAY_HEIGHT, ui::ROTATION_0,
-                                    /*isActive=*/true, "local:0", NO_PORT, ViewportType::INTERNAL);
-
+    DisplayViewport viewport =
+            createViewport(DISPLAY_ID, DISPLAY_WIDTH, DISPLAY_HEIGHT, ui::ROTATION_0,
+                           /*isActive=*/true, "local:0", NO_PORT, ViewportType::INTERNAL);
+    mFakePolicy->addDisplayViewport(viewport);
     std::list<NotifyArgs> args;
 
     args += mMapper->reconfigure(systemTime(SYSTEM_TIME_MONOTONIC), mReaderConfiguration,
@@ -188,6 +192,69 @@ TEST_F(TouchpadInputMapperTest, TouchpadHardwareState) {
     args += process(EV_SYN, SYN_REPORT, 0);
 
     mFakePolicy->assertTouchpadHardwareStateNotified();
+}
+
+TEST_F(TouchpadInputMapperTest, TouchpadAccelerationDisabled) {
+    mReaderConfiguration.touchpadAccelerationEnabled = false;
+    mReaderConfiguration.touchpadPointerSpeed = 3;
+
+    std::list<NotifyArgs> args =
+            mMapper->reconfigure(ARBITRARY_TIME, mReaderConfiguration,
+                                 InputReaderConfiguration::Change::TOUCHPAD_SETTINGS);
+    auto* touchpadMapper = static_cast<TouchpadInputMapper*>(mMapper.get());
+
+    const auto accelCurvePropsDisabled =
+            touchpadMapper->getGesturePropertyForTesting("Pointer Accel Curve");
+    ASSERT_TRUE(accelCurvePropsDisabled.has_value());
+    std::vector<double> curveValuesDisabled = accelCurvePropsDisabled.value().getRealValues();
+    std::vector<AccelerationCurveSegment> curve =
+            createFlatAccelerationCurve(mReaderConfiguration.touchpadPointerSpeed);
+    double expectedBaseGain = curve[0].baseGain;
+    ASSERT_EQ(curveValuesDisabled[0], std::numeric_limits<double>::infinity());
+    ASSERT_EQ(curveValuesDisabled[1], 0);
+    ASSERT_NEAR(curveValuesDisabled[2], expectedBaseGain, EPSILON);
+    ASSERT_EQ(curveValuesDisabled[3], 0);
+}
+
+TEST_F(TouchpadInputMapperTest, TouchpadAccelerationEnabled) {
+    // Enable touchpad acceleration.
+    mReaderConfiguration.touchpadAccelerationEnabled = true;
+    mReaderConfiguration.touchpadPointerSpeed = 3;
+
+    std::list<NotifyArgs> args =
+            mMapper->reconfigure(ARBITRARY_TIME, mReaderConfiguration,
+                                 InputReaderConfiguration::Change::TOUCHPAD_SETTINGS);
+    ASSERT_THAT(args, testing::IsEmpty());
+
+    auto* touchpadMapper = static_cast<TouchpadInputMapper*>(mMapper.get());
+
+    // Get the acceleration curve properties when acceleration is enabled.
+    const auto accelCurvePropsEnabled =
+            touchpadMapper->getGesturePropertyForTesting("Pointer Accel Curve");
+    ASSERT_TRUE(accelCurvePropsEnabled.has_value());
+
+    // Get the curve values.
+    std::vector<double> curveValuesEnabled = accelCurvePropsEnabled.value().getRealValues();
+
+    // Use createAccelerationCurveForPointerSensitivity to get expected curve segments.
+    std::vector<AccelerationCurveSegment> expectedCurveSegments =
+            createAccelerationCurveForPointerSensitivity(mReaderConfiguration.touchpadPointerSpeed);
+
+    // Iterate through the segments and compare the values.
+    for (size_t i = 0; i < expectedCurveSegments.size(); ++i) {
+        // Check max speed.
+        if (std::isinf(expectedCurveSegments[i].maxPointerSpeedMmPerS)) {
+            ASSERT_TRUE(std::isinf(curveValuesEnabled[i * 4 + 0]));
+        } else {
+            ASSERT_NEAR(curveValuesEnabled[i * 4 + 0],
+                        expectedCurveSegments[i].maxPointerSpeedMmPerS, EPSILON);
+        }
+
+        // Check that the x^2 term is zero.
+        ASSERT_NEAR(curveValuesEnabled[i * 4 + 1], 0, EPSILON);
+        ASSERT_NEAR(curveValuesEnabled[i * 4 + 2], expectedCurveSegments[i].baseGain, EPSILON);
+        ASSERT_NEAR(curveValuesEnabled[i * 4 + 3], expectedCurveSegments[i].reciprocal, EPSILON);
+    }
 }
 
 } // namespace android

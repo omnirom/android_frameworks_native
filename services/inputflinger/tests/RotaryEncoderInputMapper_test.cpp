@@ -89,9 +89,9 @@ namespace vd_flags = android::companion::virtualdevice::flags;
  */
 class RotaryEncoderInputMapperTest : public InputMapperUnitTest {
 protected:
-    void SetUp() override { SetUpWithBus(BUS_USB); }
-    void SetUpWithBus(int bus) override {
-        InputMapperUnitTest::SetUpWithBus(bus);
+    void SetUp() override { SetUp(/*bus=*/0, /*isExternal=*/false); }
+    void SetUp(int bus, bool isExternal) override {
+        InputMapperUnitTest::SetUp(bus, isExternal);
 
         EXPECT_CALL(mMockEventHub, hasRelativeAxis(EVENTHUB_ID, REL_WHEEL))
                 .WillRepeatedly(Return(true));

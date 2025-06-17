@@ -14,14 +14,26 @@
      limitations under the License.
 -->
 <configuration description="Config for SurfaceFlinger_test">
+    <target_preparer class="com.android.tradefed.targetprep.RunCommandTargetPreparer">
+        <option name="throw-if-cmd-fail" value="true" />
+        <option name="run-command" value="mkdir -p /data/local/tmp/SurfaceFlinger_test_screenshots" />
+        <option name="teardown-command" value="rm -fr /data/local/tmp/SurfaceFlinger_test_screenshots"/>
+    </target_preparer>
     <target_preparer class="com.android.tradefed.targetprep.PushFilePreparer">
         <option name="cleanup" value="true" />
         <option name="push" value="SurfaceFlinger_test->/data/local/tmp/SurfaceFlinger_test" />
     </target_preparer>
     <target_preparer class="com.android.tradefed.targetprep.RootTargetPreparer"/>
+    <target_preparer class="com.android.tradefed.targetprep.DeviceSetup">
+        <option name="screen-always-on" value="on" />
+    </target_preparer>
     <option name="test-suite-tag" value="apct" />
     <test class="com.android.tradefed.testtype.GTest" >
         <option name="native-test-device-path" value="/data/local/tmp" />
         <option name="module-name" value="SurfaceFlinger_test" />
     </test>
+    <metrics_collector class="com.android.tradefed.device.metric.FilePullerLogCollector">
+        <option name = "pull-pattern-keys" value = ".*png" />
+        <option name = "directory-keys" value = "/data/local/tmp/SurfaceFlinger_test_screenshots" />
+    </metrics_collector>
 </configuration>

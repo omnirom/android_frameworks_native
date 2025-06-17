@@ -38,6 +38,8 @@
 
 #include <system/window.h>
 
+#include <ui/BufferQueueDefs.h>
+
 namespace android {
 
 // Macros for include BufferQueueCore information in log messages
@@ -97,7 +99,11 @@ BufferQueueCore::BufferQueueCore()
         mConnectedProducerListener(),
         mBufferReleasedCbEnabled(false),
         mBufferAttachedCbEnabled(false),
+#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_UNLIMITED_SLOTS)
+        mSlots(BufferQueueDefs::NUM_BUFFER_SLOTS),
+#else
         mSlots(),
+#endif
         mQueue(),
         mFreeSlots(),
         mFreeBuffers(),
@@ -111,6 +117,9 @@ BufferQueueCore::BufferQueueCore()
         mDefaultWidth(1),
         mDefaultHeight(1),
         mDefaultBufferDataSpace(HAL_DATASPACE_UNKNOWN),
+#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_UNLIMITED_SLOTS)
+        mAllowExtendedSlotCount(false),
+#endif
         mMaxBufferCount(BufferQueueDefs::NUM_BUFFER_SLOTS),
         mMaxAcquiredBufferCount(1),
         mMaxDequeuedBufferCount(1),
@@ -221,6 +230,14 @@ void BufferQueueCore::dumpState(const String8& prefix, String8* outResult) const
     }
 }
 
+int BufferQueueCore::getTotalSlotCountLocked() const {
+#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_UNLIMITED_SLOTS)
+    return mAllowExtendedSlotCount ? mMaxBufferCount : BufferQueueDefs::NUM_BUFFER_SLOTS;
+#else
+    return BufferQueueDefs::NUM_BUFFER_SLOTS;
+#endif
+}
+
 int BufferQueueCore::getMinUndequeuedBufferCountLocked() const {
     // If dequeueBuffer is allowed to error out, we don't have to add an
     // extra buffer.
@@ -252,6 +269,26 @@ int BufferQueueCore::getMaxBufferCountLocked() const {
 
     return maxBufferCount;
 }
+
+#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_UNLIMITED_SLOTS)
+status_t BufferQueueCore::extendSlotCountLocked(int size) {
+    int previousSize = (int)mSlots.size();
+    if (previousSize > size) {
+        return BAD_VALUE;
+    }
+    if (previousSize == size) {
+        return NO_ERROR;
+    }
+
+    mSlots.resize(size);
+    for (int i = previousSize; i < size; i++) {
+        mUnusedSlots.push_back(i);
+    }
+
+    mMaxBufferCount = size;
+    return NO_ERROR;
+}
+#endif
 
 void BufferQueueCore::clearBufferSlotLocked(int slot) {
     BQ_LOGV("clearBufferSlotLocked: slot %d", slot);
@@ -383,7 +420,7 @@ void BufferQueueCore::notifyBufferReleased() const {
 void BufferQueueCore::validateConsistencyLocked() const {
     static const useconds_t PAUSE_TIME = 0;
     int allocatedSlots = 0;
-    for (int slot = 0; slot < BufferQueueDefs::NUM_BUFFER_SLOTS; ++slot) {
+    for (int slot = 0; slot < getTotalSlotCountLocked(); ++slot) {
         bool isInFreeSlots = mFreeSlots.count(slot) != 0;
         bool isInFreeBuffers =
                 std::find(mFreeBuffers.cbegin(), mFreeBuffers.cend(), slot) !=

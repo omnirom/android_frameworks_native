@@ -68,13 +68,9 @@ void DisplayTransactionCommitTest::setupCommonPreconditions() {
 
 template <typename Case, bool connected>
 void DisplayTransactionCommitTest::expectHotplugReceived(mock::EventThread* eventThread) {
-    const auto convert = [](auto physicalDisplayId) {
-        return std::make_optional(DisplayId{physicalDisplayId});
-    };
-
-    EXPECT_CALL(*eventThread,
-                onHotplugReceived(ResultOf(convert, Case::Display::DISPLAY_ID::get()), connected))
-            .Times(1);
+    const auto physicalDisplayId = asPhysicalDisplayId(Case::Display::DISPLAY_ID::get());
+    ASSERT_TRUE(physicalDisplayId);
+    EXPECT_CALL(*eventThread, onHotplugReceived(*physicalDisplayId, connected)).Times(1);
 }
 
 template <typename Case>
@@ -111,7 +107,7 @@ void DisplayTransactionCommitTest::verifyDisplayIsConnected(const sp<IBinder>& d
 
     std::optional<DisplayDeviceState::Physical> expectedPhysical;
     if (Case::Display::CONNECTION_TYPE::value) {
-        const auto displayId = PhysicalDisplayId::tryCast(Case::Display::DISPLAY_ID::get());
+        const auto displayId = asPhysicalDisplayId(Case::Display::DISPLAY_ID::get());
         ASSERT_TRUE(displayId);
         const auto hwcDisplayId = Case::Display::HWC_DISPLAY_ID_OPT::value;
         ASSERT_TRUE(hwcDisplayId);
@@ -137,10 +133,10 @@ void DisplayTransactionCommitTest::verifyPhysicalDisplayIsConnected() {
     EXPECT_TRUE(hasPhysicalHwcDisplay(Case::Display::HWC_DISPLAY_ID));
 
     // SF should have a display token.
-    const auto displayId = Case::Display::DISPLAY_ID::get();
-    ASSERT_TRUE(PhysicalDisplayId::tryCast(displayId));
+    const auto displayIdOpt = asPhysicalDisplayId(Case::Display::DISPLAY_ID::get());
+    ASSERT_TRUE(displayIdOpt);
 
-    const auto displayOpt = mFlinger.mutablePhysicalDisplays().get(displayId);
+    const auto displayOpt = mFlinger.mutablePhysicalDisplays().get(*displayIdOpt);
     ASSERT_TRUE(displayOpt);
 
     const auto& display = displayOpt->get();
@@ -163,7 +159,7 @@ void DisplayTransactionCommitTest::processesHotplugConnectCommon() {
     setupCommonPreconditions<Case>();
 
     // A hotplug connect event is enqueued for a display
-    Case::Display::injectPendingHotplugEvent(this, Connection::CONNECTED);
+    Case::Display::injectPendingHotplugEvent(this, HWComposer::HotplugEvent::Connected);
 
     // --------------------------------------------------------------------
     // Call Expectations
@@ -197,7 +193,7 @@ void DisplayTransactionCommitTest::ignoresHotplugConnectCommon() {
     setupCommonPreconditions<Case>();
 
     // A hotplug connect event is enqueued for a display
-    Case::Display::injectPendingHotplugEvent(this, Connection::CONNECTED);
+    Case::Display::injectPendingHotplugEvent(this, HWComposer::HotplugEvent::Connected);
 
     // --------------------------------------------------------------------
     // Invocation
@@ -219,7 +215,7 @@ void DisplayTransactionCommitTest::processesHotplugDisconnectCommon() {
     setupCommonPreconditions<Case>();
 
     // A hotplug disconnect event is enqueued for a display
-    Case::Display::injectPendingHotplugEvent(this, Connection::DISCONNECTED);
+    Case::Display::injectPendingHotplugEvent(this, HWComposer::HotplugEvent::Disconnected);
 
     // The display is already completely set up.
     Case::Display::injectHwcDisplay(this);
@@ -246,9 +242,9 @@ void DisplayTransactionCommitTest::processesHotplugDisconnectCommon() {
     EXPECT_FALSE(hasPhysicalHwcDisplay(Case::Display::HWC_DISPLAY_ID));
 
     // SF should not have a PhysicalDisplay.
-    const auto displayId = Case::Display::DISPLAY_ID::get();
-    ASSERT_TRUE(PhysicalDisplayId::tryCast(displayId));
-    ASSERT_FALSE(mFlinger.mutablePhysicalDisplays().contains(displayId));
+    const auto physicalDisplayIdOpt = asPhysicalDisplayId(Case::Display::DISPLAY_ID::get());
+    ASSERT_TRUE(physicalDisplayIdOpt);
+    ASSERT_FALSE(mFlinger.mutablePhysicalDisplays().contains(*physicalDisplayIdOpt));
 
     // The existing token should have been removed.
     verifyDisplayIsNotConnected(existing.token());
@@ -327,9 +323,10 @@ TEST_F(DisplayTransactionCommitTest, processesHotplugConnectThenDisconnectPrimar
                 setupCommonPreconditions<Case>();
 
                 // A hotplug connect event is enqueued for a display
-                Case::Display::injectPendingHotplugEvent(this, Connection::CONNECTED);
+                Case::Display::injectPendingHotplugEvent(this, HWComposer::HotplugEvent::Connected);
                 // A hotplug disconnect event is also enqueued for the same display
-                Case::Display::injectPendingHotplugEvent(this, Connection::DISCONNECTED);
+                Case::Display::injectPendingHotplugEvent(this,
+                                                         HWComposer::HotplugEvent::Disconnected);
 
                 // --------------------------------------------------------------------
                 // Call Expectations
@@ -355,9 +352,10 @@ TEST_F(DisplayTransactionCommitTest, processesHotplugConnectThenDisconnectPrimar
                 EXPECT_FALSE(hasPhysicalHwcDisplay(Case::Display::HWC_DISPLAY_ID));
 
                 // SF should not have a PhysicalDisplay.
-                const auto displayId = Case::Display::DISPLAY_ID::get();
-                ASSERT_TRUE(PhysicalDisplayId::tryCast(displayId));
-                ASSERT_FALSE(mFlinger.mutablePhysicalDisplays().contains(displayId));
+                const auto physicalDisplayIdOpt =
+                        asPhysicalDisplayId(Case::Display::DISPLAY_ID::get());
+                ASSERT_TRUE(physicalDisplayIdOpt);
+                ASSERT_FALSE(mFlinger.mutablePhysicalDisplays().contains(*physicalDisplayIdOpt));
             }(),
             testing::KilledBySignal(SIGABRT), "Primary display cannot be disconnected.");
 }
@@ -378,9 +376,10 @@ TEST_F(DisplayTransactionCommitTest, processesHotplugDisconnectThenConnectPrimar
                 existing.inject();
 
                 // A hotplug disconnect event is enqueued for a display
-                Case::Display::injectPendingHotplugEvent(this, Connection::DISCONNECTED);
+                Case::Display::injectPendingHotplugEvent(this,
+                                                         HWComposer::HotplugEvent::Disconnected);
                 // A hotplug connect event is also enqueued for the same display
-                Case::Display::injectPendingHotplugEvent(this, Connection::CONNECTED);
+                Case::Display::injectPendingHotplugEvent(this, HWComposer::HotplugEvent::Connected);
 
                 // --------------------------------------------------------------------
                 // Call Expectations
@@ -398,10 +397,12 @@ TEST_F(DisplayTransactionCommitTest, processesHotplugDisconnectThenConnectPrimar
 
                 // The existing token should have been removed.
                 verifyDisplayIsNotConnected(existing.token());
-                const auto displayId = Case::Display::DISPLAY_ID::get();
-                ASSERT_TRUE(PhysicalDisplayId::tryCast(displayId));
+                const auto physicalDisplayIdOpt =
+                        asPhysicalDisplayId(Case::Display::DISPLAY_ID::get());
+                ASSERT_TRUE(physicalDisplayIdOpt);
 
-                const auto displayOpt = mFlinger.mutablePhysicalDisplays().get(displayId);
+                const auto displayOpt =
+                        mFlinger.mutablePhysicalDisplays().get(*physicalDisplayIdOpt);
                 ASSERT_TRUE(displayOpt);
                 EXPECT_NE(existing.token(), displayOpt->get().token());
 
@@ -538,9 +539,9 @@ TEST_F(DisplayTransactionCommitTest, processesVirtualDisplayRemoval) {
     // Preconditions
 
     // A virtual display is set up but is removed from the current state.
-    const auto displayId = Case::Display::DISPLAY_ID::get();
-    ASSERT_TRUE(HalVirtualDisplayId::tryCast(displayId));
-    mFlinger.mutableHwcDisplayData().try_emplace(displayId);
+    const auto displayId = asHalDisplayId(Case::Display::DISPLAY_ID::get());
+    ASSERT_TRUE(displayId);
+    mFlinger.mutableHwcDisplayData().try_emplace(*displayId);
     Case::Display::injectHwcDisplay(this);
     auto existing = Case::Display::makeFakeExistingDisplayInjector(this);
     existing.inject();

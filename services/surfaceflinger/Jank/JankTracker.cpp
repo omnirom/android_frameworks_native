@@ -88,7 +88,8 @@ void JankTracker::onJankData(int32_t layerId, gui::JankData data) {
 }
 
 void JankTracker::addJankListenerLocked(int32_t layerId, sp<IBinder> listener) {
-    for (auto it = mJankListeners.find(layerId); it != mJankListeners.end(); it++) {
+    auto range = mJankListeners.equal_range(layerId);
+    for (auto it = range.first; it != range.second; it++) {
         if (it->second.mListener == listener) {
             // Undo the duplicate increment in addJankListener.
             sListenerCount--;
@@ -106,7 +107,8 @@ void JankTracker::doFlushJankData(int32_t layerId) {
     std::vector<sp<IBinder>> toSend;
 
     mLock.lock();
-    for (auto it = mJankListeners.find(layerId); it != mJankListeners.end();) {
+    auto range = mJankListeners.equal_range(layerId);
+    for (auto it = range.first; it != range.second;) {
         if (!jankData.empty()) {
             toSend.emplace_back(it->second.mListener);
         }
@@ -133,7 +135,8 @@ void JankTracker::doFlushJankData(int32_t layerId) {
 
 void JankTracker::markJankListenerForRemovalLocked(int32_t layerId, sp<IBinder> listener,
                                                    int64_t afterVysnc) {
-    for (auto it = mJankListeners.find(layerId); it != mJankListeners.end(); it++) {
+    auto range = mJankListeners.equal_range(layerId);
+    for (auto it = range.first; it != range.second; it++) {
         if (it->second.mListener == listener) {
             it->second.mRemoveAfter = std::max(static_cast<int64_t>(0), afterVysnc);
             return;
@@ -156,7 +159,8 @@ int64_t JankTracker::transferAvailableJankData(int32_t layerId,
 
 void JankTracker::dropJankListener(int32_t layerId, sp<IBinder> listener) {
     const std::lock_guard<std::mutex> _l(mLock);
-    for (auto it = mJankListeners.find(layerId); it != mJankListeners.end(); it++) {
+    auto range = mJankListeners.equal_range(layerId);
+    for (auto it = range.first; it != range.second; it++) {
         if (it->second.mListener == listener) {
             mJankListeners.erase(it);
             sListenerCount--;

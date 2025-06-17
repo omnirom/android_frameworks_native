@@ -143,13 +143,11 @@ private:
                             const std::vector<LayerSettings>& layers,
                             const std::shared_ptr<ExternalTexture>& buffer,
                             base::unique_fd&& bufferFence) override final;
-    void drawGainmapInternal(const std::shared_ptr<std::promise<FenceResult>>&& resultPromise,
-                             const std::shared_ptr<ExternalTexture>& sdr,
-                             base::borrowed_fd&& sdrFence,
-                             const std::shared_ptr<ExternalTexture>& hdr,
-                             base::borrowed_fd&& hdrFence, float hdrSdrRatio,
-                             ui::Dataspace dataspace,
-                             const std::shared_ptr<ExternalTexture>& gainmap) override final;
+    void tonemapAndDrawGainmapInternal(
+            const std::shared_ptr<std::promise<FenceResult>>&& resultPromise,
+            const std::shared_ptr<ExternalTexture>& hdr, base::borrowed_fd&& hdrFence,
+            float hdrSdrRatio, ui::Dataspace dataspace, const std::shared_ptr<ExternalTexture>& sdr,
+            const std::shared_ptr<ExternalTexture>& gainmap) override final;
 
     void dump(std::string& result) override final;
 
@@ -167,6 +165,8 @@ private:
         const SkRect& imageBounds;
     };
     sk_sp<SkShader> createRuntimeEffectShader(const RuntimeEffectShaderParameters&);
+
+    sk_sp<SkShader> localTonemap(sk_sp<SkShader>, float inputMultiplier, float targetHdrSdrRatio);
 
     const PixelFormat mDefaultPixelFormat;
 

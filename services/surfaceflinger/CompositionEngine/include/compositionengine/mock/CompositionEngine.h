@@ -37,7 +37,7 @@ public:
                  std::unique_ptr<compositionengine::LayerFECompositionState>());
 
     MOCK_CONST_METHOD0(getHwComposer, HWComposer&());
-    MOCK_METHOD1(setHwComposer, void(std::unique_ptr<HWComposer>));
+    MOCK_METHOD1(setHwComposer, void(HWComposer*));
 
     MOCK_CONST_METHOD0(getRenderEngine, renderengine::RenderEngine&());
     MOCK_METHOD1(setRenderEngine, void(renderengine::RenderEngine*));

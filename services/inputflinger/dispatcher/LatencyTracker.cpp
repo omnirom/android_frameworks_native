@@ -67,8 +67,9 @@ static void eraseByValue(std::multimap<K, V>& map, const V& value) {
 
 } // namespace
 
-LatencyTracker::LatencyTracker(InputEventTimelineProcessor& processor)
-      : mTimelineProcessor(&processor) {}
+LatencyTracker::LatencyTracker(InputEventTimelineProcessor& processor,
+                               std::vector<InputDeviceInfo>& inputDevices)
+      : mTimelineProcessor(&processor), mInputDevices(inputDevices) {}
 
 void LatencyTracker::trackListener(const NotifyArgs& args) {
     if (const NotifyKeyArgs* keyArgs = std::get_if<NotifyKeyArgs>(&args)) {
@@ -246,10 +247,6 @@ std::string LatencyTracker::dump(const char* prefix) const {
     return StringPrintf("%sLatencyTracker:\n", prefix) +
             StringPrintf("%s  mTimelines.size() = %zu\n", prefix, mTimelines.size()) +
             StringPrintf("%s  mEventTimes.size() = %zu\n", prefix, mEventTimes.size());
-}
-
-void LatencyTracker::setInputDevices(const std::vector<InputDeviceInfo>& inputDevices) {
-    mInputDevices = inputDevices;
 }
 
 } // namespace android::inputdispatcher

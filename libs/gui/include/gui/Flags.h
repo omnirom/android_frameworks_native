@@ -46,6 +46,7 @@ typedef android::sp<android::IGraphicBufferProducer> ParcelableSurfaceType;
 
 namespace flagtools {
 sp<SurfaceType> surfaceToSurfaceType(const sp<Surface>& surface);
+ParcelableSurfaceType surfaceToParcelableSurfaceType(const sp<Surface>& surface);
 ParcelableSurfaceType toParcelableSurfaceType(const view::Surface& surface);
 sp<IGraphicBufferProducer> surfaceTypeToIGBP(const sp<SurfaceType>& surface);
 bool isSurfaceTypeValid(const sp<SurfaceType>& surface);

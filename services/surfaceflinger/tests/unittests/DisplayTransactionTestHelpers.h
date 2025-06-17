@@ -114,7 +114,11 @@ public:
     // Test instances
 
     TestableSurfaceFlinger mFlinger;
+
     sp<mock::NativeWindow> mNativeWindow = sp<mock::NativeWindow>::make();
+    sp<compositionengine::mock::DisplaySurface> mDisplaySurface =
+            sp<compositionengine::mock::DisplaySurface>::make();
+
     sp<GraphicBuffer> mBuffer =
             sp<GraphicBuffer>::make(1u, 1u, PIXEL_FORMAT_RGBA_8888,
                                     GRALLOC_USAGE_SW_WRITE_OFTEN | GRALLOC_USAGE_SW_READ_OFTEN);
@@ -179,7 +183,7 @@ struct DisplayIdGetter;
 
 template <typename PhysicalDisplay>
 struct DisplayIdGetter<PhysicalDisplayIdType<PhysicalDisplay>> {
-    static PhysicalDisplayId get() {
+    static DisplayIdVariant get() {
         if (!PhysicalDisplay::HAS_IDENTIFICATION_DATA) {
             return PhysicalDisplayId::fromPort(static_cast<bool>(PhysicalDisplay::PRIMARY)
                                                        ? LEGACY_DISPLAY_TYPE_PRIMARY
@@ -193,14 +197,14 @@ struct DisplayIdGetter<PhysicalDisplayIdType<PhysicalDisplay>> {
     }
 };
 
-template <uint64_t displayId>
+template <VirtualDisplayId::BaseId displayId>
 struct DisplayIdGetter<HalVirtualDisplayIdType<displayId>> {
-    static HalVirtualDisplayId get() { return HalVirtualDisplayId(displayId); }
+    static DisplayIdVariant get() { return HalVirtualDisplayId(displayId); }
 };
 
 template <>
 struct DisplayIdGetter<GpuVirtualDisplayIdType> {
-    static GpuVirtualDisplayId get() { return GpuVirtualDisplayId(0); }
+    static DisplayIdVariant get() { return GpuVirtualDisplayId(0); }
 };
 
 template <typename>
@@ -231,6 +235,16 @@ struct HwcDisplayIdGetter<PhysicalDisplayIdType<PhysicalDisplay>> {
     static constexpr std::optional<HWDisplayId> value = PhysicalDisplay::HWC_DISPLAY_ID;
 };
 
+template <typename>
+struct PortGetter {
+    static constexpr std::optional<uint8_t> value;
+};
+
+template <typename PhysicalDisplay>
+struct PortGetter<PhysicalDisplayIdType<PhysicalDisplay>> {
+    static constexpr std::optional<uint8_t> value = PhysicalDisplay::PORT;
+};
+
 // DisplayIdType can be:
 //     1) PhysicalDisplayIdType<...> for generated ID of physical display backed by HWC.
 //     2) HalVirtualDisplayIdType<...> for hard-coded ID of virtual display backed by HWC.
@@ -241,6 +255,7 @@ struct DisplayVariant {
     using DISPLAY_ID = DisplayIdGetter<DisplayIdType>;
     using CONNECTION_TYPE = DisplayConnectionTypeGetter<DisplayIdType>;
     using HWC_DISPLAY_ID_OPT = HwcDisplayIdGetter<DisplayIdType>;
+    using PORT = PortGetter<DisplayIdType>;
 
     static constexpr int WIDTH = width;
     static constexpr int HEIGHT = height;
@@ -277,11 +292,13 @@ struct DisplayVariant {
                 TestableSurfaceFlinger::FakeDisplayDeviceInjector(test->mFlinger,
                                                                   compositionDisplay,
                                                                   CONNECTION_TYPE::value,
+                                                                  PORT::value,
                                                                   HWC_DISPLAY_ID_OPT::value,
                                                                   static_cast<bool>(PRIMARY));
 
         injector.setSecure(static_cast<bool>(SECURE));
         injector.setNativeWindow(test->mNativeWindow);
+        injector.setDisplaySurface(test->mDisplaySurface);
 
         // Creating a DisplayDevice requires getting default dimensions from the
         // native window along with some other initial setup.
@@ -348,17 +365,17 @@ struct HwcDisplayVariant {
     // The HWC active configuration id
     static constexpr hal::HWConfigId HWC_ACTIVE_CONFIG_ID = 2001;
 
-    static void injectPendingHotplugEvent(DisplayTransactionTest* test, Connection connection) {
+    static void injectPendingHotplugEvent(DisplayTransactionTest* test,
+                                          HWComposer::HotplugEvent event) {
         test->mFlinger.mutablePendingHotplugEvents().emplace_back(
-                TestableSurfaceFlinger::HotplugEvent{HWC_DISPLAY_ID, connection});
+                TestableSurfaceFlinger::HotplugEvent{HWC_DISPLAY_ID, event});
     }
 
     // Called by tests to inject a HWC display setup
     template <hal::PowerMode kPowerMode = hal::PowerMode::ON>
     static void injectHwcDisplayWithNoDefaultCapabilities(DisplayTransactionTest* test) {
-        const auto displayId = DisplayVariant::DISPLAY_ID::get();
-        ASSERT_FALSE(GpuVirtualDisplayId::tryCast(displayId));
-        TestableSurfaceFlinger::FakeHwcDisplayInjector(displayId, HWC_DISPLAY_TYPE,
+        TestableSurfaceFlinger::FakeHwcDisplayInjector(DisplayVariant::DISPLAY_ID::get(),
+                                                       HWC_DISPLAY_TYPE,
                                                        static_cast<bool>(DisplayVariant::PRIMARY))
                 .setHwcDisplayId(HWC_DISPLAY_ID)
                 .setResolution(DisplayVariant::RESOLUTION)
@@ -520,13 +537,14 @@ struct PrimaryDisplay {
     static constexpr auto GET_IDENTIFICATION_DATA = getInternalEdid;
 };
 
-template <ui::DisplayConnectionType connectionType, bool hasIdentificationData, bool secure>
+template <ui::DisplayConnectionType connectionType, bool hasIdentificationData, bool secure,
+          HWDisplayId hwDisplayId = 1002>
 struct SecondaryDisplay {
     static constexpr auto CONNECTION_TYPE = connectionType;
     static constexpr Primary PRIMARY = Primary::FALSE;
     static constexpr bool SECURE = secure;
     static constexpr uint8_t PORT = 254;
-    static constexpr HWDisplayId HWC_DISPLAY_ID = 1002;
+    static constexpr HWDisplayId HWC_DISPLAY_ID = hwDisplayId;
     static constexpr bool HAS_IDENTIFICATION_DATA = hasIdentificationData;
     static constexpr auto GET_IDENTIFICATION_DATA =
             connectionType == ui::DisplayConnectionType::Internal ? getInternalEdid
@@ -558,6 +576,11 @@ using OuterDisplayNonSecureVariant =
                                                 /*hasIdentificationData=*/true, kNonSecure>,
                                1080, 2092>;
 
+template <HWDisplayId hwDisplayId = 1002>
+using ExternalDisplayWithIdentificationVariant = PhysicalDisplayVariant<
+        SecondaryDisplay<ui::DisplayConnectionType::External,
+                         /*hasIdentificationData=*/true, kNonSecure, hwDisplayId>,
+        1920, 1280>;
 using ExternalDisplayVariant =
         PhysicalDisplayVariant<SecondaryDisplay<ui::DisplayConnectionType::External,
                                                 /*hasIdentificationData=*/false, kSecure>,
@@ -639,9 +662,8 @@ struct HwcVirtualDisplayVariant
         const ::testing::TestInfo* const test_info =
                 ::testing::UnitTest::GetInstance()->current_test_info();
 
-        const auto displayId = Base::DISPLAY_ID::get();
         auto ceDisplayArgs = compositionengine::DisplayCreationArgsBuilder()
-                                     .setId(displayId)
+                                     .setId(Base::DISPLAY_ID::get())
                                      .setPixels(Base::RESOLUTION)
                                      .setIsSecure(static_cast<bool>(Base::SECURE))
                                      .setPowerAdvisor(&test->mPowerAdvisor)
@@ -654,7 +676,12 @@ struct HwcVirtualDisplayVariant
                                                        ceDisplayArgs);
 
         // Insert display data so that the HWC thinks it created the virtual display.
-        test->mFlinger.mutableHwcDisplayData().try_emplace(displayId);
+        const auto ceDisplayIdVar = compositionDisplay->getDisplayIdVariant();
+        LOG_ALWAYS_FATAL_IF(!ceDisplayIdVar);
+        EXPECT_EQ(*ceDisplayIdVar, Base::DISPLAY_ID::get());
+        const auto displayId = asHalDisplayId(*ceDisplayIdVar);
+        LOG_ALWAYS_FATAL_IF(!displayId);
+        test->mFlinger.mutableHwcDisplayData().try_emplace(*displayId);
 
         return compositionDisplay;
     }
@@ -792,8 +819,9 @@ using HwcVirtualDisplayCase =
 
 inline DisplayModePtr createDisplayMode(DisplayModeId modeId, Fps refreshRate, int32_t group = 0,
                                         ui::Size resolution = ui::Size(1920, 1080)) {
-    return mock::createDisplayMode(modeId, refreshRate, group, resolution,
-                                   PrimaryDisplayVariant::DISPLAY_ID::get());
+    const auto physicalDisplayId = asPhysicalDisplayId(PrimaryDisplayVariant::DISPLAY_ID::get());
+    LOG_ALWAYS_FATAL_IF(!physicalDisplayId);
+    return mock::createDisplayMode(modeId, refreshRate, group, resolution, *physicalDisplayId);
 }
 
 } // namespace android

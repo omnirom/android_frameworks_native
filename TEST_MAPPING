@@ -22,5 +22,21 @@
     {
       "name": "SurfaceFlinger_test"
     }
+  ],
+  "postsubmit": [
+    {
+      "name": "SurfaceFlinger_test",
+      "keywords": [ "primary-device" ],
+      "options": [
+	// TODO(b/328119950) Known to be broken.
+        {
+          "exclude-filter": "LayerCallbackTest#SetNullBuffer"
+        },
+	// TODO(b/398306512) Flaky on real device.
+        {
+          "exclude-filter": "LayerRenderTypeTransactionTests/LayerRenderTypeTransactionTest#SetRelativeZBasic_BufferQueue/*"
+        }
+      ]
+    }
   ]
 }

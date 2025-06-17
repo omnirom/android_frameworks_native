@@ -125,10 +125,17 @@ struct KeyEntry : EventEntry {
     bool syntheticRepeat; // set to true for synthetic key repeats
 
     enum class InterceptKeyResult {
+        // The interception result is unknown.
         UNKNOWN,
+        // The event should be skipped and not sent to the application.
         SKIP,
+        // The event should be sent to the application.
         CONTINUE,
+        // The event should eventually be sent to the application, after a delay.
         TRY_AGAIN_LATER,
+        // The event should not be initially sent to the application, but instead go through
+        // post-processing to generate a fallback key event and then sent to the application.
+        FALLBACK,
     };
     // These are special fields that may need to be modified while the event is being dispatched.
     mutable InterceptKeyResult interceptKeyResult; // set based on the interception result

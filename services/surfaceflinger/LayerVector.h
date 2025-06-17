@@ -49,7 +49,8 @@ public:
     using Visitor = std::function<void(Layer*)>;
 
 private:
-    const StateSet mStateSet;
+    // FIXME: This is set but not used anywhere.
+    [[maybe_unused]] const StateSet mStateSet;
 };
 }
 

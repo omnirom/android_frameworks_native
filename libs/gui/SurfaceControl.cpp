@@ -141,7 +141,8 @@ sp<Surface> SurfaceControl::generateSurfaceLocked()
                                  ISurfaceComposerClient::eOpaque);
     mBbqChild = mClient->createSurface(String8::format("[BBQ] %s", mName.c_str()), 0, 0, mFormat,
                                        flags, mHandle, {}, &ignore);
-    mBbq = sp<BLASTBufferQueue>::make("[BBQ]" + mName, mBbqChild, mWidth, mHeight, mFormat);
+    mBbq = sp<BLASTBufferQueue>::make("[BBQ] " + mName, /* updateDestinationFrame */ true);
+    mBbq->update(mBbqChild, mWidth, mHeight, mFormat);
 
     // This surface is always consumed by SurfaceFlinger, so the
     // producerControlledByApp value doesn't matter; using false.
@@ -268,10 +269,11 @@ status_t SurfaceControl::readFromParcel(const Parcel& parcel,
     SAFE_PARCEL(parcel.readUint32, &format);
 
     // We aren't the original owner of the surface.
-    *outSurfaceControl = new SurfaceControl(new SurfaceComposerClient(
-                                                    interface_cast<ISurfaceComposerClient>(client)),
-                                            handle.get(), layerId, layerName, width, height, format,
-                                            transformHint);
+    *outSurfaceControl =
+            sp<SurfaceControl>::make(sp<SurfaceComposerClient>::make(
+                                             interface_cast<ISurfaceComposerClient>(client)),
+                                     handle, layerId, layerName, width, height, format,
+                                     transformHint);
 
     return NO_ERROR;
 }

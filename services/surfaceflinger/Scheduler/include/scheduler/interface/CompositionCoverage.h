@@ -36,7 +36,7 @@ enum class CompositionCoverage : std::uint8_t {
 
 using CompositionCoverageFlags = ftl::Flags<CompositionCoverage>;
 
-using CompositionCoveragePerDisplay = ui::DisplayMap<DisplayId, CompositionCoverageFlags>;
+using CompositionCoveragePerDisplay = ui::DisplayMap<DisplayIdVariant, CompositionCoverageFlags>;
 
 inline CompositionCoverageFlags multiDisplayUnion(const CompositionCoveragePerDisplay& displays) {
     CompositionCoverageFlags coverage;

@@ -14,10 +14,6 @@
  * limitations under the License.
  */
 
-#include "gui/view/Surface.h"
-#include "Constants.h"
-#include "MockConsumer.h"
-
 #include <gtest/gtest.h>
 
 #include <SurfaceFlingerProperties.h>
@@ -36,10 +32,13 @@
 #include <gui/IConsumerListener.h>
 #include <gui/IGraphicBufferConsumer.h>
 #include <gui/IGraphicBufferProducer.h>
+#include <gui/IProducerListener.h>
 #include <gui/ISurfaceComposer.h>
 #include <gui/Surface.h>
 #include <gui/SurfaceComposerClient.h>
 #include <gui/SyncScreenCaptureListener.h>
+#include <gui/view/Surface.h>
+#include <nativebase/nativebase.h>
 #include <private/gui/ComposerService.h>
 #include <private/gui/ComposerServiceAIDL.h>
 #include <sys/types.h>
@@ -47,6 +46,7 @@
 #include <ui/BufferQueueDefs.h>
 #include <ui/DisplayMode.h>
 #include <ui/GraphicBuffer.h>
+#include <ui/PixelFormat.h>
 #include <ui/Rect.h>
 #include <utils/Errors.h>
 #include <utils/String8.h>
@@ -55,9 +55,12 @@
 #include <cstddef>
 #include <cstdint>
 #include <future>
+#include <iterator>
 #include <limits>
 #include <thread>
 
+#include "Constants.h"
+#include "MockConsumer.h"
 #include "testserver/TestServerClient.h"
 
 namespace android {
@@ -131,7 +134,7 @@ protected:
     }
 
     virtual void SetUp() {
-        mComposerClient = new SurfaceComposerClient;
+        mComposerClient = sp<SurfaceComposerClient>::make();
         ASSERT_EQ(NO_ERROR, mComposerClient->initCheck());
 
         // TODO(brianderson): The following sometimes fails and is a source of
@@ -291,9 +294,7 @@ TEST_F(SurfaceTest, LayerCountIsOne) {
 TEST_F(SurfaceTest, QueryConsumerUsage) {
     const int TEST_USAGE_FLAGS =
             GRALLOC_USAGE_SW_READ_OFTEN | GRALLOC_USAGE_HW_RENDER;
-    sp<BufferItemConsumer> c = new BufferItemConsumer(TEST_USAGE_FLAGS);
-
-    sp<Surface> s = c->getSurface();
+    auto [c, s] = BufferItemConsumer::create(TEST_USAGE_FLAGS);
     sp<ANativeWindow> anw(s);
 
     int flags = -1;
@@ -306,10 +307,8 @@ TEST_F(SurfaceTest, QueryConsumerUsage) {
 TEST_F(SurfaceTest, QueryDefaultBuffersDataSpace) {
     const android_dataspace TEST_DATASPACE = HAL_DATASPACE_V0_SRGB;
 
-    sp<CpuConsumer> cpuConsumer = new CpuConsumer(1);
+    auto [cpuConsumer, s] = CpuConsumer::create(1);
     cpuConsumer->setDefaultBufferDataSpace(TEST_DATASPACE);
-
-    sp<Surface> s = cpuConsumer->getSurface();
     sp<ANativeWindow> anw(s);
 
     android_dataspace dataSpace;
@@ -322,8 +321,7 @@ TEST_F(SurfaceTest, QueryDefaultBuffersDataSpace) {
 }
 
 TEST_F(SurfaceTest, SettingGenerationNumber) {
-    sp<CpuConsumer> cpuConsumer = new CpuConsumer(1);
-    sp<Surface> surface = cpuConsumer->getSurface();
+    auto [cpuConsumer, surface] = CpuConsumer::create(1);
     sp<ANativeWindow> window(surface);
 
     // Allocate a buffer with a generation number of 0
@@ -600,7 +598,7 @@ TEST_F(SurfaceTest, TestGetLastDequeueStartTime) {
     ASSERT_GE(after, lastDequeueTime);
 }
 
-class FakeConsumer : public BnConsumerListener {
+class FakeConsumer : public IConsumerListener {
 public:
     void onFrameAvailable(const BufferItem& /*item*/) override {}
     void onBuffersReleased() override {}
@@ -650,16 +648,7 @@ public:
         mSupportsPresent = supportsPresent;
     }
 
-    status_t setTransactionState(
-            const FrameTimelineInfo& /*frameTimelineInfo*/, Vector<ComposerState>& /*state*/,
-            Vector<DisplayState>& /*displays*/, uint32_t /*flags*/,
-            const sp<IBinder>& /*applyToken*/, InputWindowCommands /*inputWindowCommands*/,
-            int64_t /*desiredPresentTime*/, bool /*isAutoTimestamp*/,
-            const std::vector<client_cache_t>& /*cachedBuffer*/, bool /*hasListenerCallbacks*/,
-            const std::vector<ListenerCallbacks>& /*listenerCallbacks*/, uint64_t /*transactionId*/,
-            const std::vector<uint64_t>& /*mergedTransactionIds*/) override {
-        return NO_ERROR;
-    }
+    status_t setTransactionState(TransactionState&&) override { return NO_ERROR; }
 
 protected:
     IBinder* onAsBinder() override { return nullptr; }
@@ -689,10 +678,11 @@ public:
         return binder::Status::ok();
     }
 
-    binder::Status createVirtualDisplay(const std::string& /*displayName*/, bool /*isSecure*/,
-                                        const std::string& /*uniqueId*/,
-                                        float /*requestedRefreshRate*/,
-                                        sp<IBinder>* /*outDisplay*/) override {
+    binder::Status createVirtualDisplay(
+            const std::string& /*displayName*/, bool /*isSecure*/,
+            gui::ISurfaceComposer::OptimizationPolicy /*optimizationPolicy*/,
+            const std::string& /*uniqueId*/, float /*requestedRefreshRate*/,
+            sp<IBinder>* /*outDisplay*/) override {
         return binder::Status::ok();
     }
 
@@ -1016,7 +1006,11 @@ public:
         return binder::Status::ok();
     }
 
-    binder::Status setActivePictureListener(const sp<gui::IActivePictureListener>&) {
+    binder::Status addActivePictureListener(const sp<gui::IActivePictureListener>&) {
+        return binder::Status::ok();
+    }
+
+    binder::Status removeActivePictureListener(const sp<gui::IActivePictureListener>&) {
         return binder::Status::ok();
     }
 
@@ -2173,8 +2167,7 @@ TEST_F(SurfaceTest, BatchOperations) {
     const int BUFFER_COUNT = 16;
     const int BATCH_SIZE = 8;
 
-    sp<CpuConsumer> cpuConsumer = new CpuConsumer(1);
-    sp<Surface> surface = cpuConsumer->getSurface();
+    auto [cpuConsumer, surface] = CpuConsumer::create(1);
     sp<ANativeWindow> window(surface);
     sp<StubSurfaceListener> listener = new StubSurfaceListener();
 
@@ -2222,8 +2215,7 @@ TEST_F(SurfaceTest, BatchIllegalOperations) {
     const int BUFFER_COUNT = 16;
     const int BATCH_SIZE = 8;
 
-    sp<CpuConsumer> cpuConsumer = new CpuConsumer(1);
-    sp<Surface> surface = cpuConsumer->getSurface();
+    auto [cpuConsumer, surface] = CpuConsumer::create(1);
     sp<ANativeWindow> window(surface);
     sp<StubSurfaceListener> listener = new StubSurfaceListener();
 
@@ -2243,6 +2235,52 @@ TEST_F(SurfaceTest, BatchIllegalOperations) {
     surface->setSharedBufferMode(false);
 
     ASSERT_EQ(NO_ERROR, surface->disconnect(NATIVE_WINDOW_API_CPU));
+}
+
+TEST_F(SurfaceTest, setMaxDequeuedBufferCount_setMaxAcquiredBufferCount_allocations) {
+    //
+    // Set up the consumer and producer--nothing fancy.
+    //
+    auto [consumer, surface] =
+            BufferItemConsumer::create(GRALLOC_USAGE_SW_READ_OFTEN | GRALLOC_USAGE_HW_RENDER);
+    sp<SurfaceListener> surfaceListener = sp<StubSurfaceListener>::make();
+    surface->connect(NATIVE_WINDOW_API_CPU, surfaceListener);
+    sp<GraphicBuffer> buffer;
+    sp<Fence> fence;
+
+    //
+    // These values are independent. The consumer can dequeue 3 and the consumer can acquire 3 at
+    // the same time.
+    //
+    ASSERT_EQ(OK, consumer->setMaxAcquiredBufferCount(3));
+    ASSERT_EQ(OK, surface->setMaxDequeuedBufferCount(3));
+
+    //
+    // Take all three buffers out of the queue--a fourth can't be retrieved. Then queue them.
+    //
+    std::vector<Surface::BatchBuffer> dequeuedBuffers(3);
+    EXPECT_EQ(OK, surface->dequeueBuffers(&dequeuedBuffers));
+    if (::com::android::graphics::libgui::flags::bq_always_use_max_dequeued_buffer_count()) {
+        EXPECT_EQ(INVALID_OPERATION, surface->dequeueBuffer(&buffer, &fence));
+    }
+
+    for (auto& batchBuffer : dequeuedBuffers) {
+        EXPECT_EQ(OK,
+                  surface->queueBuffer(GraphicBuffer::from(batchBuffer.buffer),
+                                       sp<Fence>::make(batchBuffer.fenceFd)));
+    }
+    dequeuedBuffers.assign(3, {});
+
+    //
+    // Acquire all three, then we should be able to dequeue 3 more.
+    //
+    std::vector<BufferItem> acquiredBuffers(3);
+    for (auto& bufferItem : acquiredBuffers) {
+        EXPECT_EQ(OK, consumer->acquireBuffer(&bufferItem, 0));
+    }
+
+    EXPECT_EQ(OK, surface->dequeueBuffers(&dequeuedBuffers));
+    EXPECT_EQ(INVALID_OPERATION, surface->dequeueBuffer(&buffer, &fence));
 }
 
 #if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_PLATFORM_API_IMPROVEMENTS)
@@ -2370,8 +2408,7 @@ TEST_F(SurfaceTest, QueueAcquireReleaseDequeue_CalledInStack_DoesNotDeadlock) {
     sp<IGraphicBufferConsumer> bqConsumer;
     BufferQueue::createBufferQueue(&bqProducer, &bqConsumer);
 
-    sp<BufferItemConsumer> consumer = sp<BufferItemConsumer>::make(bqConsumer, 3);
-    sp<Surface> surface = sp<Surface>::make(bqProducer);
+    auto [consumer, surface] = BufferItemConsumer::create(3);
     sp<ImmediateReleaseConsumerListener> consumerListener =
             sp<ImmediateReleaseConsumerListener>::make(consumer);
     consumer->setFrameAvailableListener(consumerListener);
@@ -2529,4 +2566,181 @@ TEST_F(SurfaceTest, QueueBufferOutput_TracksReplacements_Plural) {
 }
 #endif // COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_PLATFORM_API_IMPROVEMENTS)
 
+#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_UNLIMITED_SLOTS)
+TEST_F(SurfaceTest, UnlimitedSlots_FailsOnIncompatibleConsumer) {
+    sp<IGraphicBufferProducer> producer;
+    sp<IGraphicBufferConsumer> consumer;
+    BufferQueue::createBufferQueue(&producer, &consumer);
+
+    sp<IConsumerListener> consumerListener = sp<FakeConsumer>::make();
+
+    EXPECT_EQ(OK, consumer->allowUnlimitedSlots(false));
+    EXPECT_EQ(OK, consumer->consumerConnect(consumerListener, /* consumerListener */ true));
+
+    sp<Surface> surface = sp<Surface>::make(producer);
+    sp<SurfaceListener> surfaceListener = sp<StubSurfaceListener>::make();
+    EXPECT_EQ(OK, surface->connect(NATIVE_WINDOW_API_CPU, surfaceListener));
+
+    EXPECT_NE(OK, surface->setMaxDequeuedBufferCount(128))
+            << "We shouldn't be able to set high max buffer counts if the consumer doesn't allow "
+               "it";
+}
+
+TEST_F(SurfaceTest, UnlimitedSlots_CanDequeueAndQueueMoreThanOldMaximum) {
+    sp<IGraphicBufferProducer> producer;
+    sp<IGraphicBufferConsumer> consumer;
+    BufferQueue::createBufferQueue(&producer, &consumer);
+
+    sp<IConsumerListener> consumerListener = sp<FakeConsumer>::make();
+
+    EXPECT_EQ(OK, consumer->allowUnlimitedSlots(true));
+    EXPECT_EQ(OK, consumer->consumerConnect(consumerListener, /* consumerListener */ true));
+    EXPECT_EQ(OK, consumer->setDefaultBufferFormat(PIXEL_FORMAT_RGBA_8888));
+    EXPECT_EQ(OK, consumer->setConsumerUsageBits(AHARDWAREBUFFER_USAGE_CPU_WRITE_OFTEN));
+
+    sp<Surface> surface = sp<Surface>::make(producer);
+    sp<SurfaceListener> surfaceListener = sp<StubSurfaceListener>::make();
+    EXPECT_EQ(OK, surface->connect(NATIVE_WINDOW_API_CPU, surfaceListener));
+
+    EXPECT_EQ(OK, surface->setMaxDequeuedBufferCount(128))
+            << "If unlimited slots are allowed, we should be able increase the max dequeued buffer "
+               "count arbitrarily";
+
+    std::vector<std::tuple<sp<GraphicBuffer>, sp<Fence>, int>> buffers;
+    for (int i = 0; i < 128; i++) {
+        sp<GraphicBuffer> buffer;
+        sp<Fence> fence;
+        ASSERT_EQ(OK, surface->dequeueBuffer(&buffer, &fence)) << "Unable to dequeue buffer #" << i;
+        buffers.push_back({buffer, fence, i});
+    }
+
+    for (auto& [buffer, fence, idx] : buffers) {
+        ASSERT_EQ(OK, surface->queueBuffer(buffer, fence)) << "Unable to queue buffer #" << idx;
+    }
+}
+
+TEST_F(SurfaceTest, UnlimitedSlots_CanDequeueAndDetachMoreThanOldMaximum) {
+    sp<IGraphicBufferProducer> producer;
+    sp<IGraphicBufferConsumer> consumer;
+    BufferQueue::createBufferQueue(&producer, &consumer);
+
+    sp<IConsumerListener> consumerListener = sp<FakeConsumer>::make();
+
+    EXPECT_EQ(OK, consumer->allowUnlimitedSlots(true));
+    EXPECT_EQ(OK, consumer->consumerConnect(consumerListener, /* consumerListener */ true));
+    EXPECT_EQ(OK, consumer->setDefaultBufferFormat(PIXEL_FORMAT_RGBA_8888));
+    EXPECT_EQ(OK, consumer->setConsumerUsageBits(AHARDWAREBUFFER_USAGE_CPU_WRITE_OFTEN));
+
+    sp<Surface> surface = sp<Surface>::make(producer);
+    sp<SurfaceListener> surfaceListener = sp<StubSurfaceListener>::make();
+    EXPECT_EQ(OK, surface->connect(NATIVE_WINDOW_API_CPU, surfaceListener));
+
+    EXPECT_EQ(OK, surface->setMaxDequeuedBufferCount(128))
+            << "If unlimited slots are allowed, we should be able increase the max dequeued buffer "
+               "count arbitrarily";
+
+    std::vector<std::tuple<sp<GraphicBuffer>, sp<Fence>, int>> buffers;
+    for (int i = 0; i < 128; i++) {
+        sp<GraphicBuffer> buffer;
+        sp<Fence> fence;
+        ASSERT_EQ(OK, surface->dequeueBuffer(&buffer, &fence)) << "Unable to dequeue buffer #" << i;
+        buffers.push_back({buffer, fence, i});
+    }
+
+    for (auto& [buffer, _, idx] : buffers) {
+        ASSERT_EQ(OK, surface->detachBuffer(buffer)) << "Unable to detach buffer #" << idx;
+    }
+}
+
+TEST_F(SurfaceTest, UnlimitedSlots_BatchOperations) {
+    sp<IGraphicBufferProducer> producer;
+    sp<IGraphicBufferConsumer> consumer;
+    BufferQueue::createBufferQueue(&producer, &consumer);
+
+    sp<IConsumerListener> consumerListener = sp<FakeConsumer>::make();
+
+    EXPECT_EQ(OK, consumer->allowUnlimitedSlots(true));
+    EXPECT_EQ(OK, consumer->consumerConnect(consumerListener, /* consumerListener */ true));
+    EXPECT_EQ(OK, consumer->setDefaultBufferFormat(PIXEL_FORMAT_RGBA_8888));
+    EXPECT_EQ(OK, consumer->setConsumerUsageBits(AHARDWAREBUFFER_USAGE_CPU_WRITE_OFTEN));
+
+    sp<Surface> surface = sp<Surface>::make(producer);
+    sp<SurfaceListener> surfaceListener = sp<StubSurfaceListener>::make();
+    EXPECT_EQ(OK, surface->connect(NATIVE_WINDOW_API_CPU, surfaceListener));
+
+    EXPECT_EQ(OK, surface->setMaxDequeuedBufferCount(128))
+            << "If unlimited slots are allowed, we should be able increase the max dequeued buffer "
+               "count arbitrarily";
+
+    std::vector<Surface::BatchBuffer> buffers(128);
+    EXPECT_EQ(OK, surface->dequeueBuffers(&buffers));
+    EXPECT_EQ(128u, buffers.size());
+
+    std::vector<Surface::BatchQueuedBuffer> queuedBuffers;
+    std::transform(buffers.begin(), buffers.end(), std::back_inserter(queuedBuffers),
+                   [](Surface::BatchBuffer& buffer) {
+                       Surface::BatchQueuedBuffer out;
+                       out.buffer = buffer.buffer;
+                       out.fenceFd = buffer.fenceFd;
+                       return out;
+                   });
+
+    std::vector<SurfaceQueueBufferOutput> outputs;
+    EXPECT_EQ(OK, surface->queueBuffers(queuedBuffers, &outputs));
+    EXPECT_EQ(128u, outputs.size());
+}
+#endif // COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_UNLIMITED_SLOTS)
+
+TEST_F(SurfaceTest, isBufferOwned) {
+    const int TEST_USAGE_FLAGS = GRALLOC_USAGE_SW_READ_OFTEN | GRALLOC_USAGE_HW_RENDER;
+    auto [bufferItemConsumer, surface] = BufferItemConsumer::create(TEST_USAGE_FLAGS);
+
+    sp<SurfaceListener> listener = sp<StubSurfaceListener>::make();
+    ASSERT_EQ(OK, surface->connect(NATIVE_WINDOW_API_CPU, listener));
+
+    sp<GraphicBuffer> surfaceAttachableBuffer =
+            sp<GraphicBuffer>::make(10, 10, PIXEL_FORMAT_RGBA_8888, 1, TEST_USAGE_FLAGS);
+
+    //
+    // Attaching a buffer makes it owned.
+    //
+
+    bool isOwned;
+    EXPECT_EQ(OK, surface->isBufferOwned(surfaceAttachableBuffer, &isOwned));
+    EXPECT_FALSE(isOwned);
+
+    EXPECT_EQ(OK, surface->attachBuffer(surfaceAttachableBuffer.get()));
+    EXPECT_EQ(OK, surface->isBufferOwned(surfaceAttachableBuffer, &isOwned));
+    EXPECT_TRUE(isOwned);
+
+    //
+    // A dequeued buffer is always owned.
+    //
+
+    sp<GraphicBuffer> buffer;
+    sp<Fence> fence;
+    EXPECT_EQ(OK, surface->dequeueBuffer(&buffer, &fence));
+    EXPECT_EQ(OK, surface->isBufferOwned(buffer, &isOwned));
+    EXPECT_TRUE(isOwned);
+
+    //
+    // A detached buffer is no longer owned.
+    //
+
+    EXPECT_EQ(OK, surface->detachBuffer(buffer));
+    EXPECT_EQ(OK, surface->isBufferOwned(buffer, &isOwned));
+    EXPECT_FALSE(isOwned);
+
+    //
+    // It's not currently possible to verify whether or not a consumer has attached a buffer until
+    // it shows up on the Surface.
+    //
+
+    sp<GraphicBuffer> consumerAttachableBuffer =
+            sp<GraphicBuffer>::make(10, 10, PIXEL_FORMAT_RGBA_8888, 1, TEST_USAGE_FLAGS);
+
+    ASSERT_EQ(OK, bufferItemConsumer->attachBuffer(consumerAttachableBuffer));
+    EXPECT_EQ(OK, surface->isBufferOwned(consumerAttachableBuffer, &isOwned));
+    EXPECT_FALSE(isOwned);
+}
 } // namespace android

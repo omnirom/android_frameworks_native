@@ -25,6 +25,7 @@ cc_defaults {
     defaults: [
         "android.hardware.graphics.composer3-ndk_shared",
         "renderengine_defaults",
+        "libsurfaceflinger_common_deps",
     ],
     cflags: [
         "-DGL_GLEXT_PROTOTYPES",
@@ -51,6 +52,7 @@ cc_defaults {
         "libtonemap",
         "libsurfaceflinger_common",
         "libsurfaceflingerflags",
+        "libgui_window_info_static",
     ],
     local_include_dirs: ["include"],
     export_include_dirs: ["include"],
@@ -117,8 +119,17 @@ filegroup {
 // possible if libskia_renderengine is just pulled into librenderengine via whole_static_libs.
 cc_defaults {
     name: "librenderengine_deps",
-    defaults: ["skia_renderengine_deps"],
-    static_libs: ["libskia_renderengine"],
+    defaults: [
+        "skia_renderengine_deps",
+        "libsurfaceflinger_common_deps",
+    ],
+    static_libs: [
+        "libgui_window_info_static",
+        "libskia_renderengine",
+    ],
+    shared_libs: [
+        "libbinder",
+    ],
 }
 
 // Note: if compilation fails when adding librenderengine as a dependency, try adding

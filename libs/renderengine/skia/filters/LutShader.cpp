@@ -24,7 +24,6 @@
 #include <ui/ColorSpace.h>
 
 #include "include/core/SkColorSpace.h"
-#include "src/core/SkColorFilterPriv.h"
 
 using aidl::android::hardware::graphics::composer3::LutProperties;
 
@@ -39,10 +38,13 @@ static const SkString kShader = SkString(R"(
     uniform int key;
     uniform int dimension;
     uniform vec3 luminanceCoefficients; // for CIE_Y
+    // for hlg/pq transfer function, we need normalize it to [0.0, 1.0]
+    // we use `normalizeScalar` to do so
+    uniform float normalizeScalar;
 
     vec4 main(vec2 xy) {
         float4 rgba = image.eval(xy);
-        float3 linear = toLinearSrgb(rgba.rgb);
+        float3 linear = toLinearSrgb(rgba.rgb) * normalizeScalar;
         if (dimension == 1) {
             // RGB
             if (key == 0) {
@@ -52,19 +54,19 @@ static const SkString kShader = SkString(R"(
                 float gainR = lut.eval(vec2(indexR, 0.0) + 0.5).r;
                 float gainG = lut.eval(vec2(indexG, 0.0) + 0.5).r;
                 float gainB = lut.eval(vec2(indexB, 0.0) + 0.5).r;
-                return float4(linear.r * gainR, linear.g * gainG, linear.b * gainB, rgba.a);
+                linear = float3(linear.r * gainR, linear.g * gainG, linear.b * gainB);
             // MAX_RGB
             } else if (key == 1) {
                 float maxRGB = max(linear.r, max(linear.g, linear.b));
                 float index = maxRGB * float(size - 1);
                 float gain = lut.eval(vec2(index, 0.0) + 0.5).r;
-                return float4(linear * gain, rgba.a);
+                linear = linear * gain;
             // CIE_Y
             } else if (key == 2) {
                 float y = dot(linear, luminanceCoefficients) / 3.0;
                 float index = y * float(size - 1);
                 float gain = lut.eval(vec2(index, 0.0) + 0.5).r;
-                return float4(linear * gain, rgba.a);
+                linear = linear * gain;
             }
         } else if (dimension == 3) {
             if (key == 0) {
@@ -110,12 +112,10 @@ static const SkString kShader = SkString(R"(
                 float3 c0 = mix(c00, c10, linear.g);
                 float3 c1 = mix(c01, c11, linear.g);
 
-                float3 val = mix(c0, c1, linear.b);
-
-                return float4(val, rgba.a);
+                linear = mix(c0, c1, linear.b);
             }
         }
-        return rgba;
+        return float4(fromLinearSrgb(linear), rgba.a);
     })");
 
 // same as shader::toColorSpace function
@@ -181,15 +181,21 @@ sk_sp<SkShader> LutShader::generateLutShader(sk_sp<SkShader> input,
      * (R1, G1, B1, 0)
      * ...
      */
-    SkImageInfo info = SkImageInfo::Make(length /* the number of rgba */ * 4, 1,
-                                         kRGBA_F16_SkColorType, kPremul_SkAlphaType);
+    SkImageInfo info = SkImageInfo::Make(length /* the number of rgba */, 1, kRGBA_F16_SkColorType,
+                                         kPremul_SkAlphaType);
     SkBitmap bitmap;
     bitmap.allocPixels(info);
     if (!bitmap.installPixels(info, buffer.data(), info.minRowBytes())) {
-        LOG_ALWAYS_FATAL("unable to install pixels");
+        ALOGW("bitmap.installPixels failed, skip this Lut!");
+        return input;
     }
 
     sk_sp<SkImage> lutImage = SkImages::RasterFromBitmap(bitmap);
+    if (!lutImage) {
+        ALOGW("Got a nullptr from SkImages::RasterFromBitmap, skip this Lut!");
+        return input;
+    }
+
     mBuilder->child("image") = input;
     mBuilder->child("lut") =
             lutImage->makeRawShader(SkTileMode::kClamp, SkTileMode::kClamp,
@@ -197,9 +203,22 @@ sk_sp<SkShader> LutShader::generateLutShader(sk_sp<SkShader> input,
                                             ? SkSamplingOptions(SkFilterMode::kLinear)
                                             : SkSamplingOptions());
 
+    float normalizeScalar = 1.0;
+    switch (srcDataspace & HAL_DATASPACE_TRANSFER_MASK) {
+        case HAL_DATASPACE_TRANSFER_HLG:
+            normalizeScalar = 0.203;
+            break;
+        case HAL_DATASPACE_TRANSFER_ST2084:
+            normalizeScalar = 0.0203;
+            break;
+        default:
+            normalizeScalar = 1.0;
+    }
     const int uSize = static_cast<int>(size);
     const int uKey = static_cast<int>(samplingKey);
     const int uDimension = static_cast<int>(dimension);
+    const float uNormalizeScalar = static_cast<float>(normalizeScalar);
+
     if (static_cast<LutProperties::SamplingKey>(samplingKey) == LutProperties::SamplingKey::CIE_Y) {
         // Use predefined colorspaces of input dataspace so that we can get D65 illuminant
         mat3 toXYZMatrix(toColorSpace(srcDataspace).getRGBtoXYZ());
@@ -211,6 +230,7 @@ sk_sp<SkShader> LutShader::generateLutShader(sk_sp<SkShader> input,
     mBuilder->uniform("size") = uSize;
     mBuilder->uniform("key") = uKey;
     mBuilder->uniform("dimension") = uDimension;
+    mBuilder->uniform("normalizeScalar") = uNormalizeScalar;
     return mBuilder->makeShader();
 }
 
@@ -268,9 +288,7 @@ sk_sp<SkShader> LutShader::lutShader(sk_sp<SkShader>& input,
                                       lutProperties[i].samplingKey, srcDataspace);
         }
 
-        auto colorXformLutToDst =
-                SkColorFilterPriv::MakeColorSpaceXform(lutMathColorSpace, outColorSpace);
-        input = input->makeWithColorFilter(colorXformLutToDst);
+        input = input->makeWithWorkingColorSpace(outColorSpace);
     }
     return input;
 }

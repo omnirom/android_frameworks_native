@@ -362,6 +362,17 @@ WorkDuration::WorkDuration(Fps currentRefreshRate)
     validateSysprops();
 }
 
+WorkDuration::WorkDuration(Fps currentRefreshRate, Duration minSfDuration, Duration maxSfDuration,
+                           Duration appDuration)
+      : WorkDuration(currentRefreshRate,
+                     /*sfDuration*/ minSfDuration.ns(),
+                     /*appDuration*/ appDuration.ns(),
+                     /*sfEarlyDuration*/ maxSfDuration.ns(),
+                     /*appEarlyDuration*/ appDuration.ns(),
+                     /*sfEarlyGpuDuration*/ maxSfDuration.ns(),
+                     /*appEarlyGpuDuration*/ appDuration.ns(),
+                     /*hwcMinWorkDuration*/ 0) {}
+
 WorkDuration::WorkDuration(Fps currentRefreshRate, nsecs_t sfDuration, nsecs_t appDuration,
                            nsecs_t sfEarlyDuration, nsecs_t appEarlyDuration,
                            nsecs_t sfEarlyGpuDuration, nsecs_t appEarlyGpuDuration,

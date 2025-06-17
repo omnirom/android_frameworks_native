@@ -26,8 +26,8 @@
 #include <utils/Log.h>
 
 #include <unistd.h>
+#include <memory>
 #include <thread>
-
 
 using android::binder::Status;
 
@@ -346,4 +346,51 @@ TEST_F(PowerHalWrapperAidlTest, TestCreateHintSessionWithConfigUnsupported) {
                     testing::ByMove(ndk::ScopedAStatus::fromStatus(STATUS_UNKNOWN_TRANSACTION))));
     result = mWrapper->createHintSessionWithConfig(tgid, uid, threadIds, durationNanos, tag, &out);
     ASSERT_TRUE(result.isUnsupported());
+}
+
+TEST_F(PowerHalWrapperAidlTest, TestSendingCompositionData) {
+    int32_t tgid = 999;
+    int32_t uid = 1001;
+    std::vector<hal::CompositionData> dataOut;
+    dataOut.emplace_back(hal::CompositionData{
+            .timestampNanos = 0L,
+            .scheduledPresentTimestampsNanos = {100},
+            .latchTimestampNanos = 50,
+            .outputIds = {0},
+    });
+    dataOut.emplace_back(hal::CompositionData{
+            .timestampNanos = 200L,
+            .scheduledPresentTimestampsNanos = {300},
+            .latchTimestampNanos = 250,
+            .outputIds = {0},
+    });
+    EXPECT_CALL(*mMockHal.get(), sendCompositionData(_))
+            .Times(Exactly(1))
+            .WillOnce([&](const std::vector<hal::CompositionData>& passedData) {
+                if (!std::equal(passedData.begin(), passedData.end(), dataOut.begin())) {
+                    ADD_FAILURE() << "Passed composition data not the same";
+                }
+                return ndk::ScopedAStatus::ok();
+            });
+
+    ASSERT_TRUE(mWrapper->sendCompositionData(dataOut).isOk());
+}
+
+TEST_F(PowerHalWrapperAidlTest, TestSendingCompositionUpdate) {
+    int32_t tgid = 999;
+    int32_t uid = 1001;
+    hal::CompositionUpdate dataOut{
+            .timestampNanos = 123,
+            .deadOutputIds = {1, 2, 3},
+    };
+    EXPECT_CALL(*mMockHal.get(), sendCompositionUpdate(_))
+            .Times(Exactly(1))
+            .WillOnce([&](const hal::CompositionUpdate& passedData) {
+                if (passedData != dataOut) {
+                    ADD_FAILURE() << "Passed composition update data not the same";
+                }
+                return ndk::ScopedAStatus::ok();
+            });
+
+    ASSERT_TRUE(mWrapper->sendCompositionUpdate(dataOut).isOk());
 }

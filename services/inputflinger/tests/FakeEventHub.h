@@ -222,6 +222,7 @@ private:
     std::optional<int32_t> getLightBrightness(int32_t deviceId, int32_t lightId) const override;
     std::optional<std::unordered_map<LightColor, int32_t>> getLightIntensities(
             int32_t deviceId, int32_t lightId) const override;
+    std::filesystem::path getSysfsRootPath(int32_t deviceId) const override;
     void sysfsNodeChanged(const std::string& sysfsNodePath) override;
     void dump(std::string&) const override {}
     void monitor() const override {}

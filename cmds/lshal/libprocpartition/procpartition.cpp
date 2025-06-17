@@ -24,6 +24,8 @@ namespace procpartition {
 std::ostream& operator<<(std::ostream& os, Partition p) {
     switch (p) {
         case Partition::SYSTEM: return os << "system";
+        case Partition::SYSTEM_EXT: return os << "system_ext";
+        case Partition::PRODUCT: return os << "product";
         case Partition::VENDOR: return os << "vendor";
         case Partition::ODM: return os << "odm";
         case Partition::UNKNOWN: // fallthrough
@@ -56,6 +58,12 @@ std::string getCmdline(pid_t pid) {
 Partition parsePartition(const std::string& s) {
     if (s == "system") {
         return Partition::SYSTEM;
+    }
+    if (s == "system_ext") {
+        return Partition::SYSTEM_EXT;
+    }
+    if (s == "product") {
+        return Partition::PRODUCT;
     }
     if (s == "vendor") {
         return Partition::VENDOR;

@@ -46,4 +46,15 @@ struct AccelerationCurveSegment {
 std::vector<AccelerationCurveSegment> createAccelerationCurveForPointerSensitivity(
         int32_t sensitivity);
 
+/*
+ * Creates a flat acceleration curve for disabling pointer acceleration.
+ *
+ * This method generates a single AccelerationCurveSegment with specific values
+ * to effectively disable acceleration for both mice and touchpads.
+ * A flat acceleration curve ensures a constant gain, meaning that the output
+ * velocity is directly proportional to the input velocity, resulting in
+ * a 1:1 movement ratio between the input device and the on-screen pointer.
+ */
+std::vector<AccelerationCurveSegment> createFlatAccelerationCurve(int32_t sensitivity);
+
 } // namespace android

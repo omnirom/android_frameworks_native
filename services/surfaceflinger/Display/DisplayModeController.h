@@ -46,7 +46,7 @@ class DisplayModeController {
 public:
     using ActiveModeListener = ftl::Function<void(PhysicalDisplayId, Fps vsyncRate, Fps renderFps)>;
 
-    DisplayModeController() = default;
+    DisplayModeController();
 
     void setHwComposer(HWComposer* composerPtr) { mComposerPtr = composerPtr; }
     void setActiveModeListener(const ActiveModeListener& listener) {
@@ -109,7 +109,16 @@ public:
     KernelIdleTimerState getKernelIdleTimerState(PhysicalDisplayId) const
             REQUIRES(kMainThreadContext) EXCLUDES(mDisplayLock);
 
+    void setSecure(PhysicalDisplayId displayId, bool secure) REQUIRES(kMainThreadContext)
+            EXCLUDES(mDisplayLock);
+
+    bool supportsHdcp() const;
+
+    void startHdcpNegotiation(PhysicalDisplayId displayId) REQUIRES(kMainThreadContext);
+
 private:
+    enum class HdcpState { Undesired, Desired, Enabled };
+
     struct Display {
         template <size_t N>
         std::string concatId(const char (&)[N]) const;
@@ -120,6 +129,11 @@ private:
               : Display(snapshot,
                         std::make_shared<scheduler::RefreshRateSelector>(std::move(modes),
                                                                          activeModeId, config)) {}
+
+        void setSecure(bool secure) {
+            hdcpState = secure ? HdcpState::Undesired : HdcpState::Desired;
+        }
+
         const DisplaySnapshotRef snapshot;
         const RefreshRateSelectorPtr selectorPtr;
 
@@ -135,6 +149,8 @@ private:
         bool isModeSetPending GUARDED_BY(kMainThreadContext) = false;
 
         bool isKernelIdleTimerEnabled GUARDED_BY(kMainThreadContext) = false;
+
+        HdcpState hdcpState = HdcpState::Desired;
     };
 
     using DisplayPtr = std::unique_ptr<Display>;
@@ -153,6 +169,8 @@ private:
 
     mutable std::mutex mDisplayLock;
     ui::PhysicalDisplayMap<PhysicalDisplayId, DisplayPtr> mDisplays GUARDED_BY(mDisplayLock);
+
+    bool mSupportsHdcp = false;
 };
 
 } // namespace android::display

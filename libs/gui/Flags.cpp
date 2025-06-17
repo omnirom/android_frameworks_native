@@ -29,6 +29,14 @@ sp<SurfaceType> surfaceToSurfaceType(const sp<Surface>& surface) {
 #endif
 }
 
+ParcelableSurfaceType surfaceToParcelableSurfaceType(const sp<Surface>& surface) {
+#if WB_LIBCAMERASERVICE_WITH_DEPENDENCIES
+    return view::Surface::fromSurface(surface);
+#else
+    return surface->getIGraphicBufferProducer();
+#endif
+}
+
 sp<IGraphicBufferProducer> surfaceTypeToIGBP(const sp<SurfaceType>& surface) {
 #if WB_LIBCAMERASERVICE_WITH_DEPENDENCIES
     return surface->getIGraphicBufferProducer();

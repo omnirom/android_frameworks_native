@@ -47,7 +47,7 @@ public:
     int32_t getKeyCodeForKeyLocation(int32_t locationKeyCode) const override;
 
     int32_t getMetaState() override;
-    std::optional<ui::LogicalDisplayId> getAssociatedDisplayId() override;
+    std::optional<ui::LogicalDisplayId> getAssociatedDisplayId() const override;
     void updateLedState(bool reset) override;
 
 private:
@@ -96,8 +96,8 @@ private:
     void configureParameters();
     void dumpParameters(std::string& dump) const;
 
-    ui::Rotation getOrientation();
-    ui::LogicalDisplayId getDisplayId();
+    ui::Rotation getOrientation() const;
+    ui::LogicalDisplayId getDisplayId() const;
 
     [[nodiscard]] std::list<NotifyArgs> processKey(nsecs_t when, nsecs_t readTime, bool down,
                                                    int32_t scanCode, int32_t usageCode);

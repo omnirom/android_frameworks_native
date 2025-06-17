@@ -24,6 +24,7 @@
 #include <ui/DisplayId.h>
 #include <ui/Fence.h>
 #include <ui/FenceTime.h>
+#include <ui/RingBuffer.h>
 
 #include <scheduler/Features.h>
 #include <scheduler/FrameTime.h>
@@ -34,7 +35,6 @@
 // TODO(b/185536303): Pull to FTL.
 #include "../../../TracedOrdinal.h"
 #include "../../../Utils/Dumper.h"
-#include "../../../Utils/RingBuffer.h"
 
 namespace android::scheduler {
 
@@ -108,7 +108,7 @@ protected:
     std::pair<bool /* wouldBackpressure */, PresentFence> expectedSignaledPresentFence(
             Period vsyncPeriod, Period minFramePeriod) const;
     std::array<PresentFence, 2> mPresentFencesLegacy;
-    utils::RingBuffer<PresentFence, 5> mPresentFences;
+    ui::RingBuffer<PresentFence, 5> mPresentFences;
 
     FrameTime mLastSignaledFrameTime;
 

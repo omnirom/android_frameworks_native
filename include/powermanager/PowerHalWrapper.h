@@ -18,6 +18,8 @@
 
 #include <aidl/android/hardware/power/Boost.h>
 #include <aidl/android/hardware/power/ChannelConfig.h>
+#include <aidl/android/hardware/power/CompositionData.h>
+#include <aidl/android/hardware/power/CompositionUpdate.h>
 #include <aidl/android/hardware/power/IPower.h>
 #include <aidl/android/hardware/power/IPowerHintSession.h>
 #include <aidl/android/hardware/power/Mode.h>
@@ -37,6 +39,8 @@ namespace android {
 
 namespace power {
 
+namespace hal = aidl::android::hardware::power;
+
 // State of Power HAL support for individual apis.
 enum class HalSupport {
     UNKNOWN = 0,
@@ -49,21 +53,20 @@ class HalWrapper {
 public:
     virtual ~HalWrapper() = default;
 
-    virtual HalResult<void> setBoost(aidl::android::hardware::power::Boost boost,
-                                     int32_t durationMs) = 0;
-    virtual HalResult<void> setMode(aidl::android::hardware::power::Mode mode, bool enabled) = 0;
+    virtual HalResult<void> setBoost(hal::Boost boost, int32_t durationMs) = 0;
+    virtual HalResult<void> setMode(hal::Mode mode, bool enabled) = 0;
     virtual HalResult<std::shared_ptr<PowerHintSessionWrapper>> createHintSession(
             int32_t tgid, int32_t uid, const std::vector<int32_t>& threadIds,
             int64_t durationNanos) = 0;
     virtual HalResult<std::shared_ptr<PowerHintSessionWrapper>> createHintSessionWithConfig(
             int32_t tgid, int32_t uid, const std::vector<int32_t>& threadIds, int64_t durationNanos,
-            aidl::android::hardware::power::SessionTag tag,
-            aidl::android::hardware::power::SessionConfig* config) = 0;
+            hal::SessionTag tag, hal::SessionConfig* config) = 0;
     virtual HalResult<int64_t> getHintSessionPreferredRate() = 0;
-    virtual HalResult<aidl::android::hardware::power::ChannelConfig> getSessionChannel(int tgid,
-                                                                                       int uid) = 0;
+    virtual HalResult<hal::ChannelConfig> getSessionChannel(int tgid, int uid) = 0;
     virtual HalResult<void> closeSessionChannel(int tgid, int uid) = 0;
     virtual HalResult<aidl::android::hardware::power::SupportInfo> getSupportInfo() = 0;
+    virtual HalResult<void> sendCompositionData(const std::vector<hal::CompositionData>& data) = 0;
+    virtual HalResult<void> sendCompositionUpdate(const hal::CompositionUpdate& update) = 0;
 };
 
 // Empty Power HAL wrapper that ignores all api calls.
@@ -72,21 +75,20 @@ public:
     EmptyHalWrapper() = default;
     ~EmptyHalWrapper() override = default;
 
-    HalResult<void> setBoost(aidl::android::hardware::power::Boost boost,
-                             int32_t durationMs) override;
-    HalResult<void> setMode(aidl::android::hardware::power::Mode mode, bool enabled) override;
+    HalResult<void> setBoost(hal::Boost boost, int32_t durationMs) override;
+    HalResult<void> setMode(hal::Mode mode, bool enabled) override;
     HalResult<std::shared_ptr<PowerHintSessionWrapper>> createHintSession(
             int32_t tgid, int32_t uid, const std::vector<int32_t>& threadIds,
             int64_t durationNanos) override;
     HalResult<std::shared_ptr<PowerHintSessionWrapper>> createHintSessionWithConfig(
             int32_t tgid, int32_t uid, const std::vector<int32_t>& threadIds, int64_t durationNanos,
-            aidl::android::hardware::power::SessionTag tag,
-            aidl::android::hardware::power::SessionConfig* config) override;
+            hal::SessionTag tag, hal::SessionConfig* config) override;
     HalResult<int64_t> getHintSessionPreferredRate() override;
-    HalResult<aidl::android::hardware::power::ChannelConfig> getSessionChannel(int tgid,
-                                                                               int uid) override;
+    HalResult<hal::ChannelConfig> getSessionChannel(int tgid, int uid) override;
     HalResult<void> closeSessionChannel(int tgid, int uid) override;
     HalResult<aidl::android::hardware::power::SupportInfo> getSupportInfo() override;
+    HalResult<void> sendCompositionData(const std::vector<hal::CompositionData>& data) override;
+    HalResult<void> sendCompositionUpdate(const hal::CompositionUpdate& update) override;
 
 protected:
     virtual const char* getUnsupportedMessage();
@@ -99,9 +101,8 @@ public:
           : mHandleV1_0(std::move(handleV1_0)) {}
     ~HidlHalWrapperV1_0() override = default;
 
-    HalResult<void> setBoost(aidl::android::hardware::power::Boost boost,
-                             int32_t durationMs) override;
-    HalResult<void> setMode(aidl::android::hardware::power::Mode mode, bool enabled) override;
+    HalResult<void> setBoost(hal::Boost boost, int32_t durationMs) override;
+    HalResult<void> setMode(hal::Mode mode, bool enabled) override;
 
 protected:
     const sp<hardware::power::V1_0::IPower> mHandleV1_0;
@@ -127,9 +128,8 @@ protected:
 // Wrapper for the HIDL Power HAL v1.2.
 class HidlHalWrapperV1_2 : public HidlHalWrapperV1_1 {
 public:
-    HalResult<void> setBoost(aidl::android::hardware::power::Boost boost,
-                             int32_t durationMs) override;
-    HalResult<void> setMode(aidl::android::hardware::power::Mode mode, bool enabled) override;
+    HalResult<void> setBoost(hal::Boost boost, int32_t durationMs) override;
+    HalResult<void> setMode(hal::Mode mode, bool enabled) override;
     explicit HidlHalWrapperV1_2(sp<hardware::power::V1_2::IPower> handleV1_2)
           : HidlHalWrapperV1_1(std::move(handleV1_2)) {}
     ~HidlHalWrapperV1_2() override = default;
@@ -141,7 +141,7 @@ protected:
 // Wrapper for the HIDL Power HAL v1.3.
 class HidlHalWrapperV1_3 : public HidlHalWrapperV1_2 {
 public:
-    HalResult<void> setMode(aidl::android::hardware::power::Mode mode, bool enabled) override;
+    HalResult<void> setMode(hal::Mode mode, bool enabled) override;
     explicit HidlHalWrapperV1_3(sp<hardware::power::V1_3::IPower> handleV1_3)
           : HidlHalWrapperV1_2(std::move(handleV1_3)) {}
     ~HidlHalWrapperV1_3() override = default;
@@ -153,26 +153,24 @@ protected:
 // Wrapper for the AIDL Power HAL.
 class AidlHalWrapper : public EmptyHalWrapper {
 public:
-    explicit AidlHalWrapper(std::shared_ptr<aidl::android::hardware::power::IPower> handle)
-          : mHandle(std::move(handle)) {}
+    explicit AidlHalWrapper(std::shared_ptr<hal::IPower> handle) : mHandle(std::move(handle)) {}
     ~AidlHalWrapper() override = default;
 
-    HalResult<void> setBoost(aidl::android::hardware::power::Boost boost,
-                             int32_t durationMs) override;
-    HalResult<void> setMode(aidl::android::hardware::power::Mode mode, bool enabled) override;
+    HalResult<void> setBoost(hal::Boost boost, int32_t durationMs) override;
+    HalResult<void> setMode(hal::Mode mode, bool enabled) override;
     HalResult<std::shared_ptr<PowerHintSessionWrapper>> createHintSession(
             int32_t tgid, int32_t uid, const std::vector<int32_t>& threadIds,
             int64_t durationNanos) override;
     HalResult<std::shared_ptr<PowerHintSessionWrapper>> createHintSessionWithConfig(
             int32_t tgid, int32_t uid, const std::vector<int32_t>& threadIds, int64_t durationNanos,
-            aidl::android::hardware::power::SessionTag tag,
-            aidl::android::hardware::power::SessionConfig* config) override;
+            hal::SessionTag tag, hal::SessionConfig* config) override;
 
     HalResult<int64_t> getHintSessionPreferredRate() override;
-    HalResult<aidl::android::hardware::power::ChannelConfig> getSessionChannel(int tgid,
-                                                                               int uid) override;
+    HalResult<hal::ChannelConfig> getSessionChannel(int tgid, int uid) override;
     HalResult<void> closeSessionChannel(int tgid, int uid) override;
     HalResult<aidl::android::hardware::power::SupportInfo> getSupportInfo() override;
+    HalResult<void> sendCompositionData(const std::vector<hal::CompositionData>& data) override;
+    HalResult<void> sendCompositionUpdate(const hal::CompositionUpdate& update) override;
 
 protected:
     const char* getUnsupportedMessage() override;
@@ -181,16 +179,10 @@ private:
     // Control access to the boost and mode supported arrays.
     std::mutex mBoostMutex;
     std::mutex mModeMutex;
-    std::shared_ptr<aidl::android::hardware::power::IPower> mHandle;
-    std::array<HalSupport,
-               static_cast<int32_t>(
-                       *(ndk::enum_range<aidl::android::hardware::power::Boost>().end() - 1)) +
-                       1>
+    std::shared_ptr<hal::IPower> mHandle;
+    std::array<HalSupport, static_cast<int32_t>(*(ndk::enum_range<hal::Boost>().end() - 1)) + 1>
             mBoostSupportedArray GUARDED_BY(mBoostMutex) = {HalSupport::UNKNOWN};
-    std::array<HalSupport,
-               static_cast<int32_t>(
-                       *(ndk::enum_range<aidl::android::hardware::power::Mode>().end() - 1)) +
-                       1>
+    std::array<HalSupport, static_cast<int32_t>(*(ndk::enum_range<hal::Mode>().end() - 1)) + 1>
             mModeSupportedArray GUARDED_BY(mModeMutex) = {HalSupport::UNKNOWN};
 };
 

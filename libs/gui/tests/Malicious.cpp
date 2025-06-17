@@ -129,7 +129,7 @@ private:
     int32_t mExpectedSlot = 0;
 };
 
-class FakeListener : public BnConsumerListener {
+class FakeListener : public IConsumerListener {
 public:
     void onFrameAvailable(const BufferItem&) override {}
     void onBuffersReleased() override {}

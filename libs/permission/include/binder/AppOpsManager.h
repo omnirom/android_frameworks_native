@@ -148,7 +148,10 @@ public:
         OP_BLUETOOTH_ADVERTISE = 114,
         OP_RECORD_INCOMING_PHONE_AUDIO = 115,
         OP_NEARBY_WIFI_DEVICES = 116,
-        _NUM_OP = 117
+        // 116 - 154 omitted due to lack of use in native
+        OP_CONTROL_AUDIO = 154,
+        OP_CONTROL_AUDIO_PARTIAL = 155,
+        _NUM_OP = 156,
     };
 
     enum {
@@ -177,10 +180,10 @@ public:
     void finishOp(int32_t op, int32_t uid, const String16& callingPackage,
             const std::optional<String16>& attributionTag);
     void startWatchingMode(int32_t op, const String16& packageName,
-            const sp<IAppOpsCallback>& callback);
+            const sp<com::android::internal::app::IAppOpsCallback>& callback);
     void startWatchingMode(int32_t op, const String16& packageName, int32_t flags,
-            const sp<IAppOpsCallback>& callback);
-    void stopWatchingMode(const sp<IAppOpsCallback>& callback);
+            const sp<com::android::internal::app::IAppOpsCallback>& callback);
+    void stopWatchingMode(const sp<com::android::internal::app::IAppOpsCallback>& callback);
     int32_t permissionToOpCode(const String16& permission);
     void setCameraAudioRestriction(int32_t mode);
 

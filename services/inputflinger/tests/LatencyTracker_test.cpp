@@ -19,10 +19,13 @@
 #include "NotifyArgsBuilders.h"
 #include "android/input.h"
 
+#include <vector>
+
 #include <android-base/logging.h>
 #include <android-base/properties.h>
 #include <binder/Binder.h>
 #include <gtest/gtest.h>
+#include <input/InputDevice.h>
 #include <input/PrintTools.h>
 #include <inttypes.h>
 #include <linux/input.h>
@@ -51,12 +54,8 @@ static InputDeviceInfo generateTestDeviceInfo(uint16_t vendorId, uint16_t produc
     return info;
 }
 
-void setDefaultInputDeviceInfo(LatencyTracker& tracker) {
-    InputDeviceInfo deviceInfo = generateTestDeviceInfo(/*vendorId=*/0, /*productId=*/0, DEVICE_ID);
-    tracker.setInputDevices({deviceInfo});
-}
-
 const auto FIRST_TOUCH_POINTER = PointerBuilder(/*id=*/0, ToolType::FINGER).x(100).y(200);
+const auto FIRST_MOUSE_POINTER = PointerBuilder(/*id=*/1, ToolType::MOUSE);
 
 /**
  * This is a convenience method for comparing timelines that also prints the difference between
@@ -79,8 +78,9 @@ bool timelinesAreEqual(const InputEventTimeline& received, const InputEventTimel
             << "Received timeline with productId=" << received.productId
             << " instead of expected productId=" << expected.productId;
     LOG_IF(ERROR, expected.sources != received.sources)
-            << "Received timeline with sources=" << dumpSet(received.sources, ftl::enum_string)
-            << " instead of expected sources=" << dumpSet(expected.sources, ftl::enum_string);
+            << "Received timeline with sources="
+            << dumpContainer(received.sources, ftl::enum_string)
+            << " instead of expected sources=" << dumpContainer(expected.sources, ftl::enum_string);
     LOG_IF(ERROR, expected.inputEventActionType != received.inputEventActionType)
             << "Received timeline with inputEventActionType="
             << ftl::enum_string(received.inputEventActionType)
@@ -118,13 +118,14 @@ protected:
     std::unique_ptr<LatencyTracker> mTracker;
     sp<IBinder> connection1;
     sp<IBinder> connection2;
+    std::vector<InputDeviceInfo> inputDevices;
 
     void SetUp() override {
         connection1 = sp<BBinder>::make();
         connection2 = sp<BBinder>::make();
 
-        mTracker = std::make_unique<LatencyTracker>(*this);
-        setDefaultInputDeviceInfo(*mTracker);
+        inputDevices.push_back(generateTestDeviceInfo(/*vendorId=*/0, /*productId=*/0, DEVICE_ID));
+        mTracker = std::make_unique<LatencyTracker>(*this, inputDevices);
     }
     void TearDown() override {}
 
@@ -137,6 +138,10 @@ protected:
      * what we expected.
      */
     void assertReceivedTimelines(const std::vector<InputEventTimeline>& timelines);
+
+    void updateInputDevices(const std::vector<InputDeviceInfo>& inputDevicesUpdated) {
+        inputDevices = inputDevicesUpdated;
+    }
 
 private:
     void processTimeline(const InputEventTimeline& timeline) override {
@@ -446,7 +451,7 @@ TEST_F(LatencyTrackerTest, TrackListenerCheck_DeviceInfoFieldsInputEventTimeline
     deviceInfo2.addSource(AINPUT_SOURCE_TOUCHSCREEN);
     deviceInfo2.addSource(AINPUT_SOURCE_STYLUS);
 
-    mTracker->setInputDevices({deviceInfo1, deviceInfo2});
+    updateInputDevices({deviceInfo1, deviceInfo2});
     mTracker->trackListener(
             MotionArgsBuilder(AMOTION_EVENT_ACTION_CANCEL,
                               AINPUT_SOURCE_TOUCHSCREEN | AINPUT_SOURCE_STYLUS, inputEventId)
@@ -491,8 +496,13 @@ TEST_F(LatencyTrackerTest, TrackListenerCheck_InputEventActionTypeFieldInputEven
             /*vendorId*/ 0, /*productId*/ 0, {InputDeviceUsageSource::BUTTONS},
             InputEventActionType::KEY);
 
-    InputEventTimeline unknownTimeline(
+    InputEventTimeline motionScrollTimeline(
             /*eventTime*/ 12, /*readTime*/ 13,
+            /*vendorId*/ 0, /*productId*/ 0, {InputDeviceUsageSource::MOUSE},
+            InputEventActionType::MOTION_ACTION_SCROLL);
+
+    InputEventTimeline unknownTimeline(
+            /*eventTime*/ 14, /*readTime*/ 15,
             /*vendorId*/ 0, /*productId*/ 0, {InputDeviceUsageSource::TOUCHSCREEN},
             InputEventActionType::UNKNOWN_INPUT_EVENT);
 
@@ -529,8 +539,15 @@ TEST_F(LatencyTrackerTest, TrackListenerCheck_InputEventActionTypeFieldInputEven
                     .readTime(keyUpTimeline.readTime)
                     .deviceId(DEVICE_ID)
                     .build());
+    mTracker->trackListener(
+            MotionArgsBuilder(AMOTION_EVENT_ACTION_SCROLL, AINPUT_SOURCE_MOUSE, inputEventId + 5)
+                    .eventTime(motionScrollTimeline.eventTime)
+                    .readTime(motionScrollTimeline.readTime)
+                    .deviceId(DEVICE_ID)
+                    .pointer(FIRST_MOUSE_POINTER)
+                    .build());
     mTracker->trackListener(MotionArgsBuilder(AMOTION_EVENT_ACTION_POINTER_DOWN,
-                                              AINPUT_SOURCE_TOUCHSCREEN, inputEventId + 5)
+                                              AINPUT_SOURCE_TOUCHSCREEN, inputEventId + 6)
                                     .eventTime(unknownTimeline.eventTime)
                                     .readTime(unknownTimeline.readTime)
                                     .deviceId(DEVICE_ID)
@@ -541,7 +558,8 @@ TEST_F(LatencyTrackerTest, TrackListenerCheck_InputEventActionTypeFieldInputEven
 
     std::vector<InputEventTimeline> expectedTimelines = {motionDownTimeline, motionMoveTimeline,
                                                          motionUpTimeline,   keyDownTimeline,
-                                                         keyUpTimeline,      unknownTimeline};
+                                                         keyUpTimeline,      motionScrollTimeline,
+                                                         unknownTimeline};
     assertReceivedTimelines(expectedTimelines);
 }
 

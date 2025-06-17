@@ -166,7 +166,7 @@ void TransactionTracing::dump(std::string& result) const {
     mBuffer.dump(result);
 }
 
-void TransactionTracing::addQueuedTransaction(const TransactionState& transaction) {
+void TransactionTracing::addQueuedTransaction(const QueuedTransactionState& transaction) {
     perfetto::protos::TransactionState* state =
             new perfetto::protos::TransactionState(mProtoParser.toProto(transaction));
     mTransactionQueue.push(state);

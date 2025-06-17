@@ -42,22 +42,19 @@ class CommandGetCapabilities : public Command {
     }
 
     Status doMain(Args && /*args*/) override {
-        std::string statusStr;
-        int32_t cap;
-        Status ret;
+        auto hal = getHal();
 
-        if (auto hal = getHal<aidl::IVibrator>()) {
-            auto status = hal->call(&aidl::IVibrator::getCapabilities, &cap);
-            statusStr = status.getDescription();
-            ret = status.isOk() ? OK : ERROR;
-        } else {
+        if (!hal) {
             return UNAVAILABLE;
         }
 
-        std::cout << "Status: " << statusStr << std::endl;
+        int32_t cap;
+        auto status = hal->getCapabilities(&cap);
+
+        std::cout << "Status: " << status.getDescription() << std::endl;
         std::cout << "Capabilities: " << std::bitset<32>(cap) << std::endl;
 
-        return ret;
+        return status.isOk() ? OK : ERROR;
     }
 };
 

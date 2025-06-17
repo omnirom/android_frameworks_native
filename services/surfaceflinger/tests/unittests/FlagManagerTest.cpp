@@ -125,13 +125,13 @@ TEST_F(FlagManagerTest, DISABLED_returnsOverrideFalse) {
 TEST_F(FlagManagerTest, ignoresOverrideInUnitTestMode) {
     mFlagManager.setUnitTestMode();
 
-    SET_FLAG_FOR_TEST(flags::multithreaded_present, true);
+    SET_FLAG_FOR_TEST(flags::no_vsyncs_on_screen_off, true);
 
     // If this has not been called in this process, it will be called.
     // Regardless, the result is ignored.
     EXPECT_CALL(mFlagManager, getBoolProperty).WillRepeatedly(Return(false));
 
-    EXPECT_EQ(true, mFlagManager.multithreaded_present());
+    EXPECT_EQ(true, mFlagManager.no_vsyncs_on_screen_off());
 }
 
 TEST_F(FlagManagerTest, returnsValue) {

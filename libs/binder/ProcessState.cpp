@@ -48,6 +48,10 @@
 #define DEFAULT_MAX_BINDER_THREADS 15
 #define DEFAULT_ENABLE_ONEWAY_SPAM_DETECTION 1
 
+#if defined(__ANDROID__) || defined(__Fuchsia__)
+#define EXPECT_BINDER_OPEN_SUCCESS
+#endif
+
 #ifdef __ANDROID_VNDK__
 const char* kDefaultDriver = "/dev/vndbinder";
 #else
@@ -501,6 +505,21 @@ bool ProcessState::isThreadPoolStarted() const {
     return mThreadPoolStarted;
 }
 
+void ProcessState::checkExpectingThreadPoolStart() const {
+    if (mThreadPoolStarted) return;
+
+    // this is also racey, but you should setup the threadpool in the main thread. If that is an
+    // issue, we can check if we are the process leader, but haven't seen the issue in practice.
+    size_t requestedThreads = mMaxThreads.load();
+
+    // if it's manually set to the default, we do ignore it here...
+    if (requestedThreads == DEFAULT_MAX_BINDER_THREADS) return;
+    if (requestedThreads == 0) return;
+
+    ALOGW("Thread pool configuration of size %zu requested, but startThreadPool was not called.",
+          requestedThreads);
+}
+
 #define DRIVER_FEATURES_PATH "/dev/binderfs/features/"
 bool ProcessState::isDriverFeatureEnabled(const DriverFeature feature) {
     // Use static variable to cache the results.
@@ -598,7 +617,7 @@ ProcessState::ProcessState(const char* driver)
         }
     }
 
-#ifdef __ANDROID__
+#if defined(EXPECT_BINDER_OPEN_SUCCESS)
     LOG_ALWAYS_FATAL_IF(!opened.ok(),
                         "Binder driver '%s' could not be opened. Error: %s. Terminating.",
                         driver, error.c_str());

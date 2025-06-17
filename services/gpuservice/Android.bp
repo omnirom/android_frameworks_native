@@ -7,6 +7,13 @@ package {
     default_applicable_licenses: ["frameworks_native_license"],
 }
 
+aconfig_declarations {
+    name: "gpuservice_flags",
+    package: "com.android.frameworks.gpuservice.flags",
+    container: "system",
+    srcs: ["gpuservice_flags.aconfig"],
+}
+
 cc_defaults {
     name: "gpuservice_defaults",
     cflags: [
@@ -19,10 +26,22 @@ cc_defaults {
     ],
 }
 
+cc_aconfig_library {
+    name: "gpuservice_multiuser_flags_c_lib",
+    aconfig_declarations: "gpuservice_flags",
+}
+
+cc_aconfig_library {
+    name: "gpuservice_flags_c_lib",
+    aconfig_declarations: "graphicsenv_flags",
+}
+
 cc_defaults {
     name: "libgpuservice_defaults",
     defaults: [
+        "aconfig_lib_cc_static_link.defaults",
         "gpuservice_defaults",
+        "libfeatureoverride_deps",
         "libgfxstats_deps",
         "libgpumem_deps",
         "libgpumemtracer_deps",
@@ -40,8 +59,11 @@ cc_defaults {
         "libgraphicsenv",
         "liblog",
         "libutils",
+        "server_configurable_flags",
     ],
     static_libs: [
+        "gpuservice_flags_c_lib",
+        "libfeatureoverride",
         "libgfxstats",
         "libgpumem",
         "libgpumemtracer",
@@ -83,6 +105,9 @@ cc_library_static {
     srcs: [
         ":libgpuservice_sources",
     ],
+    shared_libs: [
+        "gpuservice_multiuser_flags_c_lib",
+    ],
 }
 
 cc_defaults {
@@ -116,5 +141,8 @@ cc_binary {
     srcs: [":gpuservice_binary_sources"],
     static_libs: [
         "libgpuservice",
+    ],
+    shared_libs: [
+        "gpuservice_multiuser_flags_c_lib",
     ],
 }

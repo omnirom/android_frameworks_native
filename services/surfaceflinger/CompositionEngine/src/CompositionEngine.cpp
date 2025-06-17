@@ -58,11 +58,11 @@ CompositionEngine::createLayerFECompositionState() {
 }
 
 HWComposer& CompositionEngine::getHwComposer() const {
-    return *mHwComposer.get();
+    return *mHwComposer;
 }
 
-void CompositionEngine::setHwComposer(std::unique_ptr<HWComposer> hwComposer) {
-    mHwComposer = std::move(hwComposer);
+void CompositionEngine::setHwComposer(HWComposer* hwComposer) {
+    mHwComposer = hwComposer;
 }
 
 renderengine::RenderEngine& CompositionEngine::getRenderEngine() const {
@@ -91,13 +91,13 @@ nsecs_t CompositionEngine::getLastFrameRefreshTimestamp() const {
 
 namespace {
 void offloadOutputs(Outputs& outputs) {
-    if (!FlagManager::getInstance().multithreaded_present() || outputs.size() < 2) {
+    if (outputs.size() < 2) {
         return;
     }
 
     ui::PhysicalDisplayVector<compositionengine::Output*> outputsToOffload;
     for (const auto& output : outputs) {
-        if (!ftl::Optional(output->getDisplayId()).and_then(HalDisplayId::tryCast)) {
+        if (!output->getDisplayIdVariant().and_then(asHalDisplayId<DisplayIdVariant>)) {
             // Not HWC-enabled, so it is always client-composited. No need to offload.
             continue;
         }

@@ -45,6 +45,7 @@ public:
     // compositionengine::Output overrides
     bool isValid() const override;
     ftl::Optional<DisplayId> getDisplayId() const override;
+    ftl::Optional<DisplayIdVariant> getDisplayIdVariant() const override;
     void setCompositionEnabled(bool) override;
     void setLayerCachingEnabled(bool) override;
     void setLayerCachingTexturePoolEnabled(bool) override;

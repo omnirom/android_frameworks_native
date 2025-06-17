@@ -190,6 +190,23 @@ flag {
 } # graphite_renderengine_preview_rollout
 
 flag {
+  name: "hdcp_negotiation"
+  namespace: "core_graphics"
+  description: "detect secure layers to start HDCP negotiation"
+  bug: "375340594"
+  metadata {
+    purpose: PURPOSE_BUGFIX
+  }
+} # hdcp_negotiation
+
+flag {
+  name: "increase_missed_frame_jank_threshold"
+  namespace: "core_graphics"
+  description: "Increase the jank threshold to 4 milliseconds"
+  bug: "342265411"
+} # increase_missed_frame_jank_threshold
+
+flag {
   name: "latch_unsignaled_with_auto_refresh_changed"
   namespace: "core_graphics"
   description: "Ignore eAutoRefreshChanged with latch unsignaled"
@@ -209,12 +226,30 @@ flag {
 } # local_tonemap_screenshots
 
 flag {
+  name: "monitor_buffer_fences"
+  namespace: "core_graphics"
+  description: "Monitors fences for each buffer"
+  bug: "360932099"
+} # monitor_buffer_fences
+
+flag {
   name: "no_vsyncs_on_screen_off"
   namespace: "core_graphics"
   description: "Stop vsync / Choreographer callbacks to apps when the screen is off"
   bug: "331636736"
   is_fixed_read_only: true
 } # no_vsyncs_on_screen_off
+
+flag {
+  name: "reject_dupe_layerstacks"
+  namespace: "window_surfaces"
+  description: "Reject duplicate layerstacks for displays"
+  bug: "370358572"
+  is_fixed_read_only: true
+  metadata {
+    purpose: PURPOSE_BUGFIX
+  }
+ } # reject_dupe_layerstacks
 
 flag {
   name: "single_hop_screenshot"
@@ -245,6 +280,13 @@ flag {
   bug: "352320847"
   is_fixed_read_only: true
 } # stable_edid_ids
+
+flag {
+  name: "synced_resolution_switch"
+  namespace: "core_graphics"
+  description: "Synchronize resolution modeset with framebuffer resizing"
+  bug: "355427258"
+} # synced_resolution_switch
 
 flag {
   name: "true_hdr_screenshots"
@@ -294,6 +336,16 @@ flag {
     purpose: PURPOSE_BUGFIX
   }
 } # vrr_bugfix_dropped_frame
+
+flag {
+  name: "vsync_predictor_recovery"
+  namespace: "core_graphics"
+  description: "Recover the vsync predictor from bad vsync model"
+  bug: "385059265"
+  metadata {
+    purpose: PURPOSE_BUGFIX
+  }
+ } # vsync_predictor_recovery
 
 flag {
   name: "window_blur_kawase2"

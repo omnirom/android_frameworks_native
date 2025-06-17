@@ -16,9 +16,6 @@
 
 #pragma once
 
-#include <binder/IInterface.h>
-#include <binder/SafeInterface.h>
-
 #include <utils/Errors.h>
 #include <utils/RefBase.h>
 
@@ -98,27 +95,18 @@ public:
     virtual void onSetFrameRate(float /*frameRate*/, int8_t /*compatibility*/,
                                 int8_t /*changeFrameRateStrategy*/) {}
 #endif
-};
 
-#ifndef NO_BINDER
-class IConsumerListener : public ConsumerListener, public IInterface {
-public:
-    DECLARE_META_INTERFACE(ConsumerListener)
-};
-
-class BnConsumerListener : public SafeBnInterface<IConsumerListener> {
-public:
-    BnConsumerListener() : SafeBnInterface<IConsumerListener>("BnConsumerListener") {}
-
-    status_t onTransact(uint32_t code, const Parcel& data, Parcel* reply,
-                        uint32_t flags = 0) override;
-};
-
-#else
-class IConsumerListener : public ConsumerListener {
-};
-class BnConsumerListener : public IConsumerListener {
-};
+#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_UNLIMITED_SLOTS)
+    // Notifies the consumer that IGraphicBufferProducer::extendSlotCount has
+    // been called and the total slot count has increased.
+    //
+    // This will only ever be called if
+    // IGraphicBufferConsumer::allowUnlimitedSlots has been called on the
+    // consumer.
+    virtual void onSlotCountChanged(int /* slotCount */) {}
 #endif
+};
+
+class IConsumerListener : public ConsumerListener {};
 
 } // namespace android

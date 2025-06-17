@@ -170,6 +170,7 @@ public:
 
     // Returns the DisplayId the output represents, if it has one
     virtual ftl::Optional<DisplayId> getDisplayId() const = 0;
+    virtual ftl::Optional<DisplayIdVariant> getDisplayIdVariant() const = 0;
 
     // Enables (or disables) composition on this output
     virtual void setCompositionEnabled(bool) = 0;

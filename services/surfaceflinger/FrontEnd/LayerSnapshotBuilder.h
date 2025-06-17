@@ -106,9 +106,10 @@ private:
 
     void updateSnapshots(const Args& args);
 
-    const LayerSnapshot& updateSnapshotsInHierarchy(const Args&, const LayerHierarchy& hierarchy,
-                                                    LayerHierarchy::TraversalPath& traversalPath,
-                                                    const LayerSnapshot& parentSnapshot, int depth);
+    const LayerSnapshot& updateSnapshotsInHierarchy(
+            const Args&, const LayerHierarchy& hierarchy,
+            const LayerHierarchy::TraversalPath& traversalPath, const LayerSnapshot& parentSnapshot,
+            int depth);
     void updateSnapshot(LayerSnapshot&, const Args&, const RequestedLayerState&,
                         const LayerSnapshot& parentSnapshot, const LayerHierarchy::TraversalPath&);
     static void updateRelativeState(LayerSnapshot& snapshot, const LayerSnapshot& parentSnapshot,

@@ -50,7 +50,6 @@ static const char* native_processes_to_dump[] = {
 
 // Native processes to dump on debuggable builds.
 static const char* debuggable_native_processes_to_dump[] = {
-        "/system/bin/keystore2",
         "/system/bin/vold",
         NULL,
 };
@@ -101,7 +100,7 @@ static const std::vector<std::string> aidl_interfaces_to_dump {
         "android.hardware.automotive.remoteaccess.IRemoteAccess",
         "android.hardware.automotive.vehicle.IVehicle",
         "android.hardware.biometrics.face.IBiometricsFace",
-        "android.hardware.biometrics.fingerprint.IBiometricsFingerprint",
+        "android.hardware.biometrics.fingerprint.IFingerprint",
         "android.hardware.camera.provider.ICameraProvider",
         "android.hardware.drm.IDrmFactory",
         "android.hardware.graphics.allocator.IAllocator",

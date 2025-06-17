@@ -89,7 +89,7 @@ class CommandCompose : public Command {
     }
 
     Status doMain(Args && /*args*/) override {
-        auto hal = getHal<aidl::IVibrator>();
+        auto hal = getHal();
 
         if (!hal) {
             return UNAVAILABLE;
@@ -104,7 +104,7 @@ class CommandCompose : public Command {
             callback = ndk::SharedRefBase::make<VibratorCallback>();
         }
 
-        auto status = hal->call(&aidl::IVibrator::compose, mComposite, callback);
+        auto status = hal->compose(mComposite, callback);
 
         if (status.isOk() && callback) {
             callback->waitForComplete();

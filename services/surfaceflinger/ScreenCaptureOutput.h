@@ -20,24 +20,27 @@
 #include <compositionengine/RenderSurface.h>
 #include <compositionengine/impl/Output.h>
 #include <ui/Rect.h>
-
-#include "RenderArea.h"
+#include <unordered_map>
 
 namespace android {
 
 struct ScreenCaptureOutputArgs {
     const compositionengine::CompositionEngine& compositionEngine;
     const compositionengine::Output::ColorProfile& colorProfile;
-    const RenderArea& renderArea;
     ui::LayerStack layerStack;
+    Rect sourceCrop;
     std::shared_ptr<renderengine::ExternalTexture> buffer;
+    ftl::Optional<DisplayIdVariant> displayIdVariant;
+    ui::Size reqBufferSize;
     float sdrWhitePointNits;
     float displayBrightnessNits;
     // Counterintuitively, when targetBrightness > 1.0 then dim the scene.
     float targetBrightness;
+    float layerAlpha;
     bool regionSampling;
     bool treat170mAsSrgb;
     bool dimInGammaSpaceForEnhancedScreenshots;
+    bool isSecure = false;
     bool isProtected = false;
     bool enableLocalTonemapping = false;
 };
@@ -48,10 +51,10 @@ struct ScreenCaptureOutputArgs {
 // SurfaceFlinger::captureLayers and SurfaceFlinger::captureDisplay.
 class ScreenCaptureOutput : public compositionengine::impl::Output {
 public:
-    ScreenCaptureOutput(const RenderArea& renderArea,
+    ScreenCaptureOutput(const Rect sourceCrop, ftl::Optional<DisplayIdVariant> displayIdVariant,
                         const compositionengine::Output::ColorProfile& colorProfile,
-                        bool regionSampling, bool dimInGammaSpaceForEnhancedScreenshots,
-                        bool enableLocalTonemapping);
+                        float layerAlpha, bool regionSampling,
+                        bool dimInGammaSpaceForEnhancedScreenshots, bool enableLocalTonemapping);
 
     void updateColorProfile(const compositionengine::CompositionRefreshArgs&) override;
 
@@ -65,8 +68,11 @@ protected:
             const std::shared_ptr<renderengine::ExternalTexture>& buffer) const override;
 
 private:
-    const RenderArea& mRenderArea;
+    std::unordered_map<int32_t, aidl::android::hardware::graphics::composer3::Luts> generateLuts();
+    const Rect mSourceCrop;
+    const ftl::Optional<DisplayIdVariant> mDisplayIdVariant;
     const compositionengine::Output::ColorProfile& mColorProfile;
+    const float mLayerAlpha;
     const bool mRegionSampling;
     const bool mDimInGammaSpaceForEnhancedScreenshots;
     const bool mEnableLocalTonemapping;

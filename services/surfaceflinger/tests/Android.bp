@@ -52,7 +52,7 @@ cc_test {
         "LayerTypeTransaction_test.cpp",
         "LayerUpdate_test.cpp",
         "MirrorLayer_test.cpp",
-        "MultiDisplayLayerBounds_test.cpp",
+        "MultiDisplay_test.cpp",
         "RefreshRateOverlay_test.cpp",
         "RelativeZ_test.cpp",
         "ReleaseBufferCallback_test.cpp",
@@ -63,7 +63,10 @@ cc_test {
         "VirtualDisplay_test.cpp",
         "WindowInfosListener_test.cpp",
     ],
-    data: ["SurfaceFlinger_test.filter"],
+    data: [
+        "SurfaceFlinger_test.filter",
+        "testdata/*",
+    ],
     static_libs: [
         "android.hardware.graphics.composer@2.1",
         "libsurfaceflinger_common",
@@ -76,6 +79,7 @@ cc_test {
         "libcutils",
         "libEGL",
         "libGLESv2",
+        "libjnigraphics",
         "libgui",
         "liblog",
         "libnativewindow",
@@ -83,6 +87,7 @@ cc_test {
         "libui",
         "libutils",
         "server_configurable_flags",
+        "libc++",
     ],
     header_libs: [
         "libnativewindow_headers",

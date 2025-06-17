@@ -21,20 +21,75 @@ package {
     default_applicable_licenses: ["frameworks_native_license"],
 }
 
+cc_aconfig_library {
+    name: "gpuservice_unittest_flags_c_lib",
+    aconfig_declarations: "graphicsenv_flags",
+}
+
+genrule_defaults {
+    name: "gpuservice_unittest_feature_config_pb_defaults",
+    tools: ["aprotoc"],
+    tool_files: [
+        ":feature_config_proto_definitions",
+    ],
+    cmd: "$(location aprotoc) " +
+        "--encode=feature_override.FeatureOverrideProtos " +
+        "$(locations :feature_config_proto_definitions) " +
+        "< $(in) " +
+        "> $(out) ",
+}
+
+// Main protobuf used by the unit tests.
+filegroup {
+    name: "gpuservice_unittest_feature_config_vk_prototext",
+    srcs: [
+        "data/feature_config_test.txtpb",
+    ],
+}
+
+genrule {
+    name: "gpuservice_unittest_feature_config_vk_binarypb",
+    defaults: ["gpuservice_unittest_feature_config_pb_defaults"],
+    srcs: [
+        ":gpuservice_unittest_feature_config_vk_prototext",
+    ],
+    out: ["gpuservice_unittest_feature_config_vk.binarypb"],
+}
+
+// "Updated" protobuf, used to validate forceFileRead().
+filegroup {
+    name: "gpuservice_unittest_feature_config_vk_force_read_prototext",
+    srcs: [
+        "data/feature_config_test_force_read.txtpb",
+    ],
+}
+
+genrule {
+    name: "gpuservice_unittest_feature_config_vk_force_read_binarypb",
+    defaults: ["gpuservice_unittest_feature_config_pb_defaults"],
+    srcs: [
+        ":gpuservice_unittest_feature_config_vk_force_read_prototext",
+    ],
+    out: ["gpuservice_unittest_feature_config_vk_force_read.binarypb"],
+}
+
 cc_test {
     name: "gpuservice_unittest",
     test_suites: ["device-tests"],
     defaults: [
+        "aconfig_lib_cc_static_link.defaults",
         "libgpuservice_defaults",
     ],
     srcs: [
+        "FeatureOverrideParserTest.cpp",
         "GpuMemTest.cpp",
         "GpuMemTracerTest.cpp",
-        "GpuStatsTest.cpp",
         "GpuServiceTest.cpp",
+        "GpuStatsTest.cpp",
     ],
     header_libs: ["bpf_headers"],
     shared_libs: [
+        "gpuservice_multiuser_flags_c_lib",
         "libbase",
         "libbinder",
         "libbpf_bcc",
@@ -48,10 +103,15 @@ cc_test {
         "libutils",
     ],
     static_libs: [
+        "gpuservice_unittest_flags_c_lib",
         "libgmock",
         "libgpuservice",
         "libperfetto_client_experimental",
         "perfetto_trace_protos",
+    ],
+    data: [
+        ":gpuservice_unittest_feature_config_vk_binarypb",
+        ":gpuservice_unittest_feature_config_vk_force_read_binarypb",
     ],
     require_root: true,
 }

@@ -76,7 +76,7 @@ void fillYV12BufferRect(uint8_t* buf, int w, int h, int stride,
 }
 
 void fillRGBA8Buffer(uint8_t* buf, int w, int h, int stride) {
-    const size_t PIXEL_SIZE = 4;
+    constexpr size_t PIXEL_SIZE = 4;
     for (int x = 0; x < w; x++) {
         for (int y = 0; y < h; y++) {
             off_t offset = (y * stride + x) * PIXEL_SIZE;
@@ -85,6 +85,21 @@ void fillRGBA8Buffer(uint8_t* buf, int w, int h, int stride) {
                 int parityY = (y / (1 << (c+2))) & 1;
                 buf[offset + c] = (parityX ^ parityY) ? 231 : 35;
             }
+        }
+    }
+}
+
+void fillRGBA8Buffer(uint8_t* buf, int w, int h, int stride, uint8_t r, uint8_t g, uint8_t b,
+                     uint8_t a) {
+    constexpr size_t PIXEL_SIZE = 4;
+
+    for (int x = 0; x < w; x++) {
+        for (int y = 0; y < h; y++) {
+            off_t offset = (y * stride + x) * PIXEL_SIZE;
+            buf[offset] = r;
+            buf[offset + 1] = g;
+            buf[offset + 2] = b;
+            buf[offset + 3] = a;
         }
     }
 }

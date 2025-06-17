@@ -258,11 +258,11 @@ enum ANativeWindow_FrameRateCompatibility {
     ANATIVEWINDOW_FRAME_RATE_COMPATIBILITY_FIXED_SOURCE = 1,
 
     /**
-     * The window requests a frame rate that is greater than or equal to the specified frame rate.
+     * The window requests a frame rate that is at least the specified frame rate.
      * This value should be used for UIs, animations, scrolling, and anything that is not a game
      * or video.
      */
-    ANATIVEWINDOW_FRAME_RATE_COMPATIBILITY_GTE = 2
+    ANATIVEWINDOW_FRAME_RATE_COMPATIBILITY_AT_LEAST = 2
 };
 
 /**

@@ -17,4 +17,4 @@
 
 package android.os;
 
-@JavaOnlyStableParcelable @NdkOnlyStableParcelable parcelable PersistableBundle cpp_header "binder/PersistableBundle.h" ndk_header "android/persistable_bundle_aidl.h";
+@JavaOnlyStableParcelable @NdkOnlyStableParcelable @RustOnlyStableParcelable parcelable PersistableBundle cpp_header "binder/PersistableBundle.h" ndk_header "android/persistable_bundle_aidl.h" rust_type "binder::PersistableBundle";

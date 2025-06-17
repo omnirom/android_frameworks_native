@@ -20,6 +20,7 @@
 #include <input/KeyboardClassifier.h>
 #include "NotifyArgs.h"
 
+#include <string>
 #include <vector>
 
 namespace android {
@@ -39,6 +40,8 @@ public:
     InputReaderContext() {}
     virtual ~InputReaderContext() {}
 
+    virtual std::string dump() = 0;
+
     virtual void updateGlobalMetaState() = 0;
     virtual int32_t getGlobalMetaState() = 0;
 
@@ -55,7 +58,7 @@ public:
     virtual InputReaderPolicyInterface* getPolicy() = 0;
     virtual EventHubInterface* getEventHub() = 0;
 
-    virtual int32_t getNextId() = 0;
+    virtual int32_t getNextId() const = 0;
 
     virtual void updateLedMetaState(int32_t metaState) = 0;
     virtual int32_t getLedMetaState() = 0;

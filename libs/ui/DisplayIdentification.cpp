@@ -26,6 +26,7 @@
 #include <string>
 #include <string_view>
 
+#include <ftl/concat.h>
 #include <ftl/hash.h>
 #include <log/log.h>
 #include <ui/DisplayIdentification.h>
@@ -392,10 +393,6 @@ std::optional<PnpId> getPnpId(uint16_t manufacturerId) {
     return a && b && c ? std::make_optional(PnpId{a, b, c}) : std::nullopt;
 }
 
-std::optional<PnpId> getPnpId(PhysicalDisplayId displayId) {
-    return getPnpId(displayId.getManufacturerId());
-}
-
 std::optional<DisplayIdentificationInfo> parseDisplayIdentificationData(
         uint8_t port, const DisplayIdentificationData& data) {
     if (data.empty()) {
@@ -417,6 +414,7 @@ std::optional<DisplayIdentificationInfo> parseDisplayIdentificationData(
     return DisplayIdentificationInfo{
             .id = displayId,
             .name = std::string(edid->displayName),
+            .port = port,
             .deviceProductInfo = buildDeviceProductInfo(*edid),
             .preferredDetailedTimingDescriptor = edid->preferredDetailedTimingDescriptor,
     };
@@ -424,6 +422,29 @@ std::optional<DisplayIdentificationInfo> parseDisplayIdentificationData(
 
 PhysicalDisplayId getVirtualDisplayId(uint32_t id) {
     return PhysicalDisplayId::fromEdid(0, kVirtualEdidManufacturerId, id);
+}
+
+PhysicalDisplayId generateEdidDisplayId(const Edid& edid) {
+    const ftl::Concat displayDetailsString{edid.manufacturerId,
+                                           edid.productId,
+                                           ftl::truncated<13>(edid.displayName),
+                                           edid.manufactureWeek,
+                                           edid.manufactureOrModelYear,
+                                           edid.physicalSizeInCm.getWidth(),
+                                           edid.physicalSizeInCm.getHeight()};
+
+    // String has to be cropped to 64 characters (at most) for ftl::stable_hash.
+    // This is fine as the accuracy or completeness of the above fields is not
+    // critical for a ID fabrication.
+    const std::optional<uint64_t> hashedDisplayDetailsOpt =
+            ftl::stable_hash(std::string_view(displayDetailsString.c_str(), 64));
+
+    // Combine the hashes via bit-shifted XORs.
+    const uint64_t id = (hashedDisplayDetailsOpt.value_or(0) << 17) ^
+            (edid.hashedBlockZeroSerialNumberOpt.value_or(0) >> 11) ^
+            (edid.hashedDescriptorBlockSerialNumberOpt.value_or(0) << 23);
+
+    return PhysicalDisplayId::fromValue(id);
 }
 
 } // namespace android

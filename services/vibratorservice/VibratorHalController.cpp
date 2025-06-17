@@ -18,8 +18,6 @@
 
 #include <aidl/android/hardware/vibrator/IVibrator.h>
 #include <android/binder_manager.h>
-#include <android/hardware/vibrator/1.3/IVibrator.h>
-#include <hardware/vibrator.h>
 
 #include <utils/Log.h>
 
@@ -31,14 +29,9 @@ using aidl::android::hardware::vibrator::CompositeEffect;
 using aidl::android::hardware::vibrator::CompositePrimitive;
 using aidl::android::hardware::vibrator::Effect;
 using aidl::android::hardware::vibrator::EffectStrength;
+using aidl::android::hardware::vibrator::IVibrator;
 
 using std::chrono::milliseconds;
-
-namespace V1_0 = android::hardware::vibrator::V1_0;
-namespace V1_1 = android::hardware::vibrator::V1_1;
-namespace V1_2 = android::hardware::vibrator::V1_2;
-namespace V1_3 = android::hardware::vibrator::V1_3;
-namespace Aidl = aidl::android::hardware::vibrator;
 
 namespace android {
 
@@ -53,9 +46,9 @@ std::shared_ptr<HalWrapper> connectHal(std::shared_ptr<CallbackScheduler> schedu
         return nullptr;
     }
 
-    auto serviceName = std::string(Aidl::IVibrator::descriptor) + "/default";
+    auto serviceName = std::string(IVibrator::descriptor) + "/default";
     if (AServiceManager_isDeclared(serviceName.c_str())) {
-        std::shared_ptr<Aidl::IVibrator> hal = Aidl::IVibrator::fromBinder(
+        std::shared_ptr<IVibrator> hal = IVibrator::fromBinder(
                 ndk::SpAIBinder(AServiceManager_waitForService(serviceName.c_str())));
         if (hal) {
             ALOGV("Successfully connected to Vibrator HAL AIDL service.");
@@ -63,30 +56,9 @@ std::shared_ptr<HalWrapper> connectHal(std::shared_ptr<CallbackScheduler> schedu
         }
     }
 
-    sp<V1_0::IVibrator> halV1_0 = V1_0::IVibrator::getService();
-    if (halV1_0 == nullptr) {
-        ALOGV("Vibrator HAL service not available.");
-        gHalExists = false;
-        return nullptr;
-    }
-
-    sp<V1_3::IVibrator> halV1_3 = V1_3::IVibrator::castFrom(halV1_0);
-    if (halV1_3) {
-        ALOGV("Successfully connected to Vibrator HAL v1.3 service.");
-        return std::make_shared<HidlHalWrapperV1_3>(std::move(scheduler), halV1_3);
-    }
-    sp<V1_2::IVibrator> halV1_2 = V1_2::IVibrator::castFrom(halV1_0);
-    if (halV1_2) {
-        ALOGV("Successfully connected to Vibrator HAL v1.2 service.");
-        return std::make_shared<HidlHalWrapperV1_2>(std::move(scheduler), halV1_2);
-    }
-    sp<V1_1::IVibrator> halV1_1 = V1_1::IVibrator::castFrom(halV1_0);
-    if (halV1_1) {
-        ALOGV("Successfully connected to Vibrator HAL v1.1 service.");
-        return std::make_shared<HidlHalWrapperV1_1>(std::move(scheduler), halV1_1);
-    }
-    ALOGV("Successfully connected to Vibrator HAL v1.0 service.");
-    return std::make_shared<HidlHalWrapperV1_0>(std::move(scheduler), halV1_0);
+    ALOGV("Vibrator HAL service not available.");
+    gHalExists = false;
+    return nullptr;
 }
 
 // -------------------------------------------------------------------------------------------------

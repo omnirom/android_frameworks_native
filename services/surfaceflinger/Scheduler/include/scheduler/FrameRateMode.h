@@ -33,6 +33,10 @@ struct FrameRateMode {
     }
 
     bool operator!=(const FrameRateMode& other) const { return !(*this == other); }
+
+    bool matchesResolution(const FrameRateMode& other) const {
+        return modePtr->getResolution() == other.modePtr->getResolution();
+    }
 };
 
 inline std::string to_string(const FrameRateMode& mode) {

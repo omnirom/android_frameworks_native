@@ -41,7 +41,7 @@ int receiver(int /*fd*/, int /*events*/, void* data)
 
     while ((n = q->getEvents(buffer, 1)) > 0) {
         for (int i=0 ; i<n ; i++) {
-            if (buffer[i].header.type == DisplayEventReceiver::DISPLAY_EVENT_VSYNC) {
+            if (buffer[i].header.type == DisplayEventType::DISPLAY_EVENT_VSYNC) {
                 printf("event vsync: count=%d\t", buffer[i].vsync.count);
             }
             if (oldTimeStamp) {

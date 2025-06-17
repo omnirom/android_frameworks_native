@@ -115,7 +115,7 @@ public:
     using LayerLuts =
             ftl::SmallMap<HWC2::Layer*, LutOffsetAndProperties, kLutFileDescriptorMapperSize>;
     using LutFileDescriptorMapper =
-            ftl::SmallMap<HWC2::Layer*, ndk::ScopedFileDescriptor, kLutFileDescriptorMapperSize>;
+            ftl::SmallMap<HWC2::Layer*, ::android::base::unique_fd, kLutFileDescriptorMapperSize>;
 
     [[nodiscard]] virtual hal::Error acceptChanges() = 0;
     [[nodiscard]] virtual base::expected<std::shared_ptr<HWC2::Layer>, hal::Error>
@@ -203,6 +203,11 @@ public:
     [[nodiscard]] virtual hal::Error getMaxLayerPictureProfiles(int32_t* maxProfiles) = 0;
     [[nodiscard]] virtual hal::Error setPictureProfileHandle(
             const PictureProfileHandle& handle) = 0;
+    [[nodiscard]] virtual hal::Error startHdcpNegotiation(
+            const aidl::android::hardware::drm::HdcpLevels& levels) = 0;
+    [[nodiscard]] virtual hal::Error getLuts(
+            const std::vector<android::sp<android::GraphicBuffer>>&,
+            std::vector<aidl::android::hardware::graphics::composer3::Luts>*) = 0;
 };
 
 namespace impl {
@@ -288,6 +293,10 @@ public:
     hal::Error setIdleTimerEnabled(std::chrono::milliseconds timeout) override;
     hal::Error getMaxLayerPictureProfiles(int32_t* maxProfiles) override;
     hal::Error setPictureProfileHandle(const android::PictureProfileHandle& handle) override;
+    hal::Error startHdcpNegotiation(
+            const aidl::android::hardware::drm::HdcpLevels& levels) override;
+    hal::Error getLuts(const std::vector<android::sp<android::GraphicBuffer>>&,
+                       std::vector<aidl::android::hardware::graphics::composer3::Luts>*) override;
 
     // Other Display methods
     hal::HWDisplayId getId() const override { return mId; }

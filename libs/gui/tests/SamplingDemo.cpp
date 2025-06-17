@@ -36,7 +36,7 @@ namespace android {
 class Button : public gui::BnRegionSamplingListener {
 public:
     Button(const char* name, const Rect& samplingArea) {
-        sp<SurfaceComposerClient> client = new SurfaceComposerClient;
+        sp<SurfaceComposerClient> client = sp<SurfaceComposerClient>::make();
 
         mButton = client->createSurface(String8(name), 0, 0, PIXEL_FORMAT_RGBA_8888,
                                         ISurfaceComposerClient::eFXSurfaceEffect);

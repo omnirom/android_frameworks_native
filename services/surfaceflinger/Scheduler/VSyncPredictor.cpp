@@ -206,7 +206,12 @@ bool VSyncPredictor::addVsyncTimestamp(nsecs_t timestamp) {
     // Normalizing to the oldest timestamp cuts down on error in calculating the intercept.
     const auto oldestTS = *std::min_element(mTimestamps.begin(), mTimestamps.end());
     auto it = mRateMap.find(idealPeriod());
-    auto const currentPeriod = it->second.slope;
+    // Calculated slope over the period of time can become outdated as the new timestamps are
+    // stored. Using idealPeriod instead provides a rate which is valid at all the times.
+    auto const currentPeriod =
+            mDisplayModePtr->getVrrConfig() && FlagManager::getInstance().vsync_predictor_recovery()
+            ? idealPeriod()
+            : it->second.slope;
 
     // The mean of the ordinals must be precise for the intercept calculation, so scale them up for
     // fixed-point arithmetic.

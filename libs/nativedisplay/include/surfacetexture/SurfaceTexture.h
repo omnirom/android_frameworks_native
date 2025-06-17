@@ -343,9 +343,13 @@ protected:
      * releaseBufferLocked overrides the ConsumerBase method to update the
      * mEglSlots array in addition to the ConsumerBase.
      */
+#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(BQ_GL_FENCE_CLEANUP)
+    virtual status_t releaseBufferLocked(int slot, const sp<GraphicBuffer> graphicBuffer) override;
+#else
     virtual status_t releaseBufferLocked(int slot, const sp<GraphicBuffer> graphicBuffer,
                                          EGLDisplay display = EGL_NO_DISPLAY,
                                          EGLSyncKHR eglFence = EGL_NO_SYNC_KHR) override;
+#endif
 
     /**
      * freeBufferLocked frees up the given buffer slot. If the slot has been
