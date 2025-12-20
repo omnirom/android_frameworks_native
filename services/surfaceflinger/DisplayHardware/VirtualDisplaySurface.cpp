@@ -335,8 +335,8 @@ status_t VirtualDisplaySurface::dequeueBuffer(Source source,
     if (source == SOURCE_SCRATCH) {
         usage |= GRALLOC_USAGE_HW_FB;
         usage &= ~(GRALLOC_USAGE_HW_VIDEO_ENCODER);
-        VDS_LOGV("%s(%s): updated scratch buffer usage flags=%#" PRIx64,
-                __func__, ftl::enum_string(source).c_str(), usage);
+        VDS_LOGV("dequeueBuffer(%s): updated scratch buffer usage flags=%#" PRIx64,
+                dbgSourceStr(source), usage);
     }
 
     status_t result =
