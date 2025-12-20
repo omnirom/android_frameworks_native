@@ -15,7 +15,11 @@
  */
 #pragma once
 
+#include <stddef.h>
+
 #include <lib/tipc/tipc_srv.h>
+#include <trusty_ipc.h>
+#include <uapi/trusty_peer_id.h>
 
 #if defined(__cplusplus)
 extern "C" {
@@ -24,14 +28,17 @@ extern "C" {
 struct AIBinder;
 struct ARpcServerTrusty;
 
-struct ARpcServerTrusty* ARpcServerTrusty_newPerSession(struct AIBinder* (*)(const void*, size_t,
-                                                                             char*),
-                                                        char*, void (*)(char*));
-void ARpcServerTrusty_delete(struct ARpcServerTrusty*);
-int ARpcServerTrusty_handleConnect(struct ARpcServerTrusty*, handle_t, const struct uuid*, void**);
-int ARpcServerTrusty_handleMessage(void*);
-void ARpcServerTrusty_handleDisconnect(void*);
-void ARpcServerTrusty_handleChannelCleanup(void*);
+struct ARpcServerTrusty* ARpcServerTrusty_newPerSession(
+        struct AIBinder* (*cb)(const struct trusty_peer_id*, size_t peer_len, void*), void* cbArg,
+        void (*deleteCbArg)(void*));
+void ARpcServerTrusty_delete(struct ARpcServerTrusty* rpcServer);
+
+int ARpcServerTrusty_handleConnect(struct ARpcServerTrusty* rpcServer, handle_t chan,
+                                   const struct trusty_peer_id* peer, size_t peer_len,
+                                   void** ctx_p);
+int ARpcServerTrusty_handleMessage(void* ctx);
+void ARpcServerTrusty_handleDisconnect(void* ctx);
+void ARpcServerTrusty_handleChannelCleanup(void* ctx);
 
 #if defined(__cplusplus)
 }

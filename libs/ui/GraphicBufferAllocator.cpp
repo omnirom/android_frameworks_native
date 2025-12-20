@@ -17,6 +17,8 @@
 
 #define LOG_TAG "GraphicBufferAllocator"
 #define ATRACE_TAG ATRACE_TAG_GRAPHICS
+#define ATRACE_ALLOC_COUNTER_NAME "mem.gralloc.buffers"
+#define ATRACE_ALLOC_TRACK_NAME "mem.gralloc.allocations"
 
 #include <ui/GraphicBufferAllocator.h>
 
@@ -41,6 +43,7 @@ namespace android {
 // ---------------------------------------------------------------------------
 
 using base::StringAppendF;
+using base::StringPrintf;
 
 ANDROID_SINGLETON_STATIC_INSTANCE( GraphicBufferAllocator )
 
@@ -183,6 +186,13 @@ auto GraphicBufferAllocator::allocate(const AllocationRequest& request) -> Alloc
     rec.requestorName = request.requestorName;
     list.add(result.handle, rec);
 
+    if (ATRACE_ENABLED()) {
+        ATRACE_INT64(ATRACE_ALLOC_COUNTER_NAME, list.size());
+        std::string allocInfo = std::format("[{}] {}x{} - {:p}", rec.requestorName, width, height,
+                                            static_cast<const void*>(result.handle));
+        ATRACE_INSTANT_FOR_TRACK(ATRACE_ALLOC_TRACK_NAME, allocInfo.c_str());
+    }
+
     return result;
 }
 
@@ -249,6 +259,13 @@ status_t GraphicBufferAllocator::allocateHelper(uint32_t width, uint32_t height,
     rec.requestorName = std::move(requestorName);
     list.add(*handle, rec);
 
+    if (ATRACE_ENABLED()) {
+        ATRACE_INT64(ATRACE_ALLOC_COUNTER_NAME, list.size());
+        std::string allocInfo = std::format("[{}] {}x{} - {:p}", rec.requestorName, width, height,
+                                            static_cast<const void*>(handle));
+        ATRACE_INSTANT_FOR_TRACK(ATRACE_ALLOC_TRACK_NAME, allocInfo.c_str());
+    }
+
     return NO_ERROR;
 }
 status_t GraphicBufferAllocator::allocate(uint32_t width, uint32_t height, PixelFormat format,
@@ -288,6 +305,11 @@ status_t GraphicBufferAllocator::free(buffer_handle_t handle)
     KeyedVector<buffer_handle_t, alloc_rec_t>& list(sAllocList);
     list.removeItem(handle);
 
+    if (ATRACE_ENABLED()) {
+        ATRACE_INT64(ATRACE_ALLOC_COUNTER_NAME, list.size());
+        std::string freeInfo = std::format("free - {:p}", static_cast<const void*>(handle));
+        ATRACE_INSTANT_FOR_TRACK(ATRACE_ALLOC_TRACK_NAME, freeInfo.c_str());
+    }
     return NO_ERROR;
 }
 

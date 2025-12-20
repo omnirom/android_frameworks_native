@@ -208,6 +208,32 @@ TEST_P(LayerTypeAndRenderTypeTransactionTest, SetCornerRadius) {
     }
 }
 
+TEST_P(LayerTypeAndRenderTypeTransactionTest, SetCornerRadiusFourCorners) {
+    sp<SurfaceControl> layer;
+    const uint8_t size = 64;
+    const uint8_t testArea = 4;
+    const gui::CornerRadii cornerRadius = gui::CornerRadii(20.f, 20.f, 0.f, 0.f);
+    ASSERT_NO_FATAL_FAILURE(layer = createLayer("test", size, size));
+    ASSERT_NO_FATAL_FAILURE(fillLayerColor(layer, Color::RED, size, size));
+
+    Transaction().setCornerRadius(layer, cornerRadius).apply();
+    {
+        const uint8_t bottom = size - 1;
+        const uint8_t right = size - 1;
+        auto shot = getScreenCapture();
+        // Transparent corners
+        shot->expectColor(Rect(0, 0, testArea, testArea), Color::BLACK);
+        shot->expectColor(Rect(size - testArea, 0, right, testArea), Color::BLACK);
+        // Zero radius on bottom two corners
+        shot->expectColor(Rect(0, bottom - testArea, testArea, bottom), Color::RED);
+        shot->expectColor(Rect(size - testArea, bottom - testArea, right, bottom), Color::RED);
+        // Solid center
+        shot->expectColor(Rect(size / 2 - testArea / 2, size / 2 - testArea / 2,
+                               size / 2 + testArea / 2, size / 2 + testArea / 2),
+                          Color::RED);
+    }
+}
+
 // b/200781179 - don't round a layer without a valid crop
 // This behaviour should be fixed since we treat buffer layers differently than
 // effect or container layers.
@@ -271,6 +297,33 @@ TEST_P(LayerTypeAndRenderTypeTransactionTest, SetCornerRadiusRotated) {
         shot->expectColor(Rect(size / 2 - testArea / 2, size / 2 - testArea / 2,
                                size / 2 + testArea / 2, size / 2 + testArea / 2),
                           Color::GREEN);
+    }
+}
+
+TEST_P(LayerTypeAndRenderTypeTransactionTest, SetCornerRadiiWithRotation) {
+    sp<SurfaceControl> parent;
+    sp<SurfaceControl> child;
+    const uint8_t size = 64;
+    const uint8_t testArea = 4;
+    const gui::CornerRadii radii = gui::CornerRadii(0, 10, 20, 30); // TL, TR, BL, BR
+    ASSERT_NO_FATAL_FAILURE(parent = createLayer("parent", size, size));
+    ASSERT_NO_FATAL_FAILURE(fillLayerColor(parent, Color::RED, size, size));
+    ASSERT_NO_FATAL_FAILURE(child = createLayer("child", size, size));
+    ASSERT_NO_FATAL_FAILURE(fillLayerColor(child, Color::GREEN, size, size));
+
+    Transaction()
+            .reparent(child, parent)
+            .setCornerRadius(child, radii)
+            .setPosition(child, 0, size)
+            // Rotate by half PI CCW
+            .setMatrix(child, 0.0f, -1.0f, 1.0f, 0.0f)
+            .apply();
+
+    {
+        auto shot = getScreenCapture();
+
+        shot->expectBufferMatchesImageFromFile(Rect(0, 0, size, size),
+                                               "testdata/SetCornerRadiiWithRotation.png");
     }
 }
 
@@ -585,20 +638,196 @@ TEST_P(LayerTypeAndRenderTypeTransactionTest, ParentCornerRadiusTakesPrecedence)
     }
 }
 
-TEST_P(LayerTypeAndRenderTypeTransactionTest, SetClientDrawnCornerRadius) {
+TEST_P(LayerTypeAndRenderTypeTransactionTest, ChildOverlapsParentCornerRegion) {
+    sp<SurfaceControl> parent;
+    sp<SurfaceControl> child;
+    const uint32_t parentSize = 100;
+    const uint32_t childSize = 75;
+    const gui::CornerRadii cornerRadius = gui::CornerRadii(50.f);
+    const uint32_t testArea = 4;
+
+    ASSERT_NO_FATAL_FAILURE(parent = createLayer("parent", parentSize, parentSize));
+    ASSERT_NO_FATAL_FAILURE(fillLayerColor(parent, Color::RED, parentSize, parentSize));
+    ASSERT_NO_FATAL_FAILURE(child = createLayer("child", childSize, childSize));
+    ASSERT_NO_FATAL_FAILURE(fillLayerColor(child, Color::GREEN, childSize, childSize));
+
+    // Set parent with rounded corners
+    Transaction()
+            .setCornerRadius(parent, cornerRadius)
+            .setCrop(parent, Rect(parentSize, parentSize))
+            .apply();
+
+    Transaction()
+            .reparent(child, parent)
+            .setPosition(child, 10, 10)
+            .setCrop(child, Rect(childSize, childSize))
+            .apply();
+
+    {
+        auto shot = getScreenCapture();
+
+        // Check if the child's top-left corner is transparent
+        shot->expectColor(Rect(10, 10, 10 + testArea, 10 + testArea), Color::BLACK);
+
+        // Solid center
+        shot->expectColor(Rect(childSize / 2 - testArea / 2 + 1, childSize / 2 - testArea / 2 + 1,
+                               childSize / 2 + testArea / 2, childSize / 2 + testArea / 2),
+                          Color::GREEN);
+    }
+}
+
+TEST_P(LayerTypeAndRenderTypeTransactionTest, ChildInheritsParentSettingsWhenChildCropIsEmpty) {
+    sp<SurfaceControl> parent;
+    sp<SurfaceControl> child;
+    const uint32_t size = 100;
+    const gui::CornerRadii cornerRadius = gui::CornerRadii(50.f);
+    const uint32_t testArea = 4;
+
+    ASSERT_NO_FATAL_FAILURE(parent = createLayer("parent", size, size));
+    ASSERT_NO_FATAL_FAILURE(fillLayerColor(parent, Color::RED, size, size));
+    ASSERT_NO_FATAL_FAILURE(child = createLayer("child", size, size));
+    ASSERT_NO_FATAL_FAILURE(fillLayerColor(child, Color::GREEN, size, size));
+
+    // Set parent with rounded corners
+    Transaction().setCornerRadius(parent, cornerRadius).setCrop(parent, Rect(size, size)).apply();
+
+    Transaction().reparent(child, parent).apply();
+
+    {
+        const uint8_t bottom = size - 1;
+        const uint8_t right = size - 1;
+
+        auto shot = getScreenCapture();
+        // Corners are transparent
+        shot->expectColor(Rect(0, 0, testArea, testArea), Color::BLACK);
+        shot->expectColor(Rect(size - testArea, 0, right, testArea), Color::BLACK);
+        shot->expectColor(Rect(0, bottom - testArea, testArea, bottom), Color::BLACK);
+        shot->expectColor(Rect(size - testArea, bottom - testArea, right, bottom), Color::BLACK);
+
+        // Solid center
+        shot->expectColor(Rect(size / 2 - testArea / 2 + 1, size / 2 - testArea / 2 + 1,
+                               size / 2 + testArea / 2, size / 2 + testArea / 2),
+                          Color::GREEN);
+    }
+}
+
+TEST_P(LayerTypeAndRenderTypeTransactionTest, ChildDoesNotOverlapParentCornerRegion) {
+    sp<SurfaceControl> parent;
+    sp<SurfaceControl> child;
+    const uint32_t parentSize = 100;
+    const uint32_t childSize = 75;
+    const gui::CornerRadii cornerRadius = gui::CornerRadii(10.f);
+    const uint32_t testArea = 4;
+
+    ASSERT_NO_FATAL_FAILURE(parent = createLayer("parent", parentSize, parentSize));
+    ASSERT_NO_FATAL_FAILURE(fillLayerColor(parent, Color::RED, parentSize, parentSize));
+    ASSERT_NO_FATAL_FAILURE(child = createLayer("child", childSize, childSize));
+    ASSERT_NO_FATAL_FAILURE(fillLayerColor(child, Color::GREEN, childSize, childSize));
+
+    // Set parent with rounded corners
+    Transaction()
+            .setCornerRadius(parent, cornerRadius)
+            .setCrop(parent, Rect(parentSize, parentSize))
+            .apply();
+
+    Transaction()
+            .reparent(child, parent)
+            .setPosition(child, 25, 25)
+            .setCrop(child, Rect(childSize, childSize))
+            .apply();
+
+    {
+        auto shot = getScreenCapture();
+
+        // Check if the child's top-left corner is solid
+        shot->expectColor(Rect(25, 25, 25 + testArea, 25 + testArea), Color::GREEN);
+
+        // Solid center
+        shot->expectColor(Rect(childSize / 2 - testArea / 2 + 1, childSize / 2 - testArea / 2 + 1,
+                               childSize / 2 + testArea / 2, childSize / 2 + testArea / 2),
+                          Color::GREEN);
+    }
+}
+
+TEST_P(LayerTypeAndRenderTypeTransactionTest, SetCornerRadiusChildScaledUp) {
+    sp<SurfaceControl> parent;
+    sp<SurfaceControl> child;
+    const uint32_t parentSize = 100;
+    const uint32_t childSize = 20;
+    const gui::CornerRadii cornerRadius = gui::CornerRadii(25.0f);
+    const uint32_t testArea = 4;
+
+    ASSERT_NO_FATAL_FAILURE(parent = createLayer("parent", parentSize, parentSize));
+    ASSERT_NO_FATAL_FAILURE(fillLayerColor(parent, Color::RED, parentSize, parentSize));
+    ASSERT_NO_FATAL_FAILURE(child = createLayer("child", childSize, childSize));
+    ASSERT_NO_FATAL_FAILURE(fillLayerColor(child, Color::GREEN, childSize, childSize));
+
+    Transaction()
+            .setCornerRadius(parent, cornerRadius)
+            .setCrop(parent, Rect(parentSize, parentSize))
+            .apply();
+
+    // Child positioned such that it doesn't intersect parent TL corner region
+    // unless scaled up
+    Transaction()
+            .reparent(child, parent)
+            .setPosition(child, 30, 30)
+            .setMatrix(child, 2.0f, 0.0f, 0.0f, 2.0f)
+            .setCrop(child, Rect(childSize, childSize))
+            .apply();
+    {
+        auto shot = getScreenCapture();
+        shot->expectColor(Rect(0, 0, testArea, testArea), Color::BLACK);
+        shot->expectColor(Rect(30, 30, 30 + testArea, 30 + testArea), Color::GREEN);
+    }
+}
+
+TEST_P(LayerTypeAndRenderTypeTransactionTest, SetCornerRadiusChildScaledDown) {
+    sp<SurfaceControl> parent;
+    sp<SurfaceControl> child;
+    const uint32_t parentSize = 100;
+    const uint32_t childSize = 20;
+    const gui::CornerRadii cornerRadius = gui::CornerRadii(25.0f);
+    const uint32_t testArea = 4;
+
+    ASSERT_NO_FATAL_FAILURE(parent = createLayer("parent", parentSize, parentSize));
+    ASSERT_NO_FATAL_FAILURE(fillLayerColor(parent, Color::RED, parentSize, parentSize));
+    ASSERT_NO_FATAL_FAILURE(child = createLayer("child", childSize, childSize));
+    ASSERT_NO_FATAL_FAILURE(fillLayerColor(child, Color::GREEN, childSize, childSize));
+
+    Transaction()
+            .setCornerRadius(parent, cornerRadius)
+            .setCrop(parent, Rect(parentSize, parentSize))
+            .apply();
+
+    // Child positioned such that it will not intersect with parent's TL corner
+    // when scaled down
+    Transaction()
+            .reparent(child, parent)
+            .setPosition(child, 50, 50)
+            .setMatrix(child, 0.5f, 0.0f, 0.0f, 0.5f)
+            .setCrop(child, Rect(childSize, childSize))
+            .apply();
+
+    {
+        auto shot = getScreenCapture();
+        shot->expectColor(Rect(50, 50, 50 + testArea, 50 + testArea), Color::GREEN);
+    }
+}
+
+TEST_P(LayerTypeAndRenderTypeTransactionTest, SetClientDrawnCornerRadiiWithMatchingCrop) {
     sp<SurfaceControl> layer;
     const uint8_t size = 64;
     const uint8_t testArea = 4;
-    const float cornerRadius = 20.0f;
+    const gui::CornerRadii cornerRadius = gui::CornerRadii(20.f, 20.f, 10.f, 10.f);
+    FloatRect crop(0, 0, size, size);
     ASSERT_NO_FATAL_FAILURE(layer = createLayer("test", size, size));
     ASSERT_NO_FATAL_FAILURE(fillLayerColor(layer, Color::RED, size, size));
 
     Transaction()
-            .setClientDrawnCornerRadius(layer, cornerRadius)
+            .setClientDrawnCornerRadius(layer, cornerRadius, crop)
             .setCornerRadius(layer, cornerRadius)
-            .setCrop(layer, Rect(size, size))
             .apply();
-
     {
         const uint8_t bottom = size - 1;
         const uint8_t right = size - 1;
@@ -615,6 +844,35 @@ TEST_P(LayerTypeAndRenderTypeTransactionTest, SetClientDrawnCornerRadius) {
     }
 }
 
+TEST_P(LayerTypeAndRenderTypeTransactionTest, SetClientDrawnCornerRadiiWithMismatchingCrop) {
+    sp<SurfaceControl> layer;
+    const uint8_t size = 64;
+    const uint8_t testArea = 4;
+    const gui::CornerRadii cornerRadius = gui::CornerRadii(30.f, 30.f, 20.f, 20.f);
+    FloatRect clientCrop(0, 0, size + 12, size + 12);
+    ASSERT_NO_FATAL_FAILURE(layer = createLayer("test", size, size));
+    ASSERT_NO_FATAL_FAILURE(fillLayerColor(layer, Color::RED, size, size));
+
+    Transaction()
+            .setClientDrawnCornerRadius(layer, cornerRadius, clientCrop)
+            .setCornerRadius(layer, cornerRadius)
+            .apply();
+    {
+        const uint8_t bottom = size - 1;
+        const uint8_t right = size - 1;
+        auto shot = getScreenCapture();
+        // Corners are transparent because SF will draw rounded corners
+        shot->expectColor(Rect(0, 0, testArea, testArea), Color::BLACK);
+        shot->expectColor(Rect(size - testArea, 0, right, testArea), Color::BLACK);
+        shot->expectColor(Rect(0, bottom - testArea, testArea, bottom), Color::BLACK);
+        shot->expectColor(Rect(size - testArea, bottom - testArea, right, bottom), Color::BLACK);
+        // Solid center
+        shot->expectColor(Rect(size / 2 - testArea / 2, size / 2 - testArea / 2,
+                               size / 2 + testArea / 2, size / 2 + testArea / 2),
+                          Color::RED);
+    }
+}
+
 // Test if ParentCornerRadiusTakesPrecedence if the parent's client drawn corner radius crop
 // is fully contained by the child corner radius crop.
 TEST_P(LayerTypeAndRenderTypeTransactionTest, ParentCornerRadiusPrecedenceClientDrawnCornerRadius) {
@@ -623,8 +881,9 @@ TEST_P(LayerTypeAndRenderTypeTransactionTest, ParentCornerRadiusPrecedenceClient
     const uint32_t size = 64;
     const uint32_t parentSize = size * 3;
     const Rect parentCrop(size, size, size, size);
+    const FloatRect clientCrop(size, size, size, size);
     const uint32_t testLength = 4;
-    const float cornerRadius = 20.0f;
+    gui::CornerRadii cornerRadius(20.0f);
     ASSERT_NO_FATAL_FAILURE(parent = createLayer("parent", parentSize, parentSize));
     ASSERT_NO_FATAL_FAILURE(fillLayerColor(parent, Color::RED, parentSize, parentSize));
     ASSERT_NO_FATAL_FAILURE(child = createLayer("child", size, size));
@@ -633,7 +892,7 @@ TEST_P(LayerTypeAndRenderTypeTransactionTest, ParentCornerRadiusPrecedenceClient
     Transaction()
             .setCornerRadius(parent, cornerRadius)
             .setCrop(parent, parentCrop)
-            .setClientDrawnCornerRadius(parent, cornerRadius)
+            .setClientDrawnCornerRadius(parent, cornerRadius, clientCrop)
             .reparent(child, parent)
             .setPosition(child, size, size)
             .apply(true);
@@ -747,6 +1006,144 @@ TEST_P(LayerTypeAndRenderTypeTransactionTest, SetBorderSettings) {
                                                "testdata/"
                                                "SetBorderSettings_StrokeColorWithAlpha.png");
     }
+}
+
+TEST_P(LayerTypeAndRenderTypeTransactionTest, SetBoxShadowSettings) {
+    const uint32_t parentSize = 720;
+    sp<SurfaceControl> parent;
+    ASSERT_NO_FATAL_FAILURE(parent = createLayer("parent", parentSize, parentSize));
+    ASSERT_NO_FATAL_FAILURE(fillLayerColor(parent, Color::WHITE, parentSize, parentSize));
+
+    float ystep = 350;
+    float xstep = 350;
+
+    float yinitial = 100;
+
+    float yoffset = yinitial;
+    float xoffset = 100;
+
+    Transaction tx;
+    tx.setCrop(parent, Rect(0, 0, parentSize, parentSize));
+
+    // layer 1
+    sp<SurfaceControl> child1;
+    ASSERT_NO_FATAL_FAILURE(child1 = createLayer("Child1_Standard", 250, 150));
+    ASSERT_NO_FATAL_FAILURE(fillLayerColor(child1, Color::WHITE, 250, 150));
+    gui::BoxShadowSettings settings1;
+    gui::BoxShadowSettings::BoxShadowParams boxShadow1;
+    boxShadow1.spreadRadius = 0.0f;
+    boxShadow1.blurRadius = 25.0f;
+    boxShadow1.offsetX = 15.0f;
+    boxShadow1.offsetY = 15.0f;
+    boxShadow1.color = 0xff000000;
+    settings1.boxShadows.push_back(boxShadow1);
+    tx.reparent(child1, parent)
+            .setPosition(child1, xoffset, yoffset)
+            .setCornerRadius(child1, 24.0f)
+            .setBoxShadowSettings(child1, settings1);
+
+    yoffset += ystep;
+
+    // layer 2
+    sp<SurfaceControl> child2;
+    ASSERT_NO_FATAL_FAILURE(child2 = createLayer("child2", 200, 120));
+    ASSERT_NO_FATAL_FAILURE(fillLayerColor(child2, Color::WHITE, 200, 120));
+    gui::BoxShadowSettings settings2;
+    gui::BoxShadowSettings::BoxShadowParams boxShadow2;
+    boxShadow2.spreadRadius = 0.0f;
+    boxShadow2.blurRadius = 60.0f;
+    boxShadow2.offsetX = 0.0f;
+    boxShadow2.offsetY = 10.0f;
+    boxShadow2.color = 0xff000000;
+    settings2.boxShadows.push_back(boxShadow2);
+    tx.reparent(child2, parent)
+            .setPosition(child2, xoffset, yoffset)
+            .setCornerRadius(child2, 20.0f)
+            .setBoxShadowSettings(child2, settings2);
+
+    yoffset = yinitial;
+    xoffset += xstep;
+
+    // layer 3
+    sp<SurfaceControl> child3;
+    ASSERT_NO_FATAL_FAILURE(child3 = createLayer("child3", 250, 150));
+    ASSERT_NO_FATAL_FAILURE(fillLayerColor(child3, Color::WHITE, 250, 150));
+    gui::BoxShadowSettings settings3;
+    gui::BoxShadowSettings::BoxShadowParams boxShadow3;
+    boxShadow3.spreadRadius = 0.0f;
+    boxShadow3.blurRadius = 15.0f;
+    boxShadow3.offsetX = 0.0f;
+    boxShadow3.offsetY = 0.0f;
+    boxShadow3.color = 0xff000000;
+    settings3.boxShadows.push_back(boxShadow3);
+    tx.reparent(child3, parent)
+            .setPosition(child3, xoffset, yoffset)
+            .setCornerRadius(child3, 4.0f)
+            .setBoxShadowSettings(child3, settings3);
+
+    yoffset += ystep;
+
+    // layer 4
+    sp<SurfaceControl> child4;
+    ASSERT_NO_FATAL_FAILURE(child4 = createLayer("child4", 100, 100));
+    ASSERT_NO_FATAL_FAILURE(fillLayerColor(child4, Color::WHITE, 100, 100));
+    gui::BoxShadowSettings settings4;
+    gui::BoxShadowSettings::BoxShadowParams boxShadow4;
+    boxShadow4.spreadRadius = 0.0f;
+    boxShadow4.blurRadius = 10.0f;
+    boxShadow4.offsetX = 0.0f;
+    boxShadow4.offsetY = 0.0f;
+    boxShadow4.color = 0xff000000;
+    settings4.boxShadows.push_back(boxShadow4);
+    tx.reparent(child4, parent)
+            .setPosition(child4, xoffset, yoffset)
+            .setCornerRadius(child4, 50.0f)
+            .setBoxShadowSettings(child4, settings4);
+
+    // apply and screenshot
+    tx.apply(true);
+
+    auto shot = getScreenCapture();
+    shot->expectBufferMatchesImageFromFile(Rect(0, 0, parentSize, parentSize),
+                                           "testdata/SetBoxShadowSettings.png");
+}
+
+TEST_P(LayerTypeAndRenderTypeTransactionTest, CropElevationShadowByParent) {
+    sp<SurfaceControl> parent;
+    sp<SurfaceControl> child;
+    const uint32_t size = 64;
+    const uint32_t parentSize = size * 3;
+    ASSERT_NO_FATAL_FAILURE(parent = createLayer("parent", parentSize, parentSize));
+    ASSERT_NO_FATAL_FAILURE(fillLayerColor(parent, Color::WHITE, parentSize, parentSize));
+    ASSERT_NO_FATAL_FAILURE(child = createLayer("child", size, size));
+    ASSERT_NO_FATAL_FAILURE(fillLayerColor(child, Color::BLUE, size, size));
+
+    SurfaceComposerClient::getDefault()->setGlobalShadowSettings({1, 0, 0, 0.5f}, {0, 1, 0, 0.5f},
+                                                                 0, 250.0f, 800.0f);
+
+    // Global shadow settings are committed after snapshot updates so we have to perform a commit
+    // before enabling layer shadows.
+    Transaction().apply(true);
+
+    ui::Size resolution = mRenderPathHarness.getRotatedResolution();
+    int x = resolution.width / 2;
+    int y = 500;
+
+    Transaction()
+            .setPosition(parent, x, y)
+            .setCrop(parent, Rect(0, 0, parentSize / 2, parentSize))
+            .reparent(child, parent)
+            .setPosition(child, size, size)
+            .setCrop(child, Rect(0, 0, size, size))
+            .setPosition(child, size, size)
+            .setCornerRadius(child, 20.0f)
+            .setShadowRadius(child, 20.0f)
+            .apply(true);
+
+    auto shot = getScreenCapture();
+
+    shot->expectBufferMatchesImageFromFile(Rect(x, y, x + parentSize, y + parentSize),
+                                           "testdata/CropElevationShadowByParent.png");
 }
 
 TEST_P(LayerTypeAndRenderTypeTransactionTest, SetBackgroundBlurRadiusSimple) {
@@ -995,6 +1392,70 @@ TEST_P(LayerTypeAndRenderTypeTransactionTest, SetBufferFormat) {
         shot->expectColor(crop, Color::RED);
     }
 }
+
+class RotatedVirtualDisplayTest
+      : public LayerTypeTransactionHarness,
+        public ::testing::WithParamInterface<std::tuple<uint32_t, RenderPath, ui::Rotation>> {
+public:
+    RotatedVirtualDisplayTest()
+          : LayerTypeTransactionHarness(std::get<0>(GetParam())),
+            mRenderPathHarness(this, std::get<1>(GetParam()), std::get<2>(GetParam())) {}
+
+    std::unique_ptr<ScreenCapture> getScreenCapture() {
+        return mRenderPathHarness.getScreenCapture();
+    }
+
+protected:
+    LayerRenderPathTestHarness mRenderPathHarness;
+};
+
+INSTANTIATE_TEST_CASE_P(RotatedVirtualDisplayTests, RotatedVirtualDisplayTest,
+                        ::testing::Combine(::testing::Values(static_cast<uint32_t>(
+                                                   ISurfaceComposerClient::eFXSurfaceBufferState)),
+                                           ::testing::Values(RenderPath::VIRTUAL_DISPLAY),
+                                           ::testing::Values(ui::Rotation::Rotation0,
+                                                             ui::Rotation::Rotation90,
+                                                             ui::Rotation::Rotation180,
+                                                             ui::Rotation::Rotation270)));
+
+TEST_P(RotatedVirtualDisplayTest, ElevationShadowHasCorrectOrientation) {
+    sp<SurfaceControl> parent;
+    sp<SurfaceControl> child;
+    const uint32_t size = 64;
+    const uint32_t parentSize = size * 3;
+    ASSERT_NO_FATAL_FAILURE(parent = createLayer("parent", parentSize, parentSize));
+    ASSERT_NO_FATAL_FAILURE(fillLayerColor(parent, Color::WHITE, parentSize, parentSize));
+    ASSERT_NO_FATAL_FAILURE(child = createLayer("child", size, size));
+    ASSERT_NO_FATAL_FAILURE(fillLayerColor(child, Color::GREEN, size, size));
+
+    SurfaceComposerClient::getDefault()->setGlobalShadowSettings({1, 0, 0, 1.0f}, {0, 1, 0, 1.0f},
+                                                                 0, 500.0f, 800.0f);
+
+    // Global shadow settings are committed after snapshot updates so we have to perform a commit
+    // before enabling layer shadows.
+    Transaction().apply(true);
+
+    ui::Size resolution = mRenderPathHarness.getRotatedResolution();
+    int x = resolution.width / 2;
+    int y = 500;
+    Transaction()
+            .setPosition(parent, x, y)
+            .setCrop(parent, Rect(0, 0, parentSize, parentSize))
+            .reparent(child, parent)
+            .setCrop(child, Rect(0, 0, size, size))
+            .setPosition(child, size, size)
+            .setCornerRadius(child, 20.0f)
+            .setShadowRadius(child, 20.0f)
+            .apply(true);
+
+    auto shot = getScreenCapture();
+
+    shot->expectBufferMatchesImageFromFile(mRenderPathHarness.rotateRect(
+                                                   Rect(x, y, x + parentSize, y + parentSize)),
+                                           "testdata/Shadow_" +
+                                                   mRenderPathHarness.getRotationName() + ".png");
+}
+
 } // namespace android
 
 // TODO(b/129481165): remove the #pragma below and fix conversion issues

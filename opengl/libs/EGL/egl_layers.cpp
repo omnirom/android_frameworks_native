@@ -28,6 +28,17 @@
 #include <nativeloader/native_loader.h>
 #include <sys/prctl.h>
 
+#define ANDROID_ENABLE_OVERRIDE_GLES_LAYERS 0
+
+#if ANDROID_ENABLE_OVERRIDE_GLES_LAYERS
+// b/415311329
+// Workaround to selectively load the RenderDoc GLES layer for specific processes.
+// Enabling the layer globally can cause system instability. This symbol allows
+// processes, such as SurfaceFlinger, to opt-in to RenderDoc capturing
+// without affecting other system components.
+extern "C" __attribute__((weak)) const char* _android_override_gles_debug_layers;
+#endif
+
 namespace android {
 
 // GLES Layers
@@ -171,6 +182,12 @@ std::string LayerLoader::GetDebugLayers() {
         // Only check system properties if Java settings are empty
         debug_layers = base::GetProperty("debug.gles.layers", "");
     }
+
+#if ANDROID_ENABLE_OVERRIDE_GLES_LAYERS
+    if (&_android_override_gles_debug_layers && _android_override_gles_debug_layers) {
+        debug_layers = _android_override_gles_debug_layers;
+    }
+#endif
 
     return debug_layers;
 }

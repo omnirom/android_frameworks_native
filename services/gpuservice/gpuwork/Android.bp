@@ -31,8 +31,9 @@ cc_library_shared {
         "libbpf_bcc",
         "libcutils",
         "liblog",
-        "libstatslog",
+        "libstatslog_gpustats",
         "libstatspull",
+        "libstatssocket",
         "libutils",
     ],
     export_include_dirs: [
@@ -50,11 +51,48 @@ cc_library_shared {
         "-Werror",
         "-Wformat",
         "-Wthread-safety",
-        "-Wunused",
         "-Wunreachable-code",
+        "-Wunused",
     ],
     required: [
         "bpfloader",
-        "gpuWork.o",
+        "gpuWork.bpf",
+    ],
+}
+
+cc_library_shared {
+    name: "libstatslog_gpustats",
+    host_supported: true,
+    generated_sources: ["statslog_gpustats.cpp"],
+    generated_headers: ["statslog_gpustats.h"],
+    export_generated_headers: ["statslog_gpustats.h"],
+    shared_libs: [
+        "libstatspull",
+        "libstatssocket",
+    ],
+    export_shared_lib_headers: [
+        "libstatspull",
+        "libstatssocket",
+    ],
+}
+
+genrule {
+    name: "statslog_gpustats.h",
+    tools: ["stats-log-api-gen"],
+    cmd: "$(location stats-log-api-gen) --header $(genDir)/statslog_gpustats.h" +
+        " --module gpustats --namespace android,gpustats",
+    out: [
+        "statslog_gpustats.h",
+    ],
+}
+
+genrule {
+    name: "statslog_gpustats.cpp",
+    tools: ["stats-log-api-gen"],
+    cmd: "$(location stats-log-api-gen) --cpp $(genDir)/statslog_gpustats.cpp" +
+        " --module gpustats --namespace android,gpustats" +
+        " --importHeader statslog_gpustats.h",
+    out: [
+        "statslog_gpustats.cpp",
     ],
 }

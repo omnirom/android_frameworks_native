@@ -20,6 +20,7 @@
 #include <binder/RpcSession.h>
 #include <binder/RpcTransportTipcTrusty.h>
 
+using android::IBinder;
 using android::RpcServer;
 using android::RpcServerTrusty;
 using android::RpcSession;
@@ -34,9 +35,10 @@ struct ARpcServerTrusty {
     ARpcServerTrusty(sp<RpcServer> rpcServer) : mRpcServer(std::move(rpcServer)) {}
 };
 
-ARpcServerTrusty* ARpcServerTrusty_newPerSession(AIBinder* (*cb)(const void*, size_t, char*),
-                                                 char* cbArg, void (*cbArgDeleter)(char*)) {
-    std::shared_ptr<char> cbArgSp(cbArg, cbArgDeleter);
+ARpcServerTrusty* ARpcServerTrusty_newPerSession(AIBinder* (*cb)(const trusty_peer_id*, size_t,
+                                                                 void*),
+                                                 void* cbArg, void (*cbArgDeleter)(void*)) {
+    std::shared_ptr<void> cbArgSp(cbArg, cbArgDeleter);
 
     auto rpcTransportCtxFactory = RpcTransportCtxFactoryTipcTrusty::make();
     if (rpcTransportCtxFactory == nullptr) {
@@ -53,18 +55,20 @@ ARpcServerTrusty* ARpcServerTrusty_newPerSession(AIBinder* (*cb)(const void*, si
         return nullptr;
     }
 
-    rpcServer->setPerSessionRootObject(
-            [cb, cbArgSp](wp<RpcSession> /*session*/, const void* addrPtr, size_t len) {
-                auto* aib = (*cb)(addrPtr, len, cbArgSp.get());
-                auto b = AIBinder_toPlatformBinder(aib);
+    auto create_session = [cb, cbArgSp](wp<RpcSession> /*session*/, const trusty_peer_id& peer,
+                                        size_t peer_len) -> sp<IBinder> {
+        auto* aib = (*cb)(&peer, peer_len, cbArgSp.get());
+        auto b = AIBinder_toPlatformBinder(aib);
 
-                // We have a new sp<IBinder> backed by the same binder, so we can
-                // finally release the AIBinder* from the callback
-                AIBinder_decStrong(aib);
+        // We have a new sp<IBinder> backed by the same
+        // binder, so we can finally release the AIBinder*
+        // from the callback
+        AIBinder_decStrong(aib);
 
-                return b;
-            });
+        return b;
+    };
 
+    RpcServerTrusty::setPerSessionRootObjectInternal(rpcServer.get(), std::move(create_session));
     return new (std::nothrow) ARpcServerTrusty(std::move(rpcServer));
 }
 
@@ -72,9 +76,10 @@ void ARpcServerTrusty_delete(ARpcServerTrusty* rstr) {
     delete rstr;
 }
 
-int ARpcServerTrusty_handleConnect(ARpcServerTrusty* rstr, handle_t chan, const uuid* peer,
-                                   void** ctx_p) {
-    return RpcServerTrusty::handleConnectInternal(rstr->mRpcServer.get(), chan, peer, ctx_p);
+int ARpcServerTrusty_handleConnect(ARpcServerTrusty* rstr, handle_t chan,
+                                   const trusty_peer_id* peer, size_t peer_len, void** ctx_p) {
+    return RpcServerTrusty::handleConnectInternal(rstr->mRpcServer.get(), chan, *peer, peer_len,
+                                                  ctx_p);
 }
 
 int ARpcServerTrusty_handleMessage(void* ctx) {

@@ -86,7 +86,7 @@ std::string LayerCreationArgs::getDebugString() const {
     if (layerIdToMirror != UNASSIGNED_LAYER_ID) {
         stream << " layerIdToMirror=" << layerIdToMirror;
     }
-    if (layerStackToMirror != ui::INVALID_LAYER_STACK) {
+    if (layerStackToMirror != ui::UNASSIGNED_LAYER_STACK) {
         stream << " layerStackToMirror=" << layerStackToMirror.id;
     }
     return stream.str();

@@ -94,6 +94,7 @@ cc_library {
         "android.hardware.sensors@1.0-convert",
         "libaidlcommonsupport",
         "sensorservice_flags_c_lib",
+        "aconfig_hardware_flags_c_lib",
     ],
 
     generated_headers: ["framework-cppstream-protos"],

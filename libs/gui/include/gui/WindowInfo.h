@@ -178,6 +178,10 @@ struct WindowInfo : public Parcelable {
                 static_cast<uint32_t>(os::InputConfig::GLOBAL_STYLUS_BLOCKS_TOUCH),
         SENSITIVE_FOR_PRIVACY =
                 static_cast<uint32_t>(os::InputConfig::SENSITIVE_FOR_PRIVACY),
+        DISPLAY_TOPOLOGY_AWARE =
+                static_cast<uint32_t>(os::InputConfig::DISPLAY_TOPOLOGY_AWARE),
+        DO_NOT_PILFER =
+                static_cast<uint32_t>(os::InputConfig::DO_NOT_PILFER),
         // clang-format on
     };
 

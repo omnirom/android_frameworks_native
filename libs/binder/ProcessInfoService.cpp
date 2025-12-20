@@ -14,13 +14,16 @@
  * limitations under the License.
  */
 
-#include <processinfo/ProcessInfoService.h>
+#include <android/os/IProcessInfoService.h>
 #include <binder/IServiceManager.h>
+#include <processinfo/ProcessInfoService.h>
 
 #include <utils/Log.h>
 #include <utils/String16.h>
 
 namespace android {
+
+using os::IProcessInfoService;
 
 ProcessInfoService::ProcessInfoService() {
     updateBinderLocked();
@@ -37,8 +40,15 @@ status_t ProcessInfoService::getProcessStatesImpl(size_t length, /*in*/ int32_t*
     for (int i = 0; i < BINDER_ATTEMPT_LIMIT; i++) {
 
         if (pis != nullptr) {
-            err = pis->getProcessStatesFromPids(length, /*in*/ pids, /*out*/ states);
-            if (err == NO_ERROR) return NO_ERROR; // success
+            std::vector<int32_t> pidVector(pids, pids + length);
+            std::vector<int32_t> statesVector(states, states + length);
+
+            auto status = pis->getProcessStatesFromPids(pidVector, &statesVector);
+            err = status.exceptionCode();
+            if (err == NO_ERROR) {
+                memcpy(states, statesVector.data(), length * sizeof(*states));
+                return NO_ERROR; // success
+            }
             if (IInterface::asBinder(pis)->isBinderAlive()) return err;
         }
         sleep(1);
@@ -69,9 +79,17 @@ status_t ProcessInfoService::getProcessStatesScoresImpl(size_t length,
     for (int i = 0; i < BINDER_ATTEMPT_LIMIT; i++) {
 
         if (pis != nullptr) {
-            err = pis->getProcessStatesAndOomScoresFromPids(length,
-                    /*in*/ pids, /*out*/ states, /*out*/ scores);
-            if (err == NO_ERROR) return NO_ERROR; // success
+            std::vector<int32_t> pidVector(pids, pids + length);
+            std::vector<int32_t> statesVector(states, states + length);
+            std::vector<int32_t> scoresVector(scores, scores + length);
+            auto status = pis->getProcessStatesAndOomScoresFromPids(pidVector, &statesVector,
+                                                                    &scoresVector);
+            err = status.exceptionCode();
+            if (err == NO_ERROR) {
+                memcpy(states, statesVector.data(), length * sizeof(*states));
+                memcpy(scores, scoresVector.data(), length * sizeof(*scores));
+                return NO_ERROR; // success
+            }
             if (IInterface::asBinder(pis)->isBinderAlive()) return err;
         }
         sleep(1);

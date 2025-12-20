@@ -26,13 +26,6 @@ flag {
 }
 
 flag {
-  name: "enable_input_event_tracing"
-  namespace: "input"
-  description: "Set to true to enable input event tracing, including always-on tracing on non-user builds"
-  bug: "210460522"
-}
-
-flag {
   name: "enable_multi_device_input"
   namespace: "input"
   description: "Set to true to enable multi-device input: touch and stylus can be active at the same time, but in different windows"
@@ -123,13 +116,6 @@ flag {
 }
 
 flag {
-  name: "enable_keyboard_classifier"
-  namespace: "input"
-  description: "Keyboard classifier that classifies all keyboards into alphabetic or non-alphabetic"
-  bug: "263559234"
-}
-
-flag {
   name: "show_pointers_for_partial_screenshare"
   namespace: "input"
   description: "Show touch and pointer indicators when mirroring a single task"
@@ -151,28 +137,11 @@ flag {
 }
 
 flag {
-  name: "enable_touchpad_no_focus_change"
-  namespace: "input"
-  description: "Prevents touchpad gesture changing window focus."
-  bug: "364460018"
-}
-
-flag {
   name: "enable_input_policy_profile"
   namespace: "input"
   description: "Apply input policy profile for input threads."
   bug: "347122505"
   is_fixed_read_only: true
-}
-
-flag {
-  name: "disable_touch_input_mapper_pointer_usage"
-  namespace: "input"
-  description: "Disable the PointerUsage concept in TouchInputMapper since the old touchpad stack is no longer used."
-  bug: "281840344"
-  metadata {
-    purpose: PURPOSE_BUGFIX
-  }
 }
 
 flag {
@@ -224,6 +193,13 @@ flag {
 }
 
 flag {
+  name: "scale_cursor_speed_with_dpi"
+  namespace: "lse_desktop_experience"
+  description: "Scale the cursor speed based on display density"
+  bug: "367662715"
+}
+
+flag {
   name: "use_cloned_screen_coordinates_as_raw"
   namespace: "input"
   description: "Use the cloned window's layer stack (screen) space as the raw coordinate space for input going to clones"
@@ -248,6 +224,63 @@ flag {
   namespace: "input"
   description: "Set to true to enable display topology validation"
   bug: "401219231"
+  metadata {
+    purpose: PURPOSE_BUGFIX
+  }
+}
+
+flag {
+  name: "use_topology_aware_flag"
+  namespace: "input"
+  description: "Require apps to use topology-aware flag to receive cross-display gestures"
+  bug: "401220484"
+  metadata {
+    purpose: PURPOSE_BUGFIX
+  }
+}
+
+flag {
+  name: "clear_relative_axes_in_resampled_coords"
+  namespace: "input"
+  description: "Relative axes are cleared in resampled event coordinates"
+  bug: "423433478"
+  metadata {
+    purpose: PURPOSE_BUGFIX
+  }
+}
+
+flag {
+  name: "abort_device_opening_on_enodev"
+  namespace: "input"
+  description: "Stop opening a device if it is removed before we can cache all of its axis information"
+  bug: "424789999"
+  metadata {
+    purpose: PURPOSE_BUGFIX
+  }
+}
+
+flag {
+  name: "low_level_tracing"
+  namespace: "input"
+  description: "Log low-level events from evdev and the Gestures library in traces"
+  bug: "394861376"
+}
+
+flag {
+  name: "use_separate_xy_dpi_scaling_for_mice"
+  namespace: "input"
+  description: "Use the xDpi and yDpi values to scale mouse moves"
+  bug: "432649760"
+  metadata {
+    purpose: PURPOSE_BUGFIX
+  }
+}
+
+flag {
+  name: "simultaneous_outside_and_hover_fix"
+  namespace: "input"
+  description: "Bug fix to prevent dispatcher from crashing when a window is expected to receive simultaneous action-outside and hover-exit events"
+  bug: "423393151"
   metadata {
     purpose: PURPOSE_BUGFIX
   }

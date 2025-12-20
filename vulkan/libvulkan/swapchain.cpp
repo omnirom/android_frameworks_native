@@ -266,9 +266,6 @@ Surface* SurfaceFromHandle(VkSurfaceKHR handle) {
 
 // Maximum number of TimingInfo structs to keep per swapchain:
 enum { MAX_TIMING_INFOS = 10 };
-// Minimum number of frames to look for in the past (so we don't cause
-// syncronous requests to Surface Flinger):
-enum { MIN_NUM_FRAMES_AGO = 5 };
 
 bool IsSharedPresentMode(VkPresentModeKHR mode) {
     return mode == VK_PRESENT_MODE_SHARED_DEMAND_REFRESH_KHR ||
@@ -435,17 +432,20 @@ void OrphanSwapchain(VkDevice device, Swapchain* swapchain) {
 }
 
 uint32_t get_num_ready_timings(Swapchain& swapchain) {
-    if (swapchain.timing.size() < MIN_NUM_FRAMES_AGO) {
-        return 0;
-    }
-
     uint32_t num_ready = 0;
-    const size_t num_timings = swapchain.timing.size() - MIN_NUM_FRAMES_AGO + 1;
-    for (uint32_t i = 0; i < num_timings; i++) {
+    for (uint32_t i = 0; i < swapchain.timing.size(); i++) {
         TimingInfo& ti = swapchain.timing[i];
         if (ti.ready()) {
             // This TimingInfo is ready to be reported to the user.  Add it
             // to the num_ready.
+            num_ready++;
+            continue;
+        } else if (swapchain.shared) {
+            // We don't currently support timings for shared presentation modes
+            ti.timestamp_desired_present_time_ = 0;
+            ti.timestamp_actual_present_time_ = 0;
+            ti.timestamp_render_complete_time_ = 0;
+            ti.timestamp_composition_latch_time_ = 0;
             num_ready++;
             continue;
         }
@@ -1071,7 +1071,18 @@ VkResult GetPhysicalDeviceSurfaceCapabilities2KHR(
             case VK_STRUCTURE_TYPE_SURFACE_PROTECTED_CAPABILITIES_KHR: {
                 VkSurfaceProtectedCapabilitiesKHR* protected_caps =
                     reinterpret_cast<VkSurfaceProtectedCapabilitiesKHR*>(pNext);
-                protected_caps->supportsProtected = VK_TRUE;
+
+                // Check if the device's gralloc can support protected content
+                AHardwareBuffer_Desc desc = {
+                    .width = 1,
+                    .height = 1,
+                    .layers = 1,
+                    .format = AHARDWAREBUFFER_FORMAT_R8G8B8A8_UNORM,
+                    .usage = AHARDWAREBUFFER_USAGE_GPU_FRAMEBUFFER | AHARDWAREBUFFER_USAGE_GPU_SAMPLED_IMAGE |
+                        AHARDWAREBUFFER_USAGE_PROTECTED_CONTENT
+                };
+
+                protected_caps->supportsProtected = AHardwareBuffer_isSupported(&desc) ? VK_TRUE : VK_FALSE;
             } break;
 
             case VK_STRUCTURE_TYPE_SURFACE_PRESENT_SCALING_CAPABILITIES_EXT: {
@@ -1922,7 +1933,7 @@ VkResult CreateSwapchainKHR(VkDevice device,
     VkImageFormatListCreateInfo extra_mutable_formats = {
         .sType = VK_STRUCTURE_TYPE_IMAGE_FORMAT_LIST_CREATE_INFO_KHR,
     };
-    VkImageFormatListCreateInfo* extra_mutable_formats_ptr;
+    VkImageFormatListCreateInfo* extra_mutable_formats_ptr = nullptr;
 
     // Look through the create_info pNext chain passed to createSwapchainKHR
     // for an image compression control struct.

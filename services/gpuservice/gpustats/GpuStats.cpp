@@ -23,17 +23,18 @@
 #include <cutils/properties.h>
 #include <log/log.h>
 #include <stats_event.h>
-#include <statslog.h>
+#include <statslog_gpustats.h>
 #include <utils/Trace.h>
 
+#include <algorithm>
 #include <unordered_set>
 
 namespace android {
 
 GpuStats::~GpuStats() {
     if (mStatsdRegistered) {
-        AStatsManager_clearPullAtomCallback(android::util::GPU_STATS_GLOBAL_INFO);
-        AStatsManager_clearPullAtomCallback(android::util::GPU_STATS_APP_INFO);
+        AStatsManager_clearPullAtomCallback(android::gpustats::GPU_STATS_GLOBAL_INFO);
+        AStatsManager_clearPullAtomCallback(android::gpustats::GPU_STATS_APP_INFO);
     }
 }
 
@@ -296,9 +297,9 @@ void GpuStats::interceptSystemDriverStatsLocked() {
 
 void GpuStats::registerStatsdCallbacksIfNeeded() {
     if (!mStatsdRegistered) {
-        AStatsManager_setPullAtomCallback(android::util::GPU_STATS_GLOBAL_INFO, nullptr,
+        AStatsManager_setPullAtomCallback(android::gpustats::GPU_STATS_GLOBAL_INFO, nullptr,
                                          GpuStats::pullAtomCallback, this);
-        AStatsManager_setPullAtomCallback(android::util::GPU_STATS_APP_INFO, nullptr,
+        AStatsManager_setPullAtomCallback(android::gpustats::GPU_STATS_APP_INFO, nullptr,
                                          GpuStats::pullAtomCallback, this);
         mStatsdRegistered = true;
     }
@@ -421,16 +422,16 @@ AStatsManager_PullAtomCallbackReturn GpuStats::pullAppInfoAtom(AStatsEventList* 
                 engineNames.push_back(engineName.c_str());
             }
 
-            android::util::addAStatsEvent(
+            android::gpustats::addAStatsEvent(
                     data,
-                    android::util::GPU_STATS_APP_INFO,
+                    android::gpustats::GPU_STATS_APP_INFO,
                     ele.second.appPackageName.c_str(),
                     ele.second.driverVersionCode,
-                    android::util::BytesField(glDriverBytes.c_str(),
+                    android::gpustats::BytesField(glDriverBytes.c_str(),
                                               glDriverBytes.length()),
-                    android::util::BytesField(vkDriverBytes.c_str(),
+                    android::gpustats::BytesField(vkDriverBytes.c_str(),
                                               vkDriverBytes.length()),
-                    android::util::BytesField(angleDriverBytes.c_str(),
+                    android::gpustats::BytesField(angleDriverBytes.c_str(),
                                               angleDriverBytes.length()),
                     ele.second.cpuVulkanInUse,
                     ele.second.falsePrerotation,
@@ -461,9 +462,9 @@ AStatsManager_PullAtomCallbackReturn GpuStats::pullGlobalInfoAtom(AStatsEventLis
 
     if (data) {
         for (const auto& ele : mGlobalStats) {
-          android::util::addAStatsEvent(
+          android::gpustats::addAStatsEvent(
                   data,
-                  android::util::GPU_STATS_GLOBAL_INFO,
+                  android::gpustats::GPU_STATS_GLOBAL_INFO,
                   ele.second.driverPackageName.c_str(),
                   ele.second.driverVersionName.c_str(),
                   ele.second.driverVersionCode,
@@ -491,9 +492,9 @@ AStatsManager_PullAtomCallbackReturn GpuStats::pullAtomCallback(int32_t atomTag,
     ATRACE_CALL();
 
     GpuStats* pGpuStats = reinterpret_cast<GpuStats*>(cookie);
-    if (atomTag == android::util::GPU_STATS_GLOBAL_INFO) {
+    if (atomTag == android::gpustats::GPU_STATS_GLOBAL_INFO) {
         return pGpuStats->pullGlobalInfoAtom(data);
-    } else if (atomTag == android::util::GPU_STATS_APP_INFO) {
+    } else if (atomTag == android::gpustats::GPU_STATS_APP_INFO) {
         return pGpuStats->pullAppInfoAtom(data);
     }
 

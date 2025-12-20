@@ -63,7 +63,7 @@ LimitedAxesImuSensor::LimitedAxesImuSensor(sensor_t const* list, size_t count,
 }
 
 bool LimitedAxesImuSensor::process(sensors_event_t* outEvent, const sensors_event_t& event) {
-    if (event.type == mImu3dSensor.getType()) {
+    if (event.sensor == mImu3dSensor.getHandle()) {
         *outEvent = event;
         size_t imu3dDataSize = SensorServiceUtil::eventSizeBySensorType(mImu3dSensor.getType());
         outEvent->data[0 + imu3dDataSize] = 1;

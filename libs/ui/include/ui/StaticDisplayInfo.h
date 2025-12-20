@@ -20,6 +20,7 @@
 
 #include <ui/DeviceProductInfo.h>
 #include <ui/Rotation.h>
+#include <ui/ScreenPartStatus.h>
 
 namespace android::ui {
 
@@ -32,6 +33,7 @@ struct StaticDisplayInfo {
     float density = 0.f;
     bool secure = false;
     std::optional<DeviceProductInfo> deviceProductInfo;
+    android::ScreenPartStatus screenPartStatus;
     Rotation installOrientation = ROTATION_0;
 };
 

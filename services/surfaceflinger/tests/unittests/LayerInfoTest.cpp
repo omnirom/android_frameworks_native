@@ -42,7 +42,17 @@ protected:
     static constexpr Fps LO_FPS = 30_Hz;
     static constexpr Fps HI_FPS = 90_Hz;
 
-    LayerInfoTest() { mFlinger.resetScheduler(mScheduler); }
+    static constexpr ui::LayerStack kLayerStack = ui::LayerStack::fromValue(123u);
+
+    LayerInfoTest() {
+        mScheduler->refreshRateSelector()->setLayerFilter({kLayerStack, false});
+        mFlinger.resetScheduler(mScheduler);
+
+        const auto layerProps = scheduler::LayerProps{
+                .refreshRateSelector = mScheduler->refreshRateSelector().get(),
+        };
+        layerInfo.setProperties(layerProps);
+    }
 
     void setFrameTimes(const std::deque<FrameTimeData>& frameTimes) {
         layerInfo.mFrameTimes = frameTimes;
@@ -201,8 +211,7 @@ TEST_F(LayerInfoTest, getRefreshRateVote_explicitVote) {
                                  .fps = 20_Hz};
     layerInfo.setLayerVote(vote);
 
-    auto actualVotes =
-            layerInfo.getRefreshRateVote(*mScheduler->refreshRateSelector(), systemTime());
+    auto actualVotes = layerInfo.getRefreshRateVote(systemTime());
     ASSERT_EQ(actualVotes.size(), 1u);
     ASSERT_EQ(actualVotes[0].type, vote.type);
     ASSERT_EQ(actualVotes[0].fps, vote.fps);
@@ -217,8 +226,7 @@ TEST_F(LayerInfoTest, getRefreshRateVote_explicitVoteWithCategory) {
                                  .categorySmoothSwitchOnly = true};
     layerInfo.setLayerVote(vote);
 
-    auto actualVotes =
-            layerInfo.getRefreshRateVote(*mScheduler->refreshRateSelector(), systemTime());
+    auto actualVotes = layerInfo.getRefreshRateVote(systemTime());
     ASSERT_EQ(actualVotes.size(), 2u);
     ASSERT_EQ(actualVotes[0].type, LayerHistory::LayerVoteType::ExplicitCategory);
     ASSERT_EQ(actualVotes[0].category, vote.category);
@@ -235,8 +243,7 @@ TEST_F(LayerInfoTest, getRefreshRateVote_explicitCategory) {
                                  .category = FrameRateCategory::High};
     layerInfo.setLayerVote(vote);
 
-    auto actualVotes =
-            layerInfo.getRefreshRateVote(*mScheduler->refreshRateSelector(), systemTime());
+    auto actualVotes = layerInfo.getRefreshRateVote(systemTime());
     ASSERT_EQ(actualVotes.size(), 1u);
     ASSERT_EQ(actualVotes[0].type, LayerHistory::LayerVoteType::ExplicitCategory);
     ASSERT_EQ(actualVotes[0].category, vote.category);
@@ -248,8 +255,7 @@ TEST_F(LayerInfoTest, getRefreshRateVote_categoryNoPreference) {
                                  .category = FrameRateCategory::NoPreference};
     layerInfo.setLayerVote(vote);
 
-    auto actualVotes =
-            layerInfo.getRefreshRateVote(*mScheduler->refreshRateSelector(), systemTime());
+    auto actualVotes = layerInfo.getRefreshRateVote(systemTime());
     ASSERT_EQ(actualVotes.size(), 1u);
     ASSERT_EQ(actualVotes[0].type, LayerHistory::LayerVoteType::ExplicitCategory);
     ASSERT_EQ(actualVotes[0].category, vote.category);
@@ -262,15 +268,13 @@ TEST_F(LayerInfoTest, getRefreshRateVote_noData) {
     };
     layerInfo.setLayerVote(vote);
 
-    auto actualVotes =
-            layerInfo.getRefreshRateVote(*mScheduler->refreshRateSelector(), systemTime());
+    auto actualVotes = layerInfo.getRefreshRateVote(systemTime());
     ASSERT_EQ(actualVotes.size(), 1u);
     ASSERT_EQ(actualVotes[0].type, LayerHistory::LayerVoteType::Max);
     ASSERT_EQ(actualVotes[0].fps, vote.fps);
 }
 
 TEST_F(LayerInfoTest, isFrontBuffered) {
-    SET_FLAG_FOR_TEST(flags::vrr_config, true);
     ASSERT_FALSE(layerInfo.isFrontBuffered());
 
     LayerProps prop = {.isFrontBuffered = true};

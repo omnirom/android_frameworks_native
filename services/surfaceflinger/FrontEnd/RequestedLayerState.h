@@ -121,14 +121,14 @@ struct RequestedLayerState : layer_state_t {
     bool potentialCursor{false};
     bool protectedByApp{false}; // application requires protected path to external sink
     ui::Transform requestedTransform;
-    std::shared_ptr<FenceTime> acquireFenceTime;
     std::shared_ptr<renderengine::ExternalTexture> externalTexture;
     gui::GameMode gameMode;
     scheduler::LayerInfo::FrameRate requestedFrameRate;
     uint32_t parentId = UNASSIGNED_LAYER_ID;
     uint32_t relativeParentId = UNASSIGNED_LAYER_ID;
     uint32_t layerIdToMirror = UNASSIGNED_LAYER_ID;
-    ui::LayerStack layerStackToMirror = ui::INVALID_LAYER_STACK;
+    uint32_t stopLayerId = UNASSIGNED_LAYER_ID;
+    ui::LayerStack layerStackToMirror = ui::UNASSIGNED_LAYER_STACK;
     uint32_t touchCropId = UNASSIGNED_LAYER_ID;
     uint32_t bgColorLayerId = UNASSIGNED_LAYER_ID;
     uint64_t barrierFrameNumber = 0;

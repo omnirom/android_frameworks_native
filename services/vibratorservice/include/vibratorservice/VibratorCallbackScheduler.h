@@ -20,6 +20,7 @@
 #include <android-base/thread_annotations.h>
 #include <chrono>
 #include <condition_variable>
+#include <functional>
 #include <queue>
 #include <thread>
 

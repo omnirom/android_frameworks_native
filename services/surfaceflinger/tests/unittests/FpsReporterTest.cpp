@@ -78,8 +78,6 @@ protected:
     static constexpr uint32_t LAYER_FLAGS = 0;
     static constexpr int32_t PRIORITY_UNSET = -1;
 
-    sp<Layer> createBufferStateLayer(LayerMetadata metadata);
-
     LayerCreationArgs createArgs(uint32_t id, bool canBeRoot, uint32_t parentId,
                                  LayerMetadata metadata);
 

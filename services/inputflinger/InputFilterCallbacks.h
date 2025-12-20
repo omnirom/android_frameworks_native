@@ -39,7 +39,7 @@ using IInputThreadCallback =
 class InputFilterCallbacks : public IInputFilter::BnInputFilterCallbacks {
 public:
     explicit InputFilterCallbacks(InputListenerInterface& listener,
-                                  InputFilterPolicyInterface& policy);
+                                  InputFilterPolicyInterface& policy, JNIEnv* env);
     ~InputFilterCallbacks() override = default;
 
     uint32_t getModifierState();
@@ -48,6 +48,7 @@ public:
 private:
     InputListenerInterface& mNextListener;
     InputFilterPolicyInterface& mPolicy;
+    JNIEnv* mJniEnv;
     mutable std::mutex mLock;
     struct StickyModifierState {
         uint32_t modifierState;

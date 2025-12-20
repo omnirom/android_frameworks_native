@@ -25,6 +25,7 @@
 #include <layerproto/LayerProtoHeader.h>
 #include "FrontEnd/LayerCreationArgs.h"
 #include "FrontEnd/Update.h"
+#include "QueuedTransactionState.h"
 #include "Tracing/LayerTracing.h"
 #include "Tracing/TransactionTracing.h"
 
@@ -55,7 +56,7 @@ protected:
         transaction.originPid = 2;
         mTracing.addQueuedTransaction(transaction);
         std::vector<QueuedTransactionState> transactions;
-        update.transactions.emplace_back(transaction);
+        update.transactions.emplace_back(std::move(transaction));
         mTracing.addCommittedTransactions(vsyncId, 0, update, {}, false);
         flush();
     }
@@ -67,7 +68,7 @@ protected:
         ASSERT_EQ(actualProto.transactions().size(),
                   static_cast<int32_t>(expectedTransactions.size()));
         for (uint32_t i = 0; i < expectedTransactions.size(); i++) {
-            const auto expectedTransaction = expectedTransactions[i];
+            const auto& expectedTransaction = expectedTransactions[i];
             const auto protoTransaction = actualProto.transactions(static_cast<int32_t>(i));
             EXPECT_EQ(protoTransaction.transaction_id(), expectedTransaction.id);
             EXPECT_EQ(protoTransaction.pid(), expectedTransaction.originPid);
@@ -99,7 +100,7 @@ TEST_F(TransactionTracingTest, addTransactions) {
         transaction.id = i;
         transaction.originPid = static_cast<int32_t>(i);
         transaction.mergedTransactionIds = std::vector<uint64_t>{i + 100, i + 102};
-        transactions.emplace_back(transaction);
+        transactions.emplace_back(QueuedTransactionState(transaction));
         mTracing.addQueuedTransaction(transaction);
     }
 
@@ -107,14 +108,17 @@ TEST_F(TransactionTracingTest, addTransactions) {
     // commits.
     int64_t firstTransactionSetVsyncId = 42;
     frontend::Update firstUpdate;
-    firstUpdate.transactions =
-            std::vector<QueuedTransactionState>(transactions.begin() + 50, transactions.end());
+    for (auto it = transactions.begin() + 50; it < transactions.end(); ++it) {
+        firstUpdate.transactions.emplace_back(QueuedTransactionState(*it));
+    }
     mTracing.addCommittedTransactions(firstTransactionSetVsyncId, 0, firstUpdate, {}, false);
 
     int64_t secondTransactionSetVsyncId = 43;
     frontend::Update secondUpdate;
-    secondUpdate.transactions =
-            std::vector<QueuedTransactionState>(transactions.begin(), transactions.begin() + 50);
+    for (auto it = transactions.begin(); it < transactions.begin() + 50; ++it) {
+        secondUpdate.transactions.emplace_back(QueuedTransactionState(*it));
+    }
+
     mTracing.addCommittedTransactions(secondTransactionSetVsyncId, 0, secondUpdate, {}, false);
     flush();
 
@@ -154,7 +158,7 @@ protected:
             transaction.states.emplace_back(childState);
             mTracing.addQueuedTransaction(transaction);
 
-            update.transactions.emplace_back(transaction);
+            update.transactions.emplace_back(std::move(transaction));
             VSYNC_ID_FIRST_LAYER_CHANGE = ++mVsyncId;
             mTracing.addCommittedTransactions(VSYNC_ID_FIRST_LAYER_CHANGE, 0, update, {}, false);
 
@@ -175,7 +179,7 @@ protected:
             mTracing.addQueuedTransaction(transaction);
 
             frontend::Update update;
-            update.transactions.emplace_back(transaction);
+            update.transactions.emplace_back(std::move(transaction));
             VSYNC_ID_SECOND_LAYER_CHANGE = ++mVsyncId;
             mTracing.addCommittedTransactions(VSYNC_ID_SECOND_LAYER_CHANGE, 0, update, {}, false);
             flush();
@@ -292,7 +296,7 @@ protected:
             transaction.states.emplace_back(mirrorState);
             mTracing.addQueuedTransaction(transaction);
 
-            update.transactions.emplace_back(transaction);
+            update.transactions.emplace_back(std::move(transaction));
             mTracing.addCommittedTransactions(mVsyncId, 0, update, {}, false);
             flush();
         }

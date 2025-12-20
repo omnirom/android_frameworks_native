@@ -14,16 +14,23 @@
  * limitations under the License.
  */
 
-#include "../dispatcher/trace/AndroidInputEventProtoConverter.h"
+#include "../trace/AndroidInputEventProtoConverter.h"
 
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
+
+#include "InputTracingBackendInterface.h"
 
 namespace android::inputdispatcher::trace {
 
 namespace {
 
 using testing::Return, testing::_;
+
+using input_trace::AndroidInputEventProtoConverter;
+using input_trace::TracedKeyEvent;
+using input_trace::TracedMotionEvent;
+using input_trace::WindowDispatchArgs;
 
 class MockProtoAxisValue {
 public:
@@ -94,9 +101,13 @@ public:
     MOCK_METHOD(MockProtoDispatchPointer*, add_dispatched_pointer, ());
 };
 
+class MockProtoEvdev {
+    // Currently empty as it's not used in tests.
+};
+
 using TestProtoConverter =
         AndroidInputEventProtoConverter<MockProtoMotion, MockProtoKey, MockProtoDispatch,
-                                        proto::AndroidInputEventConfig::Decoder>;
+                                        MockProtoEvdev, proto::AndroidInputEventConfig::Decoder>;
 
 TEST(AndroidInputEventProtoConverterTest, ToProtoMotionEvent) {
     TracedMotionEvent event{};
@@ -108,7 +119,7 @@ TEST(AndroidInputEventProtoConverterTest, ToProtoMotionEvent) {
     event.deviceId = 4;
     event.displayId = ui::LogicalDisplayId(5);
     event.classification = MotionClassification::PINCH;
-    event.flags = 6;
+    event.flags = MotionFlag::CANCELED;
     event.policyFlags = 7;
     event.buttonState = 8;
     event.actionButton = 9;
@@ -152,7 +163,7 @@ TEST(AndroidInputEventProtoConverterTest, ToProtoMotionEvent) {
     EXPECT_CALL(proto, set_device_id(4));
     EXPECT_CALL(proto, set_display_id(5));
     EXPECT_CALL(proto, set_classification(AMOTION_EVENT_CLASSIFICATION_PINCH));
-    EXPECT_CALL(proto, set_flags(6));
+    EXPECT_CALL(proto, set_flags(ftl::Flags<MotionFlag>(MotionFlag::CANCELED).get()));
     EXPECT_CALL(proto, set_policy_flags(7));
     EXPECT_CALL(proto, set_button_state(8));
     EXPECT_CALL(proto, set_action_button(9));
@@ -203,7 +214,7 @@ TEST(AndroidInputEventProtoConverterTest, ToProtoMotionEvent_Redacted) {
     event.deviceId = 4;
     event.displayId = ui::LogicalDisplayId(5);
     event.classification = MotionClassification::PINCH;
-    event.flags = 6;
+    event.flags = MotionFlag::CANCELED;
     event.policyFlags = 7;
     event.buttonState = 8;
     event.actionButton = 9;
@@ -247,7 +258,7 @@ TEST(AndroidInputEventProtoConverterTest, ToProtoMotionEvent_Redacted) {
     EXPECT_CALL(proto, set_device_id(4));
     EXPECT_CALL(proto, set_display_id(5));
     EXPECT_CALL(proto, set_classification(AMOTION_EVENT_CLASSIFICATION_PINCH));
-    EXPECT_CALL(proto, set_flags(6));
+    EXPECT_CALL(proto, set_flags(ftl::Flags<MotionFlag>(MotionFlag::CANCELED).get()));
     EXPECT_CALL(proto, set_policy_flags(7));
     EXPECT_CALL(proto, set_button_state(8));
     EXPECT_CALL(proto, set_action_button(9));
@@ -301,7 +312,7 @@ TEST(AndroidInputEventProtoConverterTest, ToProtoMotionEvent_ZeroValues) {
     event.deviceId = 0;
     event.displayId = ui::LogicalDisplayId(0);
     event.classification = {};
-    event.flags = 0;
+    event.flags = {};
     event.policyFlags = 0;
     event.buttonState = 0;
     event.actionButton = 0;
@@ -466,7 +477,8 @@ TEST(AndroidInputEventProtoConverterTest, ToProtoWindowDispatchEvent_Motion_Iden
     args.eventEntry = motion;
     args.vsyncId = 1;
     args.windowId = 2;
-    args.resolvedFlags = 3;
+    ftl::Flags<MotionFlag> resolvedFlags = MotionFlag::WINDOW_IS_OBSCURED;
+    args.resolvedMotionFlags = resolvedFlags;
     args.rawTransform = ui::Transform{};
     args.transform = ui::Transform{};
 
@@ -476,7 +488,7 @@ TEST(AndroidInputEventProtoConverterTest, ToProtoWindowDispatchEvent_Motion_Iden
     EXPECT_CALL(proto, set_event_id(0));
     EXPECT_CALL(proto, set_vsync_id(1));
     EXPECT_CALL(proto, set_window_id(2));
-    EXPECT_CALL(proto, set_resolved_flags(3));
+    EXPECT_CALL(proto, set_resolved_flags(resolvedFlags.get()));
     EXPECT_CALL(proto, add_dispatched_pointer()).WillOnce(Return(&pointer));
     EXPECT_CALL(pointer, set_pointer_id(4));
 
@@ -503,7 +515,8 @@ TEST(AndroidInputEventProtoConverterTest, ToProtoWindowDispatchEvent_Motion_Cust
     args.eventEntry = motion;
     args.vsyncId = 1;
     args.windowId = 2;
-    args.resolvedFlags = 3;
+    ftl::Flags<MotionFlag> resolvedFlags = MotionFlag::WINDOW_IS_OBSCURED;
+    args.resolvedMotionFlags = resolvedFlags;
     args.rawTransform.set(2, 0, 0, 0.5);
     args.transform.set(1.0, 0, 0, 0.5);
 
@@ -514,7 +527,7 @@ TEST(AndroidInputEventProtoConverterTest, ToProtoWindowDispatchEvent_Motion_Cust
     EXPECT_CALL(proto, set_event_id(0));
     EXPECT_CALL(proto, set_vsync_id(1));
     EXPECT_CALL(proto, set_window_id(2));
-    EXPECT_CALL(proto, set_resolved_flags(3));
+    EXPECT_CALL(proto, set_resolved_flags(resolvedFlags.get()));
     EXPECT_CALL(proto, add_dispatched_pointer()).WillOnce(Return(&pointer));
     EXPECT_CALL(pointer, set_pointer_id(4));
 
@@ -543,7 +556,8 @@ TEST(AndroidInputEventProtoConverterTest, ToProtoWindowDispatchEvent_Motion_Reda
     args.eventEntry = motion;
     args.vsyncId = 1;
     args.windowId = 2;
-    args.resolvedFlags = 3;
+    ftl::Flags<MotionFlag> resolvedFlags = MotionFlag::WINDOW_IS_OBSCURED;
+    args.resolvedMotionFlags = resolvedFlags;
     args.rawTransform = ui::Transform{};
     args.transform = ui::Transform{};
 
@@ -552,7 +566,7 @@ TEST(AndroidInputEventProtoConverterTest, ToProtoWindowDispatchEvent_Motion_Reda
     EXPECT_CALL(proto, set_event_id(0));
     EXPECT_CALL(proto, set_vsync_id(1));
     EXPECT_CALL(proto, set_window_id(2));
-    EXPECT_CALL(proto, set_resolved_flags(3));
+    EXPECT_CALL(proto, set_resolved_flags(resolvedFlags.get()));
 
     // Redacted fields
     EXPECT_CALL(proto, add_dispatched_pointer()).Times(0);
@@ -567,7 +581,7 @@ TEST(AndroidInputEventProtoConverterTest, ToProtoWindowDispatchEvent_Key) {
     args.eventEntry = key;
     args.vsyncId = 1;
     args.windowId = 2;
-    args.resolvedFlags = 3;
+    args.resolvedMotionFlags = MotionFlag::WINDOW_IS_OBSCURED;
     args.rawTransform = ui::Transform{};
     args.transform = ui::Transform{};
 
@@ -576,7 +590,8 @@ TEST(AndroidInputEventProtoConverterTest, ToProtoWindowDispatchEvent_Key) {
     EXPECT_CALL(proto, set_event_id(0));
     EXPECT_CALL(proto, set_vsync_id(1));
     EXPECT_CALL(proto, set_window_id(2));
-    EXPECT_CALL(proto, set_resolved_flags(3));
+    EXPECT_CALL(proto,
+                set_resolved_flags(ftl::Flags<MotionFlag>(MotionFlag::WINDOW_IS_OBSCURED).get()));
 
     TestProtoConverter::toProtoWindowDispatchEvent(args, proto, /*isRedacted=*/true);
 }

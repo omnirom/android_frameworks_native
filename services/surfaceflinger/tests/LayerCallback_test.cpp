@@ -52,7 +52,10 @@ public:
     }
 
     virtual sp<SurfaceControl> createLayerWithBuffer() {
-        return createLayer(mClient, "test", 0, 0, ISurfaceComposerClient::eFXSurfaceBufferState);
+        const std::string test_name = std::string("Test layer for ") +
+                ::testing::UnitTest::GetInstance()->current_test_info()->name();
+        return createLayer(mClient, test_name.c_str(), 0, 0,
+                           ISurfaceComposerClient::eFXSurfaceBufferState);
     }
 
     static int fillBuffer(Transaction& transaction, const sp<SurfaceControl>& layer,
@@ -85,7 +88,6 @@ public:
                 return err;
             }
         }
-
         transaction.addTransactionCompletedCallback(callbackHelper->function,
                                                     callbackHelper->getContext());
         return NO_ERROR;
@@ -170,7 +172,7 @@ TEST_F(LayerCallbackTest, BufferColor) {
     CallbackHelper callback;
     int err = fillTransaction(transaction, &callback, layer, true, true);
     if (err) {
-        GTEST_SUCCEED() << "test not supported";
+        GTEST_FAIL() << "Error:" << err;
         return;
     }
 
@@ -189,7 +191,7 @@ TEST_F(LayerCallbackTest, NoBufferNoColor) {
     CallbackHelper callback;
     int err = fillTransaction(transaction, &callback, layer, false, false);
     if (err) {
-        GTEST_SUCCEED() << "test not supported";
+        GTEST_FAIL() << "Error:" << err;
         return;
     }
 
@@ -212,7 +214,7 @@ TEST_F(LayerCallbackTest, BufferNoColor) {
     CallbackHelper callback;
     int err = fillTransaction(transaction, &callback, layer, true, false);
     if (err) {
-        GTEST_SUCCEED() << "test not supported";
+        GTEST_FAIL() << "Error:" << err;
         return;
     }
 
@@ -234,7 +236,7 @@ TEST_F(LayerCallbackTest, NoBufferColor) {
     CallbackHelper callback;
     int err = fillTransaction(transaction, &callback, layer, false, true);
     if (err) {
-        GTEST_SUCCEED() << "test not supported";
+        GTEST_FAIL() << "Error:" << err;
         return;
     }
 
@@ -254,7 +256,7 @@ TEST_F(LayerCallbackTest, NoStateChange) {
     CallbackHelper callback;
     int err = fillTransaction(transaction, &callback);
     if (err) {
-        GTEST_SUCCEED() << "test not supported";
+        GTEST_FAIL() << "Error:" << err;
         return;
     }
 
@@ -272,7 +274,7 @@ TEST_F(LayerCallbackTest, OffScreen) {
     CallbackHelper callback;
     int err = fillTransaction(transaction, &callback, layer);
     if (err) {
-        GTEST_SUCCEED() << "test not supported";
+        GTEST_FAIL() << "Error:" << err;
         return;
     }
 
@@ -295,12 +297,12 @@ TEST_F(LayerCallbackTest, MergeBufferNoColor) {
     CallbackHelper callback1, callback2;
     int err = fillTransaction(transaction1, &callback1, layer1);
     if (err) {
-        GTEST_SUCCEED() << "test not supported";
+        GTEST_FAIL() << "Error:" << err;
         return;
     }
     err = fillTransaction(transaction2, &callback2, layer2);
     if (err) {
-        GTEST_SUCCEED() << "test not supported";
+        GTEST_FAIL() << "Error:" << err;
         return;
     }
 
@@ -329,12 +331,12 @@ TEST_F(LayerCallbackTest, MergeNoBufferColor) {
     CallbackHelper callback1, callback2;
     int err = fillTransaction(transaction1, &callback1, layer1, false, true);
     if (err) {
-        GTEST_SUCCEED() << "test not supported";
+        GTEST_FAIL() << "Error:" << err;
         return;
     }
     err = fillTransaction(transaction2, &callback2, layer2, false, true);
     if (err) {
-        GTEST_SUCCEED() << "test not supported";
+        GTEST_FAIL() << "Error:" << err;
         return;
     }
 
@@ -364,12 +366,12 @@ TEST_F(LayerCallbackTest, MergeOneBufferOneColor) {
     CallbackHelper callback1, callback2;
     int err = fillTransaction(transaction1, &callback1, layer1);
     if (err) {
-        GTEST_SUCCEED() << "test not supported";
+        GTEST_FAIL() << "Error:" << err;
         return;
     }
     err = fillTransaction(transaction2, &callback2, layer2, false, true);
     if (err) {
-        GTEST_SUCCEED() << "test not supported";
+        GTEST_FAIL() << "Error:" << err;
         return;
     }
 
@@ -399,12 +401,12 @@ TEST_F(LayerCallbackTest, Merge_SameCallback) {
     CallbackHelper callback;
     int err = fillTransaction(transaction1, &callback, layer1);
     if (err) {
-        GTEST_SUCCEED() << "test not supported";
+        GTEST_FAIL() << "Error:" << err;
         return;
     }
     err = fillTransaction(transaction2, &callback, layer2);
     if (err) {
-        GTEST_SUCCEED() << "test not supported";
+        GTEST_FAIL() << "Error:" << err;
         return;
     }
 
@@ -424,12 +426,12 @@ TEST_F(LayerCallbackTest, Merge_SameLayer) {
     CallbackHelper callback1, callback2;
     int err = fillTransaction(transaction1, &callback1, layer);
     if (err) {
-        GTEST_SUCCEED() << "test not supported";
+        GTEST_FAIL() << "Error:" << err;
         return;
     }
     err = fillTransaction(transaction2, &callback2, layer);
     if (err) {
-        GTEST_SUCCEED() << "test not supported";
+        GTEST_FAIL() << "Error:" << err;
         return;
     }
 
@@ -458,12 +460,12 @@ TEST_F(LayerCallbackTest, Merge_DifferentClients) {
     CallbackHelper callback1, callback2;
     int err = fillTransaction(transaction1, &callback1, layer1);
     if (err) {
-        GTEST_SUCCEED() << "test not supported";
+        GTEST_FAIL() << "Error:" << err;
         return;
     }
     err = fillTransaction(transaction2, &callback2, layer2);
     if (err) {
-        GTEST_SUCCEED() << "test not supported";
+        GTEST_FAIL() << "Error:" << err;
         return;
     }
 
@@ -492,7 +494,7 @@ TEST_F(LayerCallbackTest, MultipleTransactions) {
     for (size_t i = 0; i < 10; i++) {
         int err = fillTransaction(transaction, &callback, layer);
         if (err) {
-            GTEST_SUCCEED() << "test not supported";
+            GTEST_FAIL() << "Error:" << err;
             return;
         }
 
@@ -520,14 +522,14 @@ TEST_F(LayerCallbackTest, MultipleTransactions_NoStateChange) {
         if (i == 0) {
             int err = fillTransaction(transaction, &callback, layer);
             if (err) {
-                GTEST_SUCCEED() << "test not supported";
+                GTEST_FAIL() << "Error:" << err;
                 return;
             }
             expected.addSurface(ExpectedResult::Transaction::PRESENTED, layer);
         } else {
             int err = fillTransaction(transaction, &callback);
             if (err) {
-                GTEST_SUCCEED() << "test not supported";
+                GTEST_FAIL() << "Error:" << err;
                 return;
             }
         }
@@ -549,13 +551,13 @@ TEST_F(LayerCallbackTest, MultipleTransactions_SameStateChange) {
         if (i == 0) {
             int err = fillTransaction(transaction, &callback, layer);
             if (err) {
-                GTEST_SUCCEED() << "test not supported";
+                GTEST_FAIL() << "Error:" << err;
                 return;
             }
         } else {
             int err = fillTransaction(transaction, &callback);
             if (err) {
-                GTEST_SUCCEED() << "test not supported";
+                GTEST_FAIL() << "Error:" << err;
                 return;
             }
         }
@@ -587,12 +589,12 @@ TEST_F(LayerCallbackTest, MultipleTransactions_Merge) {
     for (size_t i = 0; i < 10; i++) {
         int err = fillTransaction(transaction1, &callback1, layer1);
         if (err) {
-            GTEST_SUCCEED() << "test not supported";
+            GTEST_FAIL() << "Error:" << err;
             return;
         }
         err = fillTransaction(transaction2, &callback2, layer2);
         if (err) {
-            GTEST_SUCCEED() << "test not supported";
+            GTEST_FAIL() << "Error:" << err;
             return;
         }
 
@@ -636,12 +638,12 @@ TEST_F(LayerCallbackTest, MultipleTransactions_Merge_DifferentClients) {
     for (size_t i = 0; i < 10; i++) {
         int err = fillTransaction(transaction1, &callback1, layer1);
         if (err) {
-            GTEST_SUCCEED() << "test not supported";
+            GTEST_FAIL() << "Error:" << err;
             return;
         }
         err = fillTransaction(transaction2, &callback2, layer2);
         if (err) {
-            GTEST_SUCCEED() << "test not supported";
+            GTEST_FAIL() << "Error:" << err;
             return;
         }
 
@@ -686,12 +688,12 @@ TEST_F(LayerCallbackTest, MultipleTransactions_Merge_DifferentClients_NoStateCha
     // Normal call to set up test
     int err = fillTransaction(transaction1, &callback1, layer1);
     if (err) {
-        GTEST_SUCCEED() << "test not supported";
+        GTEST_FAIL() << "Error:" << err;
         return;
     }
     err = fillTransaction(transaction2, &callback2, layer2);
     if (err) {
-        GTEST_SUCCEED() << "test not supported";
+        GTEST_FAIL() << "Error:" << err;
         return;
     }
 
@@ -714,12 +716,12 @@ TEST_F(LayerCallbackTest, MultipleTransactions_Merge_DifferentClients_NoStateCha
     // Test
     err = fillTransaction(transaction1, &callback1);
     if (err) {
-        GTEST_SUCCEED() << "test not supported";
+        GTEST_FAIL() << "Error:" << err;
         return;
     }
     err = fillTransaction(transaction2, &callback2);
     if (err) {
-        GTEST_SUCCEED() << "test not supported";
+        GTEST_FAIL() << "Error:" << err;
         return;
     }
 
@@ -748,12 +750,12 @@ TEST_F(LayerCallbackTest, MultipleTransactions_Merge_DifferentClients_SameStateC
     // Normal call to set up test
     int err = fillTransaction(transaction1, &callback1, layer1);
     if (err) {
-        GTEST_SUCCEED() << "test not supported";
+        GTEST_FAIL() << "Error:" << err;
         return;
     }
     err = fillTransaction(transaction2, &callback2, layer2);
     if (err) {
-        GTEST_SUCCEED() << "test not supported";
+        GTEST_FAIL() << "Error:" << err;
         return;
     }
 
@@ -776,12 +778,12 @@ TEST_F(LayerCallbackTest, MultipleTransactions_Merge_DifferentClients_SameStateC
     // Test
     err = fillTransaction(transaction1, &callback1);
     if (err) {
-        GTEST_SUCCEED() << "test not supported";
+        GTEST_FAIL() << "Error:" << err;
         return;
     }
     err = fillTransaction(transaction2, &callback2);
     if (err) {
-        GTEST_SUCCEED() << "test not supported";
+        GTEST_FAIL() << "Error:" << err;
         return;
     }
 
@@ -812,7 +814,7 @@ TEST_F(LayerCallbackTest, DISABLED_MultipleTransactions_SingleFrame) {
 
         int err = fillTransaction(transaction, &callback, layer);
         if (err) {
-            GTEST_SUCCEED() << "test not supported";
+            GTEST_FAIL() << "Error:" << err;
             return;
         }
 
@@ -830,7 +832,7 @@ TEST_F(LayerCallbackTest, MultipleTransactions_SingleFrame_NoStateChange) {
     CallbackHelper callback;
     int err = fillTransaction(transaction, &callback, layer);
     if (err) {
-        GTEST_SUCCEED() << "test not supported";
+        GTEST_FAIL() << "Error:" << err;
         return;
     }
 
@@ -847,7 +849,7 @@ TEST_F(LayerCallbackTest, MultipleTransactions_SingleFrame_NoStateChange) {
 
         err = fillTransaction(transaction, &callback);
         if (err) {
-            GTEST_SUCCEED() << "test not supported";
+            GTEST_FAIL() << "Error:" << err;
             return;
         }
 
@@ -865,7 +867,7 @@ TEST_F(LayerCallbackTest, MultipleTransactions_SingleFrame_SameStateChange) {
     CallbackHelper callback;
     int err = fillTransaction(transaction, &callback, layer);
     if (err) {
-        GTEST_SUCCEED() << "test not supported";
+        GTEST_FAIL() << "Error:" << err;
         return;
     }
 
@@ -887,7 +889,7 @@ TEST_F(LayerCallbackTest, MultipleTransactions_SingleFrame_SameStateChange) {
 
         err = fillTransaction(transaction, &callback);
         if (err) {
-            GTEST_SUCCEED() << "test not supported";
+            GTEST_FAIL() << "Error:" << err;
             return;
         }
 
@@ -907,7 +909,7 @@ TEST_F(LayerCallbackTest, DesiredPresentTime) {
     CallbackHelper callback;
     int err = fillTransaction(transaction, &callback, layer);
     if (err) {
-        GTEST_SUCCEED() << "test not supported";
+        GTEST_FAIL() << "Error:" << err;
         return;
     }
 
@@ -931,7 +933,7 @@ TEST_F(LayerCallbackTest, DesiredPresentTime_Multiple) {
     CallbackHelper callback1;
     int err = fillTransaction(transaction, &callback1, layer);
     if (err) {
-        GTEST_SUCCEED() << "test not supported";
+        GTEST_FAIL() << "Error:" << err;
         return;
     }
 
@@ -948,7 +950,7 @@ TEST_F(LayerCallbackTest, DesiredPresentTime_Multiple) {
     CallbackHelper callback2;
     err = fillTransaction(transaction, &callback2, layer);
     if (err) {
-        GTEST_SUCCEED() << "test not supported";
+        GTEST_FAIL() << "Error:" << err;
         return;
     }
 
@@ -977,7 +979,7 @@ TEST_F(LayerCallbackTest, DISABLED_DesiredPresentTime_OutOfOrder) {
     CallbackHelper callback1;
     int err = fillTransaction(transaction, &callback1, layer);
     if (err) {
-        GTEST_SUCCEED() << "test not supported";
+        GTEST_FAIL() << "Error:" << err;
         return;
     }
 
@@ -994,7 +996,7 @@ TEST_F(LayerCallbackTest, DISABLED_DesiredPresentTime_OutOfOrder) {
     CallbackHelper callback2;
     err = fillTransaction(transaction, &callback2, layer);
     if (err) {
-        GTEST_SUCCEED() << "test not supported";
+        GTEST_FAIL() << "Error:" << err;
         return;
     }
 
@@ -1021,7 +1023,7 @@ TEST_F(LayerCallbackTest, DesiredPresentTime_Past) {
     CallbackHelper callback;
     int err = fillTransaction(transaction, &callback, layer);
     if (err) {
-        GTEST_SUCCEED() << "test not supported";
+        GTEST_FAIL() << "Error:" << err;
         return;
     }
 
@@ -1045,7 +1047,7 @@ TEST_F(LayerCallbackTest, ExpectedPresentTime) {
     CallbackHelper callback;
     int err = fillTransaction(transaction, &callback, layer);
     if (err) {
-        GTEST_SUCCEED() << "test not supported";
+        GTEST_FAIL() << "Error:" << err;
         return;
     }
 
@@ -1073,7 +1075,7 @@ TEST_F(LayerCallbackTest, EmptyBufferStateChanges) {
     for (size_t i = 0; i < 10; i++) {
         int err = fillTransaction(transaction, &callback, bufferLayer);
         if (err) {
-            GTEST_SUCCEED() << "test not supported";
+            GTEST_FAIL() << "Error:" << err;
             return;
         }
 
@@ -1108,7 +1110,7 @@ TEST_F(LayerCallbackTest, DISABLED_NonBufferLayerStateChanges) {
     CallbackHelper callback;
     int err = fillTransaction(transaction, &callback);
     if (err) {
-        GTEST_SUCCEED() << "test not supported";
+        GTEST_FAIL() << "Error:" << err;
         return;
     }
     transaction.setPosition(layer, 1, 2);
@@ -1130,7 +1132,7 @@ TEST_F(LayerCallbackTest, CommitCallbackOffscreenLayer) {
     int err = fillTransaction(transaction, &callback, layer, true);
     err |= fillBuffer(transaction, offscreenLayer);
     if (err) {
-        GTEST_SUCCEED() << "test not supported";
+        GTEST_FAIL() << "Error:" << err;
         return;
     }
 
@@ -1157,7 +1159,7 @@ TEST_F(LayerCallbackTest, TransactionCommittedCallback_BSL) {
     CallbackHelper callback;
     int err = fillTransaction(transaction, &callback, layer, true);
     if (err) {
-        GTEST_SUCCEED() << "test not supported";
+        GTEST_FAIL() << "Error:" << err;
         return;
     }
     transaction.addTransactionCommittedCallback(callback.function, callback.getContext()).apply();
@@ -1177,7 +1179,7 @@ TEST_F(LayerCallbackTest, TransactionCommittedCallback_EffectLayer) {
     CallbackHelper callback;
     int err = fillTransaction(transaction, &callback);
     if (err) {
-        GTEST_SUCCEED() << "test not supported";
+        GTEST_FAIL() << "Error:" << err;
         return;
     }
     transaction.addTransactionCommittedCallback(callback.function, callback.getContext()).apply();
@@ -1197,7 +1199,7 @@ TEST_F(LayerCallbackTest, TransactionCommittedCallback_ContainerLayer) {
     CallbackHelper callback;
     int err = fillTransaction(transaction, &callback);
     if (err) {
-        GTEST_SUCCEED() << "test not supported";
+        GTEST_FAIL() << "Error:" << err;
         return;
     }
     transaction.addTransactionCommittedCallback(callback.function, callback.getContext()).apply();
@@ -1213,7 +1215,7 @@ TEST_F(LayerCallbackTest, TransactionCommittedCallback_NoLayer) {
     CallbackHelper callback;
     int err = fillTransaction(transaction, &callback);
     if (err) {
-        GTEST_SUCCEED() << "test not supported";
+        GTEST_FAIL() << "Error:" << err;
         return;
     }
     transaction.addTransactionCommittedCallback(callback.function, callback.getContext()).apply();
@@ -1233,7 +1235,7 @@ TEST_F(LayerCallbackTest, SetNullBuffer) {
     int err = fillTransaction(transaction, &callback, layer, /*setBuffer=*/true,
                               /*setBackgroundColor=*/false);
     if (err) {
-        GTEST_SUCCEED() << "test not supported";
+        GTEST_FAIL() << "Error:" << err;
         return;
     }
     transaction.apply();
@@ -1261,17 +1263,21 @@ TEST_F(LayerCallbackTest, SetNullBuffer) {
     err = fillTransaction(transaction, &callback, layer, /*setBuffer=*/true,
                           /*setBackgroundColor=*/false);
     if (err) {
-        GTEST_SUCCEED() << "test not supported";
+        GTEST_FAIL() << "Error:" << err;
         return;
     }
 
     transaction.apply();
 
     {
+        // TODO(b/294915480) Fix this as part of release buffer cleanup. We should not be passing a
+        // release fence in this case, because there is no buffer to release. We currently pass a
+        // release fence because of defensive code used to track screenshot work. Passing a fence
+        // here is odd but harmless.
         ExpectedResult expected;
         expected.addSurface(ExpectedResult::Transaction::PRESENTED, layer,
                             ExpectedResult::Buffer::ACQUIRED,
-                            ExpectedResult::PreviousBuffer::NOT_RELEASED);
+                            ExpectedResult::PreviousBuffer::RELEASED);
         EXPECT_NO_FATAL_FAILURE(waitForCallback(callback, expected, true));
     }
 }
@@ -1304,12 +1310,12 @@ TEST_F(LayerCallbackTest, OccludedLayerHasReleaseCallback) {
     CallbackHelper callback1a, callback1b, callback2a, callback2b;
     int err = fillTransaction(transaction1, &callback1a, layer1);
     if (err) {
-        GTEST_SUCCEED() << "test not supported";
+        GTEST_FAIL() << "Error:" << err;
         return;
     }
     err = fillTransaction(transaction2, &callback2a, layer2);
     if (err) {
-        GTEST_SUCCEED() << "test not supported";
+        GTEST_FAIL() << "Error:" << err;
         return;
     }
 
@@ -1338,12 +1344,12 @@ TEST_F(LayerCallbackTest, OccludedLayerHasReleaseCallback) {
     // Submit new buffers so previous buffers can be released
     err = fillTransaction(transaction1, &callback1b, layer1);
     if (err) {
-        GTEST_SUCCEED() << "test not supported";
+        GTEST_FAIL() << "Error:" << err;
         return;
     }
     err = fillTransaction(transaction2, &callback2b, layer2);
     if (err) {
-        GTEST_SUCCEED() << "test not supported";
+        GTEST_FAIL() << "Error:" << err;
         return;
     }
 

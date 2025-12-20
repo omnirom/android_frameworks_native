@@ -48,9 +48,9 @@ TEST_F(SurfaceTextureGLTest, TexturingFromCpuFilledYV12BufferNpot) {
 
     // Fill the buffer with the a checkerboard pattern
     uint8_t* img = nullptr;
-    buf->lock(GRALLOC_USAGE_SW_WRITE_OFTEN, (void**)(&img));
+    ASSERT_EQ(NO_ERROR, buf->lock(GRALLOC_USAGE_SW_WRITE_OFTEN, (void**)(&img)));
     fillYV12Buffer(img, texWidth, texHeight, buf->getStride());
-    buf->unlock();
+    ASSERT_EQ(NO_ERROR, buf->unlock());
     ASSERT_EQ(NO_ERROR, mANW->queueBuffer(mANW.get(), buf->getNativeBuffer(),
             -1));
 
@@ -98,9 +98,9 @@ TEST_F(SurfaceTextureGLTest, TexturingFromCpuFilledYV12BufferPow2) {
 
     // Fill the buffer with the a checkerboard pattern
     uint8_t* img = nullptr;
-    buf->lock(GRALLOC_USAGE_SW_WRITE_OFTEN, (void**)(&img));
+    ASSERT_EQ(NO_ERROR, buf->lock(GRALLOC_USAGE_SW_WRITE_OFTEN, (void**)(&img)));
     fillYV12Buffer(img, texWidth, texHeight, buf->getStride());
-    buf->unlock();
+    ASSERT_EQ(NO_ERROR, buf->unlock());
     ASSERT_EQ(NO_ERROR, mANW->queueBuffer(mANW.get(), buf->getNativeBuffer(),
             -1));
 
@@ -163,9 +163,9 @@ TEST_F(SurfaceTextureGLTest, TexturingFromCpuFilledYV12BufferWithCrop) {
         sp<GraphicBuffer> buf(GraphicBuffer::from(anb));
 
         uint8_t* img = nullptr;
-        buf->lock(GRALLOC_USAGE_SW_WRITE_OFTEN, (void**)(&img));
+        ASSERT_EQ(NO_ERROR, buf->lock(GRALLOC_USAGE_SW_WRITE_OFTEN, (void**)(&img)));
         fillYV12BufferRect(img, texWidth, texHeight, buf->getStride(), crop);
-        buf->unlock();
+        ASSERT_EQ(NO_ERROR, buf->unlock());
         ASSERT_EQ(NO_ERROR, mANW->queueBuffer(mANW.get(),
                 buf->getNativeBuffer(), -1));
 
@@ -737,7 +737,6 @@ TEST_F(SurfaceTextureGLTest, InvalidWidthOrHeightFails) {
     ASSERT_NE(NO_ERROR, mST->updateTexImage());
 }
 
-#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
 TEST_F(SurfaceTextureGLTest, TestUnlimitedSlots) {
     ASSERT_EQ(OK, mSTC->connect(NATIVE_WINDOW_API_CPU, sp<StubSurfaceListener>::make()));
     ASSERT_EQ(OK, mSTC->setMaxDequeuedBufferCount(256));
@@ -755,12 +754,11 @@ TEST_F(SurfaceTextureGLTest, TestUnlimitedSlots) {
         ASSERT_EQ(OK, graphicBuffer->lock(AHARDWAREBUFFER_USAGE_CPU_WRITE_OFTEN, &buf));
         fillRGBA8Buffer((uint8_t*)buf, graphicBuffer->getWidth(), graphicBuffer->getHeight(),
                         graphicBuffer->getStride(), i, i, i, i);
-        graphicBuffer->unlock();
+        ASSERT_EQ(NO_ERROR, graphicBuffer->unlock());
 
         ASSERT_EQ(OK, mSTC->queueBuffer(graphicBuffer, fence));
         ASSERT_EQ(OK, mST->updateTexImage());
         checkPixel(0, 0, i, i, i, i);
     }
 }
-#endif
 } // namespace android

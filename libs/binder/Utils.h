@@ -85,7 +85,16 @@ constexpr size_t countof(T (&)[N]) {
 }
 
 // avoid optimizations
-void zeroMemory(uint8_t* data, size_t size);
+inline void zeroMemory(uint8_t* data, size_t size) {
+#ifdef __BIONIC__
+    memset_explicit(data, 0, size);
+#else
+    // Assembly marking to prevent any optimizing compiler from not actually clearing the buffer,
+    // this matches what exactly what memset_explicit does.
+    memset(data, 0, size);
+    __asm__ __volatile__("" : : "r"(data) : "memory");
+#endif
+}
 
 // View of contiguous sequence. Similar to std::span.
 template <typename T>
@@ -96,6 +105,11 @@ struct Span {
     size_t byteSize() { return size * sizeof(T); }
 
     iovec toIovec() { return {const_cast<std::remove_const_t<T>*>(data), byteSize()}; }
+
+    void clear() {
+        data = nullptr;
+        size = 0;
+    }
 
     // Truncates `this` to a length of `offset` and returns a span with the
     // remainder.

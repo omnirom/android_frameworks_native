@@ -13,6 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+#define LOG_TAG "libbinder.Static"
 
 // All static variables go here, to control initialization and
 // destruction order in the library.
@@ -27,7 +28,7 @@ namespace android {
 
 // ------------ Text output streams
 
-Vector<int32_t> gTextBuffers;
+[[clang::no_destroy]] Vector<int32_t> gTextBuffers;
 
 class LogTextOutput : public BufferedTextOutput
 {

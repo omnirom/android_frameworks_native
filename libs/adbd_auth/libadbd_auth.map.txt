@@ -12,6 +12,7 @@ LIBADBD_AUTH {
     adbd_auth_tls_device_disconnected; # systemapi introduced=30
     adbd_auth_get_max_version; # systemapi introduced=30
     adbd_auth_supports_feature; # systemapi introduced=30
+    adbd_auth_send_tls_server_port; # systemapi introduced=37
   local:
     *;
 };

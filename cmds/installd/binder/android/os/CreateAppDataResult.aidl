@@ -16,7 +16,7 @@
 
 package android.os;
 
-/** {@hide} */
+/** @hide */
 parcelable CreateAppDataResult {
     long ceDataInode;
     long deDataInode;

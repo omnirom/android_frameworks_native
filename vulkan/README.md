@@ -20,3 +20,56 @@ We generate several parts of the loader and tools directly from the Vulkan Regis
 
 Install Python3 (if not already installed) and execute below:
 `$ ./scripts/code_generator.py`
+
+
+### Vulkan EDI Pipeline Update Guide
+
+This guide outlines the three main parts for updating the Vulkan EDI pipeline.
+
+## Part 1: Update `vk.py` and `vkjson_*.cc` files
+
+  - **Location**: Android repository : `$ANDROID_BUILD_TOP/frameworks/native/vulkan`
+  - **Command**:
+    `python3 scripts/vkjson_codegen.py`
+
+## Part 2: Update Vulkan Device Info Collector (cts Repository)
+
+  - **Location**: Android repository: `$ANDROID_BUILD_TOP/cts`
+  - **Command**:
+    `python3 common/device-side/device-info/src/com/android/compatibility/common/deviceinfo/scripts/code_generator.py`
+
+## Part 3: Update the Protobuf Schemas (in google3)
+
+# A. Generate `VulkanDeviceInfo.deviceinfo.json
+
+  - **Location**: Android repository root: `$ANDROID_BUILD_TOP`
+  - **Commands**:
+    ```
+        # Build the necessary CTS modules
+        mmma cts/tools/cts-device-info/ cts/common/device-side/device-info
+
+        # Install the collector APK. Note: The path depends on your lunch target.
+        adb install -r -g out/target/product/<target_name>/testcases/CtsDeviceInfo/arm64/CtsDeviceInfo.apk
+
+        # Run the instrumented test to generate the file on the device
+        adb shell am instrument --no-isolated-storage -w \
+        -e class com.android.compatibility.common.deviceinfo.VulkanDeviceInfo \
+        com.android.compatibility.common.deviceinfo/androidx.test.runner.AndroidJUnitRunner
+
+        # Pull the generated JSON from the device
+        adb pull /sdcard/device-info-files/VulkanDeviceInfo.deviceinfo.json
+    ```
+
+# B. Generate Final Protobuf Files
+
+Next, move to your `google3` workspace to update the source files and run the final proto generator script.
+
+1. **Update `vk.py`**: Copy the `vk.py` from `$ANDROID_BUILD_TOP`/frameworks/native/vulkan/scripts file to `wireless/android/partner/adl/proto/scripts/`.
+    - In the copied `vk.py` file, add a comment in the file to disable lint errors - `# pylint: disable=all`
+
+2. **Update `VulkanDeviceInfo.deviceinfo.json`**: Copy the JSON file generated in the previous step (**A**) to `javatests/com/google/wireless/android/partner/adl/pipeline/extendeddeviceinfo/`.
+
+3. **Run Generator**: Execute the following command to update the `.proto` files, `apfe.sdl`, and the `ExtendedDeviceInfoTest.java` test file.
+      - **Location**: `google3`
+      - **Command**:
+        `python3 wireless/android/partner/adl/proto/scripts/vulkan_proto_gen.py`

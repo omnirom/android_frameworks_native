@@ -13,8 +13,8 @@ aidl_interface {
     unstable: true,
     srcs: [
         "parcelables/EmptyParcelable.aidl",
-        "parcelables/SingleDataParcelable.aidl",
         "parcelables/GenericDataParcelable.aidl",
+        "parcelables/SingleDataParcelable.aidl",
     ],
     flags: [
         "-Werror",
@@ -52,27 +52,28 @@ cc_fuzz {
         "random_parcel.cpp",
     ],
     static_libs: [
+        "binderReadParcelIface-cpp",
+        "binderReadParcelIface-ndk",
         "libbase",
         "libbinder_random_parcel",
         "libcutils",
         "libhidlbase",
-        "liblog",
-        "binderReadParcelIface-cpp",
-        "binderReadParcelIface-ndk",
     ],
 
     target: {
         android: {
             shared_libs: [
-                "libbinder_ndk",
                 "libbinder",
+                "libbinder_ndk",
+                "liblog",
                 "libutils",
             ],
         },
         host: {
             static_libs: [
-                "libbinder_ndk",
                 "libbinder",
+                "libbinder_ndk",
+                "liblog",
                 "libutils",
             ],
         },
@@ -96,11 +97,11 @@ cc_library_static {
         },
     },
     srcs: [
+        "libbinder_driver.cpp",
+        "libbinder_ndk_driver.cpp",
         "random_binder.cpp",
         "random_fd.cpp",
         "random_parcel.cpp",
-        "libbinder_driver.cpp",
-        "libbinder_ndk_driver.cpp",
     ],
     shared_libs: [
         "libbase",
@@ -163,7 +164,7 @@ cc_binary_host {
     shared_libs: [
         "libbase",
         "libbinder",
-        "libutils",
         "libcutils",
+        "libutils",
     ],
 }

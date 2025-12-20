@@ -28,36 +28,37 @@
 #include <common/trace.h>
 #include <log/log.h>
 
+#include "RuntimeEffectManager.h"
+
 namespace android {
 namespace renderengine {
 namespace skia {
 
-static sk_sp<SkRuntimeEffect> createMixEffect() {
-    SkString mixString(R"(
-        uniform shader blurredInput;
-        uniform shader originalInput;
-        uniform float mixFactor;
+const SkString kEffectSource_BlurFilter_MixEffect(R"(
+    uniform shader blurredInput;
+    uniform shader originalInput;
+    uniform float mixFactor;
 
-        half4 main(float2 xy) {
-            return half4(mix(originalInput.eval(xy), blurredInput.eval(xy), mixFactor)).rgb1;
-        }
-    )");
-
-    auto [mixEffect, mixError] = SkRuntimeEffect::MakeForShader(mixString);
-    if (!mixEffect) {
-        LOG_ALWAYS_FATAL("RuntimeShader error: %s", mixError.c_str());
+    half4 main(float2 xy) {
+        return half4(mix(originalInput.eval(xy), blurredInput.eval(xy), mixFactor)).rgb1;
     }
-    return mixEffect;
-}
+)");
 
 static SkMatrix getShaderTransform(const SkCanvas* canvas, const SkRect& blurRect,
-                                   const float scale) {
+                                   const float scale, const float zoomScale) {
     // 1. Apply the blur shader matrix, which scales up the blurred surface to its real size
     auto matrix = SkMatrix::Scale(scale, scale);
     // 2. Since the blurred surface has the size of the layer, we align it with the
     // top left corner of the layer position.
     matrix.postConcat(SkMatrix::Translate(blurRect.fLeft, blurRect.fTop));
-    // 3. Finally, apply the inverse canvas matrix. The snapshot made in the BlurFilter is in the
+    // 3. Apply the "zoom" effect as an extra scale + translate around the center of the blur.
+    if (zoomScale != 1.0f) {
+        matrix.postScale(zoomScale, zoomScale);
+        matrix.postTranslate(
+                blurRect.width() * (1 - zoomScale) / 2.0f,
+                blurRect.height() * (1 - zoomScale) / 2.0f);
+    }
+    // 4. Finally, apply the inverse canvas matrix. The snapshot made in the BlurFilter is in the
     // original surface orientation. The inverse matrix has to be applied to align the blur
     // surface with the current orientation/position of the canvas.
     SkMatrix drawInverse;
@@ -67,16 +68,17 @@ static SkMatrix getShaderTransform(const SkCanvas* canvas, const SkRect& blurRec
     return matrix;
 }
 
-BlurFilter::BlurFilter(const float maxCrossFadeRadius)
+BlurFilter::BlurFilter(RuntimeEffectManager& effectManager, const float maxCrossFadeRadius)
       : mMaxCrossFadeRadius(maxCrossFadeRadius),
-        mMixEffect(maxCrossFadeRadius > 0 ? createMixEffect() : nullptr) {}
+        mMixEffect(effectManager.mKnownEffects[kBlurFilter_MixEffect]) {}
 
 float BlurFilter::getMaxCrossFadeRadius() const {
     return mMaxCrossFadeRadius;
 }
 
 void BlurFilter::drawBlurRegion(SkCanvas* canvas, const SkRRect& effectRegion,
-                                const uint32_t blurRadius, const float blurAlpha,
+                                const uint32_t blurRadius, const float zoomScale,
+                                const float blurAlpha,
                                 const SkRect& blurRect, sk_sp<SkImage> blurredImage,
                                 sk_sp<SkImage> input) {
     SFTRACE_CALL();
@@ -84,9 +86,10 @@ void BlurFilter::drawBlurRegion(SkCanvas* canvas, const SkRRect& effectRegion,
     SkPaint paint;
     paint.setAlphaf(blurAlpha);
 
-    const auto blurMatrix = getShaderTransform(canvas, blurRect, kInverseInputScale);
+    auto blurMatrix = getShaderTransform(canvas, blurRect, kInverseInputScale, zoomScale);
+
     SkSamplingOptions linearSampling(SkFilterMode::kLinear, SkMipmapMode::kNone);
-    const auto blurShader = blurredImage->makeShader(SkTileMode::kClamp, SkTileMode::kClamp,
+    const auto blurShader = blurredImage->makeShader(SkTileMode::kMirror, SkTileMode::kMirror,
                                                      linearSampling, &blurMatrix);
 
     if (blurRadius < mMaxCrossFadeRadius) {
@@ -98,12 +101,19 @@ void BlurFilter::drawBlurRegion(SkCanvas* canvas, const SkRRect& effectRegion,
         if (!canvas->getTotalMatrix().invert(&inputMatrix)) {
             ALOGE("matrix was unable to be inverted");
         }
+        if (zoomScale != 1.0f) {
+            inputMatrix.preTranslate(
+                    blurRect.width() * (1 - zoomScale) / 2.0f,
+                    blurRect.height() * (1 - zoomScale) / 2.0f);
+            inputMatrix.preScale(zoomScale, zoomScale);
+        }
 
         SkRuntimeShaderBuilder blurBuilder(mMixEffect);
         blurBuilder.child("blurredInput") = blurShader;
         blurBuilder.child("originalInput") =
-                input->makeShader(SkTileMode::kClamp, SkTileMode::kClamp, linearSampling,
+                input->makeShader(SkTileMode::kMirror, SkTileMode::kMirror, linearSampling,
                                   inputMatrix);
+
         blurBuilder.uniform("mixFactor") = blurRadius / mMaxCrossFadeRadius;
 
         paint.setShader(blurBuilder.makeShader());

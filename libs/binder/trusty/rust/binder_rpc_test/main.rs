@@ -115,6 +115,16 @@ service_test! {repeat_their_binder, repeat_their_binder_rust, |srv: Strong<dyn I
     assert_eq!(out_binder.unwrap().unwrap(), in_binder);
 }}
 
+service_test! {repeat_bytes, repeat_bytes_rust, |srv: Strong<dyn IBinderRpcTest>| {
+    let bytes = vec![b'a'; 512];
+    assert_eq!(srv.repeatBytes(&bytes), Ok(bytes));
+}}
+
+service_test! {repeat_strings, repeat_strings_rust, |srv: Strong<dyn IBinderRpcTest>| {
+    let strings: Vec<_> = ["some strings", "for", "srv to echo back to us"].iter().map(|s| s.to_string()).collect();
+    assert_eq!(srv.repeatStrings(&strings), Ok(strings));
+}}
+
 service_test! {hold_binder, hold_binder_rust, |srv: Strong<dyn IBinderRpcTest>| {
     let name = "Foo";
 

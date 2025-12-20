@@ -40,6 +40,7 @@ filegroup {
         "EventHub.cpp",
         "InputDevice.cpp",
         "InputReader.cpp",
+        "InputReaderTracer.cpp",
         "Macros.cpp",
         "TouchVideoDevice.cpp",
         "controller/PeripheralController.cpp",
@@ -65,13 +66,14 @@ filegroup {
         "mapper/accumulator/MultiTouchMotionAccumulator.cpp",
         "mapper/accumulator/SingleTouchMotionAccumulator.cpp",
         "mapper/accumulator/TouchButtonAccumulator.cpp",
-        "mapper/gestures/GestureConverter.cpp",
         "mapper/gestures/GesturesLogcatAdapter.cpp",
         "mapper/gestures/HardwareProperties.cpp",
         "mapper/gestures/HardwareStateConverter.cpp",
         "mapper/gestures/Logging.cpp",
         "mapper/gestures/PropertyProvider.cpp",
+        "mapper/gestures/RelativeModeGestureConverter.cpp",
         "mapper/gestures/TimerProvider.cpp",
+        "mapper/gestures/UncapturedGestureConverter.cpp",
     ],
 }
 
@@ -88,7 +90,7 @@ cc_defaults {
         "libinput",
         "libjsoncpp",
         "liblog",
-        "libstatslog",
+        "libstatslog_inputflinger",
         "libstatspull",
         "libstatssocket",
         "libutils",
@@ -112,55 +114,4 @@ cc_defaults {
             ],
         },
     },
-}
-
-cc_library_static {
-    name: "libinputreader_static",
-    defaults: [
-        "inputflinger_defaults",
-        "libinputreader_defaults",
-    ],
-    shared_libs: [
-        "libinputflinger_base",
-    ],
-    export_header_lib_headers: [
-        "libbatteryservice_headers",
-        "libchrome-gestures_headers",
-        "libinputreader_headers",
-    ],
-    whole_static_libs: [
-        "libchrome-gestures",
-    ],
-}
-
-cc_library_shared {
-    name: "libinputreader",
-    host_supported: true,
-    defaults: [
-        "inputflinger_defaults",
-        "libinputreader_defaults",
-    ],
-    srcs: [
-        "InputReaderFactory.cpp",
-    ],
-    shared_libs: [
-        // This should consist only of dependencies from inputflinger. Other dependencies should be
-        // in cc_defaults so that they are included in the tests.
-        "libinputflinger_base",
-        "libjsoncpp",
-    ],
-    export_header_lib_headers: [
-        "libinputreader_headers",
-    ],
-    target: {
-        host: {
-            include_dirs: [
-                "bionic/libc/kernel/android/uapi/",
-                "bionic/libc/kernel/uapi",
-            ],
-        },
-    },
-    static_libs: [
-        "libchrome-gestures",
-    ],
 }

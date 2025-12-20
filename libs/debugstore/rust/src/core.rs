@@ -38,7 +38,7 @@ impl DebugStore {
     /// The default limit for the number of events that can be stored.
     ///
     /// This limit is used to initialize the storage for debug events.
-    const DEFAULT_EVENT_LIMIT: usize = 16;
+    const DEFAULT_EVENT_LIMIT: usize = 32;
     /// A designated identifier used for events that cannot be closed.
     ///
     /// This ID is used for point/instantaneous events, or events do not have

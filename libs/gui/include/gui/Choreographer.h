@@ -79,9 +79,6 @@ public:
     };
     static Context gChoreographers;
 
-    explicit Choreographer(const sp<Looper>& looper, const sp<IBinder>& layerHandle = nullptr)
-            EXCLUDES(gChoreographers.lock);
-
     void postFrameCallbackDelayed(AChoreographer_frameCallback cb,
                                   AChoreographer_frameCallback64 cb64,
                                   AChoreographer_vsyncCallback vsyncCallback, void* data,
@@ -114,6 +111,9 @@ public:
 
 private:
     Choreographer(const Choreographer&) = delete;
+    explicit Choreographer(const sp<Looper>& looper, const sp<IBinder>& layerHandle = nullptr)
+            EXCLUDES(gChoreographers.lock);
+    friend class sp<Choreographer>;
 
     void dispatchVsync(nsecs_t timestamp, PhysicalDisplayId displayId, uint32_t count,
                        VsyncEventData vsyncEventData) override;
@@ -121,11 +121,12 @@ private:
                            nsecs_t timestamp);
     void dispatchHotplug(nsecs_t timestamp, PhysicalDisplayId displayId, bool connected) override;
     void dispatchHotplugConnectionError(nsecs_t timestamp, int32_t connectionError) override;
-    void dispatchModeChanged(nsecs_t timestamp, PhysicalDisplayId displayId, int32_t modeId,
-                             nsecs_t vsyncPeriod) override;
+    void dispatchModeChangedWithFrameRateOverrides(
+            nsecs_t timestamp, PhysicalDisplayId displayId, int32_t modeId, nsecs_t vsyncPeriod,
+            nsecs_t appVsyncOffset, nsecs_t presentationDeadline,
+            std::vector<FrameRateOverride> overrides,
+            std::vector<SupportedRefreshRate> supportedRefreshRates) override;
     void dispatchNullEvent(nsecs_t, PhysicalDisplayId) override;
-    void dispatchFrameRateOverrides(nsecs_t timestamp, PhysicalDisplayId displayId,
-                                    std::vector<FrameRateOverride> overrides) override;
     void dispatchHdcpLevelsChanged(PhysicalDisplayId displayId, int32_t connectedLevel,
                                    int32_t maxLevel) override;
     void dispatchModeRejected(PhysicalDisplayId displayId, int32_t modeId) override;

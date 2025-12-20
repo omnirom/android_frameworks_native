@@ -56,17 +56,6 @@ using gui::FocusRequest;
 using gui::WindowInfoHandle;
 
 namespace {
-bool isSameWindowHandle(const sp<WindowInfoHandle>& lhs, const sp<WindowInfoHandle>& rhs) {
-    if (lhs == rhs) {
-        return true;
-    }
-
-    if (!lhs || !rhs) {
-        return false;
-    }
-
-    return *lhs->getInfo() == *rhs->getInfo();
-};
 
 bool isSameSurfaceControl(const sp<SurfaceControl>& lhs, const sp<SurfaceControl>& rhs) {
     if (lhs == rhs) {
@@ -87,9 +76,11 @@ layer_state_t::layer_state_t()
         flags(0),
         mask(0),
         reserved(0),
-        cornerRadius(0.0f),
-        clientDrawnCornerRadius(0.0f),
+        cornerRadii(gui::CornerRadii(0.0f)),
+        clientDrawnCornerRadii(gui::CornerRadii(0.0f)),
+        clientDrawnCornerRadiusCrop({0, 0, 0, 0}),
         backgroundBlurRadius(0),
+        backgroundBlurScale{1.0f},
         color(0),
         bufferTransform(0),
         transformToDisplayInverse(false),
@@ -116,7 +107,8 @@ layer_state_t::layer_state_t()
         destinationFrame(Rect::INVALID_RECT),
         dropInputMode(gui::DropInputMode::NONE),
         pictureProfileHandle(PictureProfileHandle::NONE),
-        appContentPriority(0) {
+        appContentPriority(0),
+        systemContentPriority(gui::ISystemContentPriorityConstants::Unset) {
     matrix.dsdx = matrix.dtdy = 1.0f;
     matrix.dsdy = matrix.dtdx = 0.0f;
     hdrMetadata.validTypes = 0;
@@ -146,7 +138,7 @@ status_t layer_state_t::write(Parcel& output) const
     SAFE_PARCEL(output.writeFloat, color.g);
     SAFE_PARCEL(output.writeFloat, color.b);
     SAFE_PARCEL(output.writeFloat, color.a);
-    SAFE_PARCEL(mNotDefCmpState.windowInfoHandle->writeToParcel, &output);
+    SAFE_PARCEL(mNotDefCmpState.windowInfo.writeToParcel, &output);
     SAFE_PARCEL(output.write, mNotDefCmpState.transparentRegion);
     SAFE_PARCEL(output.writeUint32, bufferTransform);
     SAFE_PARCEL(output.writeBool, transformToDisplayInverse);
@@ -163,9 +155,14 @@ status_t layer_state_t::write(Parcel& output) const
     }
 
     SAFE_PARCEL(output.write, colorTransform.asArray(), 16 * sizeof(float));
-    SAFE_PARCEL(output.writeFloat, cornerRadius);
-    SAFE_PARCEL(output.writeFloat, clientDrawnCornerRadius);
+    SAFE_PARCEL(cornerRadii.writeToParcel, &output);
+    SAFE_PARCEL(clientDrawnCornerRadii.writeToParcel, &output);
+    SAFE_PARCEL(output.writeFloat, clientDrawnCornerRadiusCrop.top);
+    SAFE_PARCEL(output.writeFloat, clientDrawnCornerRadiusCrop.left);
+    SAFE_PARCEL(output.writeFloat, clientDrawnCornerRadiusCrop.bottom);
+    SAFE_PARCEL(output.writeFloat, clientDrawnCornerRadiusCrop.right);
     SAFE_PARCEL(output.writeUint32, backgroundBlurRadius);
+    SAFE_PARCEL(output.writeFloat, backgroundBlurScale);
     SAFE_PARCEL(output.writeParcelable, metadata);
     SAFE_PARCEL(output.writeFloat, bgColor.r);
     SAFE_PARCEL(output.writeFloat, bgColor.g);
@@ -181,6 +178,7 @@ status_t layer_state_t::write(Parcel& output) const
     }
     SAFE_PARCEL(output.writeFloat, shadowRadius);
     SAFE_PARCEL(output.writeParcelable, borderSettings);
+    SAFE_PARCEL(output.writeParcelable, boxShadowSettings);
     SAFE_PARCEL(output.writeInt32, frameRateSelectionPriority);
     SAFE_PARCEL(output.writeFloat, frameRate);
     SAFE_PARCEL(output.writeByte, frameRateCompatibility);
@@ -242,6 +240,7 @@ status_t layer_state_t::write(Parcel& output) const
         SAFE_PARCEL(output.writeParcelable, *luts);
     }
 
+    SAFE_PARCEL(output.writeInt32, systemContentPriority);
     return NO_ERROR;
 }
 
@@ -280,7 +279,7 @@ status_t layer_state_t::read(const Parcel& input)
     SAFE_PARCEL(input.readFloat, &tmpFloat);
     color.a = tmpFloat;
 
-    SAFE_PARCEL(mNotDefCmpState.windowInfoHandle->readFromParcel, &input);
+    SAFE_PARCEL(mNotDefCmpState.windowInfo.readFromParcel, &input);
 
     SAFE_PARCEL(input.read, mNotDefCmpState.transparentRegion);
     SAFE_PARCEL(input.readUint32, &bufferTransform);
@@ -301,9 +300,14 @@ status_t layer_state_t::read(const Parcel& input)
     }
 
     SAFE_PARCEL(input.read, &colorTransform, 16 * sizeof(float));
-    SAFE_PARCEL(input.readFloat, &cornerRadius);
-    SAFE_PARCEL(input.readFloat, &clientDrawnCornerRadius);
+    SAFE_PARCEL(cornerRadii.readFromParcel, &input);
+    SAFE_PARCEL(clientDrawnCornerRadii.readFromParcel, &input);
+    SAFE_PARCEL(input.readFloat, &clientDrawnCornerRadiusCrop.top);
+    SAFE_PARCEL(input.readFloat, &clientDrawnCornerRadiusCrop.left);
+    SAFE_PARCEL(input.readFloat, &clientDrawnCornerRadiusCrop.bottom);
+    SAFE_PARCEL(input.readFloat, &clientDrawnCornerRadiusCrop.right);
     SAFE_PARCEL(input.readUint32, &backgroundBlurRadius);
+    SAFE_PARCEL(input.readFloat, &backgroundBlurScale);
     SAFE_PARCEL(input.readParcelable, &metadata);
 
     SAFE_PARCEL(input.readFloat, &tmpFloat);
@@ -330,6 +334,7 @@ status_t layer_state_t::read(const Parcel& input)
     }
     SAFE_PARCEL(input.readFloat, &shadowRadius);
     SAFE_PARCEL(input.readParcelable, &borderSettings);
+    SAFE_PARCEL(input.readParcelable, &boxShadowSettings);
 
     SAFE_PARCEL(input.readInt32, &frameRateSelectionPriority);
     SAFE_PARCEL(input.readFloat, &frameRate);
@@ -417,6 +422,7 @@ status_t layer_state_t::read(const Parcel& input)
         luts = nullptr;
     }
 
+    SAFE_PARCEL(input.readInt32, &systemContentPriority);
     return NO_ERROR;
 }
 
@@ -625,15 +631,20 @@ void layer_state_t::merge(const layer_state_t& other) {
     }
     if (other.what & eCornerRadiusChanged) {
         what |= eCornerRadiusChanged;
-        cornerRadius = other.cornerRadius;
+        cornerRadii = other.cornerRadii;
     }
     if (other.what & eClientDrawnCornerRadiusChanged) {
         what |= eClientDrawnCornerRadiusChanged;
-        clientDrawnCornerRadius = other.clientDrawnCornerRadius;
+        clientDrawnCornerRadii = other.clientDrawnCornerRadii;
+        clientDrawnCornerRadiusCrop = other.clientDrawnCornerRadiusCrop;
     }
     if (other.what & eBackgroundBlurRadiusChanged) {
         what |= eBackgroundBlurRadiusChanged;
         backgroundBlurRadius = other.backgroundBlurRadius;
+    }
+    if (other.what & eBackgroundBlurScaleChanged) {
+        what |= eBackgroundBlurScaleChanged;
+        backgroundBlurScale = other.backgroundBlurScale;
     }
     if (other.what & eBlurRegionsChanged) {
         what |= eBlurRegionsChanged;
@@ -714,8 +725,7 @@ void layer_state_t::merge(const layer_state_t& other) {
     }
     if (other.what & eInputInfoChanged) {
         what |= eInputInfoChanged;
-        mNotDefCmpState.windowInfoHandle =
-                sp<WindowInfoHandle>::make(*other.mNotDefCmpState.windowInfoHandle);
+        mNotDefCmpState.windowInfo = other.mNotDefCmpState.windowInfo;
     }
     if (other.what & eBackgroundColorChanged) {
         what |= eBackgroundColorChanged;
@@ -733,6 +743,10 @@ void layer_state_t::merge(const layer_state_t& other) {
     if (other.what & eBorderSettingsChanged) {
         what |= eBorderSettingsChanged;
         borderSettings = other.borderSettings;
+    }
+    if (other.what & eBoxShadowSettingsChanged) {
+        what |= eBoxShadowSettingsChanged;
+        boxShadowSettings = other.boxShadowSettings;
     }
     if (other.what & eLutsChanged) {
         what |= eLutsChanged;
@@ -825,6 +839,10 @@ void layer_state_t::merge(const layer_state_t& other) {
             appContentPriority = other.appContentPriority;
         }
     }
+    if (other.what & eSystemContentPriorityChanged) {
+        what |= eSystemContentPriorityChanged;
+        systemContentPriority = other.systemContentPriority;
+    }
     if ((other.what & what) != other.what) {
         ALOGE("Unmerged SurfaceComposer Transaction properties. LayerState::merge needs updating? "
               "other.what=0x%" PRIX64 " what=0x%" PRIX64 " unmerged flags=0x%" PRIX64,
@@ -851,9 +869,11 @@ uint64_t layer_state_t::diff(const layer_state_t& other) const {
         if (changedFlags) diff |= eFlagsChanged;
     }
     CHECK_DIFF(diff, eLayerStackChanged, other, layerStack);
-    CHECK_DIFF(diff, eCornerRadiusChanged, other, cornerRadius);
-    CHECK_DIFF(diff, eClientDrawnCornerRadiusChanged, other, clientDrawnCornerRadius);
+    CHECK_DIFF(diff, eCornerRadiusChanged, other, cornerRadii);
+    CHECK_DIFF(diff, eClientDrawnCornerRadiusChanged, other, clientDrawnCornerRadii);
+    CHECK_DIFF(diff, eClientDrawnCornerRadiusChanged, other, clientDrawnCornerRadiusCrop);
     CHECK_DIFF(diff, eBackgroundBlurRadiusChanged, other, backgroundBlurRadius);
+    CHECK_DIFF(diff, eBackgroundBlurScaleChanged, other, backgroundBlurScale);
     if (other.what & eBlurRegionsChanged) diff |= eBlurRegionsChanged;
     if (other.what & eRelativeLayerChanged) {
         diff |= eRelativeLayerChanged;
@@ -889,6 +909,7 @@ uint64_t layer_state_t::diff(const layer_state_t& other) const {
     if (other.what & eMetadataChanged) diff |= eMetadataChanged;
     CHECK_DIFF(diff, eShadowRadiusChanged, other, shadowRadius);
     CHECK_DIFF(diff, eBorderSettingsChanged, other, borderSettings);
+    CHECK_DIFF(diff, eBoxShadowSettingsChanged, other, boxShadowSettings);
     CHECK_DIFF(diff, eDefaultFrameRateCompatibilityChanged, other, defaultFrameRateCompatibility);
     CHECK_DIFF(diff, eFrameRateSelectionPriority, other, frameRateSelectionPriority);
     CHECK_DIFF3(diff, eFrameRateChanged, other, frameRate, frameRateCompatibility,
@@ -912,6 +933,8 @@ uint64_t layer_state_t::diff(const layer_state_t& other) const {
     if (other.what & eLutsChanged) diff |= eLutsChanged;
     CHECK_DIFF(diff, ePictureProfileHandleChanged, other, pictureProfileHandle);
     CHECK_DIFF(diff, eAppContentPriorityChanged, other, appContentPriority);
+    CHECK_DIFF(diff, eSystemContentPriorityChanged, other, systemContentPriority);
+    if (other.what & eStopLayerChanged) diff |= eStopLayerChanged;
 
     return diff;
 }
@@ -958,16 +981,16 @@ void layer_state_t::updateParentLayer(const sp<SurfaceControl>& newParent) {
     mNotDefCmpState.parentSurfaceControlForChild =
             newParent ? newParent->getParentingLayer() : nullptr;
 }
-void layer_state_t::updateInputWindowInfo(sp<gui::WindowInfoHandle>&& info) {
+void layer_state_t::updateInputWindowInfo(const gui::WindowInfo& info) {
     what |= eInputInfoChanged;
-    mNotDefCmpState.windowInfoHandle = std::move(info);
+    mNotDefCmpState.windowInfo = info;
 }
 
 bool layer_state_t::NotDefaultComparableState::operator==(
         const NotDefaultComparableState& rhs) const {
     return transparentRegion.hasSameRects(rhs.transparentRegion) &&
             surfaceDamageRegion.hasSameRects(rhs.surfaceDamageRegion) &&
-            isSameWindowHandle(windowInfoHandle, rhs.windowInfoHandle) &&
+            (windowInfo == rhs.windowInfo) &&
             isSameSurfaceControl(relativeLayerSurfaceControl, rhs.relativeLayerSurfaceControl) &&
             isSameSurfaceControl(parentSurfaceControlForChild, rhs.parentSurfaceControlForChild);
 }

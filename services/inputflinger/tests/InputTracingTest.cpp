@@ -16,30 +16,40 @@
 
 #include "../InputCommonConverter.h"
 #include "../dispatcher/InputDispatcher.h"
-#include "../dispatcher/trace/InputTracingPerfettoBackend.h"
-#include "../dispatcher/trace/ThreadedBackend.h"
 #include "FakeApplicationHandle.h"
 #include "FakeInputDispatcherPolicy.h"
+#include "FakeInputReaderPolicy.h"
 #include "FakeWindows.h"
+#include "InputReader.h"
 #include "InputTraceSession.h"
+#include "InputTracingPerfettoBackend.h"
+#include "InputTracingThreadedBackend.h"
 #include "TestEventMatchers.h"
+#include "TestInputListener.h"
+#include "UinputDevice.h"
 
 #include <NotifyArgsBuilders.h>
 #include <android-base/logging.h>
 #include <android/content/pm/IPackageManagerNative.h>
+#include <com_android_input_flags.h>
 #include <gtest/gtest.h>
 #include <input/Input.h>
+#include <linux/input-event-codes.h>
 #include <perfetto/trace/android/android_input_event.pbzero.h>
 #include <perfetto/trace/android/winscope_extensions.pbzero.h>
 #include <perfetto/trace/android/winscope_extensions_impl.pbzero.h>
 #include <perfetto/trace/trace.pbzero.h>
 #include <private/android_filesystem_config.h>
 #include <map>
+#include <memory>
 #include <vector>
 
 namespace android::inputdispatcher::trace {
 
 using perfetto::protos::pbzero::AndroidInputEventConfig;
+
+using input_trace::impl::PerfettoBackend;
+using input_trace::impl::ThreadedBackend;
 
 namespace {
 
@@ -92,22 +102,23 @@ const std::shared_ptr<FakeApplicationHandle> APP = std::make_shared<FakeApplicat
 
 } // namespace
 
-// --- InputTracingTest ---
+// --- InputDispatcherTracingTest ---
 
-class InputTracingTest : public testing::Test {
+class InputDispatcherTracingTest : public testing::Test {
 protected:
     std::unique_ptr<FakeInputDispatcherPolicy> mFakePolicy;
     std::unique_ptr<InputDispatcher> mDispatcher;
 
     void SetUp() override {
-        impl::PerfettoBackend::sUseInProcessBackendForTest = true;
-        impl::PerfettoBackend::sPackageManagerProvider = []() { return kPackageManager; };
+        PerfettoBackend::sUseInProcessBackendForTest = true;
+        PerfettoBackend::sPackageManagerProvider = []() { return kPackageManager; };
         mFakePolicy = std::make_unique<FakeInputDispatcherPolicy>();
 
-        auto tracingBackend = std::make_unique<impl::ThreadedBackend<impl::PerfettoBackend>>(
-                impl::PerfettoBackend());
+        auto tracingBackend = std::make_unique<ThreadedBackend<PerfettoBackend>>(PerfettoBackend(),
+                                                                                 /*env=*/nullptr);
         mRequestTracerIdle = tracingBackend->getIdleWaiterForTesting();
-        mDispatcher = std::make_unique<InputDispatcher>(*mFakePolicy, std::move(tracingBackend));
+        mDispatcher = std::make_unique<InputDispatcher>(*mFakePolicy, std::move(tracingBackend),
+                                                        /*env=*/nullptr);
 
         mDispatcher->setInputDispatchMode(/*enabled=*/true, /*frozen=*/false);
         ASSERT_EQ(OK, mDispatcher->start());
@@ -180,7 +191,7 @@ private:
     std::function<void()> mRequestTracerIdle;
 };
 
-TEST_F(InputTracingTest, EmptyConfigTracesNothing) {
+TEST_F(InputDispatcherTracingTest, EmptyConfigTracesNothing) {
     InputTraceSession s{[](auto& config) {}};
 
     auto window = sp<FakeWindowHandle>::make(APP, mDispatcher, "Window", DISPLAY_ID);
@@ -194,7 +205,7 @@ TEST_F(InputTracingTest, EmptyConfigTracesNothing) {
     waitForTracerIdle();
 }
 
-TEST_F(InputTracingTest, TraceAll) {
+TEST_F(InputDispatcherTracingTest, TraceAll) {
     InputTraceSession s{
             [](auto& config) { config->set_mode(AndroidInputEventConfig::TRACE_MODE_TRACE_ALL); }};
 
@@ -209,7 +220,7 @@ TEST_F(InputTracingTest, TraceAll) {
     waitForTracerIdle();
 }
 
-TEST_F(InputTracingTest, NoRulesTracesNothing) {
+TEST_F(InputDispatcherTracingTest, NoRulesTracesNothing) {
     InputTraceSession s{[](auto& config) {
         config->set_trace_dispatcher_input_events(true);
         config->set_trace_dispatcher_window_dispatch(true);
@@ -227,7 +238,7 @@ TEST_F(InputTracingTest, NoRulesTracesNothing) {
     waitForTracerIdle();
 }
 
-TEST_F(InputTracingTest, EmptyRuleMatchesEverything) {
+TEST_F(InputDispatcherTracingTest, EmptyRuleMatchesEverything) {
     InputTraceSession s{[](auto& config) {
         config->set_trace_dispatcher_input_events(true);
         config->set_trace_dispatcher_window_dispatch(true);
@@ -248,7 +259,7 @@ TEST_F(InputTracingTest, EmptyRuleMatchesEverything) {
     waitForTracerIdle();
 }
 
-TEST_F(InputTracingTest, UnspecifiedTracelLevel) {
+TEST_F(InputDispatcherTracingTest, UnspecifiedTracelLevel) {
     InputTraceSession s{[](auto& config) {
         config->set_trace_dispatcher_input_events(true);
         config->set_trace_dispatcher_window_dispatch(true);
@@ -269,7 +280,7 @@ TEST_F(InputTracingTest, UnspecifiedTracelLevel) {
     waitForTracerIdle();
 }
 
-TEST_F(InputTracingTest, MatchSecureWindow) {
+TEST_F(InputDispatcherTracingTest, MatchSecureWindow) {
     InputTraceSession s{[](auto& config) {
         config->set_trace_dispatcher_input_events(true);
         config->set_trace_dispatcher_window_dispatch(true);
@@ -313,7 +324,7 @@ TEST_F(InputTracingTest, MatchSecureWindow) {
     waitForTracerIdle();
 }
 
-TEST_F(InputTracingTest, MatchImeConnectionActive) {
+TEST_F(InputDispatcherTracingTest, MatchImeConnectionActive) {
     InputTraceSession s{[](auto& config) {
         config->set_trace_dispatcher_input_events(true);
         config->set_trace_dispatcher_window_dispatch(true);
@@ -343,7 +354,7 @@ TEST_F(InputTracingTest, MatchImeConnectionActive) {
     waitForTracerIdle();
 }
 
-TEST_F(InputTracingTest, MatchAllPackages) {
+TEST_F(InputDispatcherTracingTest, MatchAllPackages) {
     InputTraceSession s{[](auto& config) {
         config->set_trace_dispatcher_input_events(true);
         config->set_trace_dispatcher_window_dispatch(true);
@@ -403,7 +414,7 @@ TEST_F(InputTracingTest, MatchAllPackages) {
     waitForTracerIdle();
 }
 
-TEST_F(InputTracingTest, MatchAnyPackages) {
+TEST_F(InputDispatcherTracingTest, MatchAnyPackages) {
     InputTraceSession s{[](auto& config) {
         config->set_trace_dispatcher_input_events(true);
         config->set_trace_dispatcher_window_dispatch(true);
@@ -457,7 +468,7 @@ TEST_F(InputTracingTest, MatchAnyPackages) {
     waitForTracerIdle();
 }
 
-TEST_F(InputTracingTest, MultipleMatchersInOneRule) {
+TEST_F(InputDispatcherTracingTest, MultipleMatchersInOneRule) {
     InputTraceSession s{[](auto& config) {
         config->set_trace_dispatcher_input_events(true);
         config->set_trace_dispatcher_window_dispatch(true);
@@ -521,7 +532,7 @@ TEST_F(InputTracingTest, MultipleMatchersInOneRule) {
     waitForTracerIdle();
 }
 
-TEST_F(InputTracingTest, MultipleRulesMatchInOrder) {
+TEST_F(InputDispatcherTracingTest, MultipleRulesMatchInOrder) {
     InputTraceSession s{[](auto& config) {
         config->set_trace_dispatcher_input_events(true);
         config->set_trace_dispatcher_window_dispatch(true);
@@ -575,7 +586,7 @@ TEST_F(InputTracingTest, MultipleRulesMatchInOrder) {
     waitForTracerIdle();
 }
 
-TEST_F(InputTracingTest, TraceInboundEvents) {
+TEST_F(InputDispatcherTracingTest, TraceInboundEvents) {
     InputTraceSession s{[](auto& config) {
         // Only trace inbounds events - don't trace window dispatch
         config->set_trace_dispatcher_input_events(true);
@@ -611,7 +622,7 @@ TEST_F(InputTracingTest, TraceInboundEvents) {
     waitForTracerIdle();
 }
 
-TEST_F(InputTracingTest, TraceWindowDispatch) {
+TEST_F(InputDispatcherTracingTest, TraceWindowDispatch) {
     InputTraceSession s{[](auto& config) {
         // Only trace window dispatch - don't trace event details
         config->set_trace_dispatcher_window_dispatch(true);
@@ -647,7 +658,7 @@ TEST_F(InputTracingTest, TraceWindowDispatch) {
 }
 
 // TODO(b/336097719): Investigate flakiness and re-enable this test.
-TEST_F(InputTracingTest, DISABLED_SimultaneousTracingSessions) {
+TEST_F(InputDispatcherTracingTest, DISABLED_SimultaneousTracingSessions) {
     auto s1 = std::make_unique<InputTraceSession>(
             [](auto& config) { config->set_mode(AndroidInputEventConfig::TRACE_MODE_TRACE_ALL); });
 
@@ -746,6 +757,82 @@ TEST_F(InputTracingTest, DISABLED_SimultaneousTracingSessions) {
 
     waitForTracerIdle();
     s1.reset();
+}
+
+// --- InputReaderTracingTest ----
+
+class InputReaderTracingTest : public testing::Test {
+protected:
+    TestInputListener mTestListener;
+    sp<FakeInputReaderPolicy> mFakePolicy;
+    std::shared_ptr<EventHub> mEventHub;
+    std::unique_ptr<InputReader> mReader;
+
+    InputReaderTracingTest()
+          : mTestListener(/*eventHappenedTimeout=*/2000ms, /*eventDidNotHappenTimeout=*/30ms),
+            mFakePolicy(sp<FakeInputReaderPolicy>::make()) {}
+
+    void SetUp() override {
+#if !defined(__ANDROID__)
+        GTEST_SKIP();
+#endif
+        mOldFlagValue = com::android::input::flags::low_level_tracing();
+        com::android::input::flags::low_level_tracing(true);
+        PerfettoBackend::sUseInProcessBackendForTest = true;
+        mEventHub = std::make_shared<EventHub>();
+        auto tracingBackend = std::make_unique<ThreadedBackend<PerfettoBackend>>(PerfettoBackend(),
+                                                                                 /*env=*/nullptr);
+        mRequestTracerIdle = tracingBackend->getIdleWaiterForTesting();
+        mReader = std::make_unique<InputReader>(mEventHub, mFakePolicy, mTestListener,
+                                                /*env=*/nullptr, std::move(tracingBackend));
+
+        ASSERT_EQ(mReader->start(), OK);
+
+        // Since this test is run on a real device, all the input devices connected
+        // to the test device will show up in mReader. We wait for those input devices to
+        // show up before beginning the tests.
+        ASSERT_NO_FATAL_FAILURE(mTestListener.assertNotifyInputDevicesChangedWasCalled());
+        ASSERT_NO_FATAL_FAILURE(mFakePolicy->assertInputDevicesChanged());
+    }
+
+    void TearDown() override {
+#if !defined(__ANDROID__)
+        return;
+#endif
+        ASSERT_EQ(mReader->stop(), OK);
+        mReader.reset();
+        mFakePolicy.clear();
+        com::android::input::flags::low_level_tracing(mOldFlagValue);
+    }
+
+    std::function<void()> mRequestTracerIdle;
+
+private:
+    bool mOldFlagValue;
+};
+
+TEST_F(InputReaderTracingTest, TraceEvdevEvents) {
+    InputTraceSession s{[](auto& config) {}};
+
+    std::unique_ptr<UinputKeyboard> keyboard =
+            createUinputDevice<UinputKeyboard>("Tracing test keyboard", /*productId=*/99,
+                                               std::initializer_list<int>{KEY_Q});
+    ASSERT_NO_FATAL_FAILURE(mFakePolicy->assertInputDevicesChanged());
+
+    keyboard->injectEvent(EV_KEY, KEY_Q, 1);
+    keyboard->injectEvent(EV_SYN, SYN_REPORT, 0);
+    ASSERT_NO_FATAL_FAILURE(mTestListener.assertNotifyKeyWasCalled());
+
+    keyboard->injectEvent(EV_KEY, KEY_Q, 0);
+    keyboard->injectEvent(EV_SYN, SYN_REPORT, 0);
+    ASSERT_NO_FATAL_FAILURE(mTestListener.assertNotifyKeyWasCalled());
+
+    s.expectRawEventTraced(EV_KEY, KEY_Q, 1);
+    s.expectRawEventTraced(EV_SYN, SYN_REPORT, 0);
+    s.expectRawEventTraced(EV_KEY, KEY_Q, 0);
+    s.expectRawEventTraced(EV_SYN, SYN_REPORT, 0);
+
+    mRequestTracerIdle();
 }
 
 } // namespace android::inputdispatcher::trace

@@ -220,6 +220,16 @@ void FenceTime::signalForTest(nsecs_t signalTime) {
     mSignalTime.store(signalTime, std::memory_order_relaxed);
 }
 
+bool FenceTime::wasPendingAt(nsecs_t time) {
+    const nsecs_t signalTime = getSignalTime();
+    // If the fence is currently pending, assume that fence is pending at `time`.
+    if (signalTime == Fence::SIGNAL_TIME_PENDING) {
+        return true;
+    }
+    // A fence fired after `time` should be considered pending at `time`.
+    return Fence::isValidTimestamp(signalTime) && signalTime >= time;
+}
+
 // ============================================================================
 // FenceTime::Snapshot
 // ============================================================================

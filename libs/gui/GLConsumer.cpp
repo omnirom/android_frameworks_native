@@ -105,34 +105,16 @@ static bool hasEglProtectedContent() {
 std::tuple<sp<GLConsumer>, sp<Surface>> GLConsumer::create(uint32_t tex, uint32_t textureTarget,
                                                            bool useFenceSync,
                                                            bool isControlledByApp) {
-#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
     sp<GLConsumer> consumer =
             sp<GLConsumer>::make(tex, textureTarget, useFenceSync, isControlledByApp);
     return {consumer, consumer->getSurface()};
-#else
-    sp<IGraphicBufferProducer> igbp;
-    sp<IGraphicBufferConsumer> igbc;
-    BufferQueue::createBufferQueue(&igbp, &igbc);
-
-    return {sp<GLConsumer>::make(igbc, tex, textureTarget, useFenceSync, isControlledByApp),
-            sp<Surface>::make(igbp, isControlledByApp)};
-#endif
 }
 
 std::tuple<sp<GLConsumer>, sp<Surface>> GLConsumer::create(uint32_t textureTarget,
                                                            bool useFenceSync,
                                                            bool isControlledByApp) {
-#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
     sp<GLConsumer> consumer = sp<GLConsumer>::make(textureTarget, useFenceSync, isControlledByApp);
     return {consumer, consumer->getSurface()};
-#else
-    sp<IGraphicBufferProducer> igbp;
-    sp<IGraphicBufferConsumer> igbc;
-    BufferQueue::createBufferQueue(&igbp, &igbc);
-
-    return {sp<GLConsumer>::make(igbc, textureTarget, useFenceSync, isControlledByApp),
-            sp<Surface>::make(igbp, isControlledByApp)};
-#endif
 }
 
 sp<GLConsumer> GLConsumer::create(const sp<IGraphicBufferConsumer>& bq, uint32_t tex,
@@ -146,7 +128,6 @@ sp<GLConsumer> GLConsumer::create(const sp<IGraphicBufferConsumer>& bq, uint32_t
     return sp<GLConsumer>::make(bq, textureTarget, useFenceSync, isControlledByApp);
 }
 
-#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
 GLConsumer::GLConsumer(uint32_t tex, uint32_t texTarget, bool useFenceSync, bool isControlledByApp)
       : ConsumerBase(isControlledByApp, /* isConsumerSurfaceFlinger */ false),
         mCurrentCrop(Rect::EMPTY_RECT),
@@ -175,7 +156,6 @@ GLConsumer::GLConsumer(uint32_t tex, uint32_t texTarget, bool useFenceSync, bool
 
     mConsumer->setConsumerUsageBits(DEFAULT_USAGE_FLAGS);
 }
-#endif // COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
 
 GLConsumer::GLConsumer(const sp<IGraphicBufferConsumer>& bq, uint32_t tex, uint32_t texTarget,
                        bool useFenceSync, bool isControlledByApp)
@@ -202,13 +182,9 @@ GLConsumer::GLConsumer(const sp<IGraphicBufferConsumer>& bq, uint32_t tex, uint3
         mAttached(true) {
     GLC_LOGV("GLConsumer");
 
-    memcpy(mCurrentTransformMatrix, mtxIdentity.asArray(),
-            sizeof(mCurrentTransformMatrix));
-
-    mConsumer->setConsumerUsageBits(DEFAULT_USAGE_FLAGS);
+    memcpy(mCurrentTransformMatrix, mtxIdentity.asArray(), sizeof(mCurrentTransformMatrix));
 }
 
-#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
 GLConsumer::GLConsumer(uint32_t texTarget, bool useFenceSync, bool isControlledByApp)
       : ConsumerBase(isControlledByApp, /* isConsumerSurfaceFlinger */ false),
         mCurrentCrop(Rect::EMPTY_RECT),
@@ -234,10 +210,7 @@ GLConsumer::GLConsumer(uint32_t texTarget, bool useFenceSync, bool isControlledB
     GLC_LOGV("GLConsumer");
 
     memcpy(mCurrentTransformMatrix, mtxIdentity.asArray(), sizeof(mCurrentTransformMatrix));
-
-    mConsumer->setConsumerUsageBits(DEFAULT_USAGE_FLAGS);
 }
-#endif // COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
 
 GLConsumer::GLConsumer(const sp<IGraphicBufferConsumer>& bq, uint32_t texTarget, bool useFenceSync,
                        bool isControlledByApp)
@@ -266,8 +239,15 @@ GLConsumer::GLConsumer(const sp<IGraphicBufferConsumer>& bq, uint32_t texTarget,
 
     memcpy(mCurrentTransformMatrix, mtxIdentity.asArray(),
             sizeof(mCurrentTransformMatrix));
+}
 
+void GLConsumer::initializeConsumer() {
     mConsumer->setConsumerUsageBits(DEFAULT_USAGE_FLAGS);
+}
+
+void GLConsumer::onFirstRef() {
+    ConsumerBase::onFirstRef();
+    initializeConsumer();
 }
 
 status_t GLConsumer::setDefaultBufferSize(uint32_t w, uint32_t h)

@@ -200,15 +200,31 @@ status_t getBinderClientPids(BinderDebugContext context, pid_t pid, pid_t servic
 }
 
 status_t getBinderTransactions(pid_t pid, std::string& transactionsOutput) {
-    std::ifstream ifs("/dev/binderfs/binder_logs/transactions");
-    if (!ifs.is_open()) {
-        ifs.open("/d/binder/transactions");
-        if (!ifs.is_open()) {
-            LOG(ERROR) << "Could not open /dev/binderfs/binder_logs/transactions. "
-                       << "Likely a permissions issue. errno: " << errno;
-            return -errno;
+    // Hashed log will contain scrambled node ptr and cookie information, so
+    // try to access standard logs first.
+    static const char* kBinderTransactionLogPaths[] = {
+            "/dev/binderfs/binder_logs/transactions",
+            "/d/binder/transactions",
+            "/dev/binderfs/binder_logs/transactions_hashed",
+    };
+
+    std::ifstream ifs;
+    for (auto& path : kBinderTransactionLogPaths) {
+        ifs.open(path);
+        if (ifs.is_open()) {
+            break;
         }
     }
+
+    if (!ifs.is_open()) {
+        LOG(ERROR) << "Could not open /dev/binderfs/binder_logs/transactions. "
+                   << "Likely a permissions issue. errno: " << errno;
+        return -errno;
+    }
+
+    // Reset errno to avoid the confusing "No such file or directory" error
+    // message in case we failed to open any of the paths
+    errno = 0;
 
     std::string line;
     while (getline(ifs, line)) {

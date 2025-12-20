@@ -15,8 +15,6 @@
  */
 
 #include "DisplayHardware/Hal.h"
-#undef LOG_TAG
-#define LOG_TAG "PredictorTest"
 
 #include <common/include/common/test/FlagUtils.h>
 #include "com_android_graphics_surfaceflinger_flags.h"

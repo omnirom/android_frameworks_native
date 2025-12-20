@@ -24,6 +24,7 @@
 #include <android-base/thread_annotations.h>
 #include <ftl/mixins.h>
 #include <gui/WindowInfo.h>
+#include <input/Input.h>
 #include <input/InputDevice.h>
 #include <chrono>
 #include <functional>
@@ -84,7 +85,7 @@ public:
     // A subset of information from the InputDeviceInfo class that is used for metrics collection,
     // used to avoid copying and storing all of the fields and strings in InputDeviceInfo.
     struct MetricsDeviceInfo {
-        int32_t deviceId;
+        DeviceId deviceId;
         int32_t vendor;
         int32_t product;
         int32_t version;

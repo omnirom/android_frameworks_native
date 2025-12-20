@@ -70,7 +70,7 @@ cc_defaults {
         "libkll",
         "liblog",
         "libprotobuf-cpp-lite",
-        "libstatslog",
+        "libstatslog_inputflinger",
         "libstatspull",
         "libstatssocket",
         "libutils",
@@ -92,6 +92,7 @@ cc_defaults {
     },
     header_libs: [
         "libinputdispatcher_headers",
+        "libinputflinger_headers",
     ],
 }
 
@@ -105,7 +106,6 @@ cc_library_static {
     shared_libs: [
         // This should consist only of dependencies from inputflinger. Other dependencies should be
         // in cc_defaults so that they are included in the tests.
-        "libinputflinger_base",
         "libinputreporter",
     ],
     export_header_lib_headers: [

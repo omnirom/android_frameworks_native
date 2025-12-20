@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-#define LOG_TAG "RpcServer"
+#define LOG_TAG "libbinder.RpcServer"
 
 #include <inttypes.h>
 #include <netinet/tcp.h>
@@ -130,8 +130,18 @@ status_t RpcServer::setupInetServer(const char* address, unsigned int port,
 }
 
 void RpcServer::setMaxThreads(size_t threads) {
+#ifdef BINDER_RPC_SINGLE_THREADED
+    LOG_ALWAYS_FATAL_IF(threads > 1, "Cannot set max threads > 1 in single-threaded mode");
+#endif // BINDER_RPC_SINGLE_THREADED
     LOG_ALWAYS_FATAL_IF(threads <= 0, "RpcServer is useless without threads");
     LOG_ALWAYS_FATAL_IF(mJoinThreadRunning, "Cannot set max threads while running");
+    if (sp<IBinder> root = getRootObject(); root != nullptr) {
+        LOG_ALWAYS_FATAL_IF(threads < root->getMinRpcThreads(),
+                            "RpcServer can not satisfy the root object's minimum "
+                            "thread requirements of %d with the requested max "
+                            "thread count of %zu",
+                            root->getMinRpcThreads(), threads);
+    }
     mMaxThreads = threads;
 }
 
@@ -156,17 +166,38 @@ void RpcServer::setSupportedFileDescriptorTransportModes(
     }
 }
 
+static void logMaxThreadOverwrite(size_t max, uint16_t min, bool isPerSession) {
+    ALOGW("Overriding this RpcServer's max threads (%zu) based on the min threads required "
+          "(%d) by the %s object that is being set.",
+          max, min, isPerSession ? "per-session root" : "root");
+}
+
+void RpcServer::maybeOverwriteMaxThreads(const sp<IBinder>& binder) {
+    uint16_t minThreads = binder->getMinRpcThreads();
+    if (mMaxThreads < minThreads) {
+        logMaxThreadOverwrite(mMaxThreads, minThreads, false);
+        mMaxThreads = binder->getMinRpcThreads();
+    }
+}
+
 void RpcServer::setRootObject(const sp<IBinder>& binder) {
     RpcMutexLockGuard _l(mLock);
+    LOG_ALWAYS_FATAL_IF(mJoinThreadRunning, "Cannot set root object while running");
     mRootObjectFactory = nullptr;
     mRootObjectWeak = mRootObject = binder;
+    maybeOverwriteMaxThreads(binder);
 }
 
 void RpcServer::setRootObjectWeak(const wp<IBinder>& binder) {
     RpcMutexLockGuard _l(mLock);
+    LOG_ALWAYS_FATAL_IF(mJoinThreadRunning, "Cannot set root object while running");
     mRootObject.clear();
     mRootObjectFactory = nullptr;
     mRootObjectWeak = binder;
+
+    sp<IBinder> s = binder.promote();
+    if (s == nullptr) return;
+    maybeOverwriteMaxThreads(s);
 }
 void RpcServer::setPerSessionRootObject(
         std::function<sp<IBinder>(wp<RpcSession> session, const void*, size_t)>&& makeObject) {
@@ -207,7 +238,7 @@ static void joinRpcServer(sp<RpcServer>&& thiz) {
 
 void RpcServer::start() {
     RpcMutexLockGuard _l(mLock);
-    LOG_ALWAYS_FATAL_IF(mJoinThread.get(), "Already started!");
+    LOG_ALWAYS_FATAL_IF(mJoinThread.get() != nullptr, "Already started!");
     mJoinThread =
             std::make_unique<RpcMaybeThread>(&joinRpcServer, sp<RpcServer>::fromExisting(this));
     rpcJoinIfSingleThreaded(*mJoinThread);
@@ -231,10 +262,17 @@ status_t RpcServer::recvmsgSocketConnection(const RpcServer& server, RpcTranspor
     iovec iov{&zero, sizeof(zero)};
     std::vector<std::variant<unique_fd, borrowed_fd>> fds;
 
+    // TODO: this should delegate to RpcState::rpcRec to handle transaction errors
+    // consistently
     ssize_t num_bytes = binder::os::receiveMessageFromSocket(server.mServer, &iov, 1, &fds);
     if (num_bytes < 0) {
         int savedErrno = errno;
         ALOGE("Failed recvmsg: %s", strerror(savedErrno));
+
+        if (savedErrno == ECONNRESET) {
+            return DEAD_OBJECT;
+        }
+
         return -savedErrno;
     }
     if (num_bytes == 0) {
@@ -253,7 +291,6 @@ status_t RpcServer::recvmsgSocketConnection(const RpcServer& server, RpcTranspor
 }
 
 void RpcServer::join() {
-
     {
         RpcMutexLockGuard _l(mLock);
         LOG_ALWAYS_FATAL_IF(!mServer.fd.ok(), "RpcServer must be setup to join.");
@@ -266,41 +303,9 @@ void RpcServer::join() {
 
     status_t status;
     while ((status = mShutdownTrigger->triggerablePoll(mServer, POLLIN)) == OK) {
-        std::array<uint8_t, kRpcAddressSize> addr;
-        static_assert(addr.size() >= sizeof(sockaddr_storage), "kRpcAddressSize is too small");
-        socklen_t addrLen = addr.size();
-
-        RpcTransportFd clientSocket;
-        if ((status = mAcceptFn(*this, &clientSocket)) != OK) {
-            if (status == DEAD_OBJECT)
-                break;
-            else
-                continue;
-        }
-
-        LOG_RPC_DETAIL("accept on fd %d yields fd %d", mServer.fd.get(), clientSocket.fd.get());
-
-        if (getpeername(clientSocket.fd.get(), reinterpret_cast<sockaddr*>(addr.data()),
-                        &addrLen)) {
-            ALOGE("Could not getpeername socket: %s", strerror(errno));
-            continue;
-        }
-
-        if (mConnectionFilter != nullptr && !mConnectionFilter(addr.data(), addrLen)) {
-            ALOGE("Dropped client connection fd %d", clientSocket.fd.get());
-            continue;
-        }
-
-        {
-            RpcMutexLockGuard _l(mLock);
-            RpcMaybeThread thread =
-                    RpcMaybeThread(&RpcServer::establishConnection,
-                                   sp<RpcServer>::fromExisting(this), std::move(clientSocket), addr,
-                                   addrLen, RpcSession::join);
-
-            auto& threadRef = mConnectingThreads[thread.get_id()];
-            threadRef = std::move(thread);
-            rpcJoinIfSingleThreaded(threadRef);
+        status = acceptConnection(RpcSession::join);
+        if (status == DEAD_OBJECT) {
+            break;
         }
     }
     LOG_RPC_DETAIL("RpcServer::join exiting with %s", statusToString(status).c_str());
@@ -314,6 +319,46 @@ void RpcServer::join() {
         mShutdownTrigger = nullptr;
     }
     mShutdownCv.notify_all();
+}
+
+status_t RpcServer::acceptConnection(
+        std::function<void(sp<RpcSession>&&, RpcSession::PreJoinSetupResult&&)>&& joinFn) {
+    RpcTransportFd clientFd;
+    std::array<uint8_t, kRpcAddressSize> addr;
+    static_assert(addr.size() >= sizeof(sockaddr_storage), "kRpcAddressSize is too small");
+    socklen_t addrLen = addr.size();
+
+    status_t status;
+    if ((status = mAcceptFn(*this, &clientFd)) != OK) {
+        if (status != DEAD_OBJECT) {
+            ALOGE("Accept returned error %s", statusToString(status).c_str());
+        }
+        return status;
+    }
+
+    LOG_RPC_DETAIL("accept on fd %d yields fd %d", mServer.fd.get(), clientFd.fd.get());
+
+    if (getpeername(clientFd.fd.get(), reinterpret_cast<sockaddr*>(addr.data()), &addrLen)) {
+        ALOGE("Could not getpeername socket: %s", strerror(errno));
+        return EINVAL;
+    }
+
+    if (mConnectionFilter != nullptr && !mConnectionFilter(addr.data(), addrLen)) {
+        ALOGE("Dropped client connection fd %d", clientFd.fd.get());
+        return EINVAL;
+    }
+
+    {
+        RpcMutexLockGuard _l(mLock);
+        RpcMaybeThread thread =
+                RpcMaybeThread(&RpcServer::establishConnection, sp<RpcServer>::fromExisting(this),
+                               std::move(clientFd), addr, addrLen, std::move(joinFn));
+        auto& threadRef = mConnectingThreads[thread.get_id()];
+        threadRef = std::move(thread);
+        rpcJoinIfSingleThreaded(threadRef);
+    }
+
+    return OK;
 }
 
 bool RpcServer::shutdown() {
@@ -340,7 +385,7 @@ bool RpcServer::shutdown() {
     }
 
     while (mJoinThreadRunning || !mConnectingThreads.empty() || !mSessions.empty()) {
-        if (std::cv_status::timeout == mShutdownCv.wait_for(_l, std::chrono::seconds(1))) {
+        if (mShutdownCv.wait_for(_l, std::chrono::seconds(1)) == RpcCvStatus::timeout) {
             ALOGE("Waiting for RpcServer to shut down (1s w/o progress). Join thread running: %d, "
                   "Connecting threads: "
                   "%zu, Sessions: %zu. Is your server deadlocked?",
@@ -501,15 +546,14 @@ void RpcServer::establishConnection(
                     return;
                 }
 
-                auto status = binder::os::getRandomBytes(sessionId.data(), sessionId.size());
-                if (status != OK) {
-                    ALOGE("Failed to read random session ID: %s", statusToString(status).c_str());
+                auto result = binder::os::getRandomBytes(sessionId.data(), sessionId.size());
+                if (result != OK) {
+                    ALOGE("Failed to read random session ID: %s", statusToString(result).c_str());
                     return;
                 }
             } while (server->mSessions.end() != server->mSessions.find(sessionId));
 
             session = sp<RpcSession>::make(nullptr);
-            session->setMaxIncomingThreads(server->mMaxThreads);
             if (!session->setProtocolVersion(protocolVersion)) return;
 
             if (header.fileDescriptorTransportMode <
@@ -532,14 +576,13 @@ void RpcServer::establishConnection(
                         server->mRootObjectFactory(wp<RpcSession>(session), addr.data(), addrLen);
                 if (sessionSpecificRoot == nullptr) {
                     ALOGE("Warning: server returned null from root object factory");
+                } else {
+                    server->maybeOverwriteMaxThreads(sessionSpecificRoot);
                 }
             }
+            session->setMaxIncomingThreads(server->mMaxThreads);
 
-            if (!session->setForServer(server,
-                                       sp<RpcServer::EventListener>::fromExisting(
-                                               static_cast<RpcServer::EventListener*>(
-                                                       server.get())),
-                                       sessionId, sessionSpecificRoot)) {
+            if (!session->setForServer(server, server, sessionId, sessionSpecificRoot)) {
                 ALOGE("Failed to attach server to session");
                 return;
             }
@@ -661,6 +704,8 @@ unique_fd RpcServer::releaseServer() {
 
 status_t RpcServer::setupExternalServer(
         unique_fd serverFd, std::function<status_t(const RpcServer&, RpcTransportFd*)>&& acceptFn) {
+    if (status_t res = binder::os::setNonBlocking(serverFd); res != OK) return res;
+
     RpcMutexLockGuard _l(mLock);
     if (mServer.fd.ok()) {
         ALOGE("Each RpcServer can only have one server.");

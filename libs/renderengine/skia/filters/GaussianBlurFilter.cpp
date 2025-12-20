@@ -32,6 +32,8 @@
 #include <log/log.h>
 #include "include/gpu/GpuTypes.h" // from Skia
 
+#include "RuntimeEffectManager.h"
+
 namespace android {
 namespace renderengine {
 namespace skia {
@@ -40,7 +42,8 @@ namespace skia {
 // "high quality" mode, in SkBlurMask::Blur() (1 / sqrt(3)).
 static const float BLUR_SIGMA_SCALE = 0.57735f;
 
-GaussianBlurFilter::GaussianBlurFilter(): BlurFilter(/* maxCrossFadeRadius= */ 0.0f) {}
+GaussianBlurFilter::GaussianBlurFilter(RuntimeEffectManager& effectManager)
+      : BlurFilter(effectManager, /* maxCrossFadeRadius= */ 0.0f) {}
 
 sk_sp<SkImage> GaussianBlurFilter::generate(SkiaGpuContext* context, const uint32_t blurRadius,
                                             const sk_sp<SkImage> input,

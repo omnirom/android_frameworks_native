@@ -21,6 +21,19 @@ package {
     default_applicable_licenses: ["frameworks_native_license"],
 }
 
+aconfig_declarations {
+    name: "rss_hwm_reset_flags",
+    package: "com.android.rss_hwm_reset",
+    container: "system",
+    srcs: ["rss_hwm_reset.aconfig"],
+
+}
+
+cc_aconfig_library {
+    name: "rss_hwm_reset_flags_c_lib",
+    aconfig_declarations: "rss_hwm_reset_flags",
+}
+
 cc_binary {
     name: "rss_hwm_reset",
 
@@ -31,6 +44,11 @@ cc_binary {
     shared_libs: [
         "libbase",
         "liblog",
+        "libaconfig_storage_read_api_cc",
+    ],
+
+    static_libs: [
+        "rss_hwm_reset_flags_c_lib",
     ],
 
     init_rc: ["rss_hwm_reset.rc"],

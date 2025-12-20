@@ -10,9 +10,9 @@ package {
 cc_benchmark {
     name: "surfaceflinger_microbenchmarks",
     srcs: [
+        "*.cpp",
         ":libsurfaceflinger_mock_sources",
         ":libsurfaceflinger_sources",
-        "*.cpp",
     ],
     defaults: [
         "libsurfaceflinger_mocks_defaults",
@@ -27,4 +27,19 @@ cc_benchmark {
         "libsurfaceflinger_mocks_headers",
         "surfaceflinger_tests_common_headers",
     ],
+}
+
+cc_benchmark {
+    name: "surfaceflinger_microbenchmarks_host_supported",
+    srcs: [
+        "LocklessQueue_benchmarks.cpp",
+        "main.cpp",
+    ],
+    static_libs: [
+        "libgtest",
+    ],
+    header_libs: [
+        "liblocklessqueue_headers",
+    ],
+    host_supported: true,
 }

@@ -55,7 +55,7 @@ CorrectedGyroSensor::CorrectedGyroSensor(sensor_t const* list, size_t count)
 bool CorrectedGyroSensor::process(sensors_event_t* outEvent,
         const sensors_event_t& event)
 {
-    if (event.type == SENSOR_TYPE_GYROSCOPE) {
+    if (event.sensor == mGyro.getHandle()) {
         const vec3_t bias(mSensorFusion.getGyroBias());
         *outEvent = event;
         outEvent->data[0] -= bias.x;

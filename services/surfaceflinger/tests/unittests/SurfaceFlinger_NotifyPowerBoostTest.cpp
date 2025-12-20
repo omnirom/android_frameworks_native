@@ -30,28 +30,36 @@ namespace {
 
 using aidl::android::hardware::power::Boost;
 
+struct SharedTestState {
+    std::mutex timerMutex;
+    std::condition_variable cv;
+    bool didReset = false; // keeps track of what the most recent call was
+};
+
 TEST_F(DisplayTransactionTest, notifyPowerBoostNotifiesTouchEvent) {
     using namespace std::chrono_literals;
 
-    std::mutex timerMutex;
-    std::condition_variable cv;
-
     injectDefaultInternalDisplay([](FakeDisplayDeviceInjector&) {});
 
-    std::unique_lock lock(timerMutex);
-    bool didReset = false; // keeps track of what the most recent call was
+    auto state = std::make_shared<SharedTestState>();
 
-    auto waitForTimerReset = [&] { cv.wait_for(lock, 100ms, [&] { return didReset; }); };
-    auto waitForTimerExpired = [&] { cv.wait_for(lock, 100ms, [&] { return !didReset; }); };
+    std::unique_lock lock(state->timerMutex);
+
+    auto waitForTimerReset = [&] {
+        state->cv.wait_for(lock, 100ms, [&] { return state->didReset; });
+    };
+    auto waitForTimerExpired = [&] {
+        state->cv.wait_for(lock, 100ms, [&] { return !state->didReset; });
+    };
 
     // Add extra logic to unblock the test when the timer callbacks get called
-    mFlinger.scheduler()->replaceTouchTimer(10, [&](bool isReset) {
+    mFlinger.scheduler()->replaceTouchTimer(10, [state](bool isReset) {
         {
-            std::unique_lock lock(timerMutex); // guarantee we're waiting on the cv
-            didReset = isReset;
+            std::unique_lock lock(state->timerMutex); // guarantee we're waiting on the cv
+            state->didReset = isReset;
         }
-        cv.notify_one();                   // wake the cv
-        std::unique_lock lock(timerMutex); // guarantee we finished the cv logic
+        state->cv.notify_one();                   // wake the cv
+        std::unique_lock lock(state->timerMutex); // guarantee we finished the cv logic
     });
 
     waitForTimerReset();

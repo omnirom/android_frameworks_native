@@ -17,9 +17,6 @@
 #include "TransactionDataSource.h"
 #include "TransactionTracing.h"
 
-#undef LOG_TAG
-#define LOG_TAG "TransactionTracing"
-
 #include <log/log.h>
 
 namespace android {

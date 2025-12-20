@@ -116,6 +116,36 @@ static_assert(
         static_cast<int>(aidl::android::hardware::graphics::common::PixelFormat::YCBCR_P210) ==
                 AHARDWAREBUFFER_FORMAT_YCbCr_P210,
         "HAL and AHardwareBuffer pixel format don't match");
+static_assert(static_cast<int>(aidl::android::hardware::graphics::common::PixelFormat::R_12_UINT) ==
+                      AHARDWAREBUFFER_FORMAT_R12_UINT,
+              "HAL and AHardwareBuffer pixel format don't match");
+static_assert(static_cast<int>(aidl::android::hardware::graphics::common::PixelFormat::R_14_UINT) ==
+                      AHARDWAREBUFFER_FORMAT_R14_UINT,
+              "HAL and AHardwareBuffer pixel format don't match");
+static_assert(
+        static_cast<int>(aidl::android::hardware::graphics::common::PixelFormat::RG_1212_UINT) ==
+                AHARDWAREBUFFER_FORMAT_R12G12_UINT,
+        "HAL and AHardwareBuffer pixel format don't match");
+static_assert(
+        static_cast<int>(aidl::android::hardware::graphics::common::PixelFormat::RG_1414_UINT) ==
+                AHARDWAREBUFFER_FORMAT_R14G14_UINT,
+        "HAL and AHardwareBuffer pixel format don't match");
+static_assert(static_cast<int>(
+                      aidl::android::hardware::graphics::common::PixelFormat::RGBA_12121212_UINT) ==
+                      AHARDWAREBUFFER_FORMAT_R12G12B12A12_UINT,
+              "HAL and AHardwareBuffer pixel format don't match");
+static_assert(static_cast<int>(
+                      aidl::android::hardware::graphics::common::PixelFormat::RGBA_14141414_UINT) ==
+                      AHARDWAREBUFFER_FORMAT_R14G14B14A14_UINT,
+              "HAL and AHardwareBuffer pixel format don't match");
+static_assert(
+        static_cast<int>(aidl::android::hardware::graphics::common::PixelFormat::BGRA_1010102) ==
+                AHARDWAREBUFFER_FORMAT_B10G10R10A2_UNORM,
+        "HAL and AHardwareBuffer pixel format don't match");
+static_assert(
+        static_cast<int>(aidl::android::hardware::graphics::common::PixelFormat::BGRX_1010102) ==
+                AHARDWAREBUFFER_FORMAT_B10G10R10X2_UNORM,
+        "HAL and AHardwareBuffer pixel format don't match");
 
 static enum AHardwareBufferStatus filterStatus(status_t status) {
     switch (status) {

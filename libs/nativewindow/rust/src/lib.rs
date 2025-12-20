@@ -33,11 +33,11 @@ use ffi::{
     AHardwareBuffer, AHardwareBuffer_Desc, AHardwareBuffer_Plane, AHardwareBuffer_Planes,
     AHardwareBuffer_readFromParcel, AHardwareBuffer_writeToParcel, ARect,
 };
-use std::ffi::c_void;
 use std::fmt::{self, Debug, Formatter};
 use std::mem::{forget, ManuallyDrop};
 use std::os::fd::{AsRawFd, BorrowedFd, FromRawFd, OwnedFd};
-use std::ptr::{self, null, null_mut, NonNull};
+use std::ptr::{self, null_mut, NonNull};
+use std::{ffi::c_void, rc::Rc};
 
 /// Wrapper around a C `AHardwareBuffer_Desc`.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -297,7 +297,7 @@ impl HardwareBuffer {
         rect: Option<&ARect>,
     ) -> Result<HardwareBufferGuard<'a>, StatusCode> {
         let fence = if let Some(fence) = fence { fence.as_raw_fd() } else { -1 };
-        let rect = rect.map(ptr::from_ref).unwrap_or(null());
+        let rect = rect.map(ptr::from_ref).unwrap_or_default();
         let mut address = null_mut();
         // SAFETY: The `AHardwareBuffer` pointer we wrap is always valid, and the buffer address out
         // pointer is valid because it comes from a reference. Our caller promises that writes have
@@ -335,7 +335,7 @@ impl HardwareBuffer {
         rect: Option<&ARect>,
     ) -> Result<Vec<PlaneGuard<'a>>, StatusCode> {
         let fence = if let Some(fence) = fence { fence.as_raw_fd() } else { -1 };
-        let rect = rect.map(ptr::from_ref).unwrap_or(null());
+        let rect = rect.map(ptr::from_ref).unwrap_or_default();
         let mut planes = AHardwareBuffer_Planes {
             planeCount: 0,
             planes: [const { AHardwareBuffer_Plane { data: null_mut(), pixelStride: 0, rowStride: 0 } };
@@ -349,15 +349,20 @@ impl HardwareBuffer {
             ffi::AHardwareBuffer_lockPlanes(self.0.as_ptr(), usage.0, fence, rect, &mut planes)
         };
         status_result(status)?;
+
+        // `AHardwareBuffer_unlock` unlocks all the planes together, so we use a shared guard.
+        let guard = Rc::new(HardwareBufferGuard {
+            buffer: self,
+            address: NonNull::new(planes.planes[0].data)
+                .expect("AHardwareBuffer_lockPlanes set a null plane data"),
+        });
         let plane_count = planes.planeCount.try_into().unwrap();
         Ok(planes.planes[..plane_count]
             .iter()
             .map(|plane| PlaneGuard {
-                guard: HardwareBufferGuard {
-                    buffer: self,
-                    address: NonNull::new(plane.data)
-                        .expect("AHardwareBuffer_lockAndGetInfo set a null outVirtualAddress"),
-                },
+                _guard: guard.clone(),
+                address: NonNull::new(plane.data)
+                    .expect("AHardwareBuffer_lockPlanes set a null plane data"),
                 pixel_stride: plane.pixelStride,
                 row_stride: plane.rowStride,
             })
@@ -386,7 +391,7 @@ impl HardwareBuffer {
         rect: Option<&ARect>,
     ) -> Result<LockedBufferInfo<'a>, StatusCode> {
         let fence = if let Some(fence) = fence { fence.as_raw_fd() } else { -1 };
-        let rect = rect.map(ptr::from_ref).unwrap_or(null());
+        let rect = rect.map(ptr::from_ref).unwrap_or_default();
         let mut address = null_mut();
         let mut bytes_per_pixel = 0;
         let mut stride = 0;
@@ -566,7 +571,9 @@ pub struct LockedBufferInfo<'a> {
 #[derive(Debug)]
 pub struct PlaneGuard<'a> {
     /// The locked buffer guard.
-    pub guard: HardwareBufferGuard<'a>,
+    _guard: Rc<HardwareBufferGuard<'a>>,
+    /// The address of the buffer plane in memory.
+    pub address: NonNull<c_void>,
     /// The stride in bytes between the color channel for one pixel to the next pixel.
     pub pixel_stride: u32,
     /// The stride in bytes between rows in the buffer.
@@ -829,5 +836,30 @@ mod test {
         assert_eq!(info.bytes_per_pixel, 4);
         assert_eq!(info.stride, WIDTH * 4);
         drop(info);
+    }
+
+    #[test]
+    fn lock_planes() {
+        let buffer = HardwareBuffer::new(&HardwareBufferDescription::new(
+            1024,
+            512,
+            1,
+            AHardwareBuffer_Format::AHARDWAREBUFFER_FORMAT_Y8Cb8Cr8_420,
+            AHardwareBuffer_UsageFlags::AHARDWAREBUFFER_USAGE_CPU_READ_OFTEN,
+            0,
+        ))
+        .expect("Failed to create buffer");
+
+        // SAFETY: No other threads or processes have access to the buffer.
+        let plane_guards = unsafe {
+            buffer.lock_planes(
+                AHardwareBuffer_UsageFlags::AHARDWAREBUFFER_USAGE_CPU_READ_OFTEN,
+                None,
+                None,
+            )
+        }
+        .unwrap();
+
+        drop(plane_guards);
     }
 }

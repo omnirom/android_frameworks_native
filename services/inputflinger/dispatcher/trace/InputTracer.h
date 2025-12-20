@@ -25,6 +25,8 @@
 
 namespace android::inputdispatcher::trace::impl {
 
+using namespace android::input_trace;
+
 /**
  * The tracer implementation for InputDispatcher.
  *
@@ -36,7 +38,7 @@ namespace android::inputdispatcher::trace::impl {
  */
 class InputTracer : public InputTracerInterface {
 public:
-    explicit InputTracer(std::unique_ptr<InputTracingBackendInterface>);
+    explicit InputTracer(std::shared_ptr<InputTracingBackendInterface>);
     ~InputTracer() = default;
     InputTracer(const InputTracer&) = delete;
     InputTracer& operator=(const InputTracer&) = delete;
@@ -54,7 +56,7 @@ public:
     }
 
 private:
-    std::unique_ptr<InputTracingBackendInterface> mBackend;
+    std::shared_ptr<InputTracingBackendInterface> mBackend;
     bool mIsImeConnectionActive{false};
 
     // The state of a tracked event, shared across all events derived from the original event.

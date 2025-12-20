@@ -25,6 +25,7 @@
 #include <gui/InputApplication.h>
 #include <gui/WindowInfo.h>
 #include <input/DisplayTopologyGraph.h>
+#include <input/Input.h>
 #include <input/InputDevice.h>
 #include <input/InputTransport.h>
 #include <unordered_map>
@@ -174,14 +175,15 @@ public:
             const std::string& name) = 0;
 
     /**
-     * Creates an input channel to be used to monitor all input events on a display.
+     * Creates an input channel to be used to monitor all non-pointer input events going to focused
+     * windows on a display.
      *
      * Each monitor must target a specific display and will only receive input events sent to that
      * display.
      *
      * This method may be called on any thread (usually by the input manager).
      */
-    virtual base::Result<std::unique_ptr<InputChannel>> createInputMonitor(
+    virtual base::Result<std::unique_ptr<InputChannel>> createFocusInputMonitor(
             ui::LogicalDisplayId displayId, const std::string& name, gui::Pid pid) = 0;
 
     /* Removes input channels that will no longer receive input events.
@@ -201,7 +203,7 @@ public:
      *
      * InputDispatcher is the source of truth of Pointer Capture.
      */
-    virtual void requestPointerCapture(const sp<IBinder>& windowToken, bool enabled) = 0;
+    virtual void requestPointerCapture(const sp<IBinder>& windowToken, PointerCaptureMode mode) = 0;
 
     /**
      * Sets the eligibility of a given display to enable pointer capture. If a display is marked

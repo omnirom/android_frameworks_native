@@ -14,9 +14,6 @@
  * limitations under the License.
  */
 
-#undef LOG_TAG
-#define LOG_TAG "LayerTracing"
-
 #include "LayerDataSource.h"
 
 #include <log/log.h>

@@ -20,6 +20,7 @@
 #include "InputDeviceMetricsSource.h"
 
 #include <android-base/stringprintf.h>
+#include <input/Input.h>
 #include <input/PrintTools.h>
 
 namespace android {
@@ -44,7 +45,7 @@ int32_t linuxBusToInputDeviceBusEnum(int32_t linuxBus, bool isUsiStylus) {
     if (isUsiStylus) {
         // This is a stylus connected over the Universal Stylus Initiative (USI) protocol.
         // For metrics purposes, we treat this protocol as a separate bus.
-        return util::INPUT_DEVICE_USAGE_REPORTED__DEVICE_BUS__USI;
+        return inputflinger::stats::INPUT_DEVICE_USAGE_REPORTED__DEVICE_BUS__USI;
     }
 
     // When adding cases to this switch, also add them to the copy of this method in
@@ -52,11 +53,13 @@ int32_t linuxBusToInputDeviceBusEnum(int32_t linuxBus, bool isUsiStylus) {
     // TODO(b/286394420): deduplicate this method with the one in TouchpadInputMapper.cpp.
     switch (linuxBus) {
         case BUS_USB:
-            return util::INPUT_DEVICE_USAGE_REPORTED__DEVICE_BUS__USB;
+            return inputflinger::stats::INPUT_DEVICE_USAGE_REPORTED__DEVICE_BUS__USB;
         case BUS_BLUETOOTH:
-            return util::INPUT_DEVICE_USAGE_REPORTED__DEVICE_BUS__BLUETOOTH;
+            return inputflinger::stats::INPUT_DEVICE_USAGE_REPORTED__DEVICE_BUS__BLUETOOTH;
+        case BUS_VIRTUAL:
+            return inputflinger::stats::INPUT_DEVICE_USAGE_REPORTED__DEVICE_BUS__VIRTUAL;
         default:
-            return util::INPUT_DEVICE_USAGE_REPORTED__DEVICE_BUS__OTHER;
+            return inputflinger::stats::INPUT_DEVICE_USAGE_REPORTED__DEVICE_BUS__OTHER;
     }
 }
 
@@ -94,13 +97,15 @@ class : public InputDeviceMetricsLogger {
             ALOGD_IF(DEBUG, "        - uid: %s\t duration: %dms", uid.toString().c_str(),
                      durMillis);
         }
-        util::stats_write(util::INPUTDEVICE_USAGE_REPORTED, info.vendor, info.product, info.version,
-                          linuxBusToInputDeviceBusEnum(info.bus, info.isUsiStylus), durationMillis,
-                          sources, durationsPerSource, uids, durationsPerUid);
+        inputflinger::stats::stats_write(inputflinger::stats::INPUTDEVICE_USAGE_REPORTED,
+                                         info.vendor, info.product, info.version,
+                                         linuxBusToInputDeviceBusEnum(info.bus, info.isUsiStylus),
+                                         durationMillis, sources, durationsPerSource, uids,
+                                         durationsPerUid);
     }
 } sStatsdLogger;
 
-bool isIgnoredInputDeviceId(int32_t deviceId) {
+bool isIgnoredInputDeviceId(DeviceId deviceId) {
     switch (deviceId) {
         case INVALID_INPUT_DEVICE_ID:
         case VIRTUAL_KEYBOARD_ID:

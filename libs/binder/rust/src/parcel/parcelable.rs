@@ -607,7 +607,7 @@ impl SerializeOption for str {
                 status_result(sys::AParcel_writeString(
                     parcel.as_native_mut(),
                     s.as_ptr() as *const c_char,
-                    s.as_bytes().len().try_into().or(Err(StatusCode::BAD_VALUE))?,
+                    s.len().try_into().or(Err(StatusCode::BAD_VALUE))?,
                 ))
             },
         }
@@ -866,6 +866,7 @@ impl<T: FromIBinder + ?Sized> Deserialize for Strong<T> {
     }
 }
 
+#[allow(dead_code)]
 struct AssertIBinder;
 impl Interface for AssertIBinder {}
 impl FromIBinder for AssertIBinder {

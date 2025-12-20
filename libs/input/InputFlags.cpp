@@ -25,9 +25,13 @@
 
 namespace android {
 
-bool InputFlags::connectedDisplaysCursorEnabled() {
-    if (!com::android::window::flags::enable_desktop_mode_through_dev_option()) {
-        return com::android::input::flags::connected_displays_cursor();
+namespace {
+
+// Returns the cached dev option value if available.
+// This check is only required for connected-displays related features.
+std::optional<bool> getConnectedDisplaysDevOptionValue() {
+    if (!com::android::window::flags::show_desktop_experience_dev_option()) {
+        return std::nullopt;
     }
     static std::optional<bool> cachedDevOption;
     if (!cachedDevOption.has_value()) {
@@ -37,15 +41,31 @@ bool InputFlags::connectedDisplaysCursorEnabled() {
                 property_get(sysprop_name, value, nullptr) > 0 ? std::atoi(value) : 0;
         cachedDevOption = devOptionEnabled == 1;
     }
-    if (cachedDevOption.value_or(false)) {
+    return cachedDevOption;
+}
+
+} // namespace
+
+bool InputFlags::connectedDisplaysCursorEnabled() {
+    if (getConnectedDisplaysDevOptionValue().value_or(false)) {
         return true;
     }
     return com::android::input::flags::connected_displays_cursor();
 }
 
 bool InputFlags::connectedDisplaysCursorAndAssociatedDisplayCursorBugfixEnabled() {
+    if (getConnectedDisplaysDevOptionValue().value_or(false)) {
+        return true;
+    }
     return connectedDisplaysCursorEnabled() &&
             com::android::input::flags::connected_displays_associated_display_cursor_bugfix();
+}
+
+bool InputFlags::scaleCursorSpeedWithDisplayDensity() {
+    if (getConnectedDisplaysDevOptionValue().value_or(false)) {
+        return true;
+    }
+    return com::android::input::flags::scale_cursor_speed_with_dpi();
 }
 
 } // namespace android

@@ -42,9 +42,6 @@ int LayerVector::do_compare(const void* lhs, const void* rhs) const
     const auto& l = *reinterpret_cast<const sp<Layer>*>(lhs);
     const auto& r = *reinterpret_cast<const sp<Layer>*>(rhs);
 
-    const auto& lState = l->getDrawingState();
-    const auto& rState = r->getDrawingState();
-
     if (l->sequence == r->sequence)
         return 0;
 

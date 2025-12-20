@@ -53,7 +53,7 @@ public:
                        const Rect& orientedDisplaySpaceRect) override;
     void setNextBrightness(float brightness) override;
     void setDisplaySize(const ui::Size&) override;
-    void setLayerFilter(ui::LayerFilter) override;
+    void setLayerFilter(LayerFilter) override;
     ui::Transform::RotationFlags getTransformHint() const override;
 
     void setColorTransform(const compositionengine::CompositionRefreshArgs&) override;
@@ -74,8 +74,9 @@ public:
 
     Region getDirtyRegion() const override;
 
-    bool includesLayer(ui::LayerFilter) const override;
+    bool includesLayer(LayerFilter) const override;
     bool includesLayer(const sp<LayerFE>&) const override;
+    bool includesLayer(LayerFE*) const override;
 
     compositionengine::OutputLayer* getOutputLayerForLayer(const sp<LayerFE>&) const override;
 
@@ -118,7 +119,9 @@ public:
     const ReleasedLayers& getReleasedLayersForTest() const;
     void setDisplayColorProfileForTest(std::unique_ptr<compositionengine::DisplayColorProfile>);
     void setRenderSurfaceForTest(std::unique_ptr<compositionengine::RenderSurface>);
+
     bool plannerEnabled() const { return mPlanner != nullptr; }
+    bool plannerTexturePoolEnabled() const override;
     virtual bool anyLayersRequireClientComposition() const;
     virtual void updateProtectedContentState();
     virtual bool dequeueRenderBuffer(base::unique_fd*,
@@ -176,6 +179,7 @@ protected:
 private:
     void dirtyEntireOutput();
     compositionengine::OutputLayer* findLayerRequestingBackgroundComposition() const;
+    void sanitizeOutputLayers() const;
     void finishPrepareFrame();
     ui::Dataspace getBestDataspace(ui::Dataspace*, bool*) const;
     compositionengine::Output::ColorProfile pickColorProfile(

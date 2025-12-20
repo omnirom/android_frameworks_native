@@ -16,16 +16,16 @@
 
 #pragma once
 
-#include <ui/DisplayIdentification.h>
+#include "Display/DisplayIdentification.h"
 
 namespace android {
 
 template <size_t N>
-DisplayIdentificationData asDisplayIdentificationData(const unsigned char (&bytes)[N]) {
-    return DisplayIdentificationData(bytes, bytes + N - 1);
+display::DisplayIdentificationData asDisplayIdentificationData(const unsigned char (&bytes)[N]) {
+    return display::DisplayIdentificationData(bytes, bytes + N - 1);
 }
 
-inline const DisplayIdentificationData& getInternalEdid() {
+inline const display::DisplayIdentificationData& getInternalEdid() {
     static constexpr unsigned char kInternalEdid[] =
             "\x00\xff\xff\xff\xff\xff\xff\x00\x4c\xa3\x42\x31\x00\x00\x00\x00"
             "\x00\x15\x01\x03\x80\x1a\x10\x78\x0a\xd3\xe5\x95\x5c\x60\x90\x27"
@@ -35,11 +35,26 @@ inline const DisplayIdentificationData& getInternalEdid() {
             "\x00\x00\x00\x00\x00\x23\x87\x02\x64\x00\x00\x00\x00\xfe\x00\x53"
             "\x41\x4d\x53\x55\x4e\x47\x0a\x20\x20\x20\x20\x20\x00\x00\x00\xfe"
             "\x00\x31\x32\x31\x41\x54\x31\x31\x2d\x38\x30\x31\x0a\x20\x00\x45";
-    static const DisplayIdentificationData data = asDisplayIdentificationData(kInternalEdid);
+    static const display::DisplayIdentificationData data =
+            asDisplayIdentificationData(kInternalEdid);
     return data;
 }
 
-inline const DisplayIdentificationData& getExternalEdid() {
+inline const display::DisplayIdentificationData& getOuterEdid() {
+    static constexpr unsigned char kOuterEdid[] =
+            "\x00\xff\xff\xff\xff\xff\xff\x00\x4c\xa3\x39\x30\xd2\x02\x96\x49"
+            "\x00\x15\x01\x03\x80\x1a\x10\x78\x0a\xd3\xe5\x95\x5c\x60\x90\x27"
+            "\x19\x50\x54\x00\x00\x00\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01"
+            "\x01\x01\x01\x01\x01\x01\x9e\x1b\x00\xa0\x50\x20\x12\x30\x10\x30"
+            "\x13\x00\x05\xa3\x10\x00\x00\x19\x00\x00\x00\x0f\x00\x00\x00\x00"
+            "\x00\x00\x00\x00\x00\x23\x87\x02\x64\x00\x00\x00\x00\xfe\x00\x53"
+            "\x41\x4d\x53\x55\x4e\x47\x0a\x20\x20\x20\x20\x20\x00\x00\x00\xfe"
+            "\x00\x31\x32\x31\x41\x54\x31\x31\x2d\x38\x30\x31\x0a\x20\x00\x9C";
+    static const display::DisplayIdentificationData data = asDisplayIdentificationData(kOuterEdid);
+    return data;
+}
+
+inline const display::DisplayIdentificationData& getExternalEdid() {
     static constexpr unsigned char kExternalEdid[] =
             "\x00\xff\xff\xff\xff\xff\xff\x00\x22\xf0\x6c\x28\x01\x01\x01\x01"
             "\x02\x16\x01\x04\xb5\x40\x28\x78\xe2\x8d\x85\xad\x4f\x35\xb1\x25"
@@ -49,11 +64,12 @@ inline const DisplayIdentificationData& getExternalEdid() {
             "\x30\x20\x36\x00\x81\x90\x21\x00\x00\x1a\x00\x00\x00\xfc\x00\x48"
             "\x50\x20\x5a\x52\x33\x30\x77\x0a\x20\x20\x20\x20\x00\x00\x00\xff"
             "\x00\x43\x4e\x34\x32\x30\x32\x31\x33\x37\x51\x0a\x20\x20\x00\x71";
-    static const DisplayIdentificationData data = asDisplayIdentificationData(kExternalEdid);
+    static const display::DisplayIdentificationData data =
+            asDisplayIdentificationData(kExternalEdid);
     return data;
 }
 
-inline const DisplayIdentificationData& getExternalEedid() {
+inline const display::DisplayIdentificationData& getExternalEedid() {
     // Extended EDID with timing extension.
     static constexpr unsigned char kExternalEedid[] =
             "\x00\xff\xff\xff\xff\xff\xff\x00\x4c\x2d\xfe\x08\x00\x00\x00\x00"
@@ -72,7 +88,8 @@ inline const DisplayIdentificationData& getExternalEedid() {
             "\x5a\x00\x00\x00\x18\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"
             "\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"
             "\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\xc6";
-    static const DisplayIdentificationData data = asDisplayIdentificationData(kExternalEedid);
+    static const display::DisplayIdentificationData data =
+            asDisplayIdentificationData(kExternalEedid);
     return data;
 }
 

@@ -192,7 +192,10 @@ TEST_P(LayerTypeTransactionTest, RefreshRateIsInitialized) {
     FrameStats frameStats;
     mClient->getLayerFrameStats(handle, &frameStats);
 
-    ASSERT_GT(frameStats.refreshPeriodNano, static_cast<nsecs_t>(0));
+    // 10000 FPS is a decent upper limit.
+    ASSERT_GT(frameStats.refreshPeriodNano, static_cast<nsecs_t>(100000));
+    // 1 FPS is an unlikely lower limit
+    ASSERT_LT(frameStats.refreshPeriodNano, static_cast<nsecs_t>(1000000000));
 }
 
 } // namespace android

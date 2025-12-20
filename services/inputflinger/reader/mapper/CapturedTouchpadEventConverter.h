@@ -41,7 +41,7 @@ public:
     explicit CapturedTouchpadEventConverter(InputReaderContext& readerContext,
                                             const InputDeviceContext& deviceContext,
                                             MultiTouchMotionAccumulator& motionAccumulator,
-                                            int32_t deviceId);
+                                            DeviceId deviceId);
     std::string dump() const;
     void populateMotionRanges(InputDeviceInfo& info) const;
     void reset();
@@ -61,7 +61,7 @@ private:
     int32_t allocatePointerIdToSlot(size_t slotNumber);
     void freePointerIdForSlot(size_t slotNumber);
 
-    const int32_t mDeviceId;
+    const DeviceId mDeviceId;
     InputReaderContext& mReaderContext;
     const InputDeviceContext& mDeviceContext;
     CursorButtonAccumulator mCursorButtonAccumulator;

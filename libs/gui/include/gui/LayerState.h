@@ -22,11 +22,14 @@
 #include <span>
 
 #include <android/gui/BorderSettings.h>
+#include <android/gui/BoxShadowSettings.h>
 #include <android/gui/DisplayCaptureArgs.h>
+#include <android/gui/ISystemContentPriorityConstants.h>
 #include <android/gui/IWindowInfosReportedListener.h>
 #include <android/gui/LayerCaptureArgs.h>
 #include <android/gui/TrustedPresentationThresholds.h>
 #include <android/native_window.h>
+#include <gui/CornerRadii.h>
 #include <gui/DisplayLuts.h>
 #include <gui/IGraphicBufferProducer.h>
 #include <gui/ITransactionCompletedListener.h>
@@ -252,6 +255,10 @@ struct layer_state_t {
         eAppContentPriorityChanged = 0x100000'00000000,
         eClientDrawnCornerRadiusChanged = 0x200000'00000000,
         eBorderSettingsChanged = 0x400000'00000000,
+        eBoxShadowSettingsChanged = 0x800000'00000000,
+        eStopLayerChanged = 0x1000000'00000000,
+        eBackgroundBlurScaleChanged = 0x2000000'00000000,
+        eSystemContentPriorityChanged = 0x4000000'00000000,
     };
 
     layer_state_t();
@@ -290,13 +297,15 @@ struct layer_state_t {
     // Content updates.
     static constexpr uint64_t CONTENT_CHANGES = layer_state_t::BUFFER_CHANGES |
             layer_state_t::eAlphaChanged | layer_state_t::eAutoRefreshChanged |
-            layer_state_t::eBackgroundBlurRadiusChanged | layer_state_t::eBackgroundColorChanged |
+            layer_state_t::eBackgroundBlurRadiusChanged |
+            layer_state_t::eBackgroundBlurScaleChanged | layer_state_t::eBackgroundColorChanged |
             layer_state_t::eBlurRegionsChanged | layer_state_t::eColorChanged |
             layer_state_t::eColorSpaceAgnosticChanged | layer_state_t::eColorTransformChanged |
             layer_state_t::eCornerRadiusChanged | layer_state_t::eDimmingEnabledChanged |
             layer_state_t::eHdrMetadataChanged | layer_state_t::eShadowRadiusChanged |
             layer_state_t::eStretchChanged | layer_state_t::ePictureProfileHandleChanged |
-            layer_state_t::eAppContentPriorityChanged | layer_state_t::eBorderSettingsChanged;
+            layer_state_t::eAppContentPriorityChanged | layer_state_t::eBorderSettingsChanged |
+            layer_state_t::eBoxShadowSettingsChanged;
 
     // Changes which invalidates the layer's visible region in CE.
     static constexpr uint64_t CONTENT_DIRTY = layer_state_t::CONTENT_CHANGES |
@@ -305,12 +314,14 @@ struct layer_state_t {
     // Changes affecting child states.
     static constexpr uint64_t AFFECTS_CHILDREN = layer_state_t::GEOMETRY_CHANGES |
             layer_state_t::HIERARCHY_CHANGES | layer_state_t::eAlphaChanged |
-            layer_state_t::eBackgroundBlurRadiusChanged | layer_state_t::eBlurRegionsChanged |
+            layer_state_t::eBackgroundBlurRadiusChanged |
+            layer_state_t::eBackgroundBlurScaleChanged | layer_state_t::eBlurRegionsChanged |
             layer_state_t::eColorTransformChanged | layer_state_t::eCornerRadiusChanged |
             layer_state_t::eFlagsChanged | layer_state_t::eTrustedOverlayChanged |
             layer_state_t::eFrameRateChanged | layer_state_t::eFrameRateCategoryChanged |
             layer_state_t::eFrameRateSelectionStrategyChanged |
-            layer_state_t::eFrameRateSelectionPriority | layer_state_t::eFixedTransformHintChanged;
+            layer_state_t::eFrameRateSelectionPriority | layer_state_t::eFixedTransformHintChanged |
+            layer_state_t::eSystemContentPriorityChanged;
 
     // Changes affecting data sent to input.
     static constexpr uint64_t INPUT_CHANGES = layer_state_t::eAlphaChanged |
@@ -323,9 +334,15 @@ struct layer_state_t {
 
     // Changes that force GPU composition.
     static constexpr uint64_t COMPOSITION_EFFECTS = layer_state_t::eBackgroundBlurRadiusChanged |
-            layer_state_t::eBlurRegionsChanged | layer_state_t::eCornerRadiusChanged |
-            layer_state_t::eShadowRadiusChanged | layer_state_t::eStretchChanged |
-            layer_state_t::eBorderSettingsChanged;
+            layer_state_t::eBackgroundBlurScaleChanged | layer_state_t::eBlurRegionsChanged |
+            layer_state_t::eCornerRadiusChanged | layer_state_t::eShadowRadiusChanged |
+            layer_state_t::eStretchChanged | layer_state_t::eBorderSettingsChanged |
+            layer_state_t::eBoxShadowSettingsChanged;
+
+    // Changes that affect the frame rate
+    static constexpr uint64_t FRAME_RATE_CHANGES = layer_state_t::eFrameRateCategoryChanged |
+            layer_state_t::eFrameRateSelectionStrategyChanged |
+            layer_state_t::eFrameRateSelectionPriority | layer_state_t::eFrameRateChanged;
 
     bool hasValidBuffer() const;
     void sanitize(int32_t permissions);
@@ -340,11 +357,9 @@ struct layer_state_t {
     }
     void updateRelativeLayer(const sp<SurfaceControl>& relativeTo, int32_t z);
     void updateParentLayer(const sp<SurfaceControl>& newParent);
-    void updateInputWindowInfo(sp<gui::WindowInfoHandle>&& info);
-    const gui::WindowInfo& getWindowInfo() const {
-        return *mNotDefCmpState.windowInfoHandle->getInfo();
-    }
-    gui::WindowInfo* editWindowInfo() { return mNotDefCmpState.windowInfoHandle->editInfo(); }
+    void updateInputWindowInfo(const gui::WindowInfo& info);
+    const gui::WindowInfo& getWindowInfo() const { return mNotDefCmpState.windowInfo; }
+    gui::WindowInfo* editWindowInfo() { return &mNotDefCmpState.windowInfo; }
 
     const sp<SurfaceControl>& getParentSurfaceControlForChild() const {
         return mNotDefCmpState.parentSurfaceControlForChild;
@@ -380,9 +395,11 @@ struct layer_state_t {
     uint32_t mask;
     uint8_t reserved;
     matrix22_t matrix;
-    float cornerRadius;
-    float clientDrawnCornerRadius;
+    gui::CornerRadii cornerRadii;
+    gui::CornerRadii clientDrawnCornerRadii;
+    FloatRect clientDrawnCornerRadiusCrop;
     uint32_t backgroundBlurRadius;
+    float backgroundBlurScale;
 
     half4 color;
 
@@ -416,6 +433,9 @@ struct layer_state_t {
 
     // Draws an outline around the layer.
     gui::BorderSettings borderSettings;
+
+    // Draws a sequence of box shadows under the layer.
+    gui::BoxShadowSettings boxShadowSettings;
 
     // Priority of the layer assigned by Window Manager.
     int32_t frameRateSelectionPriority;
@@ -478,6 +498,10 @@ struct layer_state_t {
     // resources, such as picture processing hardware.
     int32_t appContentPriority = 0;
 
+    // A value indicating the importance of the layer's content from the perspective of system
+    // server.
+    int32_t systemContentPriority = gui::ISystemContentPriorityConstants::Unset;
+
     gui::CachingHint cachingHint = gui::CachingHint::Enabled;
 
     TrustedPresentationThresholds trustedPresentationThresholds;
@@ -491,7 +515,7 @@ protected:
     struct NotDefaultComparableState {
         Region transparentRegion;
         Region surfaceDamageRegion;
-        sp<gui::WindowInfoHandle> windowInfoHandle = sp<gui::WindowInfoHandle>::make();
+        gui::WindowInfo windowInfo;
         sp<SurfaceControl> relativeLayerSurfaceControl;
         sp<SurfaceControl> parentSurfaceControlForChild;
 
@@ -612,6 +636,11 @@ static inline int compare_type(const ComposerState& lhs, const ComposerState& rh
 
 static inline int compare_type(const DisplayState& lhs, const DisplayState& rhs) {
     return compare_type(lhs.token, rhs.token);
+}
+
+static inline bool isFrameBarrierNewer(uint32_t producerIdA, uint64_t frameNumberA,
+                                       uint32_t producerIdB, uint64_t frameNumberB) {
+    return producerIdA > producerIdB || (producerIdA == producerIdB && frameNumberA > frameNumberB);
 }
 
 }; // namespace android

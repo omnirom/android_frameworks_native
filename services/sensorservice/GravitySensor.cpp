@@ -54,7 +54,7 @@ GravitySensor::GravitySensor(sensor_t const* list, size_t count) {
 bool GravitySensor::process(sensors_event_t* outEvent,
         const sensors_event_t& event)
 {
-    if (event.type == SENSOR_TYPE_ACCELEROMETER) {
+    if (event.sensor == mAccelerometer.getHandle()) {
         vec3_t g;
         if (!mSensorFusion.hasEstimate(FUSION_NOMAG))
             return false;

@@ -22,6 +22,8 @@
 #include <SkSurface.h>
 #include "BlurFilter.h"
 
+#include "RuntimeEffectManager.h"
+
 namespace android {
 namespace renderengine {
 namespace skia {
@@ -33,7 +35,7 @@ namespace skia {
  */
 class KawaseBlurDualFilter : public BlurFilter {
 public:
-    explicit KawaseBlurDualFilter();
+    explicit KawaseBlurDualFilter(RuntimeEffectManager& effectManager);
     virtual ~KawaseBlurDualFilter() {}
 
     // Execute blur, saving it to a texture

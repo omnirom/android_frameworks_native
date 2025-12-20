@@ -68,12 +68,12 @@ public:
     /* Notifies the system that an input channel is unrecoverably broken. */
     virtual void notifyInputChannelBroken(const sp<IBinder>& token) = 0;
     virtual void notifyFocusChanged(const sp<IBinder>& oldToken, const sp<IBinder>& newToken) = 0;
-    virtual void notifySensorEvent(int32_t deviceId, InputDeviceSensorType sensorType,
+    virtual void notifySensorEvent(DeviceId deviceId, InputDeviceSensorType sensorType,
                                    InputDeviceSensorAccuracy accuracy, nsecs_t timestamp,
                                    const std::vector<float>& values) = 0;
-    virtual void notifySensorAccuracy(int32_t deviceId, InputDeviceSensorType sensorType,
+    virtual void notifySensorAccuracy(DeviceId deviceId, InputDeviceSensorType sensorType,
                                       InputDeviceSensorAccuracy accuracy) = 0;
-    virtual void notifyVibratorState(int32_t deviceId, bool isOn) = 0;
+    virtual void notifyVibratorState(DeviceId deviceId, bool isOn) = 0;
 
     /*
      * Notifies the system that focused display has changed.

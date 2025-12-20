@@ -74,7 +74,11 @@ static binder_status_t ReadAndValidateArraySize(const AParcel* parcel, int32_t* 
 
     if (*length < -1) return STATUS_BAD_VALUE;  // libbinder_ndk reserves these
     if (*length <= 0) return STATUS_OK;         // null
-    if (static_cast<size_t>(*length) > parcel->get()->dataAvail()) return STATUS_NO_MEMORY;
+    if (static_cast<size_t>(*length) > parcel->get()->dataAvail()) {
+        ALOGI("%s: parcel length %zu larger than available buffer size %zu", __FUNCTION__,
+              static_cast<size_t>(*length), parcel->get()->dataAvail());
+        return STATUS_NO_MEMORY;
+    }
 
     return STATUS_OK;
 }
@@ -86,7 +90,10 @@ binder_status_t WriteArray(AParcel* parcel, const T* array, int32_t length) {
     if (length <= 0) return STATUS_OK;
 
     int32_t size = 0;
-    if (__builtin_smul_overflow(sizeof(T), length, &size)) return STATUS_NO_MEMORY;
+    if (__builtin_smul_overflow(sizeof(T), length, &size)) {
+        ALOGI("%s: smul_overflow (array size: %zu, length: %d)", __FUNCTION__, sizeof(T), length);
+        return STATUS_NO_MEMORY;
+    }
 
     void* const data = parcel->get()->writeInplace(size);
     if (data == nullptr) return STATUS_NO_MEMORY;
@@ -104,7 +111,10 @@ binder_status_t WriteArray<char16_t>(AParcel* parcel, const char16_t* array, int
     if (length <= 0) return STATUS_OK;
 
     int32_t size = 0;
-    if (__builtin_smul_overflow(sizeof(char16_t), length, &size)) return STATUS_NO_MEMORY;
+    if (__builtin_smul_overflow(sizeof(char16_t), length, &size)) {
+        ALOGI("%s: smul_overflow (size: %zu, length: %d)", __FUNCTION__, sizeof(char16_t), length);
+        return STATUS_NO_MEMORY;
+    }
 
     Parcel* rawParcel = parcel->get();
 
@@ -140,10 +150,16 @@ binder_status_t ReadArray(const AParcel* parcel, void* arrayData,
     if (array == nullptr) return STATUS_NO_MEMORY;
 
     int32_t size = 0;
-    if (__builtin_smul_overflow(sizeof(T), length, &size)) return STATUS_NO_MEMORY;
+    if (__builtin_smul_overflow(sizeof(T), length, &size)) {
+        ALOGI("%s: smul_overflow (size: %zu, length: %d)", __FUNCTION__, sizeof(T), length);
+        return STATUS_NO_MEMORY;
+    }
 
     const void* data = rawParcel->readInplace(size);
-    if (data == nullptr) return STATUS_NO_MEMORY;
+    if (data == nullptr) {
+        ALOGI("%s: parcel readInplace returned a nullptr", __FUNCTION__);
+        return STATUS_NO_MEMORY;
+    }
 
     memcpy(array, data, size);
 
@@ -174,7 +190,10 @@ binder_status_t ReadArray<char16_t>(const AParcel* parcel, void* arrayData,
     if (array == nullptr) return STATUS_NO_MEMORY;
 
     int32_t size = 0;
-    if (__builtin_smul_overflow(sizeof(char16_t), length, &size)) return STATUS_NO_MEMORY;
+    if (__builtin_smul_overflow(sizeof(char16_t), length, &size)) {
+        ALOGI("%s: smul_overflow (size: %zu, length: %d)", __FUNCTION__, sizeof(char16_t), length);
+        return STATUS_NO_MEMORY;
+    }
 
     for (int32_t i = 0; i < length; i++) {
         status_t status = rawParcel->readChar(array + i);
@@ -441,7 +460,13 @@ binder_status_t AParcel_readStringArray(const AParcel* parcel, void* arrayData,
         return status;
     }
 
-    if (!allocator(arrayData, length)) return STATUS_NO_MEMORY;
+    if (!allocator(arrayData, length)) {
+        if (length < 0) {
+            return STATUS_UNEXPECTED_NULL;
+        } else {
+            return STATUS_NO_MEMORY;
+        }
+    }
 
     if (length == -1) return STATUS_OK;  // null string array
 
@@ -485,7 +510,13 @@ binder_status_t AParcel_readParcelableArray(const AParcel* parcel, void* arrayDa
         return status;
     }
 
-    if (!allocator(arrayData, length)) return STATUS_NO_MEMORY;
+    if (!allocator(arrayData, length)) {
+        if (length < 0) {
+            return STATUS_UNEXPECTED_NULL;
+        } else {
+            return STATUS_NO_MEMORY;
+        }
+    }
 
     if (length == -1) return STATUS_OK;  // null array
 

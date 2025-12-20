@@ -81,7 +81,11 @@ public:
     const std::vector<RequestedLayerState*>& getChangedLayers() const;
     const ftl::Flags<RequestedLayerState::Changes> getGlobalChanges() const;
     const RequestedLayerState* getLayerFromId(uint32_t) const;
-    bool isLayerSecure(uint32_t) const;
+    // Traverse through parent layers to identify if any are secure, as a layer's secure
+    // flag is inherited from its parents. Return an unexpected status if a layer cycle
+    // is identified.
+    base::expected<bool, status_t> isLayerSecure(uint32_t layerId,
+                                                 std::unordered_set<uint32_t>& visited) const;
 
 private:
     friend class LayerLifecycleManagerTest;

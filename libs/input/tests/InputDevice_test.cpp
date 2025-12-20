@@ -66,9 +66,6 @@ protected:
     }
 
     void SetUp() override {
-#if !defined(__ANDROID__)
-        GTEST_SKIP() << "b/253299089 Generic files are currently read directly from device.";
-#endif
         loadKeyLayout("Generic");
         loadKeyCharacterMap("Generic");
     }

@@ -72,10 +72,8 @@ public:
         void addAndGetFrameTimestamps(
                 const NewFrameEventsEntry* newTimestamps,
                 FrameEventHistoryDelta* outDelta) override;
-#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(BQ_SETFRAMERATE)
         void onSetFrameRate(float frameRate, int8_t compatibility,
                             int8_t changeFrameRateStrategy) override;
-#endif
 #if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_UNLIMITED_SLOTS)
         void onSlotCountChanged(int slotCount) override;
 #endif

@@ -35,7 +35,7 @@
 
 namespace android {
 
-using aidl::android::hardware::graphics::composer3::OutputType;
+namespace composer3 = aidl::android::hardware::graphics::composer3;
 namespace hal = android::hardware::graphics::composer::hal;
 
 class DisplayMode;
@@ -115,7 +115,7 @@ public:
             return *this;
         }
 
-        Builder& setHdrOutputType(OutputType type) {
+        Builder& setHdrOutputType(composer3::OutputType type) {
             mDisplayMode->mHdrOutputType = type;
             return *this;
         }
@@ -150,9 +150,7 @@ public:
     // Peak refresh rate represents the highest refresh rate that can be used
     // for the presentation.
     Fps getPeakFps() const {
-        return FlagManager::getInstance().vrr_config() && mVrrConfig
-                ? Fps::fromPeriodNsecs(mVrrConfig->minFrameIntervalNs)
-                : mVsyncRate;
+        return mVrrConfig ? Fps::fromPeriodNsecs(mVrrConfig->minFrameIntervalNs) : mVsyncRate;
     }
 
     Fps getVsyncRate() const { return mVsyncRate; }
@@ -172,7 +170,7 @@ public:
     // without visual interruptions such as a black screen.
     int32_t getGroup() const { return mGroup; }
 
-    OutputType getHdrOutputType() const { return mHdrOutputType; }
+    composer3::OutputType getHdrOutputType() const { return mHdrOutputType; }
 
 private:
     explicit DisplayMode(hal::HWConfigId id) : mHwcId(id) {}
@@ -187,7 +185,7 @@ private:
     Dpi mDpi;
     int32_t mGroup = -1;
     std::optional<hal::VrrConfig> mVrrConfig;
-    OutputType mHdrOutputType;
+    composer3::OutputType mHdrOutputType;
 };
 
 inline bool equalsExceptDisplayModeId(const DisplayMode& lhs, const DisplayMode& rhs) {
@@ -200,7 +198,7 @@ inline bool equalsExceptDisplayModeId(const DisplayMode& lhs, const DisplayMode&
 
 inline std::string to_string(const DisplayMode& mode) {
     return base::StringPrintf("{id=%d, hwcId=%d, resolution=%dx%d, vsyncRate=%s, "
-                              "dpi=%.2fx%.2f, group=%d, vrrConfig=%s, supportedHdrTypes=%s}",
+                              "dpi=%.2fx%.2f, group=%d, vrrConfig=%s, hdrOutputType=%s}",
                               ftl::to_underlying(mode.getId()), mode.getHwcId(), mode.getWidth(),
                               mode.getHeight(), to_string(mode.getVsyncRate()).c_str(),
                               mode.getDpi().x, mode.getDpi().y, mode.getGroup(),

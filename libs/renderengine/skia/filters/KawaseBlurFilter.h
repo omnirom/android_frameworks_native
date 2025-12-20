@@ -22,6 +22,8 @@
 #include <SkRuntimeEffect.h>
 #include <SkSurface.h>
 
+#include "RuntimeEffectManager.h"
+
 using namespace std;
 
 namespace android {
@@ -38,7 +40,7 @@ public:
     // Maximum number of render passes
     static constexpr uint32_t kMaxPasses = 4;
 
-    explicit KawaseBlurFilter();
+    explicit KawaseBlurFilter(RuntimeEffectManager& effectManager);
     virtual ~KawaseBlurFilter(){}
 
     // Execute blur, saving it to a texture

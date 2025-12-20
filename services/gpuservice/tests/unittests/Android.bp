@@ -56,23 +56,6 @@ genrule {
     out: ["gpuservice_unittest_feature_config_vk.binarypb"],
 }
 
-// "Updated" protobuf, used to validate forceFileRead().
-filegroup {
-    name: "gpuservice_unittest_feature_config_vk_force_read_prototext",
-    srcs: [
-        "data/feature_config_test_force_read.txtpb",
-    ],
-}
-
-genrule {
-    name: "gpuservice_unittest_feature_config_vk_force_read_binarypb",
-    defaults: ["gpuservice_unittest_feature_config_pb_defaults"],
-    srcs: [
-        ":gpuservice_unittest_feature_config_vk_force_read_prototext",
-    ],
-    out: ["gpuservice_unittest_feature_config_vk_force_read.binarypb"],
-}
-
 cc_test {
     name: "gpuservice_unittest",
     test_suites: ["device-tests"],
@@ -89,7 +72,6 @@ cc_test {
     ],
     header_libs: ["bpf_headers"],
     shared_libs: [
-        "gpuservice_multiuser_flags_c_lib",
         "libbase",
         "libbinder",
         "libbpf_bcc",
@@ -98,7 +80,7 @@ cc_test {
         "liblog",
         "libprotobuf-cpp-lite",
         "libprotoutil",
-        "libstatslog",
+        "libstatslog_gpustats",
         "libstatspull",
         "libutils",
     ],
@@ -111,7 +93,6 @@ cc_test {
     ],
     data: [
         ":gpuservice_unittest_feature_config_vk_binarypb",
-        ":gpuservice_unittest_feature_config_vk_force_read_binarypb",
     ],
     require_root: true,
 }

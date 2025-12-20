@@ -18,11 +18,14 @@
 
 #include <NotifyArgsBuilders.h>
 #include <android-base/logging.h>
+#include <android-base/stringprintf.h>
 #include <gtest/gtest.h>
+#include <input/InputEventLabels.h>
 #include <input/PrintTools.h>
 #include <perfetto/trace/android/android_input_event.pbzero.h>
 #include <perfetto/trace/android/winscope_extensions.pbzero.h>
 #include <perfetto/trace/android/winscope_extensions_impl.pbzero.h>
+#include <perfetto/trace/evdev.pbzero.h>
 
 #include <utility>
 
@@ -33,6 +36,7 @@ using perfetto::protos::pbzero::AndroidInputEventConfig;
 using perfetto::protos::pbzero::AndroidKeyEvent;
 using perfetto::protos::pbzero::AndroidMotionEvent;
 using perfetto::protos::pbzero::AndroidWindowInputDispatchEvent;
+using perfetto::protos::pbzero::EvdevEvent;
 using perfetto::protos::pbzero::WinscopeExtensions;
 using perfetto::protos::pbzero::WinscopeExtensionsImpl;
 
@@ -87,11 +91,15 @@ auto decodeTrace(const std::string& rawTrace) {
     ArrayMap<AndroidMotionEvent::Decoder, bool /*redacted*/> tracedMotions;
     ArrayMap<AndroidKeyEvent::Decoder, bool /*redacted*/> tracedKeys;
     ArrayMap<AndroidWindowInputDispatchEvent::Decoder, bool /*redacted*/> tracedWindowDispatches;
+    std::vector<EvdevEvent::Decoder> tracedRawEvents;
 
     Trace::Decoder trace{rawTrace};
     if (trace.has_packet()) {
         for (auto it = trace.packet(); it; it++) {
             TracePacket::Decoder packet{it->as_bytes()};
+            if (packet.has_evdev_event()) {
+                tracedRawEvents.emplace_back(packet.evdev_event());
+            }
             if (!packet.has_winscope_extensions()) {
                 continue;
             }
@@ -137,7 +145,7 @@ auto decodeTrace(const std::string& rawTrace) {
         }
     }
     return std::tuple{std::move(tracedMotions), std::move(tracedKeys),
-                      std::move(tracedWindowDispatches)};
+                      std::move(tracedWindowDispatches), std::move(tracedRawEvents)};
 }
 
 bool eventMatches(const MotionEvent& expected, const AndroidMotionEvent::Decoder& traced) {
@@ -214,13 +222,50 @@ void InputTraceSession::expectDispatchTraced(Level level, const WindowDispatchEv
     mExpectedWindowDispatches.emplace_back(event, level);
 }
 
+void InputTraceSession::expectRawEventTraced(uint16_t type, uint16_t code, int32_t value) {
+    mExpectedRawEvents.emplace_back(RawEvent{.type = type, .code = code, .value = value});
+}
+
 void InputTraceSession::verifyExpectations(const std::string& rawTrace) {
-    auto [tracedMotions, tracedKeys, tracedWindowDispatches] = decodeTrace(rawTrace);
+    auto [tracedMotions, tracedKeys, tracedWindowDispatches, tracedRawEvents] =
+            decodeTrace(rawTrace);
 
     verifyExpectedEventsTraced(mExpectedMotions, tracedMotions, "motion");
     verifyExpectedEventsTraced(mExpectedKeys, tracedKeys, "key");
     verifyExpectedEventsTraced(mExpectedWindowDispatches, tracedWindowDispatches,
                                "window dispatch");
+    verifyRawEvents(tracedRawEvents);
+}
+
+void InputTraceSession::verifyRawEvents(const std::vector<EvdevEvent::Decoder>& tracedRawEvents) {
+    // TODO(b/394861376): tests that check raw event tracing currently fail if an evdev event from
+    //   a real input device comes in during the run (e.g. from a real finger on the touchscreen).
+    //   We should filter the raw events from the trace and only consider ones from devices
+    //   registered by the test. This will be easier once we're tracing device addition events, as
+    //   currently it's difficult to get the EventHub ID of the uinput device created in the test.
+    ASSERT_EQ(tracedRawEvents.size(), mExpectedRawEvents.size())
+            << "Incorrect number of raw events traced.";
+    for (size_t i = 0; i < mExpectedRawEvents.size(); i++) {
+        const RawEvent& expected = mExpectedRawEvents[i];
+        const EvdevEventLabel expectedLabels =
+                InputEventLookup::getLinuxEvdevLabel(expected.type, expected.code, expected.value);
+        SCOPED_TRACE(::testing::Message()
+                     << "Expected raw event " << i << " (" << expectedLabels.type << " "
+                     << expectedLabels.code << " " << expectedLabels.value << ")");
+        const EvdevEvent::Decoder& traced = tracedRawEvents[i];
+        ASSERT_TRUE(traced.has_input_event());
+        const EvdevEvent::InputEvent::Decoder& tracedInputEvent{traced.input_event()};
+        const EvdevEventLabel tracedLabels =
+                InputEventLookup::getLinuxEvdevLabel(tracedInputEvent.type(),
+                                                     tracedInputEvent.code(),
+                                                     tracedInputEvent.value());
+        ASSERT_EQ(tracedInputEvent.type(), static_cast<uint32_t>(expected.type))
+                << "Expected " << expectedLabels.type << ", got " << tracedLabels.type;
+        ASSERT_EQ(tracedInputEvent.code(), static_cast<uint32_t>(expected.code))
+                << "Expected " << expectedLabels.code << ", got " << tracedLabels.code;
+        ASSERT_EQ(tracedInputEvent.value(), expected.value)
+                << "Expected " << expectedLabels.value << ", got " << tracedLabels.value;
+    }
 }
 
 } // namespace android

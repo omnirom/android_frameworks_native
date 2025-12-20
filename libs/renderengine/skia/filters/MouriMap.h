@@ -17,10 +17,14 @@
 #include <SkImage.h>
 #include <SkRuntimeEffect.h>
 #include <SkShader.h>
+
 #include "../compat/SkiaGpuContext.h"
+#include "RuntimeEffectManager.h"
+
 namespace android {
 namespace renderengine {
 namespace skia {
+
 /**
  * MouriMap is a fast, albeit not realtime, tonemapping algorithm optimized for near-exact
  * preservation of SDR (or, equivalently, LDR) regions, while trying to do an acceptable job of
@@ -60,7 +64,7 @@ namespace skia {
  */
 class MouriMap {
 public:
-    MouriMap();
+    MouriMap(RuntimeEffectManager& effectManager);
     // Apply the MouriMap tonemmaping operator to the input.
     // The inputMultiplier informs how to interpret the luminance encoding of the input.
     // For a fixed point input, this is necessary to interpret what "1.0" means for the input

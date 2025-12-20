@@ -166,4 +166,27 @@ interface IServiceManager {
      * Get debug information for all currently registered services.
      */
     ServiceDebugInfo[] getServiceDebugInfo();
+
+    /**
+     * Caller context used when delegating access checks to service manager.
+     * This may not be the same context as the caller of this method.
+     */
+    parcelable CallerContext {
+        @utf8InCpp String sidName;
+        int debugPid;
+        int uid;
+    }
+
+    /**
+     * Check if this 'callerCtx' has access for the 'permission' for a given service 'name'.
+     *
+     * This is useful when a process will be making calls to servicemanager on behalf of another
+     * process (callerCtx).
+     *
+     * @param callerCtx - context of the process that is being checked.
+     * @param name - name of the service that the caller wants to interact with
+     * @param permission - the servicemanager SELinux permission that the process is
+     *                     interested in for the service. This is either "find", "list", or "add".
+     */
+    boolean checkServiceAccess(in CallerContext callerCtx, @utf8InCpp String name, @utf8InCpp String permission);
 }

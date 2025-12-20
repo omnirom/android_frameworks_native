@@ -135,6 +135,7 @@ private:
         BitSet32 idBits;
         int32_t idToIndex[MAX_POINTER_ID + 1];
         PointerCoords pointers[MAX_POINTERS];
+        int32_t displayId;
 
         void initializeFrom(const InputMessage& msg) {
             eventTime = msg.body.motion.eventTime;
@@ -145,6 +146,7 @@ private:
                 idToIndex[id] = i;
                 pointers[i].copyFrom(msg.body.motion.pointers[i].coords);
             }
+            displayId = msg.body.motion.displayId;
         }
 
         void initializeFrom(const History& other) {
@@ -157,6 +159,7 @@ private:
                 pointers[index].copyFrom(other.pointers[index]);
             }
             idBits = other.idBits; // final copy
+            displayId = other.displayId;
         }
 
         const PointerCoords& getPointerById(uint32_t id) const { return pointers[idToIndex[id]]; }

@@ -69,7 +69,7 @@ struct OutputCompositionState {
     bool reusedClientComposition{false};
 
     // The conditions for including a layer on this output
-    ui::LayerFilter layerFilter;
+    LayerFilter layerFilter;
 
     // The common space for all layers in the layer stack. layerStackSpace.content is the Rect
     // which gets projected on the display. The orientation of this space is always ROTATION_0.
@@ -172,6 +172,8 @@ struct OutputCompositionState {
     ICEPowerCallback* powerCallback = nullptr;
 
     PictureProfileHandle pictureProfileHandle;
+
+    sp<GraphicBuffer> readbackBuffer = nullptr;
 
     // Debugging
     void dump(std::string& result) const;

@@ -79,7 +79,7 @@ public:
             return false;
         }
         if (event.getAction() == AMOTION_EVENT_ACTION_CANCEL &&
-            (event.getFlags() & AMOTION_EVENT_FLAG_CANCELED) == 0) {
+            !event.getFlags().test(MotionFlag::CANCELED)) {
             *listener << "event with CANCEL action is missing FLAG_CANCELED";
             return false;
         }

@@ -107,7 +107,6 @@ protected:
     // signaled by now (unless that frame missed).
     std::pair<bool /* wouldBackpressure */, PresentFence> expectedSignaledPresentFence(
             Period vsyncPeriod, Period minFramePeriod) const;
-    std::array<PresentFence, 2> mPresentFencesLegacy;
     ui::RingBuffer<PresentFence, 5> mPresentFences;
 
     FrameTime mLastSignaledFrameTime;
@@ -151,10 +150,15 @@ public:
 
     void endFrame(const CompositeResult&);
 
+    // Returns the number of fences that are or were pending at |time|. |time| must not be in
+    // the future.
+    size_t countPresentFencesPendingAt(TimePoint time) const;
+
     void dump(utils::Dumper&) const;
 
 private:
     friend class FrameTargeterTestBase;
+    friend class TestableScheduler;
 
     // For tests.
     using IsFencePendingFuncPtr = bool (*)(const FenceTimePtr&, int graceTimeMs);

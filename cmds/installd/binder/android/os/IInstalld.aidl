@@ -16,7 +16,7 @@
 
 package android.os;
 
-/** {@hide} */
+/** @hide */
 interface IInstalld {
     void createUserData(@nullable @utf8InCpp String uuid, int userId, int userSerial, int flags);
     void destroyUserData(@nullable @utf8InCpp String uuid, int userId, int flags);
@@ -90,8 +90,8 @@ interface IInstalld {
     void freeCache(@nullable @utf8InCpp String uuid, long targetFreeBytes, int flags);
     void linkNativeLibraryDirectory(@nullable @utf8InCpp String uuid,
             @utf8InCpp String packageName, @utf8InCpp String nativeLibPath32, int userId);
-    void createOatDir(@utf8InCpp String packageName, @utf8InCpp String oatDir,
-            @utf8InCpp String instructionSet);
+    void createOatDirs(@utf8InCpp String packageName, @utf8InCpp String oatDir,
+            in @utf8InCpp List<String> oatSubDirs);
     void linkFile(@utf8InCpp String packageName, @utf8InCpp String relativePath,
             @utf8InCpp String fromBase, @utf8InCpp String toBase);
     void moveAb(@utf8InCpp String packageName, @utf8InCpp String apkPath,

@@ -17,8 +17,8 @@
     <target_preparer class="com.android.tradefed.targetprep.RootTargetPreparer"/>
     <target_preparer class="com.android.tradefed.targetprep.PushFilePreparer">
         <option name="cleanup" value="true" />
-        <option name="push-file" key="binderHostDeviceTest-service"
-                value="/data/local/tmp/binderHostDeviceTest-service"/>
+        <option name="push-file" key="binderHostDeviceTestService"
+                value="/data/local/tmp/binderHostDeviceTestService"/>
     </target_preparer>
 
     <test class="com.android.tradefed.testtype.binary.ExecutableHostTest">

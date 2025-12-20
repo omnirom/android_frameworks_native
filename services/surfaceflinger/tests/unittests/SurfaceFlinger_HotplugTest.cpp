@@ -120,6 +120,28 @@ TEST_F(HotplugTest, createsDisplaySnapshotsForDisplaysWithIdentificationData) {
     EXPECT_EQ(ExternalDisplay::PORT::value, externalDisplaySnapshotRef.get().port());
     EXPECT_EQ(ExternalDisplay::CONNECTION_TYPE::value,
               externalDisplaySnapshotRef.get().connectionType());
+
+    // Finally, ensure that the correct ID scheme is assigned according to the connection type:
+    // port-based IDs for internal panels, and EDID-based IDs for external displays.
+    const auto primaryDisplayInfo =
+            display::parseDisplayIdentificationData(PrimaryDisplay::PORT::value.value(),
+                                                    getInternalEdid(),
+                                                    android::ScreenPartStatus::UNSUPPORTED,
+                                                    /*useStableEdidIds=*/false);
+    ASSERT_TRUE(primaryDisplayInfo);
+    EXPECT_EQ(primaryDisplayInfo->id, primaryDisplaySnapshotRef.get().displayId());
+
+    const bool useStableEdidIds = FlagManager::getInstance().stable_edid_ids() &&
+            ExternalDisplay::CONNECTION_TYPE::value == ui::DisplayConnectionType::External;
+    const auto externalDisplayInfo =
+            display::parseDisplayIdentificationData(ExternalDisplay::PORT::value.value(),
+                                                    getExternalEdid(),
+                                                    android::ScreenPartStatus::UNSUPPORTED,
+                                                    useStableEdidIds);
+    ASSERT_TRUE(externalDisplayInfo);
+    EXPECT_EQ(externalDisplayInfo->id, externalDisplaySnapshotRef.get().displayId());
+    EXPECT_NE(primaryDisplaySnapshotRef.get().displayId(),
+              externalDisplaySnapshotRef.get().displayId());
 }
 
 TEST_F(HotplugTest, createsDisplaySnapshotsForDisplaysWithoutIdentificationData) {
@@ -294,8 +316,11 @@ TEST_F(HotplugTest, rejectsHotplugOnActivePortsDuplicate) {
 
     // We expect display identification to be fetched correctly, since EDID and
     // port are available and successfully retrieved from HAL.
+    EXPECT_CALL(*mComposer, getDisplayConnectionType(DuplicatePortDisplay::HWC_DISPLAY_ID, _))
+            .WillOnce(DoAll(SetArgPointee<1>(IComposerClient::DisplayConnectionType::EXTERNAL),
+                            Return(hal::V2_4::Error::NONE)));
     EXPECT_CALL(*mComposer,
-                getDisplayIdentificationData(DuplicatePortDisplay::HWC_DISPLAY_ID, _, _))
+                getDisplayIdentificationData(DuplicatePortDisplay::HWC_DISPLAY_ID, _, _, _))
             .WillOnce(DoAll(SetArgPointee<1>(*DuplicatePortDisplay::PORT::value),
                             SetArgPointee<2>(getExternalEedid()), Return(Error::NONE)));
 

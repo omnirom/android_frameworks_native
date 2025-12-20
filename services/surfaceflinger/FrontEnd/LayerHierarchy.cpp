@@ -15,8 +15,6 @@
  */
 
 #define ATRACE_TAG ATRACE_TAG_GRAPHICS
-#undef LOG_TAG
-#define LOG_TAG "SurfaceFlinger"
 
 #include <android-base/logging.h>
 
@@ -195,6 +193,29 @@ bool LayerHierarchy::hasRelZLoop(uint32_t& outInvalidRelativeRoot) const {
     return outInvalidRelativeRoot != UNASSIGNED_LAYER_ID;
 }
 
+bool LayerHierarchy::hasLayerCycle(std::unordered_set<uint32_t>& visited) const {
+    if (!mLayer) {
+        return false;
+    }
+
+    auto const [it, newVisit] = visited.insert(mLayer->id);
+    if (!newVisit) {
+        return true;
+    }
+
+    for (auto& [child, childVariant] : mChildren) {
+        if (childVariant != LayerHierarchy::Variant::Detached && child->hasLayerCycle(visited)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool LayerHierarchy::hasLayerCycle() const {
+    std::unordered_set<uint32_t> visited;
+    return hasLayerCycle(visited);
+}
+
 void LayerHierarchyBuilder::init(const std::vector<std::unique_ptr<RequestedLayerState>>& layers) {
     mLayerIdToHierarchy.clear();
     mHierarchies.clear();
@@ -303,11 +324,9 @@ void LayerHierarchyBuilder::onLayerAdded(RequestedLayerState* layer) {
         LayerHierarchy* mirror = getHierarchyFromId(mirrorId);
         hierarchy->addChild(mirror, LayerHierarchy::Variant::Mirror);
     }
-    if (FlagManager::getInstance().detached_mirror()) {
-        if (layer->layerIdToMirror != UNASSIGNED_LAYER_ID) {
-            LayerHierarchy* mirror = getHierarchyFromId(layer->layerIdToMirror);
-            hierarchy->addChild(mirror, LayerHierarchy::Variant::Detached_Mirror);
-        }
+    if (layer->layerIdToMirror != UNASSIGNED_LAYER_ID) {
+        LayerHierarchy* mirror = getHierarchyFromId(layer->layerIdToMirror);
+        hierarchy->addChild(mirror, LayerHierarchy::Variant::Detached_Mirror);
     }
 }
 
@@ -355,11 +374,9 @@ void LayerHierarchyBuilder::updateMirrorLayer(RequestedLayerState* layer) {
     for (uint32_t mirrorId : layer->mirrorIds) {
         hierarchy->addChild(getHierarchyFromId(mirrorId), LayerHierarchy::Variant::Mirror);
     }
-    if (FlagManager::getInstance().detached_mirror()) {
-        if (layer->layerIdToMirror != UNASSIGNED_LAYER_ID) {
-            hierarchy->addChild(getHierarchyFromId(layer->layerIdToMirror),
-                                LayerHierarchy::Variant::Detached_Mirror);
-        }
+    if (layer->layerIdToMirror != UNASSIGNED_LAYER_ID) {
+        hierarchy->addChild(getHierarchyFromId(layer->layerIdToMirror),
+                            LayerHierarchy::Variant::Detached_Mirror);
     }
 }
 

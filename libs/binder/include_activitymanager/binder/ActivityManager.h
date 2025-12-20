@@ -25,6 +25,11 @@
 // ---------------------------------------------------------------------------
 namespace android {
 
+namespace app {
+class IProcessObserver;
+class RunningAppProcessInfo;
+} // namespace app
+
 #define DECLARE_PROCESS_STATE(name) \
     PROCESS_STATE_##name = (int32_t) app::ProcessStateEnum::name
 
@@ -94,6 +99,10 @@ public:
     bool isUidActive(const uid_t uid, const String16& callingPackage);
     int getUidProcessState(const uid_t uid, const String16& callingPackage);
     status_t checkPermission(const String16& permission, const pid_t pid, const uid_t uid, int32_t* outResult);
+
+    status_t registerProcessObserver(const sp<app::IProcessObserver> observer);
+    status_t unregisterProcessObserver(const sp<app::IProcessObserver> observer);
+    status_t getRunningAppProcesses(::std::vector<app::RunningAppProcessInfo>* output);
 
     status_t linkToDeath(const sp<IBinder::DeathRecipient>& recipient);
     status_t unlinkToDeath(const sp<IBinder::DeathRecipient>& recipient);

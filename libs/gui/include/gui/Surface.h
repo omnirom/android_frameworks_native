@@ -17,7 +17,6 @@
 #ifndef ANDROID_GUI_SURFACE_H
 #define ANDROID_GUI_SURFACE_H
 
-#include <android/gui/FrameTimelineInfo.h>
 #include <com_android_graphics_libgui_flags.h>
 #include <gui/BufferQueueDefs.h>
 #include <gui/HdrMetadata.h>
@@ -30,6 +29,7 @@
 #include <utils/Condition.h>
 #include <utils/Mutex.h>
 #include <utils/RefBase.h>
+#include <utils/String8.h>
 
 #include <shared_mutex>
 #include <unordered_set>
@@ -39,6 +39,7 @@ namespace android {
 class GraphicBuffer;
 
 namespace gui {
+class FrameTimelineInfo;
 class ISurfaceComposer;
 } // namespace gui
 
@@ -65,7 +66,6 @@ public:
     virtual bool needsAttachNotify() { return false; }
 #endif
 
-#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_PLATFORM_API_IMPROVEMENTS)
     // Called if this Surface is connected to a remote implementation and it
     // dies or becomes unavailable.
     virtual void onRemoteDied() {}
@@ -73,7 +73,6 @@ public:
     // Clients will overwrite this if they want to receive a notification
     // via onRemoteDied. This should return a constant value.
     virtual bool needsDeathNotify() { return false; }
-#endif // COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_PLATFORM_API_IMPROVEMENTS)
 };
 
 class StubSurfaceListener : public SurfaceListener {
@@ -85,14 +84,12 @@ public:
     virtual void onBufferDetached(int /*slot*/) override {}
 };
 
-#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_PLATFORM_API_IMPROVEMENTS)
 // Contains additional data from the queueBuffer operation.
 struct SurfaceQueueBufferOutput {
     // True if this queueBuffer caused a buffer to be replaced in the queue
     // (and therefore not will not be acquired)
     bool bufferReplaced = false;
 };
-#endif // COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_PLATFORM_API_IMPROVEMENTS)
 
 /*
  * An implementation of ANativeWindow that feeds graphics buffers into a
@@ -134,6 +131,11 @@ public:
      */
     explicit Surface(const sp<IGraphicBufferProducer>& bufferProducer, bool controlledByApp = false,
                      const sp<IBinder>& surfaceControlHandle = nullptr);
+
+    /*
+     * Get the underlying Surface from the given ANativeWindow.
+     */
+    static sp<Surface> from(ANativeWindow* anw);
 
     /* getIGraphicBufferProducer() returns the IGraphicBufferProducer this
      * Surface was created with. Usually it's an error to use the
@@ -190,10 +192,8 @@ public:
      */
     virtual void allocateBuffers();
 
-#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_PLATFORM_API_IMPROVEMENTS)
     // See IGraphicBufferProducer::allowAllocation
     status_t allowAllocation(bool allowAllocation);
-#endif // COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_PLATFORM_API_IMPROVEMENTS)
 
     /* Sets the generation number on the IGraphicBufferProducer and updates the
      * generation number on any buffers attached to the Surface after this call.
@@ -263,6 +263,12 @@ public:
     virtual status_t setFrameRate(float frameRate, int8_t compatibility,
                                   int8_t changeFrameRateStrategy);
     virtual status_t setFrameTimelineInfo(uint64_t frameNumber, const FrameTimelineInfo& info);
+    // Returns whether this surface holds the mouse cursor.
+    bool isForCursor() const { return mIsForCursor; }
+    // Sets whether this surface holds the mouse cursor.
+    void setIsForCursor(bool isForCursor) { mIsForCursor = isForCursor; }
+
+    static bool IsCursorPlaneCompatibilitySupported();
 
 #if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(BQ_EXTENDEDALLOCATE)
     /**
@@ -277,9 +283,11 @@ public:
 protected:
     virtual ~Surface();
 
+#ifndef NO_BINDER
     // Virtual for testing.
     virtual sp<ISurfaceComposer> composerService() const;
     virtual sp<gui::ISurfaceComposer> composerServiceAIDL() const;
+#endif
     virtual nsecs_t now() const;
 
 private:
@@ -363,23 +371,15 @@ private:
     int dispatchSetFrameTimelineInfo(va_list args);
     int dispatchSetAdditionalOptions(va_list args);
 
-    std::mutex mNameMutex;
-    std::string mName;
-    const char* getDebugName();
-
 protected:
-    virtual int dequeueBuffer(ANativeWindowBuffer** buffer, int* fenceFd);
-    virtual int cancelBuffer(ANativeWindowBuffer* buffer, int fenceFd);
-#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_PLATFORM_API_IMPROVEMENTS)
-    virtual int queueBuffer(ANativeWindowBuffer* buffer, int fenceFd,
+    virtual int dequeueBuffer(sp<GraphicBuffer>* buffer, int* fenceFd);
+    virtual int cancelBuffer(sp<GraphicBuffer>&& buffer, int fenceFd);
+    virtual int queueBuffer(sp<GraphicBuffer>&& buffer, int fenceFd,
                             SurfaceQueueBufferOutput* surfaceOutput = nullptr);
-#else
-    virtual int queueBuffer(ANativeWindowBuffer* buffer, int fenceFd);
-#endif // COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_PLATFORM_API_IMPROVEMENTS)
     virtual int perform(int operation, va_list args);
     virtual int setSwapInterval(int interval);
 
-    virtual int lockBuffer_DEPRECATED(ANativeWindowBuffer* buffer);
+    virtual int lockBuffer_DEPRECATED(const sp<GraphicBuffer>& buffer);
 
     virtual int connect(int api);
     virtual int setBufferCount(int bufferCount);
@@ -427,7 +427,6 @@ public:
     static status_t attachAndQueueBufferWithDataspace(Surface* surface, sp<GraphicBuffer> buffer,
                                                       ui::Dataspace dataspace);
 
-#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_PLATFORM_API_IMPROVEMENTS)
     // Dequeues a buffer and its outFence, which must be signalled before the buffer can be used.
     status_t dequeueBuffer(sp<GraphicBuffer>* buffer, sp<Fence>* outFence);
 
@@ -440,7 +439,6 @@ public:
     // Detaches this buffer, dissociating it from this Surface. This buffer must have been returned
     // by queueBuffer or associated with this Surface via an attachBuffer operation.
     status_t detachBuffer(const sp<GraphicBuffer>& buffer);
-#endif // COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_PLATFORM_API_IMPROVEMENTS)
 
     // Sets outIsOwned to true if the given buffer is currently known to be owned by this Surface.
     status_t isBufferOwned(const sp<GraphicBuffer>& buffer, bool* outIsOwned) const;
@@ -459,13 +457,8 @@ public:
         int fenceFd = -1;
         nsecs_t timestamp = NATIVE_WINDOW_TIMESTAMP_AUTO;
     };
-#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_PLATFORM_API_IMPROVEMENTS)
     virtual int queueBuffers(const std::vector<BatchQueuedBuffer>& buffers,
                              std::vector<SurfaceQueueBufferOutput>* queueBufferOutputs = nullptr);
-#else
-    virtual int queueBuffers(
-            const std::vector<BatchQueuedBuffer>& buffers);
-#endif // COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_PLATFORM_API_IMPROVEMENTS)
 
 protected:
     enum { NUM_BUFFER_SLOTS = BufferQueueDefs::NUM_BUFFER_SLOTS };
@@ -502,7 +495,6 @@ protected:
         sp<SurfaceListener> mSurfaceListener;
     };
 
-#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_PLATFORM_API_IMPROVEMENTS)
     class ProducerDeathListenerProxy : public IBinder::DeathRecipient {
     public:
         ProducerDeathListenerProxy(wp<SurfaceListener> surfaceListener);
@@ -515,31 +507,36 @@ protected:
         wp<SurfaceListener> mSurfaceListener;
     };
     friend class ProducerDeathListenerProxy;
-#endif // COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_PLATFORM_API_IMPROVEMENTS)
 
     void querySupportedTimestampsLocked() const;
 
-    void freeAllBuffers();
-    int getSlotFromBufferLocked(android_native_buffer_t* buffer) const;
+    void clearBuffersForDisconnectLocked() REQUIRES(mMutex);
+    void freeUndequeuedBuffersLocked() REQUIRES(mMutex);
+
+    int getSlotFromBufferLocked(const sp<GraphicBuffer>& buffer) const;
 
     void getDequeueBufferInputLocked(IGraphicBufferProducer::DequeueBufferInput* dequeueInput);
 
-    void getQueueBufferInputLocked(android_native_buffer_t* buffer, int fenceFd, nsecs_t timestamp,
-            IGraphicBufferProducer::QueueBufferInput* out);
+    void getQueueBufferInputLocked(const sp<GraphicBuffer>& buffer, int fenceFd, nsecs_t timestamp,
+                                   IGraphicBufferProducer::QueueBufferInput* out);
 
     // For easing in adoption of gralloc4 metadata by vendor components, as well as for supporting
     // the public ANativeWindow api, allow setting relevant metadata when queueing a buffer through
     // a native window
     void applyGrallocMetadataLocked(
-            android_native_buffer_t* buffer,
+            const sp<GraphicBuffer>& buffer,
             const IGraphicBufferProducer::QueueBufferInput& queueBufferInput);
 
     void onBufferQueuedLocked(int slot, sp<Fence> fence,
-            const IGraphicBufferProducer::QueueBufferOutput& output);
+                              const IGraphicBufferProducer::QueueBufferOutput& output)
+            REQUIRES(mMutex);
 
     struct BufferSlot {
         sp<GraphicBuffer> buffer;
         Region dirtyRegion;
+        // This buffer/slot was dequeued when the underlying IGBP sent a RELEASE_ALL_BUFFERS flag,
+        // and we must release this buffer on detach/cancel/queue.
+        bool requiresFreeOnReturn = false;
     };
 
     // mSurfaceTexture is the interface to the surface texture server. All
@@ -548,12 +545,10 @@ protected:
     // TODO: rename to mBufferProducer
     sp<IGraphicBufferProducer> mGraphicBufferProducer;
 
-#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_PLATFORM_API_IMPROVEMENTS)
     // mSurfaceDeathListener gets registered as mGraphicBufferProducer's
     // DeathRecipient when SurfaceListener::needsDeathNotify returns true and
     // gets notified when it dies.
     sp<ProducerDeathListenerProxy> mSurfaceDeathListener;
-#endif // COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_PLATFORM_API_IMPROVEMENTS)
 
     // mSlots stores the buffers that have been allocated for each buffer slot.
     // It is initialized to null pointers, and gets filled in with the result of
@@ -566,6 +561,17 @@ protected:
 #else
     BufferSlot mSlots[NUM_BUFFER_SLOTS];
 #endif
+
+    struct BufferHash {
+        std::size_t operator()(const sp<GraphicBuffer>& buffer) const {
+            return std::hash<GraphicBuffer*>{}(buffer.get());
+        }
+    };
+
+    // mLeakedBuffers holds references to buffers that were dequeued at the time of a disconnection.
+    // The contract for ANW's dequeue implies that a reference is held onto these until they're
+    // given back to the Surface via queue or cancel.
+    std::unordered_set<sp<GraphicBuffer>, BufferHash> mLeakedBuffers;
 
     // mReqWidth is the buffer width that will be requested at the next dequeue
     // operation. It is initialized to 1.
@@ -598,7 +604,7 @@ protected:
     HdrMetadata mHdrMetadata;
 
     // mHdrMetadataIsSet is a bitfield to track which HDR metadata has been set.
-    // Prevent Surface from resetting HDR metadata that was set on a bufer when
+    // Prevent Surface from resetting HDR metadata that was set on a buffer when
     // HDR metadata is not set on this Surface.
     uint32_t mHdrMetadataIsSet{0};
 
@@ -678,6 +684,7 @@ protected:
     // must be used from the lock/unlock thread
     sp<GraphicBuffer>           mLockedBuffer;
     sp<GraphicBuffer>           mPostedBuffer;
+    bool                        mIsConnected;
     bool                        mConnectedToCpu;
 
     // When a CPU producer is attached, this reflects the region that the
@@ -753,6 +760,15 @@ protected:
 
     // Buffers that are successfully dequeued/attached and handed to clients
     std::unordered_set<int> mDequeuedSlots;
+
+    // Indicates whether this surface holds the mouse cursor, and subsequently determines whether
+    // the GRALLOC_USAGE_CURSOR usage flag should be set on the buffer created when this surface is
+    // locked.
+    bool mIsForCursor = false;
+
+    mutable std::mutex mDebugMutex;
+    String8 mDebugName GUARDED_BY(mDebugMutex) = String8("not-connected");
+    uint64_t mId GUARDED_BY(mDebugMutex) = 0;
 };
 
 } // namespace android

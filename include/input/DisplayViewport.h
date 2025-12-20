@@ -17,6 +17,7 @@
 #pragma once
 
 #include <android-base/stringprintf.h>
+#include <android/configuration.h>
 #include <ftl/enum.h>
 #include <ftl/string.h>
 #include <input/Input.h>
@@ -64,6 +65,9 @@ struct DisplayViewport {
     // Not all viewports will have this specified.
     std::optional<uint8_t> physicalPort;
     ViewportType type;
+    int32_t densityDpi;
+    float xDpi;
+    float yDpi;
 
     DisplayViewport()
           : displayId(ui::LogicalDisplayId::INVALID),
@@ -81,7 +85,8 @@ struct DisplayViewport {
             isActive(false),
             uniqueId(),
             physicalPort(std::nullopt),
-            type(ViewportType::INTERNAL) {}
+            type(ViewportType::INTERNAL),
+            densityDpi(ACONFIGURATION_DENSITY_NONE) {}
 
     bool operator==(const DisplayViewport& other) const {
         return displayId == other.displayId && orientation == other.orientation &&
@@ -121,6 +126,7 @@ struct DisplayViewport {
 
     std::string toString() const {
         return StringPrintf("Viewport %s: displayId=%s, uniqueId=%s, port=%s, orientation=%d, "
+                            "densityDpi=%d xDpi=%f, yDpi=%f, "
                             "logicalFrame=[%d, %d, %d, %d], "
                             "physicalFrame=[%d, %d, %d, %d], "
                             "deviceSize=[%d, %d], "
@@ -128,9 +134,9 @@ struct DisplayViewport {
                             ftl::enum_string(type).c_str(), displayId.toString().c_str(),
                             uniqueId.c_str(),
                             physicalPort ? ftl::to_string(*physicalPort).c_str() : "<none>",
-                            static_cast<int>(orientation), logicalLeft, logicalTop, logicalRight,
-                            logicalBottom, physicalLeft, physicalTop, physicalRight, physicalBottom,
-                            deviceWidth, deviceHeight, isActive);
+                            static_cast<int>(orientation), densityDpi, xDpi, yDpi, logicalLeft,
+                            logicalTop, logicalRight, logicalBottom, physicalLeft, physicalTop,
+                            physicalRight, physicalBottom, deviceWidth, deviceHeight, isActive);
     }
 };
 

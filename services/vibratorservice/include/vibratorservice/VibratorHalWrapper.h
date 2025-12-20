@@ -132,9 +132,9 @@ private:
             return HalResult<T>::unsupported();
         }
         if (status.getExceptionCode() == EX_TRANSACTION_FAILED) {
-            return HalResult<T>::transactionFailed(status.getMessage());
+            return HalResult<T>::transactionFailed(status.getDescription().c_str());
         }
-        return HalResult<T>::failed(status.getMessage());
+        return HalResult<T>::failed(status.getDescription().c_str());
     }
 };
 

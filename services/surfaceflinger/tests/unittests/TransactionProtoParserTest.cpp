@@ -18,6 +18,7 @@
 #include <gtest/gtest.h>
 #include <limits> // std::numeric_limits
 
+#include <android/gui/TransactionBarrier.h>
 #include <gui/SurfaceComposerClient.h>
 #include <ui/Rotation.h>
 #include "LayerProtoHelper.h"
@@ -66,8 +67,13 @@ TEST(TransactionProtoParserTest, parse) {
             display.token = nullptr;
         }
         display.width = 85;
-        t1.displays.push_back(display);
+        t1.displays.emplace_back(std::move(display));
     }
+
+    gui::TransactionBarrier barrier;
+    barrier.barrierToken = String16("tok");
+    barrier.kind = gui::TransactionBarrier::BarrierKind::KIND_WAIT;
+    t1.transactionBarriers.emplace_back(std::move(barrier));
 
     class TestMapper : public TransactionProtoParser::FlingerDataMapper {
     public:
@@ -102,6 +108,10 @@ TEST(TransactionProtoParserTest, parse) {
     ASSERT_EQ(t1.displays.size(), t2.displays.size());
     ASSERT_EQ(t1.displays[1].width, t2.displays[1].width);
     ASSERT_EQ(t1.displays[0].token, t2.displays[0].token);
+
+    ASSERT_EQ(t1.transactionBarriers.size(), t2.transactionBarriers.size());
+    ASSERT_EQ(t1.transactionBarriers[0].barrierToken, t2.transactionBarriers[0].barrierToken);
+    ASSERT_EQ(t1.transactionBarriers[0].kind, t2.transactionBarriers[0].kind);
 }
 
 TEST(TransactionProtoParserTest, parseDisplayInfo) {
@@ -146,6 +156,16 @@ TEST(TransactionProtoParserTest, parseDisplayInfo) {
     EXPECT_EQ(d1.isVirtual, d2.isVirtual);
     EXPECT_EQ(d1.rotationFlags, d2.rotationFlags);
     EXPECT_EQ(d1.transformHint, d2.transformHint);
+}
+
+TEST(TransactionProtoParserTest, parseTransactionBarrier) {
+    perfetto::protos::TransactionBarrier proto;
+    proto.set_barrier_token("привет");
+    proto.set_kind(42); // invalid
+    auto barrier = TransactionProtoParser::fromProto(proto);
+    // utf8 -> utf16 conversion.
+    EXPECT_EQ(barrier.barrierToken, u"\x043F\x0440\x0438\x0432\x0435\x0442");
+    EXPECT_EQ(barrier.kind, gui::TransactionBarrier::BarrierKind::KIND_INVALID);
 }
 
 } // namespace android

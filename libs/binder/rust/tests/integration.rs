@@ -581,12 +581,12 @@ mod tests {
 
     #[tokio::test]
     async fn trivial_client_async() {
-        let service_name = "trivial_client_test";
+        let service_name = "trivial_client_test_async";
         let _process = ScopedServiceProcess::new(service_name);
         let test_client: Strong<dyn IATest<Tokio>> = binder_tokio::get_interface(service_name)
             .await
             .expect("Did not get manager binder service");
-        assert_eq!(test_client.test().await.unwrap(), "trivial_client_test");
+        assert_eq!(test_client.test().await.unwrap(), "trivial_client_test_async");
     }
 
     #[test]
@@ -600,12 +600,12 @@ mod tests {
 
     #[tokio::test]
     async fn wait_for_trivial_client_async() {
-        let service_name = "wait_for_trivial_client_test";
+        let service_name = "wait_for_trivial_client_test_async";
         let _process = ScopedServiceProcess::new(service_name);
         let test_client: Strong<dyn IATest<Tokio>> = binder_tokio::wait_for_interface(service_name)
             .await
             .expect("Did not get manager binder service");
-        assert_eq!(test_client.test().await.unwrap(), "wait_for_trivial_client_test");
+        assert_eq!(test_client.test().await.unwrap(), "wait_for_trivial_client_test_async");
     }
 
     fn get_expected_selinux_context() -> &'static str {
@@ -646,7 +646,7 @@ mod tests {
 
     #[tokio::test]
     async fn get_selinux_context_sync_to_async() {
-        let service_name = "get_selinux_context";
+        let service_name = "get_selinux_context_s2a";
         let _process = ScopedServiceProcess::new(service_name);
         let test_client: Strong<dyn ITest> =
             binder::get_interface(service_name).expect("Did not get manager binder service");
@@ -659,7 +659,7 @@ mod tests {
 
     #[tokio::test]
     async fn get_selinux_context_async_to_sync() {
-        let service_name = "get_selinux_context";
+        let service_name = "get_selinux_context_a2s";
         let _process = ScopedServiceProcess::new(service_name);
         let test_client: Strong<dyn IATest<Tokio>> = binder_tokio::get_interface(service_name)
             .await
@@ -843,7 +843,6 @@ mod tests {
     #[test]
     fn test_extensions() {
         let service_name = "rust_test_extensions";
-        let extension_name = "rust_test_extensions_ext";
 
         {
             let _process = ScopedServiceProcess::new(service_name);
@@ -855,6 +854,8 @@ mod tests {
             assert!(extension.is_none());
         }
 
+        let service_name = "rust_test_extensions2";
+        let extension_name = "rust_test_extensions_ext";
         {
             let _process = ScopedServiceProcess::new_with_extension(service_name, extension_name);
 
@@ -1049,12 +1050,12 @@ mod tests {
 
     #[test]
     fn test_accessor_from_non_accessor_binder() {
-        let service_name = "rust_test_ibinder";
+        let service_name = "rust_test_accessor_from_non_accessor_binder";
         let _process = ScopedServiceProcess::new(service_name);
         let binder = binder::get_service(service_name).unwrap();
         assert!(binder.is_binder_alive());
 
-        let accessor = Accessor::from_binder("rust_test_ibinder", binder);
+        let accessor = Accessor::from_binder("rust_test_accessor_from_non_accessor_binder", binder);
         assert!(accessor.is_none());
     }
 

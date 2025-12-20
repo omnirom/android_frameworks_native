@@ -118,13 +118,13 @@ void initializeMotionEvent(MotionEvent& event, const InputMessage& msg) {
                           0, 0, 1});
     event.initialize(msg.body.motion.eventId, msg.body.motion.deviceId, msg.body.motion.source,
                      ui::LogicalDisplayId{msg.body.motion.displayId}, msg.body.motion.hmac,
-                     msg.body.motion.action, msg.body.motion.actionButton, msg.body.motion.flags,
-                     msg.body.motion.edgeFlags, msg.body.motion.metaState,
-                     msg.body.motion.buttonState, msg.body.motion.classification, transform,
-                     msg.body.motion.xPrecision, msg.body.motion.yPrecision,
-                     msg.body.motion.xCursorPosition, msg.body.motion.yCursorPosition,
-                     displayTransform, msg.body.motion.downTime, msg.body.motion.eventTime,
-                     pointerCount, pointerProperties, pointerCoords);
+                     msg.body.motion.action, msg.body.motion.actionButton,
+                     ftl::Flags<MotionFlag>(msg.body.motion.flags), msg.body.motion.edgeFlags,
+                     msg.body.motion.metaState, msg.body.motion.buttonState,
+                     msg.body.motion.classification, transform, msg.body.motion.xPrecision,
+                     msg.body.motion.yPrecision, msg.body.motion.xCursorPosition,
+                     msg.body.motion.yCursorPosition, displayTransform, msg.body.motion.downTime,
+                     msg.body.motion.eventTime, pointerCount, pointerProperties, pointerCoords);
 }
 
 void addSample(MotionEvent& event, const InputMessage& msg) {
@@ -184,6 +184,20 @@ bool shouldResampleTool(ToolType toolType) {
     return toolType == ToolType::FINGER || toolType == ToolType::MOUSE ||
             toolType == ToolType::STYLUS || toolType == ToolType::UNKNOWN;
 }
+
+// These axis values are relative to the previous event. When synthesizing a resampled event,
+// they are set to zero, so that consumers of these axis values can correctly accumulate the delta.
+// Note that they are not cleared in `InputConsumer::rewriteMessage` because the rewritten event
+// there is a real event containing delta from the last real event.
+constexpr std::array<int32_t, 7> relativeAxesToClearOnResample{
+        AMOTION_EVENT_AXIS_RELATIVE_X,
+        AMOTION_EVENT_AXIS_RELATIVE_Y,
+        AMOTION_EVENT_AXIS_GESTURE_X_OFFSET,
+        AMOTION_EVENT_AXIS_GESTURE_Y_OFFSET,
+        AMOTION_EVENT_AXIS_GESTURE_SCROLL_X_DISTANCE,
+        AMOTION_EVENT_AXIS_GESTURE_SCROLL_Y_DISTANCE,
+        AMOTION_EVENT_AXIS_GESTURE_PINCH_SCALE_FACTOR,
+};
 
 } // namespace
 
@@ -658,6 +672,11 @@ void InputConsumer::resampleTouchState(nsecs_t sampleTime, MotionEvent* event,
         }
     }
 
+    if (current->displayId != other->displayId) {
+        ALOGD_IF(debugResampling(), "Not resampled, the other is on a different display");
+        return;
+    }
+
     // Resample touch coordinates.
     History oldLastResample;
     oldLastResample.initializeFrom(touchState.lastResample);
@@ -690,6 +709,11 @@ void InputConsumer::resampleTouchState(nsecs_t sampleTime, MotionEvent* event,
                                      lerp(currentCoords.getX(), otherCoords.getX(), alpha));
         resampledCoords.setAxisValue(AMOTION_EVENT_AXIS_Y,
                                      lerp(currentCoords.getY(), otherCoords.getY(), alpha));
+        if (input_flags::clear_relative_axes_in_resampled_coords()) {
+            for (int32_t axis : relativeAxesToClearOnResample) {
+                resampledCoords.setAxisValue(axis, 0);
+            }
+        }
         ALOGD_IF(debugResampling(),
                  "[%d] - out (%0.3f, %0.3f), cur (%0.3f, %0.3f), "
                  "other (%0.3f, %0.3f), alpha %0.3f",
@@ -840,9 +864,11 @@ bool InputConsumer::canAddSample(const Batch& batch, const InputMessage* msg) {
     const InputMessage& head = batch.samples[0];
     uint32_t pointerCount = msg->body.motion.pointerCount;
     if (head.body.motion.pointerCount != pointerCount ||
-        head.body.motion.action != msg->body.motion.action) {
+        head.body.motion.action != msg->body.motion.action ||
+        head.body.motion.displayId != msg->body.motion.displayId) {
         return false;
     }
+
     for (size_t i = 0; i < pointerCount; i++) {
         if (head.body.motion.pointers[i].properties != msg->body.motion.pointers[i].properties) {
             return false;

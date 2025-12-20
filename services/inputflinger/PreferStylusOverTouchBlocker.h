@@ -16,6 +16,7 @@
 
 #pragma once
 
+#include <input/Input.h>
 #include <optional>
 #include <set>
 #include "InputListener.h"
@@ -50,16 +51,16 @@ public:
 
 private:
     // Stores the device id's of styli that are currently down.
-    std::set<int32_t /*deviceId*/> mActiveStyli;
+    std::set<DeviceId> mActiveStyli;
     // For each device, store the last touch event as long as the touch is down. Upon liftoff,
     // the entry is erased.
-    std::map<int32_t /*deviceId*/, NotifyMotionArgs> mLastTouchEvents;
+    std::map<DeviceId, NotifyMotionArgs> mLastTouchEvents;
     // Device ids of devices for which the current touch gesture is canceled.
-    std::set<int32_t /*deviceId*/> mCanceledDevices;
+    std::set<DeviceId> mCanceledDevices;
 
     // Device ids of input devices where we encountered simultaneous touch and stylus
     // events. For these devices, we don't do any event processing (nothing is blocked or altered).
-    std::set<int32_t /*deviceId*/> mDevicesWithMixedToolType;
+    std::set<DeviceId> mDevicesWithMixedToolType;
 };
 
 } // namespace android

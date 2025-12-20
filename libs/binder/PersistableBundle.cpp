@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-#define LOG_TAG "PersistableBundle"
+#define LOG_TAG "libbinder.PersistableBundle"
 
 #include <binder/PersistableBundle.h>
 

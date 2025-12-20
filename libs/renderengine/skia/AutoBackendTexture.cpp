@@ -16,8 +16,6 @@
 
 #include "AutoBackendTexture.h"
 
-#undef LOG_TAG
-#define LOG_TAG "RenderEngine"
 #define ATRACE_TAG ATRACE_TAG_GRAPHICS
 
 #include <include/core/SkImage.h>

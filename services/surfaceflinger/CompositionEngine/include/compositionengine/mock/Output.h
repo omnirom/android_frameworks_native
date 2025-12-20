@@ -45,9 +45,10 @@ public:
     MOCK_METHOD1(setDisplaySize, void(const ui::Size&));
     MOCK_CONST_METHOD0(getTransformHint, ui::Transform::RotationFlags());
 
-    MOCK_METHOD(void, setLayerFilter, (ui::LayerFilter));
-    MOCK_METHOD(bool, includesLayer, (ui::LayerFilter), (const));
+    MOCK_METHOD(void, setLayerFilter, (LayerFilter));
+    MOCK_METHOD(bool, includesLayer, (LayerFilter), (const));
     MOCK_METHOD(bool, includesLayer, (const sp<compositionengine::LayerFE>&), (const));
+    MOCK_METHOD(bool, includesLayer, (compositionengine::LayerFE*), (const));
 
     MOCK_METHOD1(setColorTransform, void(const compositionengine::CompositionRefreshArgs&));
     MOCK_METHOD1(setColorProfile, void(const ColorProfile&));
@@ -136,6 +137,7 @@ public:
     MOCK_METHOD1(canPredictCompositionStrategy, bool(const CompositionRefreshArgs&));
     MOCK_METHOD1(setPredictCompositionStrategy, void(bool));
     MOCK_METHOD1(setTreat170mAsSrgb, void(bool));
+    MOCK_METHOD(bool, plannerTexturePoolEnabled, (), (const));
     MOCK_METHOD(void, setHintSessionGpuStart, (TimePoint startTime));
     MOCK_METHOD(void, setHintSessionGpuFence, (std::unique_ptr<FenceTime> && gpuFence));
     MOCK_METHOD(void, setHintSessionRequiresRenderEngine, (bool requiresRenderEngine));

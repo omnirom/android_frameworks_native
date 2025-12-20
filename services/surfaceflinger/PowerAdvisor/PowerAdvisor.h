@@ -36,7 +36,6 @@
 #include <common/trace.h>
 #include <ftl/flags.h>
 #include <scheduler/Time.h>
-#include <ui/DisplayIdentification.h>
 #include "../Scheduler/OneShotTimer.h"
 #include "Workload.h"
 

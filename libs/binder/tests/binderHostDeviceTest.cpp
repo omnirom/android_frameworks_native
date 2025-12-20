@@ -53,7 +53,9 @@ namespace android {
 
 namespace {
 
-constexpr const char* kServiceBinary = "/data/local/tmp/binderHostDeviceTest-service";
+// The binary sits in <name>/<arch>/<name> like:
+// /data/local/tmp/binderHostDeviceTestService/arm64/binderHostDeviceTestService
+constexpr const char* kServiceBinaryDir = "/data/local/tmp/binderHostDeviceTestService";
 constexpr const char* kServiceName = "binderHostDeviceTestService";
 constexpr const char* kDescriptor = "android.binderHostDeviceTestService";
 
@@ -92,8 +94,18 @@ public:
 
         initHostRpcServiceManagerOnce();
         ASSERT_NE(nullptr, defaultServiceManager()) << "No defaultServiceManager() over RPC";
-
-        auto service = execute({"adb", "shell", kServiceBinary, kServiceName, kDescriptor},
+        // Try to find the binary in a subdir
+        auto serviceBinary = execute({"adb", "shell", "find", kServiceBinaryDir, "-mindepth 1",
+                                      "-name", kServiceName},
+                                     &CommandResult::stdoutEndsWithNewLine);
+        ASSERT_TRUE(serviceBinary.has_value());
+        std::string binary = Trim(serviceBinary->stdoutStr);
+        // If the binary isn't in a subdir, then the kServiceBinaryDir is
+        // the actual binary. See b/437049331.
+        if (binary.empty()) {
+            binary = kServiceBinaryDir;
+        }
+        auto service = execute({"adb", "shell", binary, kServiceName, kDescriptor},
                                &CommandResult::stdoutEndsWithNewLine);
         ASSERT_TRUE(service.has_value());
         ASSERT_EQ(std::nullopt, service->exitCode) << *service;

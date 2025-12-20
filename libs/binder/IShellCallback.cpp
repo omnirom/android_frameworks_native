@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-#define LOG_TAG "ShellCallback"
+#define LOG_TAG "libbinder.ShellCallback"
 
 #include <unistd.h>
 #include <fcntl.h>

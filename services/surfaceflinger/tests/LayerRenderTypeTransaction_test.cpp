@@ -20,7 +20,10 @@
 
 #include <gui/BufferItemConsumer.h>
 #include <ui/Transform.h>
+#include <common/FlagManager.h>
+
 #include <thread>
+
 #include "TransactionTestHarnesses.h"
 namespace android {
 
@@ -268,6 +271,9 @@ TEST_P(LayerRenderTypeTransactionTest, SetRelativeZGroup_BufferState) {
 }
 
 TEST_P(LayerRenderTypeTransactionTest, SetTransparentRegionHintBasic_BufferQueue) {
+    if (FlagManager::getInstance().disable_transparent_region_hint()) {
+        GTEST_SKIP() << "Skipping test because disable_transparent_region_hint is enabled";
+    }
     const Rect top(0, 0, 32, 16);
     const Rect bottom(0, 16, 32, 32);
     sp<SurfaceControl> layer;
@@ -312,6 +318,9 @@ TEST_P(LayerRenderTypeTransactionTest, SetTransparentRegionHintBasic_BufferQueue
 }
 
 TEST_P(LayerRenderTypeTransactionTest, SetTransparentRegionHintBasic_BufferState) {
+    if (FlagManager::getInstance().disable_transparent_region_hint()) {
+        GTEST_SKIP() << "Skipping test because disable_transparent_region_hint is enabled";
+    }
     const Rect top(0, 0, 32, 16);
     const Rect bottom(0, 16, 32, 32);
     sp<SurfaceControl> layer;
@@ -1333,8 +1342,8 @@ TEST_P(LayerRenderTypeTransactionTest, DISABLED_SetFenceBasic_BufferState) {
     TransactionUtils::fillGraphicBufferColor(buffer, Rect(0, 0, 32, 32), Color::RED);
 
     sp<Fence> fence;
-    if (getBuffer(nullptr, &fence) != NO_ERROR) {
-        GTEST_SUCCEED() << "test not supported";
+    if (status_t err = getBuffer(nullptr, &fence) != NO_ERROR) {
+        GTEST_FAIL() << "Error:" << err;
         return;
     }
 

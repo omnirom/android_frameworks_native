@@ -81,7 +81,6 @@ extern "C" int LLVMFuzzerTestOneInput(uint8_t* data, size_t size) {
                     std::set<InputDeviceUsageSource> sources = {
                             fdp.ConsumeEnum<InputDeviceUsageSource>()};
                     const int32_t inputEventActionType = fdp.ConsumeIntegral<int32_t>();
-                    const InputEventType inputEventType = fdp.ConsumeEnum<InputEventType>();
                     const NotifyMotionArgs args =
                             MotionArgsBuilder(inputEventActionType, source, inputEventId)
                                     .eventTime(eventTime)

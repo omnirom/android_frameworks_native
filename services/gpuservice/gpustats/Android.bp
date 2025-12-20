@@ -14,7 +14,7 @@ cc_defaults {
         "libgraphicsenv",
         "liblog",
         "libprotoutil",
-        "libstatslog",
+        "libstatslog_gpustats",
         "libstatspull",
         "libstatssocket",
         "libutils",
@@ -39,7 +39,7 @@ cc_library_static {
         "-Werror",
         "-Wformat",
         "-Wthread-safety",
-        "-Wunused",
         "-Wunreachable-code",
+        "-Wunused",
     ],
 }

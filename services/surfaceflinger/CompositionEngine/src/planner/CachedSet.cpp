@@ -14,8 +14,6 @@
  * limitations under the License.
  */
 
-#undef LOG_TAG
-#define LOG_TAG "Planner"
 // #define LOG_NDEBUG 0
 #define ATRACE_TAG ATRACE_TAG_GRAPHICS
 
@@ -196,9 +194,14 @@ void CachedSet::render(renderengine::RenderEngine& renderEngine, TexturePool& te
     std::vector<renderengine::LayerSettings> layerSettings;
     renderengine::LayerSettings highlight;
     for (const auto& layer : mLayers) {
+        auto blurSettings = targetSettings;
+        if (!layer.hasBlurBehind()) {
+            blurSettings.blurSetting =
+                    LayerFE::ClientCompositionTargetSettings::BlurSetting::Disabled;
+        }
         if (auto clientCompositionSettings =
                     layer.getState()->getOutputLayer()->getLayerFE().prepareClientComposition(
-                            targetSettings)) {
+                            blurSettings)) {
             layerSettings.push_back(std::move(*clientCompositionSettings));
         }
     }

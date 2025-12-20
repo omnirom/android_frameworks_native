@@ -23,7 +23,9 @@
 #include <InputDevice.h>
 #include <InputMapper.h>
 #include <InputReader.h>
+#include <InputReaderTracer.h>
 #include <ThreadSafeFuzzedDataProvider.h>
+#include <input/Input.h>
 
 constexpr size_t kValidTypes[] = {EV_SW,
                                   EV_SYN,
@@ -125,6 +127,8 @@ public:
     FuzzEventHub(std::shared_ptr<ThreadSafeFuzzedDataProvider> fdp) : mFdp(std::move(fdp)) {}
     ~FuzzEventHub() {}
     void addProperty(std::string key, std::string value) { mFuzzConfig.addProperty(key, value); }
+
+    void setTracer(std::shared_ptr<InputReaderTracer> tracer) override {}
 
     ftl::Flags<InputDeviceClass> getDeviceClasses(int32_t deviceId) const override {
         uint32_t flags = 0;
@@ -315,8 +319,8 @@ public:
     void getReaderConfiguration(InputReaderConfiguration* outConfig) override {}
     void notifyInputDevicesChanged(const std::vector<InputDeviceInfo>& inputDevices) override {}
     void notifyTouchpadHardwareState(const SelfContainedHardwareState& schs,
-                                     int32_t deviceId) override {}
-    void notifyTouchpadGestureInfo(GestureType type, int32_t deviceId) override {}
+                                     DeviceId deviceId) override {}
+    void notifyTouchpadGestureInfo(GestureType type, DeviceId deviceId) override {}
     void notifyTouchpadThreeFingerTap() override {}
     std::shared_ptr<KeyCharacterMap> getKeyboardLayoutOverlay(
             const InputDeviceIdentifier& identifier,
@@ -331,7 +335,7 @@ public:
         return mTransform;
     }
     void setTouchAffineTransformation(const TouchAffineTransformation t) { mTransform = t; }
-    void notifyStylusGestureStarted(int32_t, nsecs_t) {}
+    void notifyStylusGestureStarted(DeviceId, nsecs_t) {}
     bool isInputMethodConnectionActive() override { return mFdp->ConsumeBool(); }
     std::optional<DisplayViewport> getPointerViewportForAssociatedDisplay(
             ui::LogicalDisplayId associatedDisplayId) override {
@@ -414,7 +418,7 @@ void configureAndResetDevice(Fdp& fdp, InputDevice& device) {
 
 template <class Fdp, class T, typename... Args>
 T& getMapperForDevice(Fdp& fdp, InputDevice& device, Args... args) {
-    int32_t eventhubId = fdp.template ConsumeIntegral<int32_t>();
+    RawDeviceId eventhubId = fdp.template ConsumeIntegral<int32_t>();
     // ensure a device entry exists for this eventHubId
     device.addEmptyEventHubDevice(eventhubId);
     configureAndResetDevice(fdp, device);

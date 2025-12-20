@@ -17,8 +17,7 @@
 #undef LOG_TAG
 #define LOG_TAG "TransactionApplicationTest"
 
-#include <cstdint>
-
+#include <android/gui/TransactionBarrier.h>
 #include <binder/Binder.h>
 #include <common/test/FlagUtils.h>
 #include <compositionengine/Display.h>
@@ -27,6 +26,7 @@
 #include <gtest/gtest.h>
 #include <gui/LayerState.h>
 #include <gui/SurfaceComposerClient.h>
+#include <gui/TransactionState.h>
 #include <gui/fake/BufferData.h>
 #include <log/log.h>
 #include <renderengine/mock/RenderEngine.h>
@@ -71,14 +71,14 @@ public:
     TestableSurfaceFlinger mFlinger;
     renderengine::mock::RenderEngine* mRenderEngine = new renderengine::mock::RenderEngine();
 
-    struct TransactionInfo : public TransactionState {
-        TransactionInfo() {
-            mApplyToken = IInterface::asBinder(TransactionCompletedListener::getIInstance());
-            mId = static_cast<uint64_t>(-1);
-        }
+    struct TransactionInfo {
+        TransactionState transactionState;
+        sp<IBinder> applyToken = IInterface::asBinder(TransactionCompletedListener::getIInstance());
+        static_assert(0xffffffffffffffff == static_cast<uint64_t>(-1));
+        std::vector<gui::EarlyWakeupInfo> earlyWakeupInfos;
     };
 
-    void checkEqual(const TransactionInfo& info, const QueuedTransactionState& state) {
+    void checkEqual(const TransactionState& info, const QueuedTransactionState& state) {
         EXPECT_EQ(0u, info.mComposerStates.size());
         EXPECT_EQ(0u, state.states.size());
 
@@ -88,15 +88,24 @@ public:
         EXPECT_EQ(info.mDesiredPresentTime, state.desiredPresentTime);
     }
 
+    TransactionState setupSingle(uint32_t flags, int64_t desiredPresentTime, bool isAutoTimestamp,
+                                 const FrameTimelineInfo& frameTimelineInfo) {
+        TransactionState state;
+        state.mId = static_cast<uint64_t>(-1);
+        state.mFlags |= flags;
+        state.mDesiredPresentTime = desiredPresentTime;
+        state.mIsAutoTimestamp = isAutoTimestamp;
+        state.mFrameTimelineInfo = frameTimelineInfo;
+        state.mCallbacks.mHasListenerCallbacks = mHasListenerCallbacks;
+        state.mCallbacks.mFlattenedListenerCallbacks = mCallbacks;
+        return state;
+    }
+
     void setupSingle(TransactionInfo& transaction, uint32_t flags, int64_t desiredPresentTime,
                      bool isAutoTimestamp, const FrameTimelineInfo& frameTimelineInfo) {
         mTransactionNumber++;
-        transaction.mFlags |= flags;
-        transaction.mDesiredPresentTime = desiredPresentTime;
-        transaction.mIsAutoTimestamp = isAutoTimestamp;
-        transaction.mFrameTimelineInfo = frameTimelineInfo;
-        transaction.mHasListenerCallbacks = mHasListenerCallbacks;
-        transaction.mListenerCallbacks = mCallbacks;
+        transaction.transactionState =
+                setupSingle(flags, desiredPresentTime, isAutoTimestamp, frameTimelineInfo);
     }
 
     void NotPlacedOnTransactionQueue(uint32_t flags) {
@@ -107,7 +116,8 @@ public:
                     /*desiredPresentTime*/ systemTime(), /*isAutoTimestamp*/ true,
                     FrameTimelineInfo{});
         nsecs_t applicationTime = systemTime();
-        mFlinger.setTransactionState(std::move(transaction));
+        mFlinger.setTransactionState(std::move(transaction.transactionState),
+                                     transaction.applyToken);
 
         // If transaction is synchronous, SF applyTransactionState should time out (5s) wating for
         // SF to commit the transaction. If this is animation, it should not time out waiting.
@@ -129,7 +139,8 @@ public:
         setupSingle(transaction, flags, /*desiredPresentTime*/ time + s2ns(1), false,
                     FrameTimelineInfo{});
         nsecs_t applicationSentTime = systemTime();
-        mFlinger.setTransactionState(std::move(transaction));
+        mFlinger.setTransactionState(std::move(transaction.transactionState),
+                                     transaction.applyToken);
 
         nsecs_t returnedTime = systemTime();
         EXPECT_LE(returnedTime, applicationSentTime + TRANSACTION_TIMEOUT);
@@ -155,7 +166,8 @@ public:
                     /*isAutoTimestamp*/ true, FrameTimelineInfo{});
 
         nsecs_t applicationSentTime = systemTime();
-        mFlinger.setTransactionState(std::move(transactionA));
+        mFlinger.setTransactionState(std::move(transactionA.transactionState),
+                                     transactionA.applyToken);
 
         // This thread should not have been blocked by the above transaction
         // (5s is the timeout period that applyTransactionState waits for SF to
@@ -165,7 +177,8 @@ public:
         mFlinger.flushTransactionQueues();
 
         applicationSentTime = systemTime();
-        mFlinger.setTransactionState(std::move(transactionB));
+        mFlinger.setTransactionState(std::move(transactionB.transactionState),
+                                     transactionB.applyToken);
 
         // this thread should have been blocked by the above transaction
         // if this is an animation, this thread should be blocked for 5s
@@ -177,7 +190,7 @@ public:
         mFlinger.flushTransactionQueues();
 
         // check that the transaction was applied.
-        auto transactionQueue = mFlinger.getPendingTransactionQueue();
+        const auto& transactionQueue = mFlinger.getPendingTransactionQueue();
         EXPECT_EQ(0u, transactionQueue.size());
     }
 
@@ -191,6 +204,39 @@ public:
     int mTransactionNumber = 0;
 };
 
+TEST_F(TransactionApplicationTest, WaitForTransactionBarrierSignal) {
+    ASSERT_TRUE(mFlinger.getTransactionQueue().isEmpty());
+    EXPECT_CALL(*mFlinger.scheduler(), scheduleFrame(_)).Times(1);
+
+    auto applyToken1 = sp<BBinder>::make();
+    auto applyToken2 = sp<BBinder>::make();
+
+    TransactionInfo waitTransaction;
+    setupSingle(waitTransaction, /*flags*/ 0, /*desiredPresentTime*/ s2ns(1), false,
+                FrameTimelineInfo{});
+    gui::TransactionBarrier waitBarrier;
+    waitBarrier.barrierToken = String16("tok");
+    waitBarrier.kind = gui::TransactionBarrier::BarrierKind::KIND_WAIT;
+    waitTransaction.transactionState.mBarriers.emplace_back(std::move(waitBarrier));
+    mFlinger.setTransactionState(std::move(waitTransaction.transactionState), applyToken1);
+
+    mFlinger.flushTransactionQueues();
+    const auto& transactionQueue = mFlinger.getPendingTransactionQueue();
+    EXPECT_EQ(1u, transactionQueue.size());
+
+    TransactionInfo sigTransaction;
+    setupSingle(sigTransaction, /*flags*/ 0, /*desiredPresentTime*/ s2ns(1), false,
+                FrameTimelineInfo{});
+    gui::TransactionBarrier sigBarrier;
+    sigBarrier.barrierToken = String16("tok");
+    sigBarrier.kind = gui::TransactionBarrier::BarrierKind::KIND_SIGNAL;
+    sigTransaction.transactionState.mBarriers.emplace_back(std::move(sigBarrier));
+    mFlinger.setTransactionState(std::move(sigTransaction.transactionState), applyToken2);
+
+    mFlinger.flushTransactionQueues();
+    EXPECT_TRUE(mFlinger.getPendingTransactionQueue().empty());
+}
+
 TEST_F(TransactionApplicationTest, AddToPendingQueue) {
     ASSERT_TRUE(mFlinger.getTransactionQueue().isEmpty());
     EXPECT_CALL(*mFlinger.scheduler(), scheduleFrame(_)).Times(1);
@@ -198,13 +244,13 @@ TEST_F(TransactionApplicationTest, AddToPendingQueue) {
     TransactionInfo transactionA; // transaction to go on pending queue
     setupSingle(transactionA, /*flags*/ 0, /*desiredPresentTime*/ s2ns(1), false,
                 FrameTimelineInfo{});
-    mFlinger.setTransactionState(std::move(transactionA));
+    mFlinger.setTransactionState(std::move(transactionA.transactionState), transactionA.applyToken);
 
     auto& transactionQueue = mFlinger.getTransactionQueue();
     ASSERT_FALSE(transactionQueue.isEmpty());
 
     auto transactionState = transactionQueue.pop().value();
-    checkEqual(transactionA, transactionState);
+    checkEqual(transactionA.transactionState, transactionState);
 }
 
 TEST_F(TransactionApplicationTest, Flush_RemovesFromQueue) {
@@ -214,7 +260,7 @@ TEST_F(TransactionApplicationTest, Flush_RemovesFromQueue) {
     TransactionInfo transactionA; // transaction to go on pending queue
     setupSingle(transactionA, /*flags*/ 0, /*desiredPresentTime*/ s2ns(1), false,
                 FrameTimelineInfo{});
-    mFlinger.setTransactionState(std::move(transactionA));
+    mFlinger.setTransactionState(std::move(transactionA.transactionState), transactionA.applyToken);
 
     auto& transactionQueue = mFlinger.getTransactionQueue();
     ASSERT_FALSE(transactionQueue.isEmpty());
@@ -223,10 +269,8 @@ TEST_F(TransactionApplicationTest, Flush_RemovesFromQueue) {
     // transaction here (sending a null applyToken to fake it as from a
     // different process) to re-query and reset the cached expected present time
     TransactionInfo empty;
-    empty.mApplyToken = sp<IBinder>();
-    empty.mHasListenerCallbacks = mHasListenerCallbacks;
-    empty.mListenerCallbacks = mCallbacks;
-    mFlinger.setTransactionState(std::move(empty));
+    empty.applyToken = sp<IBinder>();
+    mFlinger.setTransactionState(std::move(empty.transactionState), empty.applyToken);
 
     // flush transaction queue should flush as desiredPresentTime has
     // passed
@@ -292,7 +336,7 @@ TEST_F(TransactionApplicationTest, ApplyTokensUseDifferentQueues) {
                                                /* pixelFormat */ 0, /* outUsage */ 0);
     mFlinger.addLayer(1);
     bool out;
-    mFlinger.updateLayerSnapshots(VsyncId{1}, 0, /* transactionsFlushed */ true, out);
+    mFlinger.updateLayerSnapshots(VsyncId{1}, 0, 0, /* transactionsFlushed */ true, out);
     transaction1.states[0].externalTexture =
             std::make_shared<FakeExternalTexture>(*transaction1.states[0].state.bufferData);
     transaction1.states[0].state.surface = mFlinger.getLegacyLayer(1)->getHandle();
@@ -312,12 +356,12 @@ TEST_F(TransactionApplicationTest, ApplyTokensUseDifferentQueues) {
     mFlinger.setTransactionStateInternal(transaction1);
     mFlinger.setTransactionStateInternal(transaction2);
     mFlinger.flushTransactionQueues();
-    auto transactionQueues = mFlinger.getPendingTransactionQueue();
+    const auto& transactionQueues = mFlinger.getPendingTransactionQueue();
 
     // Transaction 1 is still in its queue.
-    EXPECT_EQ(transactionQueues[applyToken1].size(), 1u);
+    EXPECT_EQ(transactionQueues.at(applyToken1).size(), 1u);
     // Transaction 2 has been dequeued.
-    EXPECT_EQ(transactionQueues[applyToken2].size(), 0u);
+    EXPECT_FALSE(transactionQueues.contains(applyToken2));
 }
 
 class LatchUnsignaledTest : public TransactionApplicationTest {
@@ -370,9 +414,9 @@ public:
         const auto kFrameTimelineInfo = FrameTimelineInfo{};
 
         setupSingle(transaction, kFlags, kDesiredPresentTime, kIsAutoTimestamp, kFrameTimelineInfo);
-        transaction.mApplyToken = applyToken;
+        transaction.applyToken = applyToken;
         for (const auto& state : states) {
-            transaction.mComposerStates.push_back(state);
+            transaction.transactionState.mComposerStates.push_back(state);
         }
 
         return transaction;
@@ -383,8 +427,8 @@ public:
         EXPECT_TRUE(mFlinger.getTransactionQueue().isEmpty());
         EXPECT_EQ(0u, mFlinger.getPendingTransactionQueue().size());
         std::unordered_set<uint32_t> createdLayers;
-        for (auto& transaction : transactions) {
-            for (auto& state : transaction.mComposerStates) {
+        for (auto transaction : transactions) {
+            for (auto& state : transaction.transactionState.mComposerStates) {
                 auto layerId = static_cast<uint32_t>(state.state.layerId);
                 if (createdLayers.find(layerId) == createdLayers.end()) {
                     mFlinger.addLayer(layerId);
@@ -394,12 +438,13 @@ public:
         }
         bool unused;
         bool mustComposite = mFlinger.updateLayerSnapshots(VsyncId{1}, /*frameTimeNs=*/0,
+                                                           /*expectedPresentTimeNs=*/0,
                                                            /*transactionsFlushed=*/true, unused);
 
         for (auto transaction : transactions) {
             std::vector<ResolvedComposerState> resolvedStates;
-            resolvedStates.reserve(transaction.mComposerStates.size());
-            for (auto& state : transaction.mComposerStates) {
+            resolvedStates.reserve(transaction.transactionState.mComposerStates.size());
+            for (auto& state : transaction.transactionState.mComposerStates) {
                 ResolvedComposerState resolvedState;
                 resolvedState.state = std::move(state.state);
                 resolvedState.externalTexture =
@@ -410,9 +455,19 @@ public:
                 resolvedStates.emplace_back(resolvedState);
             }
 
-            QueuedTransactionState transactionState(std::move(transaction),
-                                                    std::move(resolvedStates), {}, systemTime(),
-                                                    getpid(), static_cast<int>(getuid()));
+            QueuedTransactionState
+                    transactionState(transaction.transactionState.mFrameTimelineInfo,
+                                     resolvedStates, transaction.transactionState.mDisplayStates,
+                                     transaction.transactionState.mFlags, transaction.applyToken,
+                                     transaction.transactionState.mInputWindowCommands,
+                                     transaction.transactionState.mDesiredPresentTime,
+                                     transaction.transactionState.mIsAutoTimestamp, {},
+                                     systemTime(), mHasListenerCallbacks, mCallbacks, getpid(),
+                                     static_cast<int>(getuid()),
+                                     transaction.transactionState.getId(),
+                                     transaction.transactionState.mMergedTransactionIds,
+                                     transaction.transactionState.mEarlyWakeupInfos,
+                                     transaction.transactionState.mBarriers);
             mFlinger.setTransactionStateInternal(transactionState);
         }
         mFlinger.flushTransactionQueues();
@@ -475,27 +530,7 @@ TEST_F(LatchUnsignaledAutoSingleLayerTest, Flush_KeepsUnSignaledInTheQueue_NonBu
     setTransactionStates({unsignaledTransaction}, kExpectedTransactionsPending);
 }
 
-TEST_F(LatchUnsignaledAutoSingleLayerTest, Flush_KeepsUnSignaledInTheQueue_AutoRefreshChanged) {
-    SET_FLAG_FOR_TEST(flags::latch_unsignaled_with_auto_refresh_changed, false);
-    const sp<IBinder> kApplyToken =
-            IInterface::asBinder(TransactionCompletedListener::getIInstance());
-    const auto kLayerId = 1;
-    const auto kExpectedTransactionsPending = 1u;
-
-    const auto unsignaledTransaction =
-            createTransactionInfo(kApplyToken,
-                                  {
-                                          createComposerState(kLayerId,
-                                                              fence(Fence::Status::Unsignaled),
-                                                              layer_state_t::eAutoRefreshChanged |
-                                                                      layer_state_t::
-                                                                              eBufferChanged),
-                                  });
-    setTransactionStates({unsignaledTransaction}, kExpectedTransactionsPending);
-}
-
 TEST_F(LatchUnsignaledAutoSingleLayerTest, Flush_RemovesUnSignaledInTheQueue_AutoRefreshChanged) {
-    SET_FLAG_FOR_TEST(flags::latch_unsignaled_with_auto_refresh_changed, true);
     const sp<IBinder> kApplyToken =
             IInterface::asBinder(TransactionCompletedListener::getIInstance());
     const auto kLayerId = 1;
@@ -922,6 +957,192 @@ TEST(TransactionHandlerTest, QueueTransaction) {
 
     EXPECT_EQ(transactionsReadyToBeApplied.size(), 1u);
     EXPECT_EQ(transactionsReadyToBeApplied.front().id, 42u);
+}
+
+QueuedTransactionState createBarrierTransaction(uint64_t id,
+                                                gui::TransactionBarrier::BarrierKind kind) {
+    QueuedTransactionState transaction;
+    transaction.applyToken = sp<BBinder>::make();
+    transaction.id = id;
+    transaction.postTime = systemTime();
+    gui::TransactionBarrier b;
+    b.barrierToken = String16("tok");
+    b.kind = kind;
+    transaction.transactionBarriers.emplace_back(std::move(b));
+    return transaction;
+}
+
+TEST(TransactionHandlerTest, WaitBarrierExpiration) {
+    TransactionHandler handler;
+    handler.addTransactionReadyFilter(std::bind(&TransactionHandler::isBarrierSignalledOrExpired,
+                                                &handler, std::placeholders::_1));
+
+    QueuedTransactionState transaction =
+            createBarrierTransaction(42, gui::TransactionBarrier::BarrierKind::KIND_WAIT);
+    handler.queueTransaction(std::move(transaction));
+    handler.collectTransactions();
+    std::vector<QueuedTransactionState> transactionsReadyToBeApplied = handler.flushTransactions();
+
+    // Barrier not signalled or expired.
+    EXPECT_TRUE(transactionsReadyToBeApplied.empty());
+
+    handler.setTransactionBarrierTtl(std::chrono::milliseconds(0));
+    handler.collectTransactions();
+    transactionsReadyToBeApplied = handler.flushTransactions();
+
+    // Barrier expired.
+    EXPECT_EQ(transactionsReadyToBeApplied.size(), 1u);
+    EXPECT_EQ(transactionsReadyToBeApplied.front().id, 42u);
+}
+
+TEST(TransactionHandlerTest, WaitBarrierSignalled) {
+    TransactionHandler handler;
+    handler.addTransactionReadyFilter(std::bind(&TransactionHandler::isBarrierSignalledOrExpired,
+                                                &handler, std::placeholders::_1));
+    QueuedTransactionState waitTransaction =
+            createBarrierTransaction(42, gui::TransactionBarrier::BarrierKind::KIND_WAIT);
+    handler.queueTransaction(std::move(waitTransaction));
+    handler.collectTransactions();
+    std::vector<QueuedTransactionState> transactionsReadyToBeApplied = handler.flushTransactions();
+
+    // Barrier not signalled or expired.
+    EXPECT_TRUE(transactionsReadyToBeApplied.empty());
+
+    QueuedTransactionState sigTransaction =
+            createBarrierTransaction(43, gui::TransactionBarrier::BarrierKind::KIND_SIGNAL);
+    handler.queueTransaction(std::move(sigTransaction));
+
+    handler.collectTransactions();
+    transactionsReadyToBeApplied = handler.flushTransactions();
+
+    // Signal and wait transactions applied.
+    EXPECT_EQ(transactionsReadyToBeApplied.size(), 2u);
+
+    handler.collectTransactions();
+    transactionsReadyToBeApplied = handler.flushTransactions();
+
+    // No more transactions left.
+    EXPECT_TRUE(transactionsReadyToBeApplied.empty());
+}
+
+TEST(TransactionHandlerTest, WaitEnqueuedAfterBarrierSignalled) {
+    TransactionHandler handler;
+    handler.addTransactionReadyFilter(std::bind(&TransactionHandler::isBarrierSignalledOrExpired,
+                                                &handler, std::placeholders::_1));
+    QueuedTransactionState sigTransaction =
+            createBarrierTransaction(43, gui::TransactionBarrier::BarrierKind::KIND_SIGNAL);
+    handler.queueTransaction(std::move(sigTransaction));
+
+    handler.collectTransactions();
+    std::vector<QueuedTransactionState> transactionsReadyToBeApplied = handler.flushTransactions();
+    // Signal transaction ready to be applied.
+    EXPECT_EQ(transactionsReadyToBeApplied.size(), 1u);
+    EXPECT_EQ(transactionsReadyToBeApplied.front().id, 43u);
+
+    QueuedTransactionState waitTransaction =
+            createBarrierTransaction(42, gui::TransactionBarrier::BarrierKind::KIND_WAIT);
+    handler.queueTransaction(std::move(waitTransaction));
+    handler.collectTransactions();
+    transactionsReadyToBeApplied = handler.flushTransactions();
+
+    // Wait transactions applied.
+    EXPECT_EQ(transactionsReadyToBeApplied.size(), 1u);
+    EXPECT_EQ(transactionsReadyToBeApplied.front().id, 42u);
+
+    handler.collectTransactions();
+    transactionsReadyToBeApplied = handler.flushTransactions();
+
+    // No more transactions left.
+    EXPECT_TRUE(transactionsReadyToBeApplied.empty());
+}
+
+TEST(TransactionHandlerTest, SignalAndWaitEnqueuedTogether) {
+    TransactionHandler handler;
+    handler.addTransactionReadyFilter(std::bind(&TransactionHandler::isBarrierSignalledOrExpired,
+                                                &handler, std::placeholders::_1));
+    QueuedTransactionState sigTransaction =
+            createBarrierTransaction(43, gui::TransactionBarrier::BarrierKind::KIND_SIGNAL);
+    handler.queueTransaction(std::move(sigTransaction));
+
+    QueuedTransactionState waitTransaction =
+            createBarrierTransaction(42, gui::TransactionBarrier::BarrierKind::KIND_WAIT);
+    handler.queueTransaction(std::move(waitTransaction));
+
+    handler.collectTransactions();
+    auto transactionsReadyToBeApplied = handler.flushTransactions();
+
+    // Both transactions applied.
+    EXPECT_EQ(transactionsReadyToBeApplied.size(), 2u);
+
+    handler.collectTransactions();
+    transactionsReadyToBeApplied = handler.flushTransactions();
+
+    // No more transactions left.
+    EXPECT_TRUE(transactionsReadyToBeApplied.empty());
+}
+
+TEST(TransactionHandlerTest, WaitAndSignalEnqueuedTogether) {
+    TransactionHandler handler;
+    handler.addTransactionReadyFilter(std::bind(&TransactionHandler::isBarrierSignalledOrExpired,
+                                                &handler, std::placeholders::_1));
+    QueuedTransactionState waitTransaction =
+            createBarrierTransaction(42, gui::TransactionBarrier::BarrierKind::KIND_WAIT);
+    handler.queueTransaction(std::move(waitTransaction));
+
+    QueuedTransactionState sigTransaction =
+            createBarrierTransaction(43, gui::TransactionBarrier::BarrierKind::KIND_SIGNAL);
+    handler.queueTransaction(std::move(sigTransaction));
+
+    handler.collectTransactions();
+    auto transactionsReadyToBeApplied = handler.flushTransactions();
+
+    // Both transactions applied.
+    EXPECT_EQ(transactionsReadyToBeApplied.size(), 2u);
+
+    handler.collectTransactions();
+    transactionsReadyToBeApplied = handler.flushTransactions();
+
+    // No more transactions left.
+    EXPECT_TRUE(transactionsReadyToBeApplied.empty());
+}
+
+TEST(TransactionHandlerTest, SignalBarrierExpiration) {
+    TransactionHandler handler;
+    handler.setTransactionBarrierTtl(std::chrono::milliseconds(0));
+    QueuedTransactionState sigTransaction =
+            createBarrierTransaction(42, gui::TransactionBarrier::BarrierKind::KIND_SIGNAL);
+    handler.addTransactionReadyFilter(std::bind(&TransactionHandler::isBarrierSignalledOrExpired,
+                                                &handler, std::placeholders::_1));
+    handler.queueTransaction(std::move(sigTransaction));
+    handler.collectTransactions();
+    std::vector<QueuedTransactionState> transactionsReadyToBeApplied = handler.flushTransactions();
+
+    // Signal transaction ready to be applied.
+    EXPECT_EQ(transactionsReadyToBeApplied.size(), 1u);
+    EXPECT_EQ(transactionsReadyToBeApplied.front().id, 42u);
+
+    // Expire the signal.
+    handler.flushTransactions();
+
+    handler.setTransactionBarrierTtl(std::chrono::seconds(5));
+
+    QueuedTransactionState waitTransaction =
+            createBarrierTransaction(43, gui::TransactionBarrier::BarrierKind::KIND_WAIT);
+    handler.queueTransaction(std::move(waitTransaction));
+    handler.collectTransactions();
+    transactionsReadyToBeApplied = handler.flushTransactions();
+
+    // Signal expired, wait transaction still queued.
+    EXPECT_TRUE(transactionsReadyToBeApplied.empty());
+
+    handler.setTransactionBarrierTtl(std::chrono::seconds(0));
+
+    handler.collectTransactions();
+    transactionsReadyToBeApplied = handler.flushTransactions();
+
+    // Wait transaction expired and can be applied.
+    EXPECT_EQ(transactionsReadyToBeApplied.size(), 1u);
+    EXPECT_EQ(transactionsReadyToBeApplied.front().id, 43u);
 }
 
 TEST(TransactionHandlerTest, TransactionsKeepTrackOfDirectMerges) {

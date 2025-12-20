@@ -203,7 +203,7 @@ class ApiGenerator(reg.OutputGenerator):
 
     # Write enums.in
     def writeEnums(self, outfile):
-        for enum in self.enums.iteritems():
+        for enum in self.enums.items():
             print('GL_ENUM(%s,%s)' % (enum[0], enum[1]), file=outfile)
 
 

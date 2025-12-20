@@ -33,15 +33,15 @@ std::shared_ptr<ScreenCaptureOutput> createScreenCaptureOutput(ScreenCaptureOutp
             /* sourceCrop */ const Rect, ftl::Optional<DisplayIdVariant>,
             const compositionengine::Output::ColorProfile&,
             /* layerAlpha */ float,
-            /* regionSampling */ bool>(args.compositionEngine, args.sourceCrop,
-                                       args.displayIdVariant, args.colorProfile, args.layerAlpha,
-                                       args.regionSampling,
-                                       args.dimInGammaSpaceForEnhancedScreenshots,
-                                       args.enableLocalTonemapping);
+            /* disableBlur */ bool>(args.compositionEngine, args.sourceCrop, args.displayIdVariant,
+                                    args.colorProfile, args.layerAlpha, args.disableBlur,
+                                    args.dimInGammaSpaceForEnhancedScreenshots,
+                                    args.enableLocalTonemapping);
     output->editState().isSecure = args.isSecure;
-    output->editState().isProtected = args.isProtected;
+    output->editState().isProtected = args.buffer->getUsage() & GRALLOC_USAGE_PROTECTED;
     output->setCompositionEnabled(true);
-    output->setLayerFilter({args.layerStack});
+    output->setLayerFilter(
+            {.layerStack = args.layerStack, .toInternalDisplay = false, .skipScreenshot = true});
     output->setRenderSurface(std::make_unique<ScreenCaptureRenderSurface>(std::move(args.buffer)));
     output->setDisplayBrightness(args.sdrWhitePointNits, args.displayBrightnessNits);
     output->editState().clientTargetBrightness = args.targetBrightness;
@@ -57,27 +57,19 @@ std::shared_ptr<ScreenCaptureOutput> createScreenCaptureOutput(ScreenCaptureOutp
     output->setDisplaySize({sourceCrop.getWidth(), sourceCrop.getHeight()});
     output->setProjection(orientation, sourceCrop,
                           {args.reqBufferSize.width, args.reqBufferSize.height});
-
-    {
-        std::string name = args.regionSampling ? "RegionSampling" : "ScreenCaptureOutput";
-        if (const auto id = args.displayIdVariant.and_then(asDisplayIdOfType<DisplayId>)) {
-            base::StringAppendF(&name, " for %" PRIu64, id->value);
-        }
-        output->setName(name);
-    }
+    output->setName(args.debugName);
     return output;
 }
 
 ScreenCaptureOutput::ScreenCaptureOutput(
         const Rect sourceCrop, ftl::Optional<DisplayIdVariant> displayIdVariant,
         const compositionengine::Output::ColorProfile& colorProfile, float layerAlpha,
-        bool regionSampling, bool dimInGammaSpaceForEnhancedScreenshots,
-        bool enableLocalTonemapping)
+        bool disableBlur, bool dimInGammaSpaceForEnhancedScreenshots, bool enableLocalTonemapping)
       : mSourceCrop(sourceCrop),
         mDisplayIdVariant(displayIdVariant),
         mColorProfile(colorProfile),
         mLayerAlpha(layerAlpha),
-        mRegionSampling(regionSampling),
+        mDisableBlur(disableBlur),
         mDimInGammaSpaceForEnhancedScreenshots(dimInGammaSpaceForEnhancedScreenshots),
         mEnableLocalTonemapping(enableLocalTonemapping) {}
 
@@ -137,15 +129,18 @@ ScreenCaptureOutput::generateLuts() {
             }
         }
 
-        std::vector<aidl::android::hardware::graphics::composer3::Luts> luts;
-        if (const auto physicalDisplayId = mDisplayIdVariant.and_then(asPhysicalDisplayId)) {
-            auto& hwc = getCompositionEngine().getHwComposer();
-            hwc.getLuts(*physicalDisplayId, buffers, &luts);
-        }
+        // only call getLuts if buffers are not empty
+        if (!buffers.empty()) {
+            std::vector<aidl::android::hardware::graphics::composer3::Luts> luts;
+            if (const auto physicalDisplayId = mDisplayIdVariant.and_then(asPhysicalDisplayId)) {
+                auto& hwc = getCompositionEngine().getHwComposer();
+                hwc.getLuts(*physicalDisplayId, buffers, &luts);
+            }
 
-        if (buffers.size() == luts.size()) {
-            for (size_t i = 0; i < luts.size(); i++) {
-                lutsMapper[layerIds[i]] = std::move(luts[i]);
+            if (buffers.size() == luts.size()) {
+                for (size_t i = 0; i < luts.size(); i++) {
+                    lutsMapper[layerIds[i]] = std::move(luts[i]);
+                }
             }
         }
     }
@@ -183,13 +178,13 @@ ScreenCaptureOutput::generateClientCompositionRequests(
                             static_cast<int32_t>(aidlLuts.lutProperties[j].samplingKeys[0]));
                 }
                 layer.luts = std::make_shared<gui::DisplayLuts>(base::unique_fd(
-                                                                        aidlLuts.pfd.dup().get()),
+                                                                        aidlLuts.pfd.release()),
                                                                 offsets, dimensions, sizes, keys);
             }
         }
     }
 
-    if (mRegionSampling) {
+    if (mDisableBlur) {
         for (auto& layer : clientCompositionLayers) {
             layer.backgroundBlurRadius = 0;
             layer.blurRegions.clear();

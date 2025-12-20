@@ -58,7 +58,8 @@ bool shouldDisregardOffset(uint32_t source) {
 }
 
 int32_t resolveActionForSplitMotionEvent(
-        int32_t action, int32_t flags, const std::vector<PointerProperties>& pointerProperties,
+        int32_t action, ftl::Flags<MotionFlag> flags,
+        const std::vector<PointerProperties>& pointerProperties,
         const std::vector<PointerProperties>& splitPointerProperties) {
     LOG_ALWAYS_FATAL_IF(splitPointerProperties.empty());
     const auto maskedAction = MotionEvent::getActionMasked(action);
@@ -90,20 +91,20 @@ int32_t resolveActionForSplitMotionEvent(
     }
 
     if (maskedAction == AMOTION_EVENT_ACTION_POINTER_UP) {
-        return ((flags & AMOTION_EVENT_FLAG_CANCELED) != 0) ? AMOTION_EVENT_ACTION_CANCEL
-                                                            : AMOTION_EVENT_ACTION_UP;
+        return flags.test(MotionFlag::CANCELED) ? AMOTION_EVENT_ACTION_CANCEL
+                                                : AMOTION_EVENT_ACTION_UP;
     }
     return AMOTION_EVENT_ACTION_DOWN;
 }
 
 float transformOrientation(const ui::Transform& transform, const PointerCoords& coords,
-                           int32_t motionEventFlags) {
-    if ((motionEventFlags & AMOTION_EVENT_PRIVATE_FLAG_SUPPORTS_ORIENTATION) == 0) {
+                           ftl::Flags<MotionFlag> motionEventFlags) {
+    if (!motionEventFlags.test(MotionFlag::SUPPORTS_ORIENTATION)) {
         return 0;
     }
 
     const bool isDirectionalAngle =
-            (motionEventFlags & AMOTION_EVENT_PRIVATE_FLAG_SUPPORTS_DIRECTIONAL_ORIENTATION) != 0;
+            motionEventFlags.test(MotionFlag::SUPPORTS_DIRECTIONAL_ORIENTATION);
 
     return transformAngle(transform, coords.getAxisValue(AMOTION_EVENT_AXIS_ORIENTATION),
                           isDirectionalAngle);
@@ -401,7 +402,7 @@ std::optional<int> KeyEvent::getKeyCodeFromLabel(const char* label) {
     return InputEventLookup::getKeyCodeByLabel(label);
 }
 
-void KeyEvent::initialize(int32_t id, int32_t deviceId, uint32_t source,
+void KeyEvent::initialize(int32_t id, DeviceId deviceId, uint32_t source,
                           ui::LogicalDisplayId displayId, std::array<uint8_t, 32> hmac,
                           int32_t action, int32_t flags, int32_t keyCode, int32_t scanCode,
                           int32_t metaState, int32_t repeatCount, nsecs_t downTime,
@@ -452,8 +453,8 @@ std::ostream& operator<<(std::ostream& out, const KeyEvent& event) {
         out << ", metaState=" << event.getMetaState();
     }
 
-    out << ", eventTime=" << event.getEventTime();
-    out << ", downTime=" << event.getDownTime();
+    out << ", eventTime=" << event.getEventTime() << "ns";
+    out << ", downTime=" << event.getDownTime() << "ns";
     out << ", flags=" << std::hex << event.getFlags() << std::dec;
     out << ", repeatCount=" << event.getRepeatCount();
     out << ", deviceId=" << event.getDeviceId();
@@ -580,10 +581,10 @@ bool PointerCoords::operator==(const PointerCoords& other) const {
 
 // --- MotionEvent ---
 
-void MotionEvent::initialize(int32_t id, int32_t deviceId, uint32_t source,
+void MotionEvent::initialize(int32_t id, DeviceId deviceId, uint32_t source,
                              ui::LogicalDisplayId displayId, std::array<uint8_t, 32> hmac,
-                             int32_t action, int32_t actionButton, int32_t flags, int32_t edgeFlags,
-                             int32_t metaState, int32_t buttonState,
+                             int32_t action, int32_t actionButton, ftl::Flags<MotionFlag> flags,
+                             int32_t edgeFlags, int32_t metaState, int32_t buttonState,
                              MotionClassification classification, const ui::Transform& transform,
                              float xPrecision, float yPrecision, float rawXCursorPosition,
                              float rawYCursorPosition, const ui::Transform& rawTransform,
@@ -654,9 +655,29 @@ void MotionEvent::splitFrom(const android::MotionEvent& other,
     //   the caller can know when the first event went down on the target.
     const nsecs_t splitDownTime = other.mDownTime;
 
-    auto [action, pointerProperties, pointerCoords] =
-            split(other.getAction(), other.getFlags(), other.getHistorySize(),
-                  other.mPointerProperties, other.mSamplePointerCoords, splitPointerIds);
+    auto result = split(other.getAction(), other.getFlags(), other.getHistorySize(),
+                        other.mPointerProperties, other.mSamplePointerCoords, splitPointerIds);
+    if (!result) {
+        LOG(ERROR) << "Could not split " << other << " into " << splitPointerIds
+                   << " with new id=" << newEventId << ": " << result.error();
+        // To maintain the previous behaviour of initializing the MotionEvent with *some* data, even
+        // when failure occurs, we proceed to initialize the MotionEvent with the other event's info
+        // as if splitting never occurred. The proper behaviour would be to convert this to an
+        // error and further propagate the failure up the stack, and not to initialize.
+        initialize(newEventId, other.mDeviceId, other.mSource, other.mDisplayId, /*hmac=*/{},
+                   other.getAction(), other.mActionButton, other.mFlags, other.mEdgeFlags,
+                   other.mMetaState, other.mButtonState, other.mClassification, other.mTransform,
+                   other.mXPrecision, other.mYPrecision, other.mRawXCursorPosition,
+                   other.mRawYCursorPosition, other.mRawTransform, splitDownTime,
+                   other.getEventTime(), /*pointerCount=*/0,
+                   /*pointerProperties=*/{}, /*pointerCoords=*/{});
+        mPointerProperties = other.mPointerProperties;
+        mSamplePointerCoords = other.mSamplePointerCoords;
+        mSampleEventTimes = other.mSampleEventTimes;
+        return;
+    }
+
+    auto [action, pointerProperties, pointerCoords] = *result;
 
     // Initialize the event with zero pointers, and manually set the split pointers.
     initialize(newEventId, other.mDeviceId, other.mSource, other.mDisplayId, /*hmac=*/{}, action,
@@ -664,7 +685,7 @@ void MotionEvent::splitFrom(const android::MotionEvent& other,
                other.mButtonState, other.mClassification, other.mTransform, other.mXPrecision,
                other.mYPrecision, other.mRawXCursorPosition, other.mRawYCursorPosition,
                other.mRawTransform, splitDownTime, other.getEventTime(), /*pointerCount=*/0,
-               pointerProperties.data(), pointerCoords.data());
+               /*pointerProperties=*/{}, /*pointerCoords=*/{});
     mPointerProperties = std::move(pointerProperties);
     mSamplePointerCoords = std::move(pointerCoords);
     mSampleEventTimes = other.mSampleEventTimes;
@@ -871,7 +892,7 @@ status_t MotionEvent::readFromParcel(Parcel* parcel) {
     std::move(hmac.begin(), hmac.begin() + hmac.size(), mHmac.begin());
     mAction = parcel->readInt32();
     mActionButton = parcel->readInt32();
-    mFlags = parcel->readInt32();
+    mFlags = ftl::Flags<MotionFlag>(parcel->readUint32());
     mEdgeFlags = parcel->readInt32();
     mMetaState = parcel->readInt32();
     mButtonState = parcel->readInt32();
@@ -935,7 +956,7 @@ status_t MotionEvent::writeToParcel(Parcel* parcel) const {
     parcel->writeByteVector(hmac);
     parcel->writeInt32(mAction);
     parcel->writeInt32(mActionButton);
-    parcel->writeInt32(mFlags);
+    parcel->writeUint32(mFlags.get());
     parcel->writeInt32(mEdgeFlags);
     parcel->writeInt32(mMetaState);
     parcel->writeInt32(mButtonState);
@@ -1033,11 +1054,11 @@ std::string MotionEvent::actionToString(int32_t action) {
     return android::base::StringPrintf("%" PRId32, action);
 }
 
-std::tuple<int32_t, std::vector<PointerProperties>, std::vector<PointerCoords>> MotionEvent::split(
-        int32_t action, int32_t flags, int32_t historySize,
-        const std::vector<PointerProperties>& pointerProperties,
-        const std::vector<PointerCoords>& pointerCoords,
-        std::bitset<MAX_POINTER_ID + 1> splitPointerIds) {
+base::Result<std::tuple<int32_t, std::vector<PointerProperties>, std::vector<PointerCoords>>>
+MotionEvent::split(int32_t action, ftl::Flags<MotionFlag> flags, int32_t historySize,
+                   const std::vector<PointerProperties>& pointerProperties,
+                   const std::vector<PointerCoords>& pointerCoords,
+                   std::bitset<MAX_POINTER_ID + 1> splitPointerIds) {
     LOG_ALWAYS_FATAL_IF(!splitPointerIds.any());
     const auto pointerCount = pointerProperties.size();
     LOG_ALWAYS_FATAL_IF(pointerCoords.size() != (pointerCount * (historySize + 1)));
@@ -1061,16 +1082,17 @@ std::tuple<int32_t, std::vector<PointerProperties>, std::vector<PointerCoords>> 
 
     if (CC_UNLIKELY(splitPointerProperties.size() != splitCount)) {
         // TODO(b/329107108): Promote this to a fatal check once bugs in the caller are resolved.
-        LOG(ERROR) << "Cannot split MotionEvent: Requested splitting " << splitCount
-                   << " pointers from the original event, but the original event only contained "
-                   << splitPointerProperties.size() << " of those pointers.";
+        return base::Error()
+                << "Cannot split MotionEvent: Requested splitting " << splitCount
+                << " pointers from the original event, but the original event only contained "
+                << splitPointerProperties.size() << " of those pointers.";
     }
 
     // TODO(b/327503168): Verify the splitDownTime here once it is used correctly.
 
     const auto splitAction = resolveActionForSplitMotionEvent(action, flags, pointerProperties,
                                                               splitPointerProperties);
-    return {splitAction, splitPointerProperties, splitPointerCoords};
+    return std::make_tuple(splitAction, splitPointerProperties, splitPointerCoords);
 }
 
 // Apply the given transformation to the point without checking whether the entire transform
@@ -1090,7 +1112,8 @@ vec2 MotionEvent::calculateTransformedXY(uint32_t source, const ui::Transform& t
 }
 
 // Keep in sync with calculateTransformedCoords.
-float MotionEvent::calculateTransformedAxisValue(int32_t axis, uint32_t source, int32_t flags,
+float MotionEvent::calculateTransformedAxisValue(int32_t axis, uint32_t source,
+                                                 ftl::Flags<MotionFlag> flags,
                                                  const ui::Transform& transform,
                                                  const PointerCoords& coords) {
     if (shouldDisregardTransformation(source)) {
@@ -1121,7 +1144,8 @@ float MotionEvent::calculateTransformedAxisValue(int32_t axis, uint32_t source, 
 // Keep in sync with calculateTransformedAxisValue. This is an optimization of
 // calculateTransformedAxisValue for all PointerCoords axes.
 void MotionEvent::calculateTransformedCoordsInPlace(PointerCoords& coords, uint32_t source,
-                                                    int32_t flags, const ui::Transform& transform) {
+                                                    ftl::Flags<MotionFlag> flags,
+                                                    const ui::Transform& transform) {
     if (shouldDisregardTransformation(source)) {
         return;
     }
@@ -1141,7 +1165,7 @@ void MotionEvent::calculateTransformedCoordsInPlace(PointerCoords& coords, uint3
                         transformOrientation(transform, coords, flags));
 }
 
-PointerCoords MotionEvent::calculateTransformedCoords(uint32_t source, int32_t flags,
+PointerCoords MotionEvent::calculateTransformedCoords(uint32_t source, ftl::Flags<MotionFlag> flags,
                                                       const ui::Transform& transform,
                                                       const PointerCoords& coords) {
     PointerCoords out = coords;
@@ -1193,13 +1217,13 @@ std::string MotionEvent::safeDump() const {
     if (mMetaState != 0) {
         out << ", mMetaState=" << mMetaState;
     }
-    if (mFlags != 0) {
-        out << ", mFlags=0x" << std::hex << mFlags << std::dec;
+    if (mFlags.any()) {
+        out << ", mFlags=" << mFlags.string();
     }
     if (mEdgeFlags != 0) {
         out << ", mEdgeFlags=" << mEdgeFlags;
     }
-    out << ", mDownTime=" << mDownTime;
+    out << ", mDownTime=" << mDownTime << "ns";
     out << ", mDeviceId=" << mDeviceId;
     out << ", mSource=" << inputEventSourceToString(mSource);
     out << ", mDisplayId=" << mDisplayId;
@@ -1253,8 +1277,8 @@ std::ostream& operator<<(std::ostream& out, const MotionEvent& event) {
     if (event.getMetaState() != 0) {
         out << ", metaState=" << event.getMetaState();
     }
-    if (event.getFlags() != 0) {
-        out << ", flags=0x" << std::hex << event.getFlags() << std::dec;
+    if (event.getFlags().any()) {
+        out << ", flags=" << event.getFlags().string();
     }
     if (event.getEdgeFlags() != 0) {
         out << ", edgeFlags=" << event.getEdgeFlags();
@@ -1265,8 +1289,8 @@ std::ostream& operator<<(std::ostream& out, const MotionEvent& event) {
     if (event.getHistorySize() != 0) {
         out << ", historySize=" << event.getHistorySize();
     }
-    out << ", eventTime=" << event.getEventTime();
-    out << ", downTime=" << event.getDownTime();
+    out << ", eventTime=" << event.getEventTime() << "ns";
+    out << ", downTime=" << event.getDownTime() << "ns";
     out << ", deviceId=" << event.getDeviceId();
     out << ", source=" << inputEventSourceToString(event.getSource());
     out << ", displayId=" << event.getDisplayId();

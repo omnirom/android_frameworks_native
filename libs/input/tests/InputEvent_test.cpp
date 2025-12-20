@@ -362,9 +362,9 @@ void MotionEventTest::SetUp() {
 }
 
 void MotionEventTest::initializeEventWithHistory(MotionEvent* event) {
-    const int32_t flags = AMOTION_EVENT_FLAG_WINDOW_IS_OBSCURED |
-            AMOTION_EVENT_PRIVATE_FLAG_SUPPORTS_ORIENTATION |
-            AMOTION_EVENT_PRIVATE_FLAG_SUPPORTS_DIRECTIONAL_ORIENTATION;
+    const ftl::Flags<MotionFlag> flags{MotionFlag::WINDOW_IS_OBSCURED,
+                                       MotionFlag::SUPPORTS_ORIENTATION,
+                                       MotionFlag::SUPPORTS_DIRECTIONAL_ORIENTATION};
     event->initialize(mId, 2, AINPUT_SOURCE_TOUCHSCREEN, DISPLAY_ID, HMAC,
                       AMOTION_EVENT_ACTION_MOVE, 0, flags, AMOTION_EVENT_EDGE_FLAG_TOP,
                       AMETA_ALT_ON, AMOTION_EVENT_BUTTON_PRIMARY, MotionClassification::NONE,
@@ -384,9 +384,9 @@ void MotionEventTest::assertEqualsEventWithHistory(const MotionEvent* event) {
     ASSERT_EQ(DISPLAY_ID, event->getDisplayId());
     EXPECT_EQ(HMAC, event->getHmac());
     ASSERT_EQ(AMOTION_EVENT_ACTION_MOVE, event->getAction());
-    ASSERT_EQ(AMOTION_EVENT_FLAG_WINDOW_IS_OBSCURED |
-                      AMOTION_EVENT_PRIVATE_FLAG_SUPPORTS_ORIENTATION |
-                      AMOTION_EVENT_PRIVATE_FLAG_SUPPORTS_DIRECTIONAL_ORIENTATION,
+    ASSERT_EQ(ftl::Flags<MotionFlag>({MotionFlag::WINDOW_IS_OBSCURED,
+                                      MotionFlag::SUPPORTS_ORIENTATION,
+                                      MotionFlag::SUPPORTS_DIRECTIONAL_ORIENTATION}),
               event->getFlags());
     ASSERT_EQ(AMOTION_EVENT_EDGE_FLAG_TOP, event->getEdgeFlags());
     ASSERT_EQ(AMETA_ALT_ON, event->getMetaState());
@@ -595,7 +595,7 @@ TEST_F(MotionEventTest, CheckEventIdWithHistoryIsIncremented) {
     MotionEvent event;
     constexpr int32_t ARBITRARY_ID = 42;
     event.initialize(ARBITRARY_ID, 2, AINPUT_SOURCE_TOUCHSCREEN, DISPLAY_ID, INVALID_HMAC,
-                     AMOTION_EVENT_ACTION_MOVE, 0, 0, AMOTION_EVENT_EDGE_FLAG_NONE, AMETA_NONE,
+                     AMOTION_EVENT_ACTION_MOVE, 0, {}, AMOTION_EVENT_EDGE_FLAG_NONE, AMETA_NONE,
                      AMOTION_EVENT_BUTTON_PRIMARY, MotionClassification::NONE, mTransform, 0, 0,
                      AMOTION_EVENT_INVALID_CURSOR_POSITION, AMOTION_EVENT_INVALID_CURSOR_POSITION,
                      mRawTransform, ARBITRARY_DOWN_TIME, ARBITRARY_EVENT_TIME, 2,
@@ -703,7 +703,7 @@ TEST_F(MotionEventTest, SplitPointerUpCancel) {
                                 .pointer(PointerBuilder(/*id=*/4, ToolType::FINGER).x(4).y(4))
                                 .pointer(PointerBuilder(/*id=*/6, ToolType::FINGER).x(6).y(6))
                                 .pointer(PointerBuilder(/*id=*/8, ToolType::FINGER).x(8).y(8))
-                                .addFlag(AMOTION_EVENT_FLAG_CANCELED)
+                                .addFlag(MotionFlag::CANCELED)
                                 .build();
 
     MotionEvent splitUp;
@@ -838,8 +838,8 @@ TEST_F(MotionEventTest, Transform) {
     }
     MotionEvent event;
     ui::Transform identityTransform;
-    const int32_t flags = AMOTION_EVENT_PRIVATE_FLAG_SUPPORTS_ORIENTATION |
-            AMOTION_EVENT_PRIVATE_FLAG_SUPPORTS_DIRECTIONAL_ORIENTATION;
+    const ftl::Flags<MotionFlag> flags{MotionFlag::SUPPORTS_ORIENTATION,
+                                       MotionFlag::SUPPORTS_DIRECTIONAL_ORIENTATION};
     event.initialize(InputEvent::nextId(), /*deviceId=*/0, AINPUT_SOURCE_TOUCHSCREEN, DISPLAY_ID,
                      INVALID_HMAC, AMOTION_EVENT_ACTION_MOVE, /*actionButton=*/0, flags,
                      AMOTION_EVENT_EDGE_FLAG_NONE, AMETA_NONE, /*buttonState=*/0,
@@ -900,7 +900,7 @@ MotionEvent createMotionEvent(int32_t source, uint32_t action, float x, float y,
     nsecs_t eventTime = systemTime(SYSTEM_TIME_MONOTONIC);
     MotionEvent event;
     event.initialize(InputEvent::nextId(), /*deviceId=*/1, source, ui::LogicalDisplayId::DEFAULT,
-                     INVALID_HMAC, action, /*actionButton=*/0, /*flags=*/0, /*edgeFlags=*/0,
+                     INVALID_HMAC, action, /*actionButton=*/0, /*flags=*/{}, /*edgeFlags=*/0,
                      AMETA_NONE, /*buttonState=*/0, MotionClassification::NONE, transform,
                      /*xPrecision=*/0, /*yPrecision=*/0, AMOTION_EVENT_INVALID_CURSOR_POSITION,
                      AMOTION_EVENT_INVALID_CURSOR_POSITION, rawTransform, eventTime, eventTime,
@@ -1046,7 +1046,7 @@ TEST_F(MotionEventTest, Initialize_SetsClassification) {
     ui::Transform identityTransform;
     for (MotionClassification classification : classifications) {
         event.initialize(InputEvent::nextId(), /*deviceId=*/0, AINPUT_SOURCE_TOUCHSCREEN,
-                         DISPLAY_ID, INVALID_HMAC, AMOTION_EVENT_ACTION_DOWN, 0, 0,
+                         DISPLAY_ID, INVALID_HMAC, AMOTION_EVENT_ACTION_DOWN, 0, {},
                          AMOTION_EVENT_EDGE_FLAG_NONE, AMETA_NONE, 0, classification,
                          identityTransform, 0, 0, AMOTION_EVENT_INVALID_CURSOR_POSITION,
                          AMOTION_EVENT_INVALID_CURSOR_POSITION, identityTransform, /*downTime=*/0,
@@ -1068,7 +1068,7 @@ TEST_F(MotionEventTest, Initialize_SetsCursorPosition) {
 
     ui::Transform identityTransform;
     event.initialize(InputEvent::nextId(), /*deviceId=*/0, AINPUT_SOURCE_MOUSE, DISPLAY_ID,
-                     INVALID_HMAC, AMOTION_EVENT_ACTION_DOWN, 0, 0, AMOTION_EVENT_EDGE_FLAG_NONE,
+                     INVALID_HMAC, AMOTION_EVENT_ACTION_DOWN, 0, {}, AMOTION_EVENT_EDGE_FLAG_NONE,
                      AMETA_NONE, 0, MotionClassification::NONE, identityTransform, 0, 0,
                      /*xCursorPosition=*/280, /*yCursorPosition=*/540, identityTransform,
                      /*downTime=*/0, /*eventTime=*/0, pointerCount, pointerProperties,
@@ -1112,7 +1112,7 @@ TEST_F(MotionEventTest, CoordinatesAreRoundedAppropriately) {
     PointerProperties pp{};
     MotionEvent event;
     event.initialize(InputEvent::nextId(), 2, AINPUT_SOURCE_TOUCHSCREEN, DISPLAY_ID, HMAC,
-                     AMOTION_EVENT_ACTION_MOVE, 0, AMOTION_EVENT_FLAG_WINDOW_IS_OBSCURED,
+                     AMOTION_EVENT_ACTION_MOVE, 0, MotionFlag::WINDOW_IS_OBSCURED,
                      AMOTION_EVENT_EDGE_FLAG_TOP, AMETA_ALT_ON, AMOTION_EVENT_BUTTON_PRIMARY,
                      MotionClassification::NONE, transform, 2.0f, 2.1f, rawCoords.x, rawCoords.y,
                      transform, ARBITRARY_DOWN_TIME, ARBITRARY_EVENT_TIME, 1, &pp, &pc);
@@ -1153,10 +1153,10 @@ TEST_F(MotionEventTest, ValidZeroOrientationRotated) {
                            .pointer(PointerBuilder(/*id=*/4, ToolType::FINGER).x(4).y(4))
                            .transform(ui::Transform(ui::Transform::ROT_90, 100, 100))
                            .rawTransform(ui::Transform(ui::Transform::FLIP_H, 50, 50))
-                           .addFlag(AMOTION_EVENT_PRIVATE_FLAG_SUPPORTS_ORIENTATION);
+                           .addFlag(MotionFlag::SUPPORTS_ORIENTATION);
     MotionEvent nonDirectionalEvent = builder.build();
     MotionEvent directionalEvent =
-            builder.addFlag(AMOTION_EVENT_PRIVATE_FLAG_SUPPORTS_DIRECTIONAL_ORIENTATION).build();
+            builder.addFlag(MotionFlag::SUPPORTS_DIRECTIONAL_ORIENTATION).build();
 
     // The angle is rotated by the initial transform, a 90-degree rotation.
     ASSERT_NEAR(fabs(nonDirectionalEvent.getOrientation(/*pointerIndex=*/0)), M_PI_2, EPSILON);
@@ -1188,11 +1188,11 @@ TEST_F(MotionEventTest, ValidNonZeroOrientationRotated) {
                                             .axis(AMOTION_EVENT_AXIS_ORIENTATION, initial))
                            .transform(ui::Transform(ui::Transform::ROT_90, 100, 100))
                            .rawTransform(ui::Transform(ui::Transform::FLIP_H, 50, 50))
-                           .addFlag(AMOTION_EVENT_PRIVATE_FLAG_SUPPORTS_ORIENTATION);
+                           .addFlag(MotionFlag::SUPPORTS_ORIENTATION);
 
     MotionEvent nonDirectionalEvent = builder.build();
     MotionEvent directionalEvent =
-            builder.addFlag(AMOTION_EVENT_PRIVATE_FLAG_SUPPORTS_DIRECTIONAL_ORIENTATION).build();
+            builder.addFlag(MotionFlag::SUPPORTS_DIRECTIONAL_ORIENTATION).build();
 
     // The angle is rotated by the initial transform, a 90-degree rotation.
     ASSERT_NEAR(nonDirectionalEvent.getOrientation(/*pointerIndex=*/0), initial - M_PI_2, EPSILON);

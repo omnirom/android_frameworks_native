@@ -20,6 +20,7 @@
 #include <android-base/stringprintf.h>
 #include <com_android_input_flags.h>
 #include <ftl/enum.h>
+#include <input/Input.h>
 #include <input/PrintTools.h>
 #include <inttypes.h>
 #include <linux/input-event-codes.h>
@@ -439,7 +440,7 @@ void UnwantedInteractionBlocker::onInputDevicesChanged(
 
     // Let's see which of the existing devices didn't change, so that we can keep them
     // and prevent event stream disruption
-    std::set<int32_t /*deviceId*/> devicesToKeep;
+    std::set<DeviceId> devicesToKeep;
     for (const InputDeviceInfo& device : inputDevices) {
         std::optional<AndroidPalmFilterDeviceInfo> info = createPalmFilterDeviceInfo(device);
         if (!info) {

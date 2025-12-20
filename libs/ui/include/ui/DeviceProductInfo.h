@@ -18,7 +18,6 @@
 
 #include <array>
 #include <cstdint>
-#include <optional>
 #include <string>
 #include <type_traits>
 #include <variant>
@@ -44,6 +43,17 @@ struct DeviceProductInfo {
         uint8_t week;
     };
 
+    struct EdidStructureMetadata {
+        // The EDID structure version number and revision number fields (required).
+        uint8_t version;
+        uint8_t revision;
+    };
+
+    enum InputType {
+        ANALOG,
+        DIGITAL,
+    };
+
     // Display name.
     std::string name;
 
@@ -56,6 +66,12 @@ struct DeviceProductInfo {
     using ManufactureOrModelDate = std::variant<ModelYear, ManufactureYear, ManufactureWeekAndYear>;
     static_assert(std::is_trivially_copyable_v<ManufactureOrModelDate>);
     ManufactureOrModelDate manufactureOrModelDate;
+
+    // General EDID structure metadata.
+    EdidStructureMetadata edidStructureMetadata;
+
+    // The input type of the device (analog or digital; required).
+    InputType inputType;
 
     // Relative address in the display network. Empty vector indicates that the
     // address is unavailable.

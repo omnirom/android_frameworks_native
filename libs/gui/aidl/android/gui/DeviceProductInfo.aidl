@@ -43,6 +43,18 @@ parcelable DeviceProductInfo {
         ManufactureWeekAndYear manufactureWeekAndYear;
     }
 
+    parcelable EdidStructureMetadata {
+        // The EDID structure version number and revision number fields (required).
+        int version;
+        int revision;
+    }
+
+    @Backing(type="byte")
+    enum InputType {
+        ANALOG,
+        DIGITAL
+    }
+
     // Display name.
     @utf8InCpp String name;
 
@@ -54,5 +66,12 @@ parcelable DeviceProductInfo {
 
     ManufactureOrModelDate manufactureOrModelDate;
 
+    // General EDID structure metadata.
+    EdidStructureMetadata edidStructureMetadata;
+
+    // The input type of the device (analog or digital; required).
+    InputType inputType;
+
+    // Relative address in the display network.
     byte[] relativeAddress;
 }

@@ -15,50 +15,47 @@
  */
 
 #include "SessionLayerMap.h"
-#include <android/binder_libbinder.h>
 
 namespace android::adpf {
 
-void SessionLayerMap::notifySessionsDied(std::vector<int32_t>& sessionIds) {
-    for (int id : sessionIds) {
-        auto&& iter = mSessions.find(id);
-        if (iter != mSessions.end()) {
-            mSessions.erase(iter);
-        }
+void SessionLayerMap::notifySessionsDied(std::vector<int32_t>& sessions) {
+    for (int session : sessions) {
+        mSessions.entries.erase(session);
+        // We don't create update entries for dying elements
+        mSessions.updates.erase(session);
     }
 }
 
 void SessionLayerMap::notifyLayersDied(std::vector<int32_t>& layers) {
     for (auto&& layer : layers) {
-        auto&& iter = mLayers.find(layer);
-        if (iter != mLayers.end()) {
-            mLayers.erase(iter);
-        }
+        mLayers.entries.erase(layer);
+        // We don't create update entries for dying elements
+        mLayers.updates.erase(layer);
     }
 }
 
 bool SessionLayerMap::bindSessionIDToLayers(int sessionId, const std::vector<int32_t>& layerIds) {
     // If there is no association, just drop from map
     if (layerIds.empty()) {
-        mSessions.erase(sessionId);
+        mSessions.entries.erase(sessionId);
         return false;
     }
 
     // Ensure session exists
-    if (!mSessions.contains(sessionId)) {
-        mSessions.emplace(sessionId, MappedType(sessionId, mLayers));
+    if (!mSessions.entries.contains(sessionId)) {
+        mSessions.entries.emplace(sessionId, MappedType(sessionId, mSessions, mLayers));
     }
 
-    MappedType& session = mSessions.at(sessionId);
+    MappedType& session = mSessions.entries.at(sessionId);
     std::set<int32_t> newLinks;
 
     // For each incoming link
     for (auto&& layerId : layerIds) {
-        auto&& iter = mLayers.find(layerId);
+        auto&& iter = mLayers.entries.find(layerId);
 
         // If it's not in the map, add it
-        if (iter == mLayers.end()) {
-            mLayers.emplace(layerId, MappedType(layerId, mSessions));
+        if (iter == mLayers.entries.end()) {
+            mLayers.entries.emplace(layerId, MappedType(layerId, mLayers, mSessions));
         }
 
         // Make a ref to it in the session's new association map
@@ -71,9 +68,9 @@ bool SessionLayerMap::bindSessionIDToLayers(int sessionId, const std::vector<int
 
 void SessionLayerMap::getAssociatedSessions(int32_t layerId, std::vector<int32_t>& sessionIdsOut) {
     sessionIdsOut.clear();
-    auto&& iter = mLayers.find(layerId);
+    auto&& iter = mLayers.entries.find(layerId);
 
-    if (iter == mLayers.end()) {
+    if (iter == mLayers.entries.end()) {
         return;
     }
 
@@ -82,12 +79,29 @@ void SessionLayerMap::getAssociatedSessions(int32_t layerId, std::vector<int32_t
                          iter->second.mLinks.end());
 }
 
+bool SessionLayerMap::isLayerRelevant(int32_t layer) {
+    return mLayers.entries.contains(layer);
+}
+
 void SessionLayerMap::getCurrentlyRelevantLayers(
         std::unordered_set<int32_t>& currentlyRelevantLayers) {
     currentlyRelevantLayers.clear();
-    for (auto&& layer : mLayers) {
+    for (auto&& layer : mLayers.entries) {
         currentlyRelevantLayers.insert(layer.first);
     }
+}
+
+void SessionLayerMap::getUpdatedItems(std::set<int32_t>& updatedLayers,
+                                      std::set<int32_t>& updatedSessions) {
+    updatedLayers.swap(mLayers.updates);
+    updatedSessions.swap(mSessions.updates);
+    mLayers.updates.clear();
+    mSessions.updates.clear();
+};
+
+bool SessionLayerMap::isIdle() {
+    return mLayers.entries.empty() && mLayers.updates.empty() && mSessions.entries.empty() &&
+            mSessions.updates.empty();
 }
 
 } // namespace android::adpf

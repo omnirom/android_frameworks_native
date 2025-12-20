@@ -55,7 +55,8 @@ std::vector<unique_fd> getRandomFds(FuzzedDataProvider* provider) {
                  // TODO(b/236812909): also test blocking
                  if (true) flags |= O_NONBLOCK;
 
-                 CHECK_EQ(0, pipe2(pipefds, flags)) << flags;
+                 CHECK_EQ(0, pipe2(pipefds, flags))
+                         << "flags: " << flags << ", errno: " << strerror(errno);
 
                  if (provider->ConsumeBool()) std::swap(pipefds[0], pipefds[1]);
 

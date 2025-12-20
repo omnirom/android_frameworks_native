@@ -344,6 +344,12 @@ impl InputVerifier {
              * eventually supported.
              */
             MotionAction::HoverEnter => {
+                if self.touching_pointer_ids_by_device.contains_key(&event.device_id) {
+                    return Err(format!(
+                        "{}: Invalid HOVER_ENTER event - pointers are down for device {:?}: {:?}",
+                        self.name, event.device_id, self.touching_pointer_ids_by_device
+                    ));
+                }
                 if self.hovering_pointer_ids_by_device.contains_key(&event.device_id) {
                     return Err(format!(
                         "{}: Invalid HOVER_ENTER event - pointers already hovering for device {:?}:\
@@ -355,6 +361,12 @@ impl InputVerifier {
                 it.insert(event.pointer_properties[0].id);
             }
             MotionAction::HoverMove => {
+                if self.touching_pointer_ids_by_device.contains_key(&event.device_id) {
+                    return Err(format!(
+                        "{}: Invalid HOVER_MOVE event - pointers are down for device {:?}: {:?}",
+                        self.name, event.device_id, self.touching_pointer_ids_by_device
+                    ));
+                }
                 // For compatibility reasons, we allow HOVER_MOVE without a prior HOVER_ENTER.
                 // If there was no prior HOVER_ENTER, just start a new hovering pointer.
                 let it = self.hovering_pointer_ids_by_device.entry(event.device_id).or_default();
@@ -391,6 +403,11 @@ impl InputVerifier {
     pub fn reset_device(&mut self, device_id: DeviceId) {
         self.touching_pointer_ids_by_device.remove(&device_id);
         self.hovering_pointer_ids_by_device.remove(&device_id);
+    }
+
+    /// Dump the current state of the verifier
+    pub fn dump(&self) -> String {
+        format!("{:?}", self.touching_pointer_ids_by_device)
     }
 
     fn ensure_touching_pointers_match(
@@ -630,6 +647,27 @@ mod tests {
     }
 
     #[test]
+    fn correct_down_to_hover_sequence() {
+        let mut verifier =
+            InputVerifier::new("Test", /*should_log*/ false, /*verify_buttons*/ true);
+        assert!(verifier
+            .process_movement(NotifyMotionArgs { action: MotionAction::Down, ..BASE_EVENT })
+            .is_ok());
+        assert!(verifier
+            .process_movement(NotifyMotionArgs { action: MotionAction::Move, ..BASE_EVENT })
+            .is_ok());
+        assert!(verifier
+            .process_movement(NotifyMotionArgs { action: MotionAction::Up, ..BASE_EVENT })
+            .is_ok());
+        assert!(verifier
+            .process_movement(NotifyMotionArgs { action: MotionAction::HoverEnter, ..BASE_EVENT })
+            .is_ok());
+        assert!(verifier
+            .process_movement(NotifyMotionArgs { action: MotionAction::HoverMove, ..BASE_EVENT })
+            .is_ok());
+    }
+
+    #[test]
     fn double_hover_enter() {
         let mut verifier =
             InputVerifier::new("Test", /*should_log*/ false, /*verify_buttons*/ true);
@@ -639,6 +677,32 @@ mod tests {
 
         assert!(verifier
             .process_movement(NotifyMotionArgs { action: MotionAction::HoverEnter, ..BASE_EVENT })
+            .is_err());
+    }
+
+    #[test]
+    fn down_to_hover_enter_without_up() {
+        let mut verifier =
+            InputVerifier::new("Test", /*should_log*/ false, /*verify_buttons*/ true);
+        assert!(verifier
+            .process_movement(NotifyMotionArgs { action: MotionAction::Down, ..BASE_EVENT })
+            .is_ok());
+
+        assert!(verifier
+            .process_movement(NotifyMotionArgs { action: MotionAction::HoverEnter, ..BASE_EVENT })
+            .is_err());
+    }
+
+    #[test]
+    fn down_to_hover_move_without_up() {
+        let mut verifier =
+            InputVerifier::new("Test", /*should_log*/ false, /*verify_buttons*/ true);
+        assert!(verifier
+            .process_movement(NotifyMotionArgs { action: MotionAction::Down, ..BASE_EVENT })
+            .is_ok());
+
+        assert!(verifier
+            .process_movement(NotifyMotionArgs { action: MotionAction::HoverMove, ..BASE_EVENT })
             .is_err());
     }
 

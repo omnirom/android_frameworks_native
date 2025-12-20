@@ -66,6 +66,9 @@ enum {
     PIXEL_FORMAT_R_16_UINT     = 0x39,
     PIXEL_FORMAT_RG_1616_UINT  = 0x3a,
     PIXEL_FORMAT_RGBA_10101010 = 0x3b,
+    // we really need to kill this off >_>
+    PIXEL_FORMAT_BGRA_1010102  = 0x43,
+    PIXEL_FORMAT_BGRX_1010102  = 0x44,
 };
 
 typedef int32_t PixelFormat;

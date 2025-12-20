@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-#define LOG_TAG "ProcessState"
+#define LOG_TAG "libbinder.ProcessState"
 
 #include <binder/ProcessState.h>
 
@@ -28,6 +28,7 @@
 #include <utils/String8.h>
 #include <utils/Thread.h>
 
+#include "BinderObserver.h"
 #include "Static.h"
 #include "Utils.h"
 #include "binder_module.h"
@@ -115,6 +116,11 @@ sp<ProcessState> ProcessState::initWithDriver(const char* driver)
 sp<ProcessState> ProcessState::selfOrNull()
 {
     return init(nullptr, false /*requireDefault*/);
+}
+
+sp<ProcessState> ProcessState::selfIfKernelBinderEnabled() {
+    if (access(kDefaultDriver, R_OK) == -1) return nullptr;
+    return init(kDefaultDriver, false /*requireDefault*/);
 }
 
 [[clang::no_destroy]] static sp<ProcessState> gProcess;
@@ -381,10 +387,10 @@ sp<IBinder> ProcessState::getStrongProxyForHandle(int32_t handle)
                    return nullptr;
             }
 
-            sp<BpBinder> b = BpBinder::PrivateAccessor::create(handle, &postTask);
-            e->binder = b.get();
-            if (b) e->refs = b->getWeakRefs();
-            result = b;
+            sp<BpBinder> bp = BpBinder::PrivateAccessor::create(handle, &postTask);
+            e->binder = bp.get();
+            if (bp) e->refs = bp->getWeakRefs();
+            result = bp;
         } else {
             // This little bit of nastyness is to allow us to add a primary
             // reference to the remote proxy when this team doesn't have one
@@ -621,11 +627,19 @@ ProcessState::ProcessState(const char* driver)
     LOG_ALWAYS_FATAL_IF(!opened.ok(),
                         "Binder driver '%s' could not be opened. Error: %s. Terminating.",
                         driver, error.c_str());
+#else
+    if (!opened.ok()) {
+        ALOGE("Binder driver '%s' could not be opened. Error: %s. There may be future issues.",
+              driver, error.c_str());
+    }
 #endif
 
     if (opened.ok()) {
         mDriverFD = opened.release();
     }
+#ifdef BINDER_WITH_OBSERVERS
+    mBinderObserver = std::make_unique<BinderObserver>();
+#endif
 }
 
 ProcessState::~ProcessState()

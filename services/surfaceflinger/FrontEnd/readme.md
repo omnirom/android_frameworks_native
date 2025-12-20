@@ -75,7 +75,10 @@ Transactions with the same applyToken. By default each process and each buffer p
 provides a unique ApplyToken. This prevents clients from affecting one another, and possibly
 slowing each other down.
 
-
+Transactions from different processes can be ordered with barriers.
+Process A can enqueue a transaction with a WAIT token `t`.  It will not be applied
+(up to expiration timeout) until a transaction from process B with a SIGNAL for
+the same token `t` is applied.
 
 ## Architecture
 SurfaceFlinger FrontEnd intends to optimize for predictability and performance because state

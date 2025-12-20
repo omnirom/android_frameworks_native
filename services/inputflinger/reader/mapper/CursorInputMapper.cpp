@@ -25,6 +25,7 @@
 #include <com_android_input_flags.h>
 #include <ftl/enum.h>
 #include <input/AccelerationCurve.h>
+#include <input/InputFlags.h>
 
 #include "CursorButtonAccumulator.h"
 #include "CursorScrollAccumulator.h"
@@ -33,7 +34,31 @@
 
 #include "input/PrintTools.h"
 
+namespace input_flags = com::android::input::flags;
+
 namespace android {
+
+namespace {
+
+/** Max density value supported by input. */
+const int32_t ACONFIGURATION_MAX_SUPPORTED_DENSITY = ACONFIGURATION_DENSITY_ANY;
+
+// TODO(b/408170793): We use ACONFIGURATION_DENSITY_XHIGH as baseline for scale due to
+// legacy reasons, this need to be tuned with further UX testing.
+const float SCALING_BASELINE_DENSITY = static_cast<float>(ACONFIGURATION_DENSITY_XHIGH);
+
+// Density values in range (0, ACONFIGURATION_MAX_SUPPORTED_DENSITY] are supported for cursor
+// moves scaling. Other density values e.g. ACONFIGURATION_DENSITY_DEFAULT,
+// ACONFIGURATION_DENSITY_NONE etc. are ignored.
+inline bool isDensityValueSupportedForScaling(float density) {
+    if (density > 0 && density <= ACONFIGURATION_MAX_SUPPORTED_DENSITY) {
+        return true;
+    }
+    ALOGE("Unexpected display density value %f, cursor move scaling will be disabled.", density);
+    return false;
+}
+
+} // namespace
 
 // The default velocity control parameters that has no effect.
 static const VelocityControlParameters FLAT_VELOCITY_CONTROL_PARAMS{};
@@ -129,6 +154,9 @@ void CursorInputMapper::dump(std::string& dump) {
     dump += StringPrintf(INDENT3 "DisplayId: %s\n",
                          toString(mDisplayId, streamableToString).c_str());
     dump += StringPrintf(INDENT3 "Orientation: %s\n", ftl::enum_string(mOrientation).c_str());
+    dump += StringPrintf(INDENT3 "ViewportDensityDpi: %d\n", mViewportDensityDpi);
+    dump += StringPrintf(INDENT3 "ViewportXDpi: %f\n", mViewportXDpi);
+    dump += StringPrintf(INDENT3 "ViewportYDpi: %f\n", mViewportYDpi);
     dump += StringPrintf(INDENT3 "ButtonState: 0x%08x\n", mButtonState);
     dump += StringPrintf(INDENT3 "Down: %s\n", toString(isPointerDown(mButtonState)));
     dump += StringPrintf(INDENT3 "DownTime: %" PRId64 "\n", mDownTime);
@@ -272,9 +300,6 @@ std::list<NotifyArgs> CursorInputMapper::sync(nsecs_t when, nsecs_t readTime) {
     pointerProperties.id = 0;
     pointerProperties.toolType = ToolType::MOUSE;
 
-    PointerCoords pointerCoords;
-    pointerCoords.clear();
-
     // A negative value represents inverted scrolling direction.
     // Applies only if the source is a mouse.
     const bool isMouse =
@@ -291,18 +316,6 @@ std::list<NotifyArgs> CursorInputMapper::sync(nsecs_t when, nsecs_t readTime) {
 
     float xCursorPosition = AMOTION_EVENT_INVALID_CURSOR_POSITION;
     float yCursorPosition = AMOTION_EVENT_INVALID_CURSOR_POSITION;
-    if (mSource == AINPUT_SOURCE_MOUSE) {
-        pointerCoords.setAxisValue(AMOTION_EVENT_AXIS_RELATIVE_X, deltaX);
-        pointerCoords.setAxisValue(AMOTION_EVENT_AXIS_RELATIVE_Y, deltaY);
-    } else {
-        // Pointer capture and navigation modes
-        pointerCoords.setAxisValue(AMOTION_EVENT_AXIS_X, deltaX);
-        pointerCoords.setAxisValue(AMOTION_EVENT_AXIS_Y, deltaY);
-        pointerCoords.setAxisValue(AMOTION_EVENT_AXIS_RELATIVE_X, deltaX);
-        pointerCoords.setAxisValue(AMOTION_EVENT_AXIS_RELATIVE_Y, deltaY);
-    }
-
-    pointerCoords.setAxisValue(AMOTION_EVENT_AXIS_PRESSURE, down ? 1.0f : 0.0f);
 
     // Moving an external trackball or mouse should wake the device.
     // We don't do this for internal cursor devices to prevent them from waking up
@@ -313,23 +326,48 @@ std::list<NotifyArgs> CursorInputMapper::sync(nsecs_t when, nsecs_t readTime) {
         policyFlags |= POLICY_FLAG_WAKE;
     }
 
+    const int32_t metaState = getContext()->getGlobalMetaState();
+    // Send an event for the cursor motion.
+    // TODO(b/407018146): we currently need to send a zero-delta HOVER_MOVE before scrolls so that
+    //  InputDispatcher generates a HOVER_ENTER event if necessary. (The VirtualMouseTest in CTS
+    //  depends on this.) Fix this issue then remove `|| scrolled` here.
+    if (moved || scrolled) {
+        int32_t action = wasDown || mSource != AINPUT_SOURCE_MOUSE
+                ? AMOTION_EVENT_ACTION_MOVE
+                : AMOTION_EVENT_ACTION_HOVER_MOVE;
+
+        PointerCoords moveCoords;
+        moveCoords.clear();
+        moveCoords.setAxisValue(AMOTION_EVENT_AXIS_RELATIVE_X, deltaX);
+        moveCoords.setAxisValue(AMOTION_EVENT_AXIS_RELATIVE_Y, deltaY);
+        if (mSource != AINPUT_SOURCE_MOUSE) {
+            // Pointer capture and navigation modes
+            moveCoords.setAxisValue(AMOTION_EVENT_AXIS_X, deltaX);
+            moveCoords.setAxisValue(AMOTION_EVENT_AXIS_Y, deltaY);
+        }
+
+        moveCoords.setAxisValue(AMOTION_EVENT_AXIS_PRESSURE, wasDown ? 1.0f : 0.0f);
+
+        out.push_back(NotifyMotionArgs(getContext()->getNextId(), when, readTime, getDeviceId(),
+                                       mSource, *mDisplayId, policyFlags, action, 0, 0, metaState,
+                                       lastButtonState, MotionClassification::NONE, 1,
+                                       &pointerProperties, &moveCoords, mXPrecision, mYPrecision,
+                                       xCursorPosition, yCursorPosition, downTime,
+                                       /*videoFrames=*/{}));
+    }
+
     // Synthesize key down from buttons if needed.
     out += synthesizeButtonKeys(getContext(), AKEY_EVENT_ACTION_DOWN, when, readTime, getDeviceId(),
                                 mSource, *mDisplayId, policyFlags, lastButtonState,
                                 currentButtonState);
 
-    // Send motion event.
-    if (downChanged || moved || scrolled || buttonsChanged) {
-        int32_t metaState = getContext()->getGlobalMetaState();
+    // Send motion events for buttons and scrolling.
+    if (downChanged || scrolled || buttonsChanged) {
         int32_t buttonState = lastButtonState;
-        int32_t motionEventAction;
-        if (downChanged) {
-            motionEventAction = down ? AMOTION_EVENT_ACTION_DOWN : AMOTION_EVENT_ACTION_UP;
-        } else if (down || (mSource != AINPUT_SOURCE_MOUSE)) {
-            motionEventAction = AMOTION_EVENT_ACTION_MOVE;
-        } else {
-            motionEventAction = AMOTION_EVENT_ACTION_HOVER_MOVE;
-        }
+
+        PointerCoords pointerCoords;
+        pointerCoords.clear();
+        pointerCoords.setAxisValue(AMOTION_EVENT_AXIS_PRESSURE, down ? 1.0f : 0.0f);
 
         if (buttonsReleased) {
             BitSet32 released(buttonsReleased);
@@ -340,20 +378,22 @@ std::list<NotifyArgs> CursorInputMapper::sync(nsecs_t when, nsecs_t readTime) {
                                                getDeviceId(), mSource, *mDisplayId, policyFlags,
                                                AMOTION_EVENT_ACTION_BUTTON_RELEASE, actionButton, 0,
                                                metaState, buttonState, MotionClassification::NONE,
-                                               AMOTION_EVENT_EDGE_FLAG_NONE, 1, &pointerProperties,
-                                               &pointerCoords, mXPrecision, mYPrecision,
-                                               xCursorPosition, yCursorPosition, downTime,
-                                               /*videoFrames=*/{}));
+                                               1, &pointerProperties, &pointerCoords, mXPrecision,
+                                               mYPrecision, xCursorPosition, yCursorPosition,
+                                               downTime, /*videoFrames=*/{}));
             }
         }
 
-        out.push_back(NotifyMotionArgs(getContext()->getNextId(), when, readTime, getDeviceId(),
-                                       mSource, *mDisplayId, policyFlags, motionEventAction, 0, 0,
-                                       metaState, currentButtonState, MotionClassification::NONE,
-                                       AMOTION_EVENT_EDGE_FLAG_NONE, 1, &pointerProperties,
-                                       &pointerCoords, mXPrecision, mYPrecision, xCursorPosition,
-                                       yCursorPosition, downTime,
-                                       /*videoFrames=*/{}));
+        if (downChanged) {
+            int32_t action = down ? AMOTION_EVENT_ACTION_DOWN : AMOTION_EVENT_ACTION_UP;
+            out.push_back(NotifyMotionArgs(getContext()->getNextId(), when, readTime, getDeviceId(),
+                                           mSource, *mDisplayId, policyFlags, action, 0, 0,
+                                           metaState, currentButtonState,
+                                           MotionClassification::NONE, 1, &pointerProperties,
+                                           &pointerCoords, mXPrecision, mYPrecision,
+                                           xCursorPosition, yCursorPosition, downTime,
+                                           /*videoFrames=*/{}));
+        }
 
         if (buttonsPressed) {
             BitSet32 pressed(buttonsPressed);
@@ -364,24 +404,22 @@ std::list<NotifyArgs> CursorInputMapper::sync(nsecs_t when, nsecs_t readTime) {
                                                getDeviceId(), mSource, *mDisplayId, policyFlags,
                                                AMOTION_EVENT_ACTION_BUTTON_PRESS, actionButton, 0,
                                                metaState, buttonState, MotionClassification::NONE,
-                                               AMOTION_EVENT_EDGE_FLAG_NONE, 1, &pointerProperties,
-                                               &pointerCoords, mXPrecision, mYPrecision,
-                                               xCursorPosition, yCursorPosition, downTime,
-                                               /*videoFrames=*/{}));
+                                               1, &pointerProperties, &pointerCoords, mXPrecision,
+                                               mYPrecision, xCursorPosition, yCursorPosition,
+                                               downTime, /*videoFrames=*/{}));
             }
         }
 
         ALOG_ASSERT(buttonState == currentButtonState);
 
         // Send hover move after UP to tell the application that the mouse is hovering now.
-        if (motionEventAction == AMOTION_EVENT_ACTION_UP && (mSource == AINPUT_SOURCE_MOUSE)) {
+        if (downChanged && !down && (mSource == AINPUT_SOURCE_MOUSE)) {
             out.push_back(NotifyMotionArgs(getContext()->getNextId(), when, readTime, getDeviceId(),
                                            mSource, *mDisplayId, policyFlags,
                                            AMOTION_EVENT_ACTION_HOVER_MOVE, 0, 0, metaState,
-                                           currentButtonState, MotionClassification::NONE,
-                                           AMOTION_EVENT_EDGE_FLAG_NONE, 1, &pointerProperties,
-                                           &pointerCoords, mXPrecision, mYPrecision,
-                                           xCursorPosition, yCursorPosition, downTime,
+                                           currentButtonState, MotionClassification::NONE, 1,
+                                           &pointerProperties, &pointerCoords, mXPrecision,
+                                           mYPrecision, xCursorPosition, yCursorPosition, downTime,
                                            /*videoFrames=*/{}));
         }
 
@@ -393,10 +431,9 @@ std::list<NotifyArgs> CursorInputMapper::sync(nsecs_t when, nsecs_t readTime) {
             out.push_back(NotifyMotionArgs(getContext()->getNextId(), when, readTime, getDeviceId(),
                                            mSource, *mDisplayId, policyFlags,
                                            AMOTION_EVENT_ACTION_SCROLL, 0, 0, metaState,
-                                           currentButtonState, MotionClassification::NONE,
-                                           AMOTION_EVENT_EDGE_FLAG_NONE, 1, &pointerProperties,
-                                           &pointerCoords, mXPrecision, mYPrecision,
-                                           xCursorPosition, yCursorPosition, downTime,
+                                           currentButtonState, MotionClassification::NONE, 1,
+                                           &pointerProperties, &pointerCoords, mXPrecision,
+                                           mYPrecision, xCursorPosition, yCursorPosition, downTime,
                                            /*videoFrames=*/{}));
         }
     }
@@ -481,12 +518,26 @@ void CursorInputMapper::configureOnChangePointerSpeed(const InputReaderConfigura
         mPointerVelocityControl.setAccelerationEnabled(false);
         mWheelXVelocityControl.setParameters(FLAT_VELOCITY_CONTROL_PARAMS);
         mWheelYVelocityControl.setParameters(FLAT_VELOCITY_CONTROL_PARAMS);
+        mXScale = mYScale = 1.0;
         return;
     }
 
     bool disableAllScaling = config.displaysWithMouseScalingDisabled.count(
                                      mDisplayId.value_or(ui::LogicalDisplayId::INVALID)) != 0;
 
+    if (mParameters.mode == Parameters::Mode::POINTER) {
+        if (!disableAllScaling && input_flags::use_separate_xy_dpi_scaling_for_mice() &&
+            isDensityValueSupportedForScaling(mViewportXDpi) &&
+            isDensityValueSupportedForScaling(mViewportYDpi)) {
+            mXScale = mViewportXDpi / SCALING_BASELINE_DENSITY;
+            mYScale = mViewportYDpi / SCALING_BASELINE_DENSITY;
+        } else if (!disableAllScaling && InputFlags::scaleCursorSpeedWithDisplayDensity() &&
+                   isDensityValueSupportedForScaling(mViewportDensityDpi)) {
+            mXScale = mYScale = static_cast<float>(mViewportDensityDpi) / SCALING_BASELINE_DENSITY;
+        } else {
+            mXScale = mYScale = 1.0f;
+        }
+    }
     mPointerVelocityControl.setAccelerationEnabled(!disableAllScaling);
 
     mPointerVelocityControl.setCurve(
@@ -528,6 +579,16 @@ void CursorInputMapper::configureOnChangeDisplayInfo(const InputReaderConfigurat
                         static_cast<float>(resolvedViewport->logicalRight - 1),
                         static_cast<float>(resolvedViewport->logicalBottom - 1)}
             : FloatRect{0, 0, 0, 0};
+
+    if (resolvedViewport) {
+        mViewportDensityDpi = resolvedViewport->densityDpi;
+        mViewportXDpi = resolvedViewport->xDpi;
+        mViewportYDpi = resolvedViewport->yDpi;
+    } else {
+        // we use SCALING_BASELINE_DENSITY if density information is not available,
+        // this will set scaling to 1.0f.
+        mViewportDensityDpi = mViewportXDpi = mViewportYDpi = SCALING_BASELINE_DENSITY;
+    }
 
     bumpGeneration();
 }

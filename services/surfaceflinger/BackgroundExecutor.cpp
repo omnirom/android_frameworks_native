@@ -15,8 +15,7 @@
  */
 
 //#define LOG_NDEBUG 0
-#undef LOG_TAG
-#define LOG_TAG "BackgroundExecutor"
+
 #define ATRACE_TAG ATRACE_TAG_GRAPHICS
 
 #include <processgroup/sched_policy.h>

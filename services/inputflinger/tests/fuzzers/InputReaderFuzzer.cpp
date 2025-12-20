@@ -48,7 +48,8 @@ public:
     FuzzInputReader(std::shared_ptr<EventHubInterface> fuzzEventHub,
                     const sp<InputReaderPolicyInterface>& fuzzPolicy,
                     InputListenerInterface& fuzzListener) {
-        reader = std::make_unique<InputReader>(fuzzEventHub, fuzzPolicy, fuzzListener);
+        reader = std::make_unique<InputReader>(fuzzEventHub, fuzzPolicy, fuzzListener,
+                                               /*env=*/nullptr, /*tracingBackend=*/nullptr);
     }
 
     void dump(std::string& dump) { reader->dump(dump); }
@@ -61,23 +62,23 @@ public:
 
     std::vector<InputDeviceInfo> getInputDevices() const { return reader->getInputDevices(); }
 
-    int32_t getScanCodeState(int32_t deviceId, uint32_t sourceMask, int32_t scanCode) {
+    int32_t getScanCodeState(DeviceId deviceId, uint32_t sourceMask, int32_t scanCode) {
         return reader->getScanCodeState(deviceId, sourceMask, scanCode);
     }
 
-    int32_t getKeyCodeState(int32_t deviceId, uint32_t sourceMask, int32_t keyCode) {
+    int32_t getKeyCodeState(DeviceId deviceId, uint32_t sourceMask, int32_t keyCode) {
         return reader->getKeyCodeState(deviceId, sourceMask, keyCode);
     }
 
-    int32_t getSwitchState(int32_t deviceId, uint32_t sourceMask, int32_t sw) {
+    int32_t getSwitchState(DeviceId deviceId, uint32_t sourceMask, int32_t sw) {
         return reader->getSwitchState(deviceId, sourceMask, sw);
     }
 
-    void toggleCapsLockState(int32_t deviceId) { reader->toggleCapsLockState(deviceId); }
+    void toggleCapsLockState(DeviceId deviceId) { reader->toggleCapsLockState(deviceId); }
 
     void resetLockedModifierState() { reader->resetLockedModifierState(); }
 
-    bool hasKeys(int32_t deviceId, uint32_t sourceMask, const std::vector<int32_t>& keyCodes,
+    bool hasKeys(DeviceId deviceId, uint32_t sourceMask, const std::vector<int32_t>& keyCodes,
                  uint8_t* outFlags) {
         return reader->hasKeys(deviceId, sourceMask, keyCodes, outFlags);
     }
@@ -86,86 +87,90 @@ public:
         reader->requestRefreshConfiguration(changes);
     }
 
-    void vibrate(int32_t deviceId, const VibrationSequence& sequence, ssize_t repeat,
+    void vibrate(DeviceId deviceId, const VibrationSequence& sequence, ssize_t repeat,
                  int32_t token) {
         reader->vibrate(deviceId, sequence, repeat, token);
     }
 
-    void cancelVibrate(int32_t deviceId, int32_t token) { reader->cancelVibrate(deviceId, token); }
+    void cancelVibrate(DeviceId deviceId, int32_t token) { reader->cancelVibrate(deviceId, token); }
 
-    bool isVibrating(int32_t deviceId) { return reader->isVibrating(deviceId); }
+    bool isVibrating(DeviceId deviceId) { return reader->isVibrating(deviceId); }
 
-    std::vector<int32_t> getVibratorIds(int32_t deviceId) {
+    std::vector<int32_t> getVibratorIds(DeviceId deviceId) {
         return reader->getVibratorIds(deviceId);
     }
 
-    std::optional<int32_t> getBatteryCapacity(int32_t deviceId) {
+    std::optional<int32_t> getBatteryCapacity(DeviceId deviceId) {
         return reader->getBatteryCapacity(deviceId);
     }
 
-    std::optional<int32_t> getBatteryStatus(int32_t deviceId) {
+    std::optional<int32_t> getBatteryStatus(DeviceId deviceId) {
         return reader->getBatteryStatus(deviceId);
     }
 
-    std::optional<std::string> getBatteryDevicePath(int32_t deviceId) {
+    std::optional<std::string> getBatteryDevicePath(DeviceId deviceId) {
         return reader->getBatteryDevicePath(deviceId);
     }
 
-    std::vector<InputDeviceLightInfo> getLights(int32_t deviceId) {
+    std::vector<InputDeviceLightInfo> getLights(DeviceId deviceId) {
         return reader->getLights(deviceId);
     }
 
-    std::vector<InputDeviceSensorInfo> getSensors(int32_t deviceId) {
+    std::vector<InputDeviceSensorInfo> getSensors(DeviceId deviceId) {
         return reader->getSensors(deviceId);
     }
 
-    std::optional<HardwareProperties> getTouchpadHardwareProperties(int32_t deviceId) {
+    std::optional<HardwareProperties> getTouchpadHardwareProperties(DeviceId deviceId) {
         return reader->getTouchpadHardwareProperties(deviceId);
     }
 
-    bool canDispatchToDisplay(int32_t deviceId, ui::LogicalDisplayId displayId) {
+    bool canDispatchToDisplay(DeviceId deviceId, ui::LogicalDisplayId displayId) {
         return reader->canDispatchToDisplay(deviceId, displayId);
     }
 
-    bool enableSensor(int32_t deviceId, InputDeviceSensorType sensorType,
+    bool enableSensor(DeviceId deviceId, InputDeviceSensorType sensorType,
                       std::chrono::microseconds samplingPeriod,
                       std::chrono::microseconds maxBatchReportLatency) {
         return reader->enableSensor(deviceId, sensorType, samplingPeriod, maxBatchReportLatency);
     }
 
-    void disableSensor(int32_t deviceId, InputDeviceSensorType sensorType) {
+    void disableSensor(DeviceId deviceId, InputDeviceSensorType sensorType) {
         return reader->disableSensor(deviceId, sensorType);
     }
 
-    void flushSensor(int32_t deviceId, InputDeviceSensorType sensorType) {
+    void flushSensor(DeviceId deviceId, InputDeviceSensorType sensorType) {
         return reader->flushSensor(deviceId, sensorType);
     }
 
-    bool setLightColor(int32_t deviceId, int32_t lightId, int32_t color) {
+    bool setLightColor(DeviceId deviceId, int32_t lightId, int32_t color) {
         return reader->setLightColor(deviceId, lightId, color);
     }
 
-    bool setLightPlayerId(int32_t deviceId, int32_t lightId, int32_t playerId) {
+    bool setLightPlayerId(DeviceId deviceId, int32_t lightId, int32_t playerId) {
         return reader->setLightPlayerId(deviceId, lightId, playerId);
     }
 
-    std::optional<int32_t> getLightColor(int32_t deviceId, int32_t lightId) {
+    std::optional<int32_t> getLightColor(DeviceId deviceId, int32_t lightId) {
         return reader->getLightColor(deviceId, lightId);
     }
 
-    std::optional<int32_t> getLightPlayerId(int32_t deviceId, int32_t lightId) {
+    std::optional<int32_t> getLightPlayerId(DeviceId deviceId, int32_t lightId) {
         return reader->getLightPlayerId(deviceId, lightId);
     }
 
-    int32_t getKeyCodeForKeyLocation(int32_t deviceId, int32_t locationKeyCode) const {
+    int32_t getKeyCodeForKeyLocation(DeviceId deviceId, int32_t locationKeyCode) const {
         return reader->getKeyCodeForKeyLocation(deviceId, locationKeyCode);
     }
 
-    std::optional<std::string> getBluetoothAddress(int32_t deviceId) const {
+    std::optional<std::string> getBluetoothAddress(DeviceId deviceId) const {
         return reader->getBluetoothAddress(deviceId);
     }
 
-    std::filesystem::path getSysfsRootPath(int32_t deviceId) const {
+    std::optional<std::string> getPhysicalLocationPath(DeviceId deviceId) const {
+        return reader->getPhysicalLocationPath(deviceId);
+    }
+
+    std::filesystem::path getSysfsRootPath(DeviceId deviceId) const {
         return reader->getSysfsRootPath(deviceId);
     }
 
@@ -177,7 +182,7 @@ public:
 
     void notifyMouseCursorFadedOnTyping() override { reader->notifyMouseCursorFadedOnTyping(); }
 
-    bool setKernelWakeEnabled(int32_t deviceId, bool enabled) override {
+    bool setKernelWakeEnabled(DeviceId deviceId, bool enabled) override {
         return reader->setKernelWakeEnabled(deviceId, enabled);
     }
 
@@ -301,6 +306,7 @@ extern "C" int LLVMFuzzerTestOneInput(uint8_t* data, size_t size) {
                                          std::chrono::microseconds(fdp->ConsumeIntegral<size_t>()));
                 },
                 [&]() -> void { reader->getBluetoothAddress(fdp->ConsumeIntegral<int32_t>()); },
+                [&]() -> void { reader->getPhysicalLocationPath(fdp->ConsumeIntegral<int32_t>()); },
                 [&]() -> void { reader->getSysfsRootPath(fdp->ConsumeIntegral<int32_t>()); },
         })();
     }

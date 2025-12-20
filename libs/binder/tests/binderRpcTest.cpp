@@ -42,6 +42,8 @@
 #include <trusty/tipc.h>
 #endif // BINDER_RPC_TO_TRUSTY_TEST
 
+#include "../OS.h"
+#include "../RpcWireFormat.h"
 #include "../Utils.h"
 #include "binderRpcTestCommon.h"
 #include "binderRpcTestFixture.h"
@@ -65,6 +67,9 @@ using testing::AssertionSuccess;
 
 namespace android {
 
+// TODO(b/428744319) - if we have a static version of libbinder_ndk, we should
+// be able to get rid of most of the uses of kEnableSharedLibs as it will use
+// the static libbinder sysmbols and not cause ODR violations
 #ifdef BINDER_TEST_NO_SHARED_LIBS
 constexpr bool kEnableSharedLibs = false;
 #else
@@ -307,7 +312,8 @@ std::unique_ptr<ProcessSession> BinderRpc::createRpcTestSocketServerProcessEtc(
             }));
 
     BinderRpcTestServerConfig serverConfig;
-    serverConfig.numThreads = options.numThreads;
+    serverConfig.numMaxThreads = options.numMaxThreads;
+    serverConfig.numMinThreadsPerBinder = options.numMinThreadsPerBinder;
     serverConfig.socketType = static_cast<int32_t>(socketType);
     serverConfig.rpcSecurity = static_cast<int32_t>(rpcSecurity);
     serverConfig.serverVersion = serverVersion;
@@ -465,7 +471,7 @@ TEST_P(BinderRpc, ThreadPoolGreaterThanEqualRequested) {
 
     constexpr size_t kNumThreads = 5;
 
-    auto proc = createRpcTestSocketServerProcess({.numThreads = kNumThreads});
+    auto proc = createRpcTestSocketServerProcess({.numMaxThreads = kNumThreads});
 
     EXPECT_OK(proc.rootIface->lock());
 
@@ -522,7 +528,7 @@ TEST_P(BinderRpc, ThreadPoolOverSaturated) {
 
     constexpr size_t kNumThreads = 10;
     constexpr size_t kNumCalls = kNumThreads + 3;
-    auto proc = createRpcTestSocketServerProcess({.numThreads = kNumThreads});
+    auto proc = createRpcTestSocketServerProcess({.numMaxThreads = kNumThreads});
 
     testThreadPoolOverSaturated(proc.rootIface, kNumCalls, 200 /*ms*/);
 }
@@ -536,7 +542,7 @@ TEST_P(BinderRpc, ThreadPoolLimitOutgoing) {
     constexpr size_t kNumOutgoingConnections = 10;
     constexpr size_t kNumCalls = kNumOutgoingConnections + 3;
     auto proc = createRpcTestSocketServerProcess(
-            {.numThreads = kNumThreads, .numOutgoingConnections = kNumOutgoingConnections});
+            {.numMaxThreads = kNumThreads, .numOutgoingConnections = kNumOutgoingConnections});
 
     testThreadPoolOverSaturated(proc.rootIface, kNumCalls, 200 /*ms*/);
 }
@@ -550,7 +556,7 @@ TEST_P(BinderRpc, ThreadingStressTest) {
     constexpr size_t kNumServerThreads = 5;
     constexpr size_t kNumCalls = 50;
 
-    auto proc = createRpcTestSocketServerProcess({.numThreads = kNumServerThreads});
+    auto proc = createRpcTestSocketServerProcess({.numMaxThreads = kNumServerThreads});
 
     std::vector<std::thread> threads;
     for (size_t i = 0; i < kNumClientThreads; i++) {
@@ -583,7 +589,7 @@ TEST_P(BinderRpc, OnewayStressTest) {
     constexpr size_t kNumServerThreads = 10;
     constexpr size_t kNumCalls = 1000;
 
-    auto proc = createRpcTestSocketServerProcess({.numThreads = kNumServerThreads});
+    auto proc = createRpcTestSocketServerProcess({.numMaxThreads = kNumServerThreads});
 
     std::vector<std::thread> threads;
     for (size_t i = 0; i < kNumClientThreads; i++) {
@@ -597,6 +603,35 @@ TEST_P(BinderRpc, OnewayStressTest) {
     for (auto& t : threads) t.join();
 
     saturateThreadPool(kNumServerThreads, proc.rootIface);
+}
+
+TEST_P(BinderRpc, OnewayStressTestWithIncomingThread) {
+    if (clientOrServerSingleThreaded()) {
+        GTEST_SKIP() << "This test requires multiple threads";
+    }
+
+    constexpr size_t kNumClientThreads = 10;
+    constexpr size_t kNumServerThreads = 10;
+    constexpr size_t kNumCalls = 1000;
+
+    auto proc = createRpcTestSocketServerProcess(
+            {.numMaxThreads = kNumServerThreads, .numIncomingConnectionsBySession = {1}});
+
+    std::vector<std::thread> threads;
+    for (size_t i = 0; i < kNumClientThreads; i++) {
+        threads.push_back(std::thread([&] {
+            for (size_t j = 0; j < kNumCalls; j++) {
+                EXPECT_OK(proc.rootIface->sendString("a"));
+            }
+        }));
+    }
+
+    for (auto& t : threads) t.join();
+
+    saturateThreadPool(kNumServerThreads, proc.rootIface);
+    // There is a race with a leaked binder and session when
+    // .numIncomingConnectionsBySession > 0, so force the shutdown
+    proc.forceShutdown();
 }
 
 TEST_P(BinderRpc, OnewayCallQueueingWithFds) {
@@ -617,7 +652,7 @@ TEST_P(BinderRpc, OnewayCallQueueingWithFds) {
     // https://developer.android.com/reference/android/os/IBinder#FLAG_ONEWAY
 
     auto proc = createRpcTestSocketServerProcess({
-            .numThreads = kNumServerThreads,
+            .numMaxThreads = kNumServerThreads,
             .clientFileDescriptorTransportMode = RpcSession::FileDescriptorTransportMode::UNIX,
             .serverSupportedFileDescriptorTransportModes =
                     {RpcSession::FileDescriptorTransportMode::UNIX},
@@ -651,7 +686,7 @@ TEST_P(BinderRpc, OnewayCallQueueing) {
     constexpr size_t kNumExtraServerThreads = 4;
 
     // make sure calls to the same object happen on the same thread
-    auto proc = createRpcTestSocketServerProcess({.numThreads = 1 + kNumExtraServerThreads});
+    auto proc = createRpcTestSocketServerProcess({.numMaxThreads = 1 + kNumExtraServerThreads});
 
     // all these *Oneway commands should be queued on the server sequentially,
     // even though there are multiple threads.
@@ -675,7 +710,7 @@ TEST_P(BinderRpc, OnewayCallExhaustion) {
     constexpr size_t kNumClients = 2;
     constexpr size_t kTooLongMs = 1000;
 
-    auto proc = createRpcTestSocketServerProcess({.numThreads = kNumClients, .numSessions = 2});
+    auto proc = createRpcTestSocketServerProcess({.numMaxThreads = kNumClients, .numSessions = 2});
 
     // Build up oneway calls on the second session to make sure it terminates
     // and shuts down. The first session should be unaffected (proc destructor
@@ -711,33 +746,28 @@ TEST_P(BinderRpc, OnewayCallExhaustion) {
     proc.proc->sessions.erase(proc.proc->sessions.begin() + 1);
 }
 
-// TODO(b/392717039): can we move this to universal tests?
+// TODO(b/392717039): move to universal tests
 TEST_P(BinderRpc, SendTooLargeVector) {
     if (GetParam().singleThreaded) {
         GTEST_SKIP() << "Requires multi-threaded server to test one of the sessions crashing.";
     }
 
-    auto proc = createRpcTestSocketServerProcess({.numSessions = 2});
+    auto proc = createRpcTestSocketServerProcess({});
 
-    // need a working transaction
+    // works before
     EXPECT_EQ(OK, proc.rootBinder->pingBinder());
 
     // see libbinder internal Constants.h
     const size_t kTooLargeSize = 650 * 1024;
     const std::vector<uint8_t> kTestValue(kTooLargeSize / sizeof(uint8_t), 42);
 
-    // TODO(b/392717039): Telling a server to allocate too much data currently causes the session to
-    // close since RpcServer treats any transaction error as a failure. We likely want to change
-    // this behavior to be a soft failure, since it isn't hard to keep track of this state.
-    sp<IBinderRpcTest> rootIface2 = interface_cast<IBinderRpcTest>(proc.proc->sessions.at(1).root);
     std::vector<uint8_t> result;
-    status_t res = rootIface2->repeatBytes(kTestValue, &result).transactionError();
+    status_t res = proc.rootIface->repeatBytes(kTestValue, &result).transactionError();
 
-    // TODO(b/392717039): consistent error results always
-    EXPECT_TRUE(res == -ECONNRESET || res == DEAD_OBJECT) << statusToString(res);
+    EXPECT_EQ(res, FAILED_TRANSACTION) << statusToString(res);
 
-    // died, so remove it for checks in destructor of proc
-    proc.proc->sessions.erase(proc.proc->sessions.begin() + 1);
+    // works after
+    EXPECT_EQ(OK, proc.rootBinder->pingBinder());
 }
 
 TEST_P(BinderRpc, SessionWithIncomingThreadpoolDoesntLeak) {
@@ -748,7 +778,7 @@ TEST_P(BinderRpc, SessionWithIncomingThreadpoolDoesntLeak) {
     // session 0 - will check for leaks in destrutor of proc
     // session 1 - we want to make sure it gets deleted when we drop all references to it
     auto proc = createRpcTestSocketServerProcess(
-            {.numThreads = 1, .numSessions = 2, .numIncomingConnectionsBySession = {0, 1}});
+            {.numMaxThreads = 1, .numSessions = 2, .numIncomingConnectionsBySession = {0, 1}});
 
     wp<RpcSession> session = proc.proc->sessions.at(1).session;
 
@@ -789,7 +819,7 @@ TEST_P(BinderRpc, SingleDeathRecipient) {
 
     // Death recipient needs to have an incoming connection to be called
     auto proc = createRpcTestSocketServerProcess(
-            {.numThreads = 1, .numSessions = 1, .numIncomingConnectionsBySession = {1}});
+            {.numMaxThreads = 1, .numSessions = 1, .numIncomingConnectionsBySession = {1}});
 
     auto dr = sp<MyDeathRec>::make();
     ASSERT_EQ(OK, proc.rootBinder->linkToDeath(dr, (void*)1, 0));
@@ -827,7 +857,7 @@ TEST_P(BinderRpc, SingleDeathRecipientOnShutdown) {
 
     // Death recipient needs to have an incoming connection to be called
     auto proc = createRpcTestSocketServerProcess(
-            {.numThreads = 1, .numSessions = 1, .numIncomingConnectionsBySession = {1}});
+            {.numMaxThreads = 1, .numSessions = 1, .numIncomingConnectionsBySession = {1}});
 
     auto dr = sp<MyDeathRec>::make();
     EXPECT_EQ(OK, proc.rootBinder->linkToDeath(dr, (void*)1, 0));
@@ -860,7 +890,7 @@ TEST_P(BinderRpc, DeathRecipientFailsWithoutIncoming) {
         void binderDied(const wp<IBinder>& /* who */) override {}
     };
 
-    auto proc = createRpcTestSocketServerProcess({.numThreads = 1, .numSessions = 1});
+    auto proc = createRpcTestSocketServerProcess({.numMaxThreads = 1, .numSessions = 1});
 
     auto dr = sp<MyDeathRec>::make();
     EXPECT_EQ(INVALID_OPERATION, proc.rootBinder->linkToDeath(dr, (void*)1, 0));
@@ -879,7 +909,7 @@ TEST_P(BinderRpc, UnlinkDeathRecipient) {
 
     // Death recipient needs to have an incoming connection to be called
     auto proc = createRpcTestSocketServerProcess(
-            {.numThreads = 1, .numSessions = 1, .numIncomingConnectionsBySession = {1}});
+            {.numMaxThreads = 1, .numSessions = 1, .numIncomingConnectionsBySession = {1}});
 
     auto dr = sp<MyDeathRec>::make();
     ASSERT_EQ(OK, proc.rootBinder->linkToDeath(dr, (void*)1, 0));
@@ -1061,14 +1091,15 @@ TEST_P(BinderRpc, SendMaxFiles) {
         GTEST_SKIP() << "Would fail trivially (which is tested by BinderRpc::SendFiles)";
     }
 
+    auto transportMode = RpcSession::FileDescriptorTransportMode::UNIX;
     auto proc = createRpcTestSocketServerProcess({
-            .clientFileDescriptorTransportMode = RpcSession::FileDescriptorTransportMode::UNIX,
-            .serverSupportedFileDescriptorTransportModes =
-                    {RpcSession::FileDescriptorTransportMode::UNIX},
+            .clientFileDescriptorTransportMode = transportMode,
+            .serverSupportedFileDescriptorTransportModes = {transportMode},
     });
 
+    size_t maxFds = getRpcTransportModeMaxFds(transportMode);
     std::vector<android::os::ParcelFileDescriptor> files;
-    for (int i = 0; i < 253; i++) {
+    for (size_t i = 0; i < maxFds; i++) {
         files.emplace_back(android::os::ParcelFileDescriptor(mockFileDescriptor("a")));
     }
 
@@ -1078,7 +1109,7 @@ TEST_P(BinderRpc, SendMaxFiles) {
 
     std::string result;
     EXPECT_TRUE(ReadFdToString(out.get(), &result));
-    EXPECT_EQ(result, std::string(253, 'a'));
+    EXPECT_EQ(result, std::string(maxFds, 'a'));
 }
 
 TEST_P(BinderRpc, SendTooManyFiles) {
@@ -1086,14 +1117,15 @@ TEST_P(BinderRpc, SendTooManyFiles) {
         GTEST_SKIP() << "Would fail trivially (which is tested by BinderRpc::SendFiles)";
     }
 
+    auto transportMode = RpcSession::FileDescriptorTransportMode::UNIX;
     auto proc = createRpcTestSocketServerProcess({
-            .clientFileDescriptorTransportMode = RpcSession::FileDescriptorTransportMode::UNIX,
-            .serverSupportedFileDescriptorTransportModes =
-                    {RpcSession::FileDescriptorTransportMode::UNIX},
+            .clientFileDescriptorTransportMode = transportMode,
+            .serverSupportedFileDescriptorTransportModes = {transportMode},
     });
 
+    size_t maxFds = getRpcTransportModeMaxFds(transportMode);
     std::vector<android::os::ParcelFileDescriptor> files;
-    for (int i = 0; i < 254; i++) {
+    for (size_t i = 0; i < maxFds + 1; i++) {
         files.emplace_back(android::os::ParcelFileDescriptor(mockFileDescriptor("a")));
     }
 
@@ -1113,7 +1145,8 @@ TEST_P(BinderRpc, AppendInvalidFd) {
                     {RpcSession::FileDescriptorTransportMode::UNIX},
     });
 
-    int badFd = fcntl(STDERR_FILENO, F_DUPFD_CLOEXEC, 0);
+    int badFd;
+    ASSERT_EQ(OK, binder::os::dupFileDescriptor(STDERR_FILENO, &badFd));
     ASSERT_NE(badFd, -1);
 
     // Close the file descriptor so it becomes invalid for dup
@@ -1188,7 +1221,7 @@ TEST_P(BinderRpc, Fds) {
     ssize_t beforeFds = countFds();
     ASSERT_GE(beforeFds, 0);
     {
-        auto proc = createRpcTestSocketServerProcess({.numThreads = 10});
+        auto proc = createRpcTestSocketServerProcess({.numMaxThreads = 10});
         ASSERT_EQ(OK, proc.rootBinder->pingBinder());
     }
     ASSERT_EQ(beforeFds, countFds()) << (system("ls -l /proc/self/fd/"), "fd leak?");
@@ -1239,7 +1272,7 @@ TEST_P(BinderRpcAccessor, InjectAndGetServiceHappyPath) {
     constexpr size_t kNumThreads = 10;
     const String16 kInstanceName("super.cool.service/better_than_default");
 
-    auto proc = createRpcTestSocketServerProcess({.numThreads = kNumThreads});
+    auto proc = createRpcTestSocketServerProcess({.numMaxThreads = kNumThreads});
     EXPECT_EQ(OK, proc.rootBinder->pingBinder());
 
     auto receipt = addAccessorProvider(
@@ -1332,7 +1365,7 @@ TEST_P(BinderRpcAccessor, InjectNoSockaddrProvided) {
     constexpr size_t kNumThreads = 10;
     const String16 kInstanceName("super.cool.service/better_than_default");
 
-    auto proc = createRpcTestSocketServerProcess({.numThreads = kNumThreads});
+    auto proc = createRpcTestSocketServerProcess({.numMaxThreads = kNumThreads});
     EXPECT_EQ(OK, proc.rootBinder->pingBinder());
 
     bool isProviderDeleted = false;
@@ -1492,12 +1525,18 @@ void infoProviderDataOnDelete(void* data) {
 }
 
 ABinderRpc_ConnectionInfo* infoProvider(const char* instance, void* cookie) {
+    if constexpr (!kEnableSharedLibs) {
+        return nullptr;
+    }
     if (instance == nullptr || cookie == nullptr) return nullptr;
     ConnectionInfoData* data = reinterpret_cast<ConnectionInfoData*>(cookie);
     return ABinderRpc_ConnectionInfo_new(reinterpret_cast<const sockaddr*>(&data->addr), data->len);
 }
 
 ABinderRpc_Accessor* getAccessor(const char* instance, void* cookie) {
+    if constexpr (!kEnableSharedLibs) {
+        return nullptr;
+    }
     if (instance == nullptr || cookie == nullptr) return nullptr;
     if (0 != strcmp(instance, kARpcInstance)) return nullptr;
 
@@ -1515,6 +1554,9 @@ ABinderRpc_Accessor* getAccessor(const char* instance, void* cookie) {
 class BinderARpcNdk : public ::testing::Test {};
 
 TEST_F(BinderARpcNdk, ARpcProviderNewDelete) {
+    if constexpr (!kEnableSharedLibs) {
+        GTEST_SKIP() << "Test disabled because Binder was built as a static library";
+    }
     bool isDeleted = false;
 
     AccessorProviderData* data = new AccessorProviderData{{}, 0, &isDeleted};
@@ -1533,6 +1575,9 @@ TEST_F(BinderARpcNdk, ARpcProviderNewDelete) {
 }
 
 TEST_F(BinderARpcNdk, ARpcProviderDeleteOnError) {
+    if constexpr (!kEnableSharedLibs) {
+        GTEST_SKIP() << "Test disabled because Binder was built as a static library";
+    }
     bool isDeleted = false;
     AccessorProviderData* data = new AccessorProviderData{{}, 0, &isDeleted};
 
@@ -1545,6 +1590,9 @@ TEST_F(BinderARpcNdk, ARpcProviderDeleteOnError) {
 }
 
 TEST_F(BinderARpcNdk, ARpcProvideOnErrorNoDeleteCbNoCrash) {
+    if constexpr (!kEnableSharedLibs) {
+        GTEST_SKIP() << "Test disabled because Binder was built as a static library";
+    }
     ABinderRpc_AccessorProvider* provider =
             ABinderRpc_registerAccessorProvider(getAccessor, kARpcSupportedServices, 0, nullptr,
                                                 nullptr);
@@ -1553,6 +1601,9 @@ TEST_F(BinderARpcNdk, ARpcProvideOnErrorNoDeleteCbNoCrash) {
 }
 
 TEST_F(BinderARpcNdk, ARpcProviderDuplicateInstance) {
+    if constexpr (!kEnableSharedLibs) {
+        GTEST_SKIP() << "Test disabled because Binder was built as a static library";
+    }
     const char* instance = "some.instance.name.IFoo/default";
     const uint32_t numInstances = 2;
     const char* instances[numInstances] = {
@@ -1592,6 +1643,9 @@ TEST_F(BinderARpcNdk, ARpcProviderDuplicateInstance) {
 }
 
 TEST_F(BinderARpcNdk, ARpcProviderRegisterNoInstance) {
+    if constexpr (!kEnableSharedLibs) {
+        GTEST_SKIP() << "Test disabled because Binder was built as a static library";
+    }
     const uint32_t numInstances = 0;
     const char* instances[numInstances] = {};
 
@@ -1605,6 +1659,9 @@ TEST_F(BinderARpcNdk, ARpcProviderRegisterNoInstance) {
 }
 
 TEST_F(BinderARpcNdk, ARpcAccessorNewDelete) {
+    if constexpr (!kEnableSharedLibs) {
+        GTEST_SKIP() << "Test disabled because Binder was built as a static library";
+    }
     bool isDeleted = false;
 
     ConnectionInfoData* data = new ConnectionInfoData{{}, 0, &isDeleted};
@@ -1619,6 +1676,9 @@ TEST_F(BinderARpcNdk, ARpcAccessorNewDelete) {
 }
 
 TEST_F(BinderARpcNdk, ARpcConnectionInfoNewDelete) {
+    if constexpr (!kEnableSharedLibs) {
+        GTEST_SKIP() << "Test disabled because Binder was built as a static library";
+    }
     sockaddr_vm addr{
             .svm_family = AF_VSOCK,
             .svm_port = VMADDR_PORT_ANY,
@@ -1633,6 +1693,9 @@ TEST_F(BinderARpcNdk, ARpcConnectionInfoNewDelete) {
 }
 
 TEST_F(BinderARpcNdk, ARpcAsFromBinderAsBinder) {
+    if constexpr (!kEnableSharedLibs) {
+        GTEST_SKIP() << "Test disabled because Binder was built as a static library";
+    }
     bool isDeleted = false;
 
     ConnectionInfoData* data = new ConnectionInfoData{{}, 0, &isDeleted};
@@ -1671,6 +1734,9 @@ TEST_F(BinderARpcNdk, ARpcAsFromBinderAsBinder) {
 }
 
 TEST_F(BinderARpcNdk, ARpcRequireProviderOnDeleteCallback) {
+    if constexpr (!kEnableSharedLibs) {
+        GTEST_SKIP() << "Test disabled because Binder was built as a static library";
+    }
     EXPECT_EQ(nullptr,
               ABinderRpc_registerAccessorProvider(getAccessor, kARpcSupportedServices,
                                                   kARpcNumSupportedServices,
@@ -1678,12 +1744,18 @@ TEST_F(BinderARpcNdk, ARpcRequireProviderOnDeleteCallback) {
 }
 
 TEST_F(BinderARpcNdk, ARpcRequireInfoOnDeleteCallback) {
+    if constexpr (!kEnableSharedLibs) {
+        GTEST_SKIP() << "Test disabled because Binder was built as a static library";
+    }
     EXPECT_EQ(nullptr,
               ABinderRpc_Accessor_new("the_best_service_name", infoProvider,
                                       reinterpret_cast<void*>(1), nullptr));
 }
 
 TEST_F(BinderARpcNdk, ARpcNoDataNoProviderOnDeleteCallback) {
+    if constexpr (!kEnableSharedLibs) {
+        GTEST_SKIP() << "Test disabled because Binder was built as a static library";
+    }
     ABinderRpc_AccessorProvider* provider =
             ABinderRpc_registerAccessorProvider(getAccessor, kARpcSupportedServices,
                                                 kARpcNumSupportedServices, nullptr, nullptr);
@@ -1692,6 +1764,9 @@ TEST_F(BinderARpcNdk, ARpcNoDataNoProviderOnDeleteCallback) {
 }
 
 TEST_F(BinderARpcNdk, ARpcNoDataNoInfoOnDeleteCallback) {
+    if constexpr (!kEnableSharedLibs) {
+        GTEST_SKIP() << "Test disabled because Binder was built as a static library";
+    }
     ABinderRpc_Accessor* accessor =
             ABinderRpc_Accessor_new("the_best_service_name", infoProvider, nullptr, nullptr);
     ASSERT_NE(nullptr, accessor);
@@ -1699,11 +1774,18 @@ TEST_F(BinderARpcNdk, ARpcNoDataNoInfoOnDeleteCallback) {
 }
 
 TEST_F(BinderARpcNdk, ARpcNullArgs_ConnectionInfo_new) {
+    if constexpr (!kEnableSharedLibs) {
+        GTEST_SKIP() << "Test disabled because Binder was built as a static library";
+    }
     sockaddr_storage addr;
     EXPECT_EQ(nullptr, ABinderRpc_ConnectionInfo_new(reinterpret_cast<const sockaddr*>(&addr), 0));
 }
 
 TEST_F(BinderARpcNdk, ARpcDelegateAccessorWrongInstance) {
+    if constexpr (!kEnableSharedLibs) {
+        GTEST_SKIP() << "Test disabled because Binder was built as a static library";
+    }
+
     AccessorProviderData* data = new AccessorProviderData();
     ABinderRpc_Accessor* accessor = getAccessor(kARpcInstance, data);
     ASSERT_NE(accessor, nullptr);
@@ -1721,6 +1803,14 @@ TEST_F(BinderARpcNdk, ARpcDelegateAccessorWrongInstance) {
 }
 
 TEST_F(BinderARpcNdk, ARpcDelegateNonAccessor) {
+    // TODO: test in environments we can get a proxied service?
+#ifndef __BIONIC__
+    GTEST_SKIP() << "Can only get AIDL services on device.";
+#endif
+    if constexpr (!kEnableSharedLibs) {
+        GTEST_SKIP() << "Test disabled because Binder was built as a static library";
+    }
+
     auto service = defaultServiceManager()->checkService(String16(kKnownAidlService));
     ASSERT_NE(nullptr, service);
     ndk::SpAIBinder binder = ndk::SpAIBinder(AIBinder_fromPlatformBinder(service));
@@ -1734,6 +1824,10 @@ TEST_F(BinderARpcNdk, ARpcDelegateNonAccessor) {
 
 inline void getServiceTest(BinderRpcTestProcessSession& proc,
                            ABinderRpc_AccessorProvider_getAccessorCallback getAccessor) {
+    if constexpr (!kEnableSharedLibs) {
+        GTEST_SKIP() << "Test disabled because Binder was built as a static library";
+    }
+
     constexpr size_t kNumThreads = 10;
     bool isDeleted = false;
 
@@ -1760,8 +1854,12 @@ inline void getServiceTest(BinderRpcTestProcessSession& proc,
 }
 
 TEST_P(BinderRpcAccessor, ARpcGetService) {
+    if constexpr (!kEnableSharedLibs) {
+        GTEST_SKIP() << "Test disabled because Binder was built as a static library";
+    }
+
     constexpr size_t kNumThreads = 10;
-    auto proc = createRpcTestSocketServerProcess({.numThreads = kNumThreads});
+    auto proc = createRpcTestSocketServerProcess({.numMaxThreads = kNumThreads});
     EXPECT_EQ(OK, proc.rootBinder->pingBinder());
 
     getServiceTest(proc, getAccessor);
@@ -1769,6 +1867,10 @@ TEST_P(BinderRpcAccessor, ARpcGetService) {
 
 // Create accessors and wrap each of the accessors in a delegator
 ABinderRpc_Accessor* getDelegatedAccessor(const char* instance, void* cookie) {
+    if constexpr (!kEnableSharedLibs) {
+        return nullptr;
+    }
+
     ABinderRpc_Accessor* accessor = getAccessor(instance, cookie);
     AIBinder* accessorBinder = ABinderRpc_Accessor_asBinder(accessor);
     // Once we have a handle to the AIBinder which holds a reference to the
@@ -1791,8 +1893,12 @@ ABinderRpc_Accessor* getDelegatedAccessor(const char* instance, void* cookie) {
 }
 
 TEST_P(BinderRpcAccessor, ARpcGetServiceWithDelegator) {
+    if constexpr (!kEnableSharedLibs) {
+        GTEST_SKIP() << "Test disabled because Binder was built as a static library";
+    }
+
     constexpr size_t kNumThreads = 10;
-    auto proc = createRpcTestSocketServerProcess({.numThreads = kNumThreads});
+    auto proc = createRpcTestSocketServerProcess({.numMaxThreads = kNumThreads});
     EXPECT_EQ(OK, proc.rootBinder->pingBinder());
 
     getServiceTest(proc, getDelegatedAccessor);
@@ -1948,6 +2054,8 @@ static std::vector<SocketType> testSocketTypes(bool hasPreconnected = true) {
 static std::vector<BinderRpc::ParamType> getBinderRpcParams() {
     std::vector<BinderRpc::ParamType> ret;
 
+    // IF YOU ARE MAKING MAJOR CHANGES TO RPC BINDER, SET THIS TO 'true' TO RUN ALL COMBINATIONS OF
+    // TESTS
     constexpr bool full = false;
 
     for (const auto& type : testSocketTypes()) {
@@ -1957,6 +2065,14 @@ static std::vector<BinderRpc::ParamType> getBinderRpcParams() {
                     for (const auto& serverVersion : testVersions()) {
                         for (bool singleThreaded : {false, true}) {
                             for (bool noKernel : noKernelValues()) {
+                                // SKIP combinatorial testing of old versions, since otherwise this
+                                // test takes way too long
+                                if (!full &&
+                                    (clientVersion != RPC_WIRE_PROTOCOL_VERSION &&
+                                     serverVersion != RPC_WIRE_PROTOCOL_VERSION) &&
+                                    security != RpcSecurity::RAW)
+                                    continue;
+
                                 ret.push_back(BinderRpc::ParamType{
                                         .type = type,
                                         .security = security,
@@ -2097,6 +2213,48 @@ TEST(BinderRpc, Java) {
     ASSERT_EQ(descriptor, rpcBinder->getInterfaceDescriptor())
             << "getInterfaceDescriptor should not crash system_server";
     ASSERT_EQ(OK, rpcBinder->pingBinder());
+}
+
+TEST(BinderRpcNoSetup, OverrideServerMaxThreadsRootObj) {
+    sp<RpcServer> server = RpcServer::make();
+    ASSERT_EQ(server->getMaxThreads(), 1u);
+
+    sp<BBinder> binder = sp<BBinder>::make();
+
+    binder->setMinRpcThreads(15u);
+    server->setRootObject(binder);
+    EXPECT_EQ(server->getMaxThreads(), 15u);
+}
+
+TEST(BinderRpcNoSetup, OverrideServerMaxThreadsWeakRootObj) {
+    sp<RpcServer> server = RpcServer::make();
+    ASSERT_EQ(server->getMaxThreads(), 1u);
+
+    sp<BBinder> binder = sp<BBinder>::make();
+
+    binder->setMinRpcThreads(15u);
+    server->setRootObjectWeak(binder);
+    EXPECT_EQ(server->getMaxThreads(), 15u);
+}
+
+TEST_P(BinderRpc, MinThreadsPerBinderSaturation) {
+    if (clientOrServerSingleThreaded()) {
+        GTEST_SKIP() << "This test requires multiple threads";
+    }
+    constexpr uint16_t kMinThreadsPerBinder = 7;
+    auto proc = createRpcTestSocketServerProcess(
+            {.numMaxThreads = 1, .numMinThreadsPerBinder = kMinThreadsPerBinder});
+
+    // The thread handling this will block until another
+    // thread handles the blockingRecvInt call. This will only work
+    // with more than one thread
+    EXPECT_OK(proc.rootIface->blockingSendIntOneway(1));
+    int n;
+    EXPECT_OK(proc.rootIface->blockingRecvInt(&n));
+    EXPECT_EQ(n, 1);
+
+    // force the decref
+    saturateThreadPool(kMinThreadsPerBinder, proc.rootIface);
 }
 
 class BinderRpcServerOnly : public ::testing::TestWithParam<std::tuple<RpcSecurity, uint32_t>> {

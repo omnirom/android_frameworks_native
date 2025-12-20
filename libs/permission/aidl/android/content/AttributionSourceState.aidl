@@ -20,7 +20,7 @@ package android.content;
  * Payload for the {@link AttributionSource} class needed to interoperate
  * with different languages.
  *
- * {@hide}
+ * @hide
  */
 parcelable AttributionSourceState {
     /** The PID that is accessing the permission protected data. */

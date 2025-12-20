@@ -16,11 +16,10 @@
 
 #define ATRACE_TAG ATRACE_TAG_GRAPHICS
 
-#undef LOG_TAG
-#define LOG_TAG "VsyncModulator"
-
 #include "VsyncModulator.h"
 
+#include <android/gui/EarlyWakeupInfo.h>
+#include <common/FlagManager.h>
 #include <common/trace.h>
 #include <log/log.h>
 
@@ -31,6 +30,8 @@
 using namespace std::chrono_literals;
 
 namespace android::scheduler {
+
+using base::StringAppendF;
 
 const std::chrono::nanoseconds VsyncModulator::MIN_EARLY_TRANSACTION_TIME = 1ms;
 
@@ -44,30 +45,51 @@ VsyncConfig VsyncModulator::setVsyncConfigSet(const VsyncConfigSet& config) {
     return updateVsyncConfigLocked();
 }
 
-VsyncModulator::VsyncConfigOpt VsyncModulator::setTransactionSchedule(TransactionSchedule schedule,
-                                                                      const sp<IBinder>& token) {
+VsyncModulator::VsyncConfigOpt VsyncModulator::setTransactionSchedule(
+        TransactionSchedule schedule, std::vector<gui::EarlyWakeupInfo> earlyWakeupInfos) {
     std::lock_guard<std::mutex> lock(mMutex);
-    switch (schedule) {
-        case Schedule::EarlyStart:
-            if (token) {
-                mEarlyWakeupRequests.emplace(token);
-                token->linkToDeath(sp<DeathRecipient>::fromExisting(this));
-            } else {
-                ALOGW("%s: EarlyStart requested without a valid token", __func__);
+
+    for (auto& info : earlyWakeupInfos) {
+        sp<IBinder> token = info.token;
+        std::string trace = info.trace;
+
+        switch (schedule) {
+            case Schedule::EarlyStart:
+                if (token) {
+                    SFTRACE_FORMAT_INSTANT("%s: EarlyStart requested by %s with token %p", __func__,
+                                           trace.c_str(), token.get());
+                    mEarlyWakeupRequests[token] =
+                            std::make_unique<gui::EarlyWakeupInfo>(std::move(info));
+                    token->linkToDeath(sp<DeathRecipient>::fromExisting(this));
+                } else {
+                    ALOGW("%s: EarlyStart requested without a valid token", __func__);
+                }
+                break;
+            case Schedule::EarlyEnd: {
+                if (token && mEarlyWakeupRequests.erase(token)) {
+                    SFTRACE_FORMAT_INSTANT("%s: EarlyEnd requested by %s with token %p", __func__,
+                                           trace.c_str(), token.get());
+                    token->unlinkToDeath(sp<DeathRecipient>::fromExisting(this));
+                } else {
+                    ALOGW("%s: Unexpected EarlyEnd %s", __func__, info.toString().c_str());
+                }
+                break;
             }
-            break;
-        case Schedule::EarlyEnd: {
-            if (token && mEarlyWakeupRequests.erase(token) > 0) {
-                token->unlinkToDeath(sp<DeathRecipient>::fromExisting(this));
-            } else {
-                ALOGW("%s: Unexpected EarlyEnd", __func__);
-            }
-            break;
+            case Schedule::Late:
+                // This is a speculative fix because we think we are leaking tokens.
+                // If earlyWakeupInfos is not empty, we were not in Schedule late
+                // because we got both eEarlyWakeupStart and eEarlyWakeupEnd in the
+                // same transaction. Clean up state for any earlyWakeupEnd operations.
+                if (!info.isStartRequest) {
+                    ALOGW("%s: Clearing request by %s with token %p", __func__, trace.c_str(),
+                          token.get());
+                    mEarlyWakeupRequests.erase(token);
+                }
+                break;
         }
-        case Schedule::Late:
-            // No change to mEarlyWakeup for non-explicit states.
-            break;
     }
+
+    SFTRACE_INT("EarlyWakeupRequests", static_cast<int>(mEarlyWakeupRequests.size()));
 
     if (mEarlyWakeupRequests.empty() && schedule == Schedule::EarlyEnd) {
         mEarlyTransactionFrames = MIN_EARLY_TRANSACTION_FRAMES;
@@ -167,8 +189,6 @@ VsyncConfig VsyncModulator::updateVsyncConfigLocked() {
     SFTRACE_INT("Vsync-Late", &mVsyncConfig == &mVsyncConfigSet.late);
 
     // Trace early vsync conditions
-    SFTRACE_INT("EarlyWakeupRequests",
-                                 static_cast<int>(mEarlyWakeupRequests.size()));
     SFTRACE_INT("EarlyTransactionFrames", mEarlyTransactionFrames);
     SFTRACE_INT("RefreshRateChangePending", mRefreshRateChangePending);
 
@@ -180,6 +200,7 @@ VsyncConfig VsyncModulator::updateVsyncConfigLocked() {
 
 void VsyncModulator::binderDied(const wp<IBinder>& who) {
     std::lock_guard<std::mutex> lock(mMutex);
+    ALOGW("binder died");
     mEarlyWakeupRequests.erase(who);
     static_cast<void>(updateVsyncConfigLocked());
 }
@@ -187,6 +208,14 @@ void VsyncModulator::binderDied(const wp<IBinder>& who) {
 bool VsyncModulator::isVsyncConfigEarly() const {
     std::lock_guard<std::mutex> lock(mMutex);
     return getNextVsyncConfigType() != VsyncConfigType::Late;
+}
+
+void VsyncModulator::dump(std::string& result) const {
+    std::lock_guard<std::mutex> lock(mMutex);
+    StringAppendF(&result, " Early Wakeup Requests (count=%zu):\n", mEarlyWakeupRequests.size());
+    for (const auto& pair : mEarlyWakeupRequests) {
+        StringAppendF(&result, "   %s\n", pair.second->toString().c_str());
+    }
 }
 
 } // namespace android::scheduler

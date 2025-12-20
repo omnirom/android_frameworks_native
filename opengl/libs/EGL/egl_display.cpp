@@ -356,32 +356,19 @@ EGLBoolean egl_display_t::initialize(EGLint* major, EGLint* minor) {
 
         hasColorSpaceSupport = findExtension(disp.queryString.extensions, "EGL_KHR_gl_colorspace");
 
-        // Note: CDD requires that devices supporting wide color and/or HDR color also support
-        // the EGL_KHR_gl_colorspace extension.
-        bool wideColorBoardConfig = android::sysprop::has_wide_color_display(false);
-
-        // Add wide-color extensions if device can support wide-color
-        if (wideColorBoardConfig && hasColorSpaceSupport) {
+        // If colorspace is supported, add everything that the loader handles
+        if (hasColorSpaceSupport) {
             std::vector<std::string> wideColorExtensions =
-                    {"EGL_EXT_gl_colorspace_scrgb", "EGL_EXT_gl_colorspace_scrgb_linear",
-                     "EGL_EXT_gl_colorspace_display_p3_linear", "EGL_EXT_gl_colorspace_display_p3",
-                     "EGL_EXT_gl_colorspace_display_p3_passthrough"};
+                    {"EGL_EXT_gl_colorspace_scrgb",
+                     "EGL_EXT_gl_colorspace_scrgb_linear",
+                     "EGL_EXT_gl_colorspace_display_p3_linear",
+                     "EGL_EXT_gl_colorspace_display_p3",
+                     "EGL_EXT_gl_colorspace_display_p3_passthrough",
+                     "EGL_EXT_gl_colorspace_bt2020_hlg",
+                     "EGL_EXT_gl_colorspace_bt2020_linear",
+                     "EGL_EXT_gl_colorspace_bt2020_pq"};
             extensionStrings.insert(extensionStrings.end(), wideColorExtensions.begin(),
                                     wideColorExtensions.end());
-        }
-
-        bool hasHdrBoardConfig = android::sysprop::has_HDR_display(false);
-
-        if (hasHdrBoardConfig && hasColorSpaceSupport) {
-            // hasHDRBoardConfig indicates the system is capable of supporting HDR content.
-            // Typically that means there is an HDR capable display attached, but could be
-            // support for attaching an HDR display. In either case, advertise support for
-            // HDR color spaces.
-            std::vector<std::string> hdrExtensions = {"EGL_EXT_gl_colorspace_bt2020_hlg",
-                                                      "EGL_EXT_gl_colorspace_bt2020_linear",
-                                                      "EGL_EXT_gl_colorspace_bt2020_pq"};
-            extensionStrings.insert(extensionStrings.end(), hdrExtensions.begin(),
-                                    hdrExtensions.end());
         }
 
         char const* start = gExtensionString;

@@ -18,19 +18,22 @@
 
 #ifndef __ANDROID_VNDK__
 
-#include <processinfo/IProcessInfoService.h>
 #include <utils/Errors.h>
 #include <utils/Singleton.h>
 #include <sys/types.h>
 
 namespace android {
 
+namespace os {
+class IProcessInfoService;
+};
+
 // ----------------------------------------------------------------------
 
 class ProcessInfoService : public Singleton<ProcessInfoService> {
 
     friend class Singleton<ProcessInfoService>;
-    sp<IProcessInfoService> mProcessInfoService;
+    sp<os::IProcessInfoService> mProcessInfoService;
     Mutex mProcessInfoLock;
 
     ProcessInfoService();

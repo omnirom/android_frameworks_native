@@ -26,9 +26,7 @@ cc_benchmark {
     defaults: ["android.hardware.power-ndk_shared"],
     srcs: [
         "main.cpp",
-        "PowerHalAidlBenchmarks.cpp",
         "PowerHalControllerBenchmarks.cpp",
-        "PowerHalHidlBenchmarks.cpp",
     ],
     shared_libs: [
         "libbase",

@@ -17,9 +17,11 @@
 #pragma once
 
 #include <log/log.h>
+#include <map>
 #include <set>
 #include <unordered_map>
 #include <unordered_set>
+#include <vector>
 
 namespace android::adpf {
 
@@ -33,21 +35,42 @@ public:
     bool bindSessionIDToLayers(int sessionId, const std::vector<int32_t>& layerIds);
     // Get the set of sessions that are mapped to a specific layer id
     void getAssociatedSessions(int32_t layerId, std::vector<int32_t>& sessionIdsOut);
-    // Get the set of layers that are currently being tracked
+    // Get a copy of the whole set of layers that are currently being tracked
     void getCurrentlyRelevantLayers(std::unordered_set<int32_t>& currentlyRelevantLayers);
+    // Find out whether a given layer should be tracked
+    bool isLayerRelevant(int32_t layer);
+    // Get the session associations of any layers that changed since the last time we called this
+    std::map<int32_t, int32_t> getLayerMappingUpdates();
+    // Gets the set of items that changed
+    void getUpdatedItems(std::set<int32_t>& updatedLayers, std::set<int32_t>& updatedSessions);
+    // Is there any active mapping between sessions and layers currently
+    bool isIdle();
 
 private:
+    struct MappedType;
+    struct EntrySet {
+        std::set<int32_t> updates;
+        std::unordered_map<int32_t, MappedType> entries;
+    };
+
+    EntrySet mSessions;
+    EntrySet mLayers;
+
     struct MappedType {
-        MappedType(int32_t id, std::unordered_map<int32_t, MappedType>& otherList)
-              : mId(id), mOtherList(otherList) {};
+        MappedType(int32_t id, EntrySet& sameSet, EntrySet& otherSet)
+              : mId(id), mMyEntrySet(sameSet), mOtherEntrySet(otherSet) {};
         MappedType() = delete;
         ~MappedType() { swapLinks({}); }
 
         // Replace the set of associated IDs for this mapped type with a different set of IDs,
         // updating only associations which have changed between the two sets
         void swapLinks(std::set<int32_t>&& incoming) {
+            if (mLinks == incoming) {
+                return;
+            }
             auto&& oldIter = mLinks.begin();
             auto&& newIter = incoming.begin();
+            bool isChanged = false;
 
             // Dump all outdated values and insert new ones
             while (oldIter != mLinks.end() || newIter != incoming.end()) {
@@ -55,6 +78,7 @@ private:
                 // We should have already ensured what we're linking to exists
                 if (oldIter == mLinks.end() || (newIter != incoming.end() && *newIter < *oldIter)) {
                     addRemoteAssociation(*newIter);
+                    isChanged = true;
                     ++newIter;
                     continue;
                 }
@@ -62,6 +86,7 @@ private:
                 // If there is a value in the old set but not the new set
                 if (newIter == incoming.end() || (oldIter != mLinks.end() && *oldIter < *newIter)) {
                     dropRemoteAssociation(*oldIter);
+                    isChanged = true;
                     ++oldIter;
                     continue;
                 }
@@ -73,26 +98,31 @@ private:
                     continue;
                 }
             }
-
-            mLinks.swap(incoming);
+            if (isChanged) {
+                mMyEntrySet.updates.insert(mId);
+                mLinks.swap(incoming);
+            }
         }
 
         void addRemoteAssociation(int32_t other) {
-            auto&& iter = mOtherList.find(other);
-            if (iter != mOtherList.end()) {
+            auto&& iter = mOtherEntrySet.entries.find(other);
+            if (iter != mOtherEntrySet.entries.end()) {
                 iter->second.mLinks.insert(mId);
+                mOtherEntrySet.updates.insert(iter->first);
             } else {
                 ALOGE("Existing entry in SessionLayerMap, link failed");
             }
         }
 
         void dropRemoteAssociation(int32_t other) {
-            auto&& iter = mOtherList.find(other);
-            if (iter != mOtherList.end()) {
+            auto&& iter = mOtherEntrySet.entries.find(other);
+            if (iter != mOtherEntrySet.entries.end()) {
                 iter->second.mLinks.erase(mId);
+                mOtherEntrySet.updates.insert(iter->first);
+                // If the item has no links, drop them from the map
                 if (iter->second.mLinks.empty()) {
-                    // This only erases them from the map, not from general tracking
-                    mOtherList.erase(iter);
+                    // This does not drop them from general tracking, nor make them "dead"
+                    mOtherEntrySet.entries.erase(iter);
                 }
             } else {
                 ALOGE("Missing entry in SessionLayerMap, unlinking failed");
@@ -101,11 +131,9 @@ private:
 
         int32_t mId;
         std::set<int> mLinks;
-        std::unordered_map<int32_t, MappedType>& mOtherList;
+        EntrySet& mMyEntrySet;
+        EntrySet& mOtherEntrySet;
     };
-
-    std::unordered_map<int32_t, MappedType> mSessions;
-    std::unordered_map<int32_t, MappedType> mLayers;
 };
 
 } // namespace android::adpf

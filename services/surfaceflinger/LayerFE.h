@@ -60,6 +60,8 @@ public:
     void setReleaseFence(const FenceResult& releaseFence) override;
     LayerFE::ReleaseFencePromiseStatus getReleaseFencePromiseStatus() override;
     void setReleasedBuffer(sp<GraphicBuffer> buffer) override;
+    void setLastClientTargetAcquireFence(const FenceResult&) override;
+    sp<Fence> getAndClearLastClientTargetAcquireFence() override;
     void onPictureProfileCommitted() override;
 
     // Used for debugging purposes, e.g. perfetto tracing, dumpsys.
@@ -83,13 +85,17 @@ private:
             compositionengine::LayerFE::LayerSettings&,
             compositionengine::LayerFE::ClientCompositionTargetSettings&) const;
 
-    bool hasEffect() const { return fillsColor() || drawShadows() || hasBlur() || hasOutline(); }
+    bool hasEffect() const {
+        return fillsColor() || drawShadows() || hasBlur() || hasBorderSettings() ||
+                hasBoxShadowSettings();
+    }
     bool hasBufferOrSidebandStream() const;
 
     bool fillsColor() const;
     bool hasBlur() const;
     bool drawShadows() const;
-    bool hasOutline() const;
+    bool hasBoxShadowSettings() const;
+    bool hasBorderSettings() const;
 
     const sp<GraphicBuffer> getBuffer() const;
 
@@ -99,6 +105,7 @@ private:
     ReleaseFencePromiseStatus mReleaseFencePromiseStatus = ReleaseFencePromiseStatus::UNINITIALIZED;
     HwcLayerDebugState mLastHwcState;
     wp<GraphicBuffer> mReleasedBuffer;
+    FenceResult mLastClientCompositionAcquireFence = Fence::NO_FENCE;
 };
 
 } // namespace android

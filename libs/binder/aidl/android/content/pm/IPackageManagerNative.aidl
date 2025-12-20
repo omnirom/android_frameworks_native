@@ -18,6 +18,7 @@
 package android.content.pm;
 
 import android.content.pm.IStagedApexObserver;
+import android.content.pm.PackageInfoNative;
 import android.content.pm.StagedApexInfo;
 
 /**
@@ -43,6 +44,32 @@ interface IPackageManagerNative {
     @utf8InCpp String[] getNamesForUids(in int[] uids);
 
     /**
+     * Retrieve package signing information for an application package that is installed on the
+     * system.
+     *
+     * Note that the PackageInfoNative returned may contain unset @nullable fields.  This method
+     * only populates the signingInfo field, as well as the (non-@nullable) packageName.
+     *
+     * @param packageName The full name (i.e. com.google.apps.contacts) of the desired package.
+     * @param userId of the user that has the installed package.
+     *
+     * @return A PackageInfoNative object containing the package name and signing info.
+     */
+    @nullable PackageInfoNative getPackageInfoWithSigningInfo(String packageName, int userId);
+
+    /**
+     * Retrieve signing information for application packages associated with the specified uid.
+     *
+     * Note that the PackageInfoNative returned may contain unset @nullable fields.  This method
+     * only populates the signingInfo field, as well as the (non-@nullable) packageName.
+     *
+     * @param uid The uid for which associated package information should be returned.
+     *
+     * @return An array of PackageInfoNative objects containing package names and signing info.
+     */
+    @nullable PackageInfoNative[] getPackageInfoWithSigningInfoForUid(int uid);
+
+    /**
      * Return the UID associated with the given package name.
      * Note that the same package will have different UIDs under different UserHandle on
      * the same device.
@@ -55,18 +82,26 @@ interface IPackageManagerNative {
      int getPackageUid(in @utf8InCpp String packageName, in long flags, in int userId);
 
     /**
+     * Checks whether the specified package has the specified permission.
+     *
+     * @param permName The name of the permission you are checking for.
+     * @param packageName The name of the package you are checking against.
+     * @return PackageManager#PERMISSION_GRANTED (0) is returned if the specified package has the
+     *         specified permission, or PackageManager#PERMISSION_DENIED (-1) if it does not.
+     */
+    int checkPermission(in String permName, in String packageName, in int userId);
+
+    /**
      * Returns the name of the installer (a package) which installed the named
      * package. Preloaded packages return the string "preload". Sideloaded packages
      * return an empty string. Unknown or unknowable are returned as empty strings.
      */
-
     @utf8InCpp String getInstallerForPackage(in String packageName);
 
     /**
      * Returns the version code of the named package.
      * Unknown or unknowable versions are returned as 0.
      */
-
     long getVersionCodeForPackage(in String packageName);
 
     /**

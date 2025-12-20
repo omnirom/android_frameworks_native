@@ -18,6 +18,7 @@
 
 #include <chrono>
 #include <optional>
+#include <unordered_set>
 #include <vector>
 #include "utils/Timers.h"
 
@@ -79,8 +80,8 @@ struct CompositionRefreshArgs {
     // frame. Only set if the color transform is changing this frame.
     std::optional<mat4> colorTransformMatrix;
 
-    // If true, client composition is always used.
-    bool devOptForceClientComposition{false};
+    // If a layer is on layer stack specified here, it will client composite.
+    std::unordered_set<ui::LayerStack> forcedClientCompositionLayerStacks;
 
     // If set, causes the dirty regions to flash with the delay
     std::optional<std::chrono::microseconds> devOptFlashDirtyRegionsDelay;

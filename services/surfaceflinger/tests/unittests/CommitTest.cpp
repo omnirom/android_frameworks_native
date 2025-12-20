@@ -58,6 +58,7 @@ TEST_F(CommitTest, noUpdatesDoesNotScheduleComposite) {
     flinger_setup();
     bool unused;
     bool mustComposite = mFlinger.updateLayerSnapshots(VsyncId{1}, /*frameTimeNs=*/0,
+                                                       /*expectedPresentTimeNs*/ 0,
                                                        /*transactionsFlushed=*/0, unused);
     EXPECT_FALSE(mustComposite);
 }
@@ -69,6 +70,7 @@ TEST_F(CommitTest, eTransactionNeededFlagSchedulesComposite) {
     mFlinger.setDaltonizerType(ColorBlindnessType::Deuteranomaly);
     bool unused;
     bool mustComposite = mFlinger.updateLayerSnapshots(VsyncId{1}, /*frameTimeNs=*/0,
+                                                       /*expectedPresentTimeNs*/ 0,
                                                        /*transactionsFlushed=*/0, unused);
     EXPECT_TRUE(mustComposite);
 }
@@ -106,6 +108,7 @@ TEST_F(CommitTest, metadataNotIncluded) {
 
     bool unused;
     bool mustComposite = mFlinger.updateLayerSnapshots(VsyncId{1}, /*frameTimeNs=*/0,
+                                                       /*expectedPresentTimeNs*/ 0,
                                                        /*transactionsFlushed=*/1, unused);
     EXPECT_TRUE(mustComposite);
 
@@ -150,6 +153,7 @@ TEST_F(CommitTest, metadataIsIncluded) {
 
     bool unused;
     bool mustComposite = mFlinger.updateLayerSnapshots(VsyncId{1}, /*frameTimeNs=*/0,
+                                                       /*expectedPresentTimeNs*/ 0,
                                                        /*transactionsFlushed=*/1, unused);
     EXPECT_TRUE(mustComposite);
 

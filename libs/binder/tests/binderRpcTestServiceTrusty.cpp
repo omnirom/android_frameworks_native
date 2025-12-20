@@ -77,10 +77,11 @@ int main(void) {
         // Message size needs to be large enough to cover all messages sent by the
         // tests: SendAndGetResultBackBig sends two large strings.
         constexpr size_t max_msg_size = 4096;
+        constexpr size_t max_queue_len = 32;
         auto server =
                 RpcServerTrusty::make(hset, serverInfo.port->c_str(),
                                       std::shared_ptr<const RpcServerTrusty::PortAcl>(&port_acl),
-                                      max_msg_size);
+                                      max_msg_size, max_queue_len);
         if (server == nullptr) {
             return EXIT_FAILURE;
         }

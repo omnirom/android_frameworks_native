@@ -143,7 +143,7 @@ extern "C" int LLVMFuzzerTestOneInput(uint8_t* data, size_t size) {
     NotifyStreamProvider streamProvider(fdp);
 
     FakeInputDispatcherPolicy fakePolicy;
-    auto dispatcher = std::make_unique<InputDispatcher>(fakePolicy);
+    auto dispatcher = std::make_unique<InputDispatcher>(fakePolicy, /*env=*/nullptr);
     dispatcher->setInputDispatchMode(/*enabled=*/true, /*frozen=*/false);
     // Start InputDispatcher thread
     dispatcher->start();

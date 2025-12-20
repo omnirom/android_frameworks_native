@@ -24,4 +24,5 @@ parcelable DeviceInfo {
     int deviceId;
     boolean external;
     int keyboardType;
+    boolean isVirtual;
 }

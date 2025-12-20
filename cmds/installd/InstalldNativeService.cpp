@@ -68,7 +68,6 @@
 #include "dexopt.h"
 #include "globals.h"
 #include "installd_deps.h"
-#include "otapreopt_utils.h"
 #include "utils.h"
 
 #include "CacheTracker.h"
@@ -76,6 +75,8 @@
 #include "MatchExtensionGen.h"
 #include "QuotaUtils.h"
 #include "SysTrace.h"
+
+#include <android_installd_flags.h>
 
 #ifndef LOG_TAG
 #define LOG_TAG "installd"
@@ -89,6 +90,7 @@ using android::base::StringPrintf;
 using android::base::unique_fd;
 using android::os::ParcelFileDescriptor;
 using std::endl;
+namespace flags = android::installd::flags;
 
 namespace android {
 namespace installd {
@@ -880,6 +882,11 @@ binder::Status InstalldNativeService::createAppDataLocked(
         }
         if (previousUid > 0 && previousUid != uid) {
             chown_app_profile_dir(packageName, appId, userId);
+        }
+
+        if (flags::enable_set_inode_quotas() &&
+            !PrepareAppInodeQuota(uuid ? uuid->c_str() : "", uid)) {
+            PLOG(ERROR) << "Failed to set hard quota " + path;
         }
 
         if (!prepare_app_profile_dir(packageName, appId, userId)) {
@@ -3284,7 +3291,7 @@ binder::Status InstalldNativeService::dexopt(
 
     const char* oat_dir = getCStr(outputPath);
     const char* instruction_set = instructionSet.c_str();
-    if (oat_dir != nullptr && !createOatDir(packageName, oat_dir, instruction_set).isOk()) {
+    if (oat_dir != nullptr && !createOatDirs(packageName, oat_dir, {instruction_set}).isOk()) {
         // Can't create oat dir - let dexopt use cache dir.
         oat_dir = nullptr;
     }
@@ -3492,17 +3499,15 @@ binder::Status InstalldNativeService::restoreconSdkDataLocked(
     return res;
 }
 
-binder::Status InstalldNativeService::createOatDir(const std::string& packageName,
-                                                   const std::string& oatDir,
-                                                   const std::string& instructionSet) {
+binder::Status InstalldNativeService::createOatDirs(const std::string& packageName,
+                                                    const std::string& oatDir,
+                                                    const std::vector<std::string>& oatSubDirs) {
     ENFORCE_UID(AID_SYSTEM);
     CHECK_ARGUMENT_PACKAGE_NAME(packageName);
     CHECK_ARGUMENT_PATH(oatDir);
     LOCK_PACKAGE();
 
     const char* oat_dir = oatDir.c_str();
-    const char* instruction_set = instructionSet.c_str();
-    char oat_instr_dir[PKG_PATH_MAX];
 
     if (validate_apk_path(oat_dir)) {
         return error("Invalid path " + oatDir);
@@ -3513,9 +3518,22 @@ binder::Status InstalldNativeService::createOatDir(const std::string& packageNam
     if (selinux_android_restorecon(oat_dir, 0)) {
         return error("Failed to restorecon " + oatDir);
     }
-    snprintf(oat_instr_dir, PKG_PATH_MAX, "%s/%s", oat_dir, instruction_set);
-    if (fs_prepare_dir(oat_instr_dir, S_IRWXU | S_IRWXG | S_IXOTH, AID_SYSTEM, AID_INSTALL)) {
-        return error(StringPrintf("Failed to prepare %s", oat_instr_dir));
+    for (const std::string& sub_dir : oatSubDirs) {
+        // Create the given sub-directory as well as any nonexistent parent directories.
+        std::filesystem::path current_path(oat_dir);
+        std::filesystem::path sub_path(sub_dir);
+        if (sub_path.is_absolute()) {
+            return error("Invalid oat sub directory " + sub_dir);
+        }
+        for (const std::filesystem::path& component : sub_path) {
+            current_path /= component;
+            std::string path_str = current_path.string();
+            CHECK_ARGUMENT_PATH(path_str);
+            if (fs_prepare_dir(path_str.c_str(), S_IRWXU | S_IRWXG | S_IXOTH, AID_SYSTEM,
+                               AID_INSTALL)) {
+                return error(StringPrintf("Failed to prepare %s", path_str.c_str()));
+            }
+        }
     }
     return ok();
 }

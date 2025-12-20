@@ -27,20 +27,15 @@ namespace android {
 
 class FeatureOverrideParser {
 public:
-    FeatureOverrideParser() = default;
-    FeatureOverrideParser(const FeatureOverrideParser &) = default;
+    FeatureOverrideParser(const std::string &configFilePath);
+    FeatureOverrideParser(const FeatureOverrideParser &) = delete;
     virtual ~FeatureOverrideParser() = default;
 
-    FeatureOverrides getFeatureOverrides();
-    void forceFileRead();
+    const FeatureOverrides &getCachedFeatureOverrides();
 
 private:
-    bool shouldReloadFeatureOverrides() const;
-    void parseFeatureOverrides();
-    // Allow FeatureOverrideParserMock to override with the unit test file's path.
-    virtual std::string getFeatureOverrideFilePath() const;
+    void parseFeatureOverrides(const std::string &configFilePath);
 
-    std::time_t mLastProtobufReadTime = 0;
     FeatureOverrides mFeatureOverrides;
 };
 

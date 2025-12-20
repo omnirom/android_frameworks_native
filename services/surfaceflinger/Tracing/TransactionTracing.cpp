@@ -14,10 +14,8 @@
  * limitations under the License.
  */
 
-#undef LOG_TAG
-#define LOG_TAG "TransactionTracing"
-
 #include <android-base/stringprintf.h>
+#include <common/trace.h>
 #include <log/log.h>
 #include <utils/SystemClock.h>
 
@@ -87,6 +85,7 @@ void TransactionTracing::onFlush(TransactionTracing::Mode mode) {
 void TransactionTracing::writeRingBufferToPerfetto(TransactionTracing::Mode mode) {
     // Write the ring buffer (starting state + following sequence of transactions) to perfetto
     // tracing sessions with the specified mode.
+    SFTRACE_CALL();
     const auto fileProto = writeToProto();
 
     TransactionDataSource::Trace([&](TransactionDataSource::TraceContext context) {
@@ -132,6 +131,7 @@ status_t TransactionTracing::writeToFile(const std::string& filename) {
 }
 
 perfetto::protos::TransactionTraceFile TransactionTracing::writeToProto() {
+    SFTRACE_CALL();
     std::scoped_lock<std::mutex> lock(mTraceLock);
     perfetto::protos::TransactionTraceFile fileProto = createTraceFileProto();
     const auto startingStateProto = createStartingStateProtoLocked();
@@ -160,6 +160,7 @@ perfetto::protos::TransactionTraceFile TransactionTracing::createTraceFileProto(
 }
 
 void TransactionTracing::dump(std::string& result) const {
+    SFTRACE_CALL();
     std::scoped_lock lock(mTraceLock);
     base::StringAppendF(&result, "  queued transactions=%zu created layers=%zu states=%zu\n",
                         mQueuedTransactions.size(), mCreatedLayers.size(), mStartingStates.size());
@@ -167,6 +168,7 @@ void TransactionTracing::dump(std::string& result) const {
 }
 
 void TransactionTracing::addQueuedTransaction(const QueuedTransactionState& transaction) {
+    SFTRACE_CALL();
     perfetto::protos::TransactionState* state =
             new perfetto::protos::TransactionState(mProtoParser.toProto(transaction));
     mTransactionQueue.push(state);
@@ -176,6 +178,7 @@ void TransactionTracing::addCommittedTransactions(int64_t vsyncId, nsecs_t commi
                                                   frontend::Update& newUpdate,
                                                   const frontend::DisplayInfos& displayInfos,
                                                   bool displayInfoChanged) {
+    SFTRACE_CALL();
     CommittedUpdates update;
     update.vsyncId = vsyncId;
     update.timestamp = commitTime;
@@ -228,6 +231,7 @@ void TransactionTracing::loop() {
 
 void TransactionTracing::addEntry(const std::vector<CommittedUpdates>& committedUpdates,
                                   const std::vector<uint32_t>& destroyedLayers) {
+    SFTRACE_CALL();
     std::scoped_lock lock(mTraceLock);
     std::vector<std::string> removedEntries;
     perfetto::protos::TransactionTraceEntry entryProto;
@@ -354,6 +358,7 @@ void TransactionTracing::onLayerRemoved(int32_t layerId) {
 void TransactionTracing::tryPushToTracingThread() {
     // Try to acquire the lock from main thread.
     if (mMainThreadLock.try_lock()) {
+        SFTRACE_NAME("pushTransactionsToTracingThread");
         // We got the lock! Collect any pending transactions and continue.
         mUpdates.insert(mUpdates.end(), std::make_move_iterator(mPendingUpdates.begin()),
                         std::make_move_iterator(mPendingUpdates.end()));
@@ -370,6 +375,7 @@ void TransactionTracing::tryPushToTracingThread() {
 
 void TransactionTracing::updateStartingStateLocked(
         const perfetto::protos::TransactionTraceEntry& removedEntry) {
+    SFTRACE_CALL();
     mStartingTimestamp = removedEntry.elapsed_realtime_nanos();
     // Keep track of layer starting state so we can reconstruct the layer state as we purge
     // transactions from the buffer.
@@ -410,6 +416,7 @@ void TransactionTracing::updateStartingStateLocked(
 
 std::optional<perfetto::protos::TransactionTraceEntry>
 TransactionTracing::createStartingStateProtoLocked() {
+    SFTRACE_CALL();
     if (mStartingStates.empty()) {
         return std::nullopt;
     }

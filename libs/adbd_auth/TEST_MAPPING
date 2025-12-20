@@ -1,0 +1,7 @@
+{
+  "presubmit": [
+    {
+      "name": "libadbd_auth_test"
+    }
+  ]
+}

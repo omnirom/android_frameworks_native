@@ -28,6 +28,8 @@ uint32_t bytesPerPixel(PixelFormat format) {
         case PIXEL_FORMAT_RGBX_8888:
         case PIXEL_FORMAT_BGRA_8888:
         case PIXEL_FORMAT_RGBA_1010102:
+        case PIXEL_FORMAT_BGRA_1010102:
+        case PIXEL_FORMAT_BGRX_1010102:
             return 4;
         case PIXEL_FORMAT_RGB_888:
             return 3;
@@ -38,8 +40,11 @@ uint32_t bytesPerPixel(PixelFormat format) {
         case PIXEL_FORMAT_R_8:
             return 1;
     }
+
     return 0;
 }
+
+
 
 // ----------------------------------------------------------------------------
 }; // namespace android

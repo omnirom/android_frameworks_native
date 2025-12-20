@@ -58,7 +58,7 @@ static const char* kNdkTrace = "AIDL::ndk::";
 static const char* kServerTrace = "::server";
 static const char* kClientTrace = "::client";
 static const char* kSeparator = "::";
-static const char* kUnknownCode = "Unknown_Transaction_Code:";
+static const char* kUnknownCode = "name=?_code=";
 
 namespace ABBinderTag {
 
@@ -460,7 +460,7 @@ AIBinder_Class::AIBinder_Class(const char* interfaceDescriptor, AIBinder_Class_o
       mInterfaceDescriptor(interfaceDescriptor),
       mWideInterfaceDescriptor(interfaceDescriptor) {}
 
-bool AIBinder_Class::setTransactionCodeMap(const char** transactionCodeMap, size_t length) {
+bool AIBinder_Class::setTransactionCodeMap(const char* const* transactionCodeMap, size_t length) {
     if (mTransactionCodeToFunction != nullptr) {
         ALOGE("mTransactionCodeToFunction is already set!");
         return false;
@@ -504,9 +504,8 @@ void AIBinder_Class_setOnDump(AIBinder_Class* clazz, AIBinder_onDump onDump) {
     clazz->onDump = onDump;
 }
 
-void AIBinder_Class_setTransactionCodeToFunctionNameMap(AIBinder_Class* clazz,
-                                                        const char** transactionCodeToFunction,
-                                                        size_t length) {
+void AIBinder_Class_setTransactionCodeToFunctionNameMap(
+        AIBinder_Class* clazz, const char* const* transactionCodeToFunction, size_t length) {
     LOG_ALWAYS_FATAL_IF(clazz == nullptr || transactionCodeToFunction == nullptr,
                         "Valid clazz and transactionCodeToFunction are needed to set code to "
                         "function mapping.");
@@ -1003,4 +1002,11 @@ void AIBinder_setInheritRt(AIBinder* binder, bool inheritRt) {
                         "AIBinder_setInheritRt must be called on a local binder");
 
     localBinder->setInheritRt(inheritRt);
+}
+
+binder_status_t AIBinder_setMinRpcThreads(AIBinder* binder, uint16_t min) {
+    if (min == 0) return STATUS_BAD_VALUE;
+    if (binder == nullptr) return STATUS_UNEXPECTED_NULL;
+    binder->getBinder()->setMinRpcThreads(min);
+    return STATUS_OK;
 }

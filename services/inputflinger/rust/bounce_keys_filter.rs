@@ -17,7 +17,7 @@
 //! Bounce keys input filter implementation.
 //! Bounce keys is an accessibility feature to aid users who have physical disabilities, that
 //! allows the user to configure the device to ignore rapid, repeated key presses of the same key.
-use crate::input_filter::{Filter, VIRTUAL_KEYBOARD_DEVICE_ID};
+use crate::input_filter::Filter;
 
 use android_hardware_input_common::aidl::android::hardware::input::common::Source::Source;
 use com_android_server_inputflinger::aidl::com::android::server::inputflinger::{
@@ -115,19 +115,16 @@ impl Filter for BounceKeysFilter {
         self.blocked_events.retain(|blocked_event| {
             device_infos.iter().any(|x| blocked_event.device_id == x.deviceId)
         });
-        self.supported_devices.clear();
-        for device_info in device_infos {
-            if device_info.deviceId == VIRTUAL_KEYBOARD_DEVICE_ID {
-                continue;
-            }
-            if device_info.keyboardType == KeyboardType::None as i32 {
-                continue;
-            }
-            // Support Alphabetic keyboards and Non-alphabetic external keyboards
-            if device_info.external || device_info.keyboardType == KeyboardType::Alphabetic as i32 {
-                self.supported_devices.insert(device_info.deviceId);
-            }
-        }
+        // Support non-alphabetic external keyboards (e.g. TV remote) and all Alphabetic keyboards
+        self.supported_devices = device_infos
+            .iter()
+            .filter(|d| {
+                !d.isVirtual
+                    && (d.keyboardType != KeyboardType::None as i32)
+                    && (d.external || d.keyboardType == KeyboardType::Alphabetic as i32)
+            })
+            .map(|d| d.deviceId)
+            .collect();
         self.next.notify_devices_changed(device_infos);
     }
 
@@ -159,7 +156,7 @@ impl Filter for BounceKeysFilter {
 #[cfg(test)]
 mod tests {
     use crate::bounce_keys_filter::BounceKeysFilter;
-    use crate::input_filter::{test_filter::TestFilter, Filter, VIRTUAL_KEYBOARD_DEVICE_ID};
+    use crate::input_filter::{test_filter::TestFilter, Filter};
     use android_hardware_input_common::aidl::android::hardware::input::common::Source::Source;
     use com_android_server_inputflinger::aidl::com::android::server::inputflinger::{
         DeviceInfo::DeviceInfo, KeyEvent::KeyEvent, KeyEventAction::KeyEventAction,
@@ -190,6 +187,7 @@ mod tests {
             1,   /* device_id */
             100, /* threshold */
             KeyboardType::Alphabetic,
+            false, /* is_virtual */
         );
 
         let event = KeyEvent { action: KeyEventAction::DOWN, ..BASE_KEY_EVENT };
@@ -222,6 +220,7 @@ mod tests {
             1,   /* device_id */
             100, /* threshold */
             KeyboardType::NonAlphabetic,
+            false, /* is_virtual */
         );
 
         let source = Source(Source::KEYBOARD.0 | Source::DPAD.0);
@@ -305,13 +304,14 @@ mod tests {
     }
 
     #[test]
-    fn test_is_notify_key_doesnt_block_for_virtual_keyboard() {
+    fn test_filter_doesnt_block_for_virtual_keyboard() {
         let next = TestFilter::new();
-        let mut filter = setup_filter_with_internal_device(
+        let mut filter = setup_filter_with_external_device(
             Box::new(next.clone()),
-            VIRTUAL_KEYBOARD_DEVICE_ID, /* device_id */
-            100,                        /* threshold */
+            1,   /* device_id */
+            100, /* threshold */
             KeyboardType::Alphabetic,
+            true, /* is_virtual */
         );
 
         let event = KeyEvent { action: KeyEventAction::DOWN, ..BASE_KEY_EVENT };
@@ -335,6 +335,7 @@ mod tests {
             1,   /* device_id */
             100, /* threshold */
             KeyboardType::NonAlphabetic,
+            false, /* is_virtual */
         );
 
         let event =
@@ -363,11 +364,13 @@ mod tests {
                     deviceId: 1,
                     external: true,
                     keyboardType: KeyboardType::Alphabetic as i32,
+                    isVirtual: false,
                 },
                 DeviceInfo {
                     deviceId: 2,
                     external: true,
                     keyboardType: KeyboardType::Alphabetic as i32,
+                    isVirtual: false,
                 },
             ],
             100, /* threshold */
@@ -402,11 +405,13 @@ mod tests {
                     deviceId: 1,
                     external: false,
                     keyboardType: KeyboardType::Alphabetic as i32,
+                    isVirtual: false,
                 },
                 DeviceInfo {
                     deviceId: 2,
                     external: true,
                     keyboardType: KeyboardType::Alphabetic as i32,
+                    isVirtual: false,
                 },
             ],
             100, /* threshold */
@@ -436,6 +441,7 @@ mod tests {
         device_id: i32,
         threshold: i64,
         keyboard_type: KeyboardType,
+        is_virtual: bool,
     ) -> BounceKeysFilter {
         setup_filter_with_devices(
             next,
@@ -443,6 +449,7 @@ mod tests {
                 deviceId: device_id,
                 external: true,
                 keyboardType: keyboard_type as i32,
+                isVirtual: is_virtual,
             }],
             threshold,
         )
@@ -460,6 +467,7 @@ mod tests {
                 deviceId: device_id,
                 external: false,
                 keyboardType: keyboard_type as i32,
+                isVirtual: false,
             }],
             threshold,
         )

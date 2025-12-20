@@ -56,13 +56,6 @@ const bool DEBUG_POINTER_ASSIGNMENT =
         __android_log_is_loggable(ANDROID_LOG_DEBUG, LOG_TAG "PointerAssignment", ANDROID_LOG_INFO);
 
 /**
- * Log debug messages about gesture detection.
- * Enable this via "adb shell setprop log.tag.InputReaderGestures DEBUG" (requires restart)
- */
-const bool DEBUG_GESTURES =
-        __android_log_is_loggable(ANDROID_LOG_DEBUG, LOG_TAG "Gestures", ANDROID_LOG_INFO);
-
-/**
  * Log debug messages about the vibrator.
  * Enable this via "adb shell setprop log.tag.InputReaderVibrator DEBUG" (requires restart)
  */

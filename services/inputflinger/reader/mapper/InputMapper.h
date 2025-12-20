@@ -18,6 +18,8 @@
 
 #include <optional>
 
+#include <input/Input.h>
+
 #include "EventHub.h"
 #include "InputDevice.h"
 #include "InputListener.h"
@@ -66,7 +68,7 @@ public:
 
     virtual ~InputMapper();
 
-    inline int32_t getDeviceId() const { return mDeviceContext.getId(); }
+    inline DeviceId getDeviceId() const { return mDeviceContext.getId(); }
     inline InputDeviceContext& getDeviceContext() { return mDeviceContext; }
     inline InputDeviceContext& getDeviceContext() const { return mDeviceContext; };
     inline const std::string getDeviceName() const { return mDeviceContext.getName(); }

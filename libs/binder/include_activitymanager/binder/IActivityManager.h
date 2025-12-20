@@ -18,10 +18,18 @@
 
 #ifndef __ANDROID_VNDK__
 
-#include <binder/IUidObserver.h>
 #include <binder/IInterface.h>
+#include <binder/IUidObserver.h>
+#include <binder/Parcelable.h>
+
+#include <vector>
 
 namespace android {
+
+namespace app {
+class IProcessObserver;
+class RunningAppProcessInfo;
+} // namespace app
 
 // ------------------------------------------------------------------------------------
 
@@ -55,6 +63,9 @@ public:
     virtual status_t logFgsApiEnd(int32_t apiType, int32_t appUid, int32_t appPid) = 0;
     virtual status_t logFgsApiStateChanged(int32_t apiType, int32_t state, int32_t appUid,
                                            int32_t appPid) = 0;
+    virtual status_t registerProcessObserver(const sp<app::IProcessObserver>& observer) = 0;
+    virtual status_t unregisterProcessObserver(const sp<app::IProcessObserver>& observer) = 0;
+    virtual status_t getRunningAppProcesses(::std::vector<app::RunningAppProcessInfo>* output) = 0;
 
     enum {
         OPEN_CONTENT_URI_TRANSACTION = IBinder::FIRST_CALL_TRANSACTION,
@@ -68,7 +79,10 @@ public:
         CHECK_PERMISSION_TRANSACTION,
         LOG_FGS_API_BEGIN_TRANSACTION,
         LOG_FGS_API_END_TRANSACTION,
-        LOG_FGS_API_STATE_CHANGED_TRANSACTION
+        LOG_FGS_API_STATE_CHANGED_TRANSACTION,
+        REGISTER_PROCESS_OBSERVER,
+        UNREGISTER_PROCESS_OBSERVER,
+        GET_RUNNING_APP_PROCESSES,
     };
 };
 

@@ -63,7 +63,8 @@ InputDeviceInfo generateTestDeviceInfo(int32_t id = DEVICE_ID,
                                        uint32_t sources = TOUCHSCREEN | STYLUS) {
     auto info = InputDeviceInfo();
     info.initialize(id, /*generation=*/1, /*controllerNumber=*/1, generateTestIdentifier(id),
-                    "alias", /*isExternal=*/false, /*hasMic=*/false, ui::LogicalDisplayId::INVALID);
+                    "alias", /*isExternal=*/false, /*isVirtualDevice=*/false, /*hasMic=*/false,
+                    ui::LogicalDisplayId::INVALID);
     info.addSource(sources);
     return info;
 }

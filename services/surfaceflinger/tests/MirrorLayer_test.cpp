@@ -80,9 +80,7 @@ TEST_F(MirrorLayerTest, MirrorColorLayer) {
             .show(mirrorLayer)
             .apply();
 
-    if (FlagManager::getInstance().detached_mirror()) {
-        Transaction().setPosition(mirrorLayer, 550, 550).apply();
-    }
+    Transaction().setPosition(mirrorLayer, 550, 550).apply();
 
     {
         SCOPED_TRACE("Initial Mirror");
@@ -178,9 +176,7 @@ TEST_F(MirrorLayerTest, MirrorBufferLayer) {
             .show(mirrorLayer)
             .apply();
 
-    if (FlagManager::getInstance().detached_mirror()) {
-        Transaction().setPosition(mirrorLayer, 550, 550).apply();
-    }
+    Transaction().setPosition(mirrorLayer, 550, 550).apply();
     {
         SCOPED_TRACE("Initial Mirror BufferQueueLayer");
         auto shot = screenshot();
@@ -272,9 +268,7 @@ TEST_F(MirrorLayerTest, InitialMirrorState) {
             .setLayer(mirrorLayer, INT32_MAX - 1)
             .apply();
 
-    if (FlagManager::getInstance().detached_mirror()) {
-        Transaction().setPosition(mirrorLayer, 550, 550).apply();
-    }
+    Transaction().setPosition(mirrorLayer, 550, 550).apply();
     {
         SCOPED_TRACE("Offscreen Mirror");
         auto shot = screenshot();
@@ -331,9 +325,7 @@ TEST_F(MirrorLayerTest, OffscreenMirrorScreenshot) {
     // Show the mirror layer, but don't reparent to a layer on screen.
     Transaction().reparent(mirrorLayer, mirrorParent).show(mirrorLayer).apply();
 
-    if (FlagManager::getInstance().detached_mirror()) {
-        Transaction().setPosition(mirrorLayer, 50, 50).apply();
-    }
+    Transaction().setPosition(mirrorLayer, 50, 50).apply();
 
     {
         SCOPED_TRACE("Offscreen Mirror");
@@ -358,6 +350,35 @@ TEST_F(MirrorLayerTest, OffscreenMirrorScreenshot) {
         shot->expectColor(Rect(0, 0, 50, 50), Color::BLUE);
         shot->expectColor(Rect(50, 50, 400, 400), Color::GREEN);
     }
+}
+
+TEST_F(MirrorLayerTest, MirrorLayerWithStopLayer) {
+    if (!FlagManager::getInstance().stop_layer()) {
+        GTEST_SKIP() << "skipping test - stop_layer feature flag disabled";
+    }
+
+    sp<SurfaceControl> grandchild =
+            createColorLayer("Grandchild layer", Color::BLUE, mChildLayer.get());
+    Transaction()
+            .setFlags(grandchild, layer_state_t::eLayerOpaque, layer_state_t::eLayerOpaque)
+            .setCrop(grandchild, Rect(0, 0, 200, 200))
+            .show(grandchild)
+            .apply();
+
+    // Mirror child with stop layer set to grandchild.
+    sp<SurfaceControl> mirrorLayer = mClient->mirrorSurface(mChildLayer.get(), grandchild.get());
+    ASSERT_NE(mirrorLayer, nullptr);
+
+    // Add mirrorLayer as child of mParentLayer so it's shown on the display
+    Transaction()
+            .reparent(mirrorLayer, mParentLayer)
+            .setPosition(mirrorLayer, 500, 500)
+            .show(mirrorLayer)
+            .apply();
+
+    auto shot = screenshot();
+    // Assert that we see the child's color and not the grandchild's color
+    shot->expectColor(Rect(550, 550, 600, 600), Color::GREEN);
 }
 
 } // namespace android

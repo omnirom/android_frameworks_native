@@ -21,6 +21,7 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 #include <input/BlockingQueue.h>
+#include <input/Input.h>
 #include <input/InputConsumerNoResampling.h>
 #include <input/InputTransport.h>
 
@@ -56,11 +57,10 @@ struct PublishMotionArgs {
     const nsecs_t downTime;
     const uint32_t seq;
     int32_t eventId;
-    const int32_t deviceId = 1;
+    const DeviceId deviceId = 1;
     const uint32_t source = AINPUT_SOURCE_TOUCHSCREEN;
     const ui::LogicalDisplayId displayId = ui::LogicalDisplayId::DEFAULT;
     const int32_t actionButton = 0;
-    const int32_t edgeFlags = AMOTION_EVENT_EDGE_FLAG_TOP;
     const int32_t metaState = AMETA_ALT_LEFT_ON | AMETA_ALT_ON;
     const int32_t buttonState = AMOTION_EVENT_BUTTON_PRIMARY;
     const MotionClassification classification = MotionClassification::AMBIGUOUS_GESTURE;
@@ -139,8 +139,7 @@ void verifyArgsEqualToEvent(const PublishMotionArgs& args, const MotionEvent& mo
     EXPECT_EQ(args.hmac, motionEvent.getHmac());
     EXPECT_EQ(args.action, motionEvent.getAction());
     EXPECT_EQ(args.downTime, motionEvent.getDownTime());
-    EXPECT_EQ(args.flags, motionEvent.getFlags());
-    EXPECT_EQ(args.edgeFlags, motionEvent.getEdgeFlags());
+    EXPECT_EQ(args.flags, static_cast<int32_t>(motionEvent.getFlags().get()));
     EXPECT_EQ(args.metaState, motionEvent.getMetaState());
     EXPECT_EQ(args.buttonState, motionEvent.getButtonState());
     EXPECT_EQ(args.classification, motionEvent.getClassification());
@@ -193,12 +192,11 @@ void verifyArgsEqualToEvent(const PublishMotionArgs& args, const MotionEvent& mo
 void publishMotionEvent(InputPublisher& publisher, const PublishMotionArgs& a) {
     status_t status =
             publisher.publishMotionEvent(a.seq, a.eventId, a.deviceId, a.source, a.displayId,
-                                         a.hmac, a.action, a.actionButton, a.flags, a.edgeFlags,
-                                         a.metaState, a.buttonState, a.classification, a.transform,
-                                         a.xPrecision, a.yPrecision, a.xCursorPosition,
-                                         a.yCursorPosition, a.rawTransform, a.downTime, a.eventTime,
-                                         a.pointerCount, a.pointerProperties.data(),
-                                         a.pointerCoords.data());
+                                         a.hmac, a.action, a.actionButton, a.flags, a.metaState,
+                                         a.buttonState, a.classification, a.transform, a.xPrecision,
+                                         a.yPrecision, a.xCursorPosition, a.yCursorPosition,
+                                         a.rawTransform, a.downTime, a.eventTime, a.pointerCount,
+                                         a.pointerProperties.data(), a.pointerCoords.data());
     ASSERT_EQ(OK, status) << "publisher publishMotionEvent should return OK";
 }
 
@@ -489,7 +487,7 @@ void InputPublisherAndConsumerNoResamplingTest::publishAndConsumeKeyEvent() {
 
     const uint32_t seq = mSeq++;
     int32_t eventId = InputEvent::nextId();
-    constexpr int32_t deviceId = 1;
+    constexpr DeviceId deviceId = 1;
     constexpr uint32_t source = AINPUT_SOURCE_KEYBOARD;
     constexpr ui::LogicalDisplayId displayId = ui::LogicalDisplayId::DEFAULT;
     constexpr std::array<uint8_t, 32> hmac = {31, 30, 29, 28, 27, 26, 25, 24, 23, 22, 21,
@@ -892,8 +890,8 @@ TEST_F(InputPublisherAndConsumerNoResamplingTest,
     status =
             mPublisher->publishMotionEvent(0, InputEvent::nextId(), 0, 0,
                                            ui::LogicalDisplayId::DEFAULT, INVALID_HMAC, 0, 0, 0, 0,
-                                           0, 0, MotionClassification::NONE, identityTransform, 0,
-                                           0, AMOTION_EVENT_INVALID_CURSOR_POSITION,
+                                           0, MotionClassification::NONE, identityTransform, 0, 0,
+                                           AMOTION_EVENT_INVALID_CURSOR_POSITION,
                                            AMOTION_EVENT_INVALID_CURSOR_POSITION, identityTransform,
                                            0, 0, pointerCount, pointerProperties, pointerCoords);
     ASSERT_EQ(BAD_VALUE, status) << "publisher publishMotionEvent should return BAD_VALUE";
@@ -910,8 +908,8 @@ TEST_F(InputPublisherAndConsumerNoResamplingTest,
     status =
             mPublisher->publishMotionEvent(1, InputEvent::nextId(), 0, 0,
                                            ui::LogicalDisplayId::DEFAULT, INVALID_HMAC, 0, 0, 0, 0,
-                                           0, 0, MotionClassification::NONE, identityTransform, 0,
-                                           0, AMOTION_EVENT_INVALID_CURSOR_POSITION,
+                                           0, MotionClassification::NONE, identityTransform, 0, 0,
+                                           AMOTION_EVENT_INVALID_CURSOR_POSITION,
                                            AMOTION_EVENT_INVALID_CURSOR_POSITION, identityTransform,
                                            0, 0, pointerCount, pointerProperties, pointerCoords);
     ASSERT_EQ(BAD_VALUE, status) << "publisher publishMotionEvent should return BAD_VALUE";
@@ -932,8 +930,8 @@ TEST_F(InputPublisherAndConsumerNoResamplingTest,
     status =
             mPublisher->publishMotionEvent(1, InputEvent::nextId(), 0, 0,
                                            ui::LogicalDisplayId::DEFAULT, INVALID_HMAC, 0, 0, 0, 0,
-                                           0, 0, MotionClassification::NONE, identityTransform, 0,
-                                           0, AMOTION_EVENT_INVALID_CURSOR_POSITION,
+                                           0, MotionClassification::NONE, identityTransform, 0, 0,
+                                           AMOTION_EVENT_INVALID_CURSOR_POSITION,
                                            AMOTION_EVENT_INVALID_CURSOR_POSITION, identityTransform,
                                            0, 0, pointerCount, pointerProperties, pointerCoords);
     ASSERT_EQ(BAD_VALUE, status) << "publisher publishMotionEvent should return BAD_VALUE";

@@ -168,7 +168,7 @@ impl Surface {
             ANativeWindow_lock(
                 self.0.as_ptr(),
                 &mut buffer,
-                bounds.map(ptr::from_mut).unwrap_or(null_mut()),
+                bounds.map(ptr::from_mut).unwrap_or_default(),
             )
         };
         if status != 0 {

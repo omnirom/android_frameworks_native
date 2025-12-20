@@ -34,7 +34,10 @@ cc_defaults {
         "-Wsign-compare",
         "-Wunused-result",
         "-Wzero-as-null-pointer-constant",
-    ],
+    ] + select(release_flag("RELEASE_LIBBINDER_BINDER_OBSERVER"), {
+        true: ["-DLIBBINDER_BINDER_OBSERVER"],
+        default: [],
+    }),
 }
 
 cc_test {
@@ -79,6 +82,63 @@ cc_test {
     require_root: true,
 }
 
+cc_test {
+    name: "binderStatsPusherUnitTest",
+    target: {
+        darwin: {
+            enabled: false,
+        },
+    },
+    srcs: [
+        "binderStatsPusherTest.cpp",
+        ":libbinder_observer_sources",
+    ],
+    shared_libs: [
+        "liblog",
+        "libbinder",
+        "libcutils",
+        "libutils",
+    ],
+    static_libs: [
+        "libfakeservicemanager",
+        "libgmock",
+    ],
+    header_libs: [
+        "jni_headers",
+    ],
+    test_suites: ["general-tests"],
+    host_supported: false,
+    require_root: true,
+}
+
+cc_test {
+    name: "binderObserverConfigUnitTest",
+    target: {
+        darwin: {
+            enabled: false,
+        },
+    },
+    srcs: [
+        "binderObserverConfigUnitTest.cpp",
+        ":libbinder_observer_sources",
+    ],
+    shared_libs: [
+        "liblog",
+        "libbinder",
+        "libcutils",
+        "libutils",
+    ],
+    static_libs: [
+        "libgmock",
+    ],
+    header_libs: [
+        "jni_headers",
+    ],
+    test_suites: ["general-tests"],
+    host_supported: false,
+    require_root: false,
+}
+
 // unit test only, which can run on host and doesn't use /dev/binder
 cc_test {
     name: "binderUnitTest",
@@ -95,11 +155,17 @@ cc_test {
         "binderMemoryHeapBaseUnitTest.cpp",
         "binderRecordedTransactionTest.cpp",
         "binderPersistableBundleTest.cpp",
+        "binderStatsSpscQueueTest.cpp",
     ],
     shared_libs: [
         "libbinder",
         "libcutils",
         "libutils",
+        "liblog",
+    ],
+    static_libs: [
+        "libgmock",
+        "libfakeservicemanager",
     ],
     test_suites: ["general-tests"],
 }
@@ -163,6 +229,7 @@ cc_test {
     ],
     static_libs: [
         "libgmock",
+        "libselinux",
     ],
     test_suites: [
         "general-tests",
@@ -305,6 +372,9 @@ cc_defaults {
         android: {
             test_suites: ["vts"],
         },
+        host: {
+            cflags: ["-DBINDER_NO_KERNEL_IPC_TESTING"],
+        },
     },
     defaults: [
         "binderRpcTest_common_defaults",
@@ -316,11 +386,7 @@ cc_defaults {
         "binderRpcUniversalTests.cpp",
     ],
 
-    // This test uses a lot of resources and takes a long time. Due to
-    // design of several tests, it is also very sensitive to resource
-    // contention on the device. b/276820894
     test_options: {
-        unit_test: false,
         test_runner_options: [
             {
                 name: "native-test-timeout",
@@ -364,6 +430,11 @@ cc_defaults {
         "libutils",
         // libcrypto_static is not visible to this module
         "libcrypto",
+    ],
+    exclude_shared_libs: [
+        // mixing a static libbinder with libbinder_ndk.so
+        // will present ODR issues
+        "libbinder_ndk",
     ],
     static_libs: [
         "libbase",
@@ -510,6 +581,17 @@ cc_test {
 }
 
 cc_test {
+    name: "binderRpcTestNoLegacy",
+    defaults: [
+        "binderRpcTest_defaults",
+        "binderRpcTest_static_defaults",
+    ],
+    static_libs: [
+        "libbinder_rpc_no_legacy",
+    ],
+}
+
+cc_test {
     name: "binderRpcTestNoKernelAtAll",
     defaults: [
         "binderRpcTest_defaults",
@@ -585,7 +667,7 @@ cc_test {
         "libtrusty",
     ],
 
-    test_suites: ["device-tests"],
+    test_suites: ["general-tests"],
     require_root: true,
 }
 
@@ -886,8 +968,8 @@ cc_test_host {
     static_libs: [
         "libgmock",
     ],
-    target_required: [
-        "binderHostDeviceTestService",
+    device_first_data: [
+        ":binderHostDeviceTestService",
     ],
     test_suites: ["general-tests"],
     target: {
@@ -902,9 +984,6 @@ cc_test_host {
 
 cc_test {
     name: "binderHostDeviceTestService",
-    // The binary is named differently from the module so that PushFilePreparer pushes the binary
-    // directly, not the test module directory.
-    stem: "binderHostDeviceTest-service",
     defaults: ["binder_test_defaults"],
     gtest: false,
     auto_gen_config: false,
@@ -925,6 +1004,10 @@ cc_defaults {
         "libbinder_random_parcel",
         "libcutils",
     ],
+    exclude_shared_libs: [
+        "libbase",
+        "libcutils",
+    ],
     target: {
         android: {
             shared_libs: [
@@ -935,6 +1018,11 @@ cc_defaults {
         },
         host: {
             static_libs: [
+                "libbinder_ndk",
+                "libbinder",
+                "libutils",
+            ],
+            exclude_shared_libs: [
                 "libbinder_ndk",
                 "libbinder",
                 "libutils",

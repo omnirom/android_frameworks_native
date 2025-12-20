@@ -90,11 +90,9 @@ public:
     virtual void addAndGetFrameTimestamps(const NewFrameEventsEntry* /*newTimestamps*/,
                                           FrameEventHistoryDelta* /*outDelta*/) {}
 
-#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(BQ_SETFRAMERATE)
     // Notifies the consumer of a setFrameRate call from the producer side.
     virtual void onSetFrameRate(float /*frameRate*/, int8_t /*compatibility*/,
                                 int8_t /*changeFrameRateStrategy*/) {}
-#endif
 
 #if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_UNLIMITED_SLOTS)
     // Notifies the consumer that IGraphicBufferProducer::extendSlotCount has

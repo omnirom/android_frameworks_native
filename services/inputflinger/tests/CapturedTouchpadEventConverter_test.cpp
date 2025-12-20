@@ -22,6 +22,7 @@
 #include <EventHub.h>
 #include <com_android_input_flags.h>
 #include <gtest/gtest.h>
+#include <input/Input.h>
 #include <linux/input-event-codes.h>
 #include <linux/input.h>
 #include <utils/StrongPointer.h>
@@ -55,7 +56,7 @@ public:
 
 protected:
     static constexpr int32_t DEVICE_ID = END_RESERVED_ID + 1000;
-    static constexpr int32_t EVENTHUB_ID = 1;
+    static constexpr RawDeviceId EVENTHUB_ID = 1;
 
     std::shared_ptr<InputDevice> newDevice() {
         InputDeviceIdentifier identifier;
@@ -623,7 +624,7 @@ TEST_F(CapturedTouchpadEventConverterTest, FingerAndFingerTurningIntoPalm_partia
                                     AllOf(WithMotionAction(
                                                   AMOTION_EVENT_ACTION_POINTER_UP |
                                                   1 << AMOTION_EVENT_ACTION_POINTER_INDEX_SHIFT),
-                                          WithFlags(AMOTION_EVENT_FLAG_CANCELED)))));
+                                          WithFlags(MotionFlag::CANCELED)))));
     EXPECT_THAT(args, Each(VariantWith<NotifyMotionArgs>(WithPointerCount(2u))));
 }
 

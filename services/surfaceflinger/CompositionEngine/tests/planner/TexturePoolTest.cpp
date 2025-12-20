@@ -14,9 +14,6 @@
  * limitations under the License.
  */
 
-#undef LOG_TAG
-#define LOG_TAG "TexturePoolTest"
-
 #include <compositionengine/impl/planner/TexturePool.h>
 #include <gtest/gtest.h>
 #include <log/log.h>

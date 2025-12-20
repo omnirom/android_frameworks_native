@@ -16,6 +16,7 @@
 
 #pragma once
 
+#include <android-base/result.h>
 #include <android/gui/BnWindowInfosListener.h>
 #include <android/gui/ISurfaceComposer.h>
 #include <android/gui/IWindowInfosPublisher.h>
@@ -31,10 +32,8 @@ class WindowInfosListenerReporter : public gui::BnWindowInfosListener {
 public:
     static sp<WindowInfosListenerReporter> getInstance();
     binder::Status onWindowInfosChanged(const gui::WindowInfosUpdate& update) override;
-    status_t addWindowInfosListener(
-            const sp<gui::WindowInfosListener>& windowInfosListener,
-            const sp<gui::ISurfaceComposer>&,
-            std::pair<std::vector<gui::WindowInfo>, std::vector<gui::DisplayInfo>>* outInitialInfo);
+    android::base::Result<gui::WindowInfosUpdate> addWindowInfosListener(
+            sp<gui::WindowInfosListener> windowInfosListener, const sp<gui::ISurfaceComposer>&);
     status_t removeWindowInfosListener(const sp<gui::WindowInfosListener>& windowInfosListener,
                                        const sp<gui::ISurfaceComposer>& surfaceComposer);
     void reconnect(const sp<gui::ISurfaceComposer>&);
@@ -43,14 +42,15 @@ private:
     WindowInfosListenerReporter() = default;
     friend class sp<WindowInfosListenerReporter>;
 
+    using ListenerSet =
+            std::unordered_set<sp<gui::WindowInfosListener>, gui::SpHash<gui::WindowInfosListener>>;
+
+    static constexpr int64_t UNASSIGNED_LISTENER_ID = -1;
+
     std::mutex mListenersMutex;
-    std::unordered_set<sp<gui::WindowInfosListener>, gui::SpHash<gui::WindowInfosListener>>
-            mWindowInfosListeners GUARDED_BY(mListenersMutex);
-
-    std::vector<gui::WindowInfo> mLastWindowInfos GUARDED_BY(mListenersMutex);
-    std::vector<gui::DisplayInfo> mLastDisplayInfos GUARDED_BY(mListenersMutex);
-
-    sp<gui::IWindowInfosPublisher> mWindowInfosPublisher;
-    int64_t mListenerId;
+    ListenerSet mWindowInfosListeners GUARDED_BY(mListenersMutex);
+    gui::WindowInfosUpdate mLastUpdate GUARDED_BY(mListenersMutex);
+    sp<gui::IWindowInfosPublisher> mWindowInfosPublisher GUARDED_BY(mListenersMutex);
+    int64_t mListenerId GUARDED_BY(mListenersMutex);
 };
 } // namespace android

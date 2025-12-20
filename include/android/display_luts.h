@@ -60,12 +60,28 @@ typedef struct ADisplayLuts ADisplayLuts;
 /**
  * Creates a \a ADisplayLutsEntry entry.
  *
- * You are responsible for mamanging the memory of the returned object.
+ * You are responsible for managing the memory of the returned object.
  * Always call \a ADisplayLutsEntry_destroy to release it after use.
  *
  * Functions like \a ADisplayLuts_set create their own copies of entries,
  * therefore they don't take the ownership of the instance created by
  * \a ADisplayLutsEntry_create.
+ *
+ * 1D Lut(s) are treated as gain curves.
+ *
+ * 3D Lut(s) are used for direct color manipulations.
+ * For 3D Lut(s), the values should be normalized to the range 0.0
+ * to 1.0 , inclusive. And 1.0 is the maximum panel luminance.
+ * And If N is the size of each dimension, the data is arranged in RGB order:
+ * R(0, 0, 0), R(0, 0, 1), ..., R(0, 0, N - 1),
+ * R(0, 1, 0), ..., R(0, 1, N - 1), ..., R(0, N - 1, N - 1),
+ * R(1, 0, 0), ..., R(1, 0, N - 1), ..., R(1, N - 1, N - 1), ..., R(N - 1, N - 1, N - 1),
+ * G(0, 0, 0), ..., G(N - 1, N - 1, N - 1),
+ * B(0, 0, 0), ..., B(N - 1, N - 1, N - 1).
+ *
+ * When a GPU shader samples 3D Lut data, it's accessed in a flat, one-dimensional arrangement.
+ * Assuming that we have a 3D array ORIGINAL[N][N][N],
+ * then ORIGINAL[x][y][z] is mapped to FLAT[z + N * (y + N * x)].
  *
  * @param buffer The lut raw buffer. The function creates a copy of it and does not need to
  * outlive the life of the ADisplayLutsEntry.
@@ -79,7 +95,7 @@ ADisplayLutsEntry* _Nonnull ADisplayLutsEntry_createEntry(float* _Nonnull buffer
     __INTRODUCED_IN(36);
 
 /**
- * Destroy the \a ADisplayLutsEntry instance.
+ * Destroys the \a ADisplayLutsEntry instance.
  *
  * @param entry The entry to be destroyed
  */
@@ -132,7 +148,7 @@ const float* _Nonnull ADisplayLutsEntry_getBuffer(const ADisplayLutsEntry* _Nonn
 /**
  * Creates a \a ADisplayLuts instance.
  *
- * You are responsible for mamanging the memory of the returned object.
+ * You are responsible for managing the memory of the returned object.
  * Always call \a ADisplayLuts_destroy to release it after use. E.g., after calling
  * the function \a ASurfaceTransaction_setLuts.
  *

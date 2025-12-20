@@ -27,18 +27,25 @@
 #include "mock/DisplayHardware/MockDisplayMode.h"
 #include "mock/MockFrameRateMode.h"
 
+#include <com_android_graphics_surfaceflinger_flags.h>
+#include <common/test/FlagUtils.h>
 #include <ftl/fake_guard.h>
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
+#include <ui/ScreenPartStatus.h>
 
-#define EXPECT_DISPLAY_MODE_REQUEST(expected, requestOpt)                               \
-    ASSERT_TRUE(requestOpt);                                                            \
-    EXPECT_FRAME_RATE_MODE(expected.mode.modePtr, expected.mode.fps, requestOpt->mode); \
-    EXPECT_EQ(expected.emitEvent, requestOpt->emitEvent)
+#define EXPECT_DISPLAY_MODE_REQUEST(expected, request)                              \
+    EXPECT_FRAME_RATE_MODE(expected.mode.modePtr, expected.mode.fps, request.mode); \
+    EXPECT_EQ(expected.emitEvent, request.emitEvent)
+
+#define EXPECT_DISPLAY_MODE_REQUEST_OPT(expected, requestOpt) \
+    ASSERT_TRUE(requestOpt);                                  \
+    EXPECT_DISPLAY_MODE_REQUEST(expected, (*requestOpt))
 
 namespace android::display {
 namespace {
 
+namespace flags = com::android::graphics::surfaceflinger::flags;
 namespace hal = android::hardware::graphics::composer::hal;
 
 using testing::_;
@@ -58,9 +65,14 @@ public:
                 });
 
         constexpr uint8_t kPort = 111;
-        EXPECT_CALL(*mComposerHal, getDisplayIdentificationData(kHwcDisplayId, _, _))
+        EXPECT_CALL(*mComposerHal, getDisplayIdentificationData(kHwcDisplayId, _, _, _))
                 .WillOnce(DoAll(SetArgPointee<1>(kPort), SetArgPointee<2>(getInternalEdid()),
                                 Return(hal::Error::NONE)));
+
+        EXPECT_CALL(*mComposerHal, getDisplayConnectionType(kHwcDisplayId, _))
+                .WillOnce(DoAll(SetArgPointee<1>(
+                                        hal::IComposerClient::DisplayConnectionType::INTERNAL),
+                                Return(hal::V2_4::Error::NONE)));
 
         EXPECT_CALL(*mComposerHal, setClientTargetSlotCount(kHwcDisplayId));
         EXPECT_CALL(*mComposerHal,
@@ -72,7 +84,9 @@ public:
         ASSERT_TRUE(infoOpt);
 
         mDisplayId = infoOpt->id;
-        mDisplaySnapshotOpt.emplace(mDisplayId, infoOpt->port, ui::DisplayConnectionType::Internal,
+        mDisplaySnapshotOpt.emplace(mDisplayId, infoOpt->port,
+                                    android::ScreenPartStatus::UNSUPPORTED,
+                                    ui::DisplayConnectionType::Internal,
                                     makeModes(kMode60, kMode90, kMode120), ui::ColorModes{},
                                     std::nullopt);
 
@@ -126,6 +140,7 @@ protected:
     static constexpr DisplayModeId kModeId60{0};
     static constexpr DisplayModeId kModeId90{1};
     static constexpr DisplayModeId kModeId120{2};
+    static constexpr DisplayModeId kModeId90_4K{3};
 
     static inline const ftl::NonNull<DisplayModePtr> kMode60 =
             ftl::as_non_null(mock::createDisplayMode(kModeId60, 60_Hz));
@@ -133,11 +148,15 @@ protected:
             ftl::as_non_null(mock::createDisplayMode(kModeId90, 90_Hz));
     static inline const ftl::NonNull<DisplayModePtr> kMode120 =
             ftl::as_non_null(mock::createDisplayMode(kModeId120, 120_Hz));
+    static inline const ftl::NonNull<DisplayModePtr> kMode90_4K =
+            ftl::as_non_null(mock::createDisplayMode(kModeId90_4K, 90_Hz, 1, mock::kResolution4K));
 
     static inline const DisplayModeRequest kDesiredMode30{{30_Hz, kMode60}, .emitEvent = false};
     static inline const DisplayModeRequest kDesiredMode60{{60_Hz, kMode60}, .emitEvent = true};
     static inline const DisplayModeRequest kDesiredMode90{{90_Hz, kMode90}, .emitEvent = false};
     static inline const DisplayModeRequest kDesiredMode120{{120_Hz, kMode120}, .emitEvent = true};
+    static inline const DisplayModeRequest kDesiredMode90_4K{{90_Hz, kMode90_4K},
+                                                             .emitEvent = true};
 };
 
 TEST_F(DisplayModeControllerTest, setDesiredModeToActiveMode) {
@@ -153,14 +172,16 @@ TEST_F(DisplayModeControllerTest, setDesiredMode) {
 
     EXPECT_EQ(Action::InitiateDisplayModeSwitch,
               mDmc.setDesiredMode(mDisplayId, DisplayModeRequest(kDesiredMode90)));
-    EXPECT_DISPLAY_MODE_REQUEST(kDesiredMode90, mDmc.getDesiredMode(mDisplayId));
+    EXPECT_DISPLAY_MODE_REQUEST_OPT(kDesiredMode90, mDmc.getDesiredMode(mDisplayId));
 
     // No action since a mode switch has already been initiated.
     EXPECT_EQ(Action::None, mDmc.setDesiredMode(mDisplayId, DisplayModeRequest(kDesiredMode120)));
-    EXPECT_DISPLAY_MODE_REQUEST(kDesiredMode120, mDmc.getDesiredMode(mDisplayId));
+    EXPECT_DISPLAY_MODE_REQUEST_OPT(kDesiredMode120, mDmc.getDesiredMode(mDisplayId));
 }
 
 TEST_F(DisplayModeControllerTest, clearDesiredMode) {
+    SET_FLAG_FOR_TEST(flags::modeset_state_machine, false);
+
     // Called because setDesiredMode resets the render rate to the active refresh rate.
     EXPECT_CALL(mActiveModeListener, Call(mDisplayId, 60_Hz, 60_Hz)).Times(1);
 
@@ -172,14 +193,41 @@ TEST_F(DisplayModeControllerTest, clearDesiredMode) {
     EXPECT_FALSE(mDmc.getDesiredMode(mDisplayId));
 }
 
-TEST_F(DisplayModeControllerTest, initiateModeChange) REQUIRES(kMainThreadContext) {
+TEST_F(DisplayModeControllerTest, takeDesiredModeIfMatches) {
+    SET_FLAG_FOR_TEST(flags::modeset_state_machine, true);
+    SET_FLAG_FOR_TEST(flags::synced_resolution_switch, true);
+
+    // Called because setDesiredMode resets the render rate to the active refresh rate.
+    EXPECT_CALL(mActiveModeListener, Call(mDisplayId, 60_Hz, 60_Hz)).Times(2);
+
+    // Change refresh rate.
+    EXPECT_EQ(Action::InitiateDisplayModeSwitch,
+              mDmc.setDesiredMode(mDisplayId, DisplayModeRequest(kDesiredMode90)));
+    EXPECT_EQ(kDesiredMode90, mDmc.getDesiredMode(mDisplayId));
+
+    EXPECT_EQ(kDesiredMode90, mDmc.takeDesiredModeIfMatches(mDisplayId, mock::kResolution1080p));
+
+    // Change resolution.
+    EXPECT_EQ(Action::InitiateDisplayModeSwitch,
+              mDmc.setDesiredMode(mDisplayId, DisplayModeRequest(kDesiredMode90_4K)));
+    EXPECT_EQ(kDesiredMode90_4K, mDmc.getDesiredMode(mDisplayId));
+
+    // The desired mode must match the expected resolution.
+    EXPECT_FALSE(mDmc.takeDesiredModeIfMatches(mDisplayId, mock::kResolution1080p));
+
+    EXPECT_EQ(kDesiredMode90_4K, mDmc.takeDesiredModeIfMatches(mDisplayId, mock::kResolution4K));
+}
+
+TEST_F(DisplayModeControllerTest, initiateModeChangeLegacy) REQUIRES(kMainThreadContext) {
+    SET_FLAG_FOR_TEST(flags::modeset_state_machine, false);
+
     // Called because setDesiredMode resets the render rate to the active refresh rate.
     EXPECT_CALL(mActiveModeListener, Call(mDisplayId, 60_Hz, 60_Hz)).Times(1);
 
     EXPECT_EQ(Action::InitiateDisplayModeSwitch,
               mDmc.setDesiredMode(mDisplayId, DisplayModeRequest(kDesiredMode90)));
 
-    EXPECT_DISPLAY_MODE_REQUEST(kDesiredMode90, mDmc.getDesiredMode(mDisplayId));
+    EXPECT_DISPLAY_MODE_REQUEST_OPT(kDesiredMode90, mDmc.getDesiredMode(mDisplayId));
     auto modeRequest = kDesiredMode90;
 
     hal::VsyncPeriodChangeTimeline timeline;
@@ -187,10 +235,41 @@ TEST_F(DisplayModeControllerTest, initiateModeChange) REQUIRES(kMainThreadContex
 
     EXPECT_EQ(DisplayModeController::ModeChangeResult::Changed,
               mDmc.initiateModeChange(mDisplayId, std::move(modeRequest), constraints, timeline));
-    EXPECT_DISPLAY_MODE_REQUEST(kDesiredMode90, mDmc.getPendingMode(mDisplayId));
+    EXPECT_DISPLAY_MODE_REQUEST_OPT(kDesiredMode90, mDmc.getPendingMode(mDisplayId));
 
     mDmc.clearDesiredMode(mDisplayId);
     EXPECT_FALSE(mDmc.getDesiredMode(mDisplayId));
+}
+
+TEST_F(DisplayModeControllerTest, initiateModeChange) REQUIRES(kMainThreadContext) {
+    SET_FLAG_FOR_TEST(flags::modeset_state_machine, true);
+
+    // Called because setDesiredMode resets the render rate to the active refresh rate.
+    EXPECT_CALL(mActiveModeListener, Call(mDisplayId, 60_Hz, 60_Hz)).Times(1);
+
+    EXPECT_EQ(Action::InitiateDisplayModeSwitch,
+              mDmc.setDesiredMode(mDisplayId, DisplayModeRequest(kDesiredMode90)));
+
+    EXPECT_DISPLAY_MODE_REQUEST_OPT(kDesiredMode90, mDmc.getDesiredMode(mDisplayId));
+
+    const auto desiredModeOpt = mDmc.takeDesiredModeIfMatches(mDisplayId, mock::kResolution1080p);
+    EXPECT_DISPLAY_MODE_REQUEST_OPT(kDesiredMode90, desiredModeOpt);
+    auto modeRequest = *desiredModeOpt;
+
+    hal::VsyncPeriodChangeTimeline timeline;
+    const auto constraints = expectModeSet(modeRequest, timeline);
+
+    EXPECT_EQ(DisplayModeController::ModeChangeResult::Changed,
+              mDmc.initiateModeChange(mDisplayId, std::move(modeRequest), constraints, timeline));
+    EXPECT_DISPLAY_MODE_REQUEST_OPT(kDesiredMode90, mDmc.getPendingMode(mDisplayId));
+
+    EXPECT_CALL(mActiveModeListener, Call(mDisplayId, 90_Hz, 90_Hz)).Times(1);
+
+    auto modeChange = mDmc.finalizeModeChange(mDisplayId);
+
+    auto* changePtr = std::get_if<DisplayModeController::RefreshRateChange>(&modeChange);
+    ASSERT_TRUE(changePtr);
+    EXPECT_DISPLAY_MODE_REQUEST(kDesiredMode90, changePtr->activeMode);
 }
 
 TEST_F(DisplayModeControllerTest, initiateRenderRateSwitch) {
@@ -201,13 +280,16 @@ TEST_F(DisplayModeControllerTest, initiateRenderRateSwitch) {
     EXPECT_FALSE(mDmc.getDesiredMode(mDisplayId));
 }
 
-TEST_F(DisplayModeControllerTest, initiateDisplayModeSwitch) FTL_FAKE_GUARD(kMainThreadContext) {
+TEST_F(DisplayModeControllerTest, initiateDisplayModeSwitchLegacy)
+FTL_FAKE_GUARD(kMainThreadContext) {
+    SET_FLAG_FOR_TEST(flags::modeset_state_machine, false);
+
     // Called because setDesiredMode resets the render rate to the active refresh rate.
     EXPECT_CALL(mActiveModeListener, Call(mDisplayId, 60_Hz, 60_Hz)).Times(1);
 
     EXPECT_EQ(Action::InitiateDisplayModeSwitch,
               mDmc.setDesiredMode(mDisplayId, DisplayModeRequest(kDesiredMode90)));
-    EXPECT_DISPLAY_MODE_REQUEST(kDesiredMode90, mDmc.getDesiredMode(mDisplayId));
+    EXPECT_DISPLAY_MODE_REQUEST_OPT(kDesiredMode90, mDmc.getDesiredMode(mDisplayId));
     auto modeRequest = kDesiredMode90;
 
     hal::VsyncPeriodChangeTimeline timeline;
@@ -215,13 +297,13 @@ TEST_F(DisplayModeControllerTest, initiateDisplayModeSwitch) FTL_FAKE_GUARD(kMai
 
     EXPECT_EQ(DisplayModeController::ModeChangeResult::Changed,
               mDmc.initiateModeChange(mDisplayId, std::move(modeRequest), constraints, timeline));
-    EXPECT_DISPLAY_MODE_REQUEST(kDesiredMode90, mDmc.getPendingMode(mDisplayId));
+    EXPECT_DISPLAY_MODE_REQUEST_OPT(kDesiredMode90, mDmc.getPendingMode(mDisplayId));
 
     // No action since a mode switch has already been initiated.
     EXPECT_EQ(Action::None, mDmc.setDesiredMode(mDisplayId, DisplayModeRequest(kDesiredMode120)));
 
-    EXPECT_DISPLAY_MODE_REQUEST(kDesiredMode90, mDmc.getPendingMode(mDisplayId));
-    EXPECT_DISPLAY_MODE_REQUEST(kDesiredMode120, mDmc.getDesiredMode(mDisplayId));
+    EXPECT_DISPLAY_MODE_REQUEST_OPT(kDesiredMode90, mDmc.getPendingMode(mDisplayId));
+    EXPECT_DISPLAY_MODE_REQUEST_OPT(kDesiredMode120, mDmc.getDesiredMode(mDisplayId));
     modeRequest = kDesiredMode120;
 
     constexpr bool kSubsequent = true;
@@ -229,10 +311,70 @@ TEST_F(DisplayModeControllerTest, initiateDisplayModeSwitch) FTL_FAKE_GUARD(kMai
 
     EXPECT_EQ(DisplayModeController::ModeChangeResult::Changed,
               mDmc.initiateModeChange(mDisplayId, std::move(modeRequest), constraints, timeline));
-    EXPECT_DISPLAY_MODE_REQUEST(kDesiredMode120, mDmc.getPendingMode(mDisplayId));
+    EXPECT_DISPLAY_MODE_REQUEST_OPT(kDesiredMode120, mDmc.getPendingMode(mDisplayId));
 
     mDmc.clearDesiredMode(mDisplayId);
     EXPECT_FALSE(mDmc.getDesiredMode(mDisplayId));
+}
+
+TEST_F(DisplayModeControllerTest, initiateDisplayModeSwitch) FTL_FAKE_GUARD(kMainThreadContext) {
+    SET_FLAG_FOR_TEST(flags::modeset_state_machine, false);
+
+    // Called because setDesiredMode resets the render rate to the active refresh rate.
+    EXPECT_CALL(mActiveModeListener, Call(mDisplayId, 60_Hz, 60_Hz)).Times(1);
+
+    EXPECT_EQ(Action::InitiateDisplayModeSwitch,
+              mDmc.setDesiredMode(mDisplayId, DisplayModeRequest(kDesiredMode90)));
+    EXPECT_DISPLAY_MODE_REQUEST_OPT(kDesiredMode90, mDmc.getDesiredMode(mDisplayId));
+
+    const auto desiredModeOpt = mDmc.takeDesiredModeIfMatches(mDisplayId, mock::kResolution1080p);
+    EXPECT_DISPLAY_MODE_REQUEST_OPT(kDesiredMode90, desiredModeOpt);
+    auto modeRequest = *desiredModeOpt;
+
+    hal::VsyncPeriodChangeTimeline timeline;
+    auto constraints = expectModeSet(modeRequest, timeline);
+
+    EXPECT_EQ(DisplayModeController::ModeChangeResult::Changed,
+              mDmc.initiateModeChange(mDisplayId, std::move(modeRequest), constraints, timeline));
+    EXPECT_DISPLAY_MODE_REQUEST_OPT(kDesiredMode90, mDmc.getPendingMode(mDisplayId));
+
+    EXPECT_CALL(mActiveModeListener, Call(mDisplayId, 90_Hz, 90_Hz)).Times(1);
+
+    auto modeChange = mDmc.finalizeModeChange(mDisplayId);
+    auto* changePtr = std::get_if<DisplayModeController::RefreshRateChange>(&modeChange);
+    ASSERT_TRUE(changePtr);
+    EXPECT_DISPLAY_MODE_REQUEST(kDesiredMode90, changePtr->activeMode);
+
+    // Called because setDesiredMode resets the render rate to the active refresh rate.
+    EXPECT_CALL(mActiveModeListener, Call(mDisplayId, 90_Hz, 90_Hz)).Times(1);
+
+    // The latest request should override the desired mode.
+    EXPECT_EQ(Action::InitiateDisplayModeSwitch,
+              mDmc.setDesiredMode(mDisplayId, DisplayModeRequest(kDesiredMode60)));
+    EXPECT_EQ(Action::None, mDmc.setDesiredMode(mDisplayId, DisplayModeRequest(kDesiredMode120)));
+
+    EXPECT_DISPLAY_MODE_REQUEST_OPT(kDesiredMode120, mDmc.getDesiredMode(mDisplayId));
+
+    // The mode change should not yet be pending.
+    EXPECT_FALSE(mDmc.getPendingMode(mDisplayId));
+    EXPECT_TRUE(std::holds_alternative<DisplayModeController::NoModeChange>(
+            mDmc.finalizeModeChange(mDisplayId)));
+
+    EXPECT_DISPLAY_MODE_REQUEST_OPT(kDesiredMode120, mDmc.getDesiredMode(mDisplayId));
+    modeRequest = kDesiredMode120;
+
+    constexpr bool kSubsequent = true;
+    constraints = expectModeSet(modeRequest, timeline, kSubsequent);
+
+    EXPECT_EQ(DisplayModeController::ModeChangeResult::Changed,
+              mDmc.initiateModeChange(mDisplayId, std::move(modeRequest), constraints, timeline));
+
+    EXPECT_CALL(mActiveModeListener, Call(mDisplayId, 120_Hz, 120_Hz)).Times(1);
+
+    modeChange = mDmc.finalizeModeChange(mDisplayId);
+    changePtr = std::get_if<DisplayModeController::RefreshRateChange>(&modeChange);
+    ASSERT_TRUE(changePtr);
+    EXPECT_DISPLAY_MODE_REQUEST(kDesiredMode120, changePtr->activeMode);
 }
 
 } // namespace

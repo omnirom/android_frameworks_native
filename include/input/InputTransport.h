@@ -125,6 +125,7 @@ struct InputMessage {
             int32_t buttonState;
             MotionClassification classification; // base type: uint8_t
             uint8_t empty2[3];                   // 3 bytes to fill gap created by classification
+            // TODO(b/321101159): remove edgeFlags; it's always set to AMOTION_EVENT_EDGE_FLAG_NONE.
             int32_t edgeFlags;
             nsecs_t downTime __attribute__((aligned(8)));
             float dsdx; // Begin window transform
@@ -353,7 +354,7 @@ public:
      * Returns BAD_VALUE if seq is 0.
      * Other errors probably indicate that the channel is broken.
      */
-    status_t publishKeyEvent(uint32_t seq, int32_t eventId, int32_t deviceId, int32_t source,
+    status_t publishKeyEvent(uint32_t seq, int32_t eventId, DeviceId deviceId, int32_t source,
                              ui::LogicalDisplayId displayId, std::array<uint8_t, 32> hmac,
                              int32_t action, int32_t flags, int32_t keyCode, int32_t scanCode,
                              int32_t metaState, int32_t repeatCount, nsecs_t downTime,
@@ -368,10 +369,10 @@ public:
      * or if the verifier is enabled and the event failed verification upon publishing.
      * Other errors probably indicate that the channel is broken.
      */
-    status_t publishMotionEvent(uint32_t seq, int32_t eventId, int32_t deviceId, int32_t source,
+    status_t publishMotionEvent(uint32_t seq, int32_t eventId, DeviceId deviceId, int32_t source,
                                 ui::LogicalDisplayId displayId, std::array<uint8_t, 32> hmac,
                                 int32_t action, int32_t actionButton, int32_t flags,
-                                int32_t edgeFlags, int32_t metaState, int32_t buttonState,
+                                int32_t metaState, int32_t buttonState,
                                 MotionClassification classification, const ui::Transform& transform,
                                 float xPrecision, float yPrecision, float xCursorPosition,
                                 float yCursorPosition, const ui::Transform& rawTransform,

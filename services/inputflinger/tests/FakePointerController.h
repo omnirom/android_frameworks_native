@@ -38,9 +38,11 @@ public:
     void setBounds(float minX, float minY, float maxX, float maxY);
     void clearBounds();
     const std::map<ui::LogicalDisplayId, std::vector<int32_t>>& getSpots();
+    void setTransform(ui::Transform transform);
 
     void setPosition(float x, float y) override;
     vec2 getPosition() const override;
+    vec2 getPositionInLogicalDisplay() const override;
     ui::LogicalDisplayId getDisplayId() const override;
     void setDisplayViewport(const DisplayViewport& viewport) override;
     void updatePointerIcon(PointerIconStyle iconId) override;
@@ -81,6 +83,7 @@ private:
     bool mIsPointerShown{false};
     std::optional<PointerIconStyle> mIconStyle;
     std::optional<PointerIconStyle> mCustomIconStyle;
+    ui::Transform mTransform{};
 
     std::map<ui::LogicalDisplayId, std::vector<int32_t>> mSpotsByDisplay;
     std::unordered_set<ui::LogicalDisplayId> mDisplaysToSkipScreenshot;

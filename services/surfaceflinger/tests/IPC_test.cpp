@@ -42,21 +42,13 @@ using CallbackInfo = SurfaceComposerClient::CallbackInfo;
 using TCLHash = SurfaceComposerClient::TCLHash;
 using android::hardware::graphics::common::V1_1::BufferUsage;
 
-class TransactionHelper : public Transaction, public Parcelable {
+class TransactionHelper : public Transaction {
 public:
-    TransactionHelper() : Transaction() {}
     size_t getNumListeners() { return mListenerCallbacks.size(); }
 
     std::unordered_map<sp<ITransactionCompletedListener>, CallbackInfo, TCLHash>
     getListenerCallbacks() {
         return mListenerCallbacks;
-    }
-    status_t writeToParcel(Parcel* parcel) const override {
-        return Transaction::writeToParcel(parcel);
-    }
-
-    status_t readFromParcel(const Parcel* parcel) override {
-        return Transaction::readFromParcel(parcel);
     }
 };
 

@@ -20,6 +20,8 @@
 
 #include <limits.h>
 
+#include <optional>
+
 namespace android {
 
 struct StylusState {

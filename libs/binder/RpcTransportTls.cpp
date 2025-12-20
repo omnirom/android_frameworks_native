@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-#define LOG_TAG "RpcTransportTls"
+#define LOG_TAG "libbinder.RpcTransportTls"
 #include <log/log.h>
 
 #include <poll.h>
@@ -60,7 +60,7 @@ int socketFree(BIO* bio) {
 }
 int socketRead(BIO* bio, char* buf, int size) {
     borrowed_fd fd(static_cast<int>(reinterpret_cast<intptr_t>(BIO_get_data(bio))));
-    int ret = TEMP_FAILURE_RETRY(::recv(fd.get(), buf, size, MSG_NOSIGNAL));
+    int ret = TEMP_FAILURE_RETRY(::recv(fd.get(), buf, size, 0));
     BIO_clear_retry_flags(bio);
     if (errno == EAGAIN || errno == EWOULDBLOCK) {
         BIO_set_retry_read(bio);

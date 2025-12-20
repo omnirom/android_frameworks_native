@@ -19,4 +19,5 @@
 #include <hardware/gralloc.h>
 
 // Arbitrary non-zero usage flag.
-constexpr uint64_t TEST_PRODUCER_USAGE_BITS = GRALLOC_USAGE_SW_READ_RARELY;
+constexpr uint64_t TEST_PRODUCER_USAGE_BITS =
+        GRALLOC_USAGE_SW_READ_RARELY | GRALLOC_USAGE_SW_WRITE_RARELY;

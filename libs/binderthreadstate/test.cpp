@@ -27,7 +27,6 @@
 
 #include <thread>
 
-#include <linux/prctl.h>
 #include <sys/prctl.h>
 
 using android::BinderCallType;

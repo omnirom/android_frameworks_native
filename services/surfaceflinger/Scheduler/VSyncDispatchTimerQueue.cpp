@@ -29,20 +29,11 @@
 #include "VSyncDispatchTimerQueue.h"
 #include "VSyncTracker.h"
 
-#undef LOG_TAG
-#define LOG_TAG "VSyncDispatch"
-
 namespace android::scheduler {
 
 using base::StringAppendF;
 
 namespace {
-
-ScheduleResult getExpectedCallbackTime(nsecs_t nextVsyncTime,
-                                       const VSyncDispatch::ScheduleTiming& timing) {
-    return {TimePoint::fromNs(nextVsyncTime - timing.readyDuration - timing.workDuration),
-            TimePoint::fromNs(nextVsyncTime)};
-}
 
 void traceEntry(const VSyncDispatchTimerQueueEntry& entry, nsecs_t now) {
     if (!SFTRACE_ENABLED() || !entry.wakeupTime().has_value() || !entry.targetVsync().has_value()) {
@@ -113,20 +104,12 @@ ScheduleResult VSyncDispatchTimerQueueEntry::schedule(VSyncDispatch::ScheduleTim
             mArmedInfo && ((nextWakeupTime > (mArmedInfo->mActualWakeupTime + mMinVsyncDistance)));
     SFTRACE_FORMAT_INSTANT("%s: wouldSkipAVsyncTarget=%d wouldSkipAWakeup=%d", mName.c_str(),
                            wouldSkipAVsyncTarget, wouldSkipAWakeup);
-    if (FlagManager::getInstance().dont_skip_on_early_ro()) {
-        if (wouldSkipAVsyncTarget || wouldSkipAWakeup) {
-            nextVsyncTime = mArmedInfo->mActualVsyncTime;
-        } else {
-            nextVsyncTime = adjustVsyncIfNeeded(tracker, nextVsyncTime);
-        }
-        nextWakeupTime = std::max(now, nextVsyncTime - timing.workDuration - timing.readyDuration);
+    if (wouldSkipAVsyncTarget || wouldSkipAWakeup) {
+        nextVsyncTime = mArmedInfo->mActualVsyncTime;
     } else {
-        if (wouldSkipAVsyncTarget && wouldSkipAWakeup) {
-            return getExpectedCallbackTime(nextVsyncTime, timing);
-        }
         nextVsyncTime = adjustVsyncIfNeeded(tracker, nextVsyncTime);
-        nextWakeupTime = nextVsyncTime - timing.workDuration - timing.readyDuration;
     }
+    nextWakeupTime = std::max(now, nextVsyncTime - timing.workDuration - timing.readyDuration);
 
     auto const nextReadyTime = nextVsyncTime - timing.readyDuration;
     mScheduleTiming = timing;
@@ -184,16 +167,14 @@ auto VSyncDispatchTimerQueueEntry::getArmedInfo(VSyncTracker& tracker, nsecs_t n
     const auto nextReadyTime = nextVsyncTime - timing.readyDuration;
     const auto nextWakeupTime = nextReadyTime - timing.workDuration;
 
-    if (FlagManager::getInstance().dont_skip_on_early_ro()) {
-        bool const wouldSkipAVsyncTarget =
-                armedInfo && (nextVsyncTime > (armedInfo->mActualVsyncTime + mMinVsyncDistance));
-        bool const wouldSkipAWakeup =
-                armedInfo && (nextWakeupTime > (armedInfo->mActualWakeupTime + mMinVsyncDistance));
-        SFTRACE_FORMAT_INSTANT("%s: wouldSkipAVsyncTarget=%d wouldSkipAWakeup=%d", mName.c_str(),
-                               wouldSkipAVsyncTarget, wouldSkipAWakeup);
-        if (wouldSkipAVsyncTarget || wouldSkipAWakeup) {
-            return *armedInfo;
-        }
+    bool const wouldSkipAVsyncTarget =
+            armedInfo && (nextVsyncTime > (armedInfo->mActualVsyncTime + mMinVsyncDistance));
+    bool const wouldSkipAWakeup =
+            armedInfo && (nextWakeupTime > (armedInfo->mActualWakeupTime + mMinVsyncDistance));
+    SFTRACE_FORMAT_INSTANT("%s: wouldSkipAVsyncTarget=%d wouldSkipAWakeup=%d", mName.c_str(),
+                            wouldSkipAVsyncTarget, wouldSkipAWakeup);
+    if (wouldSkipAVsyncTarget || wouldSkipAWakeup) {
+        return *armedInfo;
     }
 
     return ArmingInfo{nextWakeupTime, nextVsyncTime, nextReadyTime};

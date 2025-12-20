@@ -52,8 +52,6 @@ protected:
 };
 
 TEST_F(DereferenceSurfaceControlTest, LayerNotInTransaction) {
-    // Last strong pointer is removed, the layer is destroyed and is removed
-    // from compostion.
     fgLayer = nullptr;
     {
         SCOPED_TRACE("after setting null");
@@ -63,9 +61,7 @@ TEST_F(DereferenceSurfaceControlTest, LayerNotInTransaction) {
 }
 
 TEST_F(DereferenceSurfaceControlTest, LayerInTransaction) {
-    Transaction transaction;
-    transaction.show(fgLayer);
-    // |transaction| retains a strong pointer, so layer is retained.
+    auto transaction = Transaction().show(fgLayer);
     fgLayer = nullptr;
     {
         SCOPED_TRACE("after setting null");

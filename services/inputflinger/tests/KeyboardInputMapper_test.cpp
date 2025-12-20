@@ -904,7 +904,7 @@ TEST_F(KeyboardInputMapperTest, Configure_AssignsDisplayPort) {
     const std::string USB2 = "USB2";
     const std::string DEVICE_NAME2 = "KEYBOARD2";
     constexpr int32_t SECOND_DEVICE_ID = DEVICE_ID + 1;
-    constexpr int32_t SECOND_EVENTHUB_ID = EVENTHUB_ID + 1;
+    constexpr RawDeviceId SECOND_EVENTHUB_ID = EVENTHUB_ID + 1;
     std::shared_ptr<InputDevice> device2 =
             newDevice(SECOND_DEVICE_ID, DEVICE_NAME2, USB2, SECOND_EVENTHUB_ID,
                       ftl::Flags<InputDeviceClass>(0));
@@ -1014,7 +1014,7 @@ TEST_F(KeyboardInputMapperTest, Process_LockedKeysShouldToggleAfterReattach) {
     const std::string USB2 = "USB2";
     const std::string DEVICE_NAME2 = "KEYBOARD2";
     constexpr int32_t SECOND_DEVICE_ID = DEVICE_ID + 1;
-    constexpr int32_t SECOND_EVENTHUB_ID = EVENTHUB_ID + 1;
+    constexpr RawDeviceId SECOND_EVENTHUB_ID = EVENTHUB_ID + 1;
     std::shared_ptr<InputDevice> device2 =
             newDevice(SECOND_DEVICE_ID, DEVICE_NAME2, USB2, SECOND_EVENTHUB_ID,
                       ftl::Flags<InputDeviceClass>(0));
@@ -1102,7 +1102,7 @@ TEST_F(KeyboardInputMapperTest, Process_LockedKeysShouldToggleInMultiDevices) {
     const std::string USB2 = "USB2";
     const std::string DEVICE_NAME2 = "KEYBOARD2";
     constexpr int32_t SECOND_DEVICE_ID = DEVICE_ID + 1;
-    constexpr int32_t SECOND_EVENTHUB_ID = EVENTHUB_ID + 1;
+    constexpr RawDeviceId SECOND_EVENTHUB_ID = EVENTHUB_ID + 1;
     std::shared_ptr<InputDevice> device2 =
             newDevice(SECOND_DEVICE_ID, DEVICE_NAME2, USB2, SECOND_EVENTHUB_ID,
                       ftl::Flags<InputDeviceClass>(0));

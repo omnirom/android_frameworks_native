@@ -132,7 +132,8 @@ struct AIBinder_Class {
 
     const ::android::String16& getInterfaceDescriptor() const { return mWideInterfaceDescriptor; }
     const char* getInterfaceDescriptorUtf8() const { return mInterfaceDescriptor.c_str(); }
-    bool setTransactionCodeMap(const char** transactionCodeMap, size_t transactionCodeMapSize);
+    bool setTransactionCodeMap(const char* const* transactionCodeMap,
+                               size_t transactionCodeMapSize);
     const char* getFunctionName(transaction_code_t code) const;
     size_t getTransactionCodeToFunctionLength() const { return mTransactionCodeToFunctionLength; }
 
@@ -155,7 +156,7 @@ struct AIBinder_Class {
     // one.
     const ::android::String16 mWideInterfaceDescriptor;
     // Array which holds names of the functions
-    const char** mTransactionCodeToFunction = nullptr;
+    const char* const* mTransactionCodeToFunction = nullptr;
     // length of mmTransactionCodeToFunctionLength array
     size_t mTransactionCodeToFunctionLength = 0;
 };

@@ -20,10 +20,10 @@
 #include "android/hardware/sensors/2.0/types.h"
 
 #include <aidl/android/hardware/sensors/BnSensorsCallback.h>
+#include <aidl/sensors/convert.h>
 #include <aidlcommonsupport/NativeHandle.h>
 #include <android-base/logging.h>
 #include <android/binder_manager.h>
-#include <aidl/sensors/convert.h>
 
 using ::aidl::android::hardware::sensors::AdditionalInfo;
 using ::aidl::android::hardware::sensors::DynamicSensorInfo;
@@ -112,35 +112,47 @@ bool AidlSensorHalWrapper::connect(SensorDeviceCallback *callback) {
             AIBinder_unlinkToDeath(mSensors->asBinder().get(), mDeathRecipient.get(), this);
         }
 
-        ndk::SpAIBinder binder(AServiceManager_waitForService(aidlServiceName.c_str()));
-        if (binder.get() != nullptr) {
-            mSensors = ISensors::fromBinder(binder);
-            mEventQueue = std::make_unique<AidlMessageQueue<
-                    Event, SynchronizedReadWrite>>(MAX_RECEIVE_BUFFER_EVENT_COUNT,
-                                                   /*configureEventFlagWord=*/true);
-
-            mWakeLockQueue = std::make_unique<AidlMessageQueue<
-                    int32_t, SynchronizedReadWrite>>(MAX_RECEIVE_BUFFER_EVENT_COUNT,
-                                                     /*configureEventFlagWord=*/true);
-            if (mEventQueueFlag != nullptr) {
-                EventFlag::deleteEventFlag(&mEventQueueFlag);
+        constexpr int kMaxRetry = 20;
+        for (int i = 0; i < kMaxRetry; ++i) {
+            ndk::SpAIBinder binder(AServiceManager_waitForService(aidlServiceName.c_str()));
+            if (binder.get() != nullptr) {
+                mSensors = ISensors::fromBinder(binder);
+                if (mSensors != nullptr) {
+                    break;
+                }
             }
-            EventFlag::createEventFlag(mEventQueue->getEventFlagWord(), &mEventQueueFlag);
-            if (mWakeLockQueueFlag != nullptr) {
-                EventFlag::deleteEventFlag(&mWakeLockQueueFlag);
-            }
-            EventFlag::createEventFlag(mWakeLockQueue->getEventFlagWord(), &mWakeLockQueueFlag);
-
-            CHECK(mEventQueue != nullptr && mEventQueueFlag != nullptr &&
-                  mWakeLockQueue != nullptr && mWakeLockQueueFlag != nullptr);
-
-            mCallback = ndk::SharedRefBase::make<AidlSensorsCallback>(mSensorDeviceCallback);
-            mSensors->initialize(mEventQueue->dupeDesc(), mWakeLockQueue->dupeDesc(), mCallback);
-
-            AIBinder_linkToDeath(mSensors->asBinder().get(), mDeathRecipient.get(), this);
-        } else {
-            ALOGE("Could not connect to declared sensors AIDL HAL");
+            ALOGW("Failed to get ISensors, retry counter: %d", i);
         }
+
+        LOG_ALWAYS_FATAL_IF(mSensors == nullptr,
+                            "Could not connect to declared sensors AIDL HAL after %d retries",
+                            kMaxRetry);
+
+        mEventQueue = std::make_unique<
+                AidlMessageQueue<Event, SynchronizedReadWrite>>(MAX_RECEIVE_BUFFER_EVENT_COUNT,
+                                                                /*configureEventFlagWord=*/
+                                                                true);
+
+        mWakeLockQueue = std::make_unique<
+                AidlMessageQueue<int32_t, SynchronizedReadWrite>>(MAX_RECEIVE_BUFFER_EVENT_COUNT,
+                                                                  /*configureEventFlagWord=*/
+                                                                  true);
+        if (mEventQueueFlag != nullptr) {
+            EventFlag::deleteEventFlag(&mEventQueueFlag);
+        }
+        EventFlag::createEventFlag(mEventQueue->getEventFlagWord(), &mEventQueueFlag);
+        if (mWakeLockQueueFlag != nullptr) {
+            EventFlag::deleteEventFlag(&mWakeLockQueueFlag);
+        }
+        EventFlag::createEventFlag(mWakeLockQueue->getEventFlagWord(), &mWakeLockQueueFlag);
+
+        CHECK(mEventQueue != nullptr && mEventQueueFlag != nullptr && mWakeLockQueue != nullptr &&
+              mWakeLockQueueFlag != nullptr);
+
+        mCallback = ndk::SharedRefBase::make<AidlSensorsCallback>(mSensorDeviceCallback);
+        mSensors->initialize(mEventQueue->dupeDesc(), mWakeLockQueue->dupeDesc(), mCallback);
+
+        AIBinder_linkToDeath(mSensors->asBinder().get(), mDeathRecipient.get(), this);
     }
 
     return mSensors != nullptr;

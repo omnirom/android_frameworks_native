@@ -16,9 +16,6 @@
 
 // #define LOG_NDEBUG 0
 
-#undef LOG_TAG
-#define LOG_TAG "Planner"
-
 #include <compositionengine/impl/planner/TexturePool.h>
 #include <renderengine/impl/ExternalTexture.h>
 #include <utils/Log.h>

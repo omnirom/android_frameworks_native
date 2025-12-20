@@ -17,12 +17,13 @@
     <target_preparer class="com.android.tradefed.targetprep.RootTargetPreparer"/>
     <target_preparer class="com.android.tradefed.targetprep.PushFilePreparer">
         <option name="cleanup" value="true" />
-        <option name="push" value="rustBinderTestClientBinary->/data/local/tmp/rustBinderTest" />
-        <option name="push" value="rustBinderTestServiceBinary->/data/local/tmp/rustBinderTestService" />
+        <option name="push" value="rustBinderTest->/data/local/tmp/rustBinderTest" />
+        <option name="push" value="rustBinderTestService->/data/local/tmp/rustBinderTestService" />
     </target_preparer>
 
     <test class="com.android.tradefed.testtype.rust.RustBinaryTest" >
         <option name="test-device-path" value="/data/local/tmp" />
         <option name="module-name" value="rustBinderTest" />
+        <option name="do-not-consider-binary" value="rustBinderTestService" />
     </test>
 </configuration>

@@ -16,7 +16,7 @@
 
 package android.os;
 
-/** {@hide} */
+/** @hide */
 parcelable CreateAppDataArgs {
     @nullable @utf8InCpp String uuid;
     @utf8InCpp String packageName;

@@ -6,16 +6,16 @@ NOTE: If the Vulkan-Headers you need for generation is later than the one that e
 These updates to `external/vulkan` need to be made in AOSP. Changes to `ndk_translation` may
 need to be first made in internal-main.
 
-Run Vulkan-Profiles/scripts/gen_profiles_solutions.py in debug mode.
+In the Vulkan-Profiles git repo run Vulkan-Profiles/scripts/gen_profiles_solutions.py in debug mode.
 
 Debug mode (at time of writing) requires a dedicated debug folder within the output-library location.
 ~/Vulkan-Profiles$ mkdir debug
-~/Vulkan-Profiles$ python3 scripts/gen_profiles_solution.py --debug  --registry ~/<PATH_TO_YOUR_ANDROID_REPO>/external/vulkan-headers/registry/vk.xml --input ~/android/main/frameworks/native/vulkan/vkprofiles/profiles/ --output-library-inc . --output-library-src .
+~/Vulkan-Profiles$ python3 scripts/gen_profiles_solution.py --debug  --registry ~/<PATH_TO_YOUR_ANDROID_REPO>/external/vulkan-headers/registry/vk.xml --input ~/<PATH_TO_YOUR_ANDROID_REPO>/frameworks/native/vulkan/vkprofiles/profiles/ --output-library-inc . --output-library-src .
 
 Take the generated vulkan_profiles.h and vulkan_profiles.cpp from the debug directory you just created.
 
-~/Vulkan-Profiles$ cp debug/vulkan_profiles.cpp <PATH_TO_YOUR_ANDROID_REPO>/frameworks/native/vulkan/vkprofile/generated/
-~/Vulkan-Profiles$ cp debug/vulkan_profiles.h <PATH_TO_YOUR_ANDROID_REPO>/frameworks/native/vulkan/vkprofile/generated/
+~/Vulkan-Profiles$ cp debug/vulkan_profiles.cpp <PATH_TO_YOUR_ANDROID_REPO>/frameworks/native/vulkan/vkprofiles/generated/
+~/Vulkan-Profiles$ cp debug/vulkan_profiles.h <PATH_TO_YOUR_ANDROID_REPO>/frameworks/native/vulkan/vkprofiles/generated/
 
 
 The files need to be modified to land.

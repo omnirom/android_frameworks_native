@@ -20,9 +20,13 @@
 
 namespace android::mock {
 
+constexpr ui::Size kResolution1080p(1920, 1080);
+constexpr ui::Size kResolution4K{3840, 2160};
+constexpr ui::Size kResolution8K{7680, 4320};
+
 inline DisplayMode::Builder createDisplayModeBuilder(
         DisplayModeId modeId, Fps displayRefreshRate, int32_t group = 0,
-        ui::Size resolution = ui::Size(1920, 1080),
+        ui::Size resolution = kResolution1080p,
         PhysicalDisplayId displayId = PhysicalDisplayId::fromPort(0)) {
     return DisplayMode::Builder(hal::HWConfigId(ftl::to_underlying(modeId)))
             .setId(modeId)
@@ -34,7 +38,7 @@ inline DisplayMode::Builder createDisplayModeBuilder(
 
 inline DisplayModePtr createDisplayMode(
         DisplayModeId modeId, Fps refreshRate, int32_t group = 0,
-        ui::Size resolution = ui::Size(1920, 1080),
+        ui::Size resolution = kResolution1080p,
         PhysicalDisplayId displayId = PhysicalDisplayId::fromPort(0)) {
     return createDisplayModeBuilder(modeId, refreshRate, group, resolution, displayId).build();
 }
@@ -46,7 +50,7 @@ inline DisplayModePtr createDisplayMode(PhysicalDisplayId displayId, DisplayMode
 
 inline DisplayModePtr createVrrDisplayMode(
         DisplayModeId modeId, Fps displayRefreshRate, std::optional<hal::VrrConfig> vrrConfig,
-        int32_t group = 0, ui::Size resolution = ui::Size(1920, 1080),
+        int32_t group = 0, ui::Size resolution = kResolution1080p,
         PhysicalDisplayId displayId = PhysicalDisplayId::fromPort(0)) {
     return createDisplayModeBuilder(modeId, displayRefreshRate, group, resolution, displayId)
             .setVrrConfig(std::move(vrrConfig))

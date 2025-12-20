@@ -107,6 +107,7 @@ static const std::vector<std::string> aidl_interfaces_to_dump {
         "android.hardware.graphics.composer3.IComposer",
         "android.hardware.health.IHealth",
         "android.hardware.input.processor.IInputProcessor",
+        "android.hardware.media.c2.IComponentStore",
         "android.hardware.neuralnetworks.IDevice",
         "android.hardware.power.IPower",
         "android.hardware.power.stats.IPowerStats",

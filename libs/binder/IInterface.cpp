@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-#define LOG_TAG "IInterface"
+#define LOG_TAG "libbinder.IInterface"
 #include <binder/IInterface.h>
 
 namespace android {

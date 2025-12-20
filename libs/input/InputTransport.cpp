@@ -25,6 +25,7 @@
 #include <utils/Trace.h>
 
 #include <com_android_input_flags.h>
+#include <input/Input.h>
 #include <input/InputTransport.h>
 #include <input/PrintTools.h>
 #include <input/TraceTools.h>
@@ -541,7 +542,7 @@ InputPublisher::InputPublisher(const std::shared_ptr<InputChannel>& channel)
 InputPublisher::~InputPublisher() {
 }
 
-status_t InputPublisher::publishKeyEvent(uint32_t seq, int32_t eventId, int32_t deviceId,
+status_t InputPublisher::publishKeyEvent(uint32_t seq, int32_t eventId, DeviceId deviceId,
                                          int32_t source, ui::LogicalDisplayId displayId,
                                          std::array<uint8_t, 32> hmac, int32_t action,
                                          int32_t flags, int32_t keyCode, int32_t scanCode,
@@ -553,8 +554,8 @@ status_t InputPublisher::publishKeyEvent(uint32_t seq, int32_t eventId, int32_t 
                                 KeyEvent::getLabel(keyCode)));
     ALOGD_IF(debugTransportPublisher(),
              "channel '%s' publisher ~ %s: seq=%u, id=%d, deviceId=%d, source=%s, "
-             "action=%s, flags=0x%x, keyCode=%s, scanCode=%d, metaState=0x%x, repeatCount=%d,"
-             "downTime=%" PRId64 ", eventTime=%" PRId64,
+             "action=%s, flags=0x%x, keyCode=%s, scanCode=%d, metaState=0x%x, repeatCount=%d, "
+             "downTime=%" PRId64 "ns, eventTime=%" PRId64 "ns",
              mChannel->getName().c_str(), __func__, seq, eventId, deviceId,
              inputEventSourceToString(source).c_str(), KeyEvent::actionToString(action), flags,
              KeyEvent::getLabel(keyCode), scanCode, metaState, repeatCount, downTime, eventTime);
@@ -584,11 +585,11 @@ status_t InputPublisher::publishKeyEvent(uint32_t seq, int32_t eventId, int32_t 
 }
 
 status_t InputPublisher::publishMotionEvent(
-        uint32_t seq, int32_t eventId, int32_t deviceId, int32_t source,
+        uint32_t seq, int32_t eventId, DeviceId deviceId, int32_t source,
         ui::LogicalDisplayId displayId, std::array<uint8_t, 32> hmac, int32_t action,
-        int32_t actionButton, int32_t flags, int32_t edgeFlags, int32_t metaState,
-        int32_t buttonState, MotionClassification classification, const ui::Transform& transform,
-        float xPrecision, float yPrecision, float xCursorPosition, float yCursorPosition,
+        int32_t actionButton, int32_t flags, int32_t metaState, int32_t buttonState,
+        MotionClassification classification, const ui::Transform& transform, float xPrecision,
+        float yPrecision, float xCursorPosition, float yCursorPosition,
         const ui::Transform& rawTransform, nsecs_t downTime, nsecs_t eventTime,
         uint32_t pointerCount, const PointerProperties* pointerProperties,
         const PointerCoords* pointerCoords) {
@@ -601,15 +602,15 @@ status_t InputPublisher::publishMotionEvent(
         transform.dump(transformString, "transform", "        ");
         ALOGD("channel '%s' publisher ~ %s: seq=%u, id=%d, deviceId=%d, source=%s, "
               "displayId=%s, "
-              "action=%s, actionButton=0x%08x, flags=0x%x, edgeFlags=0x%x, "
-              "metaState=0x%x, buttonState=0x%x, classification=%s,"
-              "xPrecision=%f, yPrecision=%f, downTime=%" PRId64 ", eventTime=%" PRId64 ", "
+              "action=%s, actionButton=0x%08x, flags=0x%x, "
+              "metaState=0x%x, buttonState=0x%x, classification=%s, "
+              "xPrecision=%f, yPrecision=%f, downTime=%" PRId64 "ns, eventTime=%" PRId64 "ns, "
               "pointerCount=%" PRIu32 "\n%s",
               mChannel->getName().c_str(), __func__, seq, eventId, deviceId,
               inputEventSourceToString(source).c_str(), displayId.toString().c_str(),
-              MotionEvent::actionToString(action).c_str(), actionButton, flags, edgeFlags,
-              metaState, buttonState, motionClassificationToString(classification), xPrecision,
-              yPrecision, downTime, eventTime, pointerCount, transformString.c_str());
+              MotionEvent::actionToString(action).c_str(), actionButton, flags, metaState,
+              buttonState, motionClassificationToString(classification), xPrecision, yPrecision,
+              downTime, eventTime, pointerCount, transformString.c_str());
     }
 
     if (!seq) {
@@ -634,7 +635,7 @@ status_t InputPublisher::publishMotionEvent(
     msg.body.motion.action = action;
     msg.body.motion.actionButton = actionButton;
     msg.body.motion.flags = flags;
-    msg.body.motion.edgeFlags = edgeFlags;
+    msg.body.motion.edgeFlags = AMOTION_EVENT_EDGE_FLAG_NONE;
     msg.body.motion.metaState = metaState;
     msg.body.motion.buttonState = buttonState;
     msg.body.motion.classification = classification;

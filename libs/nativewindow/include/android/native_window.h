@@ -107,7 +107,7 @@ typedef struct ANativeWindow_Buffer {
     int32_t format;
 
     /// The actual bits.
-    void* bits;
+    void* _Nullable bits;
 
     /// Do not touch.
     uint32_t reserved[6];
@@ -117,33 +117,33 @@ typedef struct ANativeWindow_Buffer {
  * Acquire a reference on the given {@link ANativeWindow} object. This prevents the object
  * from being deleted until the reference is removed.
  */
-void ANativeWindow_acquire(ANativeWindow* window);
+void ANativeWindow_acquire(ANativeWindow* _Nonnull window);
 
 /**
  * Remove a reference that was previously acquired with {@link ANativeWindow_acquire()}.
  */
-void ANativeWindow_release(ANativeWindow* window);
+void ANativeWindow_release(ANativeWindow* _Nonnull window);
 
 /**
  * Return the current width in pixels of the window surface.
  *
  * \return negative value on error.
  */
-int32_t ANativeWindow_getWidth(ANativeWindow* window);
+int32_t ANativeWindow_getWidth(ANativeWindow* _Nonnull window);
 
 /**
  * Return the current height in pixels of the window surface.
  *
  * \return a negative value on error.
  */
-int32_t ANativeWindow_getHeight(ANativeWindow* window);
+int32_t ANativeWindow_getHeight(ANativeWindow* _Nonnull window);
 
 /**
  * Return the current pixel format (AHARDWAREBUFFER_FORMAT_*) of the window surface.
  *
  * \return a negative value on error.
  */
-int32_t ANativeWindow_getFormat(ANativeWindow* window);
+int32_t ANativeWindow_getFormat(ANativeWindow* _Nonnull window);
 
 /**
  * Change the format and size of the window buffers.
@@ -163,7 +163,7 @@ int32_t ANativeWindow_getFormat(ANativeWindow* window);
  * \param format one of the AHardwareBuffer_Format constants.
  * \return 0 for success, or a negative value on error.
  */
-int32_t ANativeWindow_setBuffersGeometry(ANativeWindow* window,
+int32_t ANativeWindow_setBuffersGeometry(ANativeWindow* _Nonnull window,
         int32_t width, int32_t height, int32_t format);
 
 /**
@@ -176,8 +176,8 @@ int32_t ANativeWindow_setBuffersGeometry(ANativeWindow* window,
  *
  * \return 0 for success, or a negative value on error.
  */
-int32_t ANativeWindow_lock(ANativeWindow* window, ANativeWindow_Buffer* outBuffer,
-        ARect* inOutDirtyBounds);
+int32_t ANativeWindow_lock(ANativeWindow* _Nonnull window, ANativeWindow_Buffer* _Nonnull outBuffer,
+        ARect* _Nullable inOutDirtyBounds);
 
 /**
  * Unlock the window's drawing surface after previously locking it,
@@ -185,7 +185,7 @@ int32_t ANativeWindow_lock(ANativeWindow* window, ANativeWindow_Buffer* outBuffe
  *
  * \return 0 for success, or a negative value on error.
  */
-int32_t ANativeWindow_unlockAndPost(ANativeWindow* window);
+int32_t ANativeWindow_unlockAndPost(ANativeWindow* _Nonnull window);
 
 /**
  * Set a transform that will be applied to future buffers posted to the window.
@@ -196,7 +196,7 @@ int32_t ANativeWindow_unlockAndPost(ANativeWindow* window);
  * \param transform combination of {@link ANativeWindowTransform} flags
  * \return 0 for success, or -EINVAL if \p transform is invalid
  */
-int32_t ANativeWindow_setBuffersTransform(ANativeWindow* window, int32_t transform) __INTRODUCED_IN(26);
+int32_t ANativeWindow_setBuffersTransform(ANativeWindow* _Nonnull window, int32_t transform) __INTRODUCED_IN(26);
 
 /**
  * All buffers queued after this call will be associated with the dataSpace
@@ -215,7 +215,7 @@ int32_t ANativeWindow_setBuffersTransform(ANativeWindow* window, int32_t transfo
  * \return 0 for success, -EINVAL if window is invalid or the dataspace is not
  * supported.
  */
-int32_t ANativeWindow_setBuffersDataSpace(ANativeWindow* window, int32_t dataSpace) __INTRODUCED_IN(28);
+int32_t ANativeWindow_setBuffersDataSpace(ANativeWindow* _Nonnull window, int32_t dataSpace) __INTRODUCED_IN(28);
 
 /**
  * Get the dataspace of the buffers in window.
@@ -225,7 +225,7 @@ int32_t ANativeWindow_setBuffersDataSpace(ANativeWindow* window, int32_t dataSpa
  * \return the dataspace of buffers in window, ADATASPACE_UNKNOWN is returned if
  * dataspace is unknown, or -EINVAL if window is invalid.
  */
-int32_t ANativeWindow_getBuffersDataSpace(ANativeWindow* window) __INTRODUCED_IN(28);
+int32_t ANativeWindow_getBuffersDataSpace(ANativeWindow* _Nonnull window) __INTRODUCED_IN(28);
 
 /**
  * Get the default dataspace of the buffers in window as set by the consumer.
@@ -235,7 +235,7 @@ int32_t ANativeWindow_getBuffersDataSpace(ANativeWindow* window) __INTRODUCED_IN
  * \return the dataspace of buffers in window, ADATASPACE_UNKNOWN is returned if
  * dataspace is unknown, or -EINVAL if window is invalid.
  */
-int32_t ANativeWindow_getBuffersDefaultDataSpace(ANativeWindow* window) __INTRODUCED_IN(34);
+int32_t ANativeWindow_getBuffersDefaultDataSpace(ANativeWindow* _Nonnull window) __INTRODUCED_IN(34);
 
 /** Compatibility value for ANativeWindow_setFrameRate. */
 enum ANativeWindow_FrameRateCompatibility {
@@ -273,7 +273,7 @@ enum ANativeWindow_FrameRateCompatibility {
  *
  * Available since API level 30.
  */
-int32_t ANativeWindow_setFrameRate(ANativeWindow* window, float frameRate, int8_t compatibility)
+int32_t ANativeWindow_setFrameRate(ANativeWindow* _Nonnull window, float frameRate, int8_t compatibility)
         __INTRODUCED_IN(30);
 
 /**
@@ -285,7 +285,7 @@ int32_t ANativeWindow_setFrameRate(ANativeWindow* window, float frameRate, int8_
  *
  * Available since API level 30.
  */
-void ANativeWindow_tryAllocateBuffers(ANativeWindow* window) __INTRODUCED_IN(30);
+void ANativeWindow_tryAllocateBuffers(ANativeWindow* _Nonnull window) __INTRODUCED_IN(30);
 
 /** Change frame rate strategy value for ANativeWindow_setFrameRate. */
 enum ANativeWindow_ChangeFrameRateStrategy {
@@ -346,7 +346,7 @@ enum ANativeWindow_ChangeFrameRateStrategy {
  * \return 0 for success, -EINVAL if the window, frame rate, or compatibility
  * value are invalid.
  */
-int32_t ANativeWindow_setFrameRateWithChangeStrategy(ANativeWindow* window, float frameRate,
+int32_t ANativeWindow_setFrameRateWithChangeStrategy(ANativeWindow* _Nonnull window, float frameRate,
         int8_t compatibility, int8_t changeFrameRateStrategy)
         __INTRODUCED_IN(31);
 
@@ -378,7 +378,7 @@ int32_t ANativeWindow_setFrameRateWithChangeStrategy(ANativeWindow* window, floa
  *
  * \return 0 for success, -EINVAL if the window value is invalid.
  */
-inline int32_t ANativeWindow_clearFrameRate(ANativeWindow* window) __INTRODUCED_IN(31) {
+inline int32_t ANativeWindow_clearFrameRate(ANativeWindow* _Nonnull window) __INTRODUCED_IN(31) {
     return ANativeWindow_setFrameRateWithChangeStrategy(window, 0,
             ANATIVEWINDOW_FRAME_RATE_COMPATIBILITY_DEFAULT,
             ANATIVEWINDOW_CHANGE_FRAME_RATE_ONLY_IF_SEAMLESS);

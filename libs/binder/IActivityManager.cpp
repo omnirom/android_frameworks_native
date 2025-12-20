@@ -17,6 +17,8 @@
 #include <unistd.h>
 #include <fcntl.h>
 
+#include <android/app/IProcessObserver.h>
+#include <android/app/RunningAppProcessInfo.h>
 #include <android/permission_manager.h>
 #include <binder/ActivityManager.h>
 #include <binder/IActivityManager.h>
@@ -231,6 +233,41 @@ public:
             return err;
         }
         return NO_ERROR;
+    }
+
+    virtual status_t registerProcessObserver(const sp<app::IProcessObserver>& observer) {
+        Parcel data;
+        Parcel reply;
+        data.writeInterfaceToken(IActivityManager::getInterfaceDescriptor());
+        data.writeStrongBinder(observer);
+        status_t err = remote()->transact(REGISTER_PROCESS_OBSERVER, data, &reply, 0);
+        if (err != NO_ERROR || ((err = reply.readExceptionCode()) != NO_ERROR)) {
+            return err;
+        }
+        return OK;
+    }
+
+    virtual status_t unregisterProcessObserver(const sp<app::IProcessObserver>& observer) {
+        Parcel data;
+        Parcel reply;
+        data.writeInterfaceToken(IActivityManager::getInterfaceDescriptor());
+        data.writeStrongBinder(observer);
+        status_t err = remote()->transact(UNREGISTER_PROCESS_OBSERVER, data, &reply, 0);
+        if (err != NO_ERROR || ((err = reply.readExceptionCode()) != NO_ERROR)) {
+            return err;
+        }
+        return OK;
+    }
+
+    virtual status_t getRunningAppProcesses(::std::vector<app::RunningAppProcessInfo>* output) {
+        Parcel data;
+        Parcel reply;
+        data.writeInterfaceToken(IActivityManager::getInterfaceDescriptor());
+        status_t err = remote()->transact(GET_RUNNING_APP_PROCESSES, data, &reply, 0);
+        if (err != NO_ERROR || ((err = reply.readExceptionCode()) != NO_ERROR)) {
+            return err;
+        }
+        return reply.readParcelableVector(output);
     }
 };
 

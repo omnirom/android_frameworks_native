@@ -48,3 +48,13 @@ flag {
     purpose: PURPOSE_BUGFIX
   }
 }
+
+flag {
+  name: "use_looper_for_uid_state_change"
+  namespace: "sensors"
+  description: "Processes UID state changes on the SensorEventAckReceiver thread instead of calling (UI) thread"
+  bug: "399607981"
+  metadata {
+    purpose: PURPOSE_BUGFIX
+  }
+}

@@ -208,6 +208,12 @@ public:
     [[nodiscard]] virtual hal::Error getLuts(
             const std::vector<android::sp<android::GraphicBuffer>>&,
             std::vector<aidl::android::hardware::graphics::composer3::Luts>*) = 0;
+
+    [[nodiscard]] virtual hal::Error getReadbackBufferAttributes(
+            aidl::android::hardware::graphics::composer3::ReadbackBufferAttributes*) = 0;
+    [[nodiscard]] virtual hal::Error setReadbackBuffer(const sp<GraphicBuffer>&,
+                                                       const android::sp<android::Fence>&) = 0;
+    [[nodiscard]] virtual hal::Error getReadbackBufferFence(android::sp<android::Fence>*) = 0;
 };
 
 namespace impl {
@@ -297,6 +303,14 @@ public:
             const aidl::android::hardware::drm::HdcpLevels& levels) override;
     hal::Error getLuts(const std::vector<android::sp<android::GraphicBuffer>>&,
                        std::vector<aidl::android::hardware::graphics::composer3::Luts>*) override;
+
+    hal::Error getReadbackBufferAttributes(
+            aidl::android::hardware::graphics::composer3::ReadbackBufferAttributes* outAttributes)
+            override;
+    virtual hal::Error setReadbackBuffer(const sp<GraphicBuffer>& buffer,
+                                         const android::sp<android::Fence>& acquireFence) override;
+    virtual hal::Error getReadbackBufferFence(
+            android::sp<android::Fence>* outReleaseFence) override;
 
     // Other Display methods
     hal::HWDisplayId getId() const override { return mId; }

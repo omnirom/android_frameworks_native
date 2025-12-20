@@ -27,12 +27,13 @@ namespace android::scheduler {
 struct ISchedulerCallback {
     virtual void requestHardwareVsync(PhysicalDisplayId, bool enabled) = 0;
     virtual void requestDisplayModes(std::vector<display::DisplayModeRequest>) = 0;
-    virtual void kernelTimerChanged(bool expired) = 0;
+    virtual void kernelTimerChanged(PhysicalDisplayId, bool expired) = 0;
     virtual void onChoreographerAttached() = 0;
     virtual void onExpectedPresentTimePosted(TimePoint, ftl::NonNull<DisplayModePtr>,
                                              Fps renderRate) = 0;
     virtual void onCommitNotComposited() = 0;
-    virtual void vrrDisplayIdle(bool idle) = 0;
+    virtual void vrrDisplayIdle(PhysicalDisplayId, bool idle) = 0;
+    virtual void enableLayerCachingTexturePool(PhysicalDisplayId, bool enable) = 0;
 
 protected:
     ~ISchedulerCallback() = default;

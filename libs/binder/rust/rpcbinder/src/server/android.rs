@@ -133,7 +133,7 @@ impl RpcServer {
 
     unsafe fn checked_from_ptr(ptr: *mut ARpcServer) -> Result<RpcServer, Error> {
         if ptr.is_null() {
-            return Err(Error::new(ErrorKind::Other, "Failed to start server"));
+            return Err(Error::other("Failed to start server"));
         }
         // SAFETY: Our caller must pass us a valid or null pointer, and we've checked that it's not
         // null.

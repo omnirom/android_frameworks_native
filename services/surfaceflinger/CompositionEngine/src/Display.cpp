@@ -26,6 +26,7 @@
 #include <compositionengine/impl/DumpHelpers.h>
 #include <compositionengine/impl/OutputLayer.h>
 #include <compositionengine/impl/RenderSurface.h>
+#include <ui/DisplayId.h>
 
 // TODO(b/129481165): remove the #pragma below and fix conversion issues
 #pragma clang diagnostic push
@@ -54,7 +55,6 @@ Display::~Display() = default;
 void Display::setConfiguration(const compositionengine::DisplayCreationArgs& args) {
     mIdVariant = args.idVariant;
     mPowerAdvisor = args.powerAdvisor;
-    mHasPictureProcessing = args.hasPictureProcessing;
     mMaxLayerPictureProfiles = args.maxLayerPictureProfiles;
     editState().isSecure = args.isSecure;
     editState().isProtected = args.isProtected;
@@ -266,6 +266,12 @@ bool Display::chooseCompositionStrategy(
 
     const TimePoint hwcValidateStartTime = TimePoint::now();
 
+    const auto physicalDisplayId = getDisplayIdVariant().and_then(asPhysicalDisplayId);
+
+    if (physicalDisplayId && getState().readbackBuffer) {
+        hwc.setReadbackBuffer(*physicalDisplayId, getState().readbackBuffer, Fence::NO_FENCE);
+    }
+
     if (status_t result = hwc.getDeviceCompositionChanges(*halDisplayId, requiresClientComposition,
                                                           getState().earliestPresentTime,
                                                           getState().expectedPresentTime,
@@ -308,7 +314,7 @@ bool Display::getSkipColorTransform() const {
                                         DisplayCapability::SKIP_CLIENT_COLOR_TRANSFORM);
     }
 
-    return hwc.hasCapability(Capability::SKIP_CLIENT_COLOR_TRANSFORM);
+    return Output::getSkipColorTransform();
 }
 
 bool Display::allLayersRequireClientComposition() const {
@@ -384,8 +390,13 @@ void Display::applyLayerLutsToLayers(const LayerLuts& layerLuts) {
 
         if (auto lutsIt = layerLuts.find(hwcLayer); lutsIt != layerLuts.end()) {
             if (auto mapperIt = mapper.find(hwcLayer); mapperIt != mapper.end()) {
-                layer->applyDeviceLayerLut(::android::base::unique_fd(mapperIt->second.release()),
-                                           lutsIt->second);
+                if (mapperIt->second.ok()) {
+                    layer->applyDeviceLayerLut(::android::base::unique_fd(
+                                                       mapperIt->second.release()),
+                                               lutsIt->second);
+                } else {
+                    layer->applyDeviceLayerLut(::android::base::unique_fd(), lutsIt->second);
+                }
             }
         }
     }
@@ -477,7 +488,12 @@ Display::getOverlaySupport() {
 }
 
 bool Display::hasPictureProcessing() const {
-    return mHasPictureProcessing;
+    const auto halDisplayIdOpt = getDisplayIdVariant().and_then(asHalDisplayId<DisplayIdVariant>);
+    if (!halDisplayIdOpt) {
+        return false;
+    }
+    return getCompositionEngine().getHwComposer().hasDisplayCapability(
+            *halDisplayIdOpt, DisplayCapability::PICTURE_PROCESSING);
 }
 
 int32_t Display::getMaxLayerPictureProfiles() const {

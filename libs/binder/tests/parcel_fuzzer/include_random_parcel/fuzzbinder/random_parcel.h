@@ -29,7 +29,12 @@ struct RandomParcelOptions {
     std::vector<sp<IBinder>> extraBinders;
     std::vector<binder::unique_fd> extraFds;
 
-    // internal state owned by fillRandomParcel, for Parcel views
+    // Only use extraParcels when this is true. This object needs to outlive
+    // the views
+    bool viewParcel = false;
+    // internal state owned by fillRandomParcel, for Parcel views.
+    // This can only be used if this RandomParcelOptions objects is guaranteed
+    // to outlive the views.
     std::vector<std::unique_ptr<Parcel>> extraParcels;
 };
 

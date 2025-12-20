@@ -23,6 +23,7 @@
 #include <variant>
 
 #include <android-base/logging.h>
+#include <android/configuration.h>
 #include <android_companion_virtualdevice_flags.h>
 #include <com_android_input_flags.h>
 #include <gmock/gmock.h>
@@ -38,10 +39,13 @@
 #include "InputReaderBase.h"
 #include "InterfaceMocks.h"
 #include "NotifyArgs.h"
+#include "ScopedFlagOverride.h"
 #include "TestEventMatchers.h"
 #include "ui/Rotation.h"
 
 #define TAG "CursorInputMapper_test"
+
+namespace input_flags = com::android::input::flags;
 
 namespace android {
 
@@ -57,6 +61,8 @@ constexpr auto HOVER_MOVE = AMOTION_EVENT_ACTION_HOVER_MOVE;
 constexpr auto INVALID_CURSOR_POSITION = AMOTION_EVENT_INVALID_CURSOR_POSITION;
 constexpr auto AXIS_X = AMOTION_EVENT_AXIS_X;
 constexpr auto AXIS_Y = AMOTION_EVENT_AXIS_Y;
+constexpr auto AXIS_RELATIVE_X = AMOTION_EVENT_AXIS_RELATIVE_X;
+constexpr auto AXIS_RELATIVE_Y = AMOTION_EVENT_AXIS_RELATIVE_Y;
 constexpr ui::LogicalDisplayId DISPLAY_ID = ui::LogicalDisplayId::DEFAULT;
 constexpr ui::LogicalDisplayId SECONDARY_DISPLAY_ID = ui::LogicalDisplayId{DISPLAY_ID.val() + 1};
 constexpr int32_t DISPLAY_WIDTH = 480;
@@ -66,7 +72,10 @@ constexpr int32_t TRACKBALL_MOVEMENT_THRESHOLD = 6;
 
 namespace {
 
-DisplayViewport createPrimaryViewport(ui::Rotation orientation) {
+DisplayViewport createPrimaryViewport(ui::Rotation orientation,
+                                      int32_t densityDpi = ACONFIGURATION_DENSITY_XHIGH,
+                                      float xDpi = ACONFIGURATION_DENSITY_NONE,
+                                      float yDpi = ACONFIGURATION_DENSITY_NONE) {
     const bool isRotated =
             orientation == ui::Rotation::Rotation90 || orientation == ui::Rotation::Rotation270;
     DisplayViewport v;
@@ -80,6 +89,9 @@ DisplayViewport createPrimaryViewport(ui::Rotation orientation) {
     v.deviceHeight = isRotated ? DISPLAY_WIDTH : DISPLAY_HEIGHT;
     v.isActive = true;
     v.uniqueId = "local:1";
+    v.densityDpi = densityDpi;
+    v.xDpi = xDpi;
+    v.yDpi = yDpi;
     return v;
 }
 
@@ -168,6 +180,8 @@ protected:
 
     void setPointerCapture(bool enabled) {
         mReaderConfiguration.pointerCaptureRequest.window = enabled ? sp<BBinder>::make() : nullptr;
+        mReaderConfiguration.pointerCaptureRequest.mode =
+                enabled ? PointerCaptureMode::ABSOLUTE : PointerCaptureMode::UNCAPTURED;
         mReaderConfiguration.pointerCaptureRequest.seq = 1;
         int32_t generation = mDevice->getGeneration();
         std::list<NotifyArgs> args =
@@ -259,6 +273,59 @@ TEST_F(CursorInputMapperUnitTest, HoverAndLeftButtonPress) {
                                           WithActionButton(AMOTION_EVENT_BUTTON_PRIMARY))),
                             VariantWith<NotifyMotionArgs>(WithMotionAction(ACTION_UP)),
                             VariantWith<NotifyMotionArgs>(WithMotionAction(HOVER_MOVE))));
+}
+
+TEST_F(CursorInputMapperUnitTest, MoveAndButtonChangeInSameFrame) {
+    createMapper();
+    std::list<NotifyArgs> args;
+
+    // Move the cursor and press the button
+    args += process(EV_REL, REL_X, -10);
+    args += process(EV_REL, REL_Y, 20);
+    args += process(EV_KEY, BTN_LEFT, 1);
+    args += process(EV_SYN, SYN_REPORT, 0);
+    ASSERT_THAT(args,
+                ElementsAre(VariantWith<NotifyMotionArgs>(
+                                    AllOf(WithMotionAction(HOVER_MOVE), WithButtonState(0),
+                                          WithNegativeAxis(AXIS_RELATIVE_X),
+                                          WithPositiveAxis(AXIS_RELATIVE_Y), WithPressure(0.0f))),
+                            VariantWith<NotifyMotionArgs>(
+                                    AllOf(WithMotionAction(ACTION_DOWN),
+                                          WithButtonState(AMOTION_EVENT_BUTTON_PRIMARY),
+                                          WithZeroAxis(AXIS_RELATIVE_X),
+                                          WithZeroAxis(AXIS_RELATIVE_Y), WithPressure(1.0f))),
+                            VariantWith<NotifyMotionArgs>(
+                                    AllOf(WithMotionAction(BUTTON_PRESS),
+                                          WithActionButton(AMOTION_EVENT_BUTTON_PRIMARY),
+                                          WithButtonState(AMOTION_EVENT_BUTTON_PRIMARY),
+                                          WithZeroAxis(AXIS_RELATIVE_X),
+                                          WithZeroAxis(AXIS_RELATIVE_Y), WithPressure(1.0f)))));
+
+    // Move some more and release the button
+    args.clear();
+    args += process(EV_REL, REL_X, 10);
+    args += process(EV_REL, REL_Y, -5);
+    args += process(EV_KEY, BTN_LEFT, 0);
+    args += process(EV_SYN, SYN_REPORT, 0);
+    ASSERT_THAT(args,
+                ElementsAre(VariantWith<NotifyMotionArgs>(
+                                    AllOf(WithMotionAction(ACTION_MOVE),
+                                          WithButtonState(AMOTION_EVENT_BUTTON_PRIMARY),
+                                          WithPositiveAxis(AXIS_RELATIVE_X),
+                                          WithNegativeAxis(AXIS_RELATIVE_Y), WithPressure(1.0f))),
+                            VariantWith<NotifyMotionArgs>(
+                                    AllOf(WithMotionAction(BUTTON_RELEASE),
+                                          WithActionButton(AMOTION_EVENT_BUTTON_PRIMARY),
+                                          WithButtonState(0), WithZeroAxis(AXIS_RELATIVE_X),
+                                          WithZeroAxis(AXIS_RELATIVE_Y), WithPressure(0.0f))),
+                            VariantWith<NotifyMotionArgs>(
+                                    AllOf(WithMotionAction(ACTION_UP), WithButtonState(0),
+                                          WithZeroAxis(AXIS_RELATIVE_X),
+                                          WithZeroAxis(AXIS_RELATIVE_Y), WithPressure(0.0f))),
+                            VariantWith<NotifyMotionArgs>(
+                                    AllOf(WithMotionAction(HOVER_MOVE), WithButtonState(0),
+                                          WithZeroAxis(AXIS_RELATIVE_X),
+                                          WithZeroAxis(AXIS_RELATIVE_Y), WithPressure(0.0f)))));
 }
 
 /**
@@ -443,8 +510,8 @@ TEST_F(CursorInputMapperUnitTest, ProcessShouldSetAllFieldsAndIncludeGlobalMetaS
     EXPECT_THAT(args,
                 Each(VariantWith<NotifyMotionArgs>(
                         AllOf(WithEventTime(ARBITRARY_TIME), WithDeviceId(DEVICE_ID),
-                              WithSource(AINPUT_SOURCE_TRACKBALL), WithFlags(0), WithEdgeFlags(0),
-                              WithPolicyFlags(0),
+                              WithSource(AINPUT_SOURCE_TRACKBALL),
+                              WithFlags(ftl::Flags<MotionFlag>()), WithPolicyFlags(0),
                               WithMetaState(AMETA_SHIFT_LEFT_ON | AMETA_SHIFT_ON),
                               WithButtonState(AMOTION_EVENT_BUTTON_PRIMARY), WithPointerCount(1),
                               WithPointerId(0, 0), WithToolType(ToolType::MOUSE),
@@ -463,8 +530,8 @@ TEST_F(CursorInputMapperUnitTest, ProcessShouldSetAllFieldsAndIncludeGlobalMetaS
     EXPECT_THAT(args,
                 Each(VariantWith<NotifyMotionArgs>(
                         AllOf(WithEventTime(ARBITRARY_TIME + 1), WithDeviceId(DEVICE_ID),
-                              WithSource(AINPUT_SOURCE_TRACKBALL), WithFlags(0), WithEdgeFlags(0),
-                              WithPolicyFlags(0),
+                              WithSource(AINPUT_SOURCE_TRACKBALL),
+                              WithFlags(ftl::Flags<MotionFlag>()), WithPolicyFlags(0),
                               WithMetaState(AMETA_SHIFT_LEFT_ON | AMETA_SHIFT_ON),
                               WithButtonState(0), WithPointerCount(1), WithPointerId(0, 0),
                               WithToolType(ToolType::MOUSE), WithCoords(0.0f, 0.0f),
@@ -539,12 +606,15 @@ TEST_F(CursorInputMapperUnitTest, ProcessShouldHandleCombinedXYAndButtonUpdates)
     args += process(ARBITRARY_TIME, EV_KEY, BTN_MOUSE, 1);
     args += process(ARBITRARY_TIME, EV_SYN, SYN_REPORT, 0);
     EXPECT_THAT(args,
-                ElementsAre(VariantWith<NotifyMotionArgs>(WithMotionAction(ACTION_DOWN)),
-                            VariantWith<NotifyMotionArgs>(WithMotionAction(BUTTON_PRESS))));
-    EXPECT_THAT(args,
-                Each(VariantWith<NotifyMotionArgs>(AllOf(WithPositiveAxis(AXIS_X),
-                                                         WithNegativeAxis(AXIS_Y),
-                                                         WithPressure(1.0f)))));
+                ElementsAre(VariantWith<NotifyMotionArgs>(
+                                    AllOf(WithMotionAction(ACTION_MOVE), WithPressure(0.0f),
+                                          WithPositiveAxis(AXIS_X), WithNegativeAxis(AXIS_Y))),
+                            VariantWith<NotifyMotionArgs>(
+                                    AllOf(WithMotionAction(ACTION_DOWN), WithPressure(1.0f),
+                                          WithZeroAxis(AXIS_X), WithZeroAxis(AXIS_Y))),
+                            VariantWith<NotifyMotionArgs>(
+                                    AllOf(WithMotionAction(BUTTON_PRESS), WithPressure(1.0f),
+                                          WithZeroAxis(AXIS_X), WithZeroAxis(AXIS_Y)))));
     args.clear();
 
     // Move X, Y a bit while pressed.
@@ -780,11 +850,9 @@ TEST_F(CursorInputMapperUnitTest, ProcessShouldHandleAllButtonsWithZeroCoords) {
     args += process(ARBITRARY_TIME, EV_KEY, BTN_RIGHT, 0);
     args += process(ARBITRARY_TIME, EV_SYN, SYN_REPORT, 0);
     EXPECT_THAT(args,
-                ElementsAre(VariantWith<NotifyMotionArgs>(WithMotionAction(BUTTON_RELEASE)),
-                            VariantWith<NotifyMotionArgs>(WithMotionAction(ACTION_MOVE))));
-    EXPECT_THAT(args,
-                Each(VariantWith<NotifyMotionArgs>(
-                        AllOf(WithButtonState(AMOTION_EVENT_BUTTON_TERTIARY),
+                ElementsAre(VariantWith<NotifyMotionArgs>(
+                        AllOf(WithMotionAction(BUTTON_RELEASE),
+                              WithButtonState(AMOTION_EVENT_BUTTON_TERTIARY),
                               WithCoords(0.0f, 0.0f), WithPressure(1.0f)))));
     args.clear();
 
@@ -818,10 +886,6 @@ TEST_P(CursorInputMapperButtonKeyTest, ProcessShouldHandleButtonKeyWithZeroCoord
                 ElementsAre(VariantWith<NotifyKeyArgs>(AllOf(WithKeyAction(AKEY_EVENT_ACTION_DOWN),
                                                              WithKeyCode(expectedKeyCode))),
                             VariantWith<NotifyMotionArgs>(
-                                    AllOf(WithMotionAction(HOVER_MOVE),
-                                          WithButtonState(expectedButtonState),
-                                          WithCoords(0.0f, 0.0f), WithPressure(0.0f))),
-                            VariantWith<NotifyMotionArgs>(
                                     AllOf(WithMotionAction(BUTTON_PRESS),
                                           WithButtonState(expectedButtonState),
                                           WithCoords(0.0f, 0.0f), WithPressure(0.0f)))));
@@ -832,9 +896,6 @@ TEST_P(CursorInputMapperButtonKeyTest, ProcessShouldHandleButtonKeyWithZeroCoord
     EXPECT_THAT(args,
                 ElementsAre(VariantWith<NotifyMotionArgs>(
                                     AllOf(WithMotionAction(BUTTON_RELEASE), WithButtonState(0),
-                                          WithCoords(0.0f, 0.0f), WithPressure(0.0f))),
-                            VariantWith<NotifyMotionArgs>(
-                                    AllOf(WithMotionAction(HOVER_MOVE), WithButtonState(0),
                                           WithCoords(0.0f, 0.0f), WithPressure(0.0f))),
                             VariantWith<NotifyKeyArgs>(AllOf(WithKeyAction(AKEY_EVENT_ACTION_UP),
                                                              WithKeyCode(expectedKeyCode)))));
@@ -1127,6 +1188,314 @@ TEST_F(CursorInputMapperUnitTest, ConfigureAccelerationOnDisplayChange) {
                 ElementsAre(VariantWith<NotifyMotionArgs>(
                         AllOf(WithMotionAction(HOVER_MOVE), WithDisplayId(DISPLAY_ID),
                               WithRelativeMotion(10, 20)))));
+}
+
+// TODO(b/432649760): DensityDependentCursorUnitTest can be merged with
+//  XYDensityDependentCursorUnitTest when corrosponding flags are fully released
+class DensityDependentCursorUnitTest : public CursorInputMapperUnitTest {
+protected:
+    std::unique_ptr<ScopedFlagOverride> mScaleWithDpiFlagOverride;
+    std::unique_ptr<ScopedFlagOverride> mSeparateXYFlagOverride;
+
+    void SetUp() override {
+        ReadFlagValueFunction read_xy = input_flags::use_separate_xy_dpi_scaling_for_mice;
+        WriteFlagValueFunction write_xy = input_flags::use_separate_xy_dpi_scaling_for_mice;
+        mSeparateXYFlagOverride = std::make_unique<ScopedFlagOverride>(read_xy, write_xy, false);
+
+        ReadFlagValueFunction read_scale = input_flags::scale_cursor_speed_with_dpi;
+        WriteFlagValueFunction write_scale = input_flags::scale_cursor_speed_with_dpi;
+        mScaleWithDpiFlagOverride =
+                std::make_unique<ScopedFlagOverride>(read_scale, write_scale, true);
+
+        CursorInputMapperUnitTest::SetUp();
+    }
+
+    void createViewport(int32_t densityDpi, float xDpi = ACONFIGURATION_DENSITY_NONE,
+                        float yDpi = ACONFIGURATION_DENSITY_NONE) {
+        DisplayViewport viewport =
+                createPrimaryViewport(ui::Rotation::Rotation0, densityDpi, xDpi, yDpi);
+        mReaderConfiguration.setDisplayViewports({viewport});
+        EXPECT_CALL((*mDevice), getAssociatedViewport).WillRepeatedly(Return(viewport));
+    }
+
+    std::list<NotifyArgs> processRelativeMove(int32_t rawRelativeX, int32_t rawRelativeY) {
+        std::list<NotifyArgs> args;
+        args += process(ARBITRARY_TIME, EV_REL, REL_X, rawRelativeX);
+        args += process(ARBITRARY_TIME, EV_REL, REL_Y, rawRelativeY);
+        args += process(ARBITRARY_TIME, EV_SYN, SYN_REPORT, 0);
+        return args;
+    }
+
+    std::tuple<float, float> getBaselineCursorMoves(int32_t rawRelativeX, int32_t rawRelativeY) {
+        // Cursor moves are not scaled for display density ACONFIGURATION_DENSITY_XHIGH, which is
+        // considered baseline. Acceleration will still apply.
+        createViewport(ACONFIGURATION_DENSITY_XHIGH);
+        mMapper = createInputMapper<CursorInputMapper>(*mDeviceContext, mReaderConfiguration);
+
+        std::list<NotifyArgs> args = processRelativeMove(rawRelativeX, rawRelativeY);
+        auto coords = get<NotifyMotionArgs>(args.back()).pointerCoords[0];
+        return {coords.getAxisValue(AMOTION_EVENT_AXIS_RELATIVE_X),
+                coords.getAxisValue(AMOTION_EVENT_AXIS_RELATIVE_Y)};
+    }
+};
+
+TEST_F(DensityDependentCursorUnitTest, ScalesCursorMoveWithDisplayDensity) {
+    // Use same move values on different density displays, generated events should be scaled
+    // according to the display density.
+    const int32_t rawRelativeX = 10;
+    const int32_t rawRelativeY = 20;
+    const auto [baselineRelativeX, baselineRelativeY] =
+            getBaselineCursorMoves(rawRelativeX, rawRelativeY);
+
+    createViewport(ACONFIGURATION_DENSITY_XXHIGH);
+
+    std::list<NotifyArgs> args =
+            mMapper->reconfigure(ARBITRARY_TIME, mReaderConfiguration,
+                                 InputReaderConfiguration::Change::DISPLAY_INFO);
+    args.clear();
+
+    args += processRelativeMove(rawRelativeX, rawRelativeY);
+    float scalingFactor = static_cast<float>(ACONFIGURATION_DENSITY_XXHIGH) /
+            static_cast<float>(ACONFIGURATION_DENSITY_XHIGH);
+    ASSERT_THAT(args,
+                ElementsAre(VariantWith<NotifyMotionArgs>(
+                        AllOf(WithMotionAction(HOVER_MOVE),
+                              WithRelativeMotion(baselineRelativeX * scalingFactor,
+                                                 baselineRelativeY * scalingFactor)))));
+}
+
+TEST_F(DensityDependentCursorUnitTest, FallbackToNoScalingWhenDensityUnavailable) {
+    const int32_t rawRelativeX = 10;
+    const int32_t rawRelativeY = 20;
+    const auto [baselineRelativeX, baselineRelativeY] =
+            getBaselineCursorMoves(rawRelativeX, rawRelativeY);
+
+    // Viewport without density information should be equivalent to viewport with baseline density.
+    createViewport(ACONFIGURATION_DENSITY_NONE);
+    std::list<NotifyArgs> args =
+            mMapper->reconfigure(ARBITRARY_TIME, mReaderConfiguration,
+                                 InputReaderConfiguration::Change::DISPLAY_INFO);
+    args.clear();
+
+    args += processRelativeMove(rawRelativeX, rawRelativeY);
+    ASSERT_THAT(args,
+                ElementsAre(VariantWith<NotifyMotionArgs>(
+                        AllOf(WithMotionAction(HOVER_MOVE),
+                              WithRelativeMotion(baselineRelativeX, baselineRelativeY)))));
+}
+
+TEST_F(DensityDependentCursorUnitTest,
+       DoesNotScaleCursorMoveWithDisplayDensityWhenMouseScalingDisabled) {
+    // Create a medium density viewport and disable all scaling.
+    mReaderConfiguration.displaysWithMouseScalingDisabled.emplace(DISPLAY_ID);
+    createViewport(ACONFIGURATION_DENSITY_MEDIUM);
+
+    mMapper = createInputMapper<CursorInputMapper>(*mDeviceContext, mReaderConfiguration);
+
+    const int32_t rawRelativeX = 10;
+    const int32_t rawRelativeY = 20;
+    std::list<NotifyArgs> args;
+    args += processRelativeMove(rawRelativeX, rawRelativeY);
+    ASSERT_THAT(args,
+                ElementsAre(VariantWith<NotifyMotionArgs>(
+                        AllOf(WithMotionAction(HOVER_MOVE),
+                              WithRelativeMotion(rawRelativeX, rawRelativeY)))));
+}
+
+TEST_F(DensityDependentCursorUnitTest,
+       ResetScaleCursorMoveWithDisplayDensityWhenMouseScalingDisabled) {
+    // Create a medium density viewport.
+    createViewport(ACONFIGURATION_DENSITY_MEDIUM);
+    mMapper = createInputMapper<CursorInputMapper>(*mDeviceContext, mReaderConfiguration);
+
+    // Disable scaling
+    mReaderConfiguration.displaysWithMouseScalingDisabled.emplace(DISPLAY_ID);
+    std::list<NotifyArgs> args =
+            mMapper->reconfigure(ARBITRARY_TIME, mReaderConfiguration,
+                                 InputReaderConfiguration::Change::POINTER_SPEED);
+    args.clear();
+
+    const int32_t rawRelativeX = 10;
+    const int32_t rawRelativeY = 20;
+    args += processRelativeMove(rawRelativeX, rawRelativeY);
+    ASSERT_THAT(args,
+                ElementsAre(VariantWith<NotifyMotionArgs>(
+                        AllOf(WithMotionAction(HOVER_MOVE),
+                              WithRelativeMotion(rawRelativeX, rawRelativeY)))));
+}
+
+TEST_F(DensityDependentCursorUnitTest, DoesNotScaleCursorMoveWithPointerCaptureEnabled) {
+    // Create a medium density viewport, that should have scaling enabled by default.
+    createViewport(ACONFIGURATION_DENSITY_MEDIUM);
+    mMapper = createInputMapper<CursorInputMapper>(*mDeviceContext, mReaderConfiguration);
+
+    // Request pointer capture after the mapper has been configured.
+    setPointerCapture(true);
+
+    // Verify pointer capture has been enabled.
+    const int32_t rawRelativeX = 10;
+    const int32_t rawRelativeY = 20;
+    std::list<NotifyArgs> args;
+    args += processRelativeMove(rawRelativeX, rawRelativeY);
+    ASSERT_THAT(args,
+                ElementsAre(VariantWith<NotifyMotionArgs>(
+                        AllOf(WithMotionAction(ACTION_MOVE),
+                              WithSource(AINPUT_SOURCE_MOUSE_RELATIVE),
+                              WithCoords(rawRelativeX, rawRelativeY),
+                              WithRelativeMotion(rawRelativeX, rawRelativeY),
+                              WithCursorPosition(INVALID_CURSOR_POSITION,
+                                                 INVALID_CURSOR_POSITION)))));
+}
+
+class XYDensityDependentCursorUnitTest : public DensityDependentCursorUnitTest {
+protected:
+    void SetUp() override {
+        ReadFlagValueFunction read_scale = input_flags::scale_cursor_speed_with_dpi;
+        WriteFlagValueFunction write_scale = input_flags::scale_cursor_speed_with_dpi;
+        mScaleWithDpiFlagOverride =
+                std::make_unique<ScopedFlagOverride>(read_scale, write_scale, true);
+
+        ReadFlagValueFunction read_xy = input_flags::use_separate_xy_dpi_scaling_for_mice;
+        WriteFlagValueFunction write_xy = input_flags::use_separate_xy_dpi_scaling_for_mice;
+        mSeparateXYFlagOverride = std::make_unique<ScopedFlagOverride>(read_xy, write_xy, true);
+
+        CursorInputMapperUnitTest::SetUp();
+    }
+
+    std::tuple<float, float> getBaselineCursorMoves(int32_t rawRelativeX, int32_t rawRelativeY) {
+        // Cursor moves are not scaled for display density ACONFIGURATION_DENSITY_XHIGH, which is
+        // considered baseline. Acceleration will still apply.
+        createViewport(/*densityDpi=*/ACONFIGURATION_DENSITY_XHIGH,
+                       /*xDpi=*/ACONFIGURATION_DENSITY_XHIGH,
+                       /*yDpi=*/ACONFIGURATION_DENSITY_XHIGH);
+        mMapper = createInputMapper<CursorInputMapper>(*mDeviceContext, mReaderConfiguration);
+
+        std::list<NotifyArgs> args = processRelativeMove(rawRelativeX, rawRelativeY);
+        auto coords = get<NotifyMotionArgs>(args.back()).pointerCoords[0];
+        return {coords.getAxisValue(AMOTION_EVENT_AXIS_RELATIVE_X),
+                coords.getAxisValue(AMOTION_EVENT_AXIS_RELATIVE_Y)};
+    }
+};
+
+TEST_F(XYDensityDependentCursorUnitTest, ScalesCursorMoveWithDisplayDensity) {
+    // Use same move values on different density displays, generated events should be scaled
+    // according to the display density.
+    const int32_t rawRelativeX = 10;
+    const int32_t rawRelativeY = 20;
+    const auto [baselineRelativeX, baselineRelativeY] =
+            getBaselineCursorMoves(rawRelativeX, rawRelativeY);
+
+    // use different dpi values for X and Y direction, overall dpi is usually average of
+    // X/Y values but its ignored for this test.
+    constexpr float xDpi = ACONFIGURATION_DENSITY_XXXHIGH;
+    constexpr float yDpi = ACONFIGURATION_DENSITY_XXHIGH;
+    constexpr int32_t densityDpi = (xDpi + yDpi) / 2.0;
+    createViewport(densityDpi, xDpi, yDpi);
+
+    mMapper = createInputMapper<CursorInputMapper>(*mDeviceContext, mReaderConfiguration);
+    std::list<NotifyArgs> args =
+            mMapper->reconfigure(ARBITRARY_TIME, mReaderConfiguration,
+                                 InputReaderConfiguration::Change::DISPLAY_INFO);
+    args.clear();
+
+    args += processRelativeMove(rawRelativeX, rawRelativeY);
+    constexpr float xScalingFactor = xDpi / static_cast<float>(ACONFIGURATION_DENSITY_XHIGH);
+    constexpr float yScalingFactor = yDpi / static_cast<float>(ACONFIGURATION_DENSITY_XHIGH);
+    ASSERT_THAT(args,
+                ElementsAre(VariantWith<NotifyMotionArgs>(
+                        AllOf(WithMotionAction(HOVER_MOVE),
+                              WithRelativeMotion(baselineRelativeX * xScalingFactor,
+                                                 baselineRelativeY * yScalingFactor)))));
+}
+
+TEST_F(XYDensityDependentCursorUnitTest, FallbackToNoScalingWhenDensityUnavailable) {
+    const int32_t rawRelativeX = 10;
+    const int32_t rawRelativeY = 20;
+    const auto [baselineRelativeX, baselineRelativeY] =
+            getBaselineCursorMoves(rawRelativeX, rawRelativeY);
+
+    // Viewport without density information should be equivalent to viewport with baseline density.
+    createViewport(/*densityDpi=*/ACONFIGURATION_DENSITY_NONE, /*xDpi=*/ACONFIGURATION_DENSITY_NONE,
+                   /*yDpi=*/ACONFIGURATION_DENSITY_NONE);
+
+    mMapper = createInputMapper<CursorInputMapper>(*mDeviceContext, mReaderConfiguration);
+    std::list<NotifyArgs> args =
+            mMapper->reconfigure(ARBITRARY_TIME, mReaderConfiguration,
+                                 InputReaderConfiguration::Change::DISPLAY_INFO);
+    args.clear();
+
+    args += processRelativeMove(rawRelativeX, rawRelativeY);
+    ASSERT_THAT(args,
+                ElementsAre(VariantWith<NotifyMotionArgs>(
+                        AllOf(WithMotionAction(HOVER_MOVE),
+                              WithRelativeMotion(baselineRelativeX, baselineRelativeY)))));
+}
+
+TEST_F(XYDensityDependentCursorUnitTest,
+       DoesNotScaleCursorMoveWithDisplayDensityWhenMouseScalingDisabled) {
+    // Create a medium density viewport and disable all scaling.
+    mReaderConfiguration.displaysWithMouseScalingDisabled.emplace(DISPLAY_ID);
+    createViewport(/*densityDpi=*/ACONFIGURATION_DENSITY_MEDIUM,
+                   /*xDpi=*/ACONFIGURATION_DENSITY_MEDIUM, /*xDpi=*/ACONFIGURATION_DENSITY_MEDIUM);
+
+    mMapper = createInputMapper<CursorInputMapper>(*mDeviceContext, mReaderConfiguration);
+
+    const int32_t rawRelativeX = 10;
+    const int32_t rawRelativeY = 20;
+    std::list<NotifyArgs> args = processRelativeMove(rawRelativeX, rawRelativeY);
+    ASSERT_THAT(args,
+                ElementsAre(VariantWith<NotifyMotionArgs>(
+                        AllOf(WithMotionAction(HOVER_MOVE),
+                              WithRelativeMotion(rawRelativeX, rawRelativeY)))));
+}
+
+TEST_F(XYDensityDependentCursorUnitTest,
+       ResetScaleCursorMoveWithDisplayDensityWhenMouseScalingDisabled) {
+    // Create a medium density viewport.
+    createViewport(/*densityDpi=*/ACONFIGURATION_DENSITY_MEDIUM,
+                   /*xDpi=*/ACONFIGURATION_DENSITY_MEDIUM, /*xDpi=*/ACONFIGURATION_DENSITY_MEDIUM);
+
+    mMapper = createInputMapper<CursorInputMapper>(*mDeviceContext, mReaderConfiguration);
+
+    std::list<NotifyArgs> args;
+    // Disables scaling
+    mReaderConfiguration.displaysWithMouseScalingDisabled.emplace(DISPLAY_ID);
+    args += mMapper->reconfigure(ARBITRARY_TIME, mReaderConfiguration,
+                                 InputReaderConfiguration::Change::POINTER_SPEED);
+    args.clear();
+
+    const int32_t rawRelativeX = 10;
+    const int32_t rawRelativeY = 20;
+    args += processRelativeMove(rawRelativeX, rawRelativeY);
+    ASSERT_THAT(args,
+                ElementsAre(VariantWith<NotifyMotionArgs>(
+                        AllOf(WithMotionAction(HOVER_MOVE),
+                              WithRelativeMotion(rawRelativeX, rawRelativeY)))));
+}
+
+TEST_F(XYDensityDependentCursorUnitTest, DoesNotScaleCursorMoveWithPointerCaptureEnabled) {
+    // Create a medium density viewport, that should have scaling enabled by default.
+    createViewport(/*densityDpi=*/ACONFIGURATION_DENSITY_MEDIUM,
+                   /*xDpi=*/ACONFIGURATION_DENSITY_MEDIUM, /*xDpi=*/ACONFIGURATION_DENSITY_MEDIUM);
+
+    mMapper = createInputMapper<CursorInputMapper>(*mDeviceContext, mReaderConfiguration);
+
+    // Request pointer capture after the mapper has been configured.
+    setPointerCapture(true);
+
+    // Verify pointer capture has been enabled.
+    const int32_t rawRelativeX = 10;
+    const int32_t rawRelativeY = 20;
+    std::list<NotifyArgs> args;
+    args += processRelativeMove(rawRelativeX, rawRelativeY);
+    ASSERT_THAT(args,
+                ElementsAre(VariantWith<NotifyMotionArgs>(
+                        AllOf(WithMotionAction(ACTION_MOVE),
+                              WithSource(AINPUT_SOURCE_MOUSE_RELATIVE),
+                              WithCoords(rawRelativeX, rawRelativeY),
+                              WithRelativeMotion(rawRelativeX, rawRelativeY),
+                              WithCursorPosition(INVALID_CURSOR_POSITION,
+                                                 INVALID_CURSOR_POSITION)))));
 }
 
 namespace {

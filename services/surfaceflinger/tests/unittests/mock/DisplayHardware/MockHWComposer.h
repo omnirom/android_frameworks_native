@@ -18,6 +18,7 @@
 
 #include <gmock/gmock.h>
 
+#include "Display/DisplayIdentification.h"
 #include "DisplayHardware/HWComposer.h"
 
 namespace android::mock {
@@ -32,7 +33,9 @@ public:
 
     MOCK_METHOD(void, setCallback, (HWC2::ComposerCallback&), (override));
     MOCK_METHOD(bool, getDisplayIdentificationData,
-                (HWDisplayId, uint8_t*, DisplayIdentificationData*), (const, override));
+                (HWDisplayId, uint8_t*, display::DisplayIdentificationData*,
+                 android::ScreenPartStatus*),
+                (const, override));
     MOCK_METHOD(bool, hasCapability, (aidl::android::hardware::graphics::composer3::Capability),
                 (const, override));
     MOCK_METHOD(bool, hasDisplayCapability,
@@ -81,7 +84,7 @@ public:
     MOCK_METHOD(ftl::Future<status_t>, setDisplayBrightness,
                 (PhysicalDisplayId, float, float, const Hwc2::Composer::DisplayBrightnessOptions&),
                 (override));
-    MOCK_METHOD(std::optional<DisplayIdentificationInfo>, onHotplug,
+    MOCK_METHOD(std::optional<display::DisplayIdentificationInfo>, onHotplug,
                 (hal::HWDisplayId, HWComposer::HotplugEvent), (override));
     MOCK_METHOD(bool, updatesDeviceProductInfoOnHotplugReconnect, (), (const, override));
     MOCK_METHOD(std::optional<PhysicalDisplayId>, onVsync, (hal::HWDisplayId, int64_t));
@@ -157,6 +160,13 @@ public:
     MOCK_METHOD(status_t, getLuts,
                 (PhysicalDisplayId, const std::vector<sp<GraphicBuffer>>&,
                  std::vector<aidl::android::hardware::graphics::composer3::Luts>*));
+
+    MOCK_METHOD(status_t, getReadbackBufferAttributes,
+                (PhysicalDisplayId,
+                 aidl::android::hardware::graphics::composer3::ReadbackBufferAttributes*));
+    MOCK_METHOD(status_t, setReadbackBuffer,
+                (PhysicalDisplayId, const sp<GraphicBuffer>&, const android::sp<android::Fence>&));
+    MOCK_METHOD(sp<Fence>, getReadbackBufferFence, (PhysicalDisplayId));
 };
 
 } // namespace android::mock

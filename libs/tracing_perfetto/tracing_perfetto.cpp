@@ -204,4 +204,15 @@ bool isTagEnabled(uint64_t category) {
          atrace_is_tag_enabled(category);
 }
 
+PerfettoTeCategory* getPerfettoCategory(uint64_t category) {
+  struct PerfettoTeCategory* perfettoTeCategory =
+      internal::toPerfettoCategory(category);
+
+  if (internal::isPerfettoCategoryEnabled(perfettoTeCategory)) {
+    return perfettoTeCategory;
+  }
+
+  return nullptr;
+}
+
 }  // namespace tracing_perfetto

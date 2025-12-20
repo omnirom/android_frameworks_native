@@ -20,11 +20,13 @@
 
 #include "InputDispatcherInterface.h"
 #include "InputDispatcherPolicyInterface.h"
+#include "InputTracingBackendInterface.h"
 
 namespace android {
 
 // This factory method is used to encapsulate implementation details in internal header files.
 std::unique_ptr<InputDispatcherInterface> createInputDispatcher(
-        InputDispatcherPolicyInterface& policy);
+        InputDispatcherPolicyInterface& policy, JNIEnv* env,
+        std::shared_ptr<input_trace::InputTracingBackendInterface> tracingBackend);
 
 } // namespace android

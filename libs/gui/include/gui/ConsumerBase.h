@@ -75,7 +75,6 @@ public:
     void dumpState(String8& result) const;
     void dumpState(String8& result, const char* prefix) const;
 
-#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
     // Returns a Surface that can be used as the producer for this consumer.
     sp<Surface> getSurface() const;
 
@@ -83,7 +82,6 @@ public:
     // that backs this ConsumerBase.
     sp<IGraphicBufferConsumer> getIGraphicBufferConsumer() const
             __attribute((deprecated("DO NOT USE: Temporary hack for refactoring")));
-#endif // COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
 
     // setFrameAvailableListener sets the listener object that will be notified
     // when a new frame becomes available.
@@ -93,10 +91,8 @@ public:
     status_t detachBuffer(int slot) __attribute((
             deprecated("Please use the GraphicBuffer variant--slots are deprecated.")));
 
-#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_PLATFORM_API_IMPROVEMENTS)
     // See IGraphicBufferConsumer::detachBuffer
     status_t detachBuffer(const sp<GraphicBuffer>& buffer);
-#endif // COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_PLATFORM_API_IMPROVEMENTS)
 
     status_t addReleaseFence(const sp<GraphicBuffer> buffer, const sp<Fence>& fence);
 
@@ -115,10 +111,8 @@ public:
     // See IGraphicBufferConsumer::setTransformHint
     status_t setTransformHint(uint32_t hint);
 
-#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
     // See IGraphicBufferConsumer::setMaxBufferCount
     status_t setMaxBufferCount(int bufferCount);
-#endif // COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
 
     // See IGraphicBufferConsumer::setMaxAcquiredBufferCount
     status_t setMaxAcquiredBufferCount(int maxAcquiredBuffers);
@@ -146,7 +140,6 @@ protected:
     // buffers from the given IGraphicBufferConsumer.
     // The controlledByApp flag indicates that this consumer is under the application's
     // control.
-#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
     explicit ConsumerBase(bool controlledByApp = false, bool consumerIsSurfaceFlinger = false);
     explicit ConsumerBase(const sp<IGraphicBufferProducer>& producer,
                           const sp<IGraphicBufferConsumer>& consumer, bool controlledByApp = false);
@@ -154,9 +147,6 @@ protected:
     explicit ConsumerBase(const sp<IGraphicBufferConsumer>& consumer, bool controlledByApp = false)
             __attribute((deprecated("ConsumerBase should own its own producer, and constructing it "
                                     "without one is fragile! This method is going away soon.")));
-#else
-    explicit ConsumerBase(const sp<IGraphicBufferConsumer>& consumer, bool controlledByApp = false);
-#endif // COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
 
     // onLastStrongRef gets called by RefBase just before the dtor of the most
     // derived class.  It is used to clean up the buffers so that ConsumerBase
@@ -319,11 +309,9 @@ protected:
     // objects if not supplied.
     sp<IGraphicBufferConsumer> mConsumer;
 
-#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
     // This Surface wraps the IGraphicBufferConsumer created for this
     // ConsumerBase.
     sp<Surface> mSurface;
-#endif // COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
 
     // The final release fence of the most recent buffer released by
     // releaseBufferLocked.

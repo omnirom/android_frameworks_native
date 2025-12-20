@@ -33,12 +33,12 @@ cc_defaults {
     },
     cflags: [
         "-O0",
-        "-g",
         "-Wall",
+        "-Werror",
         "-Wextra",
         "-Wextra-semi",
-        "-Werror",
         "-Winconsistent-missing-override",
+        "-g",
     ],
 }
 
@@ -60,6 +60,7 @@ cc_defaults {
         "libbase",
         "libbinder",
         "libbinder_ndk",
+        "libselinux",
         "libutils",
     ],
     static_libs: [
@@ -97,8 +98,8 @@ cc_test_host {
     },
     static_libs: [
         "libbase",
-        "libbinder_ndk",
         "libbinder",
+        "libbinder_ndk",
         "libcutils",
         "libfakeservicemanager",
         "libgmock",
@@ -116,7 +117,7 @@ cc_test {
     static_libs: [
         "IBinderVendorDoubleLoadTest-cpp",
         "IBinderVendorDoubleLoadTest-ndk",
-        "libbinder_aidl_test_stub-ndk",
+        "servicemanager_aidl-ndk",
     ],
     // critical that libbinder/libbinder_ndk are shared for VTS
     shared_libs: [

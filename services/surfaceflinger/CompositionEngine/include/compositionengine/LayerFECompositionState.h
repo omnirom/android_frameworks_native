@@ -19,7 +19,9 @@
 #include <cstdint>
 
 #include <android/gui/BorderSettings.h>
+#include <android/gui/BoxShadowSettings.h>
 #include <android/gui/CachingHint.h>
+#include <common/LayerFilter.h>
 #include <gui/DisplayLuts.h>
 #include <gui/HdrMetadata.h>
 #include <math/mat4.h>
@@ -104,7 +106,7 @@ struct LayerFECompositionState {
      */
 
     // The filter that determines which outputs include this layer
-    ui::LayerFilter outputFilter;
+    LayerFilter outputFilter;
 
     // If false, this layer should not be considered visible
     bool isVisible{true};
@@ -120,6 +122,9 @@ struct LayerFECompositionState {
 
     // Background blur in pixels
     int backgroundBlurRadius{0};
+
+    // Background blur content scale factor, between 0.0 and 1.0
+    float backgroundBlurScale{1.0f};
 
     // The transform from layer local coordinates to composition coordinates
     ui::Transform geomLayerTransform;
@@ -144,6 +149,9 @@ struct LayerFECompositionState {
 
     // The settings to configure the outline of a layer.
     gui::BorderSettings borderSettings;
+
+    // The settings to configure box shadows of a layer.
+    gui::BoxShadowSettings boxShadowSettings;
 
     // List of regions that require blur
     std::vector<BlurRegion> blurRegions;
@@ -240,6 +248,43 @@ struct LayerFECompositionState {
 
     // Debugging
     virtual void dump(std::string& out) const;
+
+    FloatRect outsetRectForShadow(const FloatRect& input) const {
+        FloatRect output = input;
+
+        // RenderEngine currently blurs shadows to smooth out edges, so outset by
+        // 2x the length instead of 1x to compensate
+        float outset = shadowSettings.length * 2;
+
+        // Stroke antialiasing should never add more than 2 pixels.
+        if (borderSettings.strokeWidth > 0) {
+            outset = std::max(outset, borderSettings.strokeWidth + 2);
+        }
+
+        output.left -= outset;
+        output.top -= outset;
+        output.right += outset;
+        output.bottom += outset;
+
+        for (const gui::BoxShadowSettings::BoxShadowParams& boxShadow :
+             boxShadowSettings.boxShadows) {
+            float radius = convertBlurSigmaToKernelRadius(
+                                   convertBlurUserRadiusToSigma(boxShadow.blurRadius)) +
+                    boxShadow.spreadRadius;
+
+            float shadowLeft = input.left + boxShadow.offsetX - radius;
+            float shadowTop = input.top + boxShadow.offsetY - radius;
+            float shadowRight = input.right + boxShadow.offsetX + radius;
+            float shadowBottom = input.bottom + boxShadow.offsetY + radius;
+
+            output.left = std::min(shadowLeft, output.left);
+            output.top = std::min(shadowTop, output.top);
+            output.right = std::max(shadowRight, output.right);
+            output.bottom = std::max(shadowBottom, output.bottom);
+        }
+
+        return output;
+    }
 };
 
 } // namespace android::compositionengine

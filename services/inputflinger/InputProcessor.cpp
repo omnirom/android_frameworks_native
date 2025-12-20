@@ -147,7 +147,7 @@ ClassifierEvent ClassifierEvent::createExitEvent() {
     return ClassifierEvent(ClassifierEventType::EXIT, std::nullopt);
 }
 
-std::optional<int32_t> ClassifierEvent::getDeviceId() const {
+std::optional<DeviceId> ClassifierEvent::getDeviceId() const {
     switch (type) {
         case ClassifierEventType::MOTION: {
             const NotifyMotionArgs& motionArgs = std::get<NotifyMotionArgs>(*args);
@@ -249,8 +249,7 @@ void MotionClassifier::processEvents() {
 void MotionClassifier::enqueueEvent(ClassifierEvent&& event) {
     bool eventAdded = mEvents.push(std::move(event));
     if (!eventAdded) {
-        // If the queue is full, suspect the HAL is slow in processing the events.
-        ALOGE("Could not add the event to the queue. Resetting");
+        ALOGW("Event queue full; the HAL is probably being slow. Resetting");
         reset();
     }
 }
@@ -260,7 +259,7 @@ void MotionClassifier::requestExit() {
     mEvents.push(ClassifierEvent::createExitEvent());
 }
 
-void MotionClassifier::updateClassification(int32_t deviceId, nsecs_t eventTime,
+void MotionClassifier::updateClassification(DeviceId deviceId, nsecs_t eventTime,
                                             MotionClassification classification) {
     std::scoped_lock lock(mLock);
     const nsecs_t lastDownTime = getValueForKey(mLastDownTimes, deviceId, static_cast<nsecs_t>(0));
@@ -274,7 +273,7 @@ void MotionClassifier::updateClassification(int32_t deviceId, nsecs_t eventTime,
     mClassifications[deviceId] = classification;
 }
 
-void MotionClassifier::setClassification(int32_t deviceId, MotionClassification classification) {
+void MotionClassifier::setClassification(DeviceId deviceId, MotionClassification classification) {
     std::scoped_lock lock(mLock);
     mClassifications[deviceId] = classification;
 }
@@ -284,18 +283,18 @@ void MotionClassifier::clearClassifications() {
     mClassifications.clear();
 }
 
-MotionClassification MotionClassifier::getClassification(int32_t deviceId) {
+MotionClassification MotionClassifier::getClassification(DeviceId deviceId) {
     std::scoped_lock lock(mLock);
     return getValueForKey(mClassifications, deviceId, MotionClassification::NONE);
 }
 
-void MotionClassifier::updateLastDownTime(int32_t deviceId, nsecs_t downTime) {
+void MotionClassifier::updateLastDownTime(DeviceId deviceId, nsecs_t downTime) {
     std::scoped_lock lock(mLock);
     mLastDownTimes[deviceId] = downTime;
     mClassifications[deviceId] = MotionClassification::NONE;
 }
 
-void MotionClassifier::clearDeviceState(int32_t deviceId) {
+void MotionClassifier::clearDeviceState(DeviceId deviceId) {
     std::scoped_lock lock(mLock);
     mClassifications.erase(deviceId);
     mLastDownTimes.erase(deviceId);
@@ -320,10 +319,10 @@ void MotionClassifier::reset() {
  * Request InputProcessor thread to call resetDevice for this particular device.
  */
 void MotionClassifier::reset(const NotifyDeviceResetArgs& args) {
-    int32_t deviceId = args.deviceId;
+    DeviceId deviceId = args.deviceId;
     // Clear the pending events right away, to avoid unnecessary work done by the HAL.
     mEvents.erase_if([deviceId](const ClassifierEvent& event) {
-        std::optional<int32_t> eventDeviceId = event.getDeviceId();
+        std::optional<DeviceId> eventDeviceId = event.getDeviceId();
         return eventDeviceId && (*eventDeviceId == deviceId);
     });
     enqueueEvent(args);
@@ -337,7 +336,7 @@ void MotionClassifier::dump(std::string& dump) {
     dump += INDENT3 "Device Id\tClassification\tLast down time";
     // Combine mClassifications and mLastDownTimes into a single table.
     // Create a superset of device ids.
-    std::unordered_set<int32_t> deviceIds;
+    std::unordered_set<DeviceId> deviceIds;
     std::for_each(mClassifications.begin(), mClassifications.end(),
                   [&deviceIds](auto pair) { deviceIds.insert(pair.first); });
     std::for_each(mLastDownTimes.begin(), mLastDownTimes.end(),

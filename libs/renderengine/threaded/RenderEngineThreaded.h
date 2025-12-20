@@ -66,6 +66,11 @@ public:
     std::optional<pid_t> getRenderEngineTid() const override;
     void setEnableTracing(bool tracingEnabled) override;
 
+    void rdocCaptureNextFrame() override {
+        ALOGI("[RDOC] Flagging RenderEngine to capture next frame");
+        mRenderEngine->rdocCaptureNextFrame();
+    }
+
 protected:
     void mapExternalTextureBuffer(const sp<GraphicBuffer>& buffer, bool isRenderable) override;
     void unmapExternalTextureBuffer(sp<GraphicBuffer>&& buffer) override;

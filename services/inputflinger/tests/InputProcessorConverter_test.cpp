@@ -41,9 +41,9 @@ static NotifyMotionArgs generateBasicMotionArgs() {
                                 /*deviceId=*/3, AINPUT_SOURCE_ANY, ui::LogicalDisplayId::DEFAULT,
                                 /*policyFlags=*/4, AMOTION_EVENT_ACTION_DOWN, /*actionButton=*/0,
                                 /*flags=*/0, AMETA_NONE, /*buttonState=*/0,
-                                MotionClassification::NONE, AMOTION_EVENT_EDGE_FLAG_NONE,
-                                /*pointerCount=*/1, &properties, &coords, /*xPrecision=*/0,
-                                /*yPrecision=*/0, AMOTION_EVENT_INVALID_CURSOR_POSITION,
+                                MotionClassification::NONE, /*pointerCount=*/1, &properties,
+                                &coords, /*xPrecision=*/0, /*yPrecision=*/0,
+                                AMOTION_EVENT_INVALID_CURSOR_POSITION,
                                 AMOTION_EVENT_INVALID_CURSOR_POSITION, downTime,
                                 /*videoFrames=*/{});
     return motionArgs;

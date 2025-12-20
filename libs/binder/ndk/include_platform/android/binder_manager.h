@@ -14,6 +14,15 @@
  * limitations under the License.
  */
 
+/*
+ * This file defines the AServiceManager LLNDK APIs that vendor and system
+ * processes use to interact with the Binder servicemanager process in /system.
+ * It provides a stable API for most of the functionality of the libbinder
+ * IServiceManager APIs in
+ * `frameworks/native/libs/binder/include/binder/IServiceManager.h`.
+ *
+ * All strings are expected be UTF-8.
+ */
 #pragma once
 
 #include <android/binder_ibinder.h>
@@ -39,6 +48,28 @@ enum AServiceManager_AddServiceFlag : uint32_t {
     ADD_SERVICE_DUMP_FLAG_PRIORITY_DEFAULT = 1 << 4,
     ADD_SERVICE_DUMP_FLAG_PROTO = 1 << 5,
     // All other bits are reserved for internal usage
+};
+
+/**
+ * These are the different SELinux permissions that processes need to have for
+ * different operations with servicemanager.
+ */
+enum AServiceManager_PermissionType : uint32_t {
+    /**
+     * Permission for a process to "find" this service through ServiceManager
+     * APIs like AServiceManager_getService or AServiceManager_waitForService
+     */
+    CHECK_ACCESS_PERMISSION_FIND,
+    /**
+     * Permission for a process to "list" services with
+     * libbinder's IServiceManager::listServices
+     */
+    CHECK_ACCESS_PERMISSION_LIST,
+    /**
+     * Permission for a process to "add", or register, a service with
+     * servicemanager through AServiceManager_addService
+     */
+    CHECK_ACCESS_PERMISSION_ADD,
 };
 
 /**
@@ -314,5 +345,33 @@ bool AServiceManager_tryUnregister() __INTRODUCED_IN(31);
  * (and should be called on the same thread).
  */
 void AServiceManager_reRegister() __INTRODUCED_IN(31);
+
+/**
+ * Check if this 'callerSid' has access for the 'permission' for a given service 'name'.
+ *
+ * This is useful when a process will be making calls to servicemanager on behalf of another
+ * process (callerCtx).
+ * The direct caller of this function also needs to have the permissions it is
+ * checking on behalf of the other process.
+ *
+ * \param caller_sid - UTF-8 encoded string. SELinux context of the process that is being checked.
+ * \param caller_debug_pid - PID of the process that is being checked. This can
+ *                           only be used in logging for debugging because PIDs are
+ *                           reused. Servicemanager uses it for logging denials.
+ * \param caller_uid - UID of the process that is being checked. Servicemanager
+ *                     only uses this for logging denials for better debugging.
+ * \param instance - UTF-8 encoded string. Instance name of the service that the caller
+ *                   wants to interact with.
+ * \param permission - The servicemanager SELinux permission that the process
+ *                     is interested in for the service.
+ *
+ * \return True if the process with `caller_sid` has the SELinux `permission`
+ *         for the given service `instance`. False if it does not have
+ *         permission or some error occurred.
+ */
+bool AServiceManager_checkServiceAccess(const char* caller_sid, pid_t caller_debug_pid,
+                                        uid_t caller_uid, const char* instance,
+                                        AServiceManager_PermissionType permission)
+        __INTRODUCED_IN(37);
 
 __END_DECLS

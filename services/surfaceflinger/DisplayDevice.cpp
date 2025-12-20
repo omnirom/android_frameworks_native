@@ -19,8 +19,6 @@
 #pragma clang diagnostic ignored "-Wconversion"
 
 // #define LOG_NDEBUG 0
-#undef LOG_TAG
-#define LOG_TAG "DisplayDevice"
 
 #define ATRACE_TAG ATRACE_TAG_GRAPHICS
 
@@ -49,17 +47,6 @@
 namespace android {
 
 namespace hal = hardware::graphics::composer::hal;
-
-namespace gui {
-inline std::string_view to_string(ISurfaceComposer::OptimizationPolicy optimizationPolicy) {
-    switch (optimizationPolicy) {
-        case ISurfaceComposer::OptimizationPolicy::optimizeForPower:
-            return "optimizeForPower";
-        case ISurfaceComposer::OptimizationPolicy::optimizeForPerformance:
-            return "optimizeForPerformance";
-    }
-}
-} // namespace gui
 
 DisplayDeviceCreationArgs::DisplayDeviceCreationArgs(
         const sp<SurfaceFlinger>& flinger, HWComposer& hwComposer, const wp<IBinder>& displayToken,
@@ -218,8 +205,11 @@ ui::Dataspace DisplayDevice::getCompositionDataSpace() const {
     return mCompositionDisplay->getState().dataspace;
 }
 
-void DisplayDevice::setLayerFilter(ui::LayerFilter filter) {
+void DisplayDevice::setLayerFilter(LayerFilter filter) {
     mCompositionDisplay->setLayerFilter(filter);
+    if (mRefreshRateSelector) {
+        mRefreshRateSelector->setLayerFilter(filter);
+    }
     if (mRefreshRateOverlay) {
         mRefreshRateOverlay->setLayerStack(filter.layerStack);
     }
@@ -398,10 +388,12 @@ HdrCapabilities DisplayDevice::getHdrCapabilities() const {
 
 void DisplayDevice::enableHdrSdrRatioOverlay(bool enable) {
     if (!enable) {
+        ALOGD("Disabling HdrSdrRatioOverlay");
         mHdrSdrRatioOverlay.reset();
         return;
     }
 
+    ALOGD("Enabling HdrSdrRatioOverlay");
     mHdrSdrRatioOverlay = HdrSdrRatioOverlay::create();
     if (mHdrSdrRatioOverlay) {
         mHdrSdrRatioOverlay->setLayerStack(getLayerStack());
@@ -422,9 +414,11 @@ void DisplayDevice::enableRefreshRateOverlay(bool enable, bool setByHwc, Fps ref
                                              Fps renderFps, bool showSpinner, bool showRenderRate,
                                              bool showInMiddle) {
     if (!enable) {
+        ALOGD("Disabling RefreshRateOverlay");
         mRefreshRateOverlay.reset();
         return;
     }
+    ALOGD("Enabling RefreshRateOverlay");
 
     ftl::Flags<RefreshRateOverlay::Features> features;
     if (showSpinner) {
@@ -456,7 +450,7 @@ void DisplayDevice::updateRefreshRateOverlayRate(Fps refreshRate, Fps renderFps,
     SFTRACE_CALL();
     if (mRefreshRateOverlay) {
         if (!mRefreshRateOverlay->isSetByHwc() || setByHwc) {
-            if (mRefreshRateSelector->isVrrDevice() && !mRefreshRateOverlay->isSetByHwc()) {
+            if (mRefreshRateSelector->isVrrDisplay() && !mRefreshRateOverlay->isSetByHwc()) {
                 refreshRate = renderFps;
             }
             mRefreshRateOverlay->changeRefreshRate(refreshRate, renderFps);
@@ -486,23 +480,28 @@ void DisplayDevice::onVrrIdle(bool idle) {
     }
 }
 
-void DisplayDevice::animateOverlay() {
+void DisplayDevice::animateRefreshRateOverlay() {
     if (mRefreshRateOverlay) {
         mRefreshRateOverlay->animate();
     }
-    if (mHdrSdrRatioOverlay) {
-        // hdr sdr ratio is designed to be on the top right of the screen,
-        // therefore, we need to re-calculate the display's width and height
-        if (mIsOrientationChanged) {
-            auto width = getWidth();
-            auto height = getHeight();
-            if (mOrientation == ui::ROTATION_90 || mOrientation == ui::ROTATION_270) {
-                std::swap(width, height);
-            }
-            mHdrSdrRatioOverlay->setViewport({width, height});
-        }
-        mHdrSdrRatioOverlay->animate();
+}
+
+void DisplayDevice::animateHdrSdrRatioOverlay() {
+    if (!mHdrSdrRatioOverlay) {
+        return;
     }
+
+    // hdr sdr ratio is designed to be on the top right of the screen,
+    // therefore, we need to re-calculate the display's width and height
+    if (mIsOrientationChanged) {
+        auto width = getWidth();
+        auto height = getHeight();
+        if (mOrientation == ui::ROTATION_90 || mOrientation == ui::ROTATION_270) {
+            std::swap(width, height);
+        }
+        mHdrSdrRatioOverlay->setViewport({width, height});
+    }
+    mHdrSdrRatioOverlay->animate();
 }
 
 void DisplayDevice::adjustRefreshRate(Fps pacesetterDisplayRefreshRate) {

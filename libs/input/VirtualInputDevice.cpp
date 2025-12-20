@@ -51,8 +51,7 @@ namespace vd_flags = android::companion::virtualdevice::flags;
 
 /** Creates a new uinput device and assigns a file descriptor. */
 unique_fd openUinput(const char* readableName, int32_t vendorId, int32_t productId,
-                     const char* phys, DeviceType deviceType, int32_t screenHeight,
-                     int32_t screenWidth) {
+                     const char* phys, DeviceType deviceType, std::optional<ui::Size> screenSize) {
     unique_fd fd(TEMP_FAILURE_RETRY(::open("/dev/uinput", O_WRONLY | O_NONBLOCK)));
     if (fd < 0) {
         ALOGE("Error creating uinput device: %s", strerror(errno));
@@ -138,9 +137,11 @@ unique_fd openUinput(const char* readableName, int32_t vendorId, int32_t product
         setup.id.vendor = vendorId;
         setup.id.product = productId;
         if (deviceType == DeviceType::TOUCHSCREEN) {
+            LOG_IF(FATAL, screenSize == std::nullopt)
+                    << __func__ << ": screenSize must be provided";
             uinput_abs_setup xAbsSetup;
             xAbsSetup.code = ABS_MT_POSITION_X;
-            xAbsSetup.absinfo.maximum = screenWidth - 1;
+            xAbsSetup.absinfo.maximum = screenSize->width - 1;
             xAbsSetup.absinfo.minimum = 0;
             if (ioctl(fd, UI_ABS_SETUP, &xAbsSetup) != 0) {
                 ALOGE("Error creating touchscreen uinput x axis: %s", strerror(errno));
@@ -148,7 +149,7 @@ unique_fd openUinput(const char* readableName, int32_t vendorId, int32_t product
             }
             uinput_abs_setup yAbsSetup;
             yAbsSetup.code = ABS_MT_POSITION_Y;
-            yAbsSetup.absinfo.maximum = screenHeight - 1;
+            yAbsSetup.absinfo.maximum = screenSize->height - 1;
             yAbsSetup.absinfo.minimum = 0;
             if (ioctl(fd, UI_ABS_SETUP, &yAbsSetup) != 0) {
                 ALOGE("Error creating touchscreen uinput y axis: %s", strerror(errno));
@@ -156,7 +157,7 @@ unique_fd openUinput(const char* readableName, int32_t vendorId, int32_t product
             }
             uinput_abs_setup majorAbsSetup;
             majorAbsSetup.code = ABS_MT_TOUCH_MAJOR;
-            majorAbsSetup.absinfo.maximum = screenWidth - 1;
+            majorAbsSetup.absinfo.maximum = screenSize->width - 1;
             majorAbsSetup.absinfo.minimum = 0;
             if (ioctl(fd, UI_ABS_SETUP, &majorAbsSetup) != 0) {
                 ALOGE("Error creating touchscreen uinput major axis: %s", strerror(errno));
@@ -187,9 +188,11 @@ unique_fd openUinput(const char* readableName, int32_t vendorId, int32_t product
                 return invalidFd();
             }
         } else if (deviceType == DeviceType::STYLUS) {
+            LOG_IF(FATAL, screenSize == std::nullopt)
+                    << __func__ << ": screenSize must be provided";
             uinput_abs_setup xAbsSetup;
             xAbsSetup.code = ABS_X;
-            xAbsSetup.absinfo.maximum = screenWidth - 1;
+            xAbsSetup.absinfo.maximum = screenSize->width - 1;
             xAbsSetup.absinfo.minimum = 0;
             if (ioctl(fd, UI_ABS_SETUP, &xAbsSetup) != 0) {
                 ALOGE("Error creating stylus uinput x axis: %s", strerror(errno));
@@ -197,7 +200,7 @@ unique_fd openUinput(const char* readableName, int32_t vendorId, int32_t product
             }
             uinput_abs_setup yAbsSetup;
             yAbsSetup.code = ABS_Y;
-            yAbsSetup.absinfo.maximum = screenHeight - 1;
+            yAbsSetup.absinfo.maximum = screenSize->height - 1;
             yAbsSetup.absinfo.minimum = 0;
             if (ioctl(fd, UI_ABS_SETUP, &yAbsSetup) != 0) {
                 ALOGE("Error creating stylus uinput y axis: %s", strerror(errno));
@@ -243,19 +246,23 @@ unique_fd openUinput(const char* readableName, int32_t vendorId, int32_t product
         fallback.id.vendor = vendorId;
         fallback.id.product = productId;
         if (deviceType == DeviceType::TOUCHSCREEN) {
+            LOG_IF(FATAL, screenSize == std::nullopt)
+                    << "" << __func__ << ": screenSize must be provided (legacy version)";
             fallback.absmin[ABS_MT_POSITION_X] = 0;
-            fallback.absmax[ABS_MT_POSITION_X] = screenWidth - 1;
+            fallback.absmax[ABS_MT_POSITION_X] = screenSize->width - 1;
             fallback.absmin[ABS_MT_POSITION_Y] = 0;
-            fallback.absmax[ABS_MT_POSITION_Y] = screenHeight - 1;
+            fallback.absmax[ABS_MT_POSITION_Y] = screenSize->height - 1;
             fallback.absmin[ABS_MT_TOUCH_MAJOR] = 0;
-            fallback.absmax[ABS_MT_TOUCH_MAJOR] = screenWidth - 1;
+            fallback.absmax[ABS_MT_TOUCH_MAJOR] = screenSize->width - 1;
             fallback.absmin[ABS_MT_PRESSURE] = 0;
             fallback.absmax[ABS_MT_PRESSURE] = 255;
         } else if (deviceType == DeviceType::STYLUS) {
+            LOG_IF(FATAL, screenSize == std::nullopt)
+                    << "" << __func__ << ": screenSize must be provided (legacy version)";
             fallback.absmin[ABS_X] = 0;
-            fallback.absmax[ABS_X] = screenWidth - 1;
+            fallback.absmax[ABS_X] = screenSize->width - 1;
             fallback.absmin[ABS_Y] = 0;
-            fallback.absmax[ABS_Y] = screenHeight - 1;
+            fallback.absmax[ABS_Y] = screenSize->height - 1;
             fallback.absmin[ABS_TILT_X] = -90;
             fallback.absmax[ABS_TILT_X] = 90;
             fallback.absmin[ABS_TILT_Y] = -90;
@@ -417,6 +424,7 @@ const std::map<int, int> VirtualKeyboard::KEY_CODE_MAPPING = {
         {AKEYCODE_F10, KEY_F10},
         {AKEYCODE_F11, KEY_F11},
         {AKEYCODE_F12, KEY_F12},
+        {AKEYCODE_F13, KEY_F13},
         {AKEYCODE_BACK, KEY_BACK},
         {AKEYCODE_FORWARD, KEY_FORWARD},
         {AKEYCODE_NUMPAD_1, KEY_KP1},
@@ -438,6 +446,19 @@ const std::map<int, int> VirtualKeyboard::KEY_CODE_MAPPING = {
         {AKEYCODE_NUMPAD_EQUALS, KEY_KPEQUAL},
         {AKEYCODE_NUMPAD_COMMA, KEY_KPCOMMA},
         {AKEYCODE_LANGUAGE_SWITCH, KEY_LANGUAGE},
+        {AKEYCODE_HOME, KEY_HOME},
+        {AKEYCODE_RECENT_APPS, KEY_ALL_APPLICATIONS},
+        {AKEYCODE_FULLSCREEN, KEY_FULL_SCREEN},
+        {AKEYCODE_SCREENSHOT, KEY_SELECTIVE_SCREENSHOT},
+        {AKEYCODE_BRIGHTNESS_DOWN, KEY_BRIGHTNESSDOWN},
+        {AKEYCODE_BRIGHTNESS_UP, KEY_BRIGHTNESSUP},
+        {AKEYCODE_KEYBOARD_BACKLIGHT_TOGGLE, KEY_KBDILLUMTOGGLE},
+        {AKEYCODE_KEYBOARD_BACKLIGHT_DOWN, KEY_KBDILLUMDOWN},
+        {AKEYCODE_KEYBOARD_BACKLIGHT_UP, KEY_KBDILLUMUP},
+        {AKEYCODE_DICTATE, KEY_DICTATE},
+        {AKEYCODE_VOLUME_MUTE, KEY_MUTE},
+        {AKEYCODE_VOLUME_DOWN, KEY_VOLUMEDOWN},
+        {AKEYCODE_VOLUME_UP, KEY_VOLUMEUP},
 };
 
 VirtualKeyboard::VirtualKeyboard(unique_fd fd) : VirtualInputDevice(std::move(fd)) {}

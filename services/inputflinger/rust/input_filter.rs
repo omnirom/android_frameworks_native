@@ -37,9 +37,6 @@ use std::any::Any;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, RwLock};
 
-/// Virtual keyboard device ID
-pub const VIRTUAL_KEYBOARD_DEVICE_ID: i32 = -1;
-
 /// Interface for all the sub input filters
 pub trait Filter {
     fn notify_key(&mut self, event: &KeyEvent);
@@ -302,7 +299,8 @@ mod tests {
             .notifyInputDevicesChanged(&[DeviceInfo {
                 deviceId: 0,
                 external: true,
-                keyboardType: KeyboardType::None as i32
+                keyboardType: KeyboardType::None as i32,
+                isVirtual: false,
             }])
             .is_ok());
         assert!(test_filter.is_device_changed_called());

@@ -18,7 +18,9 @@
 
 #include <android-base/logging.h>
 #include <com_android_input_flags.h>
+#include <input/Input.h>
 #include <input/InputVerifier.h>
+#include <input/PrintTools.h>
 #include "input_cxx_bridge.rs.h"
 
 using android::base::Error;
@@ -59,6 +61,11 @@ Result<void> InputVerifier::processMovement(DeviceId deviceId, int32_t source, i
     } else {
         return Error() << errorMessage;
     }
+}
+
+std::string InputVerifier::dump() const {
+    const rust::String out = android::input::verifier::dump(*mVerifier);
+    return streamableToString(out);
 }
 
 void InputVerifier::resetDevice(DeviceId deviceId) {

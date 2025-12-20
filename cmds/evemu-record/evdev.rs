@@ -200,7 +200,7 @@ impl Device {
     }
 
     pub fn properties_bitmap(&self) -> Result<Vec<u8>, nix::errno::Errno> {
-        let buf_size = (INPUT_PROP_CNT + 7) / 8;
+        let buf_size = INPUT_PROP_CNT.div_ceil(8);
         // SAFETY:
         // We know that fd is a valid file descriptor as it comes from a File that we have open.
         //
@@ -211,7 +211,7 @@ impl Device {
     }
 
     pub fn bitmap_for_event_type(&self, event_type: EventType) -> nix::Result<Vec<u8>> {
-        let buf_size = (event_type.code_count() + 7) / 8;
+        let buf_size = event_type.code_count().div_ceil(8);
         let mut buf = vec![0; buf_size];
 
         // The EVIOCGBIT ioctl can't be bound using ioctl_read_buf! like the others, since it uses

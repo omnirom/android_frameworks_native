@@ -63,10 +63,6 @@ on late-init
     chmod 0666 /sys/kernel/tracing/events/cpuhp/cpuhp_exit/enable
     chmod 0666 /sys/kernel/debug/tracing/events/cpuhp/cpuhp_pause/enable
     chmod 0666 /sys/kernel/tracing/events/cpuhp/cpuhp_pause/enable
-    chmod 0666 /sys/kernel/debug/tracing/events/power/gpu_frequency/enable
-    chmod 0666 /sys/kernel/tracing/events/power/gpu_frequency/enable
-    chmod 0666 /sys/kernel/debug/tracing/events/power/gpu_work_period/enable
-    chmod 0666 /sys/kernel/tracing/events/power/gpu_work_period/enable
     chmod 0666 /sys/kernel/debug/tracing/events/power/suspend_resume/enable
     chmod 0666 /sys/kernel/tracing/events/power/suspend_resume/enable
     chmod 0666 /sys/kernel/debug/tracing/events/cpufreq_interactive/enable
@@ -317,127 +313,255 @@ on late-init && property:ro.boot.fastboot.boottrace=
     write /sys/kernel/tracing/tracing_on 0
 
 # Handle hyp tracing instance
+# NOTE: starting with android16-6.12 kernel hypervisor tracing instance is renamed
+# from /sys/kernel/tracing/hyp to /sys/kernel/tracing/hypervisor
 on late-init && property:ro.boot.hypervisor.vm.supported=1
 
 # Hypervisor tracing instance doesn't support changing trace_clock
     chmod 0440 /sys/kernel/debug/tracing/hyp/trace_clock
     chmod 0440 /sys/kernel/tracing/hyp/trace_clock
+    chmod 0440 /sys/kernel/debug/tracing/hypervisor/trace_clock
+    chmod 0440 /sys/kernel/tracing/hypervisor/trace_clock
 
     chmod 0660 /sys/kernel/debug/tracing/hyp/buffer_size_kb
     chmod 0660 /sys/kernel/tracing/hyp/buffer_size_kb
+    chmod 0660 /sys/kernel/debug/tracing/hypervisor/buffer_size_kb
+    chmod 0660 /sys/kernel/tracing/hypervisor/buffer_size_kb
 
     chmod 0660 /sys/kernel/debug/tracing/hyp/tracing_on
     chmod 0660 /sys/kernel/tracing/hyp/tracing_on
+    chmod 0660 /sys/kernel/debug/tracing/hypervisor/tracing_on
+    chmod 0660 /sys/kernel/tracing/hypervisor/tracing_on
 
 # Tracing disabled by default
     write /sys/kernel/debug/tracing/hyp/tracing_on 0
     write /sys/kernel/tracing/hyp/tracing_on 0
+    write /sys/kernel/debug/tracing/hypervisor/tracing_on 0
+    write /sys/kernel/tracing/hypervisor/tracing_on 0
 
 # Read and truncate the hyp trace.
     chmod 0660 /sys/kernel/debug/tracing/hyp/trace
     chmod 0660 /sys/kernel/tracing/hyp/trace
+    chmod 0660 /sys/kernel/debug/tracing/hypervisor/trace
+    chmod 0660 /sys/kernel/tracing/hypervisor/trace
 
 # Read and truncate the per-CPU kernel trace.
 # Cannot use wildcards in .rc files. Update this if there is a phone with
 # TODO(b/249050813, ioffe): introduce per-cpu wildcard
     chmod 0660 /sys/kernel/debug/tracing/hyp/per_cpu/cpu0/trace
     chmod 0660 /sys/kernel/tracing/hyp/per_cpu/cpu0/trace
+    chmod 0660 /sys/kernel/debug/tracing/hypervisor/per_cpu/cpu0/trace
+    chmod 0660 /sys/kernel/tracing/hypervisor/per_cpu/cpu0/trace
+
     chmod 0660 /sys/kernel/debug/tracing/hyp/per_cpu/cpu1/trace
     chmod 0660 /sys/kernel/tracing/hyp/per_cpu/cpu1/trace
+    chmod 0660 /sys/kernel/debug/tracing/hypervisor/per_cpu/cpu1/trace
+    chmod 0660 /sys/kernel/tracing/hypervisor/per_cpu/cpu1/trace
+
     chmod 0660 /sys/kernel/debug/tracing/hyp/per_cpu/cpu2/trace
     chmod 0660 /sys/kernel/tracing/hyp/per_cpu/cpu2/trace
+    chmod 0660 /sys/kernel/debug/tracing/hypervisor/per_cpu/cpu2/trace
+    chmod 0660 /sys/kernel/tracing/hypervisor/per_cpu/cpu2/trace
+
     chmod 0660 /sys/kernel/debug/tracing/hyp/per_cpu/cpu3/trace
     chmod 0660 /sys/kernel/tracing/hyp/per_cpu/cpu3/trace
+    chmod 0660 /sys/kernel/debug/tracing/hypervisor/per_cpu/cpu3/trace
+    chmod 0660 /sys/kernel/tracing/hypervisor/per_cpu/cpu3/trace
+
     chmod 0660 /sys/kernel/debug/tracing/hyp/per_cpu/cpu4/trace
     chmod 0660 /sys/kernel/tracing/hyp/per_cpu/cpu4/trace
+    chmod 0660 /sys/kernel/debug/tracing/hypervisor/per_cpu/cpu4/trace
+    chmod 0660 /sys/kernel/tracing/hypervisor/per_cpu/cpu4/trace
+
     chmod 0660 /sys/kernel/debug/tracing/hyp/per_cpu/cpu5/trace
     chmod 0660 /sys/kernel/tracing/hyp/per_cpu/cpu5/trace
+    chmod 0660 /sys/kernel/debug/tracing/hypervisor/per_cpu/cpu5/trace
+    chmod 0660 /sys/kernel/tracing/hypervisor/per_cpu/cpu5/trace
+
     chmod 0660 /sys/kernel/debug/tracing/hyp/per_cpu/cpu6/trace
     chmod 0660 /sys/kernel/tracing/hyp/per_cpu/cpu6/trace
+    chmod 0660 /sys/kernel/debug/tracing/hypervisor/per_cpu/cpu6/trace
+    chmod 0660 /sys/kernel/tracing/hypervisor/per_cpu/cpu6/trace
+
     chmod 0660 /sys/kernel/debug/tracing/hyp/per_cpu/cpu7/trace
     chmod 0660 /sys/kernel/tracing/hyp/per_cpu/cpu7/trace
+    chmod 0660 /sys/kernel/debug/tracing/hypervisor/per_cpu/cpu7/trace
+    chmod 0660 /sys/kernel/tracing/hypervisor/per_cpu/cpu7/trace
+
     chmod 0660 /sys/kernel/debug/tracing/hyp/per_cpu/cpu8/trace
     chmod 0660 /sys/kernel/tracing/hyp/per_cpu/cpu8/trace
+    chmod 0660 /sys/kernel/debug/tracing/hypervisor/per_cpu/cpu8/trace
+    chmod 0660 /sys/kernel/tracing/hypervisor/per_cpu/cpu8/trace
+
     chmod 0660 /sys/kernel/debug/tracing/hyp/per_cpu/cpu9/trace
     chmod 0660 /sys/kernel/tracing/hyp/per_cpu/cpu9/trace
+    chmod 0660 /sys/kernel/debug/tracing/hypervisor/per_cpu/cpu9/trace
+    chmod 0660 /sys/kernel/tracing/hypervisor/per_cpu/cpu9/trace
+
     chmod 0660 /sys/kernel/debug/tracing/hyp/per_cpu/cpu10/trace
     chmod 0660 /sys/kernel/tracing/hyp/per_cpu/cpu10/trace
+    chmod 0660 /sys/kernel/debug/tracing/hypervisor/per_cpu/cpu10/trace
+    chmod 0660 /sys/kernel/tracing/hypervisor/per_cpu/cpu10/trace
+
     chmod 0660 /sys/kernel/debug/tracing/hyp/per_cpu/cpu11/trace
     chmod 0660 /sys/kernel/tracing/hyp/per_cpu/cpu11/trace
+    chmod 0660 /sys/kernel/debug/tracing/hypervisor/per_cpu/cpu11/trace
+    chmod 0660 /sys/kernel/tracing/hypervisor/per_cpu/cpu11/trace
+
     chmod 0660 /sys/kernel/debug/tracing/hyp/per_cpu/cpu12/trace
     chmod 0660 /sys/kernel/tracing/hyp/per_cpu/cpu12/trace
+    chmod 0660 /sys/kernel/debug/tracing/hypervisor/per_cpu/cpu12/trace
+    chmod 0660 /sys/kernel/tracing/hypervisor/per_cpu/cpu12/trace
+
     chmod 0660 /sys/kernel/debug/tracing/hyp/per_cpu/cpu13/trace
     chmod 0660 /sys/kernel/tracing/hyp/per_cpu/cpu13/trace
+    chmod 0660 /sys/kernel/debug/tracing/hypervisor/per_cpu/cpu13/trace
+    chmod 0660 /sys/kernel/tracing/hypervisor/per_cpu/cpu13/trace
+
     chmod 0660 /sys/kernel/debug/tracing/hyp/per_cpu/cpu14/trace
     chmod 0660 /sys/kernel/tracing/hyp/per_cpu/cpu14/trace
+    chmod 0660 /sys/kernel/debug/tracing/hypervisor/per_cpu/cpu14/trace
+    chmod 0660 /sys/kernel/tracing/hypervisor/per_cpu/cpu14/trace
+
     chmod 0660 /sys/kernel/debug/tracing/hyp/per_cpu/cpu15/trace
     chmod 0660 /sys/kernel/tracing/hyp/per_cpu/cpu15/trace
+    chmod 0660 /sys/kernel/debug/tracing/hyp/per_cpu/cpu15/trace
+    chmod 0660 /sys/kernel/tracing/hyp/per_cpu/cpu15/trace
+
     chmod 0660 /sys/kernel/debug/tracing/hyp/per_cpu/cpu16/trace
     chmod 0660 /sys/kernel/tracing/hyp/per_cpu/cpu16/trace
+    chmod 0660 /sys/kernel/debug/tracing/hypervisor/per_cpu/cpu16/trace
+    chmod 0660 /sys/kernel/tracing/hypervisor/per_cpu/cpu16/trace
+
     chmod 0660 /sys/kernel/debug/tracing/hyp/per_cpu/cpu17/trace
     chmod 0660 /sys/kernel/tracing/hyp/per_cpu/cpu17/trace
+    chmod 0660 /sys/kernel/debug/tracing/hypervisor/per_cpu/cpu17/trace
+    chmod 0660 /sys/kernel/tracing/hypervisor/per_cpu/cpu17/trace
+
     chmod 0660 /sys/kernel/debug/tracing/hyp/per_cpu/cpu18/trace
     chmod 0660 /sys/kernel/tracing/hyp/per_cpu/cpu18/trace
+    chmod 0660 /sys/kernel/debug/tracing/hypervisor/per_cpu/cpu18/trace
+    chmod 0660 /sys/kernel/tracing/hypervisor/per_cpu/cpu18/trace
+
     chmod 0660 /sys/kernel/debug/tracing/hyp/per_cpu/cpu19/trace
     chmod 0660 /sys/kernel/tracing/hyp/per_cpu/cpu19/trace
+    chmod 0660 /sys/kernel/debug/tracing/hypervisor/per_cpu/cpu19/trace
+    chmod 0660 /sys/kernel/tracing/hypervisor/per_cpu/cpu19/trace
+
     chmod 0660 /sys/kernel/debug/tracing/hyp/per_cpu/cpu20/trace
     chmod 0660 /sys/kernel/tracing/hyp/per_cpu/cpu20/trace
+    chmod 0660 /sys/kernel/debug/tracing/hypervisor/per_cpu/cpu20/trace
+    chmod 0660 /sys/kernel/tracing/hypervisor/per_cpu/cpu20/trace
+
     chmod 0660 /sys/kernel/debug/tracing/hyp/per_cpu/cpu21/trace
     chmod 0660 /sys/kernel/tracing/hyp/per_cpu/cpu21/trace
+    chmod 0660 /sys/kernel/debug/tracing/hypervisor/per_cpu/cpu21/trace
+    chmod 0660 /sys/kernel/tracing/hypervisor/per_cpu/cpu21/trace
+
     chmod 0660 /sys/kernel/debug/tracing/hyp/per_cpu/cpu22/trace
     chmod 0660 /sys/kernel/tracing/hyp/per_cpu/cpu22/trace
+    chmod 0660 /sys/kernel/debug/tracing/hypervisor/per_cpu/cpu22/trace
+    chmod 0660 /sys/kernel/tracing/hypervisor/per_cpu/cpu22/trace
+
     chmod 0660 /sys/kernel/debug/tracing/hyp/per_cpu/cpu23/trace
     chmod 0660 /sys/kernel/tracing/hyp/per_cpu/cpu23/trace
+    chmod 0660 /sys/kernel/debug/tracing/hypervisor/per_cpu/cpu23/trace
+    chmod 0660 /sys/kernel/tracing/hypervisor/per_cpu/cpu23/trace
+
 
     chmod 0440 /sys/kernel/debug/tracing/hyp/events/header_page
     chmod 0440 /sys/kernel/tracing/hyp/events/header_page
+    chmod 0440 /sys/kernel/debug/tracing/hypervisor/events/header_page
+    chmod 0440 /sys/kernel/tracing/hypervisor/events/header_page
 
 # Hyp events start here
 
 # hyp_enter event
     chmod 0660 /sys/kernel/debug/tracing/hyp/events/hyp/hyp_enter/enable
     chmod 0660 /sys/kernel/tracing/hyp/events/hyp/hyp_enter/enable
-# TODO(b/249050813): should this be handled in kernel?
+    chmod 0660 /sys/kernel/debug/tracing/hypervisor/events/hypervisor/hyp_enter/enable
+    chmod 0660 /sys/kernel/tracing/hyp/events/hyp/hyp_enter/enable
+
     chmod 0440 /sys/kernel/debug/tracing/hyp/events/hyp/hyp_enter/format
     chmod 0440 /sys/kernel/tracing/hyp/events/hyp/hyp_enter/format
+    chmod 0440 /sys/kernel/debug/tracing/hypervisor/events/hypervisor/hyp_enter/format
+    chmod 0440 /sys/kernel/tracing/hypervisor/events/hypervisor/hyp_enter/format
+
     chmod 0440 /sys/kernel/debug/tracing/hyp/events/hyp/hyp_enter/id
     chmod 0440 /sys/kernel/tracing/hyp/events/hyp/hyp_enter/id
+    chmod 0440 /sys/kernel/debug/tracing/hypervisor/events/hypervisor/hyp_enter/id
+    chmod 0440 /sys/kernel/tracing/hypervisor/events/hypervisor/hyp_enter/id
 
 # hyp_exit event
     chmod 0660 /sys/kernel/debug/tracing/hyp/events/hyp/hyp_exit/enable
     chmod 0660 /sys/kernel/tracing/hyp/events/hyp/hyp_exit/enable
-# TODO(b/249050813): should this be handled in kernel?
+    chmod 0660 /sys/kernel/debug/tracing/hypervisor/events/hypervisor/hyp_exit/enable
+    chmod 0660 /sys/kernel/tracing/hypervisor/events/hypervisor/hyp_exit/enable
+
     chmod 0440 /sys/kernel/debug/tracing/hyp/events/hyp/hyp_exit/format
     chmod 0440 /sys/kernel/tracing/hyp/events/hyp/hyp_exit/format
+    chmod 0440 /sys/kernel/debug/tracing/hypervisor/events/hypervisor/hyp_exit/format
+    chmod 0440 /sys/kernel/tracing/hypervisor/events/hypervisor/hyp_exit/format
+
     chmod 0440 /sys/kernel/debug/tracing/hyp/events/hyp/hyp_exit/id
     chmod 0440 /sys/kernel/tracing/hyp/events/hyp/hyp_exit/id
+    chmod 0440 /sys/kernel/debug/tracing/hypervisor/events/hypervisor/hyp_exit/id
+    chmod 0440 /sys/kernel/tracing/hypervisor/events/hypervisor/hyp_exit/id
 
 # host_hcall event
     chmod 0660 /sys/kernel/debug/tracing/hyp/events/hyp/host_hcall/enable
     chmod 0660 /sys/kernel/tracing/hyp/events/hyp/host_hcall/enable
-# TODO(b/249050813): should this be handled in kernel?
+    chmod 0660 /sys/kernel/debug/tracing/hypervisor/events/hypervisor/host_hcall/enable
+    chmod 0660 /sys/kernel/tracing/hypervisor/events/hypervisor/host_hcall/enable
+
     chmod 0440 /sys/kernel/debug/tracing/hyp/events/hyp/host_hcall/format
     chmod 0440 /sys/kernel/tracing/hyp/events/hyp/host_hcall/format
+    chmod 0440 /sys/kernel/debug/tracing/hypervisor/events/hypervisor/host_hcall/format
+    chmod 0440 /sys/kernel/tracing/hypervisor/events/hypervisor/host_hcall/format
+
     chmod 0440 /sys/kernel/debug/tracing/hyp/events/hyp/host_hcall/id
     chmod 0440 /sys/kernel/tracing/hyp/events/hyp/host_hcall/id
+    chmod 0440 /sys/kernel/debug/tracing/hypervisor/events/hypervisor/host_hcall/id
+    chmod 0440 /sys/kernel/tracing/hypervisor/events/hypervisor/host_hcall/id
 
 # host_smc event
     chmod 0660 /sys/kernel/debug/tracing/hyp/events/hyp/host_smc/enable
     chmod 0660 /sys/kernel/tracing/hyp/events/hyp/host_smc/enable
-# TODO(b/249050813): should this be handled in kernel?
+    chmod 0660 /sys/kernel/debug/tracing/hypervisor/events/hypervisor/host_smc/enable
+    chmod 0660 /sys/kernel/tracing/hypervisor/events/hypervisor/host_smc/enable
+
     chmod 0440 /sys/kernel/debug/tracing/hyp/events/hyp/host_smc/format
     chmod 0440 /sys/kernel/tracing/hyp/events/hyp/host_smc/format
+    chmod 0440 /sys/kernel/debug/tracing/hypervisor/events/hypervisor/host_smc/format
+    chmod 0440 /sys/kernel/tracing/hypervisor/events/hypervisor/host_smc/format
+
     chmod 0440 /sys/kernel/debug/tracing/hyp/events/hyp/host_smc/id
     chmod 0440 /sys/kernel/tracing/hyp/events/hyp/host_smc/id
+    chmod 0440 /sys/kernel/debug/tracing/hypervisor/events/hypervisor/host_smc/id
+    chmod 0440 /sys/kernel/tracing/hypervisor/events/hypervisor/host_smc/id
 
 # host_mem_abort event
     chmod 0660 /sys/kernel/debug/tracing/hyp/events/hyp/host_mem_abort/enable
     chmod 0660 /sys/kernel/tracing/hyp/events/hyp/host_mem_abort/enable
-# TODO(b/249050813): should this be handled in kernel?
+    chmod 0660 /sys/kernel/debug/tracing/hypervisor/events/hypervisor/host_mem_abort/enable
+    chmod 0660 /sys/kernel/tracing/hypervisor/events/hypervisor/host_mem_abort/enable
+
     chmod 0440 /sys/kernel/debug/tracing/hyp/events/hyp/host_mem_abort/format
     chmod 0440 /sys/kernel/tracing/hyp/events/hyp/host_mem_abort/format
+    chmod 0440 /sys/kernel/debug/tracing/hypervisor/events/hypervisor/host_mem_abort/format
+    chmod 0440 /sys/kernel/tracing/hypervisor/events/hypervisor/host_mem_abort/format
+
     chmod 0440 /sys/kernel/debug/tracing/hyp/events/hyp/host_mem_abort/id
     chmod 0440 /sys/kernel/tracing/hyp/events/hyp/host_mem_abort/id
+    chmod 0440 /sys/kernel/debug/tracing/hypervisor/events/hypervisor/host_mem_abort/id
+    chmod 0440 /sys/kernel/tracing/hypervisor/events/hypervisor/host_mem_abort/id
+
+# Ensure correct permissions on GPU related events
+on property:sys.boot_completed=1
+    chmod 0666 /sys/kernel/debug/tracing/events/power/gpu_frequency/enable
+    chmod 0666 /sys/kernel/tracing/events/power/gpu_frequency/enable
+    chmod 0666 /sys/kernel/debug/tracing/events/power/gpu_work_period/enable
+    chmod 0666 /sys/kernel/tracing/events/power/gpu_work_period/enable
 
 on property:persist.debug.atrace.boottrace=1
     start boottrace

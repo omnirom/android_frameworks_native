@@ -21,6 +21,7 @@
 #include <binder/Parcelable.h>
 #include <binder/SafeInterface.h>
 
+#include <gui/CornerRadii.h>
 #include <gui/FrameTimestamps.h>
 #include <ui/Fence.h>
 #include <utils/Timers.h>
@@ -114,13 +115,16 @@ public:
     SurfaceStats() = default;
     SurfaceStats(const sp<IBinder>& sc, std::variant<nsecs_t, sp<Fence>> acquireTimeOrFence,
                  const sp<Fence>& prevReleaseFence, std::optional<uint32_t> hint,
-                 uint32_t currentMaxAcquiredBuffersCount, FrameEventHistoryStats frameEventStats,
+                 uint32_t currentMaxAcquiredBuffersCount,
+                 std::optional<gui::CornerRadii> cornerRadii,
+                 FrameEventHistoryStats frameEventStats,
                  ReleaseCallbackId previousReleaseCallbackId)
           : surfaceControl(sc),
             acquireTimeOrFence(std::move(acquireTimeOrFence)),
             previousReleaseFence(prevReleaseFence),
             transformHint(hint),
             currentMaxAcquiredBufferCount(currentMaxAcquiredBuffersCount),
+            cornerRadii(cornerRadii),
             eventStats(frameEventStats),
             previousReleaseCallbackId(previousReleaseCallbackId) {}
 
@@ -129,6 +133,7 @@ public:
     sp<Fence> previousReleaseFence;
     std::optional<uint32_t> transformHint = 0;
     uint32_t currentMaxAcquiredBufferCount = 0;
+    std::optional<gui::CornerRadii> cornerRadii = gui::CornerRadii(0.0f);
     FrameEventHistoryStats eventStats;
     ReleaseCallbackId previousReleaseCallbackId;
 };
@@ -172,7 +177,7 @@ public:
     virtual void onTransactionCompleted(ListenerStats stats) = 0;
 
     virtual void onReleaseBuffer(ReleaseCallbackId callbackId, sp<Fence> releaseFence,
-                                 uint32_t currentMaxAcquiredBufferCount) = 0;
+                                 uint32_t currentMaxAcquiredBufferCount, bool removeFromCache) = 0;
 
     virtual void onTransactionQueueStalled(const String8& name) = 0;
 

@@ -112,38 +112,18 @@ feature_override::FeatureOverrideProtos readFeatureConfigProtos(const std::strin
 
 namespace android {
 
-std::string FeatureOverrideParser::getFeatureOverrideFilePath() const {
-    const std::string kConfigFilePath = "/system/etc/angle/feature_config_vk.binarypb";
-
-    return kConfigFilePath;
+FeatureOverrideParser::FeatureOverrideParser(const std::string &configFilePath) {
+    // Parse the feature override values from the protobuf file in the ctor, before any gpuservice
+    // threads are forked in main() for Binder. Otherwise, a lock would be required to prevent
+    // multiple threads from updating mFeatureOverrides simultaneously.
+    // Note that this prevents reading the file after the device boots if it's ever updated on the
+    // device. That feature may require a lock in the future.
+    parseFeatureOverrides(configFilePath);
 }
 
-bool FeatureOverrideParser::shouldReloadFeatureOverrides() const {
-    std::string configFilePath = getFeatureOverrideFilePath();
-
-    std::ifstream configFile(configFilePath);
-    if (!configFile.good()) {
-        return false;
-    }
-
-    struct stat fileStat{};
-    if (stat(configFilePath.c_str(), &fileStat) != 0) {
-        ALOGE("Error getting file information for '%s': %s", configFilePath.c_str(),
-              strerror(errno));
-        // stat'ing the file failed, so return false since reading it will also likely fail.
-        return false;
-    }
-
-    return fileStat.st_mtime > mLastProtobufReadTime;
-}
-
-void FeatureOverrideParser::forceFileRead() {
-    mLastProtobufReadTime = 0;
-}
-
-void FeatureOverrideParser::parseFeatureOverrides() {
+void FeatureOverrideParser::parseFeatureOverrides(const std::string &configFilePath) {
     const feature_override::FeatureOverrideProtos overridesProtos = readFeatureConfigProtos(
-            getFeatureOverrideFilePath());
+            configFilePath);
 
     // Clear out the stale values before adding the newly parsed data.
     resetFeatureOverrides(mFeatureOverrides);
@@ -187,16 +167,9 @@ void FeatureOverrideParser::parseFeatureOverrides() {
 
         mFeatureOverrides.mPackageFeatures[packageName] = featureConfigs;
     }
-
-    mLastProtobufReadTime = std::chrono::system_clock::to_time_t(
-            std::chrono::system_clock::now());
 }
 
-FeatureOverrides FeatureOverrideParser::getFeatureOverrides() {
-    if (shouldReloadFeatureOverrides()) {
-        parseFeatureOverrides();
-    }
-
+const FeatureOverrides &FeatureOverrideParser::getCachedFeatureOverrides() {
     return mFeatureOverrides;
 }
 

@@ -15,7 +15,7 @@
  */
 package android.os.storage;
 
-/** {@hide} */
+/** @hide */
 parcelable CrateMetadata {
     /**
      * To tell which uid the crate belong to.

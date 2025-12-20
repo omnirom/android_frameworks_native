@@ -268,7 +268,6 @@ TEST_F(BufferItemConsumerTest, AttachBuffer) {
     EXPECT_EQ(OK, mBIC->releaseBuffer(newBuffer2, Fence::NO_FENCE));
 }
 
-#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_PLATFORM_API_IMPROVEMENTS)
 // Test that delete BufferItemConsumer triggers onBufferFreed.
 TEST_F(BufferItemConsumerTest, DetachBufferWithBuffer) {
     int slot;
@@ -281,7 +280,6 @@ TEST_F(BufferItemConsumerTest, DetachBufferWithBuffer) {
     EXPECT_EQ(OK, mBIC->detachBuffer(buffer));
     EXPECT_THAT(mDetachedBufferSlots, testing::ElementsAre(slot));
 }
-#endif // COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_PLATFORM_API_IMPROVEMENTS)
 
 #if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_UNLIMITED_SLOTS)
 TEST_F(BufferItemConsumerTest, UnlimitedSlots_AcquireReleaseAll) {

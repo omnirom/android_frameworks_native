@@ -1,16 +1,10 @@
 # Bug component: 1075131
 
-adyabr@google.com
-alecmouri@google.com
-domlaskowski@google.com
-jreck@google.com
-lpy@google.com
-mattbuckley@google.com
+include platform/frameworks/base:/graphics/java/android/graphics/CORE_GRAPHICS_OWNERS
+
+# Additional owners
 melodymhsu@google.com
 pdwilliams@google.com
 racarr@google.com
-ramindani@google.com
-rnlee@google.com
-sallyqi@google.com
+sukoo@google.com
 vishnun@google.com
-xwxw@google.com

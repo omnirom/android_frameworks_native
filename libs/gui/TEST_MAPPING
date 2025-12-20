@@ -1,13 +1,21 @@
 {
+  "desktop-presubmit": [
+    {
+      "name": "CfVkmsCursorTest"
+    }
+  ],
   "imports": [
     {
       "path": "frameworks/native/libs/nativewindow"
     },
     {
       "path": "frameworks/native/services/surfaceflinger"
+    },
+    {
+      "path": "frameworks/base/tests/ChoreographerTests"
     }
   ],
-  "presubmit": [
+  "wm": [
     {
       "name": "libgui_test",
       "options": [

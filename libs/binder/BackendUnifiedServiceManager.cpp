@@ -13,18 +13,27 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+#define LOG_TAG "libbinder.BackendUnifiedServiceManager"
+
 #include "BackendUnifiedServiceManager.h"
 
 #include <android-base/strings.h>
 #include <android/os/IAccessor.h>
 #include <android/os/IServiceManager.h>
 #include <binder/RpcSession.h>
+#include <cutils/sockets.h>
+#include <sys/socket.h>
+#include <sys/un.h>
 
 #if defined(__BIONIC__) && !defined(__ANDROID_VNDK__)
 #include <android-base/properties.h>
 #endif
 
 namespace android {
+
+// This is similar to the kernel binder servicemanager's context 0. It's the
+// known socket that we expect the Unix Domain Socket servicemanager to be listening on.
+const char kUdsServiceManagerName[] = ANDROID_SOCKET_DIR "/rpc_servicemanager";
 
 #ifdef LIBBINDER_CLIENT_CACHE
 constexpr bool kUseCache = true;
@@ -128,7 +137,7 @@ os::ServiceWithMetadata createServiceWithMetadata(const sp<IBinder>& service, bo
     return out;
 }
 
-bool BinderCacheWithInvalidation::isClientSideCachingEnabled(const std::string& serviceName) {
+bool BinderCacheWithInvalidation::isClientSideCachingEnabled(const std::string& serviceName) const {
     sp<ProcessState> self = ProcessState::selfOrNull();
     // Should not cache if process state could not be found, or if thread pool
     // max could is not greater than zero.
@@ -175,7 +184,7 @@ Status BackendUnifiedServiceManager::updateCache(const std::string& serviceName,
     if (atrace_is_tag_enabled(ATRACE_TAG_AIDL)) {
         traceStr = "BinderCacheWithInvalidation::updateCache : " + serviceName;
     }
-    binder::ScopedTrace aidlTrace(ATRACE_TAG_AIDL, traceStr.c_str());
+    binder::ScopedTrace outerAidlTrace(ATRACE_TAG_AIDL, traceStr.c_str());
     if (!binder) {
         binder::ScopedTrace
                 aidlTrace(ATRACE_TAG_AIDL,
@@ -312,6 +321,20 @@ Status BackendUnifiedServiceManager::toBinderService(const ::std::string& name,
                         createServiceWithMetadata(nullptr, false));
                 return Status::ok();
             }
+            // Pre-flight check to handle transient connection errors.
+            os::ParcelFileDescriptor pfd;
+            if (Status status = accessor->addConnection(&pfd); !status.isOk()) {
+                if (status.serviceSpecificErrorCode() ==
+                    IAccessor::ERROR_FAILED_TO_CONNECT_TO_SOCKET) {
+                    ALOGW("Accessor failed with transient error, returning null to retry: %s",
+                          status.toString8().c_str());
+                    *_out = os::Service::make<os::Service::Tag::serviceWithMetadata>(
+                            createServiceWithMetadata(nullptr, false));
+                    return Status::ok();
+                }
+                ALOGE("Failed to add connection via accessor: %s", status.toString8().c_str());
+                return status;
+            }
             auto request = [=] {
                 os::ParcelFileDescriptor fd;
                 Status ret = accessor->addConnection(&fd);
@@ -323,7 +346,8 @@ Status BackendUnifiedServiceManager::toBinderService(const ::std::string& name,
                 }
             };
             auto session = RpcSession::make();
-            status_t status = session->setupPreconnectedClient(base::unique_fd{}, request);
+            status_t status =
+                    session->setupPreconnectedClient(base::unique_fd(pfd.release()), request);
             if (status != OK) {
                 ALOGE("Failed to set up preconnected binder RPC client: %s",
                       statusToString(status).c_str());
@@ -473,19 +497,44 @@ Status BackendUnifiedServiceManager::getServiceDebugInfo(
                                      kUnsupportedOpNoServiceManager);
 }
 
+Status BackendUnifiedServiceManager::checkServiceAccess(
+        const AidlServiceManager::CallerContext& callerCtx, const std::string& name,
+        const std::string& permission, bool* _aidl_return) {
+    if (mTheRealServiceManager) {
+        return mTheRealServiceManager->checkServiceAccess(callerCtx, name, permission,
+                                                          _aidl_return);
+    }
+    return Status::fromExceptionCode(Status::EX_UNSUPPORTED_OPERATION,
+                                     kUnsupportedOpNoServiceManager);
+}
+
 [[clang::no_destroy]] static std::once_flag gUSmOnce;
 [[clang::no_destroy]] static sp<BackendUnifiedServiceManager> gUnifiedServiceManager;
 
 static bool hasOutOfProcessServiceManager() {
-#ifndef BINDER_WITH_KERNEL_IPC
+// We don't currently support kernel binder service management or UDS
+// service management on host or when libbinder is compiled without any
+// kernel binder suport. Please use setDefaultServiceManager for host
+// processes that want to use service manager APIs.
+#if !defined(BINDER_WITH_KERNEL_IPC) || !defined(__BIONIC__)
     return false;
 #else
-#if defined(__BIONIC__) && !defined(__ANDROID_VNDK__)
-    return android::base::GetBoolProperty("servicemanager.installed", true);
-#else
+#ifdef __ANDROID_VNDK__
     return true;
+#else
+    return android::base::GetBoolProperty("servicemanager.installed", true);
 #endif
-#endif // BINDER_WITH_KERNEL_IPC
+#endif
+}
+
+static sp<AidlServiceManager> getUdsServiceManager() {
+    auto session = RpcSession::make();
+    session->setFileDescriptorTransportMode(RpcSession::FileDescriptorTransportMode::UNIX);
+    auto status = session->setupUnixDomainClient(kUdsServiceManagerName);
+    if (status == OK) {
+        return interface_cast<AidlServiceManager>(session->getRootObject());
+    }
+    return nullptr;
 }
 
 sp<BackendUnifiedServiceManager> getBackendUnifiedServiceManager() {
@@ -503,11 +552,22 @@ sp<BackendUnifiedServiceManager> getBackendUnifiedServiceManager() {
 
         sp<AidlServiceManager> sm = nullptr;
         while (hasOutOfProcessServiceManager() && sm == nullptr) {
-            sm = interface_cast<AidlServiceManager>(
-                    ProcessState::self()->getContextObject(nullptr));
+            // There is either a kernel binder service manager, or an RPC binder
+            // service manager
+            sp<ProcessState> ps = ProcessState::selfIfKernelBinderEnabled();
+            if (ps) {
+                // Service management over kernel binder
+                sm = interface_cast<AidlServiceManager>(ps->getContextObject(nullptr));
+            } else {
+                // Check for service management over Unix Domain Sockets
+                sm = getUdsServiceManager();
+            }
+
             if (sm == nullptr) {
-                ALOGE("Waiting 1s on context object on %s.",
-                      ProcessState::self()->getDriverName().c_str());
+                std::string contextObjectName = ps
+                        ? ps->getDriverName() + ", " + kUdsServiceManagerName
+                        : kUdsServiceManagerName;
+                ALOGE("Waiting 1s on context object(s) on %s.", contextObjectName.c_str());
                 sleep(1);
             }
         }

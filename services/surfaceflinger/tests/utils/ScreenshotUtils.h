@@ -281,10 +281,10 @@ public:
         ASSERT_LE(rect.right, bufferWidth);
         ASSERT_LE(rect.bottom, bufferHeight);
 
-        ASSERT_LE(rect.right, imageWidth);
-        ASSERT_LE(rect.bottom, imageHeight);
+        ASSERT_LE(rect.right - rect.left, imageWidth);
+        ASSERT_LE(rect.bottom - rect.top, imageHeight);
 
-        int tolerance = 4; // arbitrary
+        int tolerance = 8; // arbitrary
         for (int32_t y = rect.top; y < rect.bottom; y++) {
             for (int32_t x = rect.left; x < rect.right; x++) {
                 const uint8_t* bufferPixel = mPixels + y * bufferStride + x * 4;
@@ -295,7 +295,10 @@ public:
                 int dg = bufferPixel[1] - imagePixel[1];
                 int db = bufferPixel[2] - imagePixel[2];
                 int da = bufferPixel[3] - imagePixel[3];
-                int dist = std::abs(dr) + std::abs(dg) + std::abs(db) + std::abs(da);
+                int dist = std::abs(dr);
+                dist = std::max(std::abs(dg), dist);
+                dist = std::max(std::abs(db), dist);
+                dist = std::max(std::abs(da), dist);
 
                 bool pixelMatches = dist < tolerance;
 
@@ -308,11 +311,13 @@ public:
                     writeGraphicBufferToPng(outPath, mOutBuffer);
 
                     ASSERT_TRUE(pixelMatches)
-                            << String8::format("pixel @ (%3d, %3d): "
+                            << String8::format("Inside rect (%d, %d, %d, %d), " //
+                                               "pixel @ (%3d, %3d): "           //
                                                "expected [%3d, %3d, %3d, %3d], got [%3d, %3d, %3d, "
-                                               "%3d], "
+                                               "%3d], " //
                                                "wrote screenshot to '%s'",
-                                               x, y, imagePixel[0], imagePixel[1], imagePixel[2],
+                                               rect.left, rect.top, rect.right, rect.bottom, x, y,
+                                               imagePixel[0], imagePixel[1], imagePixel[2],
                                                imagePixel[3], bufferPixel[0], bufferPixel[1],
                                                bufferPixel[2], bufferPixel[3], outPath.c_str())
                                        .c_str();

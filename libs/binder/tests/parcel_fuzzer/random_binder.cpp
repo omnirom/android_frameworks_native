@@ -76,13 +76,16 @@ sp<IBinder> getRandomBinder(FuzzedDataProvider* provider) {
 
                 return new RandomBinder(String16(str.c_str()), std::move(bytes));
             },
+#ifdef __ANDROID__
             []() {
                 // this is the easiest remote binder to get ahold of, and it
                 // should be able to handle anything thrown at it, and
                 // essentially every process can talk to it, so it's a good
                 // candidate for checking usage of an actual BpBinder
+                // This only works on an Android device with binder enabled
                 return IInterface::asBinder(defaultServiceManager());
             },
+#endif
             [&]() -> sp<IBinder> { return nullptr; },
     });
     return makeFunc();

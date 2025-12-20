@@ -19,8 +19,7 @@
 #pragma clang diagnostic ignored "-Wconversion"
 
 // #define LOG_NDEBUG 0
-#undef LOG_TAG
-#define LOG_TAG "TransactionCallbackInvoker"
+
 #define ATRACE_TAG ATRACE_TAG_GRAPHICS
 
 #include "TransactionCallbackInvoker.h"
@@ -142,8 +141,8 @@ status_t TransactionCallbackInvoker::addCallbackHandle(const sp<CallbackHandle>&
                                                     handle->previousReleaseFence,
                                                     handle->transformHint,
                                                     handle->currentMaxAcquiredBufferCount,
-                                                    eventStats, handle->previousReleaseCallbackId);
-
+                                                    handle->cornerRadii, eventStats,
+                                                    handle->previousReleaseCallbackId);
         if (handle->bufferReleaseChannel &&
             handle->previousReleaseCallbackId != ReleaseCallbackId::INVALID_ID) {
             if (FlagManager::getInstance().monitor_buffer_fences()) {

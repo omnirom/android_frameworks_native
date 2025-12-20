@@ -14,8 +14,6 @@
  * limitations under the License.
  */
 
-#undef LOG_TAG
-#define LOG_TAG "LayerTraceGenerator"
 //#define LOG_NDEBUG 0
 
 #include <Tracing/TransactionProtoParser.h>

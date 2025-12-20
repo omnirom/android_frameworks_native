@@ -18,6 +18,7 @@
 
 #include "SkiaGpuContext.h"
 #include "graphite/Recorder.h"
+#include "graphite/Context.h"
 
 #include <android-base/macros.h>
 

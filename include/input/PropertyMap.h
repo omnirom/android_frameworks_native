@@ -75,7 +75,7 @@ public:
     std::optional<double> getDouble(const std::string& key) const;
 
     /* Adds all values from the specified property map. */
-    void addAll(const PropertyMap* map);
+    void addAll(const PropertyMap& map);
 
     /* Loads a property map from a file. */
     static android::base::Result<std::unique_ptr<PropertyMap>> load(const char* filename);

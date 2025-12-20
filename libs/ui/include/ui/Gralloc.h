@@ -17,15 +17,18 @@
 #ifndef ANDROID_UI_GRALLOC_H
 #define ANDROID_UI_GRALLOC_H
 
-#include <gralloctypes/Gralloc4.h>
-#include <hidl/HidlSupport.h>
+#include <cutils/native_handle.h>
+#include <system/graphics.h>
 #include <ui/GraphicTypes.h>
 #include <ui/PixelFormat.h>
 #include <ui/Rect.h>
-#include <utils/StrongPointer.h>
+#include <utils/Errors.h>
 #include "GraphicBufferAllocator.h"
 
+#include <cstdint>
+#include <optional>
 #include <string>
+#include <vector>
 
 namespace android {
 

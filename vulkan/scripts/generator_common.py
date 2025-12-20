@@ -51,10 +51,17 @@ _BLOCKED_EXTENSIONS = [
     'VK_NV_acquire_winrt_display',
     'VK_NV_cooperative_matrix',
     'VK_NV_coverage_reduction_mode',
+    'VK_NV_cuda_kernel_launch',
     'VK_NV_external_memory_win32',
+    'VK_NV_external_compute_queue',
     'VK_NV_win32_keyed_mutex',
     'VK_NVX_image_view_handle',
     'VK_QNX_screen_surface',
+]
+
+# Extensions not to probe in vkjson, but otherwise may be supportable
+_VKJSON_BLOCKED_EXTENSIONS = [
+    'VK_ARM_shader_core_properties'     # b/446075812
 ]
 
 # Extensions having functions exported by the loader.

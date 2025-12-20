@@ -138,6 +138,9 @@ status_t FeatureOverrides::writeToParcel(Parcel* parcel) const {
 status_t FeatureOverrides::readFromParcel(const Parcel* parcel) {
     status_t status;
 
+    mGlobalFeatures.clear();
+    mPackageFeatures.clear();
+
     // Number of global feature configs.
     status = parcel->resizeOutVector(&mGlobalFeatures);
     if (status != OK) {

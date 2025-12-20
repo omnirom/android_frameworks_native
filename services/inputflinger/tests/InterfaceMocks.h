@@ -46,6 +46,8 @@
 #include <utils/Errors.h>
 #include <utils/Timers.h>
 
+#include "InputReaderTracer.h"
+
 namespace android {
 
 class MockInputReaderContext : public InputReaderContext {
@@ -90,6 +92,7 @@ private:
 
 class MockEventHubInterface : public EventHubInterface {
 public:
+    MOCK_METHOD(void, setTracer, (std::shared_ptr<InputReaderTracer> tracer));
     MOCK_METHOD(ftl::Flags<InputDeviceClass>, getDeviceClasses, (int32_t deviceId), (const));
     MOCK_METHOD(InputDeviceIdentifier, getDeviceIdentifier, (int32_t deviceId), (const));
     MOCK_METHOD(int32_t, getDeviceControllerNumber, (int32_t deviceId), (const));

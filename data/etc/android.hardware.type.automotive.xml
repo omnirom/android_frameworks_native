@@ -18,5 +18,11 @@
 <permissions>
     <feature name="android.hardware.type.automotive" />
 
+    <unavailable-feature name="android.hardware.type.embedded" />
+    <unavailable-feature name="android.hardware.type.pc" />
+    <unavailable-feature name="android.hardware.type.television" />
+    <unavailable-feature name="android.hardware.type.watch" />
+    <unavailable-feature name="android.software.leanback" />
+    <unavailable-feature name="android.software.leanback_only" />
     <unavailable-feature name="android.software.picture_in_picture"/>
 </permissions>

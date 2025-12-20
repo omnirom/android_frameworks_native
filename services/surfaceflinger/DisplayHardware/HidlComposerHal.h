@@ -21,7 +21,6 @@
 #include <optional>
 #include <string>
 #include <unordered_map>
-#include <utility>
 #include <vector>
 
 // TODO(b/129481165): remove the #pragma below and fix conversion issues
@@ -35,6 +34,7 @@
 #include <math/mat4.h>
 #include <ui/DisplayedFrameStats.h>
 #include <ui/GraphicBuffer.h>
+#include <ui/ScreenPartStatus.h>
 #include <utils/StrongPointer.h>
 
 #include <aidl/android/hardware/graphics/composer3/Composition.h>
@@ -288,7 +288,8 @@ public:
 
     // Composer HAL 2.3
     Error getDisplayIdentificationData(Display display, uint8_t* outPort,
-                                       std::vector<uint8_t>* outData) override;
+                                       std::vector<uint8_t>* outData,
+                                       android::ScreenPartStatus* outScreenPartStatus) override;
     Error setLayerColorTransform(Display display, Layer layer, const float* matrix) override;
     Error getDisplayedContentSamplingAttributes(Display display, PixelFormat* outFormat,
                                                 Dataspace* outDataspace,
@@ -366,6 +367,11 @@ public:
     Error startHdcpNegotiation(Display, const aidl::android::hardware::drm::HdcpLevels&) override;
     Error getLuts(Display, const std::vector<sp<GraphicBuffer>>&,
                   std::vector<aidl::android::hardware::graphics::composer3::Luts>*) override;
+    Error getReadbackBufferAttributes(Display display,
+                                      V3_0::ReadbackBufferAttributes* outAttributes) override;
+    Error setReadbackBuffer(Display display, const sp<GraphicBuffer>& buffer,
+                            int acquireFence) override;
+    Error getReadbackBufferFence(Display display, int* outReleaseFence) override;
 
 private:
     class CommandWriter : public CommandWriterBase {

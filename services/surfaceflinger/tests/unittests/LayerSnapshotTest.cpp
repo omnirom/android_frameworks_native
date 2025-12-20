@@ -14,10 +14,14 @@
  * limitations under the License.
  */
 
+#include <cmath>
+
+#include <com_android_graphics_libgui_flags.h>
+#include <com_android_input_flags.h>
+#include <common/test/FlagUtils.h>
+#include <flag_macros.h>
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
-
-#include <common/test/FlagUtils.h>
 #include <renderengine/mock/FakeExternalTexture.h>
 
 #include "FrontEnd/LayerHierarchy.h"
@@ -26,9 +30,6 @@
 #include "Layer.h"
 #include "LayerHierarchyTest.h"
 #include "ui/GraphicTypes.h"
-
-#include <com_android_graphics_libgui_flags.h>
-#include <cmath>
 
 #define UPDATE_AND_VERIFY(BUILDER, ...)                                    \
     ({                                                                     \
@@ -43,6 +44,8 @@
     })
 
 namespace android::surfaceflinger::frontend {
+
+namespace input_flags = com::android::input::flags;
 
 using ftl::Flags;
 using namespace ftl::flag_operators;
@@ -595,6 +598,16 @@ TEST_F(LayerSnapshotTest, displayMirrorRespectsLayerSkipScreenshotFlag) {
     setLayerStack(3, 1);
 
     std::vector<uint32_t> expected = {1, 11, 111, 12, 121, 122, 1221, 13, 2, 3, 1, 11, 111, 13, 2};
+    UPDATE_AND_VERIFY(mSnapshotBuilder, expected);
+}
+
+TEST_F_WITH_FLAGS(LayerSnapshotTest, layerMirrorRespectsLayerSkipScreenshotFlag,
+                  REQUIRES_FLAGS_ENABLED(ACONFIG_FLAG(input_flags, connected_displays_cursor))) {
+    setFlags(12, layer_state_t::eLayerSkipScreenshot, layer_state_t::eLayerSkipScreenshot);
+    createLayerMirrorLayer(3, 1);
+    setLayerStack(3, 1);
+
+    std::vector<uint32_t> expected = {1, 11, 111, 12, 121, 122, 1221, 13, 2, 3, 1, 11, 111, 13};
     UPDATE_AND_VERIFY(mSnapshotBuilder, expected);
 }
 
@@ -1374,12 +1387,13 @@ TEST_F(LayerSnapshotTest, frameRateSelectionStrategyWithOverrideChildrenAndSelf)
 TEST_F(LayerSnapshotTest, skipRoundCornersWhenProtected) {
     setRoundedCorners(1, 42.f);
     setRoundedCorners(2, 42.f);
+    static gui::CornerRadii RADII = gui::CornerRadii(42.f);
     setCrop(1, Rect{1000, 1000});
     setCrop(2, Rect{1000, 1000});
 
     UPDATE_AND_VERIFY(mSnapshotBuilder, STARTING_ZORDER);
     EXPECT_TRUE(getSnapshot({.id = 1})->roundedCorner.hasRoundedCorners());
-    EXPECT_EQ(getSnapshot({.id = 1})->roundedCorner.radius.x, 42.f);
+    EXPECT_EQ(getSnapshot({.id = 1})->roundedCorner.radii, RADII);
     EXPECT_TRUE(getSnapshot({.id = 2})->roundedCorner.hasRoundedCorners());
 
     // add a buffer with the protected bit, check rounded corners are not set when
@@ -1414,7 +1428,7 @@ TEST_F(LayerSnapshotTest, skipRoundCornersWhenProtected) {
                                                                         0 /*usage*/));
     update(mSnapshotBuilder, args);
     EXPECT_TRUE(getSnapshot({.id = 1})->roundedCorner.hasRoundedCorners());
-    EXPECT_EQ(getSnapshot({.id = 1})->roundedCorner.radius.x, 42.f);
+    EXPECT_EQ(getSnapshot({.id = 1})->roundedCorner.radii, RADII);
 }
 
 TEST_F(LayerSnapshotTest, setRefreshRateIndicatorCompositionType) {
@@ -1465,17 +1479,47 @@ TEST_F(LayerSnapshotTest, setCornerRadius) {
     setRoundedCorners(1, RADIUS);
     setCrop(1, Rect{1000, 1000});
     UPDATE_AND_VERIFY(mSnapshotBuilder, STARTING_ZORDER);
-    EXPECT_EQ(getSnapshot({.id = 1})->roundedCorner.radius.x, RADIUS);
+    EXPECT_EQ(getSnapshot({.id = 1})->roundedCorner.radii.topLeft.x, RADIUS);
+    EXPECT_EQ(getSnapshot({.id = 1})->roundedCorner.radii.topLeft.y, RADIUS);
+    EXPECT_EQ(getSnapshot({.id = 1})->roundedCorner.radii.topRight.x, RADIUS);
+    EXPECT_EQ(getSnapshot({.id = 1})->roundedCorner.radii.topRight.y, RADIUS);
+    EXPECT_EQ(getSnapshot({.id = 1})->roundedCorner.radii.bottomLeft.x, RADIUS);
+    EXPECT_EQ(getSnapshot({.id = 1})->roundedCorner.radii.bottomLeft.y, RADIUS);
+    EXPECT_EQ(getSnapshot({.id = 1})->roundedCorner.radii.bottomRight.x, RADIUS);
+    EXPECT_EQ(getSnapshot({.id = 1})->roundedCorner.radii.bottomRight.y, RADIUS);
 }
 
-TEST_F(LayerSnapshotTest, ignoreCornerRadius) {
+TEST_F(LayerSnapshotTest, setCornerRadiusFourDistinctRadii) {
+    static gui::CornerRadii RADIUS = gui::CornerRadii(111.f, 222.f, 333.f, 444.f);
+    setRoundedCorners(1, 111.f, 222.f, 333.f, 444.f);
+    setCrop(1, Rect{1000, 1000});
+    UPDATE_AND_VERIFY(mSnapshotBuilder, STARTING_ZORDER);
+    EXPECT_EQ(getSnapshot({.id = 1})->roundedCorner.radii, RADIUS);
+}
+
+TEST_F(LayerSnapshotTest, setClientDrawnCornerRadius) {
     static constexpr float RADIUS = 123.f;
-    setClientDrawnCornerRadius(1, RADIUS);
+    static const gui::CornerRadii EXPECTED_CLIENT_DRAWN_RADIUS = gui::CornerRadii(RADIUS);
+    static const gui::CornerRadii ZERO_RADIUS = gui::CornerRadii(0.f);
+    setClientDrawnCornerRadius(1, RADIUS, FloatRect{0, 0, 1000, 1000});
     setRoundedCorners(1, RADIUS);
     setCrop(1, Rect{1000, 1000});
     UPDATE_AND_VERIFY(mSnapshotBuilder, STARTING_ZORDER);
     EXPECT_TRUE(getSnapshot({.id = 1})->roundedCorner.hasClientDrawnRadius());
-    EXPECT_EQ(getSnapshot({.id = 1})->roundedCorner.radius.x, 0.f);
+    EXPECT_EQ(getSnapshot({.id = 1})->roundedCorner.radii, ZERO_RADIUS);
+    EXPECT_EQ(getSnapshot({.id = 1})->roundedCorner.clientDrawnRadii, EXPECTED_CLIENT_DRAWN_RADIUS);
+}
+
+TEST_F(LayerSnapshotTest, setClientDrawnCornerRadiusFourCorners) {
+    static gui::CornerRadii RADIUS = gui::CornerRadii(111.f, 222.f, 333.f, 444.f);
+    static gui::CornerRadii ZERO_RADIUS = gui::CornerRadii(0.f);
+    setClientDrawnCornerRadius(1, 111.f, 222.f, 333.f, 444.f, FloatRect{0, 0, 1000, 1000});
+    setRoundedCorners(1, 111.f, 222.f, 333.f, 444.f);
+    setCrop(1, Rect{1000, 1000});
+    UPDATE_AND_VERIFY(mSnapshotBuilder, STARTING_ZORDER);
+    EXPECT_TRUE(getSnapshot({.id = 1})->roundedCorner.hasClientDrawnRadius());
+    EXPECT_EQ(getSnapshot({.id = 1})->roundedCorner.radii, ZERO_RADIUS);
+    EXPECT_EQ(getSnapshot({.id = 1})->roundedCorner.clientDrawnRadii, RADIUS);
 }
 
 TEST_F(LayerSnapshotTest, childInheritsParentScaledSettings) {
@@ -1483,23 +1527,156 @@ TEST_F(LayerSnapshotTest, childInheritsParentScaledSettings) {
     // ├── 1 (crop rect set to contain child layer)
     // │   ├── 11
     static constexpr float RADIUS = 123.f;
+    static gui::CornerRadii ZERO_RADIUS = gui::CornerRadii(0.f);
+
+    setBuffer(1,
+              std::make_shared<renderengine::mock::FakeExternalTexture>(1000 /*width*/,
+                                                                        1000 /*height*/,
+                                                                        1ULL /* bufferId */,
+                                                                        HAL_PIXEL_FORMAT_RGBA_8888,
+                                                                        0 /*usage*/));
+    setBuffer(11,
+              std::make_shared<renderengine::mock::FakeExternalTexture>(1000 /*width*/,
+                                                                        1000 /*height*/,
+                                                                        2ULL /* bufferId */,
+                                                                        HAL_PIXEL_FORMAT_RGBA_8888,
+                                                                        0 /*usage*/));
 
     setRoundedCorners(1, RADIUS);
-    FloatRect parentCropRect(1, 1, 999, 999);
+
+    FloatRect parentCropRect(10, 10, 990, 990);
     setCrop(1, parentCropRect);
+
     // Rotate surface by 90
     setMatrix(11, 0.f, -1.f, 1.f, 0.f);
+    // ensure there is overlap
+    setPosition(11, 500, 500);
 
     UPDATE_AND_VERIFY(mSnapshotBuilder, STARTING_ZORDER);
 
     ui::Transform t = getSnapshot({.id = 11})->localTransform.inverse();
 
-    UPDATE_AND_VERIFY(mSnapshotBuilder, STARTING_ZORDER);
     EXPECT_EQ(getSnapshot({.id = 11})->roundedCorner.cropRect, t.transform(parentCropRect));
-    EXPECT_EQ(getSnapshot({.id = 11})->roundedCorner.radius.x, RADIUS * t.getScaleX());
-    EXPECT_EQ(getSnapshot({.id = 11})->roundedCorner.radius.y, RADIUS * t.getScaleY());
-    EXPECT_EQ(getSnapshot({.id = 11})->roundedCorner.requestedRadius.x, RADIUS * t.getScaleX());
-    EXPECT_EQ(getSnapshot({.id = 11})->roundedCorner.requestedRadius.y, RADIUS * t.getScaleY());
+    EXPECT_EQ(getSnapshot({.id = 11})->roundedCorner.radii.topLeft.x, RADIUS * t.getScaleX());
+    EXPECT_EQ(getSnapshot({.id = 11})->roundedCorner.radii.topLeft.y, RADIUS * t.getScaleY());
+    EXPECT_EQ(getSnapshot({.id = 11})->roundedCorner.radii.topRight.x, RADIUS * t.getScaleX());
+    EXPECT_EQ(getSnapshot({.id = 11})->roundedCorner.radii.topRight.y, RADIUS * t.getScaleY());
+    EXPECT_EQ(getSnapshot({.id = 11})->roundedCorner.radii.bottomLeft.x, RADIUS * t.getScaleX());
+    EXPECT_EQ(getSnapshot({.id = 11})->roundedCorner.radii.bottomLeft.y, RADIUS * t.getScaleY());
+    EXPECT_EQ(getSnapshot({.id = 11})->roundedCorner.radii.bottomRight.x, RADIUS * t.getScaleX());
+    EXPECT_EQ(getSnapshot({.id = 11})->roundedCorner.radii.bottomRight.y, RADIUS * t.getScaleY());
+    EXPECT_EQ(getSnapshot({.id = 11})->roundedCorner.requestedRadii, ZERO_RADIUS);
+}
+
+TEST_F(LayerSnapshotTest, childDoesNotInheritParentSettingsWhenNoCornerOverlap) {
+    // ROOT
+    // ├── 1 (crop rect set to contain child layer)
+    // │   ├── 11
+    static constexpr float RADIUS = 123.f;
+    static const gui::CornerRadii ZERO_RADIUS = gui::CornerRadii(0.f);
+
+    setBuffer(1,
+              std::make_shared<renderengine::mock::FakeExternalTexture>(1000 /*width*/,
+                                                                        1000 /*height*/,
+                                                                        1ULL /* bufferId */,
+                                                                        HAL_PIXEL_FORMAT_RGBA_8888,
+                                                                        0 /*usage*/));
+    setBuffer(11,
+              std::make_shared<renderengine::mock::FakeExternalTexture>(200 /*width*/,
+                                                                        200 /*height*/,
+                                                                        2ULL /* bufferId */,
+                                                                        HAL_PIXEL_FORMAT_RGBA_8888,
+                                                                        0 /*usage*/));
+
+    setRoundedCorners(1, RADIUS);
+
+    FloatRect parentCropRect(0, 0, 1000, 1000);
+    setCrop(1, parentCropRect);
+
+    setPosition(11, 300, 300);
+
+    UPDATE_AND_VERIFY(mSnapshotBuilder, STARTING_ZORDER);
+
+    EXPECT_EQ(getSnapshot({.id = 11})->roundedCorner.radii, ZERO_RADIUS);
+}
+
+TEST_F(LayerSnapshotTest, childInheritsParentSettingsWhenCropIsEmpty) {
+    // ROOT
+    // ├── 1 (crop rect set to contain child layer)
+    // │   ├── 11
+    static constexpr float RADIUS = 123.f;
+    static const gui::CornerRadii ZERO_RADIUS = gui::CornerRadii(0.f);
+
+    setBuffer(1,
+              std::make_shared<renderengine::mock::FakeExternalTexture>(1000 /*width*/,
+                                                                        1000 /*height*/,
+                                                                        1ULL /* bufferId */,
+                                                                        HAL_PIXEL_FORMAT_RGBA_8888,
+                                                                        0 /*usage*/));
+    // No buffer is set on child layer
+
+    setRoundedCorners(1, RADIUS);
+
+    FloatRect parentCropRect(0, 0, 1000, 1000);
+    setCrop(1, parentCropRect);
+
+    UPDATE_AND_VERIFY(mSnapshotBuilder, STARTING_ZORDER);
+
+    EXPECT_EQ(getSnapshot({.id = 11})->roundedCorner.radii, gui::CornerRadii(RADIUS));
+    EXPECT_EQ(getSnapshot({.id = 11})->roundedCorner.cropRect, parentCropRect);
+}
+
+TEST_F(LayerSnapshotTest, childScaledInheritsParentSettings) {
+    // ROOT
+    // ├── 1 (crop rect set to contain child layer)
+    // │   ├── 11
+    static constexpr float RADIUS = 250.f;
+
+    setBuffer(1,
+              std::make_shared<renderengine::mock::FakeExternalTexture>(1000 /*width*/,
+                                                                        1000 /*height*/,
+                                                                        1ULL /* bufferId */,
+                                                                        HAL_PIXEL_FORMAT_RGBA_8888,
+                                                                        0 /*usage*/));
+    setBuffer(11,
+              std::make_shared<renderengine::mock::FakeExternalTexture>(1000 /*width*/,
+                                                                        1000 /*height*/,
+                                                                        2ULL /* bufferId */,
+                                                                        HAL_PIXEL_FORMAT_RGBA_8888,
+                                                                        0 /*usage*/));
+
+    setRoundedCorners(1, RADIUS);
+
+    FloatRect parentCropRect(0, 0, 1000, 1000);
+    setCrop(1, parentCropRect);
+
+    // Scale child layer up
+    setMatrix(11, 2.f, 0.f, 0.f, 2.f);
+
+    UPDATE_AND_VERIFY(mSnapshotBuilder, STARTING_ZORDER);
+
+    ui::Transform t = getSnapshot({.id = 11})->localTransform.inverse();
+
+    EXPECT_TRUE(getSnapshot({.id = 11})->roundedCorner.hasRoundedCorners());
+}
+
+TEST_F(LayerSnapshotTest, SetClientDrawnClippedRadii) {
+    static const gui::CornerRadii RADIUS = gui::CornerRadii(111.f, 222.f, 333.f, 444.f);
+    static const gui::CornerRadii ZERO_RADIUS = gui::CornerRadii(0.f);
+    static const gui::CornerRadii CLIPPED_RADIUS = gui::CornerRadii(111.f, 222.f, 0.f, 0.f);
+
+    // set parent(1) crop to clip the bottom half of child(11)
+    setCrop(1, Rect{1000, 500});
+
+    setRoundedCorners(11, 111.f, 222.f, 333.f, 444.f);
+    setCrop(11, Rect{1000, 1000});
+    setClientDrawnCornerRadius(11, 111.f, 222.f, 0.f, 0.f, FloatRect{0, 0, 1000, 500});
+
+    UPDATE_AND_VERIFY(mSnapshotBuilder, STARTING_ZORDER);
+
+    EXPECT_TRUE(getSnapshot({.id = 11})->roundedCorner.hasClientDrawnRadius());
+    EXPECT_EQ(getSnapshot({.id = 11})->roundedCorner.radii, ZERO_RADIUS);
+    EXPECT_EQ(getSnapshot({.id = 11})->roundedCorner.clientDrawnRadii, CLIPPED_RADIUS);
 }
 
 TEST_F(LayerSnapshotTest, childInheritsParentClientDrawnCornerRadius) {
@@ -1509,15 +1686,28 @@ TEST_F(LayerSnapshotTest, childInheritsParentClientDrawnCornerRadius) {
     // │   │   └── 111
 
     static constexpr float RADIUS = 123.f;
+    static const gui::CornerRadii RADII = gui::CornerRadii(RADIUS);
 
-    setClientDrawnCornerRadius(1, RADIUS);
+    setBuffer(1,
+              std::make_shared<renderengine::mock::FakeExternalTexture>(1000 /*width*/,
+                                                                        1000 /*height*/,
+                                                                        1ULL /* bufferId */,
+                                                                        HAL_PIXEL_FORMAT_RGBA_8888,
+                                                                        0 /*usage*/));
+    setBuffer(11,
+              std::make_shared<renderengine::mock::FakeExternalTexture>(1000 /*width*/,
+                                                                        1000 /*height*/,
+                                                                        2ULL /* bufferId */,
+                                                                        HAL_PIXEL_FORMAT_RGBA_8888,
+                                                                        0 /*usage*/));
+
     setRoundedCorners(1, RADIUS);
-    setCrop(1, Rect(1, 1, 999, 999));
+    setClientDrawnCornerRadius(1, RADIUS, FloatRect{0, 0, 1000, 1000});
 
     UPDATE_AND_VERIFY(mSnapshotBuilder, STARTING_ZORDER);
     EXPECT_TRUE(getSnapshot({.id = 1})->roundedCorner.hasClientDrawnRadius());
     EXPECT_TRUE(getSnapshot({.id = 11})->roundedCorner.hasRoundedCorners());
-    EXPECT_EQ(getSnapshot({.id = 11})->roundedCorner.radius.x, RADIUS);
+    EXPECT_EQ(getSnapshot({.id = 11})->roundedCorner.radii, RADII);
 }
 
 TEST_F(LayerSnapshotTest, childIgnoreCornerRadiusOverridesParent) {
@@ -1527,16 +1717,37 @@ TEST_F(LayerSnapshotTest, childIgnoreCornerRadiusOverridesParent) {
     // │   │   └── 111
 
     static constexpr float RADIUS = 123.f;
+    static const gui::CornerRadii RADII = gui::CornerRadii(RADIUS);
+
+    setBuffer(1,
+              std::make_shared<renderengine::mock::FakeExternalTexture>(1000 /*width*/,
+                                                                        1000 /*height*/,
+                                                                        1ULL /* bufferId */,
+                                                                        HAL_PIXEL_FORMAT_RGBA_8888,
+                                                                        0 /*usage*/));
+    setBuffer(11,
+              std::make_shared<renderengine::mock::FakeExternalTexture>(1000 /*width*/,
+                                                                        1000 /*height*/,
+                                                                        2ULL /* bufferId */,
+                                                                        HAL_PIXEL_FORMAT_RGBA_8888,
+                                                                        0 /*usage*/));
+    setBuffer(111,
+              std::make_shared<renderengine::mock::FakeExternalTexture>(1000 /*width*/,
+                                                                        1000 /*height*/,
+                                                                        3ULL /* bufferId */,
+                                                                        HAL_PIXEL_FORMAT_RGBA_8888,
+                                                                        0 /*usage*/));
 
     setRoundedCorners(1, RADIUS);
-    setCrop(1, Rect(1, 1, 999, 999));
 
-    setClientDrawnCornerRadius(11, RADIUS);
+    setRoundedCorners(11, RADIUS);
+    setClientDrawnCornerRadius(11, RADIUS, FloatRect{0, 0, 1000, 1000});
 
     UPDATE_AND_VERIFY(mSnapshotBuilder, STARTING_ZORDER);
-    EXPECT_EQ(getSnapshot({.id = 1})->roundedCorner.radius.x, RADIUS);
-    EXPECT_EQ(getSnapshot({.id = 11})->roundedCorner.radius.x, 0.f);
-    EXPECT_EQ(getSnapshot({.id = 111})->roundedCorner.radius.x, RADIUS);
+    EXPECT_EQ(getSnapshot({.id = 1})->roundedCorner.radii, RADII);
+    EXPECT_EQ(getSnapshot({.id = 11})->roundedCorner.radii, gui::CornerRadii(0.f));
+    EXPECT_EQ(getSnapshot({.id = 11})->roundedCorner.clientDrawnRadii, RADII);
+    EXPECT_EQ(getSnapshot({.id = 111})->roundedCorner.radii, RADII);
 }
 
 TEST_F(LayerSnapshotTest, setShadowRadius) {
@@ -1733,9 +1944,9 @@ TEST_F(LayerSnapshotTest, NonVisibleLayerWithInputShouldNotBeIncluded) {
     EXPECT_FALSE(foundInputLayer);
 }
 
-TEST_F(LayerSnapshotTest, ForEachSnapshotsWithPredicate) {
+TEST_F(LayerSnapshotTest, ForEachNullableSnapshotsWithPredicate) {
     std::vector<uint32_t> visitedUniqueSequences;
-    mSnapshotBuilder.forEachSnapshot(
+    mSnapshotBuilder.forEachNonNullSnapshot(
             [&](const std::unique_ptr<frontend::LayerSnapshot>& snapshot) {
                 visitedUniqueSequences.push_back(snapshot->uniqueSequence);
             },
@@ -1766,7 +1977,6 @@ TEST_F(LayerSnapshotTest, canOccludePresentation) {
 }
 
 TEST_F(LayerSnapshotTest, mirroredHierarchyIgnoresLocalTransform) {
-    SET_FLAG_FOR_TEST(flags::detached_mirror, true);
     reparentLayer(12, UNASSIGNED_LAYER_ID);
     setPosition(11, 2, 20);
     setPosition(111, 20, 200);
@@ -1795,7 +2005,6 @@ TEST_F(LayerSnapshotTest, mirroredHierarchyIgnoresLocalTransform) {
 }
 
 TEST_F(LayerSnapshotTest, overrideParentTrustedOverlayState) {
-    SET_FLAG_FOR_TEST(flags::override_trusted_overlay, true);
     hideLayer(1);
     setTrustedOverlay(1, gui::TrustedOverlay::ENABLED);
 
@@ -1820,47 +2029,6 @@ TEST_F(LayerSnapshotTest, overrideParentTrustedOverlayState) {
     EXPECT_FALSE(getSnapshot(11)->inputInfo.inputConfig.test(
             gui::WindowInfo::InputConfig::TRUSTED_OVERLAY));
     EXPECT_FALSE(getSnapshot(111)->inputInfo.inputConfig.test(
-            gui::WindowInfo::InputConfig::TRUSTED_OVERLAY));
-
-    // unset state and go back to default behavior of inheriting
-    // state
-    setTrustedOverlay(11, gui::TrustedOverlay::UNSET);
-    UPDATE_AND_VERIFY(mSnapshotBuilder, {2});
-    EXPECT_TRUE(getSnapshot(1)->inputInfo.inputConfig.test(
-            gui::WindowInfo::InputConfig::TRUSTED_OVERLAY));
-    EXPECT_TRUE(getSnapshot(11)->inputInfo.inputConfig.test(
-            gui::WindowInfo::InputConfig::TRUSTED_OVERLAY));
-    EXPECT_TRUE(getSnapshot(111)->inputInfo.inputConfig.test(
-            gui::WindowInfo::InputConfig::TRUSTED_OVERLAY));
-}
-
-TEST_F(LayerSnapshotTest, doNotOverrideParentTrustedOverlayState) {
-    SET_FLAG_FOR_TEST(flags::override_trusted_overlay, false);
-    hideLayer(1);
-    setTrustedOverlay(1, gui::TrustedOverlay::ENABLED);
-
-    Region touch{Rect{0, 0, 1000, 1000}};
-    setTouchableRegion(1, touch);
-    setTouchableRegion(11, touch);
-    setTouchableRegion(111, touch);
-
-    UPDATE_AND_VERIFY(mSnapshotBuilder, {2});
-    EXPECT_TRUE(getSnapshot(1)->inputInfo.inputConfig.test(
-            gui::WindowInfo::InputConfig::TRUSTED_OVERLAY));
-    EXPECT_TRUE(getSnapshot(11)->inputInfo.inputConfig.test(
-            gui::WindowInfo::InputConfig::TRUSTED_OVERLAY));
-    EXPECT_TRUE(getSnapshot(111)->inputInfo.inputConfig.test(
-            gui::WindowInfo::InputConfig::TRUSTED_OVERLAY));
-
-    // disable trusted overlay but flag is disabled so this behaves
-    // as UNSET
-    setTrustedOverlay(11, gui::TrustedOverlay::DISABLED);
-    UPDATE_AND_VERIFY(mSnapshotBuilder, {2});
-    EXPECT_TRUE(getSnapshot(1)->inputInfo.inputConfig.test(
-            gui::WindowInfo::InputConfig::TRUSTED_OVERLAY));
-    EXPECT_TRUE(getSnapshot(11)->inputInfo.inputConfig.test(
-            gui::WindowInfo::InputConfig::TRUSTED_OVERLAY));
-    EXPECT_TRUE(getSnapshot(111)->inputInfo.inputConfig.test(
             gui::WindowInfo::InputConfig::TRUSTED_OVERLAY));
 
     // unset state and go back to default behavior of inheriting
@@ -2187,6 +2355,153 @@ TEST_F(LayerSnapshotTest, shouldUpdatePictureProfilePriorityFromAppContentPriori
 
         EXPECT_GT(getSnapshot(2)->pictureProfilePriority, getSnapshot(1)->pictureProfilePriority);
     }
+}
+
+// Test that child layers of the stop layer are hidden.
+TEST_F(LayerSnapshotTest, stopLayer_hidesChildren) {
+    SET_FLAG_FOR_TEST(com::android::graphics::surfaceflinger::flags::stop_layer, true);
+    setStopLayer(1, 122);
+
+    std::vector<uint32_t> expected = {1, 11, 111, 12, 121, 2};
+    UPDATE_AND_VERIFY(mSnapshotBuilder, expected);
+}
+
+// Test that if a layer specifies itself as a stop layer, then it is hidden.
+TEST_F(LayerSnapshotTest, stopLayer_hidesSelf) {
+    SET_FLAG_FOR_TEST(com::android::graphics::surfaceflinger::flags::stop_layer, true);
+    setStopLayer(122, 122);
+
+    std::vector<uint32_t> expected = {1, 11, 111, 12, 121, 13, 2};
+    UPDATE_AND_VERIFY(mSnapshotBuilder, expected);
+}
+
+// Test that siblings z-ordered above a stop layer are hidden.
+TEST_F(LayerSnapshotTest, stopLayer_hidesSiblings) {
+    SET_FLAG_FOR_TEST(com::android::graphics::surfaceflinger::flags::stop_layer, true);
+    setStopLayer(1, 121);
+
+    std::vector<uint32_t> expected = {1, 11, 111, 12, 2};
+    UPDATE_AND_VERIFY(mSnapshotBuilder, expected);
+}
+
+// Test that children z-ordered below the stop layer aren't hidden.
+TEST_F(LayerSnapshotTest, stopLayer_doesntHideZOrderedBelowChildren) {
+    SET_FLAG_FOR_TEST(com::android::graphics::surfaceflinger::flags::stop_layer, true);
+    setZ(121, -1);
+    setStopLayer(1, 12);
+
+    std::vector<uint32_t> expected = {1, 11, 111, 121, 2};
+    UPDATE_AND_VERIFY(mSnapshotBuilder, expected);
+}
+
+// Test that relative children are hidden by the stop layer.
+TEST_F(LayerSnapshotTest, stopLayer_hidesRelativeChild) {
+    SET_FLAG_FOR_TEST(com::android::graphics::surfaceflinger::flags::stop_layer, true);
+    reparentRelativeLayer(111, 12);
+    setStopLayer(1, 12);
+
+    std::vector<uint32_t> expected = {1, 11, 2};
+    UPDATE_AND_VERIFY(mSnapshotBuilder, expected);
+}
+
+// Test that detached children aren't hidden by the stop layer.
+TEST_F(LayerSnapshotTest, stopLayer_doesntHideDetachedChildren) {
+    SET_FLAG_FOR_TEST(com::android::graphics::surfaceflinger::flags::stop_layer, true);
+    reparentRelativeLayer(121, 11);
+    setStopLayer(1, 12);
+
+    std::vector<uint32_t> expected = {1, 11, 111, 121, 2};
+    UPDATE_AND_VERIFY(mSnapshotBuilder, expected);
+}
+
+// Test that stop layers work on hierarchies with a single root layer.
+TEST_F(LayerSnapshotTest, stopLayer_singleRoot) {
+    SET_FLAG_FOR_TEST(com::android::graphics::surfaceflinger::flags::stop_layer, true);
+    setStopLayer(1, 11);
+
+    LayerHierarchy root = mHierarchyBuilder.getPartialHierarchy(1, /*childrenOnly=*/false);
+    LayerSnapshotBuilder::Args args{.root = root,
+                                    .layerLifecycleManager = mLifecycleManager,
+                                    .includeMetadata = false,
+                                    .displays = mFrontEndDisplayInfos,
+                                    .displayChanges = false,
+                                    .globalShadowSettings = globalShadowSettings,
+                                    .supportsBlur = true,
+                                    .supportedLayerGenericMetadata = {},
+                                    .genericLayerMetadataKeyMap = {}};
+    mSnapshotBuilder.update(args);
+
+    std::vector<uint32_t> expectedVisibleLayers = {1};
+    std::vector<uint32_t> actualVisibleLayers;
+    mSnapshotBuilder.forEachVisibleSnapshot([&actualVisibleLayers](const LayerSnapshot& snapshot) {
+        actualVisibleLayers.push_back(snapshot.path.id);
+    });
+    EXPECT_EQ(expectedVisibleLayers, actualVisibleLayers);
+}
+
+// Test two stop layers where there's no interaction between the two stop layers.
+TEST_F(LayerSnapshotTest, stopLayer_multipleStopLayers_parentAfterChild) {
+    SET_FLAG_FOR_TEST(com::android::graphics::surfaceflinger::flags::stop_layer, true);
+    setStopLayer(1, 13);
+    setStopLayer(11, 111);
+
+    std::vector<uint32_t> expected = {1, 11, 12, 121, 122, 1221, 2};
+    UPDATE_AND_VERIFY(mSnapshotBuilder, expected);
+}
+
+// Test two stop layers where the hierarchy containing the second stop layer is hidden.
+TEST_F(LayerSnapshotTest, stopLayer_multipleStopLayers_childHidden) {
+    SET_FLAG_FOR_TEST(com::android::graphics::surfaceflinger::flags::stop_layer, true);
+    setStopLayer(1, 12);
+    setStopLayer(12, 122);
+
+    std::vector<uint32_t> expected = {1, 11, 111, 2};
+    UPDATE_AND_VERIFY(mSnapshotBuilder, expected);
+}
+
+// Test two stop layers where the stop layer specified lower in the hierarchy overrides
+// the stop layer specified higher in the hierarchy.
+TEST_F(LayerSnapshotTest, stopLayer_multipleStopLayers_childStopLayerOverridden) {
+    SET_FLAG_FOR_TEST(com::android::graphics::surfaceflinger::flags::stop_layer, true);
+    setStopLayer(1, 121);
+    setStopLayer(12, 122);
+
+    std::vector<uint32_t> expected = {1, 11, 111, 12, 2};
+    UPDATE_AND_VERIFY(mSnapshotBuilder, expected);
+}
+
+// Test two stop layers where the stop layer specified higher in the hierarchy applies because
+// it appears before the stop layer applied lower in the hierarchy.
+TEST_F(LayerSnapshotTest, stopLayer_multipleStopLayers_childApplied) {
+    SET_FLAG_FOR_TEST(com::android::graphics::surfaceflinger::flags::stop_layer, true);
+    setStopLayer(1, 13);
+    setStopLayer(11, 111);
+
+    std::vector<uint32_t> expected = {1, 11, 12, 121, 122, 1221, 2};
+    UPDATE_AND_VERIFY(mSnapshotBuilder, expected);
+}
+
+// Test that the stop layer works on mirrored hierarchies.
+TEST_F(LayerSnapshotTest, stopLayer_mirrorHierarchy) {
+    SET_FLAG_FOR_TEST(com::android::graphics::surfaceflinger::flags::stop_layer, true);
+    createDisplayMirrorLayer(3, ui::LayerStack::fromValue(0), 121);
+    setLayerStack(3, 1);
+
+    std::vector<uint32_t> expected = {1, 11, 111, 12, 121, 122, 1221, 13, 2, 3, 1, 11, 111, 12};
+    UPDATE_AND_VERIFY(mSnapshotBuilder, expected);
+}
+
+TEST_F(LayerSnapshotTest, systemContentPriorityPassedToChildLayers) {
+    setSystemContentPriority(11, 1);
+    setSystemContentPriority(12, 2);
+
+    UPDATE_AND_VERIFY(mSnapshotBuilder, STARTING_ZORDER);
+    EXPECT_EQ(getSnapshot({.id = 1})->systemContentPriority,
+              gui::ISystemContentPriorityConstants::Unset);
+    EXPECT_EQ(getSnapshot({.id = 11})->systemContentPriority, 1);
+    EXPECT_EQ(getSnapshot({.id = 12})->systemContentPriority, 2);
+    EXPECT_EQ(getSnapshot({.id = 122})->systemContentPriority, 2);
+    EXPECT_EQ(getSnapshot({.id = 1221})->systemContentPriority, 2);
 }
 
 } // namespace android::surfaceflinger::frontend

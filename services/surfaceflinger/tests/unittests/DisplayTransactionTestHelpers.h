@@ -22,6 +22,7 @@
 #pragma clang diagnostic ignored "-Wextra"
 
 #include <type_traits>
+#include "Display/DisplayIdentification.h"
 #include "DisplayIdentificationTestHelpers.h"
 
 #include <binder/IPCThreadState.h>
@@ -48,8 +49,6 @@
 #include "mock/DisplayHardware/MockComposer.h"
 #include "mock/DisplayHardware/MockDisplayMode.h"
 #include "mock/MockEventThread.h"
-#include "mock/MockNativeWindowSurface.h"
-#include "mock/MockVsyncController.h"
 #include "mock/PowerAdvisor/MockPowerAdvisor.h"
 #include "mock/system/window/MockNativeWindow.h"
 
@@ -87,8 +86,6 @@ public:
 
     void injectMockScheduler(PhysicalDisplayId);
     void injectMockComposer(int virtualDisplayCount);
-    void injectFakeBufferQueueFactory();
-    void injectFakeNativeWindowSurfaceFactory();
 
     sp<DisplayDevice> injectDefaultInternalDisplay(
             std::function<void(TestableSurfaceFlinger::FakeDisplayDeviceInjector&)> injectExtra) {
@@ -135,11 +132,6 @@ public:
     mock::EventThread* mEventThread = new mock::EventThread;
     mock::EventThread* mSFEventThread = new mock::EventThread;
 
-    // These mocks are created only when expected to be created via a factory.
-    sp<mock::GraphicBufferConsumer> mConsumer;
-    sp<mock::GraphicBufferProducer> mProducer;
-    surfaceflinger::mock::NativeWindowSurface* mNativeWindowSurface = nullptr;
-
 protected:
     DisplayTransactionTest(bool withMockScheduler = true);
 };
@@ -160,6 +152,7 @@ constexpr int POWER_MODE_LEET = 1337; // An out of range power mode value
 #define BOOL_SUBSTITUTE(TYPENAME) enum class TYPENAME : bool { FALSE = false, TRUE = true };
 
 BOOL_SUBSTITUTE(Async);
+BOOL_SUBSTITUTE(HasIdentificationData);
 BOOL_SUBSTITUTE(Primary);
 BOOL_SUBSTITUTE(Secure);
 BOOL_SUBSTITUTE(Virtual);
@@ -184,15 +177,20 @@ struct DisplayIdGetter;
 template <typename PhysicalDisplay>
 struct DisplayIdGetter<PhysicalDisplayIdType<PhysicalDisplay>> {
     static DisplayIdVariant get() {
-        if (!PhysicalDisplay::HAS_IDENTIFICATION_DATA) {
+        if (PhysicalDisplay::HAS_IDENTIFICATION_DATA == HasIdentificationData::FALSE) {
             return PhysicalDisplayId::fromPort(static_cast<bool>(PhysicalDisplay::PRIMARY)
                                                        ? LEGACY_DISPLAY_TYPE_PRIMARY
                                                        : LEGACY_DISPLAY_TYPE_EXTERNAL);
         }
 
+        const bool useStableEdidIds =
+                PhysicalDisplay::CONNECTION_TYPE == ui::DisplayConnectionType::External &&
+                FlagManager::getInstance().stable_edid_ids();
         const auto info =
-                parseDisplayIdentificationData(PhysicalDisplay::PORT,
-                                               PhysicalDisplay::GET_IDENTIFICATION_DATA());
+                display::parseDisplayIdentificationData(PhysicalDisplay::PORT,
+                                                        PhysicalDisplay::GET_IDENTIFICATION_DATA(),
+                                                        android::ScreenPartStatus::UNSUPPORTED,
+                                                        useStableEdidIds);
         return info ? info->id : PhysicalDisplayId::fromPort(PhysicalDisplay::PORT);
     }
 };
@@ -316,40 +314,6 @@ struct DisplayVariant {
                 .WillRepeatedly(Return(0));
 
         return injector;
-    }
-
-    // Called by tests to set up any native window creation call expectations.
-    static void setupNativeWindowSurfaceCreationCallExpectations(DisplayTransactionTest* test) {
-        EXPECT_CALL(*test->mNativeWindowSurface, getNativeWindow())
-                .WillOnce(Return(test->mNativeWindow));
-
-        EXPECT_CALL(*test->mNativeWindow, query(NATIVE_WINDOW_WIDTH, _))
-                .WillRepeatedly(DoAll(SetArgPointee<1>(WIDTH), Return(0)));
-        EXPECT_CALL(*test->mNativeWindow, query(NATIVE_WINDOW_HEIGHT, _))
-                .WillRepeatedly(DoAll(SetArgPointee<1>(HEIGHT), Return(0)));
-        EXPECT_CALL(*test->mNativeWindow, perform(NATIVE_WINDOW_SET_BUFFERS_FORMAT))
-                .WillRepeatedly(Return(0));
-        EXPECT_CALL(*test->mNativeWindow, perform(NATIVE_WINDOW_API_CONNECT))
-                .WillRepeatedly(Return(0));
-        EXPECT_CALL(*test->mNativeWindow, perform(NATIVE_WINDOW_SET_USAGE64))
-                .WillRepeatedly(Return(0));
-        EXPECT_CALL(*test->mNativeWindow, perform(NATIVE_WINDOW_API_DISCONNECT))
-                .WillRepeatedly(Return(0));
-    }
-
-    static void setupFramebufferConsumerBufferQueueCallExpectations(DisplayTransactionTest* test) {
-        EXPECT_CALL(*test->mConsumer, consumerConnect(_, false)).WillOnce(Return(NO_ERROR));
-        EXPECT_CALL(*test->mConsumer, setConsumerName(_)).WillRepeatedly(Return(NO_ERROR));
-        EXPECT_CALL(*test->mConsumer, setConsumerUsageBits(GRALLOC_USAGE))
-                .WillRepeatedly(Return(NO_ERROR));
-        EXPECT_CALL(*test->mConsumer, setDefaultBufferSize(WIDTH, HEIGHT))
-                .WillRepeatedly(Return(NO_ERROR));
-        EXPECT_CALL(*test->mConsumer, setMaxAcquiredBufferCount(_))
-                .WillRepeatedly(Return(NO_ERROR));
-    }
-
-    static void setupFramebufferProducerBufferQueueCallExpectations(DisplayTransactionTest* test) {
-        EXPECT_CALL(*test->mProducer, allocateBuffers(0, 0, 0, 0)).WillRepeatedly(Return());
     }
 };
 
@@ -490,13 +454,13 @@ struct HwcDisplayVariant {
 
         setupHwcGetConfigsCallExpectations(test);
 
-        if (PhysicalDisplay::HAS_IDENTIFICATION_DATA) {
-            EXPECT_CALL(*test->mComposer, getDisplayIdentificationData(HWC_DISPLAY_ID, _, _))
+        if (PhysicalDisplay::HAS_IDENTIFICATION_DATA == HasIdentificationData::TRUE) {
+            EXPECT_CALL(*test->mComposer, getDisplayIdentificationData(HWC_DISPLAY_ID, _, _, _))
                     .WillOnce(DoAll(SetArgPointee<1>(PhysicalDisplay::PORT),
                                     SetArgPointee<2>(PhysicalDisplay::GET_IDENTIFICATION_DATA()),
                                     Return(Error::NONE)));
         } else {
-            EXPECT_CALL(*test->mComposer, getDisplayIdentificationData(HWC_DISPLAY_ID, _, _))
+            EXPECT_CALL(*test->mComposer, getDisplayIdentificationData(HWC_DISPLAY_ID, _, _, _))
                     .WillOnce(Return(Error::UNSUPPORTED));
         }
     }
@@ -514,8 +478,7 @@ constexpr uint32_t GRALLOC_USAGE_PHYSICAL_DISPLAY =
 
 constexpr int PHYSICAL_DISPLAY_FLAGS = 0x1;
 
-template <typename PhysicalDisplay, int width, int height,
-          Secure secure = (PhysicalDisplay::SECURE) ? Secure::TRUE : Secure::FALSE>
+template <typename PhysicalDisplay, int width, int height, Secure secure = PhysicalDisplay::SECURE>
 struct PhysicalDisplayVariant
       : DisplayVariant<PhysicalDisplayIdType<PhysicalDisplay>, width, height, Async::FALSE, secure,
                        PhysicalDisplay::PRIMARY, GRALLOC_USAGE_PHYSICAL_DISPLAY,
@@ -526,73 +489,71 @@ struct PhysicalDisplayVariant
                                          GRALLOC_USAGE_PHYSICAL_DISPLAY, PHYSICAL_DISPLAY_FLAGS>,
                           PhysicalDisplay> {};
 
-template <bool hasIdentificationData>
+template <HasIdentificationData hasIdentificationData>
 struct PrimaryDisplay {
     static constexpr auto CONNECTION_TYPE = ui::DisplayConnectionType::Internal;
     static constexpr Primary PRIMARY = Primary::TRUE;
-    static constexpr bool SECURE = true;
+    static constexpr Secure SECURE = Secure::TRUE;
     static constexpr uint8_t PORT = 255;
     static constexpr HWDisplayId HWC_DISPLAY_ID = 1001;
-    static constexpr bool HAS_IDENTIFICATION_DATA = hasIdentificationData;
+    static constexpr HasIdentificationData HAS_IDENTIFICATION_DATA = hasIdentificationData;
     static constexpr auto GET_IDENTIFICATION_DATA = getInternalEdid;
 };
 
-template <ui::DisplayConnectionType connectionType, bool hasIdentificationData, bool secure,
-          HWDisplayId hwDisplayId = 1002>
+template <ui::DisplayConnectionType connectionType, HasIdentificationData hasIdentificationData,
+          Secure secure, HWDisplayId hwDisplayId = 1002>
 struct SecondaryDisplay {
     static constexpr auto CONNECTION_TYPE = connectionType;
     static constexpr Primary PRIMARY = Primary::FALSE;
-    static constexpr bool SECURE = secure;
+    static constexpr Secure SECURE = secure;
     static constexpr uint8_t PORT = 254;
     static constexpr HWDisplayId HWC_DISPLAY_ID = hwDisplayId;
-    static constexpr bool HAS_IDENTIFICATION_DATA = hasIdentificationData;
+    static constexpr HasIdentificationData HAS_IDENTIFICATION_DATA = hasIdentificationData;
     static constexpr auto GET_IDENTIFICATION_DATA =
-            connectionType == ui::DisplayConnectionType::Internal ? getInternalEdid
-                                                                  : getExternalEdid;
+            connectionType == ui::DisplayConnectionType::Internal ? getOuterEdid : getExternalEdid;
 };
 
-constexpr bool kSecure = true;
-constexpr bool kNonSecure = false;
-
-template <bool secure>
+template <Secure secure>
 struct TertiaryDisplay {
     static constexpr auto CONNECTION_TYPE = ui::DisplayConnectionType::External;
     static constexpr Primary PRIMARY = Primary::FALSE;
-    static constexpr bool SECURE = secure;
+    static constexpr Secure SECURE = secure;
     static constexpr uint8_t PORT = 253;
     static constexpr HWDisplayId HWC_DISPLAY_ID = 1003;
     static constexpr auto GET_IDENTIFICATION_DATA = getExternalEdid;
 };
 
-using PrimaryDisplayVariant = PhysicalDisplayVariant<PrimaryDisplay<false>, 3840, 2160>;
+using PrimaryDisplayVariant =
+        PhysicalDisplayVariant<PrimaryDisplay<HasIdentificationData::FALSE>, 3840, 2160>;
 
-using InnerDisplayVariant = PhysicalDisplayVariant<PrimaryDisplay<true>, 1840, 2208>;
+using InnerDisplayVariant =
+        PhysicalDisplayVariant<PrimaryDisplay<HasIdentificationData::TRUE>, 1840, 2208>;
 using OuterDisplayVariant =
         PhysicalDisplayVariant<SecondaryDisplay<ui::DisplayConnectionType::Internal,
-                                                /*hasIdentificationData=*/true, kSecure>,
+                                                HasIdentificationData::TRUE, Secure::TRUE>,
                                1080, 2092>;
 using OuterDisplayNonSecureVariant =
         PhysicalDisplayVariant<SecondaryDisplay<ui::DisplayConnectionType::Internal,
-                                                /*hasIdentificationData=*/true, kNonSecure>,
+                                                HasIdentificationData::TRUE, Secure::FALSE>,
                                1080, 2092>;
 
 template <HWDisplayId hwDisplayId = 1002>
 using ExternalDisplayWithIdentificationVariant = PhysicalDisplayVariant<
-        SecondaryDisplay<ui::DisplayConnectionType::External,
-                         /*hasIdentificationData=*/true, kNonSecure, hwDisplayId>,
+        SecondaryDisplay<ui::DisplayConnectionType::External, HasIdentificationData::TRUE,
+                         Secure::FALSE, hwDisplayId>,
         1920, 1280>;
 using ExternalDisplayVariant =
         PhysicalDisplayVariant<SecondaryDisplay<ui::DisplayConnectionType::External,
-                                                /*hasIdentificationData=*/false, kSecure>,
+                                                HasIdentificationData::FALSE, Secure::TRUE>,
                                1920, 1280>;
 using ExternalDisplayNonSecureVariant =
         PhysicalDisplayVariant<SecondaryDisplay<ui::DisplayConnectionType::External,
-                                                /*hasIdentificationData=*/false, kNonSecure>,
+                                                HasIdentificationData::FALSE, Secure::FALSE>,
                                1920, 1280>;
 
-using TertiaryDisplayVariant = PhysicalDisplayVariant<TertiaryDisplay<kSecure>, 1600, 1200>;
+using TertiaryDisplayVariant = PhysicalDisplayVariant<TertiaryDisplay<Secure::TRUE>, 1600, 1200>;
 using TertiaryDisplayNonSecureVariant =
-        PhysicalDisplayVariant<TertiaryDisplay<kNonSecure>, 1600, 1200>;
+        PhysicalDisplayVariant<TertiaryDisplay<Secure::FALSE>, 1600, 1200>;
 
 // A virtual display not supported by the HWC.
 constexpr uint32_t GRALLOC_USAGE_NONHWC_VIRTUAL_DISPLAY = 0;
@@ -634,11 +595,6 @@ struct NonHwcVirtualDisplayVariant
 
     static void setupHwcGetActiveConfigCallExpectations(DisplayTransactionTest* test) {
         EXPECT_CALL(*test->mComposer, getActiveConfig(_, _)).Times(0);
-    }
-
-    static void setupNativeWindowSurfaceCreationCallExpectations(DisplayTransactionTest* test) {
-        Base::setupNativeWindowSurfaceCreationCallExpectations(test);
-        EXPECT_CALL(*test->mNativeWindow, setSwapInterval(0)).Times(1);
     }
 };
 
@@ -684,11 +640,6 @@ struct HwcVirtualDisplayVariant
         test->mFlinger.mutableHwcDisplayData().try_emplace(*displayId);
 
         return compositionDisplay;
-    }
-
-    static void setupNativeWindowSurfaceCreationCallExpectations(DisplayTransactionTest* test) {
-        Base::setupNativeWindowSurfaceCreationCallExpectations(test);
-        EXPECT_CALL(*test->mNativeWindow, setSwapInterval(0)).Times(1);
     }
 
     static void setupHwcVirtualDisplayCreationCallExpectations(DisplayTransactionTest* test) {

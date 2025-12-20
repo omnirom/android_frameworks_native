@@ -47,7 +47,6 @@ public:
 private:
     std::optional<rust::Box<android::input::keyboardClassifier::KeyboardClassifier>>
             mRustClassifier;
-    std::unordered_map<DeviceId, KeyboardType> mKeyboardTypeMap;
 };
 
 } // namespace android

@@ -17,6 +17,7 @@
 #ifndef FRAMEWORK_NATIVE_CMD_DUMPPOOL_H_
 #define FRAMEWORK_NATIVE_CMD_DUMPPOOL_H_
 
+#include <functional>
 #include <future>
 #include <queue>
 #include <string>

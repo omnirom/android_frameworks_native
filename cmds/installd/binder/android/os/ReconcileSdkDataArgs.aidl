@@ -16,7 +16,7 @@
 
 package android.os;
 
-/** {@hide} */
+/** @hide */
 parcelable ReconcileSdkDataArgs {
     @nullable @utf8InCpp String uuid;
     @utf8InCpp String packageName;

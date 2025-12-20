@@ -59,6 +59,7 @@ void fuzzService(const std::vector<sp<IBinder>>& binders, FuzzedDataProvider&& p
     RandomParcelOptions options{
             .extraBinders = binders,
             .extraFds = {},
+            .viewParcel = true,
     };
 
     // Reserved bytes so that we don't have to change fuzzers and seed corpus if

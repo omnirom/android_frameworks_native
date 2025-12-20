@@ -51,6 +51,8 @@ public:
 
     static std::unique_ptr<RefreshRateOverlay> create(FpsRange, ftl::Flags<Features>);
 
+    ~RefreshRateOverlay();
+
     void setLayerStack(ui::LayerStack);
     void setViewport(ui::Size);
     void changeRefreshRate(Fps, Fps);
@@ -98,7 +100,7 @@ private:
     const FpsRange mFpsRange; // For color interpolation.
     const ftl::Flags<Features> mFeatures;
 
-    const std::unique_ptr<SurfaceControlHolder> mSurfaceControl;
+    std::unique_ptr<SurfaceControlHolder> mSurfaceControl;
 };
 
 } // namespace android

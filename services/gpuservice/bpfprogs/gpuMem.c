@@ -14,7 +14,11 @@
  * limitations under the License.
  */
 
-#include <bpf_helpers.h>
+#include <android_bpf_defs.h>
+
+#ifdef ENABLE_LIBBPF
+#include <stdint.h>
+#endif  // ENABLE_LIBBPF
 
 /*
  * On Android the number of active processes using gpu is limited.
@@ -48,7 +52,8 @@ struct gpu_mem_total_args {
  * Pass AID_GRAPHICS as gid since gpuservice is in the graphics group.
  * Upon seeing size 0, the corresponding KEY needs to be cleaned up.
  */
-DEFINE_BPF_PROG("tracepoint/gpu_mem/gpu_mem_total", AID_ROOT, AID_GRAPHICS, tp_gpu_mem_total)
+DEFINE_BPF_PROG("tracepoint/gpu_mem/gpu_mem_total", AID_ROOT, AID_GRAPHICS,
+                tracepoint_gpu_mem_gpu_mem_total)
 (struct gpu_mem_total_args* args) {
     uint64_t key = 0;
     uint64_t cur_val = 0;

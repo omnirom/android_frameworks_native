@@ -28,4 +28,6 @@ parcelable StaticDisplayInfo {
     boolean secure;
     @nullable DeviceProductInfo deviceProductInfo;
     Rotation installOrientation = Rotation.Rotation0;
+    /* this comes from composer HAL's screenPartStatus.aidl file */
+    int screenPartStatus;
 }

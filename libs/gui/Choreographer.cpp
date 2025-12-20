@@ -155,7 +155,7 @@ void Choreographer::postFrameCallbackDelayed(AChoreographer_frameCallback cb,
         if (std::this_thread::get_id() != mThreadId) {
             if (mLooper != nullptr) {
                 Message m{MSG_SCHEDULE_VSYNC};
-                mLooper->sendMessage(this, m);
+                mLooper->sendMessage(sp<Choreographer>::fromExisting(this), m);
             } else {
                 scheduleVsync();
             }
@@ -165,7 +165,7 @@ void Choreographer::postFrameCallbackDelayed(AChoreographer_frameCallback cb,
     } else {
         if (mLooper != nullptr) {
             Message m{MSG_SCHEDULE_CALLBACKS};
-            mLooper->sendMessageDelayed(delay, this, m);
+            mLooper->sendMessageDelayed(delay, sp<Choreographer>::fromExisting(this), m);
         } else {
             scheduleCallbacks();
         }
@@ -229,7 +229,7 @@ void Choreographer::unregisterRefreshRateCallback(AChoreographer_refreshRateCall
 void Choreographer::scheduleLatestConfigRequest() {
     if (mLooper != nullptr) {
         Message m{MSG_HANDLE_REFRESH_RATE_UPDATES};
-        mLooper->sendMessage(this, m);
+        mLooper->sendMessage(sp<Choreographer>::fromExisting(this), m);
     } else {
         // If the looper thread is detached from Choreographer, then refresh rate
         // changes will be handled in AChoreographer_handlePendingEvents, so we
@@ -349,13 +349,12 @@ void Choreographer::dispatchHotplugConnectionError(nsecs_t, int32_t connectionEr
           this, connectionError);
 }
 
-void Choreographer::dispatchModeChanged(nsecs_t, PhysicalDisplayId, int32_t, nsecs_t) {
-    LOG_ALWAYS_FATAL("dispatchModeChanged was called but was never registered");
-}
-
-void Choreographer::dispatchFrameRateOverrides(nsecs_t, PhysicalDisplayId,
-                                               std::vector<FrameRateOverride>) {
-    LOG_ALWAYS_FATAL("dispatchFrameRateOverrides was called but was never registered");
+void Choreographer::dispatchModeChangedWithFrameRateOverrides(nsecs_t, PhysicalDisplayId, int32_t,
+                                                              nsecs_t, nsecs_t, nsecs_t,
+                                                              std::vector<FrameRateOverride>,
+                                                              std::vector<SupportedRefreshRate>) {
+    LOG_ALWAYS_FATAL(
+            "dispatchModeChangedWithFrameRateOverrides was called but was never registered");
 }
 
 void Choreographer::dispatchNullEvent(nsecs_t, PhysicalDisplayId) {

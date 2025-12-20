@@ -13,6 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+#define LOG_TAG "libbinder.libbinder_rpc_unstable"
 
 #include <binder_rpc_unstable.hpp>
 
@@ -81,6 +82,15 @@ extern "C" {
 ARpcServer* ARpcServer_newVsock(AIBinder* service, unsigned int cid, unsigned int port,
                                 unsigned int* assignedPort) {
     auto server = RpcServer::make();
+    if (const AIBinder_Class* serviceClass = AIBinder_getClass(service); serviceClass) {
+        // needed before NDK APIs are finalized in API level 37 for the new
+        // AIBinder_setMinRpcThreads to be available.
+        if (0 ==
+            strcmp(AIBinder_Class_getDescriptor(serviceClass),
+                   "com.android.isolated_storage_service.IIcingSearchEngine")) {
+            server->setMaxThreads(2);
+        }
+    }
 
     unsigned int bindCid = VMADDR_CID_ANY; // bind to the remote interface
     if (cid == VMADDR_CID_LOCAL) {

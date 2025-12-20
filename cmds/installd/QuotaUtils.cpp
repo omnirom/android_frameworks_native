@@ -17,9 +17,11 @@
 #include "QuotaUtils.h"
 
 #include <fstream>
+#include <mutex>
 #include <unordered_map>
 
 #include <sys/quota.h>
+#include <sys/statvfs.h>
 
 #include <android-base/logging.h>
 
@@ -140,6 +142,70 @@ int64_t GetOccupiedSpaceForGid(const std::string& uuid, gid_t gid) {
         return dq.dqb_curspace;
     }
 
+}
+
+bool PrepareAppInodeQuota(const std::string& uuid, uid_t uid) {
+    const std::string device = FindQuotaDeviceForUuid(uuid);
+    // Skip when device has no quotas present
+    if (device.empty()) {
+        return true;
+    }
+
+#if APPLY_HARD_QUOTAS
+    struct dqblk dq;
+    if (quotactl(QCMD(Q_GETQUOTA, USRQUOTA), device.c_str(), uid, reinterpret_cast<char*>(&dq)) !=
+        0) {
+        PLOG(WARNING) << "Failed to find quota for " << uid;
+        return false;
+    }
+
+    if (dq.dqb_ihardlimit == 0) {
+        auto path = create_data_path(uuid.empty() ? nullptr : uuid.c_str());
+        struct statvfs stat;
+        if (statvfs(path.c_str(), &stat) != 0) {
+            PLOG(WARNING) << "Failed to statvfs " << path;
+            return false;
+        }
+
+        dq.dqb_valid |= QIF_ILIMITS;
+        // limiting the app to only 50% of the inodes available,
+        // reducing the limit will be too restrictive especially for apps with valid use cases
+        dq.dqb_ihardlimit = (stat.f_files / 2);
+
+        if (quotactl(QCMD(Q_SETQUOTA, USRQUOTA), device.c_str(), uid,
+                     reinterpret_cast<char*>(&dq)) != 0) {
+            PLOG(WARNING) << "Failed to set hard quota for " << uid;
+            return false;
+        } else {
+            LOG(DEBUG) << "Applied hard quotas for " << uid;
+            return true;
+        }
+    } else {
+        // Hard quota already set; assume it's reasonable
+        return true;
+    }
+#else
+    // Hard quotas disabled
+    return true;
+#endif
+}
+
+int64_t GetInodesQuotaHardLimitsForUid(const std::string& uuid, uid_t uid) {
+    const std::string device = FindQuotaDeviceForUuid(uuid);
+    if (device.empty()) {
+        return 0;
+    }
+
+    struct dqblk dq;
+    if (quotactl(QCMD(Q_GETQUOTA, USRQUOTA), device.c_str(), uid, reinterpret_cast<char*>(&dq)) !=
+        0) {
+        if (errno != ESRCH) {
+            PLOG(ERROR) << "Failed to quotactl " << device << " for UID " << uid;
+        }
+        return -1;
+    } else {
+        return dq.dqb_ihardlimit;
+    }
 }
 
 }  // namespace installd

@@ -25,6 +25,7 @@
 #include <android/binder_process.h>
 #include <gtest/gtest.h>
 #include <iface/iface.h>
+#include <selinux/selinux.h>
 #include <utils/Looper.h>
 
 // warning: this is assuming that libbinder_ndk is using the same copy
@@ -256,7 +257,7 @@ int lazyService(const char* instance) {
 bool isServiceRunning(const char* serviceName) {
     static const sp<android::IServiceManager> sm(android::defaultServiceManager());
     const Vector<String16> services = sm->listServices();
-    for (const auto service : services) {
+    for (const auto& service : services) {
         if (service == String16(serviceName)) return true;
     }
     return false;
@@ -1083,6 +1084,53 @@ TEST(NdkBinder, FlaggedServiceAccessible) {
 
 TEST(NdkBinder, GetClassInterfaceDescriptor) {
     ASSERT_STREQ(IFoo::kIFooDescriptor, AIBinder_Class_getDescriptor(IFoo::kClass));
+}
+
+TEST(NdkBinder, CheckServiceAccessOk) {
+    // This test case runs as su which has access to all services
+    EXPECT_TRUE(AServiceManager_checkServiceAccess(
+            "u:r:su:s0", 0, 0, "adb",
+            AServiceManager_PermissionType::CHECK_ACCESS_PERMISSION_FIND));
+    EXPECT_TRUE(AServiceManager_checkServiceAccess(
+            "u:r:su:s0", 0, 0, "adb",
+            AServiceManager_PermissionType::CHECK_ACCESS_PERMISSION_LIST));
+    EXPECT_TRUE(AServiceManager_checkServiceAccess(
+            "u:r:su:s0", 0, 0, "adb", AServiceManager_PermissionType::CHECK_ACCESS_PERMISSION_ADD));
+}
+
+TEST(NdkBinder, CheckServiceAccessNotOk) {
+    bool is_enforcing = security_getenforce() == 1;
+    EXPECT_NE(is_enforcing, AServiceManager_checkServiceAccess(
+                                    "u:r:some_unknown_sid:s0", 0, 0, "adb",
+                                    AServiceManager_PermissionType::CHECK_ACCESS_PERMISSION_FIND));
+}
+
+TEST(NdkBinder, InvalidCheckServiceAccessArgs) {
+    constexpr AServiceManager_PermissionType kUnknownPermission =
+            static_cast<AServiceManager_PermissionType>(8000);
+    EXPECT_DEATH(AServiceManager_checkServiceAccess(nullptr, 0, 0, nullptr, kUnknownPermission),
+                 "nullptr");
+    EXPECT_DEATH(AServiceManager_checkServiceAccess("u:r:su:s0", 0, 0, nullptr, kUnknownPermission),
+                 "nullptr");
+    EXPECT_DEATH(AServiceManager_checkServiceAccess("u:r:su:s0", 0, 0, "adb", kUnknownPermission),
+                 "Unknown value for permission argument! permission: 8000");
+    EXPECT_DEATH(AServiceManager_checkServiceAccess(
+                         "u:r:su:s0", 0, 0, nullptr,
+                         AServiceManager_PermissionType::CHECK_ACCESS_PERMISSION_FIND),
+                 "nullptr");
+}
+
+TEST(NdkBinder, SetMinThreads) {
+    ndk::SpAIBinder binder = ndk::SharedRefBase::make<MyBinderNdkUnitTest>()->asBinder();
+    EXPECT_EQ(STATUS_OK, AIBinder_setMinRpcThreads(binder.get(), 10));
+}
+
+TEST(NdkBinder, SetMinThreadsNull) {
+    EXPECT_EQ(STATUS_UNEXPECTED_NULL, AIBinder_setMinRpcThreads(nullptr, 10));
+}
+
+TEST(NdkBinder, SetMinThreadsZero) {
+    EXPECT_EQ(STATUS_BAD_VALUE, AIBinder_setMinRpcThreads(nullptr, 0));
 }
 
 static void addOne(int* to) {

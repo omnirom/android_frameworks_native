@@ -18,6 +18,8 @@
 #include <SkRuntimeEffect.h>
 #include <SkShader.h>
 
+#include "RuntimeEffectManager.h"
+
 namespace android {
 namespace renderengine {
 namespace skia {
@@ -30,7 +32,7 @@ namespace skia {
  */
 class GainmapFactory {
 public:
-    GainmapFactory();
+    GainmapFactory(RuntimeEffectManager& effectManager);
     // Generates the gainmap shader. The hdrSdrRatio is the max_content_boost in the UltraHDR
     // specification.
     sk_sp<SkShader> createSkShader(const sk_sp<SkShader>& sdr, const sk_sp<SkShader>& hdr,

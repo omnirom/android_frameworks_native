@@ -10,7 +10,7 @@
     );
     // TODO Unhide the below method
     /**
-     * {@hide}
+     * @hide
      */
     public static native EGLSurface eglCreatePbufferFromClientBuffer(
         EGLDisplay dpy,

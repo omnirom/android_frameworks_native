@@ -153,7 +153,11 @@ public:
         data.writeInt32(mode);
         data.writeString16(opPackageName);
         data.writeString16(attributionTag);
-        remote()->transact(CREATE_SENSOR_EVENT_CONNECTION, data, &reply);
+
+        status_t status = remote()->transact(CREATE_SENSOR_EVENT_CONNECTION, data, &reply);
+        if (status != OK) {
+            ALOGE("Failed to create sensor event connection: %s", statusToString(status).c_str());
+        }
         return interface_cast<ISensorEventConnection>(reply.readStrongBinder());
     }
 

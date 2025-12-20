@@ -96,8 +96,15 @@ impl IBinderRpcTest for TestService {
             None => Err(Status::from(StatusCode::BAD_VALUE)),
         }
     }
-    fn repeatBytes(&self, _bytes: &[u8]) -> Result<Vec<u8>, Status> {
-        todo!()
+    fn repeatBytes(&self, bytes: &[u8]) -> Result<Vec<u8>, Status> {
+        let mut result = Vec::new();
+        result.extend_from_slice(bytes);
+        Ok(result)
+    }
+    fn repeatStrings(&self, strings: &[String]) -> Result<Vec<String>, Status> {
+        let mut result = Vec::new();
+        result.extend_from_slice(strings);
+        Ok(result)
     }
     fn holdBinder(&self, binder: Option<&SpIBinder>) -> Result<(), Status> {
         *HOLD_BINDER.lock().unwrap() = binder.cloned();

@@ -20,6 +20,7 @@
 #include "CursorScrollAccumulator.h"
 #include "InputMapper.h"
 
+#include <android/configuration.h>
 #include <input/VelocityControl.h>
 #include <ui/Rotation.h>
 
@@ -114,6 +115,9 @@ private:
     std::optional<ui::LogicalDisplayId> mDisplayId;
     ui::Rotation mOrientation{ui::ROTATION_0};
     FloatRect mBoundsInLogicalDisplay{};
+    int32_t mViewportDensityDpi{ACONFIGURATION_DENSITY_NONE};
+    float mViewportXDpi{ACONFIGURATION_DENSITY_NONE};
+    float mViewportYDpi{ACONFIGURATION_DENSITY_NONE};
 
     // The button state as of the last sync.
     int32_t mButtonState;

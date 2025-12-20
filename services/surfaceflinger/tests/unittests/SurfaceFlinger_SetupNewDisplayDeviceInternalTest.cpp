@@ -18,6 +18,9 @@
 #define LOG_TAG "LibSurfaceFlingerUnittests"
 
 #include <ftl/fake_guard.h>
+#include <gui/BufferItemConsumer.h>
+#include <gui/Surface.h>
+#include <ui/ScreenPartStatus.h>
 
 #include "DisplayHardware/DisplayMode.h"
 
@@ -41,8 +44,6 @@ struct WideColorP3ColorimetricSupportedVariant {
     }
 
     static void setupComposerCallExpectations(DisplayTransactionTest* test) {
-        EXPECT_CALL(*test->mNativeWindow, perform(NATIVE_WINDOW_SET_BUFFERS_DATASPACE)).Times(1);
-
         EXPECT_CALL(*test->mComposer,
                     getRenderIntents(Display::HWC_DISPLAY_ID, ColorMode::DISPLAY_P3, _))
                 .WillOnce(DoAll(SetArgPointee<2>(
@@ -199,7 +200,8 @@ void SetupNewDisplayDeviceInternalTest::setupNewDisplayDeviceInternalTest() {
     const sp<BBinder> displayToken = sp<BBinder>::make();
     const sp<compositionengine::mock::DisplaySurface> displaySurface =
             sp<compositionengine::mock::DisplaySurface>::make();
-    const auto producer = sp<mock::GraphicBufferProducer>::make();
+    const auto [consumer, surface] =
+            BufferItemConsumer::create(AHARDWAREBUFFER_USAGE_CPU_READ_RARELY);
 
     // --------------------------------------------------------------------
     // Preconditions
@@ -210,10 +212,6 @@ void SetupNewDisplayDeviceInternalTest::setupNewDisplayDeviceInternalTest() {
     // The display is setup with the HWC.
     Case::Display::injectHwcDisplay(this);
 
-    // SurfaceFlinger will use a test-controlled factory for native window
-    // surfaces.
-    injectFakeNativeWindowSurfaceFactory();
-
     // A compositionengine::Display has already been created
     auto compositionDisplay = Case::Display::injectCompositionDisplay(this);
 
@@ -221,7 +219,6 @@ void SetupNewDisplayDeviceInternalTest::setupNewDisplayDeviceInternalTest() {
     // Call Expectations
 
     // Various native window calls will be made.
-    Case::Display::setupNativeWindowSurfaceCreationCallExpectations(this);
     Case::Display::setupHwcGetActiveConfigCallExpectations(this);
     Case::Display::setupHwcGetConfigsCallExpectations(this);
     Case::WideColorSupport::setupComposerCallExpectations(this);
@@ -241,8 +238,6 @@ void SetupNewDisplayDeviceInternalTest::setupNewDisplayDeviceInternalTest() {
         ASSERT_TRUE(hwcDisplayId);
         const auto port = Case::Display::PORT::value;
         ASSERT_TRUE(port);
-        mFlinger.getHwComposer().allocatePhysicalDisplay(*hwcDisplayId, *displayId, *port,
-                                                         std::nullopt);
         DisplayModePtr activeMode = DisplayMode::Builder(Case::Display::HWC_ACTIVE_CONFIG_ID)
                                             .setResolution(Case::Display::RESOLUTION)
                                             .setVsyncPeriod(DEFAULT_VSYNC_PERIOD)
@@ -263,6 +258,7 @@ void SetupNewDisplayDeviceInternalTest::setupNewDisplayDeviceInternalTest() {
 
         const auto it = mFlinger.mutablePhysicalDisplays()
                                 .emplace_or_replace(*displayId, displayToken, *displayId, *port,
+                                                    android::ScreenPartStatus::UNSUPPORTED,
                                                     *kConnectionTypeOpt, makeModes(activeMode),
                                                     std::move(colorModes), std::nullopt)
                                 .first;
@@ -276,7 +272,7 @@ void SetupNewDisplayDeviceInternalTest::setupNewDisplayDeviceInternalTest() {
     state.flags = Case::Display::DISPLAY_FLAGS;
 
     auto device = mFlinger.setupNewDisplayDeviceInternal(displayToken, compositionDisplay, state,
-                                                         displaySurface, producer);
+                                                         displaySurface, surface);
 
     // --------------------------------------------------------------------
     // Postconditions

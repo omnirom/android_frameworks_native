@@ -21,6 +21,7 @@
 #include <string>
 #include <type_traits>
 
+#include <common/LayerFilter.h>
 #include <math/mat4.h>
 #include <ui/FloatRect.h>
 #include <ui/LayerStack.h>
@@ -54,7 +55,7 @@ void dumpVal(std::string& out, const char* name, const std::string& valueName, E
     dumpVal(out, name, valueName, static_cast<std::underlying_type_t<EnumType>>(value));
 }
 
-void dumpVal(std::string& out, const char* name, ui::LayerFilter);
+void dumpVal(std::string& out, const char* name, LayerFilter);
 void dumpVal(std::string& out, const char* name, ui::Size);
 
 void dumpVal(std::string& out, const char* name, const FloatRect&);

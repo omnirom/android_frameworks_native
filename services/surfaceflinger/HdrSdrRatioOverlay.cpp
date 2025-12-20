@@ -20,9 +20,6 @@
 
 #include <SkSurface.h>
 
-#undef LOG_TAG
-#define LOG_TAG "HdrSdrRatioOverlay"
-
 namespace android {
 
 void HdrSdrRatioOverlay::drawNumber(float number, int left, SkColor color, SkCanvas& canvas) {
@@ -118,6 +115,13 @@ HdrSdrRatioOverlay::HdrSdrRatioOverlay(ConstructorTag)
             .setLayer(mSurfaceControl->get(), INT32_MAX - 2)
             .setTrustedOverlay(mSurfaceControl->get(), true)
             .apply();
+}
+
+HdrSdrRatioOverlay::~HdrSdrRatioOverlay() {
+    for (const sp<GraphicBuffer>& buffer : mRingBuffer) {
+        android::removeBufferFromLocalCache(buffer);
+    }
+    mSurfaceControl.reset();
 }
 
 bool HdrSdrRatioOverlay::initCheck() const {

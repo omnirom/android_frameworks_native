@@ -48,10 +48,9 @@ class Surface : public Parcelable {
     sp<IGraphicBufferProducer> graphicBufferProducer;
     sp<IBinder> surfaceControlHandle;
 
-#if WB_LIBCAMERASERVICE_WITH_DEPENDENCIES
     // functions used to convert to a parcelable Surface so it can be passed over binder.
     static Surface fromSurface(const sp<android::Surface>& surface);
-    sp<android::Surface> toSurface() const;
+    sp<android::Surface> toSurface(bool controlledByApp = false) const;
 
     status_t getUniqueId(/* out */ uint64_t* id) const;
 
@@ -70,7 +69,6 @@ class Surface : public Parcelable {
         return graphicBufferProducer < other.graphicBufferProducer;
     }
     bool operator>(const Surface& other) const { return other < *this; }
-#endif
 
     virtual status_t writeToParcel(Parcel* parcel) const override;
     virtual status_t readFromParcel(const Parcel* parcel) override;

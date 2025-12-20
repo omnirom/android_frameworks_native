@@ -60,7 +60,6 @@
 #include "globals.h"
 #include "installd_constants.h"
 #include "installd_deps.h"
-#include "otapreopt_utils.h"
 #include "restorable_file.h"
 #include "run_dex2oat.h"
 #include "unique_file.h"
@@ -2301,129 +2300,8 @@ bool hash_secondary_dex_file(const std::string& dex_path, const std::string& pkg
     return wait_child_with_timeout(pid, kShortTimeoutMs) == 0;
 }
 
-// Helper for move_ab, so that we can have common failure-case cleanup.
-static bool unlink_and_rename(const char* from, const char* to) {
-    // Check whether "from" exists, and if so whether it's regular. If it is, unlink. Otherwise,
-    // return a failure.
-    struct stat s;
-    if (stat(to, &s) == 0) {
-        if (!S_ISREG(s.st_mode)) {
-            LOG(ERROR) << from << " is not a regular file to replace for A/B.";
-            return false;
-        }
-        if (unlink(to) != 0) {
-            LOG(ERROR) << "Could not unlink " << to << " to move A/B.";
-            return false;
-        }
-    } else {
-        // This may be a permission problem. We could investigate the error code, but we'll just
-        // let the rename failure do the work for us.
-    }
-
-    // Try to rename "to" to "from."
-    if (rename(from, to) != 0) {
-        PLOG(ERROR) << "Could not rename " << from << " to " << to;
-        return false;
-    }
-    return true;
-}
-
-// Move/rename a B artifact (from) to an A artifact (to).
-static bool move_ab_path(const std::string& b_path, const std::string& a_path) {
-    // Check whether B exists.
-    {
-        struct stat s;
-        if (stat(b_path.c_str(), &s) != 0) {
-            // Ignore for now. The service calling this isn't smart enough to
-            // understand lack of artifacts at the moment.
-            LOG(VERBOSE) << "A/B artifact " << b_path << " does not exist!";
-            return false;
-        }
-        if (!S_ISREG(s.st_mode)) {
-            LOG(ERROR) << "A/B artifact " << b_path << " is not a regular file.";
-            // Try to unlink, but swallow errors.
-            unlink(b_path.c_str());
-            return false;
-        }
-    }
-
-    // Rename B to A.
-    if (!unlink_and_rename(b_path.c_str(), a_path.c_str())) {
-        // Delete the b_path so we don't try again (or fail earlier).
-        if (unlink(b_path.c_str()) != 0) {
-            PLOG(ERROR) << "Could not unlink " << b_path;
-        }
-
-        return false;
-    }
-
-    return true;
-}
-
-bool move_ab(const char* apk_path, const char* instruction_set, const char* oat_dir) {
-    // Get the current slot suffix. No suffix, no A/B.
-    const std::string slot_suffix = GetProperty("ro.boot.slot_suffix", "");
-    if (slot_suffix.empty()) {
-        return false;
-    }
-
-    if (!ValidateTargetSlotSuffix(slot_suffix)) {
-        LOG(ERROR) << "Target slot suffix not legal: " << slot_suffix;
-        return false;
-    }
-
-    // Validate other inputs.
-    if (validate_apk_path(apk_path) != 0) {
-        LOG(ERROR) << "Invalid apk_path: " << apk_path;
-        return false;
-    }
-    if (validate_apk_path(oat_dir) != 0) {
-        LOG(ERROR) << "Invalid oat_dir: " << oat_dir;
-        return false;
-    }
-
-    char a_path[PKG_PATH_MAX];
-    if (!calculate_oat_file_path(a_path, oat_dir, apk_path, instruction_set)) {
-        return false;
-    }
-    const std::string a_vdex_path = create_vdex_filename(a_path);
-    const std::string a_image_path = create_image_filename(a_path);
-
-    // B path = A path + slot suffix.
-    const std::string b_path = StringPrintf("%s.%s", a_path, slot_suffix.c_str());
-    const std::string b_vdex_path = StringPrintf("%s.%s", a_vdex_path.c_str(), slot_suffix.c_str());
-    const std::string b_image_path = StringPrintf("%s.%s",
-                                                  a_image_path.c_str(),
-                                                  slot_suffix.c_str());
-
-    bool success = true;
-    if (move_ab_path(b_path, a_path)) {
-        if (move_ab_path(b_vdex_path, a_vdex_path)) {
-            // Note: we can live without an app image. As such, ignore failure to move the image file.
-            //       If we decide to require the app image, or the app image being moved correctly,
-            //       then change accordingly.
-            constexpr bool kIgnoreAppImageFailure = true;
-
-            if (!a_image_path.empty()) {
-                if (!move_ab_path(b_image_path, a_image_path)) {
-                    unlink(a_image_path.c_str());
-                    if (!kIgnoreAppImageFailure) {
-                        success = false;
-                    }
-                }
-            }
-        } else {
-            // Cleanup: delete B image, ignore errors.
-            unlink(b_image_path.c_str());
-            success = false;
-        }
-    } else {
-        // Cleanup: delete B image, ignore errors.
-        unlink(b_vdex_path.c_str());
-        unlink(b_image_path.c_str());
-        success = false;
-    }
-    return success;
+bool move_ab(const char*, const char*, const char*) {
+    return false;
 }
 
 int64_t delete_odex(const char* apk_path, const char* instruction_set, const char* oat_dir) {

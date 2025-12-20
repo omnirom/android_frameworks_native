@@ -36,8 +36,10 @@
 #include <fstream>
 
 #include <android/content/pm/IPackageManagerNative.h>
+#include <android_installd_flags.h>
 #include <binder/IServiceManager.h>
 #include "InstalldNativeService.h"
+#include "QuotaUtils.h"
 #include "binder/Status.h"
 #include "binder_test_utils.h"
 #include "dexopt.h"
@@ -49,6 +51,7 @@ using android::base::StringPrintf;
 using android::base::unique_fd;
 using android::os::ParcelFileDescriptor;
 using std::filesystem::is_empty;
+namespace flags = android::installd::flags;
 
 namespace android {
 std::string get_package_name(uid_t uid) {
@@ -227,6 +230,27 @@ protected:
         system("rm -rf /data/local/tmp/misc_de");
     }
 };
+
+TEST_F(ServiceTest, CreateAppData_QuotaEnforcementSet) {
+    LOG(INFO) << "CreateAppData_QuotaEnforcementSet";
+    if (!flags::enable_set_inode_quotas()) {
+        return;
+    }
+    android::os::CreateAppDataResult result;
+    android::os::CreateAppDataArgs args;
+    args.uuid = std::nullopt;
+    args.packageName = "com.foo";
+    args.userId = kTestUserId;
+    args.appId = kTestAppId;
+    args.seInfo = "default";
+    args.flags = FLAG_STORAGE_DE;
+
+    // initialise the mounts
+    service->invalidateMounts();
+    ASSERT_BINDER_SUCCESS(service->createAppData(args, &result));
+
+    EXPECT_LT(0, GetInodesQuotaHardLimitsForUid("", kTestAppId));
+}
 
 TEST_F(ServiceTest, FixupAppData_Upgrade) {
     LOG(INFO) << "FixupAppData_Upgrade";

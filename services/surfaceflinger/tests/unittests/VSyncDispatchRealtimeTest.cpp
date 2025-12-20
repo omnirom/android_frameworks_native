@@ -51,7 +51,7 @@ public:
     bool needsMoreSamples() const final { return false; }
     bool isVSyncInPhase(nsecs_t, Fps) final { return false; }
     void setDisplayModePtr(ftl::NonNull<DisplayModePtr>) final {}
-    void setRenderRate(Fps, bool) final {}
+    void setRenderRate(Fps, bool, std::vector<FrameRateOverride>) final {}
     void onFrameBegin(TimePoint, scheduler::FrameTime) final {}
     void onFrameMissed(TimePoint) final {}
     void dump(std::string&) const final {}

@@ -139,7 +139,6 @@ public:
                 AMETA_NONE,
                 mButtonState,
                 mClassification,
-                /*edgeFlags=*/0,
                 static_cast<uint32_t>(mPointers.size()),
                 pointerProperties.data(),
                 pointerCoords.data(),

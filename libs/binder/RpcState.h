@@ -38,7 +38,9 @@ struct RpcWireHeader;
  * a specific subset of logs to debug, this could be broken up like
  * IPCThreadState's.
  */
+// DO NOT ENABLE IN PRODUCTION
 #define SHOULD_LOG_RPC_DETAIL false
+// DO NOT ENABLE IN PRODUCTION
 
 #if SHOULD_LOG_RPC_DETAIL
 #define LOG_RPC_DETAIL(...) ALOGI(__VA_ARGS__)
@@ -46,12 +48,17 @@ struct RpcWireHeader;
 #define LOG_RPC_DETAIL(...) ALOGV(__VA_ARGS__) // for type checking
 #endif
 
+// DO NOT ENABLE IN PRODUCTION
 #define RPC_FLAKE_PRONE false
+// DO NOT ENABLE IN PRODUCTION
 
 #if RPC_FLAKE_PRONE
-void rpcMaybeWaitToFlake();
+LIBBINDER_INTERNAL_EXPORTED bool rpcMaybeFlake();
+LIBBINDER_INTERNAL_EXPORTED void rpcMaybeWaitToFlake();
+#define MAYBE_TRUE_IN_FLAKE_MODE rpcMaybeFlake()
 #define MAYBE_WAIT_IN_FLAKE_MODE rpcMaybeWaitToFlake()
 #else
+#define MAYBE_TRUE_IN_FLAKE_MODE false
 #define MAYBE_WAIT_IN_FLAKE_MODE do {} while (false)
 #endif
 
@@ -85,11 +92,6 @@ public:
     [[nodiscard]] status_t transact(const sp<RpcSession::RpcConnection>& connection,
                                     const sp<IBinder>& address, uint32_t code, const Parcel& data,
                                     const sp<RpcSession>& session, Parcel* reply, uint32_t flags);
-    [[nodiscard]] status_t transactAddress(const sp<RpcSession::RpcConnection>& connection,
-                                           uint64_t address, uint32_t code, const Parcel& data,
-                                           const sp<RpcSession>& session, Parcel* reply,
-                                           uint32_t flags);
-
     /**
      * The ownership model here carries an implicit strong refcount whenever a
      * binder is sent across processes. Since we have a local strong count in
@@ -122,12 +124,20 @@ public:
     [[nodiscard]] status_t drainCommands(const sp<RpcSession::RpcConnection>& connection,
                                          const sp<RpcSession>& session, CommandType type);
 
+    [[nodiscard]] sp<IBinder> lookupAddress(uint64_t address);
+
     /**
      * Called by Parcel for outgoing binders. This implies one refcount of
      * ownership to the outgoing binder.
      */
     [[nodiscard]] status_t onBinderLeaving(const sp<RpcSession>& session, const sp<IBinder>& binder,
                                            uint64_t* outAddress);
+
+    /**
+     * If a Parcel is not sent, this is called to cancel the address reservation by
+     * decreasing the refcount by 1.
+     */
+    [[nodiscard]] status_t cancelBinderLeaving(const sp<RpcSession>& session, uint64_t address);
 
     /**
      * Called by Parcel for incoming binders. This either returns the refcount
@@ -217,10 +227,20 @@ private:
     [[nodiscard]] status_t processDecStrong(const sp<RpcSession::RpcConnection>& connection,
                                             const sp<RpcSession>& session,
                                             const RpcWireHeader& command);
+    [[nodiscard]] status_t doDecStrong(const sp<RpcSession>& session, uint64_t address,
+                                       uint32_t amount);
 
     // Whether `parcel` is compatible with `session`.
     [[nodiscard]] static status_t validateParcel(const sp<RpcSession>& session,
                                                  const Parcel& parcel, std::string* errorMsg);
+
+    // Exactly the same as transact, but you can do a special transaction which we
+    // don't want to export outside of RpcState. A special transaction is on address
+    // '0', such as getting the root object.
+    [[nodiscard]] status_t transactInternal(const sp<RpcSession::RpcConnection>& connection,
+                                            const sp<IBinder>& maybeBinder, uint32_t code,
+                                            const Parcel& data, const sp<RpcSession>& session,
+                                            Parcel* reply, uint32_t flags);
 
     struct BinderNode {
         // Two cases:
@@ -251,9 +271,9 @@ private:
         // CASE A - local binder we are serving
         //
 
-        // async transaction queue, _only_ for local binder
         struct AsyncTodo {
-            sp<IBinder> ref;
+            // any transaction, including async, can only be on local binders
+            sp<BBinder> ref;
             CommandData data;
             std::vector<std::variant<binder::unique_fd, binder::borrowed_fd>> ancillaryFds;
             uint64_t asyncNumber = 0;

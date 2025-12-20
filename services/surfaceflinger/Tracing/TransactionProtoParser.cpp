@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+#include <android/gui/TransactionBarrier.h>
 #include <gui/SurfaceComposerClient.h>
 #include <ui/Fence.h>
 #include <ui/Rect.h>
@@ -22,7 +23,6 @@
 #include "LayerProtoHelper.h"
 #include "QueuedTransactionState.h"
 #include "TransactionProtoParser.h"
-#include "gui/LayerState.h"
 
 namespace android::surfaceflinger {
 
@@ -76,6 +76,13 @@ perfetto::protos::TransactionState TransactionProtoParser::toProto(
     for (auto& mergedTransactionId : t.mergedTransactionIds) {
         proto.mutable_merged_transaction_ids()->Add(mergedTransactionId);
     }
+    proto.set_apply_token(reinterpret_cast<uint64_t>(t.applyToken.get()));
+
+    proto.mutable_transaction_barriers()->Reserve(
+            static_cast<int32_t>(t.transactionBarriers.size()));
+    for (auto& transactionBarrier : t.transactionBarriers) {
+        proto.mutable_transaction_barriers()->Add(toProto(transactionBarrier));
+    }
 
     return proto;
 }
@@ -122,10 +129,25 @@ perfetto::protos::LayerState TransactionProtoParser::toProto(
         matrixProto->set_dtdy(layer.matrix.dtdy);
     }
     if (layer.what & layer_state_t::eCornerRadiusChanged) {
-        proto.set_corner_radius(layer.cornerRadius);
+        perfetto::protos::LayerState_CornerRadii* radiiProto = proto.mutable_corner_radii();
+        radiiProto->set_tl(layer.cornerRadii.topLeft.x);
+        radiiProto->set_tr(layer.cornerRadii.topRight.x);
+        radiiProto->set_bl(layer.cornerRadii.bottomLeft.x);
+        radiiProto->set_br(layer.cornerRadii.bottomRight.x);
+        // TODO(b/430109627): Remove usage of deprecated corner_radius field
+        proto.set_corner_radius(layer.cornerRadii.topLeft.x);
+    }
+    if (layer.what & layer_state_t::eClientDrawnCornerRadiusChanged) {
+        perfetto::protos::LayerState_CornerRadii* radiiProto = proto.mutable_corner_radii();
+        radiiProto->set_tl(layer.clientDrawnCornerRadii.topLeft.x);
+        radiiProto->set_tr(layer.clientDrawnCornerRadii.topRight.x);
+        radiiProto->set_bl(layer.clientDrawnCornerRadii.bottomLeft.x);
     }
     if (layer.what & layer_state_t::eBackgroundBlurRadiusChanged) {
         proto.set_background_blur_radius(layer.backgroundBlurRadius);
+    }
+    if (layer.what & layer_state_t::eBackgroundBlurScaleChanged) {
+        proto.set_background_blur_scale(layer.backgroundBlurScale);
     }
 
     if (layer.what & layer_state_t::eAlphaChanged) {
@@ -259,7 +281,57 @@ perfetto::protos::LayerState TransactionProtoParser::toProto(
         proto.set_drop_input_mode(
                 static_cast<perfetto::protos::LayerState_DropInputMode>(layer.dropInputMode));
     }
+    if (layer.what & layer_state_t::eSystemContentPriorityChanged) {
+        proto.set_system_content_priority(layer.systemContentPriority);
+    }
+    if (layer.what & layer_state_t::eBoxShadowSettingsChanged) {
+        perfetto::protos::BoxShadowSettings* protoSettings = proto.mutable_box_shadow_settings();
+        for (const auto& boxShadow : layer.boxShadowSettings.boxShadows) {
+            perfetto::protos::BoxShadowSettings_BoxShadowParams* protoParams =
+                    protoSettings->add_box_shadows();
+            protoParams->set_blur_radius(boxShadow.blurRadius);
+            protoParams->set_spread_radius(boxShadow.spreadRadius);
+            protoParams->set_color(boxShadow.color);
+            protoParams->set_offset_x(boxShadow.offsetX);
+            protoParams->set_offset_y(boxShadow.offsetY);
+        }
+    }
+    if (layer.what & layer_state_t::eBorderSettingsChanged) {
+        perfetto::protos::BorderSettings* protoSettings = proto.mutable_border_settings();
+        protoSettings->set_stroke_width(layer.borderSettings.strokeWidth);
+        protoSettings->set_color(layer.borderSettings.color);
+    }
     return proto;
+}
+
+perfetto::protos::TransactionBarrier TransactionProtoParser::toProto(
+        const gui::TransactionBarrier& transactionBarrier) {
+    perfetto::protos::TransactionBarrier proto;
+    proto.set_kind(static_cast<uint32_t>(transactionBarrier.kind));
+    android::String8 barrierToken(transactionBarrier.barrierToken);
+    proto.mutable_barrier_token()->assign(barrierToken.c_str(), barrierToken.size());
+    return proto;
+}
+
+gui::TransactionBarrier TransactionProtoParser::fromProto(
+        const perfetto::protos::TransactionBarrier& proto) {
+    gui::TransactionBarrier barrier;
+    auto kind = static_cast<gui::TransactionBarrier::BarrierKind>(proto.kind());
+    switch (kind) {
+        case gui::TransactionBarrier::BarrierKind::KIND_SIGNAL:
+        case gui::TransactionBarrier::BarrierKind::KIND_WAIT:
+            barrier.kind = kind;
+            break;
+        default:
+            barrier.kind = gui::TransactionBarrier::BarrierKind::KIND_INVALID;
+            break;
+    }
+
+    String8 barrierTokenUTF8(proto.barrier_token().data(), proto.barrier_token().size());
+    String16 barrierTokenUTF16(barrierTokenUTF8);
+    barrier.barrierToken = barrierTokenUTF16;
+
+    return barrier;
 }
 
 perfetto::protos::DisplayState TransactionProtoParser::toProto(const DisplayState& display) {
@@ -323,6 +395,13 @@ QueuedTransactionState TransactionProtoParser::fromProto(
     for (int i = 0; i < displayCount; i++) {
         t.displays.emplace_back(fromProto(proto.display_changes(i)));
     }
+
+    int32_t barrierCount = proto.transaction_barriers_size();
+    t.transactionBarriers.reserve(static_cast<size_t>(barrierCount));
+    for (int i = 0; i < barrierCount; i++) {
+        t.transactionBarriers.emplace_back(fromProto(proto.transaction_barriers(i)));
+    }
+
     return t;
 }
 
@@ -391,10 +470,27 @@ void TransactionProtoParser::fromProto(const perfetto::protos::LayerState& proto
         layer.matrix.dtdy = matrixProto.dtdy();
     }
     if (proto.what() & layer_state_t::eCornerRadiusChanged) {
-        layer.cornerRadius = proto.corner_radius();
+        const perfetto::protos::LayerState_CornerRadii& radiiProto = proto.corner_radii();
+        layer.cornerRadii.topLeft.x = radiiProto.tl();
+        layer.cornerRadii.topRight.x = radiiProto.tr();
+        layer.cornerRadii.bottomLeft.x = radiiProto.bl();
+        layer.cornerRadii.bottomRight.y = radiiProto.br();
+        // TODO(b/430109627): Remove usage of deprecated corner_radius field
+        layer.cornerRadii.topLeft.x = proto.corner_radius();
+    }
+    if (proto.what() & layer_state_t::eClientDrawnCornerRadiusChanged) {
+        const perfetto::protos::LayerState_CornerRadii& radiiProto =
+                proto.client_drawn_corner_radii();
+        layer.clientDrawnCornerRadii.topLeft.x = radiiProto.tl();
+        layer.clientDrawnCornerRadii.topRight.x = radiiProto.tr();
+        layer.clientDrawnCornerRadii.bottomLeft.x = radiiProto.bl();
+        layer.clientDrawnCornerRadii.bottomRight.y = radiiProto.br();
     }
     if (proto.what() & layer_state_t::eBackgroundBlurRadiusChanged) {
         layer.backgroundBlurRadius = proto.background_blur_radius();
+    }
+    if (proto.what() & layer_state_t::eBackgroundBlurScaleChanged) {
+        layer.backgroundBlurScale = proto.background_blur_radius();
     }
 
     if (proto.what() & layer_state_t::eAlphaChanged) {
@@ -529,6 +625,28 @@ void TransactionProtoParser::fromProto(const perfetto::protos::LayerState& proto
     }
     if (proto.what() & layer_state_t::eDropInputModeChanged) {
         layer.dropInputMode = static_cast<gui::DropInputMode>(proto.drop_input_mode());
+    }
+    if (proto.what() & layer_state_t::eSystemContentPriorityChanged) {
+        layer.systemContentPriority = proto.system_content_priority();
+    }
+    if ((proto.what() & layer_state_t::eBoxShadowSettingsChanged) &&
+        proto.has_box_shadow_settings()) {
+        const auto& protoSettings = proto.box_shadow_settings();
+        for (int i = 0; i < protoSettings.box_shadows_size(); i++) {
+            const auto& protoParams = protoSettings.box_shadows(i);
+            android::gui::BoxShadowSettings::BoxShadowParams params;
+            params.blurRadius = protoParams.blur_radius();
+            params.spreadRadius = protoParams.spread_radius();
+            params.color = protoParams.color();
+            params.offsetX = protoParams.offset_x();
+            params.offsetY = protoParams.offset_y();
+            layer.boxShadowSettings.boxShadows.push_back(params);
+        }
+    }
+    if ((proto.what() & layer_state_t::eBorderSettingsChanged) && proto.has_border_settings()) {
+        const auto& protoSettings = proto.border_settings();
+        layer.borderSettings.strokeWidth = protoSettings.stroke_width();
+        layer.borderSettings.color = protoSettings.color();
     }
 }
 

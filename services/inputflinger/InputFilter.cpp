@@ -45,9 +45,9 @@ AidlKeyEvent notifyKeyArgsToKeyEvent(const NotifyKeyArgs& args) {
 }
 
 InputFilter::InputFilter(InputListenerInterface& listener, IInputFlingerRust& rust,
-                         InputFilterPolicyInterface& policy)
+                         InputFilterPolicyInterface& policy, JNIEnv* env)
       : mNextListener(listener),
-        mCallbacks(ndk::SharedRefBase::make<InputFilterCallbacks>(listener, policy)),
+        mCallbacks(ndk::SharedRefBase::make<InputFilterCallbacks>(listener, policy, env)),
         mPolicy(policy) {
     LOG_ALWAYS_FATAL_IF(!rust.createInputFilter(mCallbacks, &mInputFilterRust).isOk());
     LOG_ALWAYS_FATAL_IF(!mInputFilterRust);
@@ -61,6 +61,7 @@ void InputFilter::notifyInputDevicesChanged(const NotifyInputDevicesChangedArgs&
         aidlInfo.deviceId = info.getId();
         aidlInfo.external = info.isExternal();
         aidlInfo.keyboardType = info.getKeyboardType();
+        aidlInfo.isVirtual = info.getId() < 0 || info.isVirtualDevice();
     }
     if (isFilterEnabled()) {
         LOG_ALWAYS_FATAL_IF(!mInputFilterRust->notifyInputDevicesChanged(mDeviceInfos).isOk());

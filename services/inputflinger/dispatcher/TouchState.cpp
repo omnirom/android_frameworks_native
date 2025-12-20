@@ -17,9 +17,12 @@
 #include <android-base/logging.h>
 #include <android-base/stringprintf.h>
 #include <gui/WindowInfo.h>
+#include <input/PrintTools.h>
 
 #include "InputTarget.h"
 #include "TouchState.h"
+
+#define INDENT "  "
 
 using namespace android::ftl::flag_operators;
 using android::base::StringPrintf;
@@ -138,11 +141,13 @@ void TouchState::removeWindowByToken(const sp<IBinder>& token) {
     }
 }
 
-void TouchState::cancelPointersForWindowsExcept(DeviceId deviceId,
-                                                std::bitset<MAX_POINTER_ID + 1> pointerIds,
-                                                const sp<IBinder>& token) {
+void TouchState::cancelPointersForPilferingRequest(DeviceId deviceId,
+                                                   std::bitset<MAX_POINTER_ID + 1> pointerIds,
+                                                   const sp<IBinder>& token) {
     std::for_each(windows.begin(), windows.end(), [&](TouchedWindow& w) {
-        if (w.windowHandle->getToken() != token) {
+        if (w.windowHandle->getToken() != token &&
+            !w.windowHandle->getInfo()->inputConfig.test(
+                    gui::WindowInfo::InputConfig::DO_NOT_PILFER)) {
             w.removeTouchingPointers(deviceId, pointerIds);
         }
     });
@@ -174,6 +179,10 @@ void TouchState::cancelPointersForNonPilferingWindows() {
     // limitation here.
     for (const auto& [deviceId, allPilferedPointerIds] : allPilferedPointerIdsByDevice) {
         std::for_each(windows.begin(), windows.end(), [&](TouchedWindow& w) {
+            if (w.windowHandle->getInfo()->inputConfig.test(
+                        gui::WindowInfo::InputConfig::DO_NOT_PILFER)) {
+                return;
+            }
             std::bitset<MAX_POINTER_ID + 1> pilferedByOtherWindows =
                     w.getPilferingPointers(deviceId) ^ allPilferedPointerIds;
             // Remove all pointers pilfered by other windows
@@ -281,13 +290,13 @@ void TouchState::removeAllPointersForDevice(DeviceId deviceId) {
 std::string TouchState::dump() const {
     std::string out;
     if (!windows.empty()) {
-        out += "  Windows:\n";
+        out += "TouchedWindows:\n";
         for (size_t i = 0; i < windows.size(); i++) {
             const TouchedWindow& touchedWindow = windows[i];
-            out += StringPrintf("    %zu : ", i) + touchedWindow.dump();
+            out += addLinePrefix(StringPrintf("%zu: ", i) + touchedWindow.dump(), INDENT);
         }
     } else {
-        out += "  Windows: <none>\n";
+        out += "TouchedWindows: <none>\n";
     }
     return out;
 }

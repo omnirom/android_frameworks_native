@@ -75,6 +75,20 @@ enum Commands {
 
     #[command(about = "Force commit ahead of next VSYNC.")]
     ScheduleCommit,
+
+    #[command(
+        about = "display_id = i64, Forcibly changes the pacesetter display to specified display, \
+                      which will persist until the display is removed or another ForcePacesetter \
+                      or ResetForcedPacesetter call is made. Valid display IDs can be obtained   \
+                      through: adb shell dumpsys SurfaceFlinger --display-ids"
+    )]
+    ForcePacesetter { display_id: i64 },
+
+    #[command(
+        about = "Resets the forced pacesetter display selection made by the ForcePacesetter \
+                        call. No-op if there was no forced pacesetter display set."
+    )]
+    ResetForcedPacesetter,
 }
 
 /// sfdo command line tool
@@ -145,6 +159,14 @@ fn main() {
             } else {
                 eprintln!("No state, choices are [enabled | disabled]");
             }
+        }
+        Some(Commands::ForcePacesetter { display_id }) => {
+            let res = composer_service.forcePacesetter(*display_id);
+            print_result("forcePacesetter", res);
+        }
+        Some(Commands::ResetForcedPacesetter) => {
+            let res = composer_service.resetForcedPacesetter();
+            print_result("resetForcedPacesetter", res);
         }
         None => {
             println!("Execute SurfaceFlinger internal commands.");

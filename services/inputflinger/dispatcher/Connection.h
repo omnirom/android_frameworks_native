@@ -18,9 +18,18 @@
 
 #include "InputState.h"
 
+#include <binder/IBinder.h>
+#include <input/Input.h>
 #include <input/InputTransport.h>
 #include <utils/RefBase.h>
+#include <utils/StrongPointer.h>
+
 #include <deque>
+#include <memory>
+#include <string>
+
+#include "Entry.h"
+#include "InputState.h"
 
 namespace android::inputdispatcher {
 
@@ -42,7 +51,9 @@ public:
     };
 
     Status status;
-    bool monitor;
+    // True if this connection is for a focus monitor, which behaves differently in various ways and
+    // is usually associated with a display and not with a window.
+    bool isFocusMonitor;
     InputPublisher inputPublisher;
     InputState inputState;
 
@@ -58,7 +69,7 @@ public:
     // yet received a "finished" response from the application.
     std::deque<std::unique_ptr<DispatchEntry>> waitQueue;
 
-    Connection(std::unique_ptr<InputChannel> inputChannel, bool monitor,
+    Connection(std::unique_ptr<InputChannel> inputChannel, bool isFocusMonitor,
                const IdGenerator& idGenerator);
 
     inline const std::string getInputChannelName() const {

@@ -18,6 +18,7 @@
 #include <gtest/gtest.h>
 #include <gui/SurfaceComposerClient.h>
 #include <gui/SurfaceControl.h>
+#include <private/gui/SyncFeatures.h>
 #include <ui/Fence.h>
 #include <utils/Timers.h>
 #include <chrono>
@@ -95,18 +96,21 @@ public:
         if (mTransactionResult == ExpectedResult::Transaction::PRESENTED) {
             ASSERT_GE(latchTime, 0) << "bad latch time";
             ASSERT_NE(presentFence, nullptr);
-            if (mExpectedPresentTime >= 0) {
-                ASSERT_EQ(presentFence->wait(3000), NO_ERROR);
-                ASSERT_GE(presentFence->getSignalTime(), mExpectedPresentTime - nsecs_t(5 * 1e6));
-                // if the panel is running at 30 hz, at the worst case, our expected time just
-                // misses vsync and we have to wait another 33.3ms
-                ASSERT_LE(presentFence->getSignalTime(),
-                          mExpectedPresentTime + nsecs_t(66.666666 * 1e6));
-            } else if (mExpectedPresentTimeForVsyncId >= 0) {
-                ASSERT_EQ(presentFence->wait(3000), NO_ERROR);
-                // We give 4ms for prediction error
-                ASSERT_GE(presentFence->getSignalTime(),
-                          mExpectedPresentTimeForVsyncId - 4'000'000);
+            if (SyncFeatures::getInstance().useNativeFenceSync()) {
+                if (mExpectedPresentTime >= 0) {
+                    ASSERT_EQ(presentFence->wait(3000), NO_ERROR);
+                    ASSERT_GE(presentFence->getSignalTime(),
+                            mExpectedPresentTime - nsecs_t(5 * 1e6));
+                    // if the panel is running at 30 hz, at the worst case, our expected time just
+                    // misses vsync and we have to wait another 33.3ms
+                    ASSERT_LE(presentFence->getSignalTime(),
+                              mExpectedPresentTime + nsecs_t(66.666666 * 1e6));
+                } else if (mExpectedPresentTimeForVsyncId >= 0) {
+                    ASSERT_EQ(presentFence->wait(3000), NO_ERROR);
+                    // We give 4ms for prediction error
+                    ASSERT_GE(presentFence->getSignalTime(),
+                              mExpectedPresentTimeForVsyncId - 4'000'000);
+                }
             }
         } else {
             ASSERT_EQ(presentFence, nullptr) << "transaction shouldn't have been presented";
@@ -136,7 +140,7 @@ private:
         void verifySurfaceControlStats(const SurfaceControlStats& surfaceControlStats,
                                        nsecs_t /* latchTime */) const {
             const auto& [surfaceControl, latch, acquireTimeOrFence, presentFence,
-                         previousReleaseFence, transformHint, frameEvents, ignore] =
+                         previousReleaseFence, transformHint, frameEvents, ignore, cornerRadii] =
                     surfaceControlStats;
 
             nsecs_t acquireTime = -1;
@@ -150,12 +154,16 @@ private:
                 }
             }
 
-            if (mBufferResult == ExpectedResult::Buffer::ACQUIRED) {
-                ASSERT_GT(acquireTime, 0) << "acquire time should be valid";
-            } else {
-                ASSERT_LE(acquireTime, 0) << "acquire time should not be valid";
+            // If the device doesn't have native fence support, skip validating the acquire time.
+            // Cuttlefish uses a fence with a signal time of -1 to indicate completion.
+            if (SyncFeatures::getInstance().useNativeFenceSync()) {
+                if (mBufferResult == ExpectedResult::Buffer::ACQUIRED) {
+                    ASSERT_GT(acquireTime, 0) << "acquire time should be valid";
+                } else {
+                    ASSERT_LE(acquireTime, 0) << "acquire time should not be valid";
+                }
+                ASSERT_EQ(acquireTime > 0, mBufferResult == ExpectedResult::Buffer::ACQUIRED);
             }
-            ASSERT_EQ(acquireTime > 0, mBufferResult == ExpectedResult::Buffer::ACQUIRED);
 
             if (mPreviousBufferResult == ExpectedResult::PreviousBuffer::RELEASED) {
                 ASSERT_NE(previousReleaseFence, nullptr)

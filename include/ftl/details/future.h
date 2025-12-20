@@ -48,12 +48,8 @@ using future_result_t = typename future_result<T>::type;
 
 struct ValueTag {};
 
-template <typename, typename T, template <typename> class>
-class BaseFuture;
-
-template <typename Self, typename T>
-class BaseFuture<Self, T, std::future> {
-  using Impl = std::future<T>;
+template <typename Self, typename T, template <typename> class FutureImpl = std::future>
+class BaseFuture {
 
  public:
   Future<T, std::shared_future> share() {
@@ -61,7 +57,7 @@ class BaseFuture<Self, T, std::future> {
       return {ValueTag{}, std::move(*value)};
     }
 
-    return std::get<Impl>(self()).share();
+    return std::get<FutureImpl<T>>(self()).share();
   }
 
  protected:
@@ -70,7 +66,7 @@ class BaseFuture<Self, T, std::future> {
       return std::move(*value);
     }
 
-    return std::get<Impl>(self()).get();
+    return std::get<FutureImpl<T>>(self()).get();
   }
 
   template <class Rep, class Period>
@@ -79,7 +75,7 @@ class BaseFuture<Self, T, std::future> {
       return std::future_status::ready;
     }
 
-    return std::get<Impl>(self()).wait_for(timeout_duration);
+    return std::get<FutureImpl<T>>(self()).wait_for(timeout_duration);
   }
 
  private:

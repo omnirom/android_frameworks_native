@@ -27,20 +27,10 @@ namespace {
 class VirtualDisplayTest : public ::testing::Test {
 protected:
     void SetUp() override {
-#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
         mGLConsumer = sp<GLConsumer>::make(GLConsumer::TEXTURE_EXTERNAL, true, false, false);
         mGLConsumer->setName(String8("Virtual disp consumer (VirtualDisplayTest)"));
         mGLConsumer->setDefaultBufferSize(100, 100);
         mProducer = mGLConsumer->getSurface()->getIGraphicBufferProducer();
-#else
-        sp<IGraphicBufferConsumer> consumer;
-
-        BufferQueue::createBufferQueue(&mProducer, &consumer);
-        consumer->setConsumerName(String8("Virtual disp consumer (VirtualDisplayTest)"));
-        consumer->setDefaultBufferSize(100, 100);
-
-        mGLConsumer = sp<GLConsumer>::make(consumer, GLConsumer::TEXTURE_EXTERNAL, true, false);
-#endif // COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
     }
 
     sp<IGraphicBufferProducer> mProducer;

@@ -76,7 +76,10 @@
       "name": "monkey_test"
     },
     {
-      "name": "CtsSurfaceControlTests"
+      "name": "CtsSurfaceControlTests_input_related"
+    },
+    {
+      "name": "WmTests_SurfaceControlViewHostTests"
     }
   ],
   "postsubmit": [

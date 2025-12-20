@@ -18,6 +18,7 @@
 
 #include <android/input.h>
 #include <attestation/HmacKeyManager.h>
+#include <ftl/flags.h>
 #include <input/Input.h>
 #include <input/InputTransport.h>
 #include <ui/LogicalDisplayId.h>
@@ -251,7 +252,7 @@ public:
     MotionEventBuilder(int32_t action, int32_t source) {
         mAction = action;
         if (mAction == AMOTION_EVENT_ACTION_CANCEL) {
-            mFlags |= AMOTION_EVENT_FLAG_CANCELED;
+            mFlags |= MotionFlag::CANCELED;
         }
         mSource = source;
         mEventTime = systemTime(SYSTEM_TIME_MONOTONIC);
@@ -303,7 +304,7 @@ public:
         return *this;
     }
 
-    MotionEventBuilder& addFlag(uint32_t flags) {
+    MotionEventBuilder& addFlag(ftl::Flags<MotionFlag> flags) {
         mFlags |= flags;
         return *this;
     }
@@ -354,7 +355,7 @@ private:
     ui::LogicalDisplayId mDisplayId{ui::LogicalDisplayId::DEFAULT};
     int32_t mActionButton{0};
     int32_t mButtonState{0};
-    int32_t mFlags{0};
+    ftl::Flags<MotionFlag> mFlags{};
     float mRawXCursorPosition{AMOTION_EVENT_INVALID_CURSOR_POSITION};
     float mRawYCursorPosition{AMOTION_EVENT_INVALID_CURSOR_POSITION};
     ui::Transform mTransform;

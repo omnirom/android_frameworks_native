@@ -63,7 +63,7 @@ static MotionEvent generateMotionEvent() {
     MotionEvent event;
     event.initialize(IInputConstants::INVALID_INPUT_EVENT_ID, DEVICE_ID, AINPUT_SOURCE_TOUCHSCREEN,
                      ui::LogicalDisplayId::DEFAULT, INVALID_HMAC, AMOTION_EVENT_ACTION_DOWN,
-                     /* actionButton */ 0, /* flags */ 0,
+                     /* actionButton */ 0, /* flags */ {},
                      /* edgeFlags */ 0, AMETA_NONE, /* buttonState */ 0, MotionClassification::NONE,
                      identityTransform, /* xPrecision */ 0,
                      /* yPrecision */ 0, AMOTION_EVENT_INVALID_CURSOR_POSITION,
@@ -91,8 +91,7 @@ static NotifyMotionArgs generateMotionArgs() {
                           DEVICE_ID, AINPUT_SOURCE_TOUCHSCREEN, ui::LogicalDisplayId::DEFAULT,
                           POLICY_FLAG_PASS_TO_USER, AMOTION_EVENT_ACTION_DOWN,
                           /* actionButton */ 0, /* flags */ 0, AMETA_NONE, /* buttonState */ 0,
-                          MotionClassification::NONE, AMOTION_EVENT_EDGE_FLAG_NONE, 1,
-                          pointerProperties, pointerCoords,
+                          MotionClassification::NONE, 1, pointerProperties, pointerCoords,
                           /* xPrecision */ 0, /* yPrecision */ 0,
                           AMOTION_EVENT_INVALID_CURSOR_POSITION,
                           AMOTION_EVENT_INVALID_CURSOR_POSITION, currentTime, /* videoFrames */ {});
@@ -103,7 +102,7 @@ static NotifyMotionArgs generateMotionArgs() {
 static void benchmarkNotifyMotion(benchmark::State& state) {
     // Create dispatcher
     FakeInputDispatcherPolicy fakePolicy;
-    auto dispatcher = std::make_unique<InputDispatcher>(fakePolicy);
+    auto dispatcher = std::make_unique<InputDispatcher>(fakePolicy, /*env=*/nullptr);
     dispatcher->setInputDispatchMode(/*enabled*/ true, /*frozen*/ false);
     dispatcher->start();
 
@@ -138,7 +137,7 @@ static void benchmarkNotifyMotion(benchmark::State& state) {
 static void benchmarkInjectMotion(benchmark::State& state) {
     // Create dispatcher
     FakeInputDispatcherPolicy fakePolicy;
-    auto dispatcher = std::make_unique<InputDispatcher>(fakePolicy);
+    auto dispatcher = std::make_unique<InputDispatcher>(fakePolicy, /*env=*/nullptr);
     dispatcher->setInputDispatchMode(/*enabled*/ true, /*frozen*/ false);
     dispatcher->start();
 
@@ -172,7 +171,7 @@ static void benchmarkInjectMotion(benchmark::State& state) {
 static void benchmarkOnWindowInfosChanged(benchmark::State& state) {
     // Create dispatcher
     FakeInputDispatcherPolicy fakePolicy;
-    auto dispatcher = std::make_unique<InputDispatcher>(fakePolicy);
+    auto dispatcher = std::make_unique<InputDispatcher>(fakePolicy, /*env=*/nullptr);
     dispatcher->setInputDispatchMode(/*enabled*/ true, /*frozen*/ false);
     dispatcher->start();
 

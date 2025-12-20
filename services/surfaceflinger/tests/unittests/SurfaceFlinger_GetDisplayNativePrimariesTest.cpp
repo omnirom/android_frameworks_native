@@ -37,7 +37,6 @@ private:
 
 GetDisplayNativePrimaries::GetDisplayNativePrimaries() {
     SimplePrimaryDisplayCase::Display::injectHwcDisplay(this);
-    injectFakeNativeWindowSurfaceFactory();
 }
 
 void GetDisplayNativePrimaries::populateDummyDisplayNativePrimaries(

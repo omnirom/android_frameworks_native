@@ -34,4 +34,7 @@ MODULE_BINDGEN_FLAGS += \
 	--allowlist-type="ARpcServerTrusty" \
 	--allowlist-function="ARpcServerTrusty_.*" \
 
+MODULE_BINDGEN_BLOCK_TYPES := \
+	trusty_peer_id
+
 include make/library.mk

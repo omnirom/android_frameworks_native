@@ -25,7 +25,7 @@
 
 #include "test_framework/core/DisplayConfiguration.h"
 #include "test_framework/core/TestService.h"
-#include "test_framework/fake_hwc3/Hwc3Controller.h"
+#include "test_framework/hwc3/Hwc3Controller.h"
 #include "test_framework/surfaceflinger/SFController.h"
 
 namespace android::surfaceflinger::tests::end2end::test_framework::core {
@@ -56,7 +56,7 @@ auto TestService::init(std::span<const DisplayConfiguration> displays)
         -> base::expected<void, std::string> {
     using namespace std::string_literals;
 
-    auto hwcResult = fake_hwc3::Hwc3Controller::make(displays);
+    auto hwcResult = hwc3::Hwc3Controller::make(displays);
     if (!hwcResult) {
         return base::unexpected(std::move(hwcResult).error());
     }
@@ -68,7 +68,7 @@ auto TestService::init(std::span<const DisplayConfiguration> displays)
     }
     auto flinger = *std::move(flingerResult);
 
-    surfaceflinger::SFController::useHwcService(fake_hwc3::Hwc3Controller::getServiceName());
+    surfaceflinger::SFController::useHwcService(hwc3::Hwc3Controller::getServiceName());
 
     if (auto result = flinger->startAndConnect(); !result) {
         return base::unexpected(std::move(result).error());

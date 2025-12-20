@@ -31,86 +31,99 @@ namespace {
 
 constexpr bool kExpectSetPowerModeOnce = false;
 struct FoldableTest : DualDisplayTransactionTest<hal::PowerMode::OFF, hal::PowerMode::OFF,
-                                                 kExpectSetPowerModeOnce> {};
+                                                 kExpectSetPowerModeOnce>,
+                      public testing::WithParamInterface<bool> {};
 
-TEST_F(FoldableTest, promotesPacesetterOnBoot) {
+TEST_P(FoldableTest, promotesPacesetterOnBoot) {
+    SET_FLAG_FOR_TEST(flags::pacesetter_selection, GetParam());
+
     // When the device boots, the inner display should be the pacesetter.
-    ASSERT_EQ(mFlinger.scheduler()->pacesetterDisplayId(), kInnerDisplayId);
+    ASSERT_EQ(mFlinger.scheduler()->pacesetterDisplayId(), getInnerDisplayId());
 
     // ...and should still be after powering on.
     mFlinger.setPhysicalDisplayPowerMode(mInnerDisplay, PowerMode::ON);
-    ASSERT_EQ(mFlinger.scheduler()->pacesetterDisplayId(), kInnerDisplayId);
+    ASSERT_EQ(mFlinger.scheduler()->pacesetterDisplayId(), getInnerDisplayId());
 }
 
-TEST_F(FoldableTest, promotesPacesetterOnFoldUnfold) {
+TEST_P(FoldableTest, promotesPacesetterOnFoldUnfold) {
+    SET_FLAG_FOR_TEST(flags::pacesetter_selection, GetParam());
+
     mFlinger.setPhysicalDisplayPowerMode(mInnerDisplay, PowerMode::ON);
 
     // The outer display should become the pacesetter after folding.
     mFlinger.setPhysicalDisplayPowerMode(mInnerDisplay, PowerMode::OFF);
     mFlinger.setPhysicalDisplayPowerMode(mOuterDisplay, PowerMode::ON);
-    ASSERT_EQ(mFlinger.scheduler()->pacesetterDisplayId(), kOuterDisplayId);
+    ASSERT_EQ(mFlinger.scheduler()->pacesetterDisplayId(), getOuterDisplayId());
 
     // The inner display should become the pacesetter after unfolding.
     mFlinger.setPhysicalDisplayPowerMode(mOuterDisplay, PowerMode::OFF);
     mFlinger.setPhysicalDisplayPowerMode(mInnerDisplay, PowerMode::ON);
-    ASSERT_EQ(mFlinger.scheduler()->pacesetterDisplayId(), kInnerDisplayId);
+    ASSERT_EQ(mFlinger.scheduler()->pacesetterDisplayId(), getInnerDisplayId());
 }
 
 TEST_F(FoldableTest, promotesPacesetterOnConcurrentPowerOn) {
+    SET_FLAG_FOR_TEST(flags::pacesetter_selection, false);
+
     mFlinger.setPhysicalDisplayPowerMode(mInnerDisplay, PowerMode::ON);
 
     // The inner display should stay the pacesetter if both are powered on.
     // TODO(b/255635821): The pacesetter should depend on the displays' refresh rates.
     mFlinger.setPhysicalDisplayPowerMode(mOuterDisplay, PowerMode::ON);
-    ASSERT_EQ(mFlinger.scheduler()->pacesetterDisplayId(), kInnerDisplayId);
+    ASSERT_EQ(mFlinger.scheduler()->pacesetterDisplayId(), getInnerDisplayId());
 
     // The outer display should become the pacesetter if designated.
-    mFlinger.scheduler()->setPacesetterDisplay(kOuterDisplayId);
-    ASSERT_EQ(mFlinger.scheduler()->pacesetterDisplayId(), kOuterDisplayId);
+    mFlinger.scheduler()->designatePacesetterDisplay(getOuterDisplayId());
+    ASSERT_EQ(mFlinger.scheduler()->pacesetterDisplayId(), getOuterDisplayId());
 
     // The inner display should become the pacesetter if designated.
-    mFlinger.scheduler()->setPacesetterDisplay(kInnerDisplayId);
-    ASSERT_EQ(mFlinger.scheduler()->pacesetterDisplayId(), kInnerDisplayId);
+    mFlinger.scheduler()->designatePacesetterDisplay(getInnerDisplayId());
+    ASSERT_EQ(mFlinger.scheduler()->pacesetterDisplayId(), getInnerDisplayId());
 }
 
-TEST_F(FoldableTest, promotesPacesetterOnConcurrentPowerOff) {
+TEST_P(FoldableTest, promotesPacesetterOnConcurrentPowerOff) {
+    SET_FLAG_FOR_TEST(flags::pacesetter_selection, GetParam());
+
     mFlinger.setPhysicalDisplayPowerMode(mInnerDisplay, PowerMode::ON);
     mFlinger.setPhysicalDisplayPowerMode(mOuterDisplay, PowerMode::ON);
 
     // The outer display should become the pacesetter if the inner display powers off.
     mFlinger.setPhysicalDisplayPowerMode(mInnerDisplay, PowerMode::OFF);
-    ASSERT_EQ(mFlinger.scheduler()->pacesetterDisplayId(), kOuterDisplayId);
+    ASSERT_EQ(mFlinger.scheduler()->pacesetterDisplayId(), getOuterDisplayId());
 
     // The outer display should stay the pacesetter if both are powered on.
     // TODO(b/255635821): The pacesetter should depend on the displays' refresh rates.
     mFlinger.setPhysicalDisplayPowerMode(mInnerDisplay, PowerMode::ON);
-    ASSERT_EQ(mFlinger.scheduler()->pacesetterDisplayId(), kOuterDisplayId);
+    ASSERT_EQ(mFlinger.scheduler()->pacesetterDisplayId(), getOuterDisplayId());
 
     // The inner display should become the pacesetter if the outer display powers off.
     mFlinger.setPhysicalDisplayPowerMode(mOuterDisplay, PowerMode::OFF);
-    ASSERT_EQ(mFlinger.scheduler()->pacesetterDisplayId(), kInnerDisplayId);
+    ASSERT_EQ(mFlinger.scheduler()->pacesetterDisplayId(), getInnerDisplayId());
 }
 
-TEST_F(FoldableTest, doesNotRequestHardwareVsyncIfPoweredOff) {
+TEST_P(FoldableTest, doesNotRequestHardwareVsyncIfPoweredOff) {
+    SET_FLAG_FOR_TEST(flags::pacesetter_selection, GetParam());
+
     // Both displays are powered off.
-    EXPECT_CALL(mFlinger.mockSchedulerCallback(), requestHardwareVsync(kInnerDisplayId, _))
+    EXPECT_CALL(mFlinger.mockSchedulerCallback(), requestHardwareVsync(getInnerDisplayId(), _))
             .Times(0);
-    EXPECT_CALL(mFlinger.mockSchedulerCallback(), requestHardwareVsync(kOuterDisplayId, _))
+    EXPECT_CALL(mFlinger.mockSchedulerCallback(), requestHardwareVsync(getOuterDisplayId(), _))
             .Times(0);
 
     EXPECT_FALSE(mInnerDisplay->isPoweredOn());
     EXPECT_FALSE(mOuterDisplay->isPoweredOn());
 
     auto& scheduler = *mFlinger.scheduler();
-    scheduler.onHardwareVsyncRequest(kInnerDisplayId, true);
-    scheduler.onHardwareVsyncRequest(kOuterDisplayId, true);
+    scheduler.onHardwareVsyncRequest(getInnerDisplayId(), true);
+    scheduler.onHardwareVsyncRequest(getOuterDisplayId(), true);
 }
 
-TEST_F(FoldableTest, requestsHardwareVsyncForInnerDisplay) {
+TEST_P(FoldableTest, requestsHardwareVsyncForInnerDisplay) {
+    SET_FLAG_FOR_TEST(flags::pacesetter_selection, GetParam());
+
     // Only inner display is powered on.
-    EXPECT_CALL(mFlinger.mockSchedulerCallback(), requestHardwareVsync(kInnerDisplayId, true))
+    EXPECT_CALL(mFlinger.mockSchedulerCallback(), requestHardwareVsync(getInnerDisplayId(), true))
             .Times(1);
-    EXPECT_CALL(mFlinger.mockSchedulerCallback(), requestHardwareVsync(kOuterDisplayId, _))
+    EXPECT_CALL(mFlinger.mockSchedulerCallback(), requestHardwareVsync(getOuterDisplayId(), _))
             .Times(0);
 
     // The injected VsyncSchedule uses TestableScheduler::mockRequestHardwareVsync, so no calls to
@@ -121,15 +134,17 @@ TEST_F(FoldableTest, requestsHardwareVsyncForInnerDisplay) {
     EXPECT_FALSE(mOuterDisplay->isPoweredOn());
 
     auto& scheduler = *mFlinger.scheduler();
-    scheduler.onHardwareVsyncRequest(kInnerDisplayId, true);
-    scheduler.onHardwareVsyncRequest(kOuterDisplayId, true);
+    scheduler.onHardwareVsyncRequest(getInnerDisplayId(), true);
+    scheduler.onHardwareVsyncRequest(getOuterDisplayId(), true);
 }
 
-TEST_F(FoldableTest, requestsHardwareVsyncForOuterDisplay) {
+TEST_P(FoldableTest, requestsHardwareVsyncForOuterDisplay) {
+    SET_FLAG_FOR_TEST(flags::pacesetter_selection, GetParam());
+
     // Only outer display is powered on.
-    EXPECT_CALL(mFlinger.mockSchedulerCallback(), requestHardwareVsync(kInnerDisplayId, _))
+    EXPECT_CALL(mFlinger.mockSchedulerCallback(), requestHardwareVsync(getInnerDisplayId(), _))
             .Times(0);
-    EXPECT_CALL(mFlinger.mockSchedulerCallback(), requestHardwareVsync(kOuterDisplayId, true))
+    EXPECT_CALL(mFlinger.mockSchedulerCallback(), requestHardwareVsync(getOuterDisplayId(), true))
             .Times(1);
 
     // The injected VsyncSchedule uses TestableScheduler::mockRequestHardwareVsync, so no calls to
@@ -142,15 +157,17 @@ TEST_F(FoldableTest, requestsHardwareVsyncForOuterDisplay) {
     EXPECT_TRUE(mOuterDisplay->isPoweredOn());
 
     auto& scheduler = *mFlinger.scheduler();
-    scheduler.onHardwareVsyncRequest(kInnerDisplayId, true);
-    scheduler.onHardwareVsyncRequest(kOuterDisplayId, true);
+    scheduler.onHardwareVsyncRequest(getInnerDisplayId(), true);
+    scheduler.onHardwareVsyncRequest(getOuterDisplayId(), true);
 }
 
-TEST_F(FoldableTest, requestsHardwareVsyncForBothDisplays) {
+TEST_P(FoldableTest, requestsHardwareVsyncForBothDisplays) {
+    SET_FLAG_FOR_TEST(flags::pacesetter_selection, GetParam());
+
     // Both displays are powered on.
-    EXPECT_CALL(mFlinger.mockSchedulerCallback(), requestHardwareVsync(kInnerDisplayId, true))
+    EXPECT_CALL(mFlinger.mockSchedulerCallback(), requestHardwareVsync(getInnerDisplayId(), true))
             .Times(1);
-    EXPECT_CALL(mFlinger.mockSchedulerCallback(), requestHardwareVsync(kOuterDisplayId, true))
+    EXPECT_CALL(mFlinger.mockSchedulerCallback(), requestHardwareVsync(getOuterDisplayId(), true))
             .Times(1);
 
     // The injected VsyncSchedule uses TestableScheduler::mockRequestHardwareVsync, so no calls to
@@ -166,28 +183,31 @@ TEST_F(FoldableTest, requestsHardwareVsyncForBothDisplays) {
     scheduler.onHardwareVsyncRequest(mOuterDisplay->getPhysicalId(), true);
 }
 
-TEST_F(FoldableTest, requestVsyncOnPowerOn) {
-    EXPECT_CALL(mFlinger.scheduler()->mockRequestHardwareVsync, Call(kInnerDisplayId, true))
+TEST_P(FoldableTest, requestVsyncOnPowerOn) {
+    SET_FLAG_FOR_TEST(flags::pacesetter_selection, GetParam());
+    EXPECT_CALL(mFlinger.scheduler()->mockRequestHardwareVsync, Call(getInnerDisplayId(), true))
             .Times(1);
-    EXPECT_CALL(mFlinger.scheduler()->mockRequestHardwareVsync, Call(kOuterDisplayId, true))
+    EXPECT_CALL(mFlinger.scheduler()->mockRequestHardwareVsync, Call(getOuterDisplayId(), true))
             .Times(1);
 
     mFlinger.setPhysicalDisplayPowerMode(mInnerDisplay, PowerMode::ON);
     mFlinger.setPhysicalDisplayPowerMode(mOuterDisplay, PowerMode::ON);
 }
 
-TEST_F(FoldableTest, disableVsyncOnPowerOffPacesetter) {
+TEST_P(FoldableTest, disableVsyncOnPowerOffPacesetter) {
+    SET_FLAG_FOR_TEST(flags::pacesetter_selection, GetParam());
+    SET_FLAG_FOR_TEST(flags::multithreaded_present, true);
     // When the device boots, the inner display should be the pacesetter.
-    ASSERT_EQ(mFlinger.scheduler()->pacesetterDisplayId(), kInnerDisplayId);
+    ASSERT_EQ(mFlinger.scheduler()->pacesetterDisplayId(), getInnerDisplayId());
 
     testing::InSequence seq;
-    EXPECT_CALL(mFlinger.scheduler()->mockRequestHardwareVsync, Call(kInnerDisplayId, true))
+    EXPECT_CALL(mFlinger.scheduler()->mockRequestHardwareVsync, Call(getInnerDisplayId(), true))
             .Times(1);
-    EXPECT_CALL(mFlinger.scheduler()->mockRequestHardwareVsync, Call(kOuterDisplayId, true))
+    EXPECT_CALL(mFlinger.scheduler()->mockRequestHardwareVsync, Call(getOuterDisplayId(), true))
             .Times(1);
 
     // Turning off the pacesetter will result in disabling VSYNC.
-    EXPECT_CALL(mFlinger.scheduler()->mockRequestHardwareVsync, Call(kInnerDisplayId, false))
+    EXPECT_CALL(mFlinger.scheduler()->mockRequestHardwareVsync, Call(getInnerDisplayId(), false))
             .Times(1);
 
     mFlinger.setPhysicalDisplayPowerMode(mInnerDisplay, PowerMode::ON);
@@ -196,8 +216,48 @@ TEST_F(FoldableTest, disableVsyncOnPowerOffPacesetter) {
     mFlinger.setPhysicalDisplayPowerMode(mInnerDisplay, PowerMode::OFF);
 
     // Other display is now the pacesetter.
-    ASSERT_EQ(mFlinger.scheduler()->pacesetterDisplayId(), kOuterDisplayId);
+    ASSERT_EQ(mFlinger.scheduler()->pacesetterDisplayId(), getOuterDisplayId());
 }
+
+TEST_P(FoldableTest, layerCachingTexturePoolOnFrontInternal) {
+    SET_FLAG_FOR_TEST(flags::pacesetter_selection, GetParam());
+
+    ON_CALL(mFlinger.mockSchedulerCallback(), enableLayerCachingTexturePool)
+            .WillByDefault([&](PhysicalDisplayId displayId, bool enable) {
+                mFlinger.enableLayerCachingTexturePool(displayId, enable);
+            });
+
+    ASSERT_EQ(mFlinger.scheduler()->pacesetterDisplayId(), getInnerDisplayId());
+
+    // In order for TexturePool to be enabled, layer caching needs to be enabled.
+    mInnerDisplay->getCompositionDisplay()->setLayerCachingEnabled(true);
+    mOuterDisplay->getCompositionDisplay()->setLayerCachingEnabled(true);
+
+    mFlinger.setPhysicalDisplayPowerMode(mOuterDisplay, PowerMode::OFF);
+    mFlinger.setPhysicalDisplayPowerMode(mInnerDisplay, PowerMode::ON);
+
+    // Switching to outer display as the front-internal display should disable the inner display's
+    // pool and enable the outer display's pool.
+    mFlinger.setPhysicalDisplayPowerMode(mOuterDisplay, PowerMode::ON);
+    mFlinger.setPhysicalDisplayPowerMode(mInnerDisplay, PowerMode::OFF);
+
+    ASSERT_EQ(mFlinger.scheduler()->pacesetterDisplayId(), getOuterDisplayId());
+
+    EXPECT_FALSE(mInnerDisplay->getCompositionDisplay()->plannerTexturePoolEnabled());
+    EXPECT_TRUE(mOuterDisplay->getCompositionDisplay()->plannerTexturePoolEnabled());
+
+    mFlinger.setPhysicalDisplayPowerMode(mOuterDisplay, PowerMode::OFF);
+    mFlinger.setPhysicalDisplayPowerMode(mInnerDisplay, PowerMode::ON);
+
+    EXPECT_TRUE(mInnerDisplay->getCompositionDisplay()->plannerTexturePoolEnabled());
+    EXPECT_FALSE(mOuterDisplay->getCompositionDisplay()->plannerTexturePoolEnabled());
+}
+
+INSTANTIATE_TEST_SUITE_P(Foldable, FoldableTest, testing::Bool(),
+                         [](const testing::TestParamInfo<FoldableTest::ParamType>& info) {
+                             return info.param ? "PacesetterSelectionEnabled"
+                                               : "PacesetterSelectionDisabled";
+                         });
 
 } // namespace
 } // namespace android

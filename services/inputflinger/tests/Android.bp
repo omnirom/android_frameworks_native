@@ -41,7 +41,6 @@ cc_test {
         // will always run against the compiled version of the inputflinger code rather than the
         // version on the device.
         "libinputdispatcher_defaults",
-        "libinputflinger_base_defaults",
         "libinputflinger_defaults",
         "libinputreader_defaults",
         "libinputreporter_defaults",
@@ -59,7 +58,6 @@ cc_test {
         "FakeInputTracingBackend.cpp",
         "FakePointerController.cpp",
         "FocusResolver_test.cpp",
-        "GestureConverter_test.cpp",
         "HardwareProperties_test.cpp",
         "HardwareStateConverter_test.cpp",
         "InputDeviceMetricsCollector_test.cpp",
@@ -81,6 +79,7 @@ cc_test {
         "PointerChoreographer_test.cpp",
         "PreferStylusOverTouch_test.cpp",
         "PropertyProvider_test.cpp",
+        "RelativeModeGestureConverter_test.cpp",
         "RotaryEncoderInputMapper_test.cpp",
         "SensorInputMapper_test.cpp",
         "SlopController_test.cpp",
@@ -90,6 +89,7 @@ cc_test {
         "TimerProvider_test.cpp",
         "TouchpadInputMapper_test.cpp",
         "UinputDevice.cpp",
+        "UncapturedGestureConverter_test.cpp",
         "UnwantedInteractionBlocker_test.cpp",
         "VibratorInputMapper_test.cpp",
     ],
@@ -134,4 +134,8 @@ cc_test {
         "device-tests",
     ],
     native_coverage: false,
+    device_first_data: [
+        ":keychars_test_data",
+        ":keylayout_test_data",
+    ],
 }

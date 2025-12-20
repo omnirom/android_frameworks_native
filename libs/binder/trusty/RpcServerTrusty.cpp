@@ -14,14 +14,20 @@
  * limitations under the License.
  */
 
-#define LOG_TAG "RpcServerTrusty"
+#define LOG_TAG "libbinder.RpcServerTrusty"
+
+#include <cinttypes>
+#include <cstring>
 
 #include <binder/Parcel.h>
 #include <binder/RpcServer.h>
 #include <binder/RpcServerTrusty.h>
 #include <binder/RpcThreads.h>
 #include <binder/RpcTransportTipcTrusty.h>
+#include <lk/macros.h>
 #include <log/log.h>
+
+#include <lib/tipc/tipc.h>
 
 #include "../FdTrigger.h"
 #include "../RpcState.h"
@@ -33,7 +39,8 @@ namespace android {
 
 sp<RpcServerTrusty> RpcServerTrusty::make(
         tipc_hset* handleSet, std::string&& portName, std::shared_ptr<const PortAcl>&& portAcl,
-        size_t msgMaxSize, std::unique_ptr<RpcTransportCtxFactory> rpcTransportCtxFactory) {
+        size_t msgMaxSize, size_t msgQueueLen,
+        std::unique_ptr<RpcTransportCtxFactory> rpcTransportCtxFactory) {
     // Default is without TLS.
     if (rpcTransportCtxFactory == nullptr)
         rpcTransportCtxFactory = RpcTransportCtxFactoryTipcTrusty::make();
@@ -44,13 +51,14 @@ sp<RpcServerTrusty> RpcServerTrusty::make(
     }
 
     auto srv = sp<RpcServerTrusty>::make(std::move(ctx), std::move(portName), std::move(portAcl),
-                                         msgMaxSize);
+                                         msgMaxSize, msgQueueLen);
     if (srv == nullptr) {
         ALOGE("Failed to create RpcServerTrusty: can't create server object");
         return nullptr;
     }
 
-    int rc = tipc_add_service(handleSet, &srv->mTipcPort, 1, 0, &kTipcOps);
+    int rc =
+            tipc_add_service_ports(handleSet, &srv->mTipcPort, 1, 0, &kTipcOps, &srv->mTipcPortCtx);
     if (rc != NO_ERROR) {
         ALOGE("Failed to create RpcServerTrusty: can't add service: %d", rc);
         return nullptr;
@@ -59,13 +67,14 @@ sp<RpcServerTrusty> RpcServerTrusty::make(
 }
 
 RpcServerTrusty::RpcServerTrusty(std::unique_ptr<RpcTransportCtx> ctx, std::string&& portName,
-                                 std::shared_ptr<const PortAcl>&& portAcl, size_t msgMaxSize)
+                                 std::shared_ptr<const PortAcl>&& portAcl, size_t msgMaxSize,
+                                 size_t msgQueueLen)
       : mRpcServer(makeRpcServer(std::move(ctx))),
         mPortName(std::move(portName)),
         mPortAcl(std::move(portAcl)) {
     mTipcPort.name = mPortName.c_str();
     mTipcPort.msg_max_size = msgMaxSize;
-    mTipcPort.msg_queue_len = 6; // Three each way
+    mTipcPort.msg_queue_len = msgQueueLen;
     mTipcPort.priv = this;
 
     if (mPortAcl) {
@@ -94,13 +103,111 @@ RpcServerTrusty::RpcServerTrusty(std::unique_ptr<RpcTransportCtx> ctx, std::stri
     }
 }
 
-int RpcServerTrusty::handleConnect(const tipc_port* port, handle_t chan, const uuid* peer,
-                                   void** ctx_p) {
-    auto* server = reinterpret_cast<RpcServerTrusty*>(const_cast<void*>(port->priv));
-    return handleConnectInternal(server->mRpcServer.get(), chan, peer, ctx_p);
+void RpcServerTrusty::setPerSessionRootObject(
+        std::function<sp<IBinder>(wp<RpcSession> session, const void* peer, size_t peer_len)>&&
+                create_session) {
+    auto wrap_create_session = [create_session =
+                                        std::move(create_session)](wp<RpcSession> session,
+                                                                   const trusty_peer_id& peer,
+                                                                   size_t peer_len) -> sp<IBinder> {
+        if (peer.kind != TRUSTY_PEER_ID_KIND_UUID) {
+            ALOGE("Creating binder root object, but peer had "
+                  "non-uuid type %" PRIx64 " (expected %" PRIx64 ")",
+                  peer.kind, TRUSTY_PEER_ID_KIND_UUID);
+            return nullptr;
+        }
+        if (peer_len != sizeof(trusty_peer_id_uuid)) {
+            ALOGE("Creating binder root object, but uuid-type peer had unexpected "
+                  "size %zu (expected %zu)",
+                  peer_len, sizeof(trusty_peer_id_uuid));
+            return nullptr;
+        }
+
+        const auto& peer_uuid = reinterpret_cast<const trusty_peer_id_uuid&>(peer);
+        return create_session(std::move(session), &peer_uuid.id, sizeof(peer_uuid.id));
+    };
+    setPerSessionRootObjectInternal(mRpcServer.get(), std::move(wrap_create_session));
 }
 
-int RpcServerTrusty::handleConnectInternal(RpcServer* rpcServer, handle_t chan, const uuid* peer,
+void RpcServerTrusty::setPerSessionRootObjectInternal(
+        RpcServer* server,
+        std::function<sp<IBinder>(wp<RpcSession> session, const trusty_peer_id& peer,
+                                  size_t peer_len)>&& create_session) {
+    auto wrap_create_session =
+            [create_session = std::move(create_session)](wp<RpcSession> session, const void* peer,
+                                                         size_t peer_len) -> sp<IBinder> {
+        if (peer_len > sizeof(trusty_peer_id_storage)) {
+            ALOGE("Creating binder root object, but peer ID (%zu bytes) too "
+                  "big to fit in trusty_peer_id_storage (%zu bytes)",
+                  peer_len, sizeof(trusty_peer_id_storage));
+            return nullptr;
+        }
+
+        /* memcpy because peer isn't guaranteed to be sufficiently aligned */
+        trusty_peer_id_storage peer_obj = TRUSTY_PEER_ID_STORAGE_INITIAL_VALUE();
+        std::memcpy(&peer_obj, peer, peer_len);
+
+        return create_session(std::move(session), reinterpret_cast<const trusty_peer_id&>(peer_obj),
+                              peer_len);
+    };
+    server->setPerSessionRootObject(std::move(wrap_create_session));
+}
+
+status_t RpcServerTrusty::queueConnect(unique_fd chan, const trusty_peer_id& peer,
+                                       size_t peer_len) {
+    struct AddConnectionTodo {
+        struct tipc_work_todo todo;
+        struct tipc_port_ctx* port;
+        unique_fd chan;
+        struct trusty_peer_id_storage peer;
+        size_t peer_len;
+
+        static int DoWork(struct tipc_work_todo* todo) {
+            AddConnectionTodo* self = containerof(todo, AddConnectionTodo, todo);
+            handle_t chan = self->chan.release();
+            int rc = tipc_add_connection(self->port, chan,
+                                         &reinterpret_cast<const trusty_peer_id&>(self->peer),
+                                         self->peer_len);
+            if (rc != NO_ERROR) {
+                close(chan);
+            }
+
+            delete self;
+            return rc;
+        }
+    };
+
+    if (peer_len > sizeof(trusty_peer_id_storage)) {
+        ALOGE("Tried to queue connection, but peer ID (kind %" PRIx64 ", %zu"
+              "bytes) is too big to fit in trusty_peer_id_storage (%zu bytes)",
+              peer.kind, peer_len, sizeof(trusty_peer_id_storage));
+        return BAD_VALUE;
+    }
+
+    auto* add_conn = new (std::nothrow) AddConnectionTodo{
+            .todo = TIPC_WORK_TODO_INITIAL_VALUE(add_conn->todo, AddConnectionTodo::DoWork),
+            .port = mTipcPortCtx,
+            .chan = std::move(chan),
+            .peer = TRUSTY_PEER_ID_STORAGE_INITIAL_VALUE(),
+            .peer_len = peer_len,
+    };
+    if (add_conn == nullptr) {
+        return NO_MEMORY;
+    }
+    std::memcpy(&add_conn->peer, &peer, peer_len);
+
+    tipc_queue_work(tipc_get_hset(mTipcPortCtx), &add_conn->todo);
+    return OK;
+}
+
+int RpcServerTrusty::handleConnect(const tipc_port* port, handle_t chan, const trusty_peer_id* peer,
+                                   size_t peer_len, void** ctx_p) {
+    auto* server = reinterpret_cast<RpcServerTrusty*>(const_cast<void*>(port->priv));
+    return handleConnectInternal(server->mRpcServer.get(), chan, *peer, peer_len, ctx_p);
+}
+
+int RpcServerTrusty::handleConnectInternal(RpcServer* rpcServer, handle_t chan,
+                                           const trusty_peer_id& peer, size_t peer_len,
                                            void** ctx_p) {
     rpcServer->mShutdownTrigger = FdTrigger::make();
     rpcServer->mConnectingThreads[rpc_this_thread::get_id()] = RpcMaybeThread();
@@ -137,10 +244,12 @@ int RpcServerTrusty::handleConnectInternal(RpcServer* rpcServer, handle_t chan, 
     android::RpcTransportFd transportFd(std::move(clientFd));
 
     std::array<uint8_t, RpcServer::kRpcAddressSize> addr;
-    constexpr size_t addrLen = sizeof(*peer);
-    memcpy(addr.data(), peer, addrLen);
+    if (peer_len > RpcServer::kRpcAddressSize) {
+        return ERR_BAD_LEN;
+    }
+    memcpy(addr.data(), &peer, peer_len);
     RpcServer::establishConnection(sp<RpcServer>::fromExisting(rpcServer), std::move(transportFd),
-                                   addr, addrLen, joinFn);
+                                   addr, peer_len, joinFn);
 
     return rc;
 }

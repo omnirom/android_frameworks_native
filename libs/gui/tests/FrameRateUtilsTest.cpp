@@ -65,12 +65,10 @@ TEST(FrameRateUtilsTest, ValidateFrameRate) {
     EXPECT_FALSE(ValidateFrameRate(60.0f, 3, ANATIVEWINDOW_CHANGE_FRAME_RATE_ONLY_IF_SEAMLESS, ""));
 
     // Invalid change frame rate strategy.
-    if (flags::bq_setframerate()) {
-        EXPECT_FALSE(
-                ValidateFrameRate(60.0f, ANATIVEWINDOW_FRAME_RATE_COMPATIBILITY_DEFAULT, -1, ""));
-        EXPECT_FALSE(
-                ValidateFrameRate(60.0f, ANATIVEWINDOW_FRAME_RATE_COMPATIBILITY_DEFAULT, 2, ""));
-    }
+    EXPECT_FALSE(
+            ValidateFrameRate(60.0f, ANATIVEWINDOW_FRAME_RATE_COMPATIBILITY_DEFAULT, -1, ""));
+    EXPECT_FALSE(
+            ValidateFrameRate(60.0f, ANATIVEWINDOW_FRAME_RATE_COMPATIBILITY_DEFAULT, 2, ""));
 }
 
 } // namespace android

@@ -20,7 +20,7 @@
 
 #include <inttypes.h>
 #include <log/log_event_list.h>
-#include <statslog.h>
+#include <statslog_inputflinger.h>
 
 #include <android-base/logging.h>
 #include <android-base/stringprintf.h>
@@ -78,40 +78,52 @@ namespace android::inputdispatcher {
 int32_t LatencyStageIndexToAtomEnum(LatencyStageIndex latencyStageIndex) {
     switch (latencyStageIndex) {
         case LatencyStageIndex::EVENT_TO_READ:
-            return util::INPUT_EVENT_LATENCY_REPORTED__LATENCY_STAGE__EVENT_TO_READ;
+            return inputflinger::stats::INPUT_EVENT_LATENCY_REPORTED__LATENCY_STAGE__EVENT_TO_READ;
         case LatencyStageIndex::READ_TO_DELIVER:
-            return util::INPUT_EVENT_LATENCY_REPORTED__LATENCY_STAGE__READ_TO_DELIVER;
+            return inputflinger::stats::
+                    INPUT_EVENT_LATENCY_REPORTED__LATENCY_STAGE__READ_TO_DELIVER;
         case LatencyStageIndex::DELIVER_TO_CONSUME:
-            return util::INPUT_EVENT_LATENCY_REPORTED__LATENCY_STAGE__DELIVER_TO_CONSUME;
+            return inputflinger::stats::
+                    INPUT_EVENT_LATENCY_REPORTED__LATENCY_STAGE__DELIVER_TO_CONSUME;
         case LatencyStageIndex::CONSUME_TO_FINISH:
-            return util::INPUT_EVENT_LATENCY_REPORTED__LATENCY_STAGE__CONSUME_TO_FINISH;
+            return inputflinger::stats::
+                    INPUT_EVENT_LATENCY_REPORTED__LATENCY_STAGE__CONSUME_TO_FINISH;
         case LatencyStageIndex::CONSUME_TO_GPU_COMPLETE:
-            return util::INPUT_EVENT_LATENCY_REPORTED__LATENCY_STAGE__CONSUME_TO_GPU_COMPLETE;
+            return inputflinger::stats::
+                    INPUT_EVENT_LATENCY_REPORTED__LATENCY_STAGE__CONSUME_TO_GPU_COMPLETE;
         case LatencyStageIndex::GPU_COMPLETE_TO_PRESENT:
-            return util::INPUT_EVENT_LATENCY_REPORTED__LATENCY_STAGE__GPU_COMPLETE_TO_PRESENT;
+            return inputflinger::stats::
+                    INPUT_EVENT_LATENCY_REPORTED__LATENCY_STAGE__GPU_COMPLETE_TO_PRESENT;
         case LatencyStageIndex::END_TO_END:
-            return util::INPUT_EVENT_LATENCY_REPORTED__LATENCY_STAGE__END_TO_END;
+            return inputflinger::stats::INPUT_EVENT_LATENCY_REPORTED__LATENCY_STAGE__END_TO_END;
         default:
-            return util::INPUT_EVENT_LATENCY_REPORTED__LATENCY_STAGE__UNKNOWN_LATENCY_STAGE;
+            return inputflinger::stats::
+                    INPUT_EVENT_LATENCY_REPORTED__LATENCY_STAGE__UNKNOWN_LATENCY_STAGE;
     }
 }
 
 int32_t InputEventTypeEnumToAtomEnum(InputEventActionType inputEventActionType) {
     switch (inputEventActionType) {
         case InputEventActionType::UNKNOWN_INPUT_EVENT:
-            return util::INPUT_EVENT_LATENCY_REPORTED__INPUT_EVENT_TYPE__UNKNOWN_INPUT_EVENT;
+            return inputflinger::stats::
+                    INPUT_EVENT_LATENCY_REPORTED__INPUT_EVENT_TYPE__UNKNOWN_INPUT_EVENT;
         case InputEventActionType::MOTION_ACTION_DOWN:
-            return util::INPUT_EVENT_LATENCY_REPORTED__INPUT_EVENT_TYPE__MOTION_ACTION_DOWN;
+            return inputflinger::stats::
+                    INPUT_EVENT_LATENCY_REPORTED__INPUT_EVENT_TYPE__MOTION_ACTION_DOWN;
         case InputEventActionType::MOTION_ACTION_MOVE:
-            return util::INPUT_EVENT_LATENCY_REPORTED__INPUT_EVENT_TYPE__MOTION_ACTION_MOVE;
+            return inputflinger::stats::
+                    INPUT_EVENT_LATENCY_REPORTED__INPUT_EVENT_TYPE__MOTION_ACTION_MOVE;
         case InputEventActionType::MOTION_ACTION_UP:
-            return util::INPUT_EVENT_LATENCY_REPORTED__INPUT_EVENT_TYPE__MOTION_ACTION_UP;
+            return inputflinger::stats::
+                    INPUT_EVENT_LATENCY_REPORTED__INPUT_EVENT_TYPE__MOTION_ACTION_UP;
         case InputEventActionType::MOTION_ACTION_HOVER_MOVE:
-            return util::INPUT_EVENT_LATENCY_REPORTED__INPUT_EVENT_TYPE__MOTION_ACTION_HOVER_MOVE;
+            return inputflinger::stats::
+                    INPUT_EVENT_LATENCY_REPORTED__INPUT_EVENT_TYPE__MOTION_ACTION_HOVER_MOVE;
         case InputEventActionType::MOTION_ACTION_SCROLL:
-            return util::INPUT_EVENT_LATENCY_REPORTED__INPUT_EVENT_TYPE__MOTION_ACTION_SCROLL;
+            return inputflinger::stats::
+                    INPUT_EVENT_LATENCY_REPORTED__INPUT_EVENT_TYPE__MOTION_ACTION_SCROLL;
         case InputEventActionType::KEY:
-            return util::INPUT_EVENT_LATENCY_REPORTED__INPUT_EVENT_TYPE__KEY;
+            return inputflinger::stats::INPUT_EVENT_LATENCY_REPORTED__INPUT_EVENT_TYPE__KEY;
     }
 }
 
@@ -237,8 +249,8 @@ void LatencyAggregatorWithHistograms::pushLatencyStatistics() {
                 continue;
             }
 
-            stats_write(android::util::INPUT_EVENT_LATENCY_REPORTED, vendorId, productId,
-                        sourcesVector, InputEventTypeEnumToAtomEnum(action),
+            stats_write(android::inputflinger::stats::INPUT_EVENT_LATENCY_REPORTED, vendorId,
+                        productId, sourcesVector, InputEventTypeEnumToAtomEnum(action),
                         LatencyStageIndexToAtomEnum(
                                 static_cast<LatencyStageIndex>(latencyStageIndex)),
                         histogramVersions[latencyStageIndex][actionIndex], binCountsVector);
@@ -284,18 +296,19 @@ void LatencyAggregatorWithHistograms::processSlowEvent(const InputEventTimeline&
         const nsecs_t consumeToGpuComplete = gpuCompletedTime - connectionTimeline.consumeTime;
         const nsecs_t gpuCompleteToPresent = presentTime - gpuCompletedTime;
 
-        android::util::stats_write(android::util::SLOW_INPUT_EVENT_REPORTED,
-                                   timeline.inputEventActionType ==
-                                           InputEventActionType::MOTION_ACTION_DOWN,
-                                   static_cast<int32_t>(ns2us(eventToRead)),
-                                   static_cast<int32_t>(ns2us(readToDeliver)),
-                                   static_cast<int32_t>(ns2us(deliverToConsume)),
-                                   static_cast<int32_t>(ns2us(consumeToFinish)),
-                                   static_cast<int32_t>(ns2us(consumeToGpuComplete)),
-                                   static_cast<int32_t>(ns2us(gpuCompleteToPresent)),
-                                   static_cast<int32_t>(ns2us(endToEndLatency.count())),
-                                   static_cast<int32_t>(mNumEventsSinceLastSlowEventReport),
-                                   static_cast<int32_t>(mNumSkippedSlowEvents));
+        android::inputflinger::stats::
+                stats_write(android::inputflinger::stats::SLOW_INPUT_EVENT_REPORTED,
+                            timeline.inputEventActionType ==
+                                    InputEventActionType::MOTION_ACTION_DOWN,
+                            static_cast<int32_t>(ns2us(eventToRead)),
+                            static_cast<int32_t>(ns2us(readToDeliver)),
+                            static_cast<int32_t>(ns2us(deliverToConsume)),
+                            static_cast<int32_t>(ns2us(consumeToFinish)),
+                            static_cast<int32_t>(ns2us(consumeToGpuComplete)),
+                            static_cast<int32_t>(ns2us(gpuCompleteToPresent)),
+                            static_cast<int32_t>(ns2us(endToEndLatency.count())),
+                            static_cast<int32_t>(mNumEventsSinceLastSlowEventReport),
+                            static_cast<int32_t>(mNumSkippedSlowEvents));
         mNumEventsSinceLastSlowEventReport = 0;
         mNumSkippedSlowEvents = 0;
         mLastSlowEventTime = timeline.readTime;
@@ -337,7 +350,7 @@ std::string LatencyAggregatorWithHistograms::dump(const char* prefix) const {
     }
 
     return StringPrintf("%sLatencyAggregatorWithHistograms:\n", prefix) + statisticsStr +
-            StringPrintf("%s  mLastSlowEventTime=%" PRId64 "\n", prefix, mLastSlowEventTime) +
+            StringPrintf("%s  mLastSlowEventTime=%" PRId64 "ns\n", prefix, mLastSlowEventTime) +
             StringPrintf("%s  mNumEventsSinceLastSlowEventReport = %zu\n", prefix,
                          mNumEventsSinceLastSlowEventReport) +
             StringPrintf("%s  mNumSkippedSlowEvents = %zu\n", prefix, mNumSkippedSlowEvents);

@@ -23,10 +23,13 @@
 
 #include <android-base/logging.h>
 #include <android-base/properties.h>
+#include <com_android_input_flags.h>
 #include <ftl/enum.h>
 
 #include <input/Resampler.h>
 #include <utils/Timers.h>
+
+namespace input_flags = com::android::input::flags;
 
 namespace android {
 namespace {
@@ -72,6 +75,20 @@ inline float lerp(float a, float b, float alpha) {
     return a + alpha * (b - a);
 }
 
+// These axis values are relative to the previous event. When synthesizing a resampled event,
+// they are set to zero, so that consumers of these axis values can correctly accumulate the delta.
+// Note that they are not cleared in `LegacyResampler::overwriteMotionEventSamples` because the
+// overwritten event there is a real event containing delta from the last real event.
+constexpr std::array<int32_t, 7> relativeAxesToClearOnResample{
+        AMOTION_EVENT_AXIS_RELATIVE_X,
+        AMOTION_EVENT_AXIS_RELATIVE_Y,
+        AMOTION_EVENT_AXIS_GESTURE_X_OFFSET,
+        AMOTION_EVENT_AXIS_GESTURE_Y_OFFSET,
+        AMOTION_EVENT_AXIS_GESTURE_SCROLL_X_DISTANCE,
+        AMOTION_EVENT_AXIS_GESTURE_SCROLL_Y_DISTANCE,
+        AMOTION_EVENT_AXIS_GESTURE_PINCH_SCALE_FACTOR,
+};
+
 PointerCoords calculateResampledCoords(const PointerCoords& a, const PointerCoords& b,
                                        float alpha) {
     // We use the value of alpha to initialize resampledCoords with the latest sample information.
@@ -79,6 +96,11 @@ PointerCoords calculateResampledCoords(const PointerCoords& a, const PointerCoor
     resampledCoords.isResampled = true;
     resampledCoords.setAxisValue(AMOTION_EVENT_AXIS_X, lerp(a.getX(), b.getX(), alpha));
     resampledCoords.setAxisValue(AMOTION_EVENT_AXIS_Y, lerp(a.getY(), b.getY(), alpha));
+    if (input_flags::clear_relative_axes_in_resampled_coords()) {
+        for (int32_t axis : relativeAxesToClearOnResample) {
+            resampledCoords.setAxisValue(axis, 0);
+        }
+    }
     return resampledCoords;
 }
 

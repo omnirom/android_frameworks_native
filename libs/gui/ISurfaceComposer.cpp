@@ -51,27 +51,24 @@ using gui::IWindowInfosListener;
 using gui::LayerCaptureArgs;
 using ui::ColorMode;
 
-class BpSurfaceComposer : public BpInterface<ISurfaceComposer>
-{
+class BpSurfaceComposer : public BpInterface<ISurfaceComposer> {
 public:
-    explicit BpSurfaceComposer(const sp<IBinder>& impl)
-        : BpInterface<ISurfaceComposer>(impl)
-    {
-    }
+    explicit BpSurfaceComposer(const sp<IBinder>& impl) : BpInterface<ISurfaceComposer>(impl) {}
 
     virtual ~BpSurfaceComposer();
 
-    status_t setTransactionState(TransactionState&& state) override {
+    status_t setTransactionState(TransactionState&& state, const sp<IBinder>& applyToken) override {
         Parcel data, reply;
         data.writeInterfaceToken(ISurfaceComposer::getInterfaceDescriptor());
+
         SAFE_PARCEL(state.writeToParcel, &data);
+        SAFE_PARCEL(data.writeStrongBinder, applyToken);
 
         if (state.mFlags & ISurfaceComposer::eOneWay) {
-            return remote()->transact(BnSurfaceComposer::SET_TRANSACTION_STATE,
-                    data, &reply, IBinder::FLAG_ONEWAY);
+            return remote()->transact(BnSurfaceComposer::SET_TRANSACTION_STATE, data, &reply,
+                                      IBinder::FLAG_ONEWAY);
         } else {
-            return remote()->transact(BnSurfaceComposer::SET_TRANSACTION_STATE,
-                    data, &reply);
+            return remote()->transact(BnSurfaceComposer::SET_TRANSACTION_STATE, data, &reply);
         }
     }
 };
@@ -84,16 +81,19 @@ IMPLEMENT_META_INTERFACE(SurfaceComposer, "android.ui.ISurfaceComposer");
 
 // ----------------------------------------------------------------------
 
-status_t BnSurfaceComposer::onTransact(
-    uint32_t code, const Parcel& data, Parcel* reply, uint32_t flags)
-{
+status_t BnSurfaceComposer::onTransact(uint32_t code, const Parcel& data, Parcel* reply,
+                                       uint32_t flags) {
     switch (code) {
         case SET_TRANSACTION_STATE: {
             CHECK_INTERFACE(ISurfaceComposer, data, reply);
 
             TransactionState state;
             SAFE_PARCEL(state.readFromParcel, &data);
-            return setTransactionState(std::move(state));
+
+            sp<IBinder> applyToken;
+            SAFE_PARCEL(data.readStrongBinder, &applyToken);
+
+            return setTransactionState(std::move(state), applyToken);
         }
         case GET_SCHEDULING_POLICY: {
             gui::SchedulingPolicy policy;

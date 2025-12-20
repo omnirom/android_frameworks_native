@@ -18,8 +18,6 @@
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wconversion"
 
-#undef LOG_TAG
-#define LOG_TAG "FrameTracer"
 #define ATRACE_TAG ATRACE_TAG_GRAPHICS
 
 #include "FrameTracer.h"

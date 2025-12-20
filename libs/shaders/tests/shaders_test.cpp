@@ -61,13 +61,9 @@ TEST_F(ShadersTest, buildLinearEffectUniforms_selectsNoOpGamutMatrices) {
                                                aidl::android::hardware::graphics::composer3::
                                                        RenderIntent::COLORIMETRIC);
     EXPECT_THAT(uniforms,
-                Contains(UniformEq("in_rgbToXyz",
+                Contains(UniformEq("in_SrcRgbToXyz",
                                    buildUniformValue<mat3>(
-                                           ColorSpace::linearExtendedSRGB().getRGBtoXYZ()))));
-    EXPECT_THAT(uniforms,
-                Contains(UniformEq("in_xyzToSrcRgb",
-                                   buildUniformValue<mat3>(
-                                           ColorSpace::linearSRGB().getXYZtoRGB()))));
+                                           ColorSpace::linearSRGB().getRGBtoXYZ()))));
     // color transforms are already tested in renderengine's tests
     EXPECT_THAT(uniforms, Contains(UniformNameEq("in_colorTransform")));
 }
@@ -84,12 +80,8 @@ TEST_F(ShadersTest, buildLinearEffectUniforms_selectsGamutTransformMatrices) {
                                                aidl::android::hardware::graphics::composer3::
                                                        RenderIntent::COLORIMETRIC);
     EXPECT_THAT(uniforms,
-                Contains(UniformEq("in_rgbToXyz",
-                                   buildUniformValue<mat3>(
-                                           ColorSpace::linearExtendedSRGB().getRGBtoXYZ()))));
-    EXPECT_THAT(uniforms,
-                Contains(UniformEq("in_xyzToSrcRgb",
-                                   buildUniformValue<mat3>(inputColorSpace.getXYZtoRGB()))));
+                Contains(UniformEq("in_SrcRgbToXyz",
+                                   buildUniformValue<mat3>(inputColorSpace.getRGBtoXYZ()))));
     EXPECT_THAT(uniforms, Contains(UniformNameEq("in_colorTransform")));
 }
 

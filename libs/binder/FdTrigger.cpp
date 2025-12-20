@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-#define LOG_TAG "FdTrigger"
+#define LOG_TAG "libbinder.FdTrigger"
 #include <log/log.h>
 
 #include "FdTrigger.h"
@@ -23,7 +23,9 @@
 
 #include <binder/Functional.h>
 
+#ifndef BINDER_RPC_SINGLE_THREADED
 #include "FdUtils.h"
+#endif // BINDER_RPC_SINGLE_THREADED
 #include "RpcState.h"
 #include "Utils.h"
 
@@ -59,11 +61,9 @@ bool FdTrigger::isTriggered() {
 }
 
 status_t FdTrigger::triggerablePoll(const android::RpcTransportFd& transportFd, int16_t event) {
-#ifdef BINDER_RPC_SINGLE_THREADED
-    if (mTriggered) {
+    if (isTriggered()) {
         return DEAD_OBJECT;
     }
-#endif
 
     LOG_ALWAYS_FATAL_IF(event == 0, "triggerablePoll %d with event 0 is not allowed",
                         transportFd.fd.get());

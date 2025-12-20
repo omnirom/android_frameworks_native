@@ -19,6 +19,9 @@
 // clang-format on
 #include "MultiTouchMotionAccumulator.h"
 
+#include <input/InputEventLabels.h>
+#include <linux/input-event-codes.h>
+
 namespace android {
 
 // --- MultiTouchMotionAccumulator ---
@@ -106,8 +109,9 @@ void MultiTouchMotionAccumulator::syncSlots(const InputDeviceContext& deviceCont
                 mSlots[i - 1].populateAxisValue(axisCode, mtSlotValues[i]);
             }
         } else {
-            ALOGE("Could not retrieve multi-touch slot value for axis=%d error=%s status=%d",
-                  axisCode, result.error().message().c_str(), result.error().code().value());
+            ALOGE("Could not retrieve multi-touch slot value for axis %s error=%s status=%d",
+                  InputEventLookup::getLinuxEvdevLabel(EV_ABS, axisCode, 0).code.c_str(),
+                  result.error().message().c_str(), result.error().code().value());
         }
     }
     populateCurrentSlot(deviceContext);

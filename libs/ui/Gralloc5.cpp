@@ -20,13 +20,23 @@
 #include <ui/Gralloc5.h>
 
 #include <aidl/android/hardware/graphics/allocator/AllocationError.h>
+#include <aidl/android/hardware/graphics/allocator/BufferDescriptorInfo.h>
+#include <aidl/android/hardware/graphics/common/StandardMetadataType.h>
 #include <aidlcommonsupport/NativeHandle.h>
 #include <android/binder_manager.h>
+#include <android/hardware/graphics/mapper/IMapper.h>
 #include <android/hardware/graphics/mapper/utils/IMapperMetadataTypes.h>
-#include <binder/IPCThreadState.h>
 #include <dlfcn.h>
+#include <gralloctypes/Gralloc4.h>
 #include <ui/FatVector.h>
+#include <ui/GraphicTypes.h>
 #include <vndksupport/linker.h>
+
+#include <cstdint>
+#include <memory>
+#include <sstream>
+#include <string>
+#include <vector>
 
 using namespace aidl::android::hardware::graphics::allocator;
 using namespace aidl::android::hardware::graphics::common;

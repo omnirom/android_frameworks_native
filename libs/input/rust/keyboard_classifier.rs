@@ -28,9 +28,9 @@
 //! - If KeyboardType::NonAlphabetic and we receive alphabetic key event, then change type to
 //!   KeyboardType::Alphabetic. Once changed, no further changes. (i.e. verified = true)
 //! - TODO(b/263559234): If KeyboardType::Alphabetic and we don't receive any alphabetic key event
-//!    across multiple device connections in a time period, then change type to
-//!    KeyboardType::NonAlphabetic. Once changed, it can still change back to Alphabetic
-//!    (i.e. verified = false).
+//!   across multiple device connections in a time period, then change type to
+//!   KeyboardType::NonAlphabetic. Once changed, it can still change back to Alphabetic
+//!   (i.e. verified = false).
 
 use crate::data_store::DataStore;
 use crate::input::{DeviceId, InputDevice, KeyboardType};

@@ -24,6 +24,7 @@
 #include <android-base/stringprintf.h>
 #include <cutils/atomic.h>
 #include <ftl/enum.h>
+#include <input/Input.h>
 #include <inttypes.h>
 
 using android::base::StringPrintf;
@@ -70,7 +71,7 @@ EventEntry::EventEntry(int32_t id, Type type, nsecs_t eventTime, uint32_t policy
 
 // --- DeviceResetEntry ---
 
-DeviceResetEntry::DeviceResetEntry(int32_t id, nsecs_t eventTime, int32_t deviceId)
+DeviceResetEntry::DeviceResetEntry(int32_t id, nsecs_t eventTime, DeviceId deviceId)
       : EventEntry(id, Type::DEVICE_RESET, eventTime, 0), deviceId(deviceId) {}
 
 std::string DeviceResetEntry::getDescription() const {
@@ -101,8 +102,8 @@ PointerCaptureChangedEntry::PointerCaptureChangedEntry(int32_t id, nsecs_t event
         pointerCaptureRequest(request) {}
 
 std::string PointerCaptureChangedEntry::getDescription() const {
-    return StringPrintf("PointerCaptureChangedEvent(pointerCaptureEnabled=%s)",
-                        pointerCaptureRequest.isEnable() ? "true" : "false");
+    return StringPrintf("PointerCaptureChangedEvent(mode=%s)",
+                        ftl::enum_string(pointerCaptureRequest.mode).c_str());
 }
 
 // --- DragEntry ---
@@ -123,7 +124,7 @@ std::string DragEntry::getDescription() const {
 // --- KeyEntry ---
 
 KeyEntry::KeyEntry(int32_t id, std::shared_ptr<InjectionState> injectionState, nsecs_t eventTime,
-                   int32_t deviceId, uint32_t source, ui::LogicalDisplayId displayId,
+                   DeviceId deviceId, uint32_t source, ui::LogicalDisplayId displayId,
                    uint32_t policyFlags, int32_t action, int32_t flags, int32_t keyCode,
                    int32_t scanCode, int32_t metaState, int32_t repeatCount, nsecs_t downTime)
       : EventEntry(id, Type::KEY, eventTime, policyFlags),
@@ -147,7 +148,7 @@ std::string KeyEntry::getDescription() const {
     if (!IS_DEBUGGABLE_BUILD) {
         return "KeyEvent";
     }
-    return StringPrintf("KeyEvent(deviceId=%d, eventTime=%" PRIu64 ", source=%s, displayId=%s, "
+    return StringPrintf("KeyEvent(deviceId=%d, eventTime=%" PRIu64 "ns, source=%s, displayId=%s, "
                         "action=%s, "
                         "flags=0x%08x, keyCode=%s(%d), scanCode=%d, metaState=0x%08x, "
                         "repeatCount=%d), policyFlags=0x%08x",
@@ -177,13 +178,12 @@ std::string TouchModeEntry::getDescription() const {
 // --- MotionEntry ---
 
 MotionEntry::MotionEntry(int32_t id, std::shared_ptr<InjectionState> injectionState,
-                         nsecs_t eventTime, int32_t deviceId, uint32_t source,
+                         nsecs_t eventTime, DeviceId deviceId, uint32_t source,
                          ui::LogicalDisplayId displayId, uint32_t policyFlags, int32_t action,
-                         int32_t actionButton, int32_t flags, int32_t metaState,
-                         int32_t buttonState, MotionClassification classification,
-                         int32_t edgeFlags, float xPrecision, float yPrecision,
-                         float xCursorPosition, float yCursorPosition, nsecs_t downTime,
-                         const std::vector<PointerProperties>& pointerProperties,
+                         int32_t actionButton, ftl::Flags<MotionFlag> flags, int32_t metaState,
+                         int32_t buttonState, MotionClassification classification, float xPrecision,
+                         float yPrecision, float xCursorPosition, float yCursorPosition,
+                         nsecs_t downTime, const std::vector<PointerProperties>& pointerProperties,
                          const std::vector<PointerCoords>& pointerCoords)
       : EventEntry(id, Type::MOTION, eventTime, policyFlags),
         deviceId(deviceId),
@@ -195,7 +195,6 @@ MotionEntry::MotionEntry(int32_t id, std::shared_ptr<InjectionState> injectionSt
         metaState(metaState),
         buttonState(buttonState),
         classification(classification),
-        edgeFlags(edgeFlags),
         xPrecision(xPrecision),
         yPrecision(yPrecision),
         xCursorPosition(xCursorPosition),
@@ -211,17 +210,16 @@ std::string MotionEntry::getDescription() const {
         return "MotionEvent";
     }
     std::string msg;
-    msg += StringPrintf("MotionEvent(deviceId=%d, eventTime=%" PRIu64
-                        ", source=%s, displayId=%s, action=%s, actionButton=0x%08x, flags=0x%08x,"
-                        " metaState=0x%08x, "
+    msg += StringPrintf("MotionEvent(deviceId=%d, eventTime=%" PRIu64 "ns, source=%s, displayId=%s,"
+                        "action=%s, actionButton=0x%08x, flags=%s, metaState=0x%08x, "
                         "buttonState=0x%08x, "
-                        "classification=%s, edgeFlags=0x%08x, xPrecision=%.1f, yPrecision=%.1f, "
+                        "classification=%s, xPrecision=%.1f, yPrecision=%.1f, "
                         "xCursorPosition=%0.1f, yCursorPosition=%0.1f, pointers=[",
                         deviceId, eventTime, inputEventSourceToString(source).c_str(),
                         displayId.toString().c_str(), MotionEvent::actionToString(action).c_str(),
-                        actionButton, flags, metaState, buttonState,
-                        motionClassificationToString(classification), edgeFlags, xPrecision,
-                        yPrecision, xCursorPosition, yCursorPosition);
+                        actionButton, flags.string().c_str(), metaState, buttonState,
+                        motionClassificationToString(classification), xPrecision, yPrecision,
+                        xCursorPosition, yCursorPosition);
 
     for (uint32_t i = 0; i < getPointerCount(); i++) {
         if (i) {
@@ -241,7 +239,7 @@ std::ostream& operator<<(std::ostream& out, const MotionEntry& motionEntry) {
 
 // --- SensorEntry ---
 
-SensorEntry::SensorEntry(int32_t id, nsecs_t eventTime, int32_t deviceId, uint32_t source,
+SensorEntry::SensorEntry(int32_t id, nsecs_t eventTime, DeviceId deviceId, uint32_t source,
                          uint32_t policyFlags, nsecs_t hwTimestamp,
                          InputDeviceSensorType sensorType, InputDeviceSensorAccuracy accuracy,
                          bool accuracyChanged, std::vector<float> values)
@@ -290,19 +288,14 @@ DispatchEntry::DispatchEntry(std::shared_ptr<const EventEntry> eventEntry,
         rawTransform(rawTransform),
         globalScaleFactor(globalScaleFactor),
         deliveryTime(0),
-        resolvedFlags(0),
+        resolvedMotionFlags{},
         targetUid(targetUid),
         vsyncId(vsyncId),
         windowId(windowId) {
     switch (this->eventEntry->type) {
-        case EventEntry::Type::KEY: {
-            const KeyEntry& keyEntry = static_cast<const KeyEntry&>(*this->eventEntry);
-            resolvedFlags = keyEntry.flags;
-            break;
-        }
         case EventEntry::Type::MOTION: {
             const MotionEntry& motionEntry = static_cast<const MotionEntry&>(*this->eventEntry);
-            resolvedFlags = motionEntry.flags;
+            resolvedMotionFlags = motionEntry.flags;
             break;
         }
         default: {
@@ -321,10 +314,13 @@ uint32_t DispatchEntry::nextSeq() {
 }
 
 std::ostream& operator<<(std::ostream& out, const DispatchEntry& entry) {
+    out << "DispatchEntry{";
+    if (entry.eventEntry->type == EventEntry::Type::MOTION) {
+        out << "resolvedMotionFlags=" << entry.resolvedMotionFlags.string() << ", ";
+    }
     std::string transform;
     entry.transform.dump(transform, "transform");
-    out << "DispatchEntry{resolvedFlags=" << entry.resolvedFlags
-        << ", targetFlags=" << entry.targetFlags.string() << ", transform=" << transform
+    out << "targetFlags=" << entry.targetFlags.string() << ", transform=" << transform
         << "} original: " << entry.eventEntry->getDescription();
     return out;
 }

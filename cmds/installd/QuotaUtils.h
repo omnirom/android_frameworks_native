@@ -37,6 +37,16 @@ int64_t GetOccupiedSpaceForGid(const std::string& uuid, gid_t gid);
 
 /* Get the current occupied space in bytes for a project id or -1 if fails */
 int64_t GetOccupiedSpaceForProjectId(const std::string& uuid, int projectId);
+
+/**
+ * Ensure that we have a hard-limit quota to protect against abusive apps;
+ * they should never use more than 50% of inodes.
+ */
+bool PrepareAppInodeQuota(const std::string& uuid, uid_t uid);
+
+/* Get the inode quota hard limits for a uid or -1 if fails */
+int64_t GetInodesQuotaHardLimitsForUid(const std::string& uuid, uid_t uid);
+
 }  // namespace installd
 }  // namespace android
 

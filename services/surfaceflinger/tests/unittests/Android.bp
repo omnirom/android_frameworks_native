@@ -63,7 +63,6 @@ filegroup {
         "mock/MockEventThread.cpp",
         "mock/MockFrameTimeline.cpp",
         "mock/MockFrameTracer.cpp",
-        "mock/MockNativeWindowSurface.cpp",
         "mock/MockTimeStats.cpp",
         "mock/MockVSyncDispatch.cpp",
         "mock/MockVSyncTracker.cpp",
@@ -91,6 +90,9 @@ cc_test {
         ":libsurfaceflinger_backend_mock_sources",
         ":libsurfaceflinger_mock_sources",
         ":libsurfaceflinger_sources",
+    ],
+    static_libs: [
+        "libflagtest",
     ],
 }
 
@@ -156,7 +158,7 @@ cc_defaults {
         "libpowermanager",
         "libprocessgroup",
         "libprotobuf-cpp-lite",
-        "libstatslog_surfaceflinger",
+        "libstatslog_surfaceflinger_bootstrap",
         "libsync",
         "libtracing_perfetto",
         "libui",

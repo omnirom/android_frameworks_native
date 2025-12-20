@@ -10,7 +10,6 @@ package {
 
 cc_test {
     name: "libinput_tests",
-    cpp_std: "c++20",
     host_supported: true,
     srcs: [
         "BlockingQueue_test.cpp",
@@ -80,7 +79,6 @@ cc_test {
         "libbinder",
         "libcutils",
         "liblog",
-        "libstatslog",
         "libtinyxml2",
         "libutils",
         "server_configurable_flags",
@@ -88,6 +86,10 @@ cc_test {
     data: [
         ":motion_predictor_model",
         "data/*",
+    ],
+    device_first_data: [
+        ":keychars_test_data",
+        ":keylayout_test_data",
     ],
     test_options: {
         unit_test: true,

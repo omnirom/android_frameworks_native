@@ -15,6 +15,8 @@
  */
 #pragma once
 
+#include <stdint.h>
+
 typedef struct uuid {
-    int placeholder;
+    uint64_t placeholder;
 } uuid_t;

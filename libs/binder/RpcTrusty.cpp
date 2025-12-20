@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-#define LOG_TAG "RpcTrusty"
+#define LOG_TAG "libbinder.RpcTrusty"
 
 #include <binder/RpcSession.h>
 #include <binder/RpcTransportTipcAndroid.h>

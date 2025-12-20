@@ -56,7 +56,7 @@ void addRawMotionRange(InputDeviceInfo& deviceInfo, int32_t androidAxis,
 
 CapturedTouchpadEventConverter::CapturedTouchpadEventConverter(
         InputReaderContext& readerContext, const InputDeviceContext& deviceContext,
-        MultiTouchMotionAccumulator& motionAccumulator, int32_t deviceId)
+        MultiTouchMotionAccumulator& motionAccumulator, DeviceId deviceId)
       : mDeviceId(deviceId),
         mReaderContext(readerContext),
         mDeviceContext(deviceContext),
@@ -313,8 +313,8 @@ NotifyMotionArgs CapturedTouchpadEventConverter::makeMotionArgs(
                             ui::LogicalDisplayId::INVALID, /*policyFlags=*/POLICY_FLAG_WAKE, action,
                             /*actionButton=*/actionButton, flags,
                             mReaderContext.getGlobalMetaState(), mButtonState,
-                            MotionClassification::NONE, AMOTION_EVENT_EDGE_FLAG_NONE, coords.size(),
-                            properties.data(), coords.data(), /*xPrecision=*/1.0f,
+                            MotionClassification::NONE, coords.size(), properties.data(),
+                            coords.data(), /*xPrecision=*/1.0f,
                             /*yPrecision=*/1.0f, AMOTION_EVENT_INVALID_CURSOR_POSITION,
                             AMOTION_EVENT_INVALID_CURSOR_POSITION, mDownTime, /*videoFrames=*/{});
 }

@@ -296,4 +296,10 @@ inline bool operator!=(const SmallMap<K, V, N, E>& lhs, const SmallMap<Q, W, M, 
   return !(lhs == rhs);
 }
 
+template <typename>
+struct is_small_map : std::false_type {};
+
+template <typename K, typename V, std::size_t N>
+struct is_small_map<SmallMap<K, V, N>> : std::true_type {};
+
 }  // namespace android::ftl

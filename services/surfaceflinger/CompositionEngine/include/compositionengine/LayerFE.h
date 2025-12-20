@@ -164,6 +164,10 @@ public:
     // Sets promise with its buffer's release fence
     virtual void setReleaseFence(const FenceResult& releaseFence) = 0;
 
+    virtual void setLastClientTargetAcquireFence(const FenceResult&) = 0;
+
+    virtual sp<Fence> getAndClearLastClientTargetAcquireFence() = 0;
+
     // Checks if the buffer's release fence has been set
     virtual LayerFE::ReleaseFencePromiseStatus getReleaseFencePromiseStatus() = 0;
 

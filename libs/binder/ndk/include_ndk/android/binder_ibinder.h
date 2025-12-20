@@ -239,9 +239,9 @@ void AIBinder_Class_setOnDump(AIBinder_Class* clazz, AIBinder_onDump onDump) __I
  * You can use nullptr if certain transaction codes are not used. Lifetime should be same as clazz.
  * \param length number of elements in the transactionCodeToFunctionMap
  */
-void AIBinder_Class_setTransactionCodeToFunctionNameMap(AIBinder_Class* clazz,
-                                                        const char** transactionCodeToFunctionMap,
-                                                        size_t length) __INTRODUCED_IN(36);
+void AIBinder_Class_setTransactionCodeToFunctionNameMap(
+        AIBinder_Class* clazz, const char* const* transactionCodeToFunctionMap, size_t length)
+        __INTRODUCED_IN(36);
 
 /**
  * Get function name associated with transaction code for given class
@@ -882,6 +882,23 @@ AIBinder_Weak* AIBinder_Weak_clone(const AIBinder_Weak* weak) __INTRODUCED_IN(31
  * \return whether "lhs < rhs" is true
  */
 bool AIBinder_Weak_lt(const AIBinder_Weak* lhs, const AIBinder_Weak* rhs) __INTRODUCED_IN(31);
+
+/**
+ * Set the minimum number of RPC threads required to service this binder.
+ *
+ * This value is used to ensure there are enough threads for the RPC binder
+ * connections.
+ *
+ * This is not related to the ProcessState binder threadpool.
+ *
+ * \param binder the local AIBinder (ABBinder) to set this minimum on.
+ * \param min number of threads required to service the binder, must be at least 1
+ *
+ * \return STATUS_UNEXPECTED_NULL if binder is nullptr
+ *         STATUS_BAD_VALUE if min is 0
+ *         STATUS_OK otherwise
+ */
+binder_status_t AIBinder_setMinRpcThreads(AIBinder* binder, uint16_t min) __INTRODUCED_IN(37);
 
 __END_DECLS
 

@@ -147,6 +147,9 @@ sp<Surface> SurfaceControl::generateSurfaceLocked()
     // This surface is always consumed by SurfaceFlinger, so the
     // producerControlledByApp value doesn't matter; using false.
     mSurfaceData = mBbq->getSurface(true);
+    if (Surface::IsCursorPlaneCompatibilitySupported()) {
+        mSurfaceData->setIsForCursor(flags & ISurfaceComposerClient::eCursorWindow);
+    }
 
     return mSurfaceData;
 }
@@ -194,22 +197,23 @@ const std::string& SurfaceControl::getName() const {
     return mName;
 }
 
-std::shared_ptr<Choreographer> SurfaceControl::getChoreographer() {
+Choreographer* SurfaceControl::getChoreographer() {
     if (mChoreographer) {
-        return mChoreographer;
+        return mChoreographer.get();
     }
     sp<Looper> looper = Looper::getForThread();
     if (!looper.get()) {
         ALOGE("%s: No looper prepared for thread", __func__);
         return nullptr;
     }
-    mChoreographer = std::make_shared<Choreographer>(looper, getHandle());
-    status_t result = mChoreographer->initialize();
+    auto choreographer = sp<Choreographer>::make(looper, getHandle());
+    status_t result = choreographer->initialize();
     if (result != OK) {
         ALOGE("Failed to initialize choreographer");
-        mChoreographer = nullptr;
+        return nullptr;
     }
-    return mChoreographer;
+    mChoreographer = std::move(choreographer);
+    return mChoreographer.get();
 }
 
 sp<IGraphicBufferProducer> SurfaceControl::getIGraphicBufferProducer()
@@ -304,7 +308,7 @@ sp<SurfaceControl> SurfaceControl::getParentingLayer() {
     if (mBbqChild != nullptr) {
         return mBbqChild;
     }
-    return this;
+    return sp<SurfaceControl>::fromExisting(this);
 }
 
 uint64_t SurfaceControl::resolveFrameNumber(const std::optional<uint64_t>& frameNumber) {

@@ -79,10 +79,11 @@ private:
 
 class TestBLASTBufferQueue : public BLASTBufferQueue {
 public:
-    TestBLASTBufferQueue(const std::string& name, const sp<SurfaceControl>& surface, int width,
-                         int height, int32_t format)
-          : BLASTBufferQueue(name) {
-        update(surface, width, height, format);
+    static sp<TestBLASTBufferQueue> create(const sp<SurfaceControl>& surface, int width,
+                                           int height) {
+        auto blastBufferQueueAdapter = sp<TestBLASTBufferQueue>::make("TestBLASTBufferQueue");
+        blastBufferQueueAdapter->update(surface, width, height, PIXEL_FORMAT_RGBA_8888);
+        return blastBufferQueueAdapter;
     }
 
     void transactionCallback(nsecs_t latchTime, const sp<Fence>& presentFence,
@@ -106,6 +107,9 @@ public:
     }
 
 private:
+    friend class sp<TestBLASTBufferQueue>;
+    TestBLASTBufferQueue(const std::string& name) : BLASTBufferQueue(name) {}
+
     std::mutex frameNumberMutex;
     std::condition_variable mWaitForCallbackCV;
     int64_t mLastTransactionFrameNumber = -1;
@@ -114,8 +118,7 @@ private:
 class BLASTBufferQueueHelper {
 public:
     BLASTBufferQueueHelper(const sp<SurfaceControl>& sc, int width, int height) {
-        mBlastBufferQueueAdapter = sp<TestBLASTBufferQueue>::make("TestBLASTBufferQueue", sc, width,
-                                                                  height, PIXEL_FORMAT_RGBA_8888);
+        mBlastBufferQueueAdapter = TestBLASTBufferQueue::create(sc, width, height);
     }
 
     void update(const sp<SurfaceControl>& sc, int width, int height) {
@@ -190,6 +193,12 @@ public:
 
     void setApplyToken(sp<IBinder> applyToken) {
         mBlastBufferQueueAdapter->setApplyToken(std::move(applyToken));
+    }
+
+    void dropBbq() { mBlastBufferQueueAdapter.clear(); }
+
+    void setCornerRadiiCallback(std::function<void(const gui::CornerRadii)> callback) {
+        mBlastBufferQueueAdapter->setCornerRadiiCallback(callback);
     }
 
 private:
@@ -1418,23 +1427,103 @@ TEST_F(BLASTBufferQueueTest, TransformHint) {
     ASSERT_EQ(ui::Transform::ROT_90, static_cast<ui::Transform::RotationFlags>(transformHint));
 
     ANativeWindow_Buffer buffer;
-    surface->lock(&buffer, nullptr /* inOutDirtyBounds */);
+    ASSERT_EQ(NO_ERROR, surface->lock(&buffer, nullptr /* inOutDirtyBounds */));
 
     // Transform hint is updated via callbacks or surface control updates
     mSurfaceControl->setTransformHint(ui::Transform::ROT_0);
     adapter.update(mSurfaceControl, mDisplayWidth, mDisplayHeight);
 
     // The hint does not change and matches the value used when dequeueing the buffer.
-    surface->query(NATIVE_WINDOW_TRANSFORM_HINT, &transformHint);
+    ASSERT_EQ(NO_ERROR, surface->query(NATIVE_WINDOW_TRANSFORM_HINT, &transformHint));
     ASSERT_EQ(ui::Transform::ROT_90, static_cast<ui::Transform::RotationFlags>(transformHint));
 
-    surface->unlockAndPost();
+    ASSERT_EQ(NO_ERROR, surface->unlockAndPost());
 
     // After queuing the buffer, we get the updated transform hint
-    surface->query(NATIVE_WINDOW_TRANSFORM_HINT, &transformHint);
+    ASSERT_EQ(NO_ERROR, surface->query(NATIVE_WINDOW_TRANSFORM_HINT, &transformHint));
     ASSERT_EQ(ui::Transform::ROT_0, static_cast<ui::Transform::RotationFlags>(transformHint));
 
     adapter.waitForCallbacks();
+}
+
+TEST_F(BLASTBufferQueueTest, SetCornerRadiiCallback) {
+    gui::CornerRadii capturedRadii;
+    bool callbackInvoked = false;
+    std::mutex mutex;
+    std::condition_variable cv;
+
+    auto callback = [&](const gui::CornerRadii& radii) {
+        std::unique_lock<std::mutex> lock(mutex);
+        capturedRadii = radii;
+        callbackInvoked = true;
+        cv.notify_one();
+    };
+    BLASTBufferQueueHelper adapter(mSurfaceControl, mDisplayWidth, mDisplayHeight);
+    adapter.setCornerRadiiCallback(callback);
+
+    gui::CornerRadii expectedRadii(10.0f, 20.0f, 30.0f, 40.0f);
+
+    sp<IGraphicBufferProducer> igbProducer;
+    setUpProducer(adapter, igbProducer);
+
+    Transaction syncTransaction;
+    syncTransaction.setCornerRadius(mSurfaceControl, expectedRadii);
+    adapter.setSyncTransaction(syncTransaction, true /* acquireSingleBuffer */);
+    queueBuffer(igbProducer, 255, 0, 0, 0);
+    syncTransaction.apply();
+
+    std::unique_lock<std::mutex> lock(mutex);
+    if (!callbackInvoked) {
+        ASSERT_NE(cv.wait_for(lock, std::chrono::seconds(3)), std::cv_status::timeout)
+                << "did not receive callback";
+    }
+
+    ASSERT_TRUE(callbackInvoked);
+    ASSERT_EQ(capturedRadii, expectedRadii);
+}
+
+// Verifies that we don't deadlock if BufferQueueProducer::cancelBuffer is called on a thread
+// right before the owner of BBQ drops its strong pointer (b/410458641). This test is
+// non-deterministic and sensitive to timings. The owning BBQ pointer may be dropped before,
+// during, or after notifyBufferReleased is called. This test could be improved by mocking
+// the BufferReleaseReader, forcing it to wait until after we drop the BBQ pointer. Doing so
+// would require injecting a mock BufferReleaseReader into BBQ which is difficult to do with the
+// current code structure.
+TEST_F(BLASTBufferQueueTest, CancelBuffer_NoDeadlock) {
+    for (int i = 0; i < 100; i++) {
+        BLASTBufferQueueHelper adapter(mSurfaceControl, mDisplayWidth, mDisplayHeight);
+        sp<IGraphicBufferProducer> producer;
+        setUpProducer(adapter, producer);
+
+        int slot;
+        sp<Fence> fence;
+        sp<GraphicBuffer> buf;
+        status_t status = producer->dequeueBuffer(&slot, &fence, mDisplayWidth, mDisplayHeight,
+                                                  PIXEL_FORMAT_RGBA_8888,
+                                                  GRALLOC_USAGE_SW_WRITE_OFTEN, nullptr, nullptr);
+        ASSERT_EQ(IGraphicBufferProducer::BUFFER_NEEDS_REALLOCATION, status);
+        ASSERT_EQ(OK, producer->requestBuffer(slot, &buf));
+
+        bool threadComplete = false;
+        std::mutex threadCompleteMutex;
+        std::condition_variable threadCompleteCondition;
+
+        std::thread thread([&]() {
+            producer->cancelBuffer(slot, fence);
+            std::lock_guard lock{threadCompleteMutex};
+            threadComplete = true;
+            threadCompleteCondition.notify_one();
+        });
+
+        // Give the background thread some time to start up before dropping the BBQ pointer.
+        std::this_thread::sleep_for(1ms);
+
+        adapter.dropBbq();
+        std::unique_lock lock{threadCompleteMutex};
+        ASSERT_TRUE(threadCompleteCondition.wait_for(lock, 5s, [&]() { return threadComplete; }))
+                << "Failed to join background thread, likely indicates deadlock";
+        thread.join();
+    }
 }
 
 class BLASTBufferQueueTransformTest : public BLASTBufferQueueTest {

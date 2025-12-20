@@ -200,9 +200,9 @@ NotifyMotionArgs generateFuzzedMotionArgs(IdGenerator& idGenerator, FuzzedDataPr
     return NotifyMotionArgs(idGenerator.nextId(), eventTime, readTime, deviceId, source, displayId,
                             POLICY_FLAG_PASS_TO_USER, action, actionButton,
                             getFuzzedFlags(fdp, action), AMETA_NONE, getFuzzedButtonState(fdp),
-                            MotionClassification::NONE, AMOTION_EVENT_EDGE_FLAG_NONE, pointerCount,
-                            pointerProperties.data(), pointerCoords.data(), /*xPrecision=*/0,
-                            /*yPrecision=*/0, cursorX, cursorY, downTime, /*videoFrames=*/{});
+                            MotionClassification::NONE, pointerCount, pointerProperties.data(),
+                            pointerCoords.data(), /*xPrecision=*/0, /*yPrecision=*/0, cursorX,
+                            cursorY, downTime, /*videoFrames=*/{});
 }
 
 } // namespace android

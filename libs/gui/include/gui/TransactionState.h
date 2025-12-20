@@ -17,17 +17,36 @@
 #pragma once
 
 #include <android/gui/FrameTimelineInfo.h>
+#include <android/gui/TransactionBarrier.h>
 #include <binder/Parcelable.h>
 #include <gui/LayerState.h>
 
 namespace android {
 
+struct TransactionListenerCallbacks {
+    std::vector<ListenerCallbacks> mFlattenedListenerCallbacks;
+    // Note: mHasListenerCallbacks can be true even if mFlattenedListenerCallbacks is
+    // empty because it reflects the unflattened map.
+    bool mHasListenerCallbacks = false;
+
+    status_t writeToParcel(Parcel* parcel) const;
+    status_t readFromParcel(const Parcel* parcel);
+    void clear();
+    bool operator==(const TransactionListenerCallbacks& rhs) const = default;
+    bool operator!=(const TransactionListenerCallbacks& rhs) const = default;
+};
+
 // Class to store all the transaction data and the parcelling logic
 class TransactionState {
 public:
     explicit TransactionState() = default;
-    TransactionState(TransactionState&& other) = default;
-    TransactionState& operator=(TransactionState&& other) = default;
+    TransactionState(TransactionState const& other) = default;
+    TransactionState(uint64_t id, uint32_t flags, int64_t desiredPresentTime, bool isAutoTimestamp)
+          : mId(id),
+            mFlags(flags),
+            mDesiredPresentTime(desiredPresentTime),
+            mIsAutoTimestamp(isAutoTimestamp) {}
+
     status_t writeToParcel(Parcel* parcel) const;
     status_t readFromParcel(const Parcel* parcel);
     layer_state_t* getLayerState(const sp<SurfaceControl>& sc);
@@ -37,21 +56,18 @@ public:
     // The id is updated every time the transaction is applied.
     uint64_t getId() const { return mId; }
     std::vector<uint64_t> getMergedTransactionIds() const { return mMergedTransactionIds; }
-    void enableDebugLogCallPoints() { mLogCallPoints = true; }
     void merge(TransactionState&& other,
-               const std::function<void(layer_state_t&)>& onBufferOverwrite);
+               const std::function<void(const layer_state_t&)>& onBufferOverwrite);
 
     // copied from FrameTimelineInfo::merge()
     void mergeFrameTimelineInfo(const FrameTimelineInfo& other);
+
     void clear();
     bool operator==(const TransactionState& rhs) const = default;
     bool operator!=(const TransactionState& rhs) const = default;
 
     uint64_t mId = 0;
-    std::vector<uint64_t> mMergedTransactionIds;
     uint32_t mFlags = 0;
-    // The vsync id provided by Choreographer.getVsyncId and the input event id
-    gui::FrameTimelineInfo mFrameTimelineInfo;
     // mDesiredPresentTime is the time in nanoseconds that the client would like the transaction
     // to be presented. When it is not possible to present at exactly that time, it will be
     // presented after the time has passed.
@@ -67,29 +83,23 @@ public:
     // The desired present time does not affect this ordering.
     int64_t mDesiredPresentTime = 0;
     bool mIsAutoTimestamp = true;
-    // If not null, transactions will be queued up using this token otherwise a common token
-    // per process will be used.
-    sp<IBinder> mApplyToken;
-    // Indicates that the Transaction may contain buffers that should be cached. The reason this
-    // is only a guess is that buffers can be removed before cache is called. This is only a
-    // hint that at some point a buffer was added to this transaction before apply was called.
-    bool mMayContainBuffer = false;
-    // Prints debug logs when enabled.
-    bool mLogCallPoints = false;
 
-    std::vector<DisplayState> mDisplayStates;
-    std::vector<ComposerState> mComposerStates;
-    InputWindowCommands mInputWindowCommands;
-    std::vector<client_cache_t> mUncacheBuffers;
-    // Note: mHasListenerCallbacks can be true even if mListenerCallbacks is
-    // empty.
-    bool mHasListenerCallbacks = false;
-    std::vector<ListenerCallbacks> mListenerCallbacks;
+    // The vsync id provided by Choreographer.getVsyncId and the input event id
+    gui::FrameTimelineInfo mFrameTimelineInfo = {};
+    std::vector<client_cache_t> mUncacheBuffers = {};
+    std::vector<uint64_t> mMergedTransactionIds = {};
+    TransactionListenerCallbacks mCallbacks = TransactionListenerCallbacks();
+    InputWindowCommands mInputWindowCommands = {};
+    // Tracks the client setting the early wakeup request
+    std::vector<gui::EarlyWakeupInfo> mEarlyWakeupInfos = {};
+    std::vector<ComposerState> mComposerStates = {};
+    std::vector<DisplayState> mDisplayStates = {};
+    std::vector<gui::TransactionBarrier> mBarriers = {};
 
-private:
-    explicit TransactionState(TransactionState const& other) = default;
-    friend class TransactionApplicationTest;
-    friend class SurfaceComposerClient;
+    // Keep track of the last MAX_BARRIERS_LENGTH transaction barriers.
+    // Ordered most recently merged to least recently merged.
+    static constexpr size_t MAX_BARRIERS_LENGTH = 10u;
+
     // We keep track of the last MAX_MERGE_HISTORY_LENGTH merged transaction ids.
     // Ordered most recently merged to least recently merged.
     static constexpr size_t MAX_MERGE_HISTORY_LENGTH = 10u;

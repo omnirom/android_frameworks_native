@@ -20,6 +20,8 @@
 #include <android-base/stringprintf.h>
 #include <input/PrintTools.h>
 
+#define INDENT "  "
+
 using android::base::Result;
 using android::base::StringPrintf;
 
@@ -41,6 +43,10 @@ bool hasPointerId(const std::vector<TouchedWindow::HoveringPointer>& pointers, i
                         [&pointerId](const TouchedWindow::HoveringPointer& pointer) {
                             return pointer.properties.id == pointerId;
                         }) != pointers.end();
+}
+
+std::string deviceIdToString(const DeviceId& deviceId) {
+    return StringPrintf("DeviceId(%d)", deviceId);
 }
 
 } // namespace
@@ -329,9 +335,10 @@ std::string TouchedWindow::deviceStateToString(const TouchedWindow::DeviceState&
 
 std::string TouchedWindow::dump() const {
     std::string out;
-    std::string deviceStates =
-            dumpMap(mDeviceStates, constToString, TouchedWindow::deviceStateToString);
-    out += StringPrintf("name='%s', targetFlags=%s, forwardingWindowToken=%p, mDeviceStates=%s\n",
+    std::string deviceStates = addLinePrefix(dumpMap(mDeviceStates, deviceIdToString,
+                                                     TouchedWindow::deviceStateToString),
+                                             INDENT);
+    out += StringPrintf("name='%s', targetFlags=%s, forwardingWindowToken=%p, mDeviceStates=\n%s\n",
                         windowHandle->getName().c_str(), targetFlags.string().c_str(),
                         forwardingWindowToken.get(), deviceStates.c_str());
     return out;

@@ -14,9 +14,6 @@
  * limitations under the License.
  */
 
-#undef LOG_TAG
-#define LOG_TAG "LayerStateTest"
-
 #include <aidl/android/hardware/graphics/common/BufferUsage.h>
 #include <common/include/common/test/FlagUtils.h>
 #include <compositionengine/impl/OutputLayer.h>

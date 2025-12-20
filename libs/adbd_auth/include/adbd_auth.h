@@ -28,9 +28,11 @@
 __BEGIN_DECLS
 
 // The transport type of the device connection.
+// must be in sync with frameworks/base/core/java/android/debug/AdbTransportType.aidl
 enum AdbTransportType : int32_t {
     kAdbTransportTypeUsb = 0,
     kAdbTransportTypeWifi,
+    kAdbTransportTypeVsock,
 };
 static_assert(sizeof(AdbTransportType) == sizeof(int32_t), "Unexpected AdbTransportType size");
 
@@ -45,6 +47,14 @@ struct AdbdAuthCallbacksV1 : AdbdAuthCallbacks {
     // adbd so it can take the appropriate actions (e.g. disconnect all devices
     // using that key).
     void (*key_removed)(const char* public_key, size_t length);
+};
+
+struct AdbdAuthCallbacksV2 : AdbdAuthCallbacksV1 {
+    // The framework wants adbd to start adb wifi (TCP / TLS)
+    void (*start_adbd_wifi)();
+
+    // The framework wants adbd to stop adb wifi (TCP / TLS)
+    void (*stop_adbd_wifi)();
 };
 
 struct AdbdAuthContext;
@@ -175,6 +185,7 @@ void adbd_auth_tls_device_disconnected(AdbdAuthContext* ctx,
 uint32_t adbd_auth_get_max_version(void) __INTRODUCED_IN(30);
 
 enum AdbdAuthFeature : int32_t {
+  WifiLifeCycle, // Framework can request ADB Wifi TLS server to start/stop.
 };
 
 /**
@@ -184,5 +195,13 @@ enum AdbdAuthFeature : int32_t {
  * @return true if the feature is supported
  */
 bool adbd_auth_supports_feature(AdbdAuthFeature feature);
+
+/**
+ * Advertise the port number the TLS server is running on. 0 = not running.
+ *
+ * @param ctx the AdbdAuthContext
+ * @param port the port number the TLS server is running on.
+ */
+void adbd_auth_send_tls_server_port(AdbdAuthContext* ctx, uint16_t port) __INTRODUCED_IN(37);
 
 __END_DECLS

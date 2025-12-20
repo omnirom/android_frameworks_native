@@ -161,20 +161,6 @@ static common::PolicyFlag getPolicyFlags(int32_t flags) {
     return static_cast<common::PolicyFlag>(flags);
 }
 
-static common::EdgeFlag getEdgeFlags(int32_t flags) {
-    static_assert(static_cast<common::EdgeFlag>(AMOTION_EVENT_EDGE_FLAG_NONE) ==
-                  common::EdgeFlag::NONE);
-    static_assert(static_cast<common::EdgeFlag>(AMOTION_EVENT_EDGE_FLAG_TOP) ==
-                  common::EdgeFlag::TOP);
-    static_assert(static_cast<common::EdgeFlag>(AMOTION_EVENT_EDGE_FLAG_BOTTOM) ==
-                  common::EdgeFlag::BOTTOM);
-    static_assert(static_cast<common::EdgeFlag>(AMOTION_EVENT_EDGE_FLAG_LEFT) ==
-                  common::EdgeFlag::LEFT);
-    static_assert(static_cast<common::EdgeFlag>(AMOTION_EVENT_EDGE_FLAG_RIGHT) ==
-                  common::EdgeFlag::RIGHT);
-    return static_cast<common::EdgeFlag>(flags);
-}
-
 static common::Meta getMetastate(int32_t state) {
     static_assert(static_cast<common::Meta>(AMETA_NONE) == common::Meta::NONE);
     static_assert(static_cast<common::Meta>(AMETA_ALT_ON) == common::Meta::ALT_ON);
@@ -323,7 +309,8 @@ common::MotionEvent notifyMotionArgsToHalMotionEvent(const NotifyMotionArgs& arg
     event.actionButton = getActionButton(args.actionButton);
     event.flags = getFlags(args.flags);
     event.policyFlags = getPolicyFlags(args.policyFlags);
-    event.edgeFlags = getEdgeFlags(args.edgeFlags);
+    // TODO(b/321101159): remove the edgeFlags field from the AIDL MotionEvent.
+    event.edgeFlags = common::EdgeFlag::NONE;
     event.metaState = getMetastate(args.metaState);
     event.buttonState = getButtonState(args.buttonState);
     event.xPrecision = args.xPrecision;
@@ -348,11 +335,12 @@ MotionEvent toMotionEvent(const NotifyMotionArgs& args, const ui::Transform* tra
 
     MotionEvent event;
     event.initialize(args.id, args.deviceId, args.source, args.displayId, *hmac, args.action,
-                     args.actionButton, args.flags, args.edgeFlags, args.metaState,
-                     args.buttonState, args.classification, *transform, args.xPrecision,
-                     args.yPrecision, args.xCursorPosition, args.yCursorPosition, *rawTransform,
-                     args.downTime, args.eventTime, args.getPointerCount(),
-                     args.pointerProperties.data(), args.pointerCoords.data());
+                     args.actionButton, ftl::Flags<MotionFlag>(args.flags),
+                     AMOTION_EVENT_EDGE_FLAG_NONE, args.metaState, args.buttonState,
+                     args.classification, *transform, args.xPrecision, args.yPrecision,
+                     args.xCursorPosition, args.yCursorPosition, *rawTransform, args.downTime,
+                     args.eventTime, args.getPointerCount(), args.pointerProperties.data(),
+                     args.pointerCoords.data());
     return event;
 }
 

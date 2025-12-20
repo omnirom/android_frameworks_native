@@ -14,13 +14,15 @@
  * limitations under the License.
  */
 
-#define LOG_TAG "binderRpcTest"
+#define LOG_TAG "libbinder.binderRpcTest"
 
 #include <binder/RpcTransportTipcTrusty.h>
 #include <trusty-gtest.h>
 #include <trusty_ipc.h>
 
 #include "binderRpcTestFixture.h"
+
+#include <algorithm>
 
 using android::binder::unique_fd;
 

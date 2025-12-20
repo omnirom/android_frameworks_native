@@ -49,18 +49,14 @@ class CompositionEngine;
 } // namespace compositionengine
 
 namespace scheduler {
+class FrameTimeline;
 class VsyncConfiguration;
 class VsyncController;
 } // namespace scheduler
 
-namespace frametimeline {
-class FrameTimeline;
-} // namespace frametimeline
-
 namespace surfaceflinger {
 
 struct LayerCreationArgs;
-class NativeWindowSurface;
 
 // The interface that SurfaceFlinger uses to create all of the implementations
 // of each interface.
@@ -74,20 +70,13 @@ public:
     virtual sp<GraphicBuffer> createGraphicBuffer(uint32_t width, uint32_t height,
                                                   PixelFormat format, uint32_t layerCount,
                                                   uint64_t usage, std::string requestorName) = 0;
-    virtual void createBufferQueue(sp<IGraphicBufferProducer>* outProducer,
-                                   sp<IGraphicBufferConsumer>* outConsumer,
-                                   bool consumerIsSurfaceFlinger) = 0;
-
-    virtual std::unique_ptr<surfaceflinger::NativeWindowSurface> createNativeWindowSurface(
-            const sp<IGraphicBufferProducer>&) = 0;
 
     virtual std::unique_ptr<compositionengine::CompositionEngine> createCompositionEngine() = 0;
 
-    virtual sp<Layer> createBufferStateLayer(const LayerCreationArgs& args) = 0;
-    virtual sp<Layer> createEffectLayer(const LayerCreationArgs& args) = 0;
+    virtual sp<Layer> createLayer(const LayerCreationArgs& args) = 0;
     virtual sp<LayerFE> createLayerFE(const std::string& layerName, const Layer* owner) = 0;
     virtual std::unique_ptr<FrameTracer> createFrameTracer() = 0;
-    virtual std::unique_ptr<frametimeline::FrameTimeline> createFrameTimeline(
+    virtual std::unique_ptr<scheduler::FrameTimeline> createFrameTimeline(
             std::shared_ptr<TimeStats> timeStats, pid_t surfaceFlingerPid) = 0;
 
 protected:

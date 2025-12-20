@@ -22,7 +22,7 @@
 
 #include <scheduler/interface/ICompositor.h>
 
-#include "FrameTimeline/FrameTimeline.h"
+#include "Scheduler/FrameTimeline.h"
 #include "Scheduler/MessageQueue.h"
 #include "mock/MockVSyncDispatch.h"
 #include "utils/Timers.h"
@@ -68,9 +68,9 @@ public:
     const sp<MockHandler> mHandler;
 };
 
-struct MockTokenManager : frametimeline::TokenManager {
-    MOCK_METHOD1(generateTokenForPredictions, int64_t(frametimeline::TimelineItem&& prediction));
-    MOCK_CONST_METHOD1(getPredictionsForToken, std::optional<frametimeline::TimelineItem>(int64_t));
+struct MockTokenManager : scheduler::TokenManager {
+    MOCK_METHOD1(generateTokenForPredictions, int64_t(scheduler::TimelineItem&& prediction));
+    MOCK_CONST_METHOD1(getPredictionsForToken, std::optional<scheduler::TimelineItem>(int64_t));
 };
 
 struct MessageQueueTest : testing::Test {
@@ -159,9 +159,9 @@ TEST_F(MessageQueueTest, commitTwiceWithCallback) {
     constexpr VsyncId vsyncId{42};
 
     EXPECT_CALL(mTokenManager,
-                generateTokenForPredictions(
-                        frametimeline::TimelineItem(kStartTime.ns(), kEndTime.ns(),
-                                                    kPresentTime.ns(), kPresentTime.ns())))
+                generateTokenForPredictions(scheduler::TimelineItem(kStartTime.ns(), kEndTime.ns(),
+                                                                    kPresentTime.ns(),
+                                                                    kPresentTime.ns())))
             .WillOnce(Return(ftl::to_underlying(vsyncId)));
     EXPECT_CALL(*mEventQueue.mHandler, dispatchFrame(vsyncId, kPresentTime)).Times(1);
     EXPECT_NO_FATAL_FAILURE(

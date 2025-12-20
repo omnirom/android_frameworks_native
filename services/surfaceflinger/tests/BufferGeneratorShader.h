@@ -34,9 +34,9 @@ void main() {
 static const char* FRAGMENT_SHADER = R"SHADER__(#version 300 es
 precision highp float;
 
-layout(location = 0) uniform vec4 resolution;
-layout(location = 1) uniform float time;
-layout(location = 2) uniform vec3[4] SPHERICAL_HARMONICS;
+uniform vec4 resolution;
+uniform float time;
+uniform vec3[4] SPHERICAL_HARMONICS;
 
 layout(location = 0) out vec4 fragColor;
 

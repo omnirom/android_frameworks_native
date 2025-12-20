@@ -183,6 +183,7 @@ cc_library_shared {
         "EGL/egl_angle_platform.cpp",
     ],
     shared_libs: [
+        "libapexsupport",
         "libvndksupport",
         "android.hardware.configstore@1.0",
         "android.hardware.configstore-utils",

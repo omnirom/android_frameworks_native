@@ -35,6 +35,9 @@ namespace android {
 namespace surfaceflinger {
 class LayerProtoHelper {
 public:
+    static void writeCornerRadiiToProto(
+            float tl, float tr, float bl, float br,
+            const std::function<perfetto::protos::CornerRadiiProto*()>& getCornerRadiiProto);
     static void writePositionToProto(
             const float x, const float y,
             std::function<perfetto::protos::PositionProto*()> getPositionProto);

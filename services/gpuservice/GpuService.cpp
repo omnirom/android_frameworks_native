@@ -24,7 +24,6 @@
 #include <binder/IResultReceiver.h>
 #include <binder/Parcel.h>
 #include <binder/PermissionCache.h>
-#include <com_android_frameworks_gpuservice_flags.h>
 #include <com_android_graphics_graphicsenv_flags.h>
 #include <cutils/properties.h>
 #include <cutils/multiuser.h>
@@ -42,7 +41,6 @@
 #include <thread>
 #include <memory>
 
-namespace gpuservice_flags = com::android::frameworks::gpuservice::flags;
 namespace graphicsenv_flags = com::android::graphics::graphicsenv::flags;
 
 namespace android {
@@ -62,11 +60,14 @@ const std::string sAngleGlesDriverSuffix = "angle";
 
 const char* const GpuService::SERVICE_NAME = "gpu";
 
+const std::string kConfigFilePath = "/system/etc/angle/feature_config_vk.binarypb";
+
 GpuService::GpuService()
       : mGpuMem(std::make_shared<GpuMem>()),
         mGpuWork(std::make_shared<gpuwork::GpuWork>()),
         mGpuStats(std::make_unique<GpuStats>()),
-        mGpuMemTracer(std::make_unique<GpuMemTracer>()) {
+        mGpuMemTracer(std::make_unique<GpuMemTracer>()),
+        mFeatureOverrideParser(kConfigFilePath) {
 
     mGpuMemAsyncInitThread = std::make_unique<std::thread>([this] (){
         mGpuMem->initialize();
@@ -120,22 +121,13 @@ void GpuService::toggleAngleAsSystemDriver(bool enabled) {
 
     // only system_server with the ACCESS_GPU_SERVICE permission is allowed to set
     // persist.graphics.egl
-    if (gpuservice_flags::multiuser_permission_check()) {
-        // retrieve the appid of Settings app on multiuser builds
-        const int multiuserappid = multiuser_get_app_id(uid);
-        if (multiuserappid != AID_SYSTEM ||
-            !PermissionCache::checkPermission(sAccessGpuServicePermission, pid, uid)) {
-            ALOGE("Permission Denial: can't set persist.graphics.egl from setAngleAsSystemDriver() "
+    // retrieve the appid of Settings app on multiuser builds
+    const int multiuserappid = multiuser_get_app_id(uid);
+    if (multiuserappid != AID_SYSTEM ||
+        !PermissionCache::checkPermission(sAccessGpuServicePermission, pid, uid)) {
+        ALOGE("Permission Denial: can't set persist.graphics.egl from setAngleAsSystemDriver() "
                 "pid=%d, uid=%d\n, multiuserappid=%d", pid, uid, multiuserappid);
-            return;
-        }
-    } else {
-        if (uid != AID_SYSTEM ||
-            !PermissionCache::checkPermission(sAccessGpuServicePermission, pid, uid)) {
-            ALOGE("Permission Denial: can't set persist.graphics.egl from setAngleAsSystemDriver() "
-                "pid=%d, uid=%d\n", pid, uid);
-            return;
-        }
+        return;
     }
 
     std::lock_guard<std::mutex> lock(mLock);
@@ -146,13 +138,17 @@ void GpuService::toggleAngleAsSystemDriver(bool enabled) {
     }
 }
 
-FeatureOverrides GpuService::getFeatureOverrides() {
-    if (!graphicsenv_flags::angle_feature_overrides()) {
-        FeatureOverrides featureOverrides;
-        return featureOverrides;
-    }
+std::string GpuService::getPersistGraphicsEgl() {
+    std::lock_guard<std::mutex> lock(mLock);
+    return android::base::GetProperty("persist.graphics.egl", "");
+}
 
-    return mFeatureOverrideParser.getFeatureOverrides();
+void GpuService::getFeatureOverrides(FeatureOverrides& featureOverrides) {
+    featureOverrides = mFeatureOverrideParser.getCachedFeatureOverrides();
+}
+
+const FeatureOverrides &GpuService::getCachedFeatureOverrides() {
+    return mFeatureOverrideParser.getCachedFeatureOverrides();
 }
 
 void GpuService::setUpdatableDriverPath(const std::string& driverPath) {
@@ -251,7 +247,8 @@ status_t GpuService::doDump(int fd, const Vector<String16>& args, bool /*asProto
 }
 
 status_t GpuService::cmdFeatureOverrides(int out, int /*err*/) {
-    dprintf(out, "%s\n", mFeatureOverrideParser.getFeatureOverrides().toString().c_str());
+    const FeatureOverrides &featureOverrides = mFeatureOverrideParser.getCachedFeatureOverrides();
+    dprintf(out, "%s\n", featureOverrides.toString().c_str());
     return NO_ERROR;
 }
 

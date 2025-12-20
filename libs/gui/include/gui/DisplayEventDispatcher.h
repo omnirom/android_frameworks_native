@@ -20,6 +20,7 @@
 
 namespace android {
 using FrameRateOverride = DisplayEventReceiver::Event::FrameRateOverride;
+using SupportedRefreshRate = DisplayEventReceiver::Event::SupportedRefreshRate;
 
 class DisplayEventDispatcher : public LooperCallback {
 public:
@@ -50,6 +51,7 @@ private:
     nsecs_t mLastScheduleVsyncTime;
 
     std::vector<FrameRateOverride> mFrameRateOverrides;
+    std::vector<SupportedRefreshRate> mSupportedRefreshRates;
 
     virtual void dispatchVsync(nsecs_t timestamp, PhysicalDisplayId displayId, uint32_t count,
                                VsyncEventData vsyncEventData) = 0;
@@ -58,14 +60,14 @@ private:
 
     virtual void dispatchHotplugConnectionError(nsecs_t timestamp, int32_t connectionError) = 0;
 
-    virtual void dispatchModeChanged(nsecs_t timestamp, PhysicalDisplayId displayId, int32_t modeId,
-                                     nsecs_t vsyncPeriod) = 0;
+    virtual void dispatchModeChangedWithFrameRateOverrides(
+            nsecs_t timestamp, PhysicalDisplayId displayId, int32_t modeId, nsecs_t renderPeriod,
+            nsecs_t appVsyncOffset, nsecs_t presentationDeadline,
+            std::vector<FrameRateOverride> overrides,
+            std::vector<SupportedRefreshRate> supportedRefreshRates) = 0;
     // AChoreographer-specific hook for processing null-events so that looper
     // can be properly poked.
     virtual void dispatchNullEvent(nsecs_t timestamp, PhysicalDisplayId displayId) = 0;
-
-    virtual void dispatchFrameRateOverrides(nsecs_t timestamp, PhysicalDisplayId displayId,
-                                            std::vector<FrameRateOverride> overrides) = 0;
 
     virtual void dispatchHdcpLevelsChanged(PhysicalDisplayId displayId, int32_t connectedLevel,
                                            int32_t maxLevel) = 0;

@@ -1179,6 +1179,65 @@ Status ServiceManager::getServiceDebugInfo(std::vector<ServiceDebugInfo>* outRet
     return Status::ok();
 }
 
+Status ServiceManager::checkServiceAccessImpl(const Access::CallingContext& ctx,
+                                              const std::string& name,
+                                              const std::string& permission, bool* outReturn) {
+    *outReturn = false;
+    if (permission == "find") {
+        std::optional<std::string> _accessor;
+        if (auto status = canFindService(ctx, name, &_accessor); !status.isOk()) {
+            return Status::fromExceptionCode(Status::EX_SECURITY, "SELinux denied.");
+        }
+    } else if (permission == "add") {
+        std::optional<std::string> _accessor;
+        if (auto status = canAddService(ctx, name, &_accessor); !status.isOk()) {
+            return Status::fromExceptionCode(Status::EX_SECURITY, "SELinux denied.");
+        }
+    } else if (permission == "list") {
+        if (!mAccess->canList(ctx)) {
+            return Status::fromExceptionCode(Status::EX_SECURITY, "SELinux denied.");
+        }
+    } else {
+        ALOGE("Unknown service_manager permission: %s", permission.c_str());
+        return Status::fromExceptionCode(Status::EX_ILLEGAL_ARGUMENT, "Invalid permission");
+    }
+
+    *outReturn = true;
+    return Status::ok();
+}
+
+Status ServiceManager::checkServiceAccess(const IServiceManager::CallerContext& callerCtx,
+                                          const std::string& name, const std::string& permission,
+                                          bool* outReturn) {
+    if (callerCtx.sidName.empty() || name.empty() || permission.empty()) {
+        return Status::
+                fromExceptionCode(Status::EX_SECURITY,
+                                  String8::format("Call to checkServiceAccess has incomplete "
+                                                  "arguments. "
+                                                  "the caller security context (sid): \"%s\", "
+                                                  "name: \"%s\", permission: \"%s\".",
+                                                  callerCtx.sidName.c_str(), name.c_str(),
+                                                  permission.c_str()));
+    }
+    // The caller must have check_access permission
+    Access::CallingContext directCallerCtx = mAccess->getCallingContext();
+    // TODO add check_access permission in system/sepolicy/private/access_vectors
+    // For now, the only user of this, virtmgr, already has access to these
+    // services because it needs to proxy them.
+    auto status = checkServiceAccessImpl(directCallerCtx, name, permission, outReturn);
+    if (!status.isOk() || !*outReturn) {
+        return Status::fromExceptionCode(Status::EX_SECURITY,
+                                         "Caller is not allowed to delegate this check to "
+                                         "servicemanager.");
+    }
+
+    Access::CallingContext callingCtx;
+    callingCtx.debugPid = callerCtx.debugPid;
+    callingCtx.uid = callerCtx.uid;
+    callingCtx.sid = callerCtx.sidName;
+    return checkServiceAccessImpl(callingCtx, name, permission, outReturn);
+}
+
 void ServiceManager::clear() {
     mNameToService.clear();
     mNameToRegistrationCallback.clear();

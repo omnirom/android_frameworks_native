@@ -22,6 +22,8 @@
 #include <memory>
 #include <vector>
 
+#include <com_android_input_flags.h>
+#include <flag_macros.h>
 #include <input/Input.h>
 #include <input/InputEventBuilders.h>
 #include <input/InputTransport.h>
@@ -30,6 +32,11 @@
 namespace android {
 
 namespace {
+
+namespace input_flags = com::android::input::flags;
+
+const auto CLEAR_RELATIVE_AXES_IN_RESAMPLED_COORDS =
+        ACONFIG_FLAG(input_flags, clear_relative_axes_in_resampled_coords);
 
 using namespace std::literals::chrono_literals;
 
@@ -41,6 +48,7 @@ struct Pointer {
     float x{0.0f};
     float y{0.0f};
     bool isResampled{false};
+    std::map<int32_t /* axis */, float /* value */> axisValues = {};
     /**
      * Converts from Pointer to PointerCoords. Enables calling LegacyResampler methods and
      * assertions only with the relevant data for tests.
@@ -52,6 +60,9 @@ Pointer::operator PointerCoords() const {
     PointerCoords pointerCoords;
     pointerCoords.setAxisValue(AMOTION_EVENT_AXIS_X, x);
     pointerCoords.setAxisValue(AMOTION_EVENT_AXIS_Y, y);
+    for (const auto& [axis, value] : axisValues) {
+        pointerCoords.setAxisValue(axis, value);
+    }
     pointerCoords.isResampled = isResampled;
     return pointerCoords;
 }
@@ -77,9 +88,13 @@ InputSample::operator InputMessage() const {
                     .downTime(0);
 
     for (const Pointer& pointer : pointers) {
-        messageBuilder.pointer(
+        PointerBuilder pointerBuilder =
                 PointerBuilder{pointer.id, pointer.toolType}.x(pointer.x).y(pointer.y).isResampled(
-                        pointer.isResampled));
+                        pointer.isResampled);
+        for (const auto& [axis, value] : pointer.axisValues) {
+            pointerBuilder.axis(axis, value);
+        }
+        messageBuilder.pointer(pointerBuilder);
     }
     return messageBuilder.build();
 }
@@ -102,8 +117,11 @@ InputStream::operator MotionEvent() const {
                     .eventTime(
                             static_cast<std::chrono::nanoseconds>(firstSample.eventTime).count());
     for (const Pointer& pointer : firstSample.pointers) {
-        const PointerBuilder pointerBuilder =
+        PointerBuilder pointerBuilder =
                 PointerBuilder(pointer.id, pointer.toolType).x(pointer.x).y(pointer.y);
+        for (const auto& [axis, value] : pointer.axisValues) {
+            pointerBuilder.axis(axis, value);
+        }
         motionEventBuilder.pointer(pointerBuilder);
     }
     MotionEvent motionEvent = motionEventBuilder.build();
@@ -125,7 +143,7 @@ InputStream::operator MotionEvent() const {
  * ~16 milliseconds. The resampler's RESAMPLE_LATENCY constant determines the resample time, which
  * is calculated as frameTime - RESAMPLE_LATENCY. resampleTime specifies the time used for
  * resampling. For example, if the desired frame time consumption is ~16 milliseconds, the resample
- * time would be ~11 milliseconds. Consequenly, the last added sample to the motion event has an
+ * time would be ~11 milliseconds. Consequently, the last added sample to the motion event has an
  * event time of ~11 milliseconds. Note that there are specific scenarios where resampleMotionEvent
  * is not called with a multiple of ~16 milliseconds. These cases are primarily for data addition
  * or to test other functionalities of the resampler.
@@ -138,7 +156,7 @@ InputStream::operator MotionEvent() const {
  * 1), the coordinates are interpolated. If alpha is greater than or equal to 1, the coordinates are
  * extrapolated.
  *
- * The timeline below depics an interpolation scenario
+ * The timeline below depicts an interpolation scenario
  * -----------------------------------|---------|---------|---------|----------
  *                                   10ms      11ms      15ms      16ms
  *                                   MOVE       |        MOVE       |
@@ -157,7 +175,7 @@ InputStream::operator MotionEvent() const {
  * - The motion event metadata must not change.
  * - The number of samples in the motion event must only increment by 1.
  * - The resampled values must be at the end of motion event coordinates.
- * - The rasamples values must be near the hand calculations.
+ * - The resampled values must be near the hand calculations.
  * - The resampled time must be the most recent one in motion event.
  */
 class ResamplerTest : public testing::Test {
@@ -191,6 +209,9 @@ protected:
 
     void assertMotionEventIsNotResampled(const MotionEvent& original,
                                          const MotionEvent& notResampled);
+
+    void assertMotionEventHistoricalCoords(const MotionEvent& event, size_t historicalIndex,
+                                           const std::vector<Pointer>& expectedCoords);
 };
 
 void ResamplerTest::assertMotionEventMetaDataDidNotMutate(const MotionEvent& beforeCall,
@@ -223,7 +244,7 @@ void ResamplerTest::assertMotionEventIsResampledAndCoordsNear(
     const size_t numPointers = resampled.getPointerCount();
     const size_t beginLatestSample = resampledSampleSize - 1;
     for (size_t i = 0; i < numPointers; ++i) {
-        SCOPED_TRACE(i);
+        SCOPED_TRACE(testing::Message() << "Pointer idx = " << i);
         EXPECT_EQ(original.getPointerId(i), resampled.getPointerId(i));
         EXPECT_EQ(original.getToolType(i), resampled.getToolType(i));
 
@@ -233,6 +254,26 @@ void ResamplerTest::assertMotionEventIsResampledAndCoordsNear(
         EXPECT_TRUE(resampledCoords.isResampled);
         EXPECT_NEAR(expectedCoords[i].getX(), resampledCoords.getX(), EPSILON);
         EXPECT_NEAR(expectedCoords[i].getY(), resampledCoords.getY(), EPSILON);
+    }
+}
+
+void ResamplerTest::assertMotionEventHistoricalCoords(const MotionEvent& event,
+                                                      size_t historicalIndex,
+                                                      const std::vector<Pointer>& expectedCoords) {
+    const size_t numPointers = event.getPointerCount();
+    EXPECT_EQ(expectedCoords.size(), numPointers);
+
+    for (size_t pointerIdx = 0; pointerIdx < numPointers; ++pointerIdx) {
+        SCOPED_TRACE(testing::Message() << "Pointer idx = " << pointerIdx);
+        const PointerCoords* coords =
+                event.getHistoricalRawPointerCoords(pointerIdx, historicalIndex);
+
+        EXPECT_NEAR(expectedCoords[pointerIdx].x, coords->getX(), EPSILON);
+        EXPECT_NEAR(expectedCoords[pointerIdx].y, coords->getY(), EPSILON);
+        EXPECT_EQ(expectedCoords[pointerIdx].isResampled, coords->isResampled);
+        for (const auto& [axis, value] : expectedCoords[pointerIdx].axisValues) {
+            EXPECT_NEAR(value, coords->getAxisValue(axis), EPSILON);
+        }
     }
 }
 
@@ -248,17 +289,15 @@ TEST_F(ResamplerTest, NonResampledAxesArePreserved) {
     constexpr float TOUCH_MAJOR_VALUE = 1.0f;
 
     MotionEvent motionEvent =
-            InputStream{{InputSample{5ms, {{.id = 0, .x = 1.0f, .y = 1.0f, .isResampled = false}}}},
+            InputStream{{InputSample{5ms, {{.id = 0, .x = 1.0f, .y = 1.0f, .isResampled = false}}},
+                         InputSample{10ms,
+                                     {{.id = 0,
+                                       .x = 2.0f,
+                                       .y = 2.0f,
+                                       .isResampled = false,
+                                       .axisValues = {{AMOTION_EVENT_AXIS_TOUCH_MAJOR,
+                                                       TOUCH_MAJOR_VALUE}}}}}},
                         AMOTION_EVENT_ACTION_MOVE};
-
-    constexpr std::chrono::nanoseconds eventTime{10ms};
-    PointerCoords pointerCoords{};
-    pointerCoords.isResampled = false;
-    pointerCoords.setAxisValue(AMOTION_EVENT_AXIS_X, 2.0f);
-    pointerCoords.setAxisValue(AMOTION_EVENT_AXIS_Y, 2.0f);
-    pointerCoords.setAxisValue(AMOTION_EVENT_AXIS_TOUCH_MAJOR, TOUCH_MAJOR_VALUE);
-
-    motionEvent.addSample(eventTime.count(), &pointerCoords, motionEvent.getId());
 
     const InputMessage futureSample =
             InputSample{15ms, {{.id = 0, .x = 3.0f, .y = 4.0f, .isResampled = false}}};
@@ -274,6 +313,46 @@ TEST_F(ResamplerTest, NonResampledAxesArePreserved) {
                                                        .x = 2.2f,
                                                        .y = 2.4f,
                                                        .isResampled = true}});
+}
+
+TEST_F_WITH_FLAGS(ResamplerTest, RelativeAxesAreCleared,
+                  REQUIRES_FLAGS_ENABLED(CLEAR_RELATIVE_AXES_IN_RESAMPLED_COORDS)) {
+    MotionEvent motionEvent =
+            InputStream{{InputSample{5ms, {{.id = 0, .x = 1.0f, .y = 1.0f, .isResampled = false}}},
+                         InputSample{10ms,
+                                     {{.id = 0,
+                                       .x = 2.0f,
+                                       .y = 2.0f,
+                                       .isResampled = false,
+                                       .axisValues = {{AMOTION_EVENT_AXIS_RELATIVE_X, 1},
+                                                      {AMOTION_EVENT_AXIS_RELATIVE_Y, 1}}}}}},
+                        AMOTION_EVENT_ACTION_MOVE};
+
+    const InputMessage futureSample =
+            InputSample{15ms,
+                        {{.id = 0,
+                          .x = 3.0f,
+                          .y = 4.0f,
+                          .isResampled = false,
+                          .axisValues = {{AMOTION_EVENT_AXIS_RELATIVE_X, 1},
+                                         {AMOTION_EVENT_AXIS_RELATIVE_Y, 2}}}}};
+
+    const MotionEvent originalMotionEvent = motionEvent;
+
+    mResampler->resampleMotionEvent(16ms, motionEvent, &futureSample);
+
+    // Resampled event should not have relative axes.
+    EXPECT_EQ(motionEvent.getAxisValue(AMOTION_EVENT_AXIS_RELATIVE_X, 0), 0);
+    EXPECT_EQ(motionEvent.getAxisValue(AMOTION_EVENT_AXIS_RELATIVE_Y, 0), 0);
+
+    // Historical relative values are preserved as is.
+    assertMotionEventHistoricalCoords(motionEvent, 1,
+                                      {{.id = 0,
+                                        .x = 2.0f,
+                                        .y = 2.0f,
+                                        .isResampled = false,
+                                        .axisValues = {{AMOTION_EVENT_AXIS_RELATIVE_X, 1},
+                                                       {AMOTION_EVENT_AXIS_RELATIVE_Y, 1}}}});
 }
 
 TEST_F(ResamplerTest, SinglePointerNotEnoughDataToResample) {
@@ -863,4 +942,106 @@ TEST_F(ResamplerTest, MultiplePointerShouldNotResampleToolTypeExtrapolation) {
 
     assertMotionEventIsNotResampled(originalMotionEvent, motionEvent);
 }
+
+TEST_F_WITH_FLAGS(ResamplerTest, OverwriteStillMotionEventKeepsRelativeAxes,
+                  REQUIRES_FLAGS_ENABLED(CLEAR_RELATIVE_AXES_IN_RESAMPLED_COORDS)) {
+    MotionEvent motionEvent =
+            InputStream{{InputSample{10ms,
+                                     {{.id = 0, .x = 10.0f, .y = 10.0f, .isResampled = false}}},
+                         InputSample{20ms,
+                                     {{.id = 0,
+                                       .x = 20.0f,
+                                       .y = 20.0f,
+                                       .isResampled = false,
+                                       .axisValues = {{AMOTION_EVENT_AXIS_RELATIVE_X, 10},
+                                                      {AMOTION_EVENT_AXIS_RELATIVE_Y, 10}}}}}},
+                        AMOTION_EVENT_ACTION_MOVE};
+
+    // This will extrapolate the coordinate at 25ms, resampled as (25, 25).
+    mResampler->resampleMotionEvent(30ms, motionEvent, nullptr);
+
+    // Real event of X/Y coordinates hasn't changed at 30ms, but relative coordinates have.
+    MotionEvent stillMotionEvent =
+            InputStream{{InputSample{30ms,
+                                     {{.id = 0,
+                                       .x = 20.0f,
+                                       .y = 20.0f,
+                                       .isResampled = false,
+                                       .axisValues = {{AMOTION_EVENT_AXIS_RELATIVE_X, 10},
+                                                      {AMOTION_EVENT_AXIS_RELATIVE_Y, 10}}}}}},
+                        AMOTION_EVENT_ACTION_MOVE};
+    const MotionEvent originalStillMotionEvent = stillMotionEvent;
+
+    // This "still" event is overwritten by the resampled coordinates, but relative values remain.
+    mResampler->resampleMotionEvent(40ms, stillMotionEvent, nullptr);
+
+    assertMotionEventIsResampledAndCoordsNear(originalStillMotionEvent, stillMotionEvent,
+                                              {Pointer{.id = 0,
+                                                       .x = 25.0f,
+                                                       .y = 25.0f,
+                                                       .isResampled = true}});
+    // Resampled event should not have relative axes.
+    EXPECT_EQ(stillMotionEvent.getAxisValue(AMOTION_EVENT_AXIS_RELATIVE_X, 0), 0);
+    EXPECT_EQ(stillMotionEvent.getAxisValue(AMOTION_EVENT_AXIS_RELATIVE_Y, 0), 0);
+    // Historical coord from a real event is rewritten, but relative values are preserved as is.
+    assertMotionEventHistoricalCoords(stillMotionEvent, 0,
+                                      {{.id = 0,
+                                        .x = 25.0f,
+                                        .y = 25.0f,
+                                        .isResampled = true,
+                                        .axisValues = {{AMOTION_EVENT_AXIS_RELATIVE_X, 10},
+                                                       {AMOTION_EVENT_AXIS_RELATIVE_Y, 10}}}});
+}
+
+TEST_F_WITH_FLAGS(ResamplerTest, OverwriteOldPointersKeepsRelativeAxes,
+                  REQUIRES_FLAGS_ENABLED(CLEAR_RELATIVE_AXES_IN_RESAMPLED_COORDS)) {
+    MotionEvent motionEvent =
+            InputStream{{InputSample{10ms,
+                                     {{.id = 0, .x = 10.0f, .y = 10.0f, .isResampled = false}}},
+                         InputSample{20ms,
+                                     {{.id = 0,
+                                       .x = 20.0f,
+                                       .y = 20.0f,
+                                       .isResampled = false,
+                                       .axisValues = {{AMOTION_EVENT_AXIS_RELATIVE_X, 10},
+                                                      {AMOTION_EVENT_AXIS_RELATIVE_Y, 10}}}}}},
+                        AMOTION_EVENT_ACTION_MOVE};
+
+    // This will extrapolate the coordinate at 25ms, resampled as (25, 25).
+    mResampler->resampleMotionEvent(30ms, motionEvent, nullptr);
+
+    // Real event whose timestamp is before the previous resampled event.
+    MotionEvent oldMotionEvent =
+            InputStream{{InputSample{24ms,
+                                     {{.id = 0,
+                                       .x = 24.0f,
+                                       .y = 24.0f,
+                                       .isResampled = false,
+                                       .axisValues = {{AMOTION_EVENT_AXIS_RELATIVE_X, 4},
+                                                      {AMOTION_EVENT_AXIS_RELATIVE_Y, 4}}}}}},
+                        AMOTION_EVENT_ACTION_MOVE};
+    const MotionEvent originalOldMotionEvent = oldMotionEvent;
+
+    // This "old" event is overwritten by the resampled coordinates, but relative values remain.
+    mResampler->resampleMotionEvent(31ms, oldMotionEvent, nullptr);
+
+    // Resamples for 26ms.
+    assertMotionEventIsResampledAndCoordsNear(originalOldMotionEvent, oldMotionEvent,
+                                              {Pointer{.id = 0,
+                                                       .x = 26.0f,
+                                                       .y = 26.0f,
+                                                       .isResampled = true}});
+    // Resampled event should not have relative axes.
+    EXPECT_EQ(oldMotionEvent.getAxisValue(AMOTION_EVENT_AXIS_RELATIVE_X, 0), 0);
+    EXPECT_EQ(oldMotionEvent.getAxisValue(AMOTION_EVENT_AXIS_RELATIVE_Y, 0), 0);
+    // Historical coord from a real event is rewritten, but relative values are preserved as is.
+    assertMotionEventHistoricalCoords(oldMotionEvent, 0,
+                                      {{.id = 0,
+                                        .x = 25.0f,
+                                        .y = 25.0f,
+                                        .isResampled = true,
+                                        .axisValues = {{AMOTION_EVENT_AXIS_RELATIVE_X, 4},
+                                                       {AMOTION_EVENT_AXIS_RELATIVE_Y, 4}}}});
+}
+
 } // namespace android

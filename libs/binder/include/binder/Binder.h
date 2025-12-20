@@ -91,6 +91,16 @@ public:
     // This must be called before the object is sent to another process. Not thread safe.
     LIBBINDER_EXPORTED void setInheritRt(bool inheritRt);
 
+    // Default is 1. This is configured for each RpcSession attached to each
+    // BBinder object in an RpcServer.
+    LIBBINDER_EXPORTED void setMinRpcThreads(uint16_t min);
+    LIBBINDER_EXPORTED uint16_t getMinRpcThreads() const;
+
+    // Set default, overridden by setInheritRt. You must set this default early.
+    // Any binder objects sent out of the process before this is called will
+    // not use the updated value.
+    LIBBINDER_EXPORTED static void setGlobalInheritRt(bool enabled);
+
     LIBBINDER_EXPORTED pid_t getDebugPid();
 
     // Whether this binder has been sent to another process.
@@ -124,12 +134,13 @@ private:
     [[nodiscard]] status_t startRecordingTransactions(const Parcel& data);
     [[nodiscard]] status_t stopRecordingTransactions();
 
+    static std::atomic<bool> sGlobalInheritRt;
+
     std::atomic<Extras*> mExtras;
 
     friend ::android::internal::Stability;
     int16_t mStability;
     bool mParceled;
-    bool mRecordingOn;
 
 #ifdef __LP64__
     int32_t mReserved1;

@@ -24,7 +24,7 @@
 #include <gpustats/GpuStats.h>
 #include <gtest/gtest.h>
 #include <stats_pull_atom_callback.h>
-#include <statslog.h>
+#include <statslog_gpustats.h>
 #include <utils/Looper.h>
 #include <utils/String16.h>
 #include <utils/Vector.h>
@@ -520,7 +520,7 @@ TEST_F(GpuStatsTest, canPullGlobalAtom) {
     EXPECT_FALSE(inputCommand(InputCommand::DUMP_GLOBAL).empty());
     EXPECT_FALSE(inputCommand(InputCommand::DUMP_APP).empty());
 
-    EXPECT_TRUE(testableGpuStats.makePullAtomCallback(android::util::GPU_STATS_GLOBAL_INFO) ==
+    EXPECT_TRUE(testableGpuStats.makePullAtomCallback(android::gpustats::GPU_STATS_GLOBAL_INFO) ==
                 AStatsManager_PULL_SUCCESS);
 
     EXPECT_TRUE(inputCommand(InputCommand::DUMP_GLOBAL).empty());
@@ -537,7 +537,7 @@ TEST_F(GpuStatsTest, canPullAppAtom) {
     EXPECT_FALSE(inputCommand(InputCommand::DUMP_GLOBAL).empty());
     EXPECT_FALSE(inputCommand(InputCommand::DUMP_APP).empty());
 
-    EXPECT_TRUE(testableGpuStats.makePullAtomCallback(android::util::GPU_STATS_APP_INFO) ==
+    EXPECT_TRUE(testableGpuStats.makePullAtomCallback(android::gpustats::GPU_STATS_APP_INFO) ==
                 AStatsManager_PULL_SUCCESS);
 
     EXPECT_FALSE(inputCommand(InputCommand::DUMP_GLOBAL).empty());

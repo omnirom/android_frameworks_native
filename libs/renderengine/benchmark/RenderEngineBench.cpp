@@ -18,6 +18,8 @@
 #include <android-base/file.h>
 #include <benchmark/benchmark.h>
 #include <com_android_graphics_libgui_flags.h>
+#include <com_android_graphics_surfaceflinger_flags.h>
+#include <ftl/enum.h>
 #include <gui/SurfaceComposerClient.h>
 #include <log/log.h>
 #include <renderengine/ExternalTexture.h>
@@ -26,6 +28,7 @@
 #include <renderengine/impl/ExternalTexture.h>
 
 #include <mutex>
+#include <sstream>
 
 using namespace android;
 using namespace android::renderengine;
@@ -73,22 +76,6 @@ std::pair<uint32_t, uint32_t> getDisplaySize() {
         height = static_cast<uint32_t>(resolution.height);
     });
     return std::pair<uint32_t, uint32_t>(width, height);
-}
-
-static std::unique_ptr<RenderEngine> createRenderEngine(
-        RenderEngine::Threaded threaded, RenderEngine::GraphicsApi graphicsApi,
-        RenderEngine::BlurAlgorithm blurAlgorithm = RenderEngine::BlurAlgorithm::KAWASE) {
-    auto args = RenderEngineCreationArgs::Builder()
-                        .setPixelFormat(static_cast<int>(ui::PixelFormat::RGBA_8888))
-                        .setImageCacheSize(1)
-                        .setEnableProtectedContext(true)
-                        .setPrecacheToneMapperShaderOnly(false)
-                        .setBlurAlgorithm(blurAlgorithm)
-                        .setContextPriority(RenderEngine::ContextPriority::REALTIME)
-                        .setThreaded(threaded)
-                        .setGraphicsApi(graphicsApi)
-                        .build();
-    return RenderEngine::create(args);
 }
 
 static std::shared_ptr<ExternalTexture> allocateBuffer(RenderEngine& re, uint32_t width,
@@ -209,11 +196,8 @@ constexpr char kHomescreenPath[] = "/resources/homescreen.png";
  * Draw a layer with texture and no additional shaders as a baseline to evaluate a shader's impact
  * on performance
  */
-template <class... Args>
-void BM_homescreen(benchmark::State& benchState, Args&&... args) {
-    auto args_tuple = std::make_tuple(std::move(args)...);
-    auto re = createRenderEngine(static_cast<RenderEngine::Threaded>(std::get<0>(args_tuple)),
-                                 static_cast<RenderEngine::GraphicsApi>(std::get<1>(args_tuple)));
+void BM_homescreen(benchmark::State& benchState, const RenderEngineCreationArgs& creationArgs) {
+    auto re = RenderEngine::create(creationArgs);
 
     auto [width, height] = getDisplaySize();
     auto srcBuffer = createTexture(*re, kHomescreenPath);
@@ -237,11 +221,9 @@ void BM_homescreen(benchmark::State& benchState, Args&&... args) {
     benchDrawLayers(*re, layers, benchState, "homescreen");
 }
 
-template <class... Args>
-void BM_homescreen_blur(benchmark::State& benchState, Args&&... args) {
-    auto args_tuple = std::make_tuple(std::move(args)...);
-    auto re = createRenderEngine(static_cast<RenderEngine::Threaded>(std::get<0>(args_tuple)),
-                                 static_cast<RenderEngine::GraphicsApi>(std::get<1>(args_tuple)));
+void BM_homescreen_blur(benchmark::State& benchState,
+                        const RenderEngineCreationArgs& creationArgs) {
+    auto re = RenderEngine::create(creationArgs);
 
     auto [width, height] = getDisplaySize();
     auto srcBuffer = createTexture(*re, kHomescreenPath);
@@ -275,11 +257,9 @@ void BM_homescreen_blur(benchmark::State& benchState, Args&&... args) {
     benchDrawLayers(*re, layers, benchState, "homescreen_blurred");
 }
 
-template <class... Args>
-void BM_homescreen_edgeExtension(benchmark::State& benchState, Args&&... args) {
-    auto args_tuple = std::make_tuple(std::move(args)...);
-    auto re = createRenderEngine(static_cast<RenderEngine::Threaded>(std::get<0>(args_tuple)),
-                                 static_cast<RenderEngine::GraphicsApi>(std::get<1>(args_tuple)));
+void BM_homescreen_edgeExtension(benchmark::State& benchState,
+                                 const RenderEngineCreationArgs& creationArgs) {
+    auto re = RenderEngine::create(creationArgs);
 
     auto [width, height] = getDisplaySize();
     auto srcBuffer = createTexture(*re, kHomescreenPath);
@@ -310,19 +290,78 @@ void BM_homescreen_edgeExtension(benchmark::State& benchState, Args&&... args) {
     benchDrawLayers(*re, layers, benchState, "homescreen_edge_extension");
 }
 
-BENCHMARK_CAPTURE(BM_homescreen_blur, gaussian, RenderEngine::Threaded::YES,
-                  RenderEngine::GraphicsApi::GL, RenderEngine::BlurAlgorithm::GAUSSIAN);
+std::string GenerateBenchmarkVariantName(const char* benchmarkName,
+                                         const RenderEngineCreationArgs& args) {
+    std::stringstream ss;
+    ss << ftl::enum_string(args.skiaBackend);
+    ss << ftl::enum_string(args.graphicsApi);
 
-BENCHMARK_CAPTURE(BM_homescreen_blur, kawase, RenderEngine::Threaded::YES,
-                  RenderEngine::GraphicsApi::GL, RenderEngine::BlurAlgorithm::KAWASE);
+    if (args.blurAlgorithm != RenderEngine::BlurAlgorithm::None) {
+        ss << "_";
+        ss << ftl::enum_string(args.blurAlgorithm);
+    }
 
-BENCHMARK_CAPTURE(BM_homescreen_blur, kawase_dual_filter, RenderEngine::Threaded::YES,
-                  RenderEngine::GraphicsApi::GL, RenderEngine::BlurAlgorithm::KAWASE_DUAL_FILTER);
+    ss << "__" << benchmarkName;
 
-BENCHMARK_CAPTURE(BM_homescreen, SkiaGLThreaded, RenderEngine::Threaded::YES,
-                  RenderEngine::GraphicsApi::GL);
+    return ss.str();
+}
 
-#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS_EDGE_EXTENSION_SHADER
-BENCHMARK_CAPTURE(BM_homescreen_edgeExtension, SkiaGLThreaded, RenderEngine::Threaded::YES,
-                  RenderEngine::GraphicsApi::GL);
-#endif
+template <class Lambda, class... Args>
+void RegisterBenchmarkIfValid(Lambda&& benchmarkFn, const char* benchmarkName,
+                              const RenderEngineCreationArgs& reCreationArgs,
+                              Args&&... benchmarkArgs) {
+    // Graphite only supports (native) Vulkan in RenderEngine.
+    if (reCreationArgs.skiaBackend == RenderEngine::SkiaBackend::Graphite &&
+        reCreationArgs.graphicsApi != RenderEngine::GraphicsApi::Vk) {
+        return;
+    }
+
+    if (!RenderEngine::canSupport(reCreationArgs.graphicsApi)) {
+        return;
+    }
+
+    benchmark::RegisterBenchmark(GenerateBenchmarkVariantName(benchmarkName, reCreationArgs),
+                                 benchmarkFn, reCreationArgs, benchmarkArgs...);
+}
+
+#define REGISTER_BM_IF_VALID(benchmarkFn, reCreationArgs, ...) \
+    RegisterBenchmarkIfValid(benchmarkFn, #benchmarkFn, reCreationArgs, ##__VA_ARGS__)
+
+namespace renderenginebench {
+
+void registerBenchmarks() {
+    RenderEngineCreationArgs::Builder argBuilder =
+            RenderEngineCreationArgs::Builder()
+                    .setPixelFormat(static_cast<int>(ui::PixelFormat::RGBA_8888))
+                    .setImageCacheSize(1)
+                    .setEnableProtectedContext(true)
+                    .setPrecacheToneMapperShaderOnly(false)
+                    .setContextPriority(RenderEngine::ContextPriority::Realtime)
+                    .setThreaded(RenderEngine::Threaded::Yes);
+
+    for (RenderEngine::GraphicsApi graphicsApi :
+         {RenderEngine::GraphicsApi::GL, RenderEngine::GraphicsApi::Vk}) {
+        argBuilder.setGraphicsApi(graphicsApi);
+
+        for (RenderEngine::SkiaBackend skiaBackend : ftl::enum_range<RenderEngine::SkiaBackend>()) {
+            argBuilder.setSkiaBackend(skiaBackend);
+
+            // BM_homescreen_blur
+            for (RenderEngine::BlurAlgorithm blurAlgorithm :
+                 ftl::enum_range<RenderEngine::BlurAlgorithm>()) {
+                if (blurAlgorithm == RenderEngine::BlurAlgorithm::None) continue;
+                argBuilder.setBlurAlgorithm(blurAlgorithm);
+                REGISTER_BM_IF_VALID(BM_homescreen_blur, argBuilder.build());
+            }
+            argBuilder.setBlurAlgorithm(RenderEngine::BlurAlgorithm::None);
+
+            // BM_homescreen
+            REGISTER_BM_IF_VALID(BM_homescreen, argBuilder.build());
+
+            // BM_homescreen_edgeExtension
+            REGISTER_BM_IF_VALID(BM_homescreen_edgeExtension, argBuilder.build());
+        }
+    }
+}
+
+} // namespace renderenginebench

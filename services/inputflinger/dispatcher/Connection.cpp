@@ -16,14 +16,17 @@
 
 #include "Connection.h"
 
-#include "Entry.h"
+#include <binder/IBinder.h>
+#include <input/Input.h>
+#include <input/InputTransport.h>
+#include <utils/StrongPointer.h>
 
 namespace android::inputdispatcher {
 
-Connection::Connection(std::unique_ptr<InputChannel> inputChannel, bool monitor,
+Connection::Connection(std::unique_ptr<InputChannel> inputChannel, bool isFocusMonitor,
                        const IdGenerator& idGenerator)
       : status(Status::NORMAL),
-        monitor(monitor),
+        isFocusMonitor(isFocusMonitor),
         inputPublisher(std::move(inputChannel)),
         inputState(idGenerator) {}
 

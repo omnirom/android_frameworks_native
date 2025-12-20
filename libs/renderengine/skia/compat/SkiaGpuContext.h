@@ -16,11 +16,9 @@
 
 #pragma once
 
-#undef LOG_TAG
-#define LOG_TAG "RenderEngine"
-
 #include <include/core/SkSurface.h>
 #include <include/gpu/ganesh/GrDirectContext.h>
+#include <include/gpu/ganesh/GrContextOptions.h>
 #include <include/gpu/ganesh/gl/GrGLInterface.h>
 #include <include/gpu/graphite/Context.h>
 #include <include/gpu/vk/VulkanBackendContext.h>

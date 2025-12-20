@@ -28,6 +28,25 @@ int tipc_run_event_loop(struct tipc_hset*) {
     return 0;
 }
 
+struct list_node {
+    int placeholder;
+};
+
+#define LIST_INITIAL_CLEARED_VALUE \
+    {                              \
+    }
+
+struct tipc_work_todo {
+    int (*do_work)(struct tipc_work_todo*);
+    int64_t run_after;
+    struct list_node node;
+};
+
+#define TIPC_WORK_TODO_INITIAL_VALUE(self, do_work_cb) \
+    {.do_work = do_work_cb, .node = LIST_INITIAL_CLEARED_VALUE}
+
+static inline void tipc_queue_work(struct tipc_hset*, struct tipc_work_todo*) {}
+
 #if defined(__cplusplus)
 }
 #endif

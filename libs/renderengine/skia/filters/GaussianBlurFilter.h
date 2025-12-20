@@ -22,6 +22,8 @@
 #include <SkRuntimeEffect.h>
 #include <SkSurface.h>
 
+#include "RuntimeEffectManager.h"
+
 using namespace std;
 
 namespace android {
@@ -33,7 +35,7 @@ namespace skia {
  */
 class GaussianBlurFilter: public BlurFilter {
 public:
-    explicit GaussianBlurFilter();
+    explicit GaussianBlurFilter(RuntimeEffectManager& effectManager);
     virtual ~GaussianBlurFilter(){}
 
     // Execute blur, saving it to a texture

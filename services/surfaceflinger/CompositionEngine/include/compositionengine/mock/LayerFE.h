@@ -54,6 +54,8 @@ public:
     MOCK_METHOD1(setReleaseFence, void(const FenceResult&));
     MOCK_METHOD1(setReleasedBuffer, void(sp<GraphicBuffer>));
     MOCK_METHOD0(getReleaseFencePromiseStatus, LayerFE::ReleaseFencePromiseStatus());
+    MOCK_METHOD1(setLastClientTargetAcquireFence, void(const FenceResult&));
+    MOCK_METHOD0(getAndClearLastClientTargetAcquireFence, sp<Fence>());
     MOCK_CONST_METHOD0(getDebugName, const char*());
     MOCK_CONST_METHOD0(getSequence, int32_t());
     MOCK_CONST_METHOD0(hasRoundedCorners, bool());

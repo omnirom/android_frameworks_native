@@ -5,7 +5,7 @@
     );
 
     /**
-     * {@hide}
+     * @hide
      */
     @UnsupportedAppUsage(maxTargetSdk = Build.VERSION_CODES.R, trackingBug = 170729553)
     public static native EGLDisplay eglGetDisplay(

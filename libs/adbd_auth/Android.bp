@@ -19,6 +19,7 @@ package {
     // to get the below license kinds:
     //   SPDX-license-identifier-Apache-2.0
     default_applicable_licenses: ["frameworks_native_license"],
+    default_team: "trendy_team_android_developer_tools",
 }
 
 cc_library {
@@ -45,12 +46,56 @@ cc_library {
     target: {
         darwin: {
             enabled: false,
-        }
+        },
     },
 
     static_libs: [
         "libbase",
         "libcutils",
         "liblog",
+    ],
+}
+
+cc_test {
+    name: "libadbd_auth_test",
+    srcs: [
+        "adbd_auth_test.cpp",
+    ],
+    static_libs: [
+        "libadbd_auth",
+        "libbase",
+        "libcutils",
+        "liblog",
+    ],
+    test_suites: [
+        "general-tests",
+    ],
+}
+
+aconfig_declarations {
+    name: "aconfig_adbdauth_flags",
+    package: "com.android.adbdauth.flags",
+    container: "system",
+    srcs: [
+        "adbdauth_flags.aconfig",
+    ],
+}
+
+cc_aconfig_library {
+    name: "android_adbdauth_flags_cc_lib",
+    aconfig_declarations: "aconfig_adbdauth_flags",
+    apex_available: [
+        "//apex_available:platform",
+        "com.android.adbd",
+    ],
+    min_sdk_version: "apex_inherit",
+}
+
+java_aconfig_library {
+    name: "aconfig_adbdauth_flags_java_lib",
+    aconfig_declarations: "aconfig_adbdauth_flags",
+    apex_available: [
+        "//apex_available:platform",
+        "com.android.adbd",
     ],
 }

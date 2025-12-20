@@ -1,0 +1,10 @@
+package: "android.installd.flags"
+container: "system"
+
+flag {
+  name: "enable_set_inode_quotas"
+  namespace: "mediaprovider"
+  description: "This flag controls setting inode quota limits for apps"
+  bug: "293301664"
+  is_fixed_read_only: true
+}

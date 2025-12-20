@@ -18,18 +18,17 @@
 
 #include <stdint.h>
 #include <functional>
-#include <iosfwd>
 #include <limits>
 #include <type_traits>
 
 #ifndef LIKELY
 #define LIKELY_DEFINED_LOCAL
 #ifdef __cplusplus
-#   define LIKELY( exp )    (__builtin_expect( !!(exp), true ))
-#   define UNLIKELY( exp )  (__builtin_expect( !!(exp), false ))
+#define LIKELY(exp) (__builtin_expect(!!(exp), true))
+#define UNLIKELY(exp) (__builtin_expect(!!(exp), false))
 #else
-#   define LIKELY( exp )    (__builtin_expect( !!(exp), 1 ))
-#   define UNLIKELY( exp )  (__builtin_expect( !!(exp), 0 ))
+#define LIKELY(exp) (__builtin_expect(!!(exp), 1))
+#define UNLIKELY(exp) (__builtin_expect(!!(exp), 0))
 #endif
 #endif
 
@@ -58,45 +57,45 @@ namespace android {
 class half {
     struct fp16 {
         uint16_t bits;
-        explicit constexpr fp16() noexcept : bits(0) { }
-        explicit constexpr fp16(uint16_t b) noexcept : bits(b) { }
-        void setS(unsigned int s) noexcept { bits = uint16_t((bits & 0x7FFF) | (s<<15)); }
-        void setE(unsigned int s) noexcept { bits = uint16_t((bits & 0xE3FF) | (s<<10)); }
-        void setM(unsigned int s) noexcept { bits = uint16_t((bits & 0xFC00) | (s<< 0)); }
-        constexpr unsigned int getS() const noexcept { return  bits >> 15u; }
-        constexpr unsigned int getE() const noexcept { return (bits >> 10u) & 0x1Fu; }
-        constexpr unsigned int getM() const noexcept { return  bits         & 0x3FFu; }
+        explicit constexpr fp16() noexcept : bits(0) {}
+        explicit constexpr fp16(uint16_t b) noexcept : bits(b) {}
+        void setS(uint32_t s) noexcept { bits = uint16_t((bits & 0x7FFF) | (s << 15)); }
+        void setE(uint32_t s) noexcept { bits = uint16_t((bits & 0x83FF) | (s << 10)); }
+        void setM(uint32_t s) noexcept { bits = uint16_t((bits & 0xFC00) | (s << 0)); }
+        constexpr uint32_t getS() const noexcept { return bits >> 15u; }
+        constexpr uint32_t getE() const noexcept { return (bits >> 10u) & 0x1Fu; }
+        constexpr uint32_t getM() const noexcept { return bits & 0x3FFu; }
     };
     struct fp32 {
         union {
             uint32_t bits;
             float fp;
         };
-        explicit constexpr fp32() noexcept : bits(0) { }
-        explicit constexpr fp32(float f) noexcept : fp(f) { }
-        void setS(unsigned int s) noexcept { bits = uint32_t((bits & 0x7FFFFFFF) | (s<<31)); }
-        void setE(unsigned int s) noexcept { bits = uint32_t((bits & 0x807FFFFF) | (s<<23)); }
-        void setM(unsigned int s) noexcept { bits = uint32_t((bits & 0xFF800000) | (s<< 0)); }
-        constexpr unsigned int getS() const noexcept { return  bits >> 31u; }
-        constexpr unsigned int getE() const noexcept { return (bits >> 23u) & 0xFFu; }
-        constexpr unsigned int getM() const noexcept { return  bits         & 0x7FFFFFu; }
+        explicit constexpr fp32() noexcept : bits(0) {}
+        explicit constexpr fp32(float f) noexcept : fp(f) {}
+        void setS(uint32_t s) noexcept { bits = uint32_t((bits & 0x7FFFFFFF) | (s << 31)); }
+        void setE(uint32_t s) noexcept { bits = uint32_t((bits & 0x807FFFFF) | (s << 23)); }
+        void setM(uint32_t s) noexcept { bits = uint32_t((bits & 0xFF800000) | (s << 0)); }
+        constexpr uint32_t getS() const noexcept { return bits >> 31u; }
+        constexpr uint32_t getE() const noexcept { return (bits >> 23u) & 0xFFu; }
+        constexpr uint32_t getM() const noexcept { return bits & 0x7FFFFFu; }
     };
 
 public:
-    CONSTEXPR half() noexcept { }
-    CONSTEXPR half(float v) noexcept : mBits(ftoh(v)) { }
+    CONSTEXPR half() noexcept {}
+    CONSTEXPR half(float v) noexcept : mBits(ftoh(v)) {}
     CONSTEXPR operator float() const noexcept { return htof(mBits); }
 
     uint16_t getBits() const noexcept { return mBits.bits; }
-    unsigned int getExponent() const noexcept { return mBits.getE(); }
-    unsigned int getMantissa() const noexcept { return mBits.getM(); }
+    uint32_t getExponent() const noexcept { return mBits.getE(); }
+    uint32_t getMantissa() const noexcept { return mBits.getM(); }
 
 private:
     friend class std::numeric_limits<half>;
-    friend CONSTEXPR half operator"" _hf(long double v);
+    friend CONSTEXPR half operator""_hf(long double v);
 
     enum Binary { binary };
-    explicit constexpr half(Binary, uint16_t bits) noexcept : mBits(bits) { }
+    explicit constexpr half(Binary, uint16_t bits) noexcept : mBits(bits) {}
     static CONSTEXPR fp16 ftoh(float v) noexcept;
     static CONSTEXPR float htof(fp16 v) noexcept;
     fp16 mBits;
@@ -109,21 +108,20 @@ inline CONSTEXPR half::fp16 half::ftoh(float v) noexcept {
         out.setE(0x1F);
         out.setM(in.getM() ? 0x200 : 0);
     } else {
-        int e = static_cast<int>(in.getE()) - 127 + 15;
-        if (e >= 0x1F) {
+        uint32_t e = in.getE();
+        uint32_t m = in.getM() + 0x1000; // Rounding to the nearest even.
+        if (e > 143) {
             // overflow
-            out.setE(0x31); // +/- inf
-        } else if (e <= 0) {
-            // underflow
-            // flush to +/- 0
-        } else {
-            unsigned int m = in.getM();
-            out.setE(uint16_t(e));
+            out.setE(0x1F);
+        } else if (e > 112) {
+            // normalized
+            out.setE(e - 112);
             out.setM(m >> 13);
-            if (m & 0x1000) {
-                // rounding
-                out.bits++;
-            }
+        } else if (e > 101) {
+            // denormalized
+            out = fp16(static_cast<uint16_t>((((0x007FF000 + m) >> (125 - e)) + 1) >> 1));
+        } else {
+            // underflow
         }
     }
     out.setS(in.getS());
@@ -138,12 +136,19 @@ inline CONSTEXPR float half::htof(half::fp16 in) noexcept {
     } else {
         if (in.getE() == 0) {
             if (in.getM()) {
-                // TODO: denormal half float, treat as zero for now
-                // (it's stupid because they can be represented as regular float)
+                uint32_t m = in.getM();
+                uint32_t e = 127 - 14;
+                m <<= 13;
+                while (m < 0x800000) {
+                    m <<= 1;
+                    e--;
+                }
+                out.setE(e);
+                out.setM(m & 0x7FFFFF);
             }
         } else {
             int e = static_cast<int>(in.getE()) - 15 + 127;
-            unsigned int m = in.getM();
+            uint32_t m = in.getM();
             out.setE(uint32_t(e));
             out.setM(m << 13);
         }
@@ -152,7 +157,7 @@ inline CONSTEXPR float half::htof(half::fp16 in) noexcept {
     return out.fp;
 }
 
-inline CONSTEXPR android::half operator"" _hf(long double v) {
+inline CONSTEXPR android::half operator""_hf(long double v) {
     return android::half(android::half::binary, android::half::ftoh(static_cast<float>(v)).bits);
 }
 
@@ -160,9 +165,10 @@ inline CONSTEXPR android::half operator"" _hf(long double v) {
 
 namespace std {
 
-template<> struct is_floating_point<android::half> : public std::true_type {};
+template <>
+struct is_floating_point<android::half> : public std::true_type {};
 
-template<>
+template <>
 class numeric_limits<android::half> {
 public:
     typedef android::half type;
@@ -192,21 +198,38 @@ public:
     static constexpr const int max_exponent = 16;
     static constexpr const int max_exponent10 = 4;
 
-    inline static constexpr type round_error() noexcept { return android::half(android::half::binary, 0x3800); }
-    inline static constexpr type min() noexcept { return android::half(android::half::binary, 0x0400); }
-    inline static constexpr type max() noexcept { return android::half(android::half::binary, 0x7bff); }
-    inline static constexpr type lowest() noexcept { return android::half(android::half::binary, 0xfbff); }
-    inline static constexpr type epsilon() noexcept { return android::half(android::half::binary, 0x1400); }
-    inline static constexpr type infinity() noexcept { return android::half(android::half::binary, 0x7c00); }
-    inline static constexpr type quiet_NaN() noexcept { return android::half(android::half::binary, 0x7fff); }
-    inline static constexpr type denorm_min() noexcept { return android::half(android::half::binary, 0x0001); }
-    inline static constexpr type signaling_NaN() noexcept { return android::half(android::half::binary, 0x7dff); }
+    inline static constexpr type round_error() noexcept {
+        return android::half(android::half::binary, 0x3800);
+    }
+    inline static constexpr type min() noexcept {
+        return android::half(android::half::binary, 0x0400);
+    }
+    inline static constexpr type max() noexcept {
+        return android::half(android::half::binary, 0x7bff);
+    }
+    inline static constexpr type lowest() noexcept {
+        return android::half(android::half::binary, 0xfbff);
+    }
+    inline static constexpr type epsilon() noexcept {
+        return android::half(android::half::binary, 0x1400);
+    }
+    inline static constexpr type infinity() noexcept {
+        return android::half(android::half::binary, 0x7c00);
+    }
+    inline static constexpr type quiet_NaN() noexcept {
+        return android::half(android::half::binary, 0x7fff);
+    }
+    inline static constexpr type denorm_min() noexcept {
+        return android::half(android::half::binary, 0x0001);
+    }
+    inline static constexpr type signaling_NaN() noexcept {
+        return android::half(android::half::binary, 0x7dff);
+    }
 };
 
-template<> struct hash<android::half> {
-    size_t operator()(const android::half& half) {
-        return std::hash<float>{}(half);
-    }
+template <>
+struct hash<android::half> {
+    size_t operator()(const android::half& half) { return std::hash<float>{}(half); }
 };
 
 } // namespace std

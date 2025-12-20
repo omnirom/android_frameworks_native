@@ -172,6 +172,10 @@ public:
     // Traverse the hierarchy and return true if loops are found. The outInvalidRelativeRoot
     // will contain the first relative root that was visited twice in a traversal.
     bool hasRelZLoop(uint32_t& outInvalidRelativeRoot) const;
+
+    // Checks if a cycle exists at any point from the current layer. This cycle detection
+    // works for offscreen layers as well, which do not get updated in the relZLoop.
+    bool hasLayerCycle() const;
     std::vector<std::pair<LayerHierarchy*, Variant>> mChildren;
 
 private:
@@ -185,6 +189,7 @@ private:
                           const LayerHierarchy::TraversalPath& parent) const;
     void traverse(const Visitor& visitor, const LayerHierarchy::TraversalPath& parent,
                   uint32_t depth = 0) const;
+    bool hasLayerCycle(std::unordered_set<uint32_t>& unvisited) const;
     void dump(std::ostream& out, const std::string& prefix, LayerHierarchy::Variant variant,
               bool isLastChild, bool includeMirroredHierarchy) const;
 

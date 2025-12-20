@@ -206,17 +206,17 @@ public:
         EXPECT_EQ(AMOTION_EVENT_ACTION_DOWN, mev->getAction());
         EXPECT_NEAR(x, mev->getX(0), EPSILON);
         EXPECT_NEAR(y, mev->getY(0), EPSILON);
-        EXPECT_EQ(0, mev->getFlags() & VERIFIED_MOTION_EVENT_FLAGS);
+        EXPECT_EQ(ftl::Flags<MotionFlag>{}, mev->getFlags() & VERIFIED_MOTION_EVENT_FLAGS);
 
         ev = consumeEvent();
         ASSERT_NE(ev, nullptr);
         ASSERT_EQ(InputEventType::MOTION, ev->getType());
         mev = static_cast<MotionEvent*>(ev);
         EXPECT_EQ(AMOTION_EVENT_ACTION_UP, mev->getAction());
-        EXPECT_EQ(0, mev->getFlags() & VERIFIED_MOTION_EVENT_FLAGS);
+        EXPECT_EQ(ftl::Flags<MotionFlag>{}, mev->getFlags() & VERIFIED_MOTION_EVENT_FLAGS);
     }
 
-    void expectTapWithFlag(int x, int y, int32_t flags) {
+    void expectTapWithFlag(int x, int y, ftl::Flags<MotionFlag> flags) {
         InputEvent* ev = consumeEvent();
         ASSERT_NE(ev, nullptr);
         ASSERT_EQ(InputEventType::MOTION, ev->getType());
@@ -243,14 +243,14 @@ public:
         const PointerCoords& coords = *mev->getRawPointerCoords(0 /*pointerIndex*/);
         EXPECT_NEAR(displayX, coords.getX(), EPSILON);
         EXPECT_NEAR(displayY, coords.getY(), EPSILON);
-        EXPECT_EQ(0, mev->getFlags() & VERIFIED_MOTION_EVENT_FLAGS);
+        EXPECT_EQ(ftl::Flags<MotionFlag>{}, mev->getFlags() & VERIFIED_MOTION_EVENT_FLAGS);
 
         ev = consumeEvent();
         ASSERT_NE(ev, nullptr);
         ASSERT_EQ(InputEventType::MOTION, ev->getType());
         mev = static_cast<MotionEvent*>(ev);
         EXPECT_EQ(AMOTION_EVENT_ACTION_UP, mev->getAction());
-        EXPECT_EQ(0, mev->getFlags() & VERIFIED_MOTION_EVENT_FLAGS);
+        EXPECT_EQ(ftl::Flags<MotionFlag>{}, mev->getFlags() & VERIFIED_MOTION_EVENT_FLAGS);
     }
 
     void expectKey(int32_t keycode) {
@@ -863,7 +863,7 @@ TEST_F(InputSurfacesTest, touch_flag_obscured) {
     nonTouchableSurface->showAt(100, 100);
 
     injectTap(190, 199);
-    surface->expectTapWithFlag(90, 99, AMOTION_EVENT_FLAG_WINDOW_IS_OBSCURED);
+    surface->expectTapWithFlag(90, 99, MotionFlag::WINDOW_IS_OBSCURED);
 }
 
 TEST_F(InputSurfacesTest, touch_flag_partially_obscured_with_crop) {
@@ -891,7 +891,7 @@ TEST_F(InputSurfacesTest, touch_flag_partially_obscured_with_crop) {
     });
 
     injectTap(190, 199);
-    surface->expectTapWithFlag(90, 99, AMOTION_EVENT_FLAG_WINDOW_IS_PARTIALLY_OBSCURED);
+    surface->expectTapWithFlag(90, 99, MotionFlag::WINDOW_IS_PARTIALLY_OBSCURED);
 }
 
 TEST_F(InputSurfacesTest, touch_not_obscured_with_crop) {

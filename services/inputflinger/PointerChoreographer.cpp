@@ -87,15 +87,12 @@ vec2 calculatePositionOnDestinationViewport(const DisplayViewport& destinationVi
     }
 }
 
-// The standardised medium display density for which 1 px  = 1 dp
-constexpr int32_t DENSITY_MEDIUM = ACONFIGURATION_DENSITY_MEDIUM;
-
-inline float pxToDp(int px, int dpi) {
-    return static_cast<float>(px * DENSITY_MEDIUM) / static_cast<float>(dpi);
+float pxToDp(int px, int dpi) {
+    return static_cast<float>(px * ACONFIGURATION_DENSITY_MEDIUM) / static_cast<float>(dpi);
 }
 
-inline int dpToPx(float dp, int dpi) {
-    return static_cast<int>((dp * dpi) / DENSITY_MEDIUM);
+int dpToPx(float dp, int dpi) {
+    return static_cast<int>((dp * dpi) / static_cast<float>(ACONFIGURATION_DENSITY_MEDIUM));
 }
 
 } // namespace
@@ -107,13 +104,15 @@ PointerChoreographer::PointerChoreographer(InputListenerInterface& inputListener
       : PointerChoreographer(
                 inputListener, policy,
                 [](const sp<android::gui::WindowInfosListener>& listener) {
-                    auto initialInfo = std::make_pair(std::vector<android::gui::WindowInfo>{},
-                                                      std::vector<android::gui::DisplayInfo>{});
 #if defined(__ANDROID__)
-                    SurfaceComposerClient::getDefault()->addWindowInfosListener(listener,
-                                                                                &initialInfo);
+                    android::base::Result<android::gui::WindowInfosUpdate> result =
+                            SurfaceComposerClient::getDefault()->addWindowInfosListener(listener);
+                    LOG_IF(FATAL, !result.ok()) << "Can't add window listener, pointers won't work";
+                    return result->windowInfos;
+#else
+                    gui::WindowInfosUpdate emptyUpdate;
+                    return emptyUpdate.windowInfos;
 #endif
-                    return initialInfo.first;
                 },
                 [](const sp<android::gui::WindowInfosListener>& listener) {
 #if defined(__ANDROID__)
@@ -296,9 +295,7 @@ void PointerChoreographer::processPointerDeviceMotionEventLocked(NotifyMotionArg
                                                                  PointerControllerInterface& pc) {
     const float deltaX = newArgs.pointerCoords[0].getAxisValue(AMOTION_EVENT_AXIS_RELATIVE_X);
     const float deltaY = newArgs.pointerCoords[0].getAxisValue(AMOTION_EVENT_AXIS_RELATIVE_Y);
-    vec2 filteredDelta =
-            filterPointerMotionForAccessibilityLocked(pc.getPosition(), vec2{deltaX, deltaY},
-                                                      newArgs.displayId);
+    const vec2 filteredDelta = filterPointerMotionForAccessibilityLocked(pc, vec2{deltaX, deltaY});
     vec2 unconsumedDelta = pc.move(filteredDelta.x, filteredDelta.y);
     if (InputFlags::connectedDisplaysCursorEnabled() &&
         (std::abs(unconsumedDelta.x) > 0 || std::abs(unconsumedDelta.y) > 0)) {
@@ -316,14 +313,13 @@ void PointerChoreographer::processPointerDeviceMotionEventLocked(NotifyMotionArg
 
 void PointerChoreographer::handleUnconsumedDeltaLocked(PointerControllerInterface& pc,
                                                        const vec2& unconsumedDelta) {
-    // Display topology is in rotated coordinate space and Pointer controller returns and expects
+    // Display topology is in rotated coordinate space and PointerController expects
     // values in the un-rotated coordinate space. So we need to transform delta and cursor position
     // back to the rotated coordinate space to lookup adjacent display in the display topology.
     const auto& sourceDisplayTransform = pc.getDisplayTransform();
     const vec2 rotatedUnconsumedDelta =
             transformWithoutTranslation(sourceDisplayTransform, unconsumedDelta);
-    const vec2 cursorPosition = pc.getPosition();
-    const vec2 rotatedCursorPosition = sourceDisplayTransform.transform(cursorPosition);
+    const vec2 rotatedCursorPosition = pc.getPositionInLogicalDisplay();
 
     // To find out the boundary that cursor is crossing we are checking delta in x and y direction
     // respectively. This prioritizes x direction over y.
@@ -867,14 +863,21 @@ std::optional<DisplayViewport> PointerChoreographer::getViewportForPointerDevice
     return std::nullopt;
 }
 
-vec2 PointerChoreographer::getMouseCursorPosition(ui::LogicalDisplayId displayId) {
+std::optional<vec2> PointerChoreographer::getMouseCursorPosition(ui::LogicalDisplayId displayId) {
     std::scoped_lock _l(getLock());
-    const ui::LogicalDisplayId resolvedDisplayId = getTargetMouseDisplayLocked(displayId);
-    if (auto it = mMousePointersByDisplay.find(resolvedDisplayId);
-        it != mMousePointersByDisplay.end()) {
+    if (auto it = mMousePointersByDisplay.find(displayId); it != mMousePointersByDisplay.end()) {
         return it->second->getPosition();
     }
-    return {AMOTION_EVENT_INVALID_CURSOR_POSITION, AMOTION_EVENT_INVALID_CURSOR_POSITION};
+    return std::nullopt;
+}
+
+std::optional<vec2> PointerChoreographer::getMouseCursorPositionInLogicalDisplay(
+        ui::LogicalDisplayId displayId) {
+    std::scoped_lock _l(getLock());
+    if (auto it = mMousePointersByDisplay.find(displayId); it != mMousePointersByDisplay.end()) {
+        return it->second->getPositionInLogicalDisplay();
+    }
+    return std::nullopt;
 }
 
 void PointerChoreographer::setShowTouchesEnabled(bool enabled) {
@@ -1030,7 +1033,8 @@ PointerChoreographer::findDestinationDisplayLocked(const ui::LogicalDisplayId so
         LOG(WARNING) << "Source display missing from topology " << sourceDisplayId;
         return std::nullopt;
     }
-    for (const DisplayTopologyAdjacentDisplay& adjacentDisplay : sourceNode->second) {
+    for (const DisplayTopologyAdjacentDisplay& adjacentDisplay :
+         sourceNode->second.adjacentDisplays) {
         if (adjacentDisplay.position != sourceBoundary) {
             continue;
         }
@@ -1043,8 +1047,8 @@ PointerChoreographer::findDestinationDisplayLocked(const ui::LogicalDisplayId so
         }
         // As displays can have different densities we need to do all calculations in
         // density-independent-pixels a.k.a. dp values.
-        const int sourceDensity = mTopology.displaysDensity.at(sourceDisplayId);
-        const int adjacentDisplayDensity = mTopology.displaysDensity.at(adjacentDisplay.displayId);
+        const int sourceDensity = mTopology.graph.at(sourceDisplayId).density;
+        const int adjacentDisplayDensity = mTopology.graph.at(adjacentDisplay.displayId).density;
         const float sourceCursorOffsetDp = pxToDp(sourceCursorOffsetPx, sourceDensity);
         const int32_t edgeSizePx = sourceBoundary == DisplayTopologyPosition::TOP ||
                         sourceBoundary == DisplayTopologyPosition::BOTTOM
@@ -1066,18 +1070,25 @@ PointerChoreographer::findDestinationDisplayLocked(const ui::LogicalDisplayId so
 }
 
 vec2 PointerChoreographer::filterPointerMotionForAccessibilityLocked(
-        const vec2& current, const vec2& delta, const ui::LogicalDisplayId& displayId) {
+        const PointerControllerInterface& pc, const vec2& delta) {
     if (!mPointerMotionFilterEnabled) {
         return delta;
     }
-    std::optional<vec2> filterResult =
-            mPolicy.filterPointerMotionForAccessibility(current, delta, displayId);
+
+    // PointerController expects coordinates in physical display coordinates.
+    // PointerMotionFilter in Java expects coordinates in logical display coordinates.
+    const auto& displayTransform = pc.getDisplayTransform();
+    const vec2 current = pc.getPositionInLogicalDisplay();
+    const vec2 deltaInDisplay = transformWithoutTranslation(displayTransform, delta);
+    const ui::LogicalDisplayId displayId = pc.getDisplayId();
+    const std::optional<vec2> filterResult =
+            mPolicy.filterPointerMotionForAccessibility(current, deltaInDisplay, displayId);
     if (!filterResult.has_value()) {
         // Disable filter when there's any error.
         mPointerMotionFilterEnabled = false;
         return delta;
     }
-    return *filterResult;
+    return transformWithoutTranslation(displayTransform.inverse(), *filterResult);
 }
 
 // --- PointerChoreographer::PointerChoreographerDisplayInfoListener ---

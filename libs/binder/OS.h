@@ -33,7 +33,7 @@ status_t setNonBlocking(borrowed_fd fd);
 
 status_t getRandomBytes(uint8_t* data, size_t size);
 
-status_t dupFileDescriptor(int oldFd, int* newFd);
+LIBBINDER_INTERNAL_EXPORTED status_t dupFileDescriptor(int oldFd, int* newFd);
 
 std::unique_ptr<RpcTransportCtxFactory> makeDefaultRpcTransportCtxFactory();
 

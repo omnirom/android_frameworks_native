@@ -113,7 +113,7 @@ TEST_F(ScreenCaptureTest, SetFlagsSecureEUidSystem) {
             shot->expectColor(Rect(0, 0, 32, 32), Color::BLACK);
         }
 
-        mCaptureArgs.captureArgs.captureSecureLayers = true;
+        mCaptureArgs.captureArgs.secureLayerMode = gui::SecureLayerMode::Capture;
         // AID_SYSTEM is allowed to capture secure content.
         ASSERT_EQ(NO_ERROR, ScreenCapture::captureLayers(mCaptureArgs, mCaptureResults));
         ASSERT_TRUE(mCaptureResults.capturedSecureLayers);
@@ -163,9 +163,9 @@ TEST_F(ScreenCaptureTest, CaptureChildSetParentFlagsSecureEUidSystem) {
         shot->expectColor(Rect(0, 0, 10, 10), Color::BLACK);
     }
 
-    // Here we pass captureSecureLayers = true and since we are AID_SYSTEM we should be able
+    // Here we set secureLayerMode = Capture and since we are AID_SYSTEM we should be able
     // to receive them...we are expected to take care with the results.
-    mCaptureArgs.captureArgs.captureSecureLayers = true;
+    mCaptureArgs.captureArgs.secureLayerMode = gui::SecureLayerMode::Capture;
     ASSERT_EQ(NO_ERROR, ScreenCapture::captureLayers(mCaptureArgs, mCaptureResults));
     ASSERT_TRUE(mCaptureResults.capturedSecureLayers);
     ScreenCapture sc(mCaptureResults.buffer, mCaptureResults.capturedHdrLayers);
@@ -200,7 +200,7 @@ TEST_F(ScreenCaptureTest, CaptureChildRespectsParentSecureFlag) {
     LayerCaptureArgs captureArgs;
     captureArgs.layerHandle = childLayer->getHandle();
     captureArgs.captureArgs.sourceCrop = gui::aidl_utils::toARect(size);
-    captureArgs.captureArgs.captureSecureLayers = false;
+    captureArgs.captureArgs.secureLayerMode = gui::SecureLayerMode::Redact;
     {
         SCOPED_TRACE("parent hidden");
         ASSERT_EQ(NO_ERROR, ScreenCapture::captureLayers(captureArgs, mCaptureResults));
@@ -209,7 +209,7 @@ TEST_F(ScreenCaptureTest, CaptureChildRespectsParentSecureFlag) {
         sc.expectColor(size, Color::BLACK);
     }
 
-    captureArgs.captureArgs.captureSecureLayers = true;
+    captureArgs.captureArgs.secureLayerMode = gui::SecureLayerMode::Capture;
     {
         SCOPED_TRACE("capture secure parent not visible");
         ASSERT_EQ(NO_ERROR, ScreenCapture::captureLayers(captureArgs, mCaptureResults));
@@ -219,7 +219,7 @@ TEST_F(ScreenCaptureTest, CaptureChildRespectsParentSecureFlag) {
     }
 
     Transaction().show(parentLayer).apply();
-    captureArgs.captureArgs.captureSecureLayers = false;
+    captureArgs.captureArgs.secureLayerMode = gui::SecureLayerMode::Redact;
     {
         SCOPED_TRACE("parent visible");
         ASSERT_EQ(NO_ERROR, ScreenCapture::captureLayers(captureArgs, mCaptureResults));
@@ -228,7 +228,7 @@ TEST_F(ScreenCaptureTest, CaptureChildRespectsParentSecureFlag) {
         sc.expectColor(size, Color::BLACK);
     }
 
-    captureArgs.captureArgs.captureSecureLayers = true;
+    captureArgs.captureArgs.secureLayerMode = gui::SecureLayerMode::Capture;
     {
         SCOPED_TRACE("capture secure parent visible");
         ASSERT_EQ(NO_ERROR, ScreenCapture::captureLayers(captureArgs, mCaptureResults));
@@ -261,7 +261,7 @@ TEST_F(ScreenCaptureTest, CaptureOffscreenChildRespectsParentSecureFlag) {
     LayerCaptureArgs captureArgs;
     captureArgs.layerHandle = childLayer->getHandle();
     captureArgs.captureArgs.sourceCrop = gui::aidl_utils::toARect(size);
-    captureArgs.captureArgs.captureSecureLayers = false;
+    captureArgs.captureArgs.secureLayerMode = gui::SecureLayerMode::Redact;
     {
         SCOPED_TRACE("parent hidden");
         ASSERT_EQ(NO_ERROR, ScreenCapture::captureLayers(captureArgs, mCaptureResults));
@@ -270,7 +270,7 @@ TEST_F(ScreenCaptureTest, CaptureOffscreenChildRespectsParentSecureFlag) {
         sc.expectColor(size, Color::BLACK);
     }
 
-    captureArgs.captureArgs.captureSecureLayers = true;
+    captureArgs.captureArgs.secureLayerMode = gui::SecureLayerMode::Capture;
     {
         SCOPED_TRACE("capture secure parent not visible");
         ASSERT_EQ(NO_ERROR, ScreenCapture::captureLayers(captureArgs, mCaptureResults));
@@ -280,7 +280,7 @@ TEST_F(ScreenCaptureTest, CaptureOffscreenChildRespectsParentSecureFlag) {
     }
 
     Transaction().show(parentLayer).apply();
-    captureArgs.captureArgs.captureSecureLayers = false;
+    captureArgs.captureArgs.secureLayerMode = gui::SecureLayerMode::Redact;
     {
         SCOPED_TRACE("parent visible");
         ASSERT_EQ(NO_ERROR, ScreenCapture::captureLayers(captureArgs, mCaptureResults));
@@ -289,7 +289,7 @@ TEST_F(ScreenCaptureTest, CaptureOffscreenChildRespectsParentSecureFlag) {
         sc.expectColor(size, Color::BLACK);
     }
 
-    captureArgs.captureArgs.captureSecureLayers = true;
+    captureArgs.captureArgs.secureLayerMode = gui::SecureLayerMode::Capture;
     {
         SCOPED_TRACE("capture secure parent visible");
         ASSERT_EQ(NO_ERROR, ScreenCapture::captureLayers(captureArgs, mCaptureResults));
@@ -737,7 +737,7 @@ TEST_F(ScreenCaptureTest, CaptureSecureLayer) {
     mCapture->expectColor(Rect(30, 30, 60, 60), Color::RED);
 
     // Passing flag secure so the blue layer should be screenshot too.
-    args.captureArgs.captureSecureLayers = true;
+    args.captureArgs.secureLayerMode = gui::SecureLayerMode::Capture;
     ScreenCapture::captureLayers(&mCapture, args);
     mCapture->expectColor(Rect(0, 0, 30, 30), Color::BLUE);
     mCapture->expectColor(Rect(30, 30, 60, 60), Color::RED);
@@ -781,7 +781,7 @@ TEST_F(ScreenCaptureTest, ScreenshotProtectedBuffer) {
     // Reading color data will expectedly result in crash, only check usage bit
     // b/309965549 Checking that the usage bit is protected does not work for
     // devices that do not support usage protected.
-    mCaptureArgs.captureArgs.allowProtected = true;
+    mCaptureArgs.captureArgs.protectedLayerMode = gui::ProtectedLayerMode::Capture;
     ASSERT_EQ(NO_ERROR, ScreenCapture::captureLayers(mCaptureArgs, captureResults));
     // ASSERT_EQ(GRALLOC_USAGE_PROTECTED, GRALLOC_USAGE_PROTECTED &
     // captureResults.buffer->getUsage());
@@ -1061,6 +1061,63 @@ TEST_F(ScreenCaptureTest, captureOffscreenNullSnapshot) {
     // for the purposes of this test since we explicitly want a null snapshot.
     captureArgs.childrenOnly = true;
     ScreenCapture::captureLayers(&mCapture, captureArgs);
+}
+
+TEST_F(ScreenCaptureTest, captureOffscreenCyclicalHierarchyInChildrenFails) {
+    sp<SurfaceControl> layer1;
+    ASSERT_NO_FATAL_FAILURE(layer1 = createLayer("Layer1", 32, 32,
+                                                 ISurfaceComposerClient::eFXSurfaceBufferState,
+                                                 mBGSurfaceControl.get()));
+    ASSERT_NO_FATAL_FAILURE(fillBufferLayerColor(layer1, Color::RED, 32, 32));
+
+    sp<SurfaceControl> layer2;
+    ASSERT_NO_FATAL_FAILURE(layer2 = createLayer(String8("Layer2"), 32, 32, 0, layer1.get()));
+
+    sp<SurfaceControl> layer3;
+    ASSERT_NO_FATAL_FAILURE(layer3 = createLayer(String8("Layer3"), 32, 32, 0, layer2.get()));
+
+    Transaction().show(layer1).hide(mFGSurfaceControl).reparent(layer1, nullptr).apply();
+
+    {
+        // Validate that the red layer is not on screen
+        ScreenCapture::captureLayers(&mCapture, mCaptureArgs);
+        mCapture->expectColor(Rect(0, 0, mDisplayWidth, mDisplayHeight), {63, 63, 195, 255});
+    }
+
+    // Introduce cycle
+    Transaction().reparent(layer1, layer3).apply(true /* synchronous */);
+
+    LayerCaptureArgs captureArgs;
+    captureArgs.layerHandle = layer1->getHandle();
+
+    ScreenCaptureResults captureResults;
+    status_t result = ScreenCapture::captureLayers(captureArgs, captureResults);
+
+    ASSERT_EQ(BAD_VALUE, result);
+}
+
+TEST_F(ScreenCaptureTest, captureCyclicalHierarchyInParentsFails) {
+    sp<SurfaceControl> layer1;
+    ASSERT_NO_FATAL_FAILURE(layer1 = createLayer("Layer1", 32, 32,
+                                                 ISurfaceComposerClient::eFXSurfaceBufferState,
+                                                 mBGSurfaceControl.get()));
+    sp<SurfaceControl> layer2;
+    ASSERT_NO_FATAL_FAILURE(layer2 = createLayer(String8("Layer2"), 32, 32, 0, layer1.get()));
+
+    sp<SurfaceControl> layer3;
+    ASSERT_NO_FATAL_FAILURE(layer3 = createLayer(String8("Layer3"), 32, 32, 0, layer2.get()));
+    ASSERT_NO_FATAL_FAILURE(fillBufferLayerColor(layer3, Color::RED, 32, 32));
+
+    // Introduce cycle
+    Transaction().reparent(layer1, layer2).apply(true /* synchronous */);
+
+    LayerCaptureArgs captureArgs;
+    captureArgs.layerHandle = layer3->getHandle();
+
+    ScreenCaptureResults captureResults;
+    status_t result = ScreenCapture::captureLayers(captureArgs, captureResults);
+
+    ASSERT_EQ(BAD_VALUE, result);
 }
 
 // In the following tests we verify successful skipping of a parent layer,

@@ -121,6 +121,11 @@ std::vector<IServiceManager::ServiceDebugInfo> FakeServiceManager::getServiceDeb
     return ret;
 }
 
+bool FakeServiceManager::checkServiceAccess(const String16&, pid_t, uid_t,
+                                    const String16&, const String16&) {
+    return true;
+}
+
 void FakeServiceManager::clear() {
     std::map<String16, sp<IBinder>> backup;
 

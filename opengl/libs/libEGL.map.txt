@@ -4,7 +4,7 @@ LIBEGL {
     eglBindTexImage;
     eglChooseConfig;
     eglClientWaitSync; # introduced=29
-    eglClientWaitSyncKHR; # introduced-arm=18 introduced-arm64=21 introduced-mips=18 introduced-mips64=21 introduced-x86=18 introduced-x86_64=21
+    eglClientWaitSyncKHR;
     eglCopyBuffers;
     eglCreateContext;
     eglCreateImage; # introduced=29
@@ -19,7 +19,7 @@ LIBEGL {
     eglCreateStreamKHR; # introduced=23
     eglCreateStreamProducerSurfaceKHR; # introduced=23
     eglCreateSync; # introduced=29
-    eglCreateSyncKHR; # introduced-arm=18 introduced-arm64=21 introduced-mips=18 introduced-mips64=21 introduced-x86=18 introduced-x86_64=21
+    eglCreateSyncKHR;
     eglCreateWindowSurface;
     eglDestroyContext;
     eglDestroyImage; # introduced=29
@@ -27,7 +27,7 @@ LIBEGL {
     eglDestroyStreamKHR; # introduced=23
     eglDestroySurface;
     eglDestroySync; # introduced=29
-    eglDestroySyncKHR; # introduced-arm=18 introduced-arm64=21 introduced-mips=18 introduced-mips64=21 introduced-x86=18 introduced-x86_64=21
+    eglDestroySyncKHR;
     eglDupNativeFenceFDANDROID; # llndk
     eglGetConfigAttrib;
     eglGetConfigs;
@@ -41,13 +41,13 @@ LIBEGL {
     eglGetProcAddress;
     eglGetStreamFileDescriptorKHR; # introduced=23
     eglGetSyncAttrib; # introduced=29
-    eglGetSyncAttribKHR; # introduced-arm=18 introduced-arm64=21 introduced-mips=18 introduced-mips64=21 introduced-x86=18 introduced-x86_64=21
-    eglGetSystemTimeFrequencyNV; # introduced-arm=14 introduced-arm64=21 introduced-mips=14 introduced-mips64=21 introduced-x86=14 introduced-x86_64=21
-    eglGetSystemTimeNV; # introduced-arm=14 introduced-arm64=21 introduced-mips=14 introduced-mips64=21 introduced-x86=14 introduced-x86_64=21
+    eglGetSyncAttribKHR;
+    eglGetSystemTimeFrequencyNV;
+    eglGetSystemTimeNV;
     eglInitialize;
     eglLockSurfaceKHR;
     eglMakeCurrent;
-    eglPresentationTimeANDROID; # introduced-arm=18 introduced-arm64=21 introduced-mips=18 introduced-mips64=21 introduced-x86=18 introduced-x86_64=21
+    eglPresentationTimeANDROID;
     eglQueryAPI;
     eglQueryContext;
     eglQueryStreamKHR; # introduced=23
@@ -59,7 +59,7 @@ LIBEGL {
     eglReleaseTexImage;
     eglReleaseThread;
     eglSetDamageRegionKHR; # introduced=23
-    eglSignalSyncKHR; # introduced-arm=18 introduced-arm64=21 introduced-mips=18 introduced-mips64=21 introduced-x86=18 introduced-x86_64=21
+    eglSignalSyncKHR;
     eglStreamAttribKHR; # introduced=23
     eglStreamConsumerAcquireKHR; # introduced=23
     eglStreamConsumerGLTextureExternalKHR; # introduced=23
@@ -74,7 +74,7 @@ LIBEGL {
     eglWaitGL;
     eglWaitNative;
     eglWaitSync; # introduced=29
-    eglWaitSyncKHR; # introduced-arm=18 introduced-arm64=21 introduced-mips=18 introduced-mips64=21 introduced-x86=18 introduced-x86_64=21
+    eglWaitSyncKHR;
   local:
     *;
 };

@@ -1,0 +1,91 @@
+// Copyright 2025 The Android Open Source Project
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//      http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package {
+    default_team: "trendy_team_webapps_cros_android",
+}
+
+rust_defaults {
+    name: "serialservice_defaults",
+    proc_macros: [
+        "libasync_trait",
+    ],
+    rustlibs: [
+        "android.hardware.serialservice-rust",
+        "libanyhow",
+        "libbinder_rs",
+        "libbinder_tokio_rs",
+        "libfutures",
+        "liblog_rust",
+        "liblogger",
+        "libmockall",
+        "libnix",
+        "librustutils",
+        "libtokio",
+        "libtokio_stream",
+        "libueventd",
+    ],
+}
+
+rust_binary {
+    name: "serialservice",
+    srcs: ["rust/service.rs"],
+    system_ext_specific: true,
+    defaults: ["serialservice_defaults"],
+    init_rc: ["serialservice.rc"],
+    rustlibs: [
+        "libandroid_hardware_serial_flags_rust",
+        "libserialservice",
+    ],
+    prefer_rlib: true,
+}
+
+rust_library {
+    name: "libserialservice",
+    crate_name: "serialservice",
+    crate_root: "rust/lib.rs",
+    system_ext_specific: true,
+    defaults: ["serialservice_defaults"],
+    init_rc: ["serialservice.rc"],
+}
+
+rust_test {
+    name: "serialservice_test",
+    crate_name: "serialservice",
+    crate_root: "rust/lib.rs",
+    defaults: ["serialservice_defaults"],
+    srcs: ["rust/*.rs"],
+    test_options: {
+        unit_test: true,
+    },
+    test_suites: ["device-tests"],
+    rustlibs: [
+        "libandroid_logger",
+        "libserialservice",
+        "libtempfile",
+        "libtokio_test",
+    ],
+}
+
+rust_fuzz {
+    name: "serialservice_fuzzer",
+    srcs: ["rust/service_fuzzer.rs"],
+    defaults: [
+        "serialservice_defaults",
+        "service_fuzzer_defaults_rs",
+    ],
+    rustlibs: [
+        "libserialservice",
+    ],
+}

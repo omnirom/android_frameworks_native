@@ -56,7 +56,9 @@ constexpr void assert_small_callable() {
 
     static_assert(sizeof(F) <= kFunctionBufferSize,
                   "Supplied callable is larger than std::function optimization buffer. "
-                  "Try using std::ref, but make sure lambda lives long enough to be called.");
+                  "std::ref can avoid this or allow referencing a global function, "
+                  "but you should avoid creating large callables that require allocations every "
+                  "time");
 }
 
 template <typename T>

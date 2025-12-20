@@ -1,6 +1,7 @@
-adyabr@google.com
-alecmouri@google.com
+# Bug component: 1075130
+
+include /services/surfaceflinger/OWNERS
+
+# Historical owners
 chrisforbes@google.com
-jreck@google.com
 mathias@google.com
-romainguy@google.com

@@ -23,6 +23,7 @@
 
 #include <aidl/android/hardware/input/processor/IInputProcessor.h>
 #include <input/BlockingQueue.h>
+#include <input/Input.h>
 #include "InputListener.h"
 namespace android {
 
@@ -48,7 +49,7 @@ struct ClassifierEvent {
     // Convenience function to create an EXIT event
     static ClassifierEvent createExitEvent();
 
-    std::optional<int32_t> getDeviceId() const;
+    std::optional<DeviceId> getDeviceId() const;
 };
 
 // --- Interfaces ---
@@ -196,17 +197,16 @@ private:
      * Per-device input classifications. Should only be accessed using the
      * getClassification / setClassification methods.
      */
-    std::unordered_map<int32_t /*deviceId*/, MotionClassification> mClassifications
-            GUARDED_BY(mLock);
+    std::unordered_map<DeviceId, MotionClassification> mClassifications GUARDED_BY(mLock);
     /**
      * Set the current classification for a given device.
      */
-    void setClassification(int32_t deviceId, MotionClassification classification);
+    void setClassification(DeviceId deviceId, MotionClassification classification);
     /**
      * Get the current classification for a given device.
      */
-    MotionClassification getClassification(int32_t deviceId);
-    void updateClassification(int32_t deviceId, nsecs_t eventTime,
+    MotionClassification getClassification(DeviceId deviceId);
+    void updateClassification(DeviceId deviceId, nsecs_t eventTime,
                               MotionClassification classification);
     /**
      * Clear all current classifications
@@ -218,11 +218,11 @@ private:
      *
      * Accessed indirectly by both InputProcessor thread and the thread that receives notifyMotion.
      */
-    std::unordered_map<int32_t /*deviceId*/, nsecs_t /*downTime*/> mLastDownTimes GUARDED_BY(mLock);
+    std::unordered_map<DeviceId, nsecs_t /*downTime*/> mLastDownTimes GUARDED_BY(mLock);
 
-    void updateLastDownTime(int32_t deviceId, nsecs_t downTime);
+    void updateLastDownTime(DeviceId deviceId, nsecs_t downTime);
 
-    void clearDeviceState(int32_t deviceId);
+    void clearDeviceState(DeviceId deviceId);
 
     /**
      * Exit the InputProcessor HAL thread.

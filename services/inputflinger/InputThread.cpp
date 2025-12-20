@@ -16,9 +16,12 @@
 
 #include "InputThread.h"
 
+#include <functional>
+
 #include <android-base/logging.h>
 #include <com_android_input_flags.h>
 #include <processgroup/processgroup.h>
+#include "jni.h"
 
 namespace android {
 
@@ -26,63 +29,72 @@ namespace input_flags = com::android::input::flags;
 
 namespace {
 
-bool applyInputEventProfile(const Thread& thread) {
-#if defined(__ANDROID__)
-    return SetTaskProfiles(thread.getTid(), {"InputPolicy"});
-#else
-    // Since thread information is not available and there's no benefit of
-    // applying the task profile on host, return directly.
-    return true;
-#endif
+bool applyInputEventProfile() {
+    static constexpr pid_t CURRENT_THREAD = 0;
+    return SetTaskProfiles(CURRENT_THREAD, {"InputPolicy"});
 }
 
-// Implementation of Thread from libutils.
-class InputThreadImpl : public Thread {
+class JvmAttacher {
 public:
-    explicit InputThreadImpl(std::function<void()> loop)
-          : Thread(/* canCallJava */ true), mThreadLoop(loop) {}
+    JvmAttacher(JNIEnv* env, const std::string& name) {
+        if (env == nullptr) {
+            LOG(INFO) << "env is nullptr for thread " << name;
+            return;
+        }
+        env->GetJavaVM(&mVm);
+        LOG_IF(FATAL, mVm == nullptr) << "Could not get JavaVM from provided JNIEnv";
 
-    ~InputThreadImpl() {}
+        JavaVMAttachArgs args{
+                .version = JNI_VERSION_1_6,
+                .name = name.c_str(),
+                .group = nullptr,
+        };
+        if (mVm->AttachCurrentThread(&env, &args) != JNI_OK) {
+            LOG(FATAL) << "Cannot attach thread " << name << " to Java VM.";
+        }
+    }
+
+    ~JvmAttacher() {
+        if (mVm != nullptr && mVm->DetachCurrentThread() != JNI_OK) {
+            LOG(FATAL) << "Cannot detach thread from Java VM.";
+        }
+    }
 
 private:
-    std::function<void()> mThreadLoop;
-
-    bool threadLoop() override {
-        mThreadLoop();
-        return true;
-    }
+    JavaVM* mVm = nullptr;
 };
 
 } // namespace
 
 InputThread::InputThread(std::string name, std::function<void()> loop, std::function<void()> wake,
-                         bool isInCriticalPath)
+                         bool isInCriticalPath, JNIEnv* env)
       : mThreadWake(wake) {
-    mThread = sp<InputThreadImpl>::make(loop);
-    mThread->run(name.c_str(), ANDROID_PRIORITY_URGENT_DISPLAY);
-    if (input_flags::enable_input_policy_profile() && isInCriticalPath) {
-        if (!applyInputEventProfile(*mThread)) {
-            LOG(ERROR) << "Couldn't apply input policy profile for " << name;
+    std::thread loopThread{[this, name, isInCriticalPath, loop, env] {
+        if (input_flags::enable_input_policy_profile() && isInCriticalPath) {
+            if (!applyInputEventProfile()) {
+                LOG(ERROR) << "Couldn't apply input policy profile for " << name;
+            }
         }
-    }
+
+        JvmAttacher jvmAttacher(env, name);
+
+        while (!mStopThread) {
+            loop();
+        }
+    }};
+    mThread = std::move(loopThread);
 }
 
 InputThread::~InputThread() {
-    mThread->requestExit();
+    mStopThread = true;
     if (mThreadWake) {
         mThreadWake();
     }
-    mThread->requestExitAndWait();
+    mThread.join();
 }
 
 bool InputThread::isCallingThread() {
-#if defined(__ANDROID__)
-    return gettid() == mThread->getTid();
-#else
-    // Assume that the caller is doing everything correctly,
-    // since thread information is not available on host
-    return false;
-#endif
+    return std::this_thread::get_id() == mThread.get_id();
 }
 
 } // namespace android

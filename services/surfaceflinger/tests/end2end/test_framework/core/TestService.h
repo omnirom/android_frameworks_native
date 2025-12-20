@@ -34,11 +34,11 @@ class SFController;
 
 }  // namespace surfaceflinger
 
-namespace fake_hwc3 {
+namespace hwc3 {
 
 class Hwc3Controller;
 
-}  // namespace fake_hwc3
+}  // namespace hwc3
 
 namespace core {
 
@@ -53,7 +53,7 @@ class TestService final {
     explicit TestService(Passkey passkey);
 
     // Obtains the HWC3 back-end controller
-    [[nodiscard]] auto hwc() -> fake_hwc3::Hwc3Controller& {
+    [[nodiscard]] auto hwc() -> hwc3::Hwc3Controller& {
         CHECK(mHwc);
         return *mHwc;
     }
@@ -68,7 +68,7 @@ class TestService final {
     [[nodiscard]] auto init(std::span<const DisplayConfiguration> displays)
             -> base::expected<void, std::string>;
 
-    std::shared_ptr<fake_hwc3::Hwc3Controller> mHwc;
+    std::shared_ptr<hwc3::Hwc3Controller> mHwc;
     std::shared_ptr<surfaceflinger::SFController> mFlinger;
 };
 

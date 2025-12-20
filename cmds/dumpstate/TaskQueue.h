@@ -17,6 +17,7 @@
 #ifndef FRAMEWORK_NATIVE_CMD_TASKQUEUE_H_
 #define FRAMEWORK_NATIVE_CMD_TASKQUEUE_H_
 
+#include <functional>
 #include <mutex>
 #include <queue>
 

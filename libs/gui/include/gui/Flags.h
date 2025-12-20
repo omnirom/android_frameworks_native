@@ -19,6 +19,8 @@
 #include <com_android_graphics_libgui_flags.h>
 #include <utils/StrongPointer.h>
 
+struct ANativeWindow;
+
 namespace android {
 
 class IGraphicBufferProducer;
@@ -27,15 +29,10 @@ namespace view {
 class Surface;
 }
 
-#define WB_CAMERA3_AND_PROCESSORS_WITH_DEPENDENCIES                  \
-    (COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CAMERA3_AND_PROCESSORS) && \
-     COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ) &&  \
-     COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_PLATFORM_API_IMPROVEMENTS))
+#define WB_LIBCAMERASERVICE_WITH_DEPENDENCIES \
+    (COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_LIBCAMERASERVICE))
 
-#define WB_LIBCAMERASERVICE_WITH_DEPENDENCIES       \
-    (WB_CAMERA3_AND_PROCESSORS_WITH_DEPENDENCIES && \
-     COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_LIBCAMERASERVICE))
-
+// Camera
 #if WB_LIBCAMERASERVICE_WITH_DEPENDENCIES
 typedef android::Surface SurfaceType;
 typedef android::view::Surface ParcelableSurfaceType;
@@ -54,4 +51,22 @@ ParcelableSurfaceType convertSurfaceTypeToParcelable(sp<SurfaceType> surface);
 sp<SurfaceType> convertParcelableSurfaceTypeToSurface(const ParcelableSurfaceType& surface);
 } // namespace flagtools
 
+// Media
+#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_MEDIA_MIGRATION)
+typedef android::Surface MediaSurfaceType;
+typedef android::view::Surface MediaParcelableSurfaceType;
+#else
+typedef android::IGraphicBufferProducer MediaSurfaceType;
+typedef android::sp<android::IGraphicBufferProducer> MediaParcelableSurfaceType;
+#endif
+
+namespace mediaflagtools {
+sp<MediaSurfaceType> nativeWindowToSurfaceType(ANativeWindow* anw);
+sp<MediaSurfaceType> igbpToSurfaceType(const sp<IGraphicBufferProducer>& igbp);
+sp<IGraphicBufferProducer> surfaceTypeToIGBP(const sp<MediaSurfaceType>& mst);
+sp<SurfaceType> mediaSurfaceToCameraSurfaceType(const sp<MediaSurfaceType>& mst,
+                                                bool controlledByApp = false);
+sp<Surface> surfaceTypeToSurface(const sp<MediaSurfaceType>& mst, bool controlledByApp = false);
+sp<MediaSurfaceType> surfaceToSurfaceType(const sp<Surface>& surface);
+} // namespace mediaflagtools
 } // namespace android

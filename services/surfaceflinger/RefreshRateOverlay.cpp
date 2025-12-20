@@ -23,9 +23,6 @@
 
 #include <SkSurface.h>
 
-#undef LOG_TAG
-#define LOG_TAG "RefreshRateOverlay"
-
 namespace android {
 
 auto RefreshRateOverlay::draw(int refreshRate, int renderFps, bool idle, SkColor color,
@@ -184,6 +181,17 @@ RefreshRateOverlay::RefreshRateOverlay(ConstructorTag, FpsRange fpsRange,
             .apply();
 }
 
+RefreshRateOverlay::~RefreshRateOverlay() {
+    for (const auto& pair : mBufferCache) {
+        for (const sp<GraphicBuffer>& buffer : pair.second) {
+            android::removeBufferFromLocalCache(buffer);
+        }
+    }
+
+    mBufferCache.clear();
+    mSurfaceControl.reset();
+}
+
 bool RefreshRateOverlay::initCheck() const {
     return mSurfaceControl != nullptr;
 }
@@ -288,8 +296,7 @@ void RefreshRateOverlay::onVrrIdle(bool idle) {
 }
 
 void RefreshRateOverlay::changeRenderRate(Fps renderFps) {
-    if (mFeatures.test(Features::RenderRate) && mRefreshRate &&
-        FlagManager::getInstance().misc1()) {
+    if (mFeatures.test(Features::RenderRate) && mRefreshRate) {
         mRenderFps = renderFps;
         const auto buffer = getOrCreateBuffers(*mRefreshRate, renderFps, mIsVrrIdle)[mFrame];
         createTransaction().setBuffer(mSurfaceControl->get(), buffer).apply();

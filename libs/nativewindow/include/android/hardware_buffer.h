@@ -209,6 +209,63 @@ enum AHardwareBuffer_Format {
      *   OpenGL ES: N/A
      */
     AHARDWAREBUFFER_FORMAT_R10G10B10A10_UNORM       = 0x3b,
+
+    /**
+     * Corresponding formats:
+     *   Vulkan: VK_FORMAT_R12X4_UINT
+     *   OpenGL ES: N/A
+     */
+    AHARDWAREBUFFER_FORMAT_R12_UINT       	    = 0x3d,
+
+    /**
+     * Corresponding formats:
+     *   Vulkan: VK_FORMAT_R14X2_UINT
+     *   OpenGL ES: N/A
+     */
+    AHARDWAREBUFFER_FORMAT_R14_UINT               = 0x3e,
+
+    /**
+     * Corresponding formats:
+     *   Vulkan: VK_FORMAT_R12X4G12X4_UINT
+     *   OpenGL ES: N/A
+     */
+    AHARDWAREBUFFER_FORMAT_R12G12_UINT          = 0x3f,
+
+    /**
+     * Corresponding formats:
+     *   Vulkan: VK_FORMAT_R14X2G14X2_UINT
+     *   OpenGL ES: N/A
+     */
+    AHARDWAREBUFFER_FORMAT_R14G14_UINT          = 0x40,
+
+    /**
+     * Corresponding formats:
+     *   Vulkan: VK_FORMAT_R12X4G12X4B12X4A12X4_UINT
+     *   OpenGL ES: N/A
+     */
+    AHARDWAREBUFFER_FORMAT_R12G12B12A12_UINT= 0x41,
+
+    /**
+     * Corresponding formats:
+     *   Vulkan: VK_FORMAT_R14X2G14X2B14X2A14X2_UINT
+     *   OpenGL ES: N/A
+     */
+    AHARDWAREBUFFER_FORMAT_R14G14B14A14_UINT= 0x42,
+
+    /**
+     * Corresponding formats:
+     *   Vulkan: VK_FORMAT_A2R10G10B10_UNORM_PACK32
+     *   OpenGL ES: N/A
+     */
+    AHARDWAREBUFFER_FORMAT_B10G10R10A2_UNORM        = 0x43,
+
+    /**
+     * Corresponding formats:
+     *   Vulkan: VK_FORMAT_A2R10G10B10_UNORM_PACK32
+     *   OpenGL ES: N/A
+     */
+    AHARDWAREBUFFER_FORMAT_B10G10R10X2_UNORM        = 0x44,
+
 };
 
 /**

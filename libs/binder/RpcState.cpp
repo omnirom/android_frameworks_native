@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-#define LOG_TAG "RpcState"
+#define LOG_TAG "libbinder.RpcState"
 
 #include "RpcState.h"
 
@@ -25,11 +25,12 @@
 
 #include "Constants.h"
 #include "Debug.h"
+#include "FdTrigger.h"
 #include "RpcWireFormat.h"
 #include "Utils.h"
 
 #include <random>
-#include <sstream>
+#include <string>
 
 #include <inttypes.h>
 
@@ -44,7 +45,7 @@ using android::binder::borrowed_fd;
 using android::binder::unique_fd;
 
 #if RPC_FLAKE_PRONE
-void rpcMaybeWaitToFlake() {
+static unsigned rpcFlakeUnsigned() {
     [[clang::no_destroy]] static std::random_device r;
     [[clang::no_destroy]] static RpcMutex m;
     unsigned num;
@@ -52,6 +53,14 @@ void rpcMaybeWaitToFlake() {
         RpcMutexLockGuard lock(m);
         num = r();
     }
+    return num;
+}
+bool rpcMaybeFlake() {
+    return rpcFlakeUnsigned() % 10 == 0; // flake 10%
+    // return rpcFlakeUnsigned() % 4 != 0; // flake 75%
+}
+void rpcMaybeWaitToFlake() {
+    unsigned num = rpcFlakeUnsigned();
     if (num % 10 == 0) usleep(num % 1000);
 }
 #endif
@@ -69,6 +78,13 @@ static bool enableAncillaryFds(RpcSession::FileDescriptorTransportMode mode) {
 
 RpcState::RpcState() {}
 RpcState::~RpcState() {}
+
+sp<IBinder> RpcState::lookupAddress(uint64_t address) {
+    for (auto& [addr, node] : mNodeForAddress) {
+        if (addr == address) return node.sentRef;
+    }
+    return nullptr;
+}
 
 status_t RpcState::onBinderLeaving(const sp<RpcSession>& session, const sp<IBinder>& binder,
                                    uint64_t* outAddress) {
@@ -121,6 +137,7 @@ status_t RpcState::onBinderLeaving(const sp<RpcSession>& session, const sp<IBind
     // arbitrary limit for maximum number of nodes in a process (otherwise we
     // might run out of addresses)
     if (mNodeForAddress.size() > 100000) {
+        ALOGE("%s: too many nodes in the process (%zu)", __FUNCTION__, mNodeForAddress.size());
         return NO_MEMORY;
     }
 
@@ -151,6 +168,10 @@ status_t RpcState::onBinderLeaving(const sp<RpcSession>& session, const sp<IBind
             return OK;
         }
     }
+}
+
+status_t RpcState::cancelBinderLeaving(const sp<RpcSession>& session, uint64_t address) {
+    return doDecStrong(session, address, 1);
 }
 
 status_t RpcState::onBinderEntering(const sp<RpcSession>& session, uint64_t address,
@@ -331,10 +352,16 @@ std::string RpcState::BinderNode::toString() const {
         desc = "(not promotable)";
     }
 
-    std::stringstream ss;
-    ss << "node{" << intptr_t(this->binder.unsafe_get()) << " times sent: " << this->timesSent
-       << " times recd: " << this->timesRecd << " type: " << desc << "}";
-    return ss.str();
+    std::string out = "node{";
+    out.append(std::to_string(intptr_t(this->binder.unsafe_get())));
+    out.append(" times sent: ");
+    out.append(std::to_string(this->timesSent));
+    out.append(" times recd: ");
+    out.append(std::to_string(this->timesRecd));
+    out.append(" type: ");
+    out.append(desc);
+    out.append("}");
+    return out;
 }
 
 RpcState::CommandData::CommandData(size_t size) : mSize(size) {
@@ -357,9 +384,43 @@ RpcState::CommandData::CommandData(size_t size) : mSize(size) {
     } else if (size > binder::kLogTransactionsOverBytes) {
         ALOGW("Transaction too large: inefficient and in danger of breaking: %zu bytes.", size);
     }
-    mData.reset(new (std::nothrow) uint8_t[size]);
+
+    // must always be written over
+    uint8_t* data = new (std::nothrow) uint8_t[size];
+
+    if (!data) {
+        // For helping debug b/404210068. If we are running out of memory,
+        // then, as Android is today, it's going down no matter what we do.
+        // However, if we can get data out of this process, go ahead and log
+        // to help us debug this bug.
+        ALOGE("Failed to allocate %zu data.", size);
+    }
+
+    mData.reset(data);
 }
 
+// all transport errors should pass through here
+static inline status_t handleRpcError(const std::unique_ptr<RpcTransport>& transport,
+                                      const sp<RpcSession>& session, status_t status,
+                                      const char* stateContext, const char* what, int niovs) {
+    if (status == DEAD_OBJECT || status == -ECONNRESET) {
+        LOG_RPC_DETAIL("Failed to %s %s (%d iovs) on RpcTransport %p, error: %s", stateContext,
+                       what, niovs, transport.get(), statusToString(status).c_str());
+    } else {
+        ALOGE("Failed to %s %s (%d iovs) on RpcTransport %p, error: %s", stateContext, what, niovs,
+              transport.get(), statusToString(status).c_str());
+    }
+    (void)session->shutdownAndWait(false);
+
+    if (status == -ECONNRESET) {
+        LOG_RPC_DETAIL("Converting -ECONNRESET to DEAD_OBJECT.");
+        status = DEAD_OBJECT;
+    }
+
+    return status;
+}
+
+// MUST ALWAYS SHUTDOWN ON ERROR, DUE TO CALLER CONSTRAITS
 status_t RpcState::rpcSend(const sp<RpcSession::RpcConnection>& connection,
                            const sp<RpcSession>& session, const char* what, iovec* iovs, int niovs,
                            const std::optional<SmallFunction<status_t()>>& altPoll,
@@ -375,15 +436,13 @@ status_t RpcState::rpcSend(const sp<RpcSession::RpcConnection>& connection,
                                                                   iovs, niovs, altPoll,
                                                                   ancillaryFds);
         status != OK) {
-        LOG_RPC_DETAIL("Failed to write %s (%d iovs) on RpcTransport %p, error: %s", what, niovs,
-                       connection->rpcTransport.get(), statusToString(status).c_str());
-        (void)session->shutdownAndWait(false);
-        return status;
+        return handleRpcError(connection->rpcTransport, session, status, "write", what, niovs);
     }
 
     return OK;
 }
 
+// MUST ALWAYS SHUTDOWN ON ERROR, DUE TO CALLER CONSTRAITS
 status_t RpcState::rpcRec(const sp<RpcSession::RpcConnection>& connection,
                           const sp<RpcSession>& session, const char* what, iovec* iovs, int niovs,
                           std::vector<std::variant<unique_fd, borrowed_fd>>* ancillaryFds) {
@@ -392,10 +451,7 @@ status_t RpcState::rpcRec(const sp<RpcSession::RpcConnection>& connection,
                                                                  iovs, niovs, std::nullopt,
                                                                  ancillaryFds);
         status != OK) {
-        LOG_RPC_DETAIL("Failed to read %s (%d iovs) on RpcTransport %p, error: %s", what, niovs,
-                       connection->rpcTransport.get(), statusToString(status).c_str());
-        (void)session->shutdownAndWait(false);
-        return status;
+        return handleRpcError(connection->rpcTransport, session, status, "read", what, niovs);
     }
 
     for (int i = 0; i < niovs; i++) {
@@ -474,8 +530,8 @@ sp<IBinder> RpcState::getRootObject(const sp<RpcSession::RpcConnection>& connect
     data.markForRpc(session);
     Parcel reply;
 
-    status_t status =
-            transactAddress(connection, 0, RPC_SPECIAL_TRANSACT_GET_ROOT, data, session, &reply, 0);
+    status_t status = transactInternal(connection, nullptr, RPC_SPECIAL_TRANSACT_GET_ROOT, data,
+                                       session, &reply, 0);
     if (status != OK) {
         ALOGE("Error getting root object: %s", statusToString(status).c_str());
         return nullptr;
@@ -490,8 +546,8 @@ status_t RpcState::getMaxThreads(const sp<RpcSession::RpcConnection>& connection
     data.markForRpc(session);
     Parcel reply;
 
-    status_t status = transactAddress(connection, 0, RPC_SPECIAL_TRANSACT_GET_MAX_THREADS, data,
-                                      session, &reply, 0);
+    status_t status = transactInternal(connection, nullptr, RPC_SPECIAL_TRANSACT_GET_MAX_THREADS,
+                                       data, session, &reply, 0);
     if (status != OK) {
         ALOGE("Error getting max threads: %s", statusToString(status).c_str());
         return status;
@@ -515,8 +571,8 @@ status_t RpcState::getSessionId(const sp<RpcSession::RpcConnection>& connection,
     data.markForRpc(session);
     Parcel reply;
 
-    status_t status = transactAddress(connection, 0, RPC_SPECIAL_TRANSACT_GET_SESSION_ID, data,
-                                      session, &reply, 0);
+    status_t status = transactInternal(connection, nullptr, RPC_SPECIAL_TRANSACT_GET_SESSION_ID,
+                                       data, session, &reply, 0);
     if (status != OK) {
         ALOGE("Error getting session ID: %s", statusToString(status).c_str());
         return status;
@@ -528,27 +584,60 @@ status_t RpcState::getSessionId(const sp<RpcSession::RpcConnection>& connection,
 status_t RpcState::transact(const sp<RpcSession::RpcConnection>& connection,
                             const sp<IBinder>& binder, uint32_t code, const Parcel& data,
                             const sp<RpcSession>& session, Parcel* reply, uint32_t flags) {
+    // only internal callers of transactInternal can use special transactions
+    LOG_ALWAYS_FATAL_IF(binder == nullptr, "Binder should not be null");
+
+    if (status_t status = transactInternal(connection, binder, code, data, session, reply, flags);
+        status != OK) {
+        // TODO(b/414720799): this log is added to debug this bug, but it could be a bit noisy, and
+        // we may only want to log it from some cases moving forward.
+        ALOGE("RPC protocol error during call to binder: %p code: %" PRIu32 " transaction: %s",
+              binder.get(), code, statusToString(status).c_str());
+        return status;
+    }
+
+    return OK;
+}
+
+status_t RpcState::transactInternal(const sp<RpcSession::RpcConnection>& connection,
+                                    const sp<IBinder>& maybeBinder, uint32_t code,
+                                    const Parcel& data, const sp<RpcSession>& session,
+                                    Parcel* reply, uint32_t flags) {
     std::string errorMsg;
     if (status_t status = validateParcel(session, data, &errorMsg); status != OK) {
         ALOGE("Refusing to send RPC on binder %p code %" PRIu32 ": Parcel %p failed validation: %s",
-              binder.get(), code, &data, errorMsg.c_str());
+              maybeBinder.get(), code, &data, errorMsg.c_str());
         return status;
     }
+
     uint64_t address;
-    if (status_t status = onBinderLeaving(session, binder, &address); status != OK) return status;
+    if (maybeBinder) {
+        if (status_t status = onBinderLeaving(session, maybeBinder, &address); status != OK) {
+            return status;
+        }
+    } else {
+        address = RPC_SPECIAL_TRANSACTION_ADDRESS;
+    }
 
-    return transactAddress(connection, address, code, data, session, reply, flags);
-}
+    scope_guard onBinderLeavingGuard = make_scope_guard([&]() {
+        if (!maybeBinder) return;
+        if (status_t status = cancelBinderLeaving(session, address); status != OK) {
+            ALOGE("Failed to fix reference count when canceling transaction %s",
+                  statusToString(status).c_str());
+            (void)session->shutdownAndWait(false);
+            // we'd like to return DEAD_OBJECT from the outer function here, but
+            // rpcSend will immediately fail
+        }
+    });
 
-status_t RpcState::transactAddress(const sp<RpcSession::RpcConnection>& connection,
-                                   uint64_t address, uint32_t code, const Parcel& data,
-                                   const sp<RpcSession>& session, Parcel* reply, uint32_t flags) {
-    LOG_ALWAYS_FATAL_IF(!data.isForRpc());
-    LOG_ALWAYS_FATAL_IF(data.objectsCount() != 0);
+    if (!(flags & IBinder::FLAG_ONEWAY)) {
+        LOG_ALWAYS_FATAL_IF(reply == nullptr,
+                            "Reply parcel must be used for synchronous transaction.");
+    }
 
     uint64_t asyncNumber = 0;
 
-    if (address != 0) {
+    if (address != RPC_SPECIAL_TRANSACTION_ADDRESS) {
         RpcMutexUniqueLock _l(mNodeMutex);
         if (mTerminated) return DEAD_OBJECT; // avoid fatal only, otherwise races
         auto it = mNodeForAddress.find(address);
@@ -577,6 +666,19 @@ status_t RpcState::transactAddress(const sp<RpcSession::RpcConnection>& connecti
                                 __builtin_add_overflow(objectTableSpan.byteSize(), bodySize,
                                                        &bodySize),
                         "Too much data %zu", data.dataSize());
+
+    if (bodySize >= binder::kRpcTransactionLimitBytes - sizeof(RpcWireHeader)) {
+        // fail here rather than having client allocate a huge amount of data
+        ALOGE("Transaction for code %d too large: %" PRIu32 " body size bytes.", code, bodySize);
+        return FAILED_TRANSACTION;
+    }
+
+    // At this point, all errors imply a protocol break and the transaction must be shut
+    // down to avoid leaks. Any errors before this point while constructing this Parcel
+    // can be ignored.
+    data.rpcSend();
+    onBinderLeavingGuard.release();
+
     RpcWireHeader command{
             .command = RPC_COMMAND_TRANSACT,
             .bodySize = bodySize,
@@ -591,37 +693,62 @@ status_t RpcState::transactAddress(const sp<RpcSession::RpcConnection>& connecti
             .parcelDataSize = static_cast<uint32_t>(data.dataSize()),
     };
 
-    // Oneway calls have no sync point, so if many are sent before, whether this
-    // is a twoway or oneway transaction, they may have filled up the socket.
-    // So, make sure we drain them before polling
-    constexpr size_t kWaitMaxUs = 1000000;
-    constexpr size_t kWaitLogUs = 10000;
-    size_t waitUs = 0;
-
     iovec iovs[]{
             {&command, sizeof(RpcWireHeader)},
             {&transaction, sizeof(RpcWireTransaction)},
             {const_cast<uint8_t*>(data.data()), data.dataSize()},
             objectTableSpan.toIovec(),
     };
-    auto altPoll = [&] {
-        if (waitUs > kWaitLogUs) {
-            ALOGE("Cannot send command, trying to process pending refcounts. Waiting "
-                  "%zuus. Too many oneway calls?",
-                  waitUs);
-        }
+    std::optional<SmallFunction<status_t()>> altPoll = std::nullopt;
+    struct {
+        const sp<RpcSession::RpcConnection> connection;
+        const sp<RpcSession> session;
+        size_t waitUs;
+    } tmpHeap = {connection, session, 0};
+    if (session->getMaxIncomingThreads() == 0) {
+        altPoll = [this, &tmpHeap] {
+            // Oneway calls have no sync point, so if many are sent before, whether this
+            // is a twoway or oneway transaction, they may have filled up the socket.
+            // So, make sure we drain them before polling
+            constexpr size_t kWaitMaxUs = 1000000;
+            constexpr size_t kWaitLogUs = 10000;
+            if (tmpHeap.waitUs > kWaitLogUs) {
+                // At this point, the transaction buffer is filling up, and we would like to
+                // poll and wait for us to be able to write. However, if we just wait, then
+                // in the case of too many oneway calls, if the other side is blocked on
+                // sending decRefs, because our in buffer is full, we need to go ahead
+                // and drain these. We should never see a nested call at this point because
+                // this is failing to send the transaction itself. A nested call cannot
+                // occur until the entire transaction is sent, then we will handle them
+                // while waiting for the reply. It's also possible to hit this point when
+                // we just send too big of a command, and it fills up the buffer. Then
+                // we need to wait for it to be read. However, we cannot poll because
+                // there is no way to know why the other side is blocked. If it is blocked
+                // sending decRefs from oneway calls (there may have been just enough sent
+                // before this call), then we have to handle them.
+                //
+                // TODO: if we have incoming threads, we may be able to force all the decrefs
+                // to happen on the incoming calls in order to avoid this sleep.
+                ALOGE("Cannot send command, trying to process pending refcounts. Waiting "
+                      "%zuus. Common when too much data is sent or too many oneway calls build up",
+                      tmpHeap.waitUs);
+            }
 
-        if (waitUs > 0) {
-            usleep(waitUs);
-            waitUs = std::min(kWaitMaxUs, waitUs * 2);
-        } else {
-            waitUs = 1;
-        }
+            if (tmpHeap.waitUs > 0) {
+                usleep(tmpHeap.waitUs);
+                tmpHeap.waitUs = std::min(kWaitMaxUs, tmpHeap.waitUs * 2);
+            } else {
+                tmpHeap.waitUs = 1;
+            }
 
-        return drainCommands(connection, session, CommandType::CONTROL_ONLY);
-    };
-    if (status_t status = rpcSend(connection, session, "transaction", iovs, countof(iovs),
-                                  std::ref(altPoll), rpcFields->mFds.get());
+            // This is restricted to "CONTROL_ONLY" because we should not receive any
+            // nested transactions until the entire transaction is sent and starts
+            // executing.
+            return drainCommands(tmpHeap.connection, tmpHeap.session, CommandType::CONTROL_ONLY);
+        };
+    }
+    if (status_t status = rpcSend(connection, session, "transaction", iovs, countof(iovs), altPoll,
+                                  rpcFields->mImpl ? &rpcFields->mImpl->mFds : nullptr);
         status != OK) {
         // rpcSend calls shutdownAndWait, so all refcounts should be reset. If we ever tolerate
         // errors here, then we may need to undo the binder-sent counts for the transaction as
@@ -637,8 +764,8 @@ status_t RpcState::transactAddress(const sp<RpcSession::RpcConnection>& connecti
         return OK;
     }
 
-    LOG_ALWAYS_FATAL_IF(reply == nullptr, "Reply parcel must be used for synchronous transaction.");
-
+    // b/416734088
+    // NOW THAT WE'VE SENT TRANSACTION, WE MUST READ FULL RESULT FOR PROTOCOL TO BE IN SYNC
     return waitForReply(connection, session, reply);
 }
 
@@ -661,14 +788,14 @@ status_t RpcState::waitForReply(const sp<RpcSession::RpcConnection>& connection,
                                              ? &ancillaryFds
                                              : nullptr);
             status != OK)
-            return status;
+            return status; // rpcRec failure calls shutdown
 
         if (command.command == RPC_COMMAND_REPLY) break;
 
         if (status_t status = processCommand(connection, session, command, CommandType::ANY,
                                              std::move(ancillaryFds));
             status != OK)
-            return status;
+            return status; // processCommand must shutdown on failure
 
         // Reset to avoid spurious use-after-move warning from clang-tidy.
         ancillaryFds = decltype(ancillaryFds)();
@@ -687,15 +814,25 @@ status_t RpcState::waitForReply(const sp<RpcSession::RpcConnection>& connection,
     memset(&rpcReply, 0, sizeof(RpcWireReply)); // zero because of potential short read
 
     CommandData data(command.bodySize - rpcReplyWireSize);
-    if (!data.valid()) return NO_MEMORY;
+    if (!data.valid()) {
+        // b/404210068 - if we run out of memory, the wire protocol gets messed up.
+        // so shutdown. We would need to read all the transaction data anyway and
+        // send a reply still to gracefully recover.
+        (void)session->shutdownAndWait(false);
+        return NO_MEMORY;
+    }
 
     iovec iovs[]{
             {&rpcReply, rpcReplyWireSize},
             {data.data(), data.size()},
     };
     if (status_t status = rpcRec(connection, session, "reply body", iovs, countof(iovs), nullptr);
-        status != OK)
+        status != OK) {
+        // rpcRec shuts down connection on failure
         return status;
+    }
+
+    // NOW THAT WE'VE READ RESPONSE, WE CAN RETURN WITHOUT SHUTTING DOWN THE CONNECTION.
 
     if (rpcReply.status != OK) return rpcReply.status;
 
@@ -718,6 +855,7 @@ status_t RpcState::waitForReply(const sp<RpcSession::RpcConnection>& connection,
                   " sizeofHeader=%zu parcelSize=%" PRId32 " objectTableBytesSize=%zu. Terminating!",
                   command.bodySize, rpcReplyWireSize, rpcReply.parcelDataSize,
                   objectTableBytes->size);
+            (void)session->shutdownAndWait(false);
             return BAD_VALUE;
         }
         objectTableSpan = *maybeSpan;
@@ -777,9 +915,13 @@ status_t RpcState::getAndExecuteCommand(const sp<RpcSession::RpcConnection>& con
                 rpcRec(connection, session, "command header (for server)", &iov, 1,
                        enableAncillaryFds(session->getFileDescriptorTransportMode()) ? &ancillaryFds
                                                                                      : nullptr);
-        status != OK)
+        status != OK) {
         return status;
+    }
 
+    // b/416734088
+    // NOW THAT WE'VE READ HEADER WE MUST READ THE REST AND WRITE FULL RESPONSE, OR OTHERWISE
+    // SHUTDOWN THE SERVICE
     return processCommand(connection, session, command, type, std::move(ancillaryFds));
 }
 
@@ -796,6 +938,9 @@ status_t RpcState::drainCommands(const sp<RpcSession::RpcConnection>& connection
     return OK;
 }
 
+// THIS FUNCTION MUST SHUTDOWN IF IT ERRORS, ACCORDING TO waitForReply.
+// THIS FUNCTION MUST ALWAYS READ THE FULL COMMAND, ACCORDING TO getAndExecuteCommand and
+// waitForReply.
 status_t RpcState::processCommand(
         const sp<RpcSession::RpcConnection>& connection, const sp<RpcSession>& session,
         const RpcWireHeader& command, CommandType type,
@@ -819,23 +964,45 @@ status_t RpcState::processCommand(
     });
 #endif // BINDER_WITH_KERNEL_IPC
 
+    status_t result = NO_INIT;
+
     switch (command.command) {
         case RPC_COMMAND_TRANSACT:
-            if (type != CommandType::ANY) return BAD_TYPE;
-            return processTransact(connection, session, command, std::move(ancillaryFds));
+            if (type != CommandType::ANY) {
+                ALOGE("CommandType %d, but got RPC command %d.", static_cast<int>(type),
+                      command.command);
+                (void)session->shutdownAndWait(false);
+                return BAD_TYPE;
+            }
+            result = processTransact(connection, session, command, std::move(ancillaryFds));
+            break;
         case RPC_COMMAND_DEC_STRONG:
-            return processDecStrong(connection, session, command);
+            result = processDecStrong(connection, session, command);
+            break;
+        default:
+            // We should always know the version of the opposing side, and since the
+            // RPC-binder-level wire protocol is not self synchronizing, we have no way
+            // to understand where the current command ends and the next one begins. We
+            // also can't consider it a fatal error because this would allow any client
+            // to kill us, so ending the session for misbehaving client.
+            ALOGE("Unknown RPC command %d - terminating session. Header: %s. CommandType: %d. "
+                  "numFds: %zu",
+                  command.command, HexString(&command, sizeof(command)).c_str(),
+                  static_cast<int>(type), ancillaryFds.size());
+            (void)session->shutdownAndWait(false);
+            return DEAD_OBJECT;
     }
 
-    // We should always know the version of the opposing side, and since the
-    // RPC-binder-level wire protocol is not self synchronizing, we have no way
-    // to understand where the current command ends and the next one begins. We
-    // also can't consider it a fatal error because this would allow any client
-    // to kill us, so ending the session for misbehaving client.
-    ALOGE("Unknown RPC command %d - terminating session", command.command);
-    (void)session->shutdownAndWait(false);
-    return DEAD_OBJECT;
+    if (result != OK) {
+        LOG_ALWAYS_FATAL_IF(!session->mShutdownTrigger->isTriggered(),
+                            "Error during processing command must trigger shutdown! %s",
+                            statusToString(result).c_str());
+    }
+    return result;
 }
+
+// THIS FUNCTION MUST SHUTDOWN IF IT ERRORS, ACCORDING TO processCommand.
+// THIS FUNCTION MUST ALWAYS READ THE FULL COMMAND, ACCORDING TO processCommand.
 status_t RpcState::processTransact(
         const sp<RpcSession::RpcConnection>& connection, const sp<RpcSession>& session,
         const RpcWireHeader& command,
@@ -844,13 +1011,21 @@ status_t RpcState::processTransact(
 
     CommandData transactionData(command.bodySize);
     if (!transactionData.valid()) {
+        // b/404210068 - if we run out of memory, the wire protocol gets messed up.
+        // so shutdown. We would need to read all the transaction data anyway and
+        // send a reply still to gracefully recover.
+        (void)session->shutdownAndWait(false);
         return NO_MEMORY;
     }
     iovec iov{transactionData.data(), transactionData.size()};
     if (status_t status = rpcRec(connection, session, "transaction body", &iov, 1, nullptr);
-        status != OK)
-        return status;
+        status != OK) {
+        return status; // rpcRec always shuts down on error
+    }
 
+    // ACCORDING TO RPC BINDER PROTOCOL:
+    // - if the transaction is oneway, we must not write a response
+    // - if the transaction is twoway, we must ALWAYS write a response
     return processTransactInternal(connection, session, std::move(transactionData),
                                    std::move(ancillaryFds));
 }
@@ -863,6 +1038,11 @@ static void do_nothing_to_transact_data(const uint8_t* data, size_t dataSize,
     (void)objectsCount;
 }
 
+// ACCORDING TO RPC BINDER PROTOCOL:
+// - if the transaction is oneway, we must not write a response
+// - if the transaction is twoway, we must ALWAYS write a response
+// DUE TO CLIENT CONSTRAINTS, WE CANNOT RETURN AN ERROR WITHOUT SHUTTING DOWN THE CONNECTION
+// UNTIL THE FULL RESPONSE HAS BEEN WRITTEN.
 status_t RpcState::processTransactInternal(
         const sp<RpcSession::RpcConnection>& connection, const sp<RpcSession>& session,
         CommandData transactionData,
@@ -885,7 +1065,7 @@ processTransactInternalTailCall:
     bool oneway = transaction->flags & IBinder::FLAG_ONEWAY;
 
     status_t replyStatus = OK;
-    if (addr != 0) {
+    if (addr != RPC_SPECIAL_TRANSACTION_ADDRESS) {
         if (!target) {
             replyStatus = onBinderEntering(session, addr, &target);
         }
@@ -919,7 +1099,8 @@ processTransactInternalTailCall:
                 // we need to process some other asynchronous transaction
                 // first
                 it->second.asyncTodo.push(BinderNode::AsyncTodo{
-                        .ref = target,
+                        // checked above
+                        .ref = sp<BBinder>::fromExisting(target->localBinder()),
                         .data = std::move(transactionData),
                         .ancillaryFds = std::move(ancillaryFds),
                         .asyncNumber = transaction->asyncNumber,
@@ -946,6 +1127,8 @@ processTransactInternalTailCall:
                               target.get(), numPending);
                     }
                 }
+
+                // This is a oneway transaction (scheduled later), no response is required.
                 return OK;
             }
         }
@@ -977,6 +1160,7 @@ processTransactInternalTailCall:
                       " objectTableBytesSize=%zu. Terminating!",
                       transactionData.size(), sizeof(RpcWireTransaction),
                       transaction->parcelDataSize, objectTableBytes->size);
+                (void)session->shutdownAndWait(false);
                 return BAD_VALUE;
             }
             objectTableSpan = *maybeSpan;
@@ -1004,6 +1188,8 @@ processTransactInternalTailCall:
                 connection->allowNested = origAllowNested;
             } else {
                 LOG_RPC_DETAIL("Got special transaction %u", transaction->code);
+                LOG_ALWAYS_FATAL_IF(addr != RPC_SPECIAL_TRANSACTION_ADDRESS,
+                                    "!target && replyStatus == OK should imply special address");
 
                 switch (transaction->code) {
                     case RPC_SPECIAL_TRANSACT_GET_MAX_THREADS: {
@@ -1093,17 +1279,24 @@ processTransactInternalTailCall:
 
         // done processing all the async commands on this binder that we can, so
         // write decstrongs on the binder
-        if (addr != 0 && replyStatus == OK) {
+        if (addr != RPC_SPECIAL_TRANSACTION_ADDRESS && target != nullptr) {
             return flushExcessBinderRefs(session, addr, target);
         }
 
         return OK;
     }
 
+    // No refcounts for root object - it's always held. If an error results
+    // in us not having the binder so that we can't flush refs, then there may
+    // be a leak, but the more fundamental problem is the error.
     // Binder refs are flushed for oneway calls only after all calls which are
     // built up are executed. Otherwise, they fill up the binder buffer.
-    if (addr != 0 && replyStatus == OK) {
-        replyStatus = flushExcessBinderRefs(session, addr, target);
+    if (addr != RPC_SPECIAL_TRANSACTION_ADDRESS && target != nullptr) {
+        // if this fails, we are broken out of the protocol, so just shutdown. There
+        // is no chance we could write the status to the other side.
+        if (status_t status = flushExcessBinderRefs(session, addr, target); status != OK) {
+            return status;
+        }
     }
 
     std::string errorMsg;
@@ -1112,7 +1305,21 @@ processTransactInternalTailCall:
         // Forward the error to the client of the transaction.
         reply.freeData();
         reply.markForRpc(session);
+
+        if (replyStatus != OK) {
+            ALOGE("Dropping error from transaction (%s) due to more serious error in "
+                  "validateParcel (%s)",
+                  statusToString(replyStatus).c_str(), statusToString(status).c_str());
+        }
         replyStatus = status;
+    }
+
+    // b/404210068 - we see this case with no logs in the VM. Make sure we always log in this
+    // case, so if the bug repros again, we prove that there are missing logs. Try the negative
+    // as well to be extra careful. TODO - delete this code anytime in the future.
+    if (replyStatus == NO_MEMORY || replyStatus == ENOMEM) {
+        ALOGE("Replying to transaction code: %" PRIo32 " error: %s.", transaction->code,
+              statusToString(replyStatus).c_str());
     }
 
     auto* rpcFields = reply.maybeRpcFields();
@@ -1124,10 +1331,34 @@ processTransactInternalTailCall:
                                                                 rpcFields->mObjectPositions.size()};
 
     uint32_t bodySize;
-    LOG_ALWAYS_FATAL_IF(__builtin_add_overflow(rpcReplyWireSize, reply.dataSize(), &bodySize) ||
-                                __builtin_add_overflow(objectTableSpan.byteSize(), bodySize,
-                                                       &bodySize),
-                        "Too much data for reply %zu", reply.dataSize());
+    while (true) {
+        LOG_ALWAYS_FATAL_IF(__builtin_add_overflow(rpcReplyWireSize, reply.dataSize(), &bodySize) ||
+                                    __builtin_add_overflow(objectTableSpan.byteSize(), bodySize,
+                                                           &bodySize),
+                            "Too much data for reply %zu", reply.dataSize());
+
+        if (bodySize < binder::kRpcTransactionLimitBytes - sizeof(RpcWireHeader)) {
+            break;
+        }
+
+        // Fail here, rather than requesting the client to allocate a huge amount.
+        // See waitForReply. There we have a separate rpcRec for the header (at the
+        // time of writing). However, it's better to impose the limit over the
+        // entire packet, as +/- a few bytes doesn't matter, this would work even
+        // if those are combined, and it errs on making the packet here slightly
+        // smaller.
+        ALOGE("Reply transaction for code %d too large: %" PRIu32 " body size bytes.",
+              transaction->code, bodySize);
+        reply.setDataSize(0);
+        objectTableSpan.clear();
+        replyStatus = FAILED_TRANSACTION; // match kernel binder
+    }
+
+    // Ownership of objects in Parcel is considered to be the receiver at this point. All errors
+    // above should be sent through "replyStatus" anyway. However, for other Parcel which are
+    // constructed elsewhere, this won't get called, so their resources will get cleaned up.
+    reply.rpcSend();
+
     RpcWireHeader cmdReply{
             .command = RPC_COMMAND_REPLY,
             .bodySize = bodySize,
@@ -1147,9 +1378,11 @@ processTransactInternalTailCall:
             objectTableSpan.toIovec(),
     };
     return rpcSend(connection, session, "reply", iovs, countof(iovs), std::nullopt,
-                   rpcFields->mFds.get());
+                   rpcFields->mImpl ? &rpcFields->mImpl->mFds : nullptr);
 }
 
+// THIS FUNCTION MUST SHUTDOWN IF IT ERRORS, ACCORDING TO processCommand.
+// THIS FUNCTION MUST ALWAYS READ THE FULL COMMAND, ACCORDING TO processCommand.
 status_t RpcState::processDecStrong(const sp<RpcSession::RpcConnection>& connection,
                                     const sp<RpcSession>& session, const RpcWireHeader& command) {
     LOG_ALWAYS_FATAL_IF(command.command != RPC_COMMAND_DEC_STRONG, "command: %d", command.command);
@@ -1164,15 +1397,26 @@ status_t RpcState::processDecStrong(const sp<RpcSession::RpcConnection>& connect
     RpcDecStrong body;
     iovec iov{&body, sizeof(RpcDecStrong)};
     if (status_t status = rpcRec(connection, session, "dec ref body", &iov, 1, nullptr);
-        status != OK)
-        return status;
+        status != OK) {
+        return status; // rpcRec shutsdown if it fails
+    }
 
-    uint64_t addr = RpcWireAddress::toRaw(body.address);
+    // AT THIS POINT, WE HAVE READ THE FULL TRANSACTION, SO WE CAN RETURN WITHOUT MESSING
+    // UP THE PROTOCOL
+
+    return doDecStrong(session, RpcWireAddress::toRaw(body.address), body.amount);
+}
+
+status_t RpcState::doDecStrong(const sp<RpcSession>& session, uint64_t addr, uint32_t amount) {
     RpcMutexUniqueLock _l(mNodeMutex);
+    if (mTerminated) return DEAD_OBJECT;
+
     auto it = mNodeForAddress.find(addr);
     if (it == mNodeForAddress.end()) {
-        ALOGE("Unknown binder address %" PRIu64 " for dec strong.", addr);
-        return OK;
+        ALOGE("Unknown binder address %" PRIu64 " for dec strong. Terminating!", addr);
+        _l.unlock();
+        (void)session->shutdownAndWait(false);
+        return BAD_VALUE;
     }
 
     sp<IBinder> target = it->second.binder.promote();
@@ -1185,19 +1429,22 @@ status_t RpcState::processDecStrong(const sp<RpcSession::RpcConnection>& connect
         return BAD_VALUE;
     }
 
-    if (it->second.timesSent < body.amount) {
-        ALOGE("Record of sending binder %zu times, but requested decStrong for %" PRIu64 " of %u",
-              it->second.timesSent, addr, body.amount);
-        return OK;
+    if (it->second.timesSent < amount) {
+        ALOGE("Record of sending binder %zu times, but requested decStrong for %" PRIu64
+              " of %u. Terminating!",
+              it->second.timesSent, addr, amount);
+        _l.unlock();
+        (void)session->shutdownAndWait(false);
+        return BAD_VALUE;
     }
 
     LOG_ALWAYS_FATAL_IF(it->second.sentRef == nullptr, "Inconsistent state, lost ref for %" PRIu64,
                         addr);
 
-    LOG_RPC_DETAIL("Processing dec strong of %" PRIu64 " by %u from %zu", addr, body.amount,
+    LOG_RPC_DETAIL("Processing dec strong of %" PRIu64 " by %u from %zu", addr, amount,
                    it->second.timesSent);
 
-    it->second.timesSent -= body.amount;
+    it->second.timesSent -= amount;
     sp<IBinder> tempHold = tryEraseNode(session, std::move(_l), it);
     // LOCK ALREADY RELEASED
     tempHold = nullptr; // destructor may make binder calls on this session
@@ -1221,45 +1468,28 @@ status_t RpcState::validateParcel(const sp<RpcSession>& session, const Parcel& p
     uint32_t protocolVersion = session->getProtocolVersion().value();
     if (protocolVersion < RPC_WIRE_PROTOCOL_VERSION_RPC_HEADER_FEATURE_EXPLICIT_PARCEL_SIZE &&
         !rpcFields->mObjectPositions.empty()) {
-        std::stringstream ss;
-        ss << "Parcel has attached objects but the session's protocol version (" << protocolVersion
-           << ") is too old, must be at least "
-           << RPC_WIRE_PROTOCOL_VERSION_RPC_HEADER_FEATURE_EXPLICIT_PARCEL_SIZE;
-        *errorMsg = ss.str();
+        *errorMsg = "Parcel has attached objects but the session's protocol version ";
+        errorMsg->append(std::to_string(protocolVersion));
+        errorMsg->append(" is too old, must be at least ");
+        errorMsg->append(
+                std::to_string(RPC_WIRE_PROTOCOL_VERSION_RPC_HEADER_FEATURE_EXPLICIT_PARCEL_SIZE));
         return BAD_VALUE;
     }
 
-    if (rpcFields->mFds && !rpcFields->mFds->empty()) {
-        switch (session->getFileDescriptorTransportMode()) {
-            case RpcSession::FileDescriptorTransportMode::NONE:
-                *errorMsg =
-                        "Parcel has file descriptors, but no file descriptor transport is enabled";
-                return FDS_NOT_ALLOWED;
-            case RpcSession::FileDescriptorTransportMode::UNIX: {
-                constexpr size_t kMaxFdsPerMsg = 253;
-                if (rpcFields->mFds->size() > kMaxFdsPerMsg) {
-                    std::stringstream ss;
-                    ss << "Too many file descriptors in Parcel for unix domain socket: "
-                       << rpcFields->mFds->size() << " (max is " << kMaxFdsPerMsg << ")";
-                    *errorMsg = ss.str();
-                    return BAD_VALUE;
-                }
-                break;
-            }
-            case RpcSession::FileDescriptorTransportMode::TRUSTY: {
-                // Keep this in sync with trusty_ipc.h!!!
-                // We could import that file here on Trusty, but it's not
-                // available on Android
-                constexpr size_t kMaxFdsPerMsg = 8;
-                if (rpcFields->mFds->size() > kMaxFdsPerMsg) {
-                    std::stringstream ss;
-                    ss << "Too many file descriptors in Parcel for Trusty IPC connection: "
-                       << rpcFields->mFds->size() << " (max is " << kMaxFdsPerMsg << ")";
-                    *errorMsg = ss.str();
-                    return BAD_VALUE;
-                }
-                break;
-            }
+    if (rpcFields->mImpl && !rpcFields->mImpl->mFds.empty()) {
+        auto fileDescriptorTransportMode = session->getFileDescriptorTransportMode();
+        size_t maxFdsPerMsg = getRpcTransportModeMaxFds(fileDescriptorTransportMode);
+        if (RpcSession::FileDescriptorTransportMode::NONE == fileDescriptorTransportMode) {
+            *errorMsg = "Parcel has file descriptors, but no file descriptor transport is enabled";
+            return FDS_NOT_ALLOWED;
+        }
+        if (rpcFields->mImpl->mFds.size() > maxFdsPerMsg) {
+            *errorMsg = "Too many file descriptors in Parcel: ";
+            errorMsg->append(std::to_string(rpcFields->mImpl->mFds.size()));
+            errorMsg->append(" (max is ");
+            errorMsg->append(std::to_string(maxFdsPerMsg));
+            errorMsg->append(")");
+            return BAD_VALUE;
         }
     }
 

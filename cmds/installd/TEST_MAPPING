@@ -7,9 +7,6 @@
       "name": "installd_dexopt_test"
     },
     {
-      "name": "installd_otapreopt_test"
-    },
-    {
       "name": "installd_service_test"
     },
     {

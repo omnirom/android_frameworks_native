@@ -118,8 +118,8 @@ std::optional<double> PropertyMap::getDouble(const std::string& key) const {
     return value;
 }
 
-void PropertyMap::addAll(const PropertyMap* map) {
-    for (const auto& [key, value] : map->mProperties) {
+void PropertyMap::addAll(const PropertyMap& map) {
+    for (const auto& [key, value] : map.mProperties) {
         mProperties.emplace(key, value);
     }
 }

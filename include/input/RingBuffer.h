@@ -24,6 +24,8 @@
 #include <type_traits>
 #include <utility>
 
+#include <stdlib.h>
+
 #include <android-base/stringprintf.h>
 
 namespace android {

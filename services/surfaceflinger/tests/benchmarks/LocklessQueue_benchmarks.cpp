@@ -14,8 +14,9 @@
  * limitations under the License.
  */
 
-#include <memory>
 #include <optional>
+#include <utility>
+#include <vector>
 
 #include <benchmark/benchmark.h>
 
@@ -24,15 +25,18 @@
 namespace android::surfaceflinger {
 
 namespace {
+
 static void pushPop(benchmark::State& state) {
-    LocklessQueue<std::vector<uint32_t>> queue;
+    using ItemT = std::vector<int64_t>;
+    LocklessQueue<ItemT> queue;
+    ItemT item(size_t(state.range(0)), 42);
     for (auto _ : state) {
-        queue.push({10, 5});
-        std::vector<uint32_t> poppedValue = *queue.pop();
-        benchmark::DoNotOptimize(poppedValue);
+        queue.push(std::move(item));
+        item = std::move(*queue.pop());
+        benchmark::DoNotOptimize(item);
     }
 }
-BENCHMARK(pushPop);
+BENCHMARK(pushPop)->Range(1, 1048576);
 
 } // namespace
 } // namespace android::surfaceflinger

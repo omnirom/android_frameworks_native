@@ -181,9 +181,9 @@ Status VibratorController::doOnce(IVibrator* vibrator, const VibratorController:
     auto status = op(vibrator);
     if (!status.isOk()) {
         if (isStatusUnsupported(status)) {
-            ALOGV("Vibrator HAL %s is unsupported: %s", logLabel, status.getMessage());
+            ALOGV("Vibrator HAL %s is unsupported: %s", logLabel, status.getDescription().c_str());
         } else {
-            ALOGE("Vibrator HAL %s failed: %s", logLabel, status.getMessage());
+            ALOGE("Vibrator HAL %s failed: %s", logLabel, status.getDescription().c_str());
         }
     }
     return status;

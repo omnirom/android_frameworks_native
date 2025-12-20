@@ -15,7 +15,8 @@
  */
 
 parcelable BinderRpcTestServerConfig {
-    int numThreads;
+    int numMaxThreads;
+    int numMinThreadsPerBinder;
     int[] serverSupportedFileDescriptorTransportModes;
     int socketType;
     int rpcSecurity;

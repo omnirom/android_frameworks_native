@@ -49,6 +49,8 @@ public:
     template <class D, class... Ts>
     friend std::unique_ptr<D> createUinputDevice(Ts... args);
 
+    void injectEvent(uint16_t type, uint16_t code, int32_t value);
+
 protected:
     const char* mName;
     const int16_t mProductId;
@@ -58,8 +60,6 @@ protected:
     // Signals which types of events this device supports before it is created.
     // This must be overridden by subclasses.
     virtual void configureDevice(int fd, uinput_user_dev* device) = 0;
-
-    void injectEvent(uint16_t type, uint16_t code, int32_t value);
 
 private:
     base::unique_fd mDeviceFd;

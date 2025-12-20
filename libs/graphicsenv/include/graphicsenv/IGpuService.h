@@ -57,8 +57,11 @@ public:
     // sets ANGLE as system GLES driver if enabled==true by setting persist.graphics.egl to true.
     virtual void toggleAngleAsSystemDriver(bool enabled) = 0;
 
+    // gets persist.graphics.egl value
+    virtual std::string getPersistGraphicsEgl() = 0;
+
     // Get the list of features to override.
-    virtual FeatureOverrides getFeatureOverrides() = 0;
+    virtual void getFeatureOverrides(FeatureOverrides& featureOverrides) = 0;
 };
 
 class BnGpuService : public BnInterface<IGpuService> {
@@ -72,6 +75,7 @@ public:
         SET_TARGET_STATS_ARRAY,
         ADD_VULKAN_ENGINE_NAME,
         GET_FEATURE_CONFIG_OVERRIDES,
+        GET_PERSIST_GRAPHICS_EGL,
         // Always append new enum to the end.
     };
 
@@ -80,6 +84,7 @@ public:
 
 protected:
     virtual status_t shellCommand(int in, int out, int err, std::vector<String16>& args) = 0;
+    virtual const FeatureOverrides& getCachedFeatureOverrides() = 0;
 };
 
 } // namespace android

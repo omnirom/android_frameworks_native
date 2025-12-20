@@ -23,9 +23,12 @@
 #include <scheduler/FrameRateMode.h>
 #include <scheduler/FrameTime.h>
 
+#include <gui/DisplayEventReceiver.h>
+
 #include "VSyncDispatch.h"
 
 namespace android::scheduler {
+using FrameRateOverride = DisplayEventReceiver::Event::FrameRateOverride;
 
 /*
  * VSyncTracker is an interface for providing estimates on future Vsync signal times based on
@@ -34,6 +37,12 @@ namespace android::scheduler {
 class VSyncTracker {
 public:
     virtual ~VSyncTracker();
+
+    /*
+     * The threshold for a vsync timestamp to be too old to be used for prediction of
+     * nextAnticipatedVSyncTimeFrom.
+     */
+    static constexpr Duration kPredictorThreshold = std::chrono::milliseconds(200);
 
     /*
      * Adds a known timestamp from a vsync timing source (HWVsync signal, present fence)
@@ -103,15 +112,19 @@ public:
      * Sets a render rate on the tracker. If the render rate is not a divisor
      * of the period, the render rate is ignored until the period changes.
      * The tracker will continue to track the vsync timeline and expect it
-     * to match the current period, however, nextAnticipatedVSyncTimeFrom will
-     * return vsyncs according to the render rate set. Setting a render rate is useful
-     * when a display is running at 120Hz but the render frame rate is 60Hz.
+     * to match the current period.
+     * nextAnticipatedVSyncTimeFrom will return vsyncs according to the new render rate
+     * set only after the point where all the frame rate overrides align.
+     * Setting a render rate is useful when a display is running at 120Hz but
+     * the render frame rate is 60Hz.
      *
      * \param [in] Fps   The render rate the tracker should operate at.
      * \param [in] applyImmediately Whether to apply the new render rate immediately regardless of
      *                              already committed vsyncs.
+     * \param [in] std::vector<FrameRateOverride> list of all the frame rate overrides currently
+     *                                            active with the old render rate.
      */
-    virtual void setRenderRate(Fps, bool applyImmediately) = 0;
+    virtual void setRenderRate(Fps, bool applyImmediately, std::vector<FrameRateOverride>) = 0;
 
     virtual void onFrameBegin(TimePoint expectedPresentTime, FrameTime lastSignaledFrameTime) = 0;
 

@@ -7,3 +7,10 @@ flag {
   description: "This flag controls the ANGLE Feature Overrides in GraphicsEnv."
   bug: "372694741"
 }
+
+flag {
+  name: "query_persist_graphics_egl"
+  namespace: "gpu"
+  description: "This flag controls the ability to query persist.graphics.egl through GpuService"
+  bug: "408439360"
+}

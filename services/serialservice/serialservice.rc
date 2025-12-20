@@ -1,0 +1,5 @@
+service native_serial /system_ext/bin/serialservice
+    class late_start
+    oneshot
+    user system
+    group system

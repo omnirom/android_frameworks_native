@@ -36,6 +36,10 @@ const std::map<ui::LogicalDisplayId, std::vector<int32_t>>& FakePointerControlle
     return mSpotsByDisplay;
 }
 
+void FakePointerController::setTransform(ui::Transform transform) {
+    mTransform = transform;
+}
+
 void FakePointerController::setPosition(float x, float y) {
     if (!mEnabled) return;
 
@@ -49,6 +53,14 @@ vec2 FakePointerController::getPosition() const {
     }
 
     return {mX, mY};
+}
+
+vec2 FakePointerController::getPositionInLogicalDisplay() const {
+    if (!mEnabled) {
+        return {0, 0};
+    }
+
+    return mTransform.transform(mX, mY);
 }
 
 ui::LogicalDisplayId FakePointerController::getDisplayId() const {
@@ -196,7 +208,7 @@ void FakePointerController::clearSpots() {
 }
 
 ui::Transform FakePointerController::getDisplayTransform() const {
-    return ui::Transform();
+    return mTransform;
 }
 
 } // namespace android

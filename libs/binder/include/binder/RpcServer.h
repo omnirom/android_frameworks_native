@@ -25,13 +25,11 @@
 #include <utils/RefBase.h>
 
 #include <bitset>
-#include <mutex>
-#include <thread>
 
 namespace android {
 
 class FdTrigger;
-class RpcServerTrusty;
+class RpcServerTrusty; // TODO(b/387305736) remove. Move functionality into RpcServer.
 class RpcSocketAddress;
 
 /**
@@ -64,12 +62,9 @@ public:
     setupUnixDomainSocketBootstrapServer(binder::unique_fd serverFd);
 
     /**
-     * This represents a session for responses, e.g.:
+     * Creates an RPC server that binds to a Unix socket address |path|.
      *
-     *     process A serves binder a
-     *     process B opens a session to process A
-     *     process B makes binder b and sends it to A
-     *     A uses this 'back session' to send things back to B
+     * |path| must not be null.
      */
     [[nodiscard]] LIBBINDER_EXPORTED status_t setupUnixDomainServer(const char* path);
 
@@ -249,8 +244,9 @@ public:
     LIBBINDER_EXPORTED ~RpcServer();
 
 private:
-    friend RpcServerTrusty;
+    friend RpcServerTrusty; // TODO(b/387305736): remove. Move functionality into RpcServer.
     friend sp<RpcServer>;
+    friend wp<EventListener>;
     explicit RpcServer(std::unique_ptr<RpcTransportCtx> ctx);
 
     void onSessionAllIncomingThreadsEnded(const sp<RpcSession>& session) override;
@@ -269,9 +265,13 @@ private:
     static status_t recvmsgSocketConnection(const RpcServer& server, RpcTransportFd* out);
 
     [[nodiscard]] status_t setupSocketServer(const RpcSocketAddress& address);
+    [[nodiscard]] status_t acceptConnection(
+            std::function<void(sp<RpcSession>&&, RpcSession::PreJoinSetupResult&&)>&& joinFn);
 
     const std::unique_ptr<RpcTransportCtx> mCtx;
     size_t mMaxThreads = 1;
+    // overwrite mMaxThreads if the binder has min threads to something larger
+    void maybeOverwriteMaxThreads(const sp<IBinder>& binder);
     std::optional<uint32_t> mProtocolVersion;
     // A mode is supported if the N'th bit is on, where N is the mode enum's value.
     std::bitset<8> mSupportedFileDescriptorTransportModes = std::bitset<8>().set(

@@ -18,6 +18,8 @@
 
 #[allow(bad_style)]
 mod sys {
+    pub use trusty_sys::trusty_peer_id;
+
     include!(env!("BINDGEN_INC_FILE"));
 }
 

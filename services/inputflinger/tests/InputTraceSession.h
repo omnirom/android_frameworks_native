@@ -22,6 +22,7 @@
 #include <gtest/gtest.h>
 #include <input/Input.h>
 #include <perfetto/config/android/android_input_event_config.pbzero.h>
+#include <perfetto/trace/evdev.pbzero.h>
 #include <perfetto/trace/trace.pbzero.h>
 #include <perfetto/tracing.h>
 #include <variant>
@@ -72,13 +73,18 @@ public:
     };
     void expectDispatchTraced(Level level, const WindowDispatchEvent& event);
 
+    void expectRawEventTraced(uint16_t type, uint16_t code, int32_t value);
+
 private:
     std::unique_ptr<perfetto::TracingSession> mPerfettoSession;
     ArrayMap<WindowDispatchEvent, Level> mExpectedWindowDispatches;
     ArrayMap<MotionEvent, Level> mExpectedMotions;
     ArrayMap<KeyEvent, Level> mExpectedKeys;
+    std::vector<RawEvent> mExpectedRawEvents;
 
     void verifyExpectations(const std::string& rawTrace);
+    void verifyRawEvents(
+            const std::vector<perfetto::protos::pbzero::EvdevEvent::Decoder>& tracedRawEvents);
 };
 
 } // namespace android

@@ -126,6 +126,8 @@ public:
                                   std::vector<const char*>& disabled);
     // Set the persist.graphics.egl system property value.
     void nativeToggleAngleAsSystemDriver(bool enabled);
+    // Get the persist.graphics.egl system property value.
+    std::string nativeGetPersistGraphicsEgl();
     bool shouldUseSystemAngle();
     bool shouldUseNativeDriver();
 

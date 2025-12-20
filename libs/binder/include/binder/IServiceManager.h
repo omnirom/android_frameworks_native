@@ -164,6 +164,25 @@ public:
      * Only used for testing. This is enabled by default.
      */
     virtual void enableAddServiceCache(bool value) = 0;
+
+    /**
+     * Check if this 'callerSid' has access for the 'permission' for a given service 'name'.
+     *
+     * This is useful when a process will be making calls to servicemanager on behalf of another
+     * process (callerCtx).
+     *
+     * @param callerSid - SELinux context of the process that is being checked.
+     * @param callerDebugPid - Debug PID of the process that is being checked.
+     *                         Used for logging denials.
+     * @param callerUid - UID process that is being checked. Used for logging
+     *                    denials
+     * @param name - name of the service that the caller wants to interact with
+     * @param permission - the servicemanager SELinux permission that the process is
+     *                     interested in for the service. This is either "find", "list", or "add".
+     */
+    virtual bool checkServiceAccess(const String16& callererSid, pid_t callererDebugPid,
+                                    uid_t callererUid, const String16& name,
+                                    const String16& permission) = 0;
 };
 
 LIBBINDER_EXPORTED sp<IServiceManager> defaultServiceManager();

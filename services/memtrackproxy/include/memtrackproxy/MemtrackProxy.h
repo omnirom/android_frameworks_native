@@ -51,6 +51,7 @@ private:
 
     sp<V1_0_hidl::IMemtrack> memtrack_hidl_instance_;
     std::shared_ptr<V1_aidl::IMemtrack> memtrack_aidl_instance_;
+    bool is_get_memory_supported_;
 };
 
 } // namespace memtrack

@@ -17,9 +17,6 @@
 // #define LOG_NDEBUG 0
 #define ATRACE_TAG ATRACE_TAG_GRAPHICS
 
-#undef LOG_TAG
-#define LOG_TAG "SurfaceFlinger"
-
 #include "LayerLifecycleManager.h"
 #include "Client.h" // temporarily needed for LayerCreationArgs
 #include "LayerLog.h"
@@ -55,10 +52,10 @@ void LayerLifecycleManager::addLayers(std::vector<std::unique_ptr<RequestedLayer
         mChangedLayers.push_back(newLayer.get());
         layer.parentId = linkLayer(layer.parentId, layer.id);
         layer.relativeParentId = linkLayer(layer.relativeParentId, layer.id);
-        if (layer.layerStackToMirror != ui::INVALID_LAYER_STACK) {
+        if (layer.layerStackToMirror != ui::UNASSIGNED_LAYER_STACK) {
             // Set mirror layer's default layer stack to -1 so it doesn't end up rendered on a
             // display accidentally.
-            layer.layerStack = ui::INVALID_LAYER_STACK;
+            layer.layerStack = ui::UNASSIGNED_LAYER_STACK;
 
             // if this layer is mirroring a display, then walk though all the existing root layers
             // for the layer stack and add them as children to be mirrored.
@@ -70,14 +67,7 @@ void LayerLifecycleManager::addLayers(std::vector<std::unique_ptr<RequestedLayer
                 }
             }
         } else {
-            // Check if we are mirroring a single layer, and if so add it to the list of children
-            // to be mirrored.
             layer.layerIdToMirror = linkLayer(layer.layerIdToMirror, layer.id);
-            if (!FlagManager::getInstance().detached_mirror()) {
-                if (layer.layerIdToMirror != UNASSIGNED_LAYER_ID) {
-                    layer.mirrorIds.emplace_back(layer.layerIdToMirror);
-                }
-            }
         }
         layer.touchCropId = linkLayer(layer.touchCropId, layer.id);
         if (layer.isRoot()) {
@@ -124,7 +114,7 @@ void LayerLifecycleManager::onHandlesDestroyed(
 
         layer.parentId = unlinkLayer(layer.parentId, layer.id);
         layer.relativeParentId = unlinkLayer(layer.relativeParentId, layer.id);
-        if (layer.layerStackToMirror != ui::INVALID_LAYER_STACK) {
+        if (layer.layerStackToMirror != ui::UNASSIGNED_LAYER_STACK) {
             layer.mirrorIds = unlinkLayers(layer.mirrorIds, layer.id);
             swapErase(mDisplayMirroringLayers, layer.id);
         } else {
@@ -221,7 +211,20 @@ void LayerLifecycleManager::applyTransactions(
             layer->merge(resolvedComposerState);
 
             if (layer->what & layer_state_t::eBackgroundColorChanged) {
-                if (layer->bgColorLayerId == UNASSIGNED_LAYER_ID && layer->bgColor.a != 0) {
+                RequestedLayerState* bgColorLayer = nullptr;
+                if (layer->bgColorLayerId != UNASSIGNED_LAYER_ID) {
+                    bgColorLayer = getLayerFromId(layer->bgColorLayerId);
+                    if (bgColorLayer == nullptr) {
+                        LLOG_ALWAYS_FATAL_WITH_TRACE_IF(!ignoreUnknownLayers,
+                                                        "%s Background color layer with layerid=%d "
+                                                        "not found",
+                                                        __func__, layer->bgColorLayerId);
+                        layer->bgColorLayerId = UNASSIGNED_LAYER_ID;
+                    }
+                }
+                if (bgColorLayer == nullptr && layer->bgColor.a != 0) {
+                    // Case 1: The background layer doesn't exist and the background color has a
+                    // non-zero alpha. Create a background layer.
                     LayerCreationArgs
                             backgroundLayerArgs(LayerCreationArgs::getInternalLayerId(
                                                         LayerCreationArgs::sInternalSequence++),
@@ -241,13 +244,15 @@ void LayerLifecycleManager::applyTransactions(
                     backgroundLayer->dataspace = layer->bgColorDataspace;
                     layer->bgColorLayerId = backgroundLayer->id;
                     addLayers({std::move(newLayers)});
-                } else if (layer->bgColorLayerId != UNASSIGNED_LAYER_ID && layer->bgColor.a == 0) {
-                    RequestedLayerState* bgColorLayer = getLayerFromId(layer->bgColorLayerId);
+                } else if (bgColorLayer != nullptr && layer->bgColor.a == 0) {
+                    // Case 2: The background layer exists and the background color has a zero
+                    // alpha (invisible). Destroy the background layer.
                     layer->bgColorLayerId = UNASSIGNED_LAYER_ID;
                     bgColorLayer->parentId = unlinkLayer(bgColorLayer->parentId, bgColorLayer->id);
                     onHandlesDestroyed({{bgColorLayer->id, bgColorLayer->debugName}});
-                } else if (layer->bgColorLayerId != UNASSIGNED_LAYER_ID) {
-                    RequestedLayerState* bgColorLayer = getLayerFromId(layer->bgColorLayerId);
+                } else if (bgColorLayer != nullptr && layer->bgColor.a != 0) {
+                    // Case 3: The background layer exists and the background color alpha might
+                    // have changed. Update the background layer.
                     bgColorLayer->color = layer->bgColor;
                     bgColorLayer->dataspace = layer->bgColorDataspace;
                     bgColorLayer->what |= layer_state_t::eColorChanged |
@@ -440,15 +445,22 @@ void LayerLifecycleManager::updateDisplayMirrorLayers(RequestedLayerState& rootL
     }
 }
 
-bool LayerLifecycleManager::isLayerSecure(uint32_t layerId) const {
+base::expected<bool, status_t> LayerLifecycleManager::isLayerSecure(
+        uint32_t layerId, std::unordered_set<uint32_t>& visited) const {
     if (layerId == UNASSIGNED_LAYER_ID) {
         return false;
+    }
+
+    auto const [it, newVisit] = visited.insert(layerId);
+    if (!newVisit) {
+        ALOGV("Cycle detected at layer ID %d", layerId);
+        return base::unexpected(BAD_VALUE);
     }
 
     if (getLayerFromId(layerId)->flags & layer_state_t::eLayerSecure) {
         return true;
     }
-    return isLayerSecure(getLayerFromId(layerId)->parentId);
+    return isLayerSecure(getLayerFromId(layerId)->parentId, visited);
 }
 
 } // namespace android::surfaceflinger::frontend

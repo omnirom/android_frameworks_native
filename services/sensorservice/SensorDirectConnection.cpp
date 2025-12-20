@@ -119,6 +119,11 @@ void SensorService::SensorDirectConnection::onSensorAccessChanged(bool hasAccess
 }
 
 void SensorService::SensorDirectConnection::onMicSensorAccessChanged(bool isMicToggleOn) {
+    // TODO(b/398253250): Create a more robust way to allow VNDK and system clients to be exempted
+    if (mUid == AID_SYSTEM) {
+        return;
+    }
+
     if (isMicToggleOn) {
         capRates();
     } else {
@@ -184,7 +189,9 @@ int32_t SensorService::SensorDirectConnection::configureChannel(int handle, int 
     }
 
     int requestedRateLevel = rateLevel;
-    if (mService->isSensorInCappedSet(s.getType()) && rateLevel != SENSOR_DIRECT_RATE_STOP) {
+    // TODO(b/398253250): Create a more robust way to allow VNDK and system clients to be exempted
+    if (mService->isSensorInCappedSet(s.getType()) && rateLevel != SENSOR_DIRECT_RATE_STOP &&
+        mUid != AID_SYSTEM) {
         status_t err = mService->adjustRateLevelBasedOnMicAndPermission(&rateLevel, mOpPackageName);
         if (err != OK) {
             return err;

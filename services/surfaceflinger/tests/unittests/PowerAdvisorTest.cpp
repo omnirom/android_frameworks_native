@@ -87,7 +87,6 @@ protected:
     int64_t mSessionId = 123;
     SET_FLAG_FOR_TEST(android::os::adpf_use_fmq_channel, true);
     SET_FLAG_FOR_TEST(android::os::adpf_use_fmq_channel_fixed, false);
-    SET_FLAG_FOR_TEST(com::android::graphics::surfaceflinger::flags::adpf_fmq_sf, false);
 };
 
 bool PowerAdvisorTest::sessionExists() {
@@ -187,7 +186,6 @@ void PowerAdvisorTest::testGpuScenario(GpuTestConfig& config, WorkDuration& ret)
     SET_FLAG_FOR_TEST(com::android::graphics::surfaceflinger::flags::adpf_gpu_sf,
                       config.adpfGpuFlagOn);
     SET_FLAG_FOR_TEST(android::os::adpf_use_fmq_channel_fixed, config.usesFmq);
-    SET_FLAG_FOR_TEST(com::android::graphics::surfaceflinger::flags::adpf_fmq_sf, config.usesFmq);
     mPowerAdvisor->onBootFinished();
     bool expectsFmqSuccess = config.usesSharedFmqFlag && !config.fmqFull;
     if (config.usesFmq) {
@@ -801,7 +799,6 @@ TEST_F(PowerAdvisorTest, fmq_sendTargetAndActualDuration_queueFull) {
 
 TEST_F(PowerAdvisorTest, fmq_sendHint) {
     SET_FLAG_FOR_TEST(android::os::adpf_use_fmq_channel_fixed, true);
-    SET_FLAG_FOR_TEST(com::android::graphics::surfaceflinger::flags::adpf_fmq_sf, true);
     mPowerAdvisor->onBootFinished();
     SetUpFmq(true, false);
     auto startTime = uptimeNanos();
@@ -820,7 +817,6 @@ TEST_F(PowerAdvisorTest, fmq_sendHint) {
 
 TEST_F(PowerAdvisorTest, fmq_sendHint_noSharedFlag) {
     SET_FLAG_FOR_TEST(android::os::adpf_use_fmq_channel_fixed, true);
-    SET_FLAG_FOR_TEST(com::android::graphics::surfaceflinger::flags::adpf_fmq_sf, true);
     mPowerAdvisor->onBootFinished();
     SetUpFmq(false, false);
     SessionHint hint;
@@ -835,7 +831,6 @@ TEST_F(PowerAdvisorTest, fmq_sendHint_noSharedFlag) {
 
 TEST_F(PowerAdvisorTest, fmq_sendHint_queueFull) {
     SET_FLAG_FOR_TEST(android::os::adpf_use_fmq_channel_fixed, true);
-    SET_FLAG_FOR_TEST(com::android::graphics::surfaceflinger::flags::adpf_fmq_sf, true);
     mPowerAdvisor->onBootFinished();
     SetUpFmq(true, true);
     ASSERT_EQ(mBackendFmq->availableToRead(), 2uL);

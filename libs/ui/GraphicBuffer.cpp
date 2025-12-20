@@ -75,7 +75,7 @@ static void resolveLegacyByteLayoutFromPlaneLayout(const std::vector<ui::PlaneLa
 }
 
 sp<GraphicBuffer> GraphicBuffer::from(ANativeWindowBuffer* anwb) {
-    return static_cast<GraphicBuffer *>(anwb);
+    return sp<GraphicBuffer>::fromExisting(static_cast<GraphicBuffer*>(anwb));
 }
 
 GraphicBuffer* GraphicBuffer::fromAHardwareBuffer(AHardwareBuffer* buffer) {

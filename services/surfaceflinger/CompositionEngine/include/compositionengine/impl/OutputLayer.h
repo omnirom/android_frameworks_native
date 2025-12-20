@@ -28,8 +28,6 @@
 #include <ui/PictureProfileHandle.h>
 #include <ui/Rect.h>
 
-#include <ui/DisplayIdentification.h>
-
 #include <aidl/android/hardware/graphics/composer3/Composition.h>
 
 using aidl::android::hardware::graphics::composer3::LutProperties;

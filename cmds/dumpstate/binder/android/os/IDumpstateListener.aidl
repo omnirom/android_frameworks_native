@@ -22,7 +22,7 @@ package android.os;
   * <p>When bugreport creation is complete one of {@code onError} or {@code onFinished} is called.
   *
   *
-  * {@hide}
+  * @hide
   */
 interface IDumpstateListener {
     /**

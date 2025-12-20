@@ -122,6 +122,12 @@ public:
                 (const std::vector<android::sp<android::GraphicBuffer>>&,
                  std::vector<aidl::android::hardware::graphics::composer3::Luts>*),
                 (override));
+    MOCK_METHOD(hal::Error, getReadbackBufferAttributes,
+                (aidl::android::hardware::graphics::composer3::ReadbackBufferAttributes*),
+                (override));
+    MOCK_METHOD(hal::Error, setReadbackBuffer,
+                (const sp<GraphicBuffer>&, const android::sp<android::Fence>&), (override));
+    MOCK_METHOD(hal::Error, getReadbackBufferFence, (android::sp<android::Fence>*), (override));
 };
 
 class Layer : public HWC2::Layer {

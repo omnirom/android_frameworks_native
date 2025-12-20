@@ -18,6 +18,7 @@
 #define ATRACE_TAG ATRACE_TAG_GRAPHICS
 
 #include "AutoBackendTexture.h"
+#include "ShaderCache.h"
 #include "SkiaRenderEngine.h"
 #include "android-base/unique_fd.h"
 #include "cutils/properties.h"
@@ -30,12 +31,20 @@
 #include "ui/Rect.h"
 #include "utils/Timers.h"
 
+#include <android-base/properties.h>
+#include <android-base/stringprintf.h>
 #include <com_android_graphics_libgui_flags.h>
+#include <common/FlagManager.h>
 #include <common/trace.h>
+#include <private/EGL/cache.h>
 
 namespace android::renderengine::skia {
 
 namespace {
+
+static const std::string kCacheAvailableProp = "service.sf.cache_dir_available";
+static const char* kEglShaderCachePath = "/data/misc/surfaceflinger/egl_shaders";
+static const char* kSkiaShaderCachePath = "/data/misc/surfaceflinger/skia_shaders";
 
 // clang-format off
 // Any non-identity matrix will do.
@@ -67,8 +76,9 @@ const std::array<float, 3> kLayerWhitePoints = {
 };
 } // namespace
 
-static void drawShadowLayers(SkiaRenderEngine* renderengine, const DisplaySettings& display,
-                             const std::shared_ptr<ExternalTexture>& dstTexture) {
+static void drawElevationShadowLayers(SkiaRenderEngine* renderengine,
+                                      const DisplaySettings& display,
+                                      const std::shared_ptr<ExternalTexture>& dstTexture) {
     // Somewhat arbitrary dimensions, but on screen and slightly shorter, based
     // on actual use.
     const Rect& displayRect = display.physicalDisplay;
@@ -79,7 +89,7 @@ static void drawShadowLayers(SkiaRenderEngine* renderengine, const DisplaySettin
             .geometry =
                     Geometry{
                             .boundaries = rect,
-                            .roundedCornersRadius = {50.f, 50.f},
+                            .roundedCornersRadii = android::gui::CornerRadii(50.f),
                             .roundedCornersCrop = rect,
                     },
             .alpha = 1,
@@ -100,7 +110,7 @@ static void drawShadowLayers(SkiaRenderEngine* renderengine, const DisplaySettin
             .geometry =
                     Geometry{
                             .boundaries = smallerRect,
-                            .roundedCornersRadius = {50.f, 50.f},
+                            .roundedCornersRadii = android::gui::CornerRadii(50.f),
                             .roundedCornersCrop = rect,
                     },
             .source =
@@ -134,6 +144,78 @@ static void drawShadowLayers(SkiaRenderEngine* renderengine, const DisplaySettin
     }
 }
 
+static void drawBoxShadowLayers(SkiaRenderEngine* renderengine, const DisplaySettings& display,
+                                const std::shared_ptr<ExternalTexture>& dstTexture) {
+    const Rect& displayRect = display.physicalDisplay;
+
+    // The texture must be large enough for two shaders
+    // 1. See ComputeBlurredRRectParams in GrBlurUtils.cpp, the dstTexture must be large enough
+    //    for the blur to be considered nine patcheable.
+    // 2. See TesselationPathRenderer, there must be enough GPU work to choose the CPU path.
+    LOG_ALWAYS_FATAL_IF(displayRect.width() < 384 || displayRect.height() < 384,
+                        "dstTexture must be at least 256x256");
+
+    gui::BorderSettings borderSettings;
+    borderSettings.strokeWidth = 2.0f;
+    borderSettings.color = 666747334;
+
+    gui::BoxShadowSettings boxShadowSettings;
+    gui::BoxShadowSettings::BoxShadowParams shadow1;
+    shadow1.blurRadius = 28.0f;
+    shadow1.spreadRadius = 0.0f;
+    shadow1.color = 167772160;
+    shadow1.offsetX = 0.0f;
+    shadow1.offsetY = 0.0f;
+    boxShadowSettings.boxShadows.push_back(shadow1);
+
+    gui::BoxShadowSettings::BoxShadowParams shadow2;
+    shadow2.blurRadius = 16.0f;
+    shadow2.spreadRadius = 0.0f;
+    shadow2.color = 436207616;
+    shadow2.offsetX = 0.0f;
+    shadow2.offsetY = 4.0f;
+    boxShadowSettings.boxShadows.push_back(shadow2);
+
+    FloatRect rect(20, 20, 250, 250);
+    LayerSettings layer{
+            .geometry =
+                    Geometry{
+                            .boundaries = rect,
+                            .originalBounds = rect,
+                            .roundedCornersRadii = android::gui::CornerRadii(32.0f),
+                            .roundedCornersCrop = rect,
+                            .otherCrop = FloatRect(-16384, -16384, 16384, 16384),
+                    },
+            .source =
+                    PixelSource{
+                            .solidColor = half3(0.f, 0.f, 0.f),
+                    },
+            .alpha = 1,
+            // setting this is mandatory for shadows and blurs
+            .skipContentDraw = true,
+            // drawShadow ignores alpha
+            .borderSettings = borderSettings,
+            .boxShadowSettings = boxShadowSettings,
+    };
+
+    {
+        SFTRACE_NAME("RotatedClip");
+        // This triggers quite a few shaders, not quite sure what they all are.
+        layer.geometry.positionTransform = kFlip;
+        renderengine->drawLayers(display, {layer}, dstTexture, base::unique_fd());
+    }
+    {
+        SFTRACE_NAME("RRectBlur_NinePatch");
+        layer.geometry.positionTransform = mat4();
+        renderengine->drawLayers(display, {layer}, dstTexture, base::unique_fd());
+    }
+    {
+        SFTRACE_NAME("ConcavePath_Tessellate");
+        layer.geometry.positionTransform = mat4::scale(vec4(1.5f, 1.5f, 1.0f, 1.0f)) * kFlip;
+        renderengine->drawLayers(display, {layer}, dstTexture, base::unique_fd());
+    }
+}
+
 static void drawImageLayers(SkiaRenderEngine* renderengine, const DisplaySettings& display,
                             const std::shared_ptr<ExternalTexture>& dstTexture,
                             const std::shared_ptr<ExternalTexture>& srcTexture) {
@@ -143,8 +225,6 @@ static void drawImageLayers(SkiaRenderEngine* renderengine, const DisplaySetting
             .geometry =
                     Geometry{
                             .boundaries = rect,
-                            // The position transform doesn't matter when the reduced shader mode
-                            // in in effect. A matrix transform stage is always included.
                             .positionTransform = mat4(),
                             .roundedCornersCrop = rect,
                     },
@@ -155,19 +235,23 @@ static void drawImageLayers(SkiaRenderEngine* renderengine, const DisplaySetting
                                           }},
     };
 
-    for (auto dataspace : {kDestDataSpace, kOtherDataSpace}) {
-        layer.sourceDataspace = dataspace;
-        // Cache shaders for both rects and round rects.
-        // In reduced shader mode, all non-zero round rect radii get the same code path.
-        for (float roundedCornersRadius : {0.0f, 50.0f}) {
-            // roundedCornersCrop is always set, but the radius triggers the behavior
-            layer.geometry.roundedCornersRadius = {roundedCornersRadius, roundedCornersRadius};
-            for (bool isOpaque : {true, false}) {
-                layer.source.buffer.isOpaque = isOpaque;
-                for (auto alpha : {half(.2f), half(1.0f)}) {
-                    layer.alpha = alpha;
-                    auto layers = std::vector<LayerSettings>{layer};
-                    renderengine->drawLayers(display, layers, dstTexture, base::unique_fd());
+    for (mat4 transform : {mat4(), kFlip}) {
+        layer.geometry.positionTransform = transform;
+        for (auto dataspace : {kDestDataSpace, kOtherDataSpace}) {
+            layer.sourceDataspace = dataspace;
+            // Cache shaders for both rects and round rects.
+            // In reduced shader mode, all non-zero round rect radii get the same code path.
+            for (float roundedCornersRadius : {0.0f, 50.0f}) {
+                // roundedCornersCrop is always set, but the radius triggers the behavior
+                layer.geometry.roundedCornersRadii =
+                        android::gui::CornerRadii(roundedCornersRadius);
+                for (bool isOpaque : {true, false}) {
+                    layer.source.buffer.isOpaque = isOpaque;
+                    for (auto alpha : {half(.2f), half(1.0f)}) {
+                        layer.alpha = alpha;
+                        auto layers = std::vector<LayerSettings>{layer};
+                        renderengine->drawLayers(display, layers, dstTexture, base::unique_fd());
+                    }
                 }
             }
         }
@@ -193,7 +277,7 @@ static void drawSolidLayers(SkiaRenderEngine* renderengine, const DisplaySetting
     for (auto transform : {mat4(), kScaleAndTranslate}) {
         layer.geometry.positionTransform = transform;
         for (float roundedCornersRadius : {0.0f, 50.f}) {
-            layer.geometry.roundedCornersRadius = {roundedCornersRadius, roundedCornersRadius};
+            layer.geometry.roundedCornersRadii = android::gui::CornerRadii(roundedCornersRadius);
             auto layers = std::vector<LayerSettings>{layer};
             renderengine->drawLayers(display, layers, dstTexture, base::unique_fd());
         }
@@ -248,7 +332,7 @@ static void drawClippedLayers(SkiaRenderEngine* renderengine, const DisplaySetti
             .geometry =
                     Geometry{
                             .boundaries = rect,
-                            .roundedCornersRadius = {27.f, 27.f},
+                            .roundedCornersRadii = android::gui::CornerRadii(27.f),
                             .roundedCornersCrop =
                                     FloatRect(0, 0, displayRect.width(), displayRect.height()),
                     },
@@ -284,7 +368,7 @@ static void drawPIPImageLayer(SkiaRenderEngine* renderengine, const DisplaySetti
                             // which happens in this layer because the roundrect crop is just a bit
                             // larger than the layer bounds.
                             .positionTransform = kFlip,
-                            .roundedCornersRadius = {94.2551f, 94.2551f},
+                            .roundedCornersRadii = android::gui::CornerRadii(94.2551f),
                             .roundedCornersCrop = FloatRect(-93.75, 0, displayRect.width() + 93.75,
                                                             displayRect.height()),
                     },
@@ -316,7 +400,7 @@ static void drawHolePunchLayer(SkiaRenderEngine* renderengine, const DisplaySett
                             // clipRRect is used instead of drawRRect
                             .boundaries = small,
                             .positionTransform = kScaleAndTranslate,
-                            .roundedCornersRadius = {50.f, 50.f},
+                            .roundedCornersRadii = android::gui::CornerRadii(50.f),
                             .roundedCornersCrop = rect,
                     },
             .source =
@@ -345,7 +429,7 @@ static void drawImageDimmedLayers(SkiaRenderEngine* renderengine, const DisplayS
                             // The position transform doesn't matter when the reduced shader mode
                             // in in effect. A matrix transform stage is always included.
                             .positionTransform = mat4(),
-                            .roundedCornersRadius = {0.f, 0.f},
+                            .roundedCornersRadii = android::gui::CornerRadii(0.f),
                             .roundedCornersCrop = rect,
                     },
             .source = PixelSource{.buffer = Buffer{.buffer = srcTexture,
@@ -389,7 +473,7 @@ static void drawTransparentImageDimmedLayers(SkiaRenderEngine* renderengine,
     };
 
     for (auto roundedCornerRadius : {0.f, 50.f}) {
-        layer.geometry.roundedCornersRadius = {roundedCornerRadius, roundedCornerRadius};
+        layer.geometry.roundedCornersRadii = android::gui::CornerRadii(roundedCornerRadius);
         for (auto alpha : {0.5f, 1.0f}) {
             layer.alpha = alpha;
             for (auto isOpaque : {true, false}) {
@@ -427,7 +511,7 @@ static void drawClippedDimmedImageLayers(SkiaRenderEngine* renderengine,
                     Geometry{
                             .boundaries = boundary,
                             .positionTransform = mat4(),
-                            .roundedCornersRadius = {27.f, 27.f},
+                            .roundedCornersRadii = android::gui::CornerRadii(27.f),
                             .roundedCornersCrop = rect,
                     },
             .source = PixelSource{.buffer =
@@ -447,8 +531,7 @@ static void drawClippedDimmedImageLayers(SkiaRenderEngine* renderengine,
 
     for (size_t i = 0; i < transforms.size(); i++) {
         layer.geometry.positionTransform = transforms[i];
-        layer.geometry.roundedCornersRadius = {radius, radius};
-
+        layer.geometry.roundedCornersRadii = android::gui::CornerRadii(radius);
         std::vector<LayerSettings> layers;
 
         for (auto layerWhitePoint : kLayerWhitePoints) {
@@ -497,7 +580,7 @@ static void drawBT2020ImageLayers(SkiaRenderEngine* renderengine, const DisplayS
                             // The position transform doesn't matter when the reduced shader mode
                             // in in effect. A matrix transform stage is always included.
                             .positionTransform = mat4(),
-                            .roundedCornersRadius = {0.f, 0.f},
+                            .roundedCornersRadii = android::gui::CornerRadii(0.f),
                             .roundedCornersCrop = rect,
                     },
             .source = PixelSource{.buffer = Buffer{.buffer = srcTexture,
@@ -533,7 +616,7 @@ static void drawBT2020ClippedImageLayers(SkiaRenderEngine* renderengine,
                     Geometry{
                             .boundaries = boundary,
                             .positionTransform = kScaleAsymmetric,
-                            .roundedCornersRadius = {64.1f, 64.1f},
+                            .roundedCornersRadii = android::gui::CornerRadii(64.1f),
                             .roundedCornersCrop = rect,
                     },
             .source = PixelSource{.buffer =
@@ -564,7 +647,7 @@ static void drawExtendedHDRImageLayers(SkiaRenderEngine* renderengine,
                             // The position transform doesn't matter when the reduced shader mode
                             // in in effect. A matrix transform stage is always included.
                             .positionTransform = mat4(),
-                            .roundedCornersRadius = {50.f, 50.f},
+                            .roundedCornersRadii = android::gui::CornerRadii(50.f),
                             .roundedCornersCrop = rect,
                     },
             .source = PixelSource{.buffer = Buffer{.buffer = srcTexture,
@@ -576,7 +659,7 @@ static void drawExtendedHDRImageLayers(SkiaRenderEngine* renderengine,
     };
 
     for (auto roundedCornerRadius : {0.f, 50.f}) {
-        layer.geometry.roundedCornersRadius = {roundedCornerRadius, roundedCornerRadius};
+        layer.geometry.roundedCornersRadii = android::gui::CornerRadii(roundedCornerRadius);
         for (auto alpha : {0.5f, 1.f}) {
             layer.alpha = alpha;
             std::vector<LayerSettings> layers;
@@ -602,7 +685,7 @@ static void drawP3ImageLayers(SkiaRenderEngine* renderengine, const DisplaySetti
                             // The position transform doesn't matter when the reduced shader mode
                             // in in effect. A matrix transform stage is always included.
                             .positionTransform = mat4(),
-                            .roundedCornersRadius = {50.f, 50.f},
+                            .roundedCornersRadii = android::gui::CornerRadii(50.f),
                             .roundedCornersCrop = rect,
                     },
             .source = PixelSource{.buffer = Buffer{.buffer = srcTexture,
@@ -651,6 +734,102 @@ static void drawEdgeExtensionLayers(SkiaRenderEngine* renderengine, const Displa
     }
 }
 
+static void drawExtendedHDRFilteredImageLayers(SkiaRenderEngine* renderengine, const DisplaySettings& display,
+                                               const std::shared_ptr<ExternalTexture>& dstTexture,
+                                               const std::shared_ptr<ExternalTexture>& srcTexture) {
+    const Rect& displayRect = display.physicalDisplay;
+    FloatRect rect(0, 0, displayRect.width(), displayRect.height());
+    LayerSettings layer{
+            .geometry =
+                    Geometry{
+                            .boundaries = rect,
+                            // The position transform doesn't matter when the reduced shader mode
+                            // in in effect. A matrix transform stage is always included.
+                            .positionTransform = mat4(),
+                            .roundedCornersRadii = android::gui::CornerRadii(50.f),
+                            .roundedCornersCrop = rect,
+                    },
+            .source = PixelSource{.buffer = Buffer{.buffer = srcTexture,
+                                                   .useTextureFiltering = true,
+                                                   .usePremultipliedAlpha = true,
+                                                   .isOpaque = true,
+                                                   .maxLuminanceNits = 0.f}},
+            .sourceDataspace = kExtendedHdrDataSpce,
+    };
+
+    for (auto roundedCornerRadius : {0.f, 50.f}) {
+        layer.geometry.roundedCornersRadii = android::gui::CornerRadii(roundedCornerRadius);
+        for (auto alpha : {0.5f, 1.f}) {
+            layer.alpha = alpha;
+            std::vector<LayerSettings> layers;
+
+            for (auto layerWhitePoint : kLayerWhitePoints) {
+                layer.whitePointNits = layerWhitePoint;
+                layers.push_back(layer);
+            }
+            renderengine->drawLayers(display, layers, dstTexture, base::unique_fd());
+        }
+    }
+}
+
+static void drawExtendedHDRFilteredImageShadowLayers(SkiaRenderEngine* renderengine,
+                                                     const DisplaySettings& display,
+                                                     const std::shared_ptr<ExternalTexture>& dstTexture,
+                                                     const std::shared_ptr<ExternalTexture>& srcTexture) {
+    const Rect& displayRect = display.physicalDisplay;
+    FloatRect rect(0, 0, displayRect.width(), displayRect.height());
+    FloatRect smallerRect(20, 20, displayRect.width()-20, displayRect.height()-20);
+
+    LayerSettings layer{
+            .geometry =
+                    Geometry{
+                            .boundaries = rect,
+                            // The position transform doesn't matter when the reduced shader mode
+                            // in in effect. A matrix transform stage is always included.
+                            .positionTransform = mat4(),
+                            .roundedCornersRadii = android::gui::CornerRadii(50.f),
+                            .roundedCornersCrop = rect,
+                    },
+            .source = PixelSource{.buffer = Buffer{.buffer = srcTexture,
+                                                   .useTextureFiltering = true,
+                                                   .usePremultipliedAlpha = true,
+                                                   .isOpaque = true,
+                                                   .maxLuminanceNits = 0.f}},
+            .sourceDataspace = kExtendedHdrDataSpce,
+    };
+
+    LayerSettings caster{
+            .geometry =
+                    Geometry{
+                            .boundaries = smallerRect,
+                            .roundedCornersRadii = android::gui::CornerRadii(50.f),
+                            .roundedCornersCrop = smallerRect,
+                    },
+            .source = PixelSource{.buffer = Buffer{.buffer = srcTexture,
+                                                   .useTextureFiltering = true,
+                                                   .usePremultipliedAlpha = true,
+                                                   .isOpaque = false,
+                                                   .maxLuminanceNits = 0.f}},
+            .alpha = 1,
+            .sourceDataspace = ui::Dataspace::V0_SRGB,
+    };
+
+    for (auto alpha : {0.5f, 1.f}) {
+        layer.alpha = alpha;
+
+        for (auto casterAlpha : {0.5f, 1.f}) {
+            caster.alpha = casterAlpha;
+
+            for (auto layerWhitePoint : kLayerWhitePoints) {
+                layer.whitePointNits = layerWhitePoint;
+
+                auto layers = std::vector<LayerSettings>{layer, caster};
+                renderengine->drawLayers(display, layers, dstTexture, base::unique_fd());
+            }
+        }
+    }
+}
+
 //
 // The collection of shaders cached here were found by using perfetto to record shader compiles
 // during actions that involve RenderEngine, logging the layer settings, and the shader code
@@ -672,7 +851,7 @@ void Cache::primeShaderCache(SkiaRenderEngine* renderengine, PrimeCacheConfig co
     // The loop is beneficial for debugging and should otherwise be optimized out by the compiler.
     // Adding additional bounds to the loop is useful for verifying that the size of the dst buffer
     // does not impact the shader compilation counts by triggering different behaviors in RE/Skia.
-    for (SkSize bounds : {SkSize::Make(128, 128), /*SkSize::Make(1080, 2340)*/}) {
+    for (SkSize bounds : {SkSize::Make(384, 384), /*SkSize::Make(1080, 2340)*/}) {
         const nsecs_t timeBefore = systemTime();
         // The dimensions should not matter, so long as we draw inside them.
         const Rect displayRect(0, 0, bounds.fWidth, bounds.fHeight);
@@ -681,6 +860,16 @@ void Cache::primeShaderCache(SkiaRenderEngine* renderengine, PrimeCacheConfig co
                 .clip = displayRect,
                 .maxLuminance = 500,
                 .outputDataspace = kDestDataSpace,
+        };
+        DisplaySettings v0srgbDisplay{
+                .physicalDisplay = displayRect,
+                .clip = displayRect,
+                .maxLuminance = 1000,
+                .outputDataspace = ui::Dataspace::V0_SRGB,
+                .deviceHandlesColorTransform = true,
+                .targetLuminanceNits = 128.002f,
+                .dimmingStage = aidl::android::hardware::graphics::composer3::DimmingStage::GAMMA_OETF,
+                .renderIntent = aidl::android::hardware::graphics::composer3::RenderIntent::ENHANCE
         };
         DisplaySettings p3Display{
                 .physicalDisplay = displayRect,
@@ -745,9 +934,15 @@ void Cache::primeShaderCache(SkiaRenderEngine* renderengine, PrimeCacheConfig co
         }
 
         if (config.cacheShadowLayers) {
-            SFTRACE_NAME("cacheShadowLayers");
-            drawShadowLayers(renderengine, display, srcTexture);
-            drawShadowLayers(renderengine, p3Display, srcTexture);
+            {
+                SFTRACE_NAME("cacheShadowLayers");
+                drawElevationShadowLayers(renderengine, display, srcTexture);
+                drawElevationShadowLayers(renderengine, p3Display, srcTexture);
+            }
+            {
+                SFTRACE_NAME("cacheBoxShadows");
+                drawBoxShadowLayers(renderengine, display, srcTexture);
+            }
         }
 
         if (renderengine->supportsBackgroundBlur()) {
@@ -841,8 +1036,12 @@ void Cache::primeShaderCache(SkiaRenderEngine* renderengine, PrimeCacheConfig co
             drawExtendedHDRImageLayers(renderengine, p3Display, dstTexture, externalTexture);
             drawExtendedHDRImageLayers(renderengine, p3DisplayEnhance, dstTexture, externalTexture);
 
+            drawExtendedHDRFilteredImageLayers(renderengine, v0srgbDisplay, dstTexture, externalTexture);
+            drawExtendedHDRFilteredImageShadowLayers(renderengine, v0srgbDisplay, dstTexture, externalTexture);
+
             drawP3ImageLayers(renderengine, p3DisplayEnhance, dstTexture, externalTexture);
         }
+
 
         // draw one final layer synchronously to force GL submit
         LayerSettings layer{
@@ -860,6 +1059,27 @@ void Cache::primeShaderCache(SkiaRenderEngine* renderengine, PrimeCacheConfig co
         const int shadersCompiled = renderengine->reportShadersCompiled() - previousCount;
         ALOGD("Shader cache generated %d shaders in %f ms\n", shadersCompiled, compileTimeMs);
     }
+}
+
+void Cache::initializeDiskCache() {
+    static bool sInitialized = false;
+    if (sInitialized) return;
+
+    if (FlagManager::getInstance().shader_disk_cache()) {
+        auto& cache = uirenderer::skiapipeline::ShaderCache::get();
+        auto before = systemTime();
+        SFTRACE_NAME("Initializing disk cache");
+        if (base::WaitForProperty(kCacheAvailableProp, "1", std::chrono::seconds(5))) {
+            auto after = systemTime();
+            ALOGD("Waited %.4fms for disk to be ready", (after - before) / 1000000.0f);
+            egl_set_cache_filename(kEglShaderCachePath);
+            cache.setFilename(kSkiaShaderCachePath);
+        } else {
+            ALOGW("Timeout waiting for shader disk cache location");
+        }
+    }
+
+    sInitialized = true;
 }
 
 } // namespace android::renderengine::skia

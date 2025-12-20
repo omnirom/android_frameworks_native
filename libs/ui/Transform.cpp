@@ -96,6 +96,11 @@ Transform Transform::operator * (float value) const {
             R[i][j] = M[i][j] * value;
         }
     }
+    if (value != 1.0) {
+        // If a non-unity scale is applied, the type might change.
+        // Mark it as UNKNOWN to force re-computation.
+        r.mType = UNKNOWN_TYPE;
+    }
     r.type();
     return r;
 }

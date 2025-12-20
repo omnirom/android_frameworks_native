@@ -14,9 +14,6 @@
  * limitations under the License.
  */
 
-#undef LOG_TAG
-#define LOG_TAG "LayerTraceGenerator"
-
 #include <fstream>
 #include <iostream>
 #include <string>

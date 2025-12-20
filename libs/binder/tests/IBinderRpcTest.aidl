@@ -36,6 +36,8 @@ interface IBinderRpcTest {
 
     byte[] repeatBytes(in byte[] bytes);
 
+    @utf8InCpp String[] repeatStrings(in @utf8InCpp String[] strings);
+
     // Idea is client creates its own instance of IBinderRpcTest and calls this,
     // and the server calls 'binder' with (calls - 1) passing itself as 'binder',
     // going back and forth until calls = 0

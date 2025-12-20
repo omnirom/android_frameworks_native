@@ -110,6 +110,7 @@ public:
                           bool deviceHandlesColorTransform);
 
     void setTexturePoolEnabled(bool enabled) { mTexturePool.setEnabled(enabled); }
+    bool isTexturePoolEnabled() const { return mTexturePool.isEnabled(); }
 
     void dump(std::string& result) const;
     void dumpLayers(std::string& result) const;
@@ -172,17 +173,18 @@ private:
                 const bool requiresHolePunch =
                         mHolePunchCandidate && mHolePunchCandidate->requiresHolePunch();
 
-                if (!requiresHolePunch) {
-                    // If we don't require a hole punch, then treat solid color layers at the front
-                    // to be "cheap", so remove them from the candidate cached set.
+                if (!requiresHolePunch && mBlurringLayer == nullptr) {
+                    // If we don't require a hole punch and we're not being blurred, then treat
+                    // solid color layers at the front to be "cheap", so remove them from the
+                    // candidate cached set.
                     while (mNumSets > 1 && mStart->getLayerCount() == 1 &&
                            mStart->getFirstLayer().getBuffer() == nullptr) {
                         mStart++;
                         mNumSets--;
                     }
 
-                    // Only allow for single cached sets if a hole punch is required. If we're here,
-                    // then we don't require a hole punch, so don't build a run.
+                    // Only allow for single cached sets if a hole punch or blur is required.
+                    // Neither is true if we're here.
                     if (mNumSets <= 1) {
                         return std::nullopt;
                     }

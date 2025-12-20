@@ -20,10 +20,12 @@
 #include <utility>
 #include <variant>
 
+#include <common/LayerFilter.h>
 #include <ftl/concat.h>
 #include <ftl/optional.h>
 #include <ftl/unit.h>
 #include <gui/DisplayEventReceiver.h>
+#include <ui/LayerStack.h>
 
 #include <scheduler/Fps.h>
 #include <scheduler/FrameRateMode.h>
@@ -37,8 +39,6 @@
 namespace android::scheduler {
 
 using namespace std::chrono_literals;
-
-using FrameRateOverride = DisplayEventReceiver::Event::FrameRateOverride;
 
 // Selects the refresh rate of a display by ranking its `DisplayModes` in accordance with
 // the DisplayManager (or override) `Policy`, the `LayerRequirement` of each active layer,
@@ -190,11 +190,15 @@ public:
         // Whether layer is in focus or not based on WindowManager's state
         bool focused = false;
 
+        LayerFilter layerFilter;
+
         bool operator==(const LayerRequirement& other) const {
             return name == other.name && vote == other.vote &&
                     isApproxEqual(desiredRefreshRate, other.desiredRefreshRate) &&
                     seamlessness == other.seamlessness && weight == other.weight &&
-                    focused == other.focused && frameRateCategory == other.frameRateCategory;
+                    focused == other.focused && frameRateCategory == other.frameRateCategory &&
+                    frameRateCategorySmoothSwitchOnly == other.frameRateCategorySmoothSwitchOnly &&
+                    layerFilter == other.layerFilter;
         }
 
         bool operator!=(const LayerRequirement& other) const { return !(*this == other); }
@@ -280,6 +284,7 @@ public:
 
     // See mActiveModeOpt for thread safety.
     FrameRateMode getActiveMode() const EXCLUDES(mLock);
+    bool hasActiveMode() const EXCLUDES(mLock);
 
     // Returns a known frame rate that is the closest to frameRate
     Fps findClosestKnownFrameRate(Fps frameRate) const;
@@ -288,23 +293,7 @@ public:
 
     // Configuration flags.
     struct Config {
-        enum class FrameRateOverride {
-            // Do not override the frame rate for an app
-            Disabled,
-
-            // Override the frame rate for an app to a value which is also
-            // a display refresh rate
-            AppOverrideNativeRefreshRates,
-
-            // Override the frame rate for an app to any value
-            AppOverride,
-
-            // Override the frame rate for all apps and all values.
-            Enabled,
-
-            ftl_last = Enabled
-        };
-        FrameRateOverride enableFrameRateOverride = FrameRateOverride::Disabled;
+        bool enableFrameRateOverride = false;
 
         // Specifies the upper refresh rate threshold (inclusive) for layer vote types of multiple
         // or heuristic, such that refresh rates higher than this value will not be voted for. 0 if
@@ -319,12 +308,11 @@ public:
         ftl::Optional<KernelIdleTimerController> kernelIdleTimerController;
     };
 
-    RefreshRateSelector(
-            DisplayModes, DisplayModeId activeModeId,
-            Config config = {.enableFrameRateOverride = Config::FrameRateOverride::Disabled,
-                             .frameRateMultipleThreshold = 0,
-                             .legacyIdleTimerTimeout = 0ms,
-                             .kernelIdleTimerController = {}});
+    RefreshRateSelector(DisplayModes, DisplayModeId activeModeId,
+                        Config config = {.enableFrameRateOverride = false,
+                                         .frameRateMultipleThreshold = 0,
+                                         .legacyIdleTimerTimeout = 0ms,
+                                         .kernelIdleTimerController = {}});
 
     RefreshRateSelector(const RefreshRateSelector&) = delete;
     RefreshRateSelector& operator=(const RefreshRateSelector&) = delete;
@@ -336,13 +324,12 @@ public:
 
     // Returns whether switching modes (refresh rate or resolution) is possible.
     // TODO(b/158780872): Consider HAL support, and skip frame rate detection if the modes only
-    //  differ in resolution. Once Config::FrameRateOverride::Enabled becomes the default,
+    //  differ in resolution. Once mConfig.enableFrameRateOverride becomes the default,
     //  we can probably remove canSwitch altogether since all devices will be able
     //  to switch to a frame rate divisor.
     bool canSwitch() const EXCLUDES(mLock) {
         std::lock_guard lock(mLock);
-        return mDisplayModes.size() > 1 ||
-                mFrameRateOverrideConfig == Config::FrameRateOverride::Enabled;
+        return mDisplayModes.size() > 1 || mConfig.enableFrameRateOverride;
     }
 
     // Class to enumerate options around toggling the kernel timer on and off.
@@ -355,13 +342,9 @@ public:
     // refresh rates.
     KernelIdleTimerAction getIdleTimerAction() const;
 
-    bool supportsAppFrameRateOverrideByContent() const {
-        return mFrameRateOverrideConfig != Config::FrameRateOverride::Disabled;
-    }
+    bool supportsAppFrameRateOverrideByContent() const { return mConfig.enableFrameRateOverride; }
 
-    bool supportsFrameRateOverride() const {
-        return mFrameRateOverrideConfig == Config::FrameRateOverride::Enabled;
-    }
+    bool supportsFrameRateOverride() const { return mConfig.enableFrameRateOverride; }
 
     // Return the display refresh rate divisor to match the layer
     // frame rate, or 0 if the display refresh rate is not a multiple of the
@@ -402,11 +385,6 @@ public:
         mIdleTimerCallbacks = std::move(callbacks);
     }
 
-    void clearIdleTimerCallbacks() EXCLUDES(mIdleTimerCallbacksMutex) {
-        std::scoped_lock lock(mIdleTimerCallbacksMutex);
-        mIdleTimerCallbacks.reset();
-    }
-
     void startIdleTimer() {
         mIdleTimerStarted = true;
         if (mIdleTimer) {
@@ -414,11 +392,14 @@ public:
         }
     }
 
-    void stopIdleTimer() {
+    void stopIdleTimer() EXCLUDES(mIdleTimerCallbacksMutex) {
         mIdleTimerStarted = false;
         if (mIdleTimer) {
             mIdleTimer->stop();
         }
+
+        std::scoped_lock lock(mIdleTimerCallbacksMutex);
+        mIdleTimerCallbacks.reset();
     }
 
     void resetKernelIdleTimer() {
@@ -437,11 +418,18 @@ public:
 
     std::chrono::milliseconds getIdleTimerTimeout();
 
-    bool isVrrDevice() const;
+    bool isVrrDisplay() const;
 
     std::pair<Fps, Fps> getFrameRateCategoryRates() const { return kFrameRateCategoryRates; }
 
     std::vector<float> getSupportedFrameRates() const EXCLUDES(mLock);
+
+    LayerFilter getLayerFilter() const EXCLUDES(mLock) {
+        std::lock_guard lock(mLock);
+        return mLayerFilter;
+    }
+
+    void setLayerFilter(LayerFilter layerFilter) EXCLUDES(mLock);
 
 private:
     friend struct TestableRefreshRateSelector;
@@ -451,7 +439,7 @@ private:
     // See mActiveModeOpt for thread safety.
     const FrameRateMode& getActiveModeLocked() const REQUIRES(mLock);
 
-    RankedFrameRates getRankedFrameRatesLocked(const std::vector<LayerRequirement>& layers,
+    RankedFrameRates getRankedFrameRatesLocked(const std::vector<LayerRequirement>& allLayers,
                                                GlobalSignals signals, Fps pacesetterFps) const
             REQUIRES(mLock);
 
@@ -512,38 +500,31 @@ private:
     void updateDisplayModes(DisplayModes, DisplayModeId activeModeId) EXCLUDES(mLock)
             REQUIRES(kMainThreadContext);
 
-    void initializeIdleTimer(std::chrono::milliseconds timeout);
+    void createIdleTimer(std::chrono::milliseconds timeout);
 
     std::optional<IdleTimerCallbacks::Callbacks> getIdleTimerCallbacks() const
             REQUIRES(mIdleTimerCallbacksMutex) {
         if (!mIdleTimerCallbacks) return {};
 
-        if (mIsVrrDevice) return mIdleTimerCallbacks->vrr;
+        if (mIsVrrDisplay) return mIdleTimerCallbacks->vrr;
 
         return mConfig.kernelIdleTimerController.has_value() ? mIdleTimerCallbacks->kernel
                                                              : mIdleTimerCallbacks->platform;
-    }
-
-    bool isNativeRefreshRate(Fps fps) const REQUIRES(mLock) {
-        LOG_ALWAYS_FATAL_IF(mConfig.enableFrameRateOverride !=
-                                    Config::FrameRateOverride::AppOverrideNativeRefreshRates,
-                            "should only be called when "
-                            "Config::FrameRateOverride::AppOverrideNativeRefreshRates is used");
-        return mAppOverrideNativeRefreshRates.contains(fps);
     }
 
     std::vector<FrameRateMode> createFrameRateModes(
             const Policy&, std::function<bool(const DisplayMode&)>&& filterModes,
             const FpsRange&) const REQUIRES(mLock);
 
+    using PreferredFpsForMode = ftl::SmallMap<DisplayModeId, Fps, 8>;
+    PreferredFpsForMode getPreferredFpsForMode(std::optional<int> anchorGroupOpt,
+                                               RefreshRateOrder) const REQUIRES(mLock);
+    PreferredFpsForMode getMaxFpsForMode(std::optional<int> anchorGroupOpt) const REQUIRES(mLock);
+
     // The display modes of the active display. The DisplayModeIterators below are pointers into
     // this container, so must be invalidated whenever the DisplayModes change. The Policy below
     // is also dependent, so must be reset as well.
     DisplayModes mDisplayModes GUARDED_BY(mLock);
-
-    // Set of supported display refresh rates for easy lookup
-    // when FrameRateOverride::AppOverrideNativeRefreshRates is in use.
-    ftl::SmallMap<Fps, ftl::Unit, 8, FpsApproxEqual> mAppOverrideNativeRefreshRates;
 
     ftl::Optional<FrameRateMode> mActiveModeOpt GUARDED_BY(mLock);
 
@@ -555,13 +536,15 @@ private:
     std::vector<FrameRateMode> mAppRequestFrameRates GUARDED_BY(mLock);
     std::vector<FrameRateMode> mAllFrameRates GUARDED_BY(mLock);
 
-    // Caches whether the device is VRR-compatible based on the active display mode.
-    std::atomic_bool mIsVrrDevice = false;
+    // Caches whether the display is VRR-compatible based on the active display mode.
+    std::atomic_bool mIsVrrDisplay = false;
 
     Policy mDisplayManagerPolicy GUARDED_BY(mLock);
     std::optional<Policy> mOverridePolicy GUARDED_BY(mLock);
 
     unsigned mNumModeSwitchesInPolicy GUARDED_BY(kMainThreadContext) = 0;
+
+    LayerFilter mLayerFilter GUARDED_BY(mLock);
 
     mutable std::mutex mLock;
 
@@ -575,8 +558,6 @@ private:
     // refresh rate
     const std::vector<Fps> mFrameRatesThatFavorsAtLeast60 = {23.976_Hz, 25_Hz, 29.97_Hz, 50_Hz,
                                                              59.94_Hz};
-
-    Config::FrameRateOverride mFrameRateOverrideConfig;
 
     struct GetRankedFrameRatesCache {
         std::vector<LayerRequirement> layers;
@@ -601,6 +582,15 @@ private:
 
     // Returns the range of supported frame rates.
     FpsRange getSupportedFrameRateRangeLocked() const REQUIRES(mLock);
+
+    // The number of frame rates to be supported when using frame rate override for ARR.
+    static constexpr size_t kNumFrameRates = 15;
+
+    // A list of frame rates to be used for ARR.
+    // RefreshRateSelector will select that closet possible frame rates from the list
+    // and pad it to fill the gaps until it reaches kNumFrameRates.
+    const std::vector<Fps> kFpsAnchorList = {1_Hz,  2_Hz,  5_Hz,  10_Hz, 15_Hz,
+                                             20_Hz, 24_Hz, 30_Hz, 48_Hz, 60_Hz};
 };
 
 } // namespace android::scheduler

@@ -60,16 +60,20 @@ public:
 
     /* Move the pointer and return unconsumed delta if the pointer has crossed the current
      * viewport bounds.
+     * The movement should be in the display physical coordinates.
      *
      * Return value may be used to move pointer to corresponding adjacent display, if it exists in
      * the display-topology */
     [[nodiscard]] virtual vec2 move(float deltaX, float deltaY) = 0;
 
-    /* Sets the absolute location of the pointer. */
+    /* Sets the display physical location of the pointer. */
     virtual void setPosition(float x, float y) = 0;
 
-    /* Gets the absolute location of the pointer. */
+    /* Gets the display physical location of the pointer. */
     virtual vec2 getPosition() const = 0;
+
+    /* Gets the display logical location of the pointer. */
+    virtual vec2 getPositionInLogicalDisplay() const = 0;
 
     enum class Transition {
         // Fade/unfade immediately.

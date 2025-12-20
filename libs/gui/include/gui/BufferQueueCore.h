@@ -51,11 +51,17 @@ namespace android {
 
 class IConsumerListener;
 class IProducerListener;
+#ifdef ENABLE_BQC_TESTING
+class MockBufferQueueCore;
+#endif
 
 class BufferQueueCore : public virtual RefBase {
 
     friend class BufferQueueProducer;
     friend class BufferQueueConsumer;
+#ifdef ENABLE_BQC_TESTING
+    friend class TestableBufferQueueCore;
+#endif
 
 public:
     // Used as a placeholder slot number when the value isn't pointing to an
@@ -81,12 +87,10 @@ public:
     BufferQueueCore();
     virtual ~BufferQueueCore();
 
-#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(BUFFER_RELEASE_CHANNEL)
 protected:
     // Wake up any threads waiting for a buffer release. The BufferQueue mutex should always held
     // when this method is called.
     virtual void notifyBufferReleased() const;
-#endif
 
 private:
     // Dump our state in a string
@@ -136,11 +140,6 @@ private:
     // freeAllBuffersLocked frees the GraphicBuffer and sync resources for
     // all slots, even if they're currently dequeued, queued, or acquired.
     void freeAllBuffersLocked();
-
-    // discardFreeBuffersLocked releases all currently-free buffers held by the
-    // queue, in order to reduce the memory consumption of the queue to the
-    // minimum possible without discarding data.
-    void discardFreeBuffersLocked();
 
     // If delta is positive, makes more slots available. If negative, takes
     // away slots. Returns false if the request can't be met.

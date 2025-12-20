@@ -56,9 +56,7 @@ bool ValidateFrameRate(float frameRate, int8_t compatibility, int8_t changeFrame
             changeFrameRateStrategy != ANATIVEWINDOW_CHANGE_FRAME_RATE_ALWAYS) {
             ALOGE("%s failed - invalid change frame rate strategy value %d", functionName,
                   changeFrameRateStrategy);
-            if (flags::bq_setframerate()) {
-                return false;
-            }
+            return false;
         }
     }
 

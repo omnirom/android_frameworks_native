@@ -42,6 +42,20 @@ cc_aconfig_library {
 }
 
 cc_aconfig_library {
+    name: "aconfig_libgui_flags_c_lib",
+    min_sdk_version: "30",
+    vendor_available: true,
+    double_loadable: true,
+    host_supported: true,
+    apex_available: [
+        "//apex_available:platform",
+        "com.android.media",
+        "com.android.media.swcodec",
+    ],
+    aconfig_declarations: "libgui_flags",
+}
+
+cc_aconfig_library {
     name: "libguiflags_no_apex",
     aconfig_declarations: "libgui_flags",
 }
@@ -85,15 +99,45 @@ cc_library_headers {
     ],
 }
 
+filegroup {
+    name: "box_shadow_aidl",
+    srcs: [
+        "android/gui/BoxShadowSettings.aidl",
+        "android/gui/BorderSettings.aidl",
+    ],
+}
+
+aidl_interface {
+    name: "android.gui.boxshadow",
+    unstable: true,
+    vendor_available: true,
+    srcs: [":box_shadow_aidl"],
+    local_include_dir: ".",
+    backend: {
+        java: {
+            enabled: true,
+            sdk_version: "current",
+            apex_available: [
+                "//apex_available:platform",
+            ],
+        },
+    },
+}
+
 // AIDL files that should be exposed to java
 filegroup {
     name: "guiconstants_aidl",
     srcs: [
+        "android/gui/BorderSettings.aidl",
+        "android/gui/BoxShadowSettings.aidl",
+        "android/gui/CornerRadiiData.aidl",
         "android/gui/DropInputMode.aidl",
+        "android/gui/EarlyWakeupInfo.aidl",
         "android/gui/StalledTransactionInfo.aidl",
         "android/**/TouchOcclusionMode.aidl",
+        "android/gui/TransactionBarrier.aidl",
         "android/gui/TrustedOverlay.aidl",
-        "android/gui/BorderSettings.aidl",
+        "android/gui/Vec2.aidl",
     ],
 }
 
@@ -296,6 +340,11 @@ filegroup {
 cc_defaults {
     name: "libgui-defaults",
     defaults: ["libgui_bufferqueue-defaults"],
+    tidy: true,
+    tidy_flags: [
+        // Only check our headers
+        "--header-filter=^.*frameworks/native/libs/gui/.*.h$",
+    ],
     static_libs: [
         "libgui_aidl_static",
         "libgui_window_info_static",
@@ -350,6 +399,10 @@ cc_defaults {
         "libsurfaceflingerflags",
     ],
 
+    shared_libs: [
+        "libaconfig_storage_read_api_cc",
+    ],
+
     afdo: true,
 
     lto: {
@@ -357,6 +410,7 @@ cc_defaults {
     },
 
     cflags: [
+        "-DANDROID_UTILS_REF_BASE_DISABLE_IMPLICIT_CONSTRUCTION",
         "-Wthread-safety",
     ],
 }
@@ -396,17 +450,21 @@ filegroup {
     srcs: [
         "BatchBufferOps.cpp",
         "BufferItem.cpp",
+        "BufferItemConsumer.cpp",
         "BufferQueue.cpp",
         "BufferQueueConsumer.cpp",
         "BufferQueueCore.cpp",
         "BufferQueueProducer.cpp",
         "BufferQueueThreadState.cpp",
         "BufferSlot.cpp",
+        "ConsumerBase.cpp",
+        "FenceMonitor.cpp",
         "FrameRateUtils.cpp",
         "FrameTimestamps.cpp",
         "GLConsumerUtils.cpp",
         "HdrMetadata.cpp",
         "IGraphicBufferProducerFlattenables.cpp",
+        "Surface.cpp",
         "bufferqueue/1.0/Conversion.cpp",
         "bufferqueue/1.0/H2BProducerListener.cpp",
         "bufferqueue/1.0/WProducerListener.cpp",

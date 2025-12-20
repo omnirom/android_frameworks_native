@@ -149,8 +149,7 @@ int main() {
 
     // publish gui::ISurfaceComposer, the new AIDL interface
     sp<SurfaceComposerAIDL> composerAIDL = sp<SurfaceComposerAIDL>::make(flinger);
-    if (FlagManager::getInstance().misc1() &&
-        !FlagManager::getInstance().disable_sched_fifo_composer()) {
+    if (!FlagManager::getInstance().disable_sched_fifo_composer()) {
         composerAIDL->setMinSchedulerPolicy(SCHED_FIFO, newPriority);
     }
     sm->addService(String16("SurfaceFlingerAIDL"), composerAIDL, false,

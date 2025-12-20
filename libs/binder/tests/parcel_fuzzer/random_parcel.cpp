@@ -49,7 +49,7 @@ void fillRandomParcel(Parcel* outputParcel, FuzzedDataProvider&& provider,
     });
 
     Parcel* p;
-    if (resultShouldBeView) {
+    if (options->viewParcel && resultShouldBeView) {
         options->extraParcels.push_back(std::make_unique<Parcel>());
         // held for duration of test, so that view will be valid
         p = options->extraParcels[options->extraParcels.size() - 1].get();
@@ -60,7 +60,7 @@ void fillRandomParcel(Parcel* outputParcel, FuzzedDataProvider&& provider,
     // must be last guard, so outputParcel gets setup as view before
     // other guards
     auto viewify_guard = binder::impl::make_scope_guard([&]() {
-        if (resultShouldBeView) {
+        if (options->viewParcel && resultShouldBeView) {
             outputParcel->makeDangerousViewOf(p);
         }
     });

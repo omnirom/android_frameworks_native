@@ -20,6 +20,7 @@
 #include <input/KeyboardClassifier.h>
 #include "NotifyArgs.h"
 
+#include <list>
 #include <string>
 #include <vector>
 

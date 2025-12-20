@@ -62,13 +62,17 @@ public:
         FUZZ_LOG() << "should not reach";
         abort();
     }
-    status_t unflatten(void const*& buffer, size_t& size, int const*& /*fds*/, size_t& /*count*/) {
+    status_t unflatten(void const*& buffer, size_t& size, int const*& fds, size_t& count) {
+        for (size_t i = 0; i < count; i++) {
+            close(fds[i]);
+        }
         if (size < sizeof(mValue)) {
             return android::NO_MEMORY;
         }
         android::FlattenableUtils::read(buffer, size, mValue);
         return android::OK;
     }
+
 private:
     int32_t mValue = 0xFEEDBEEF;
 };

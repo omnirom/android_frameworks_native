@@ -35,15 +35,11 @@ aidl::android::hardware::graphics::common::Dataspace toAidlDataspace(ui::Dataspa
 
 void generateXYZTransforms(std::string& shader) {
     shader.append(R"(
-        uniform float3x3 in_rgbToXyz;
-        uniform float3x3 in_xyzToSrcRgb;
+        uniform float3x3 in_SrcRgbToXyz;
         uniform float4x4 in_colorTransform;
-        float3 ToXYZ(float3 rgb) {
-            return in_rgbToXyz * rgb;
-        }
 
-        float3 ToSrcRGB(float3 xyz) {
-            return in_xyzToSrcRgb * xyz;
+        float3 ToXYZ(float3 rgb) {
+            return in_SrcRgbToXyz * rgb;
         }
 
         float3 ApplyColorTransform(float3 rgb) {
@@ -152,13 +148,19 @@ void generateOOTF(ui::Dataspace inputDataspace, ui::Dataspace outputDataspace,
     generateLuminanceNormalizationForOOTF(inputDataspace, outputDataspace, shader);
 
     // Some tonemappers operate on CIE luminance, other tonemappers operate on linear rgb
-    // luminance in the source gamut.
+    // luminance in the source gamut. This assumes that the working colorspace of the linear effect
+    // SkShader is set to a linear gamma with the source gamut.
+    //
+    // NOTE: The ScaleLuminance functions are written taking an `xyz` argument, but since it's a
+    // uniform scale factor and linearRGB and XYZ differ by a linear transformation, it is okay
+    // to pass in the linear source RGB directly and then we don't need to convert scaledXYZ back
+    // to RGB.
     shader.append(R"(
             float3 OOTF(float3 linearRGB) {
                 float3 scaledLinearRGB = ScaleLuminance(linearRGB);
                 float3 scaledXYZ = ToXYZ(scaledLinearRGB);
 
-                float gain = libtonemap_LookupTonemapGain(ToSrcRGB(scaledXYZ), scaledXYZ);
+                float gain = libtonemap_LookupTonemapGain(scaledLinearRGB, scaledXYZ);
 
                 return NormalizeLuminance(scaledXYZ * gain);
             }
@@ -176,6 +178,9 @@ void generateOETF(std::string& shader) {
 
 void generateEffectiveOOTF(bool undoPremultipliedAlpha, LinearEffect::SkSLType type,
                            bool needsCustomOETF, std::string& shader) {
+    // The generated SkSL will be wrapped in a working color space set to a linear gamma and input
+    // gamut, with 1.0 == 203 nits. `inputColor` will be already converted to that linear space
+    // (for ColorFilter type), and `child` will return a value in that linear space (for Shader).
     switch (type) {
         case LinearEffect::SkSLType::ColorFilter:
             shader.append(R"(
@@ -191,24 +196,27 @@ void generateEffectiveOOTF(bool undoPremultipliedAlpha, LinearEffect::SkSLType t
             )");
             break;
     }
+    // TODO(b/425457165): skia may premul unconditionally so investigate removing the predicate
     if (undoPremultipliedAlpha) {
         shader.append(R"(
             c.rgb = c.rgb / (c.a + 0.0019);
         )");
     }
-    // We are using linear sRGB as a working space, with 1.0 == 203 nits
     shader.append(R"(
-        c.rgb = ApplyColorTransform(OOTF(toLinearSrgb(c.rgb)));
+        c.rgb = ApplyColorTransform(OOTF(c.rgb));
     )");
     if (needsCustomOETF) {
+        // When there is a custom OETF, the wrapping working color space shader uses an output space
+        // set to the final surface's color space to disable any further color management. This
+        // allows this SkSL to apply a custom OETF that is effectively "casted" to that space.
+        //
+        // This is awkward but is used to manage the encoding that certain display hardware expects.
         shader.append(R"(
             c.rgb = OETF(c.rgb);
         )");
-    } else {
-        shader.append(R"(
-            c.rgb = fromLinearSrgb(c.rgb);
-        )");
     }
+    // Otherwise, this shader is emitting an RGB value in the input space with a linear gamma, and
+    // Skia will convert that to the output space as needed.
     if (undoPremultipliedAlpha) {
         shader.append(R"(
             c.rgb = c.rgb * (c.a + 0.0019);
@@ -282,20 +290,30 @@ std::vector<tonemap::ShaderUniform> buildLinearEffectUniforms(
     auto outputColorSpace = toColorSpace(linearEffect.outputDataspace);
 
     uniforms.push_back(
-            {.name = "in_rgbToXyz",
-             .value = buildUniformValue<mat3>(ColorSpace::linearExtendedSRGB().getRGBtoXYZ())});
-    uniforms.push_back({.name = "in_xyzToSrcRgb",
-                        .value = buildUniformValue<mat3>(inputColorSpace.getXYZtoRGB())});
-    // Transforms xyz colors to linear source colors, then applies the color transform, then
-    // transforms to linear extended RGB for skia to color manage.
-    uniforms.push_back({.name = "in_colorTransform",
-                        .value = buildUniformValue<mat4>(
-                                mat4(ColorSpace::linearExtendedSRGB().getXYZtoRGB()) *
-                                // TODO: the color transform ideally should be applied
-                                // in the source colorspace, but doing that breaks
-                                // renderengine tests
-                                mat4(outputColorSpace.getRGBtoXYZ()) * colorTransform *
-                                mat4(outputColorSpace.getXYZtoRGB()))});
+            {.name = "in_SrcRgbToXyz",
+             .value = buildUniformValue<mat3>(inputColorSpace.getRGBtoXYZ())});
+    // Transforms xyz colors to linear input colors, then applies the color transform, and
+    // optionally transforming from the input to output gamut.
+    //
+    // When there is a custom OETF, the wrapping working color space shader declares the output
+    // space to be `outputColorSpace` even though it uses a different encoding function. In this
+    // case, the RGB values must be mapped from the input gamut to the output gamut.
+    //
+    // When there is no custom OETF, the wrapped working color space shader declares the output
+    // space to be `inputColorSpace` with a linear gamma. This allows Skia to optimally transform
+    // to the output space depending on its GPU backend.
+    const bool needsCustomOETF = (linearEffect.fakeOutputDataspace & HAL_DATASPACE_TRANSFER_MASK) !=
+            HAL_DATASPACE_TRANSFER_GAMMA2_2;
+
+    auto gamutTransform = mat3();
+    if (needsCustomOETF) {
+        gamutTransform = outputColorSpace.getXYZtoRGB() * inputColorSpace.getRGBtoXYZ();
+    }
+
+    uniforms.push_back(
+            {.name = "in_colorTransform",
+             .value = buildUniformValue<mat4>(
+                     mat4(gamutTransform) * colorTransform * mat4(inputColorSpace.getXYZtoRGB()))});
 
     tonemap::Metadata metadata{.displayMaxLuminance = maxDisplayLuminance,
                                // If the input luminance is unknown, use display luminance (aka,
@@ -309,7 +327,7 @@ std::vector<tonemap::ShaderUniform> buildLinearEffectUniforms(
                                .buffer = buffer,
                                .renderIntent = renderIntent};
 
-    for (const auto uniform : tonemap::getToneMapper()->generateShaderSkSLUniforms(metadata)) {
+    for (const auto& uniform : tonemap::getToneMapper()->generateShaderSkSLUniforms(metadata)) {
         uniforms.push_back(uniform);
     }
 

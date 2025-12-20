@@ -110,10 +110,10 @@ public:
         return sCallbacks.back();
     }
 
-    static sp<GraphicBuffer> getBuffer() {
+    static sp<GraphicBuffer> getBuffer(uint64_t additionalUsage = 0) {
         return sp<GraphicBuffer>::make(32u, 32u, PIXEL_FORMAT_RGBA_8888, 1u,
                                        BufferUsage::CPU_READ_OFTEN | BufferUsage::CPU_WRITE_OFTEN |
-                                               BufferUsage::COMPOSER_OVERLAY,
+                                               BufferUsage::COMPOSER_OVERLAY | additionalUsage,
                                        "test");
     }
     static uint64_t generateFrameNumber() {
@@ -487,6 +487,52 @@ TEST_F(ReleaseBufferCallbackTest, SetBuffer_OverwriteBuffersWithNull) {
                           releaseCallback->getCallback());
 
     ASSERT_NO_FATAL_FAILURE(waitForReleaseBufferCallback(*releaseCallback, firstBufferCallbackId));
+}
+
+TEST_F(ReleaseBufferCallbackTest, CacheBufferOverwriteTransaction) {
+    sp<SurfaceControl> layer = createBufferStateLayer();
+    Transaction().show(layer).setLayer(layer, INT32_MAX).apply(true);
+    ReleaseBufferCallbackHelper* releaseCallback = getReleaseBufferCallbackHelper();
+
+    sp<GraphicBuffer> firstBuffer = getBuffer(static_cast<uint64_t>(BufferUsage::GPU_TEXTURE));
+    TransactionUtils::fillGraphicBufferColor(firstBuffer, Rect(0, 0, 32, 32), Color::BLUE);
+
+    // Create transaction with a buffer.
+    Transaction t1;
+    t1.setBuffer(layer, firstBuffer, std::nullopt, generateFrameNumber(), 0 /* producerId */,
+                 releaseCallback->getCallback());
+
+    Parcel parcel;
+    // Invoke writeToParcel to force the buffer to get cached locally
+    t1.writeToParcel(&parcel);
+    t1.clear();
+
+    parcel.setDataPosition(0);
+    t1.readFromParcel(&parcel);
+
+    sp<GraphicBuffer> secondBuffer = getBuffer(static_cast<uint64_t>(BufferUsage::GPU_TEXTURE));
+    TransactionUtils::fillGraphicBufferColor(secondBuffer, Rect(0, 0, 32, 32), Color::RED);
+    Transaction t2;
+    // Call setBuffer on the new transaction
+    t2.setBuffer(layer, secondBuffer, std::nullopt, generateFrameNumber(), 0 /* producerId */,
+                 releaseCallback->getCallback());
+    t1.merge(std::move(t2)).show(layer).apply(true);
+
+    // Second buffer was applied correctly
+    LayerCaptureArgs captureArgs;
+    captureArgs.layerHandle = layer->getHandle();
+    std::unique_ptr<ScreenCapture> capture;
+    ScreenCapture::captureLayers(&capture, captureArgs);
+    capture->expectSize(32, 32);
+    capture->expectColor(Rect(0, 0, 32, 32), Color::RED);
+
+    // Apply first buffer that was dropped before cached in SF
+    t1.setBuffer(layer, firstBuffer, std::nullopt, generateFrameNumber(), 0 /* producerId */,
+                 releaseCallback->getCallback())
+            .apply(true);
+    captureArgs.layerHandle = layer->getHandle();
+    ScreenCapture::captureLayers(&capture, captureArgs);
+    capture->expectColor(Rect(0, 0, 32, 32), Color::BLUE);
 }
 
 } // namespace android

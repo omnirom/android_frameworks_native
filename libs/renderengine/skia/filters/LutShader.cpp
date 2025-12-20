@@ -19,11 +19,13 @@
 #include <SkTileMode.h>
 #include <common/trace.h>
 #include <cutils/ashmem.h>
+#include <include/core/SkColorSpace.h>
 #include <math/half.h>
 #include <sys/mman.h>
 #include <ui/ColorSpace.h>
 
-#include "include/core/SkColorSpace.h"
+#include "RuntimeEffectManager.h"
+#include "skia/ColorSpaces.h"
 
 using aidl::android::hardware::graphics::composer3::LutProperties;
 
@@ -31,7 +33,7 @@ namespace android {
 namespace renderengine {
 namespace skia {
 
-static const SkString kShader = SkString(R"(
+const SkString kEffectSource_LutEffect(R"(
     uniform shader image;
     uniform shader lut;
     uniform int size;
@@ -44,7 +46,7 @@ static const SkString kShader = SkString(R"(
 
     vec4 main(vec2 xy) {
         float4 rgba = image.eval(xy);
-        float3 linear = toLinearSrgb(rgba.rgb) * normalizeScalar;
+        float3 linear = rgba.rgb * normalizeScalar;
         if (dimension == 1) {
             // RGB
             if (key == 0) {
@@ -70,52 +72,68 @@ static const SkString kShader = SkString(R"(
             }
         } else if (dimension == 3) {
             if (key == 0) {
-                float tx = linear.r * float(size - 1);
-                float ty = linear.g * float(size - 1);
-                float tz = linear.b * float(size - 1);
+                // index
+                float x = linear.r * float(size - 1);
+                float y = linear.g * float(size - 1);
+                float z = linear.b * float(size - 1);
 
-                // calculate lower and upper bounds for each dimension
-                int x = int(tx);
-                int y = int(ty);
-                int z = int(tz);
+                // lower bound
+                float x0 = floor(x);
+                float y0 = floor(y);
+                float z0 = floor(z);
 
-                int i000 = x + y * size + z * size * size;
-                int i100 = i000 + 1;
-                int i010 = i000 + size;
-                int i110 = i000 + size + 1;
-                int i001 = i000 + size * size;
-                int i101 = i000 + size * size + 1;
-                int i011 = i000 + size * size + size;
-                int i111 = i000 + size * size + size + 1;
+                // upper bound
+                float x1 = min(x0 + 1.0, float(size - 1));
+                float y1 = min(y0 + 1.0, float(size - 1));
+                float z1 = min(z0 + 1.0, float(size - 1));
 
-                // get 1d normalized indices
-                float c000 = float(i000) / float(size * size * size);
-                float c100 = float(i100) / float(size * size * size);
-                float c010 = float(i010) / float(size * size * size);
-                float c110 = float(i110) / float(size * size * size);
-                float c001 = float(i001) / float(size * size * size);
-                float c101 = float(i101) / float(size * size * size);
-                float c011 = float(i011) / float(size * size * size);
-                float c111 = float(i111) / float(size * size * size);
+                // weight
+                // if the value reaches to upper bound, x1 == x0, then weight is 0
+                // if no, x1 - x0 should always be 1.0
+                float tx = x1 == x0 ? 0 : x - x0;
+                float ty = y1 == y0 ? 0 : y - y0;
+                float tz = z1 == z0 ? 0 : z - z0;
 
-                //TODO(b/377984618): support Tetrahedral interpolation
+                // get indices
+                // this follows 3d flatten policy described in API/AIDL interface
+                // i.e., `FLAT[z + DEPTH * (y + HEIGHT * x)] = ORIGINAL[x][y][z]`
+                float i000 = z0 + (y0 * float(size)) + (x0 * float(size) * float(size));
+                float i001 = z1 + (y0 * float(size)) + (x0 * float(size) * float(size));
+                float i010 = z0 + (y1 * float(size)) + (x0 * float(size) * float(size));
+                float i011 = z1 + (y1 * float(size)) + (x0 * float(size) * float(size));
+                float i100 = z0 + (y0 * float(size)) + (x1 * float(size) * float(size));
+                float i101 = z1 + (y0 * float(size)) + (x1 * float(size) * float(size));
+                float i110 = z0 + (y1 * float(size)) + (x1 * float(size) * float(size));
+                float i111 = z1 + (y1 * float(size)) + (x1 * float(size) * float(size));
+
+                // TODO(b/377984618): support Tetrahedral interpolation
                 // perform trilinear interpolation
-                float3 c00 = mix(lut.eval(vec2(c000, 0.0) + 0.5).rgb,
-                                 lut.eval(vec2(c100, 0.0) + 0.5).rgb, linear.r);
-                float3 c01 = mix(lut.eval(vec2(c001, 0.0) + 0.5).rgb,
-                                 lut.eval(vec2(c101, 0.0) + 0.5).rgb, linear.r);
-                float3 c10 = mix(lut.eval(vec2(c010, 0.0) + 0.5).rgb,
-                                 lut.eval(vec2(c110, 0.0) + 0.5).rgb, linear.r);
-                float3 c11 = mix(lut.eval(vec2(c011, 0.0) + 0.5).rgb,
-                                 lut.eval(vec2(c111, 0.0) + 0.5).rgb, linear.r);
+                // see https://en.wikipedia.org/wiki/Trilinear_interpolation
+                float3 c000 = lut.eval(vec2(i000, 0.0) + 0.5).rgb;
+                float3 c001 = lut.eval(vec2(i001, 0.0) + 0.5).rgb;
+                float3 c010 = lut.eval(vec2(i010, 0.0) + 0.5).rgb;
+                float3 c011 = lut.eval(vec2(i011, 0.0) + 0.5).rgb;
+                float3 c100 = lut.eval(vec2(i100, 0.0) + 0.5).rgb;
+                float3 c101 = lut.eval(vec2(i101, 0.0) + 0.5).rgb;
+                float3 c110 = lut.eval(vec2(i110, 0.0) + 0.5).rgb;
+                float3 c111 = lut.eval(vec2(i111, 0.0) + 0.5).rgb;
 
-                float3 c0 = mix(c00, c10, linear.g);
-                float3 c1 = mix(c01, c11, linear.g);
+                // mix(x, y, a) = x * (1 - a) + y * a
+                // interpolate along the z-axis
+                float3 c00 = mix(c000, c001, tz);
+                float3 c01 = mix(c010, c011, tz);
+                float3 c10 = mix(c100, c101, tz);
+                float3 c11 = mix(c110, c111, tz);
 
-                linear = mix(c0, c1, linear.b);
+                // interpolate along the y-axis
+                float3 c0 = mix(c00, c01, ty);
+                float3 c1 = mix(c10, c11, ty);
+
+                // interpolate along the x-axis
+                linear = mix(c0, c1, tx);
             }
         }
-        return float4(fromLinearSrgb(linear), rgba.a);
+        return float4(linear, rgba.a);
     })");
 
 // same as shader::toColorSpace function
@@ -141,6 +159,31 @@ static ColorSpace toColorSpace(ui::Dataspace dataspace) {
         default:
             return ColorSpace::sRGB();
     }
+}
+
+static float computeHlgScale() {
+    static constexpr auto input = 0.7498773651;
+    static constexpr auto a = 0.17883277;
+    static constexpr auto b = 1 - 4 * a;
+    const static auto c = 0.5 - a * std::log(4 * a);
+    // Returns about 265 nits -- After the typical HLG OOTF this would map to 203 nits under ideal
+    // conditions.
+    return (exp((input - c) / a) + b) / 12;
+}
+
+static float computePqScale() {
+    static constexpr auto input = 0.58068888104;
+    static constexpr auto m1 = 0.1593017578125;
+    static constexpr auto m2 = 78.84375;
+    static constexpr auto c1 = 0.8359375;
+    static constexpr auto c2 = 18.8515625;
+    static constexpr auto c3 = 18.6875;
+    // This should essetially return 203 nits
+    return pow((pow(input, 1 / m2) - c1) / (c2 - c3 * pow(input, 1 / m2)), 1 / m1);
+}
+
+LutShader::LutShader(RuntimeEffectManager& effectManager) {
+    mEffect = effectManager.mKnownEffects[kLutEffect];
 }
 
 sk_sp<SkShader> LutShader::generateLutShader(sk_sp<SkShader> input,
@@ -170,16 +213,20 @@ sk_sp<SkShader> LutShader::generateLutShader(sk_sp<SkShader> input,
      * 1D Lut RGB/MAX_RGB
      * (R0, 0, 0, 0)
      * (R1, 0, 0, 0)
+     * ...
+     * (R_length-1, 0, 0, 0)
      *
      * 1D Lut CIE_Y
      * (Y0, 0, 0, 0)
      * (Y1, 0, 0, 0)
      * ...
+     * (Y_length-1, 0, 0, 0)
      *
      * 3D Lut MAX_RGB
      * (R0, G0, B0, 0)
      * (R1, G1, B1, 0)
      * ...
+     * (R_length-1, G_length-1, B_length-1, 0)
      */
     SkImageInfo info = SkImageInfo::Make(length /* the number of rgba */, 1, kRGBA_F16_SkColorType,
                                          kPremul_SkAlphaType);
@@ -206,15 +253,15 @@ sk_sp<SkShader> LutShader::generateLutShader(sk_sp<SkShader> input,
     float normalizeScalar = 1.0;
     switch (srcDataspace & HAL_DATASPACE_TRANSFER_MASK) {
         case HAL_DATASPACE_TRANSFER_HLG:
-            normalizeScalar = 0.203;
+            normalizeScalar = computeHlgScale();
             break;
         case HAL_DATASPACE_TRANSFER_ST2084:
-            normalizeScalar = 0.0203;
+            normalizeScalar = computePqScale();
             break;
         default:
             normalizeScalar = 1.0;
     }
-    const int uSize = static_cast<int>(size);
+    const int uSize = static_cast<int>(size); // the size per dimension
     const int uKey = static_cast<int>(samplingKey);
     const int uDimension = static_cast<int>(dimension);
     const float uNormalizeScalar = static_cast<float>(normalizeScalar);
@@ -231,28 +278,21 @@ sk_sp<SkShader> LutShader::generateLutShader(sk_sp<SkShader> input,
     mBuilder->uniform("key") = uKey;
     mBuilder->uniform("dimension") = uDimension;
     mBuilder->uniform("normalizeScalar") = uNormalizeScalar;
-    return mBuilder->makeShader();
+
+    // de-gamma the image without changing the primaries
+    return mBuilder->makeShader()->makeWithWorkingColorSpace(
+            toSkColorSpace(srcDataspace)->makeLinearGamma());
 }
 
 sk_sp<SkShader> LutShader::lutShader(sk_sp<SkShader>& input,
                                      std::shared_ptr<gui::DisplayLuts> displayLuts,
-                                     ui::Dataspace srcDataspace,
-                                     sk_sp<SkColorSpace> outColorSpace) {
+                                     ui::Dataspace srcDataspace) {
     if (mBuilder == nullptr) {
-        const static SkRuntimeEffect::Result instance = SkRuntimeEffect::MakeForShader(kShader);
-        mBuilder = std::make_unique<SkRuntimeShaderBuilder>(instance.effect);
+        mBuilder = std::make_unique<SkRuntimeShaderBuilder>(mEffect);
     }
 
     auto& fd = displayLuts->getLutFileDescriptor();
     if (fd.ok()) {
-        // de-gamma the image without changing the primaries
-        SkImage* baseImage = input->isAImage((SkMatrix*)nullptr, (SkTileMode*)nullptr);
-        sk_sp<SkColorSpace> baseColorSpace = baseImage && baseImage->colorSpace()
-                ? baseImage->refColorSpace()
-                : SkColorSpace::MakeSRGB();
-        sk_sp<SkColorSpace> lutMathColorSpace = baseColorSpace->makeLinearGamma();
-        input = input->makeWithWorkingColorSpace(lutMathColorSpace);
-
         auto& offsets = displayLuts->offsets;
         auto& lutProperties = displayLuts->lutProperties;
         std::vector<float> buffers;
@@ -287,8 +327,6 @@ sk_sp<SkShader> LutShader::lutShader(sk_sp<SkShader>& input,
                                       lutProperties[i].dimension, lutProperties[i].size,
                                       lutProperties[i].samplingKey, srcDataspace);
         }
-
-        input = input->makeWithWorkingColorSpace(outColorSpace);
     }
     return input;
 }

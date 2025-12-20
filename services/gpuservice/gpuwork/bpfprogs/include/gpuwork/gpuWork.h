@@ -18,6 +18,9 @@
 
 #include <stdint.h>
 
+// The maximum number of tracked GPU ID and UID pairs (|GpuIdUid|).
+#define MAX_TRACKED_GPU_ID_UIDS 512
+
 #ifdef __cplusplus
 #include <type_traits>
 
@@ -59,9 +62,6 @@ typedef struct {
     // the map is nearly full.
     uint64_t num_map_entries;
 } GlobalData;
-
-// The maximum number of tracked GPU ID and UID pairs (|GpuIdUid|).
-static const uint32_t kMaxTrackedGpuIdUids = 512;
 
 #ifdef __cplusplus
 } // namespace gpuwork

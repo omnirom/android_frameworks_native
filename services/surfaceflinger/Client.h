@@ -51,6 +51,7 @@ private:
                                       gui::FrameStats* outStats) override;
 
     binder::Status mirrorSurface(const sp<IBinder>& mirrorFromHandle,
+                                 const sp<IBinder>& stopAtHandle,
                                  gui::CreateSurfaceResult* outResult) override;
 
     binder::Status mirrorDisplay(int64_t displayId, gui::CreateSurfaceResult* outResult) override;

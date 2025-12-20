@@ -65,10 +65,6 @@ protected:
         EXPECT_EQ(0, success);
     }
 
-#if !COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
-    sp<IGraphicBufferProducer> mProducer;
-    sp<IGraphicBufferConsumer> mConsumer;
-#endif // COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
     sp<BufferItemConsumer> mItemConsumer;
     sp<TestableSurface> mWindow;
 };

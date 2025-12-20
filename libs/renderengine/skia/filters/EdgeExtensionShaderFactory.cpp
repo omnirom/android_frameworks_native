@@ -22,9 +22,11 @@
 #include <com_android_graphics_libgui_flags.h>
 #include "log/log_main.h"
 
+#include "RuntimeEffectManager.h"
+
 namespace android::renderengine::skia {
 
-static const SkString edgeShader = SkString(R"(
+const SkString kEffectSource_EdgeExtensionEffect(R"(
     uniform shader uContentTexture;
     uniform vec2 uImgSize;
 
@@ -57,22 +59,14 @@ static const SkString edgeShader = SkString(R"(
     }
 )");
 
-EdgeExtensionShaderFactory::EdgeExtensionShaderFactory() {
-    mResult = std::make_unique<SkRuntimeEffect::Result>(SkRuntimeEffect::MakeForShader(edgeShader));
-    LOG_ALWAYS_FATAL_IF(!mResult->errorText.isEmpty(),
-                        "EdgeExtensionShaderFactory compilation "
-                        "failed with an unexpected error: %s",
-                        mResult->errorText.c_str());
+EdgeExtensionShaderFactory::EdgeExtensionShaderFactory(RuntimeEffectManager& effectManager) {
+    mEffect = effectManager.mKnownEffects[kEdgeExtensionEffect];
 }
 
 sk_sp<SkShader> EdgeExtensionShaderFactory::createSkShader(const sk_sp<SkShader>& inputShader,
                                                            const LayerSettings& layer,
                                                            const SkRect& imageBounds) const {
-    LOG_ALWAYS_FATAL_IF(mResult == nullptr,
-                        "EdgeExtensionShaderFactory did not initialize mResult. "
-                        "This means that we unexpectedly applied the edge extension shader");
-
-    SkRuntimeShaderBuilder builder = SkRuntimeShaderBuilder(mResult->effect);
+    SkRuntimeShaderBuilder builder = SkRuntimeShaderBuilder(mEffect);
 
     builder.child("uContentTexture") = inputShader;
     if (imageBounds.isEmpty()) {

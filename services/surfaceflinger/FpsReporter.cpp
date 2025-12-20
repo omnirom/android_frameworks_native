@@ -14,8 +14,6 @@
  * limitations under the License.
  */
 
-#undef LOG_TAG
-#define LOG_TAG "FpsReporter"
 #define ATRACE_TAG ATRACE_TAG_GRAPHICS
 
 #include <algorithm>
@@ -26,7 +24,7 @@
 
 namespace android {
 
-FpsReporter::FpsReporter(frametimeline::FrameTimeline& frameTimeline, std::unique_ptr<Clock> clock)
+FpsReporter::FpsReporter(scheduler::FrameTimeline& frameTimeline, std::unique_ptr<Clock> clock)
       : mFrameTimeline(frameTimeline), mClock(std::move(clock)) {
     LOG_ALWAYS_FATAL_IF(mClock == nullptr, "Passed in null clock when constructing FpsReporter!");
 }

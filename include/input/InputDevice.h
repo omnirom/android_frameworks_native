@@ -149,7 +149,7 @@ struct InputDeviceSensorInfo {
                                    float maxRange, float resolution, float power, int32_t minDelay,
                                    int32_t fifoReservedEventCount, int32_t fifoMaxEventCount,
                                    std::string stringType, int32_t maxDelay, int32_t flags,
-                                   int32_t id)
+                                   DeviceId id)
           : name(name),
             vendor(vendor),
             version(version),
@@ -196,7 +196,7 @@ struct InputDeviceSensorInfo {
     // Sensor flags
     int32_t flags;
     // Sensor id, same as the input device ID it belongs to.
-    int32_t id;
+    DeviceId id;
 };
 
 struct BrightnessLevel : ftl::DefaultConstructible<BrightnessLevel, std::uint8_t>,
@@ -280,12 +280,13 @@ public:
         float resolution;
     };
 
-    void initialize(int32_t id, int32_t generation, int32_t controllerNumber,
+    void initialize(DeviceId id, int32_t generation, int32_t controllerNumber,
                     const InputDeviceIdentifier& identifier, const std::string& alias,
-                    bool isExternal, bool hasMic, ui::LogicalDisplayId associatedDisplayId,
+                    bool isExternal, bool isVirtualDevice, bool hasMic,
+                    ui::LogicalDisplayId associatedDisplayId,
                     InputDeviceViewBehavior viewBehavior = {{}}, bool enabled = true);
 
-    inline int32_t getId() const { return mId; }
+    inline DeviceId getId() const { return mId; }
     inline int32_t getControllerNumber() const { return mControllerNumber; }
     inline int32_t getGeneration() const { return mGeneration; }
     inline const InputDeviceIdentifier& getIdentifier() const { return mIdentifier; }
@@ -294,6 +295,7 @@ public:
         return mAlias.empty() ? mIdentifier.name : mAlias;
     }
     inline bool isExternal() const { return mIsExternal; }
+    inline bool isVirtualDevice() const { return mIsVirtualDevice; }
     inline bool hasMic() const { return mHasMic; }
     inline uint32_t getSources() const { return mSources; }
 
@@ -329,9 +331,6 @@ public:
     inline void setHasBattery(bool hasBattery) { mHasBattery = hasBattery; }
     inline bool hasBattery() const { return mHasBattery; }
 
-    inline void setButtonUnderPad(bool hasButton) { mHasButtonUnderPad = hasButton; }
-    inline bool hasButtonUnderPad() const { return mHasButtonUnderPad; }
-
     inline void setHasSensor(bool hasSensor) { mHasSensor = hasSensor; }
     inline bool hasSensor() const { return mHasSensor; }
 
@@ -354,12 +353,13 @@ public:
     inline bool isEnabled() const { return mEnabled; }
 
 private:
-    int32_t mId;
+    DeviceId mId;
     int32_t mGeneration;
     int32_t mControllerNumber;
     InputDeviceIdentifier mIdentifier;
     std::string mAlias;
     bool mIsExternal;
+    bool mIsVirtualDevice;
     bool mHasMic;
     std::optional<KeyboardLayoutInfo> mKeyboardLayoutInfo;
     uint32_t mSources;
@@ -371,7 +371,6 @@ private:
 
     bool mHasVibrator;
     bool mHasBattery;
-    bool mHasButtonUnderPad;
     bool mHasSensor;
 
     std::vector<MotionRange> mMotionRanges;
@@ -419,7 +418,7 @@ extern std::string getInputDeviceConfigurationFilePathByDeviceIdentifier(
 extern std::string getInputDeviceConfigurationFilePathByName(
         const std::string& name, InputDeviceConfigurationFileType type);
 
-enum ReservedInputDeviceId : int32_t {
+enum ReservedInputDeviceId : RawDeviceId {
     // Device id representing an invalid device
     INVALID_INPUT_DEVICE_ID = android::os::IInputConstants::INVALID_INPUT_DEVICE_ID,
     // Device id of a special "virtual" keyboard that is always present.

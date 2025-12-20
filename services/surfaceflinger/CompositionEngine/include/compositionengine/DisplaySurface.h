@@ -49,7 +49,13 @@ public:
     // before composition takes place. The DisplaySurface can use the
     // composition type to decide how to manage the flow of buffers between
     // GPU and HWC for this frame.
-    enum class CompositionType : uint8_t { Unknown = 0, Gpu = 0b1, Hwc = 0b10, Mixed = Gpu | Hwc };
+    enum class CompositionType : uint8_t {
+        Unknown = 0,
+        Gpu = 0b1,
+        Hwc = 0b10,
+        Mixed = Gpu | Hwc,
+        ftl_last = Mixed
+    };
     virtual status_t prepareFrame(CompositionType) = 0;
 
     // Inform the surface that GPU composition is complete for this frame, and

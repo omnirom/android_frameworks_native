@@ -25,13 +25,17 @@
 #include <android-base/logging.h>
 #include <android/binder_auto_utils.h>
 #include <android/binder_libbinder.h>
+#include <binder/ProcessState.h>
+#include <binder/Trace.h>
 #include <fuzzbinder/random_parcel.h>
 #include <fuzzer/FuzzedDataProvider.h>
+#include <hwbinder/ProcessState.h>
 
-#include <cstdlib>
-#include <ctime>
 #include <sys/resource.h>
 #include <sys/time.h>
+#include <cstdlib>
+#include <ctime>
+#include <filesystem>
 
 #include "../../Utils.h"
 
@@ -39,6 +43,7 @@ using android::fillRandomParcel;
 using android::RandomParcelOptions;
 using android::sp;
 using android::HexString;
+std::once_flag gOpenFds;
 
 void fillRandomParcel(::android::hardware::Parcel* p, FuzzedDataProvider&& provider,
                       RandomParcelOptions* options) {
@@ -157,11 +162,27 @@ static AIBinder_Class* kNothingClass =
         AIBinder_Class_define("nothing", NothingClass_onCreate, NothingClass_onDestroy,
                               NothingClass_onTransact);
 
+static long numFds() {
+    return std::distance(std::filesystem::directory_iterator("/proc/self/fd"),
+                         std::filesystem::directory_iterator{});
+}
 extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     if (size <= 1) return 0;  // no use
 
     // avoid timeouts, see b/142617274, b/142473153
     if (size > 50000) return 0;
+    std::call_once(gOpenFds, []() {
+        // Cause the known FDs to be created before we track them.
+        android::binder::ScopedTrace openYourFds(ATRACE_TAG_AIDL, "Open FDs");
+        (void)android::ProcessState::self();
+        (void)android::hardware::ProcessState::self();
+        ALOGE("Logging creates a socked + a pmsg FD");
+    });
+
+    struct rlimit limit{};
+    CHECK_EQ(0, getrlimit(RLIMIT_NOFILE, &limit));
+    uint64_t maxFds = limit.rlim_cur;
+    int initialFds = numFds();
 
     FuzzedDataProvider provider = FuzzedDataProvider(data, size);
 
@@ -209,5 +230,6 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
 
     provider.PickValueInArray(fuzzBackend)(std::move(provider));
 
+    CHECK_EQ(initialFds, numFds()) << "FDs are being leaked";
     return 0;
 }

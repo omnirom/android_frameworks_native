@@ -24,6 +24,7 @@
 #include <binder/IBinder.h>
 #include <ftl/future.h>
 #include <gui/BufferReleaseChannel.h>
+#include <gui/CornerRadii.h>
 #include <gui/ITransactionCompletedListener.h>
 #include <renderengine/ExternalTexture.h>
 #include <ui/Fence.h>
@@ -48,6 +49,7 @@ public:
     nsecs_t latchTime = -1;
     std::optional<uint32_t> transformHint = std::nullopt;
     uint32_t currentMaxAcquiredBufferCount = 0;
+    std::optional<gui::CornerRadii> cornerRadii = std::nullopt;
     std::shared_ptr<FenceTime> gpuCompositionDoneFence{FenceTime::NO_FENCE};
     CompositorTiming compositorTiming;
     nsecs_t refreshStartTime = 0;

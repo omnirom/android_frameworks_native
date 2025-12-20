@@ -70,19 +70,27 @@ static InputDeviceInfo generateTestDeviceInfo(int32_t deviceId, uint32_t source,
 
     auto info = InputDeviceInfo();
     info.initialize(deviceId, /*generation=*/1, /*controllerNumber=*/1, identifier, "alias",
-                    /*isExternal=*/false, /*hasMic=*/false, associatedDisplayId);
+                    /*isExternal=*/false, /*isVirtualDevice=*/false, /*hasMic=*/false,
+                    associatedDisplayId);
     info.addSource(source);
     return info;
+}
+
+DisplayViewport createViewport(ui::LogicalDisplayId displayId, int32_t width = DISPLAY_WIDTH,
+                               int32_t height = DISPLAY_HEIGHT,
+                               ui::Rotation orientation = ui::ROTATION_0) {
+    DisplayViewport viewport;
+    viewport.displayId = displayId;
+    viewport.logicalRight = width;
+    viewport.logicalBottom = height;
+    viewport.orientation = orientation;
+    return viewport;
 }
 
 static std::vector<DisplayViewport> createViewports(std::vector<ui::LogicalDisplayId> displayIds) {
     std::vector<DisplayViewport> viewports;
     for (auto displayId : displayIds) {
-        DisplayViewport viewport;
-        viewport.displayId = displayId;
-        viewport.logicalRight = DISPLAY_WIDTH;
-        viewport.logicalBottom = DISPLAY_HEIGHT;
-        viewports.push_back(viewport);
+        viewports.push_back(createViewport(displayId));
     }
     return viewports;
 }
@@ -150,9 +158,14 @@ protected:
             // setDefaultMouseDisplayId without topology.
             // For this reason in tests we mock this behavior by creating topology with a single
             // display.
-            mChoreographer.setDisplayTopology({.primaryDisplayId = displayId,
-                                               .graph{{displayId, {}}},
-                                               .displaysDensity = {{displayId, DENSITY_MEDIUM}}});
+            mChoreographer.setDisplayTopology(
+                    DisplayTopologyGraph::create(/*primaryDisplayId=*/displayId,
+                                                 /*topologyGraph=*/
+                                                 {{displayId,
+                                                   {{},
+                                                    DENSITY_MEDIUM,
+                                                    FloatRect(0, 0, 500, 500)}}})
+                            .value());
         } else {
             mChoreographer.setDefaultMouseDisplayId(displayId);
         }
@@ -543,7 +556,8 @@ TEST_F(PointerChoreographerTest, DoesNotMovePointerForMouseRelativeSource) {
                                      ui::LogicalDisplayId::INVALID)}});
     mChoreographer.notifyPointerCaptureChanged(
             NotifyPointerCaptureChangedArgs(/*id=*/2, systemTime(SYSTEM_TIME_MONOTONIC),
-                                            PointerCaptureRequest(/*window=*/sp<BBinder>::make(),
+                                            PointerCaptureRequest(PointerCaptureMode::ABSOLUTE,
+                                                                  /*window=*/sp<BBinder>::make(),
                                                                   /*seq=*/0)));
 
     // Notify motion as if pointer capture is enabled.
@@ -584,7 +598,8 @@ TEST_F(PointerChoreographerTest, WhenPointerCaptureEnabledHidesPointer) {
     // Enable pointer capture and check if the PointerController hid the pointer.
     mChoreographer.notifyPointerCaptureChanged(
             NotifyPointerCaptureChangedArgs(/*id=*/1, systemTime(SYSTEM_TIME_MONOTONIC),
-                                            PointerCaptureRequest(/*window=*/sp<BBinder>::make(),
+                                            PointerCaptureRequest(PointerCaptureMode::ABSOLUTE,
+                                                                  /*window=*/sp<BBinder>::make(),
                                                                   /*seq=*/0)));
     ASSERT_FALSE(pc->isPointerShown());
 }
@@ -1694,7 +1709,8 @@ TEST_F(PointerChoreographerTest, DoesNotMovePointerForTouchpadSource) {
     // Assume that pointer capture is enabled.
     mChoreographer.notifyPointerCaptureChanged(
             NotifyPointerCaptureChangedArgs(/*id=*/1, systemTime(SYSTEM_TIME_MONOTONIC),
-                                            PointerCaptureRequest(/*window=*/sp<BBinder>::make(),
+                                            PointerCaptureRequest(PointerCaptureMode::ABSOLUTE,
+                                                                  /*window=*/sp<BBinder>::make(),
                                                                   /*seq=*/0)));
 
     // Notify motion as if pointer capture is enabled.
@@ -1729,7 +1745,8 @@ TEST_F(PointerChoreographerTest, WhenPointerCaptureEnabledTouchpadHidesPointer) 
     // Enable pointer capture and check if the PointerController hid the pointer.
     mChoreographer.notifyPointerCaptureChanged(
             NotifyPointerCaptureChangedArgs(/*id=*/1, systemTime(SYSTEM_TIME_MONOTONIC),
-                                            PointerCaptureRequest(/*window=*/sp<BBinder>::make(),
+                                            PointerCaptureRequest(PointerCaptureMode::ABSOLUTE,
+                                                                  /*window=*/sp<BBinder>::make(),
                                                                   /*seq=*/0)));
     ASSERT_FALSE(pc->isPointerShown());
 }
@@ -1898,6 +1915,44 @@ TEST_F(PointerChoreographerTest, A11yPointerMotionFilterTouchpad) {
     pc->assertPosition(104, 213);
     mTestListener.assertNotifyMotionWasCalled(AllOf(WithCoords(104, 213), WithDisplayId(DISPLAY_ID),
                                                     WithCursorPosition(104, 213),
+                                                    WithRelativeMotion(10, 20)));
+}
+
+TEST_F(PointerChoreographerTest, A11yPointerMotionFilterApplyTransform) {
+    mChoreographer.setDisplayViewports(
+            {createViewport(DISPLAY_ID, DISPLAY_WIDTH, DISPLAY_HEIGHT, ui::ROTATION_90)});
+    setDefaultMouseDisplayId(DISPLAY_ID);
+    mChoreographer.notifyInputDevicesChanged(
+            {/*id=*/0,
+             {generateTestDeviceInfo(DEVICE_ID, AINPUT_SOURCE_MOUSE,
+                                     ui::LogicalDisplayId::INVALID)}});
+    auto pc = assertPointerControllerCreated(ControllerType::MOUSE);
+    ASSERT_EQ(DISPLAY_ID, pc->getDisplayId());
+
+    pc->setTransform(ui::Transform(ui::Transform::toRotationFlags(ui::ROTATION_90), DISPLAY_HEIGHT,
+                                   DISPLAY_WIDTH));
+    pc->setPosition(200, 700); // (100, 200) in the logical display space.
+    mChoreographer.setAccessibilityPointerMotionFilterEnabled(true);
+
+    // Pointer moves (10, 20) in the physical space, which is (-20, 10) in the logical space.
+    EXPECT_CALL(mMockPolicy,
+                filterPointerMotionForAccessibility(testing::Eq(vec2{100, 200}),
+                                                    testing::Eq(vec2{-20.f, 10.f}),
+                                                    testing::Eq(DISPLAY_ID)))
+            .Times(1)
+            .WillOnce(testing::Return(vec2{-12, 6}));
+
+    mChoreographer.notifyMotion(
+            MotionArgsBuilder(AMOTION_EVENT_ACTION_HOVER_MOVE, AINPUT_SOURCE_MOUSE)
+                    .pointer(MOUSE_POINTER)
+                    .deviceId(DEVICE_ID)
+                    .displayId(ui::LogicalDisplayId::INVALID)
+                    .build());
+
+    // Cursor position is decided by filtered delta, but pointer coord's relative values are kept.
+    pc->assertPosition(206, 712);
+    mTestListener.assertNotifyMotionWasCalled(AllOf(WithCoords(206, 712), WithDisplayId(DISPLAY_ID),
+                                                    WithCursorPosition(206, 712),
                                                     WithRelativeMotion(10, 20)));
 }
 
@@ -2528,6 +2583,30 @@ TEST_F(PointerChoreographerTest, MouseAndDrawingTabletReportMouseEvents) {
     assertPointerControllerRemoved(pc);
 }
 
+TEST_F(PointerChoreographerTest, GetMouseCursorPosition) {
+    mChoreographer.setDisplayViewports(
+            {createViewport(DISPLAY_ID, DISPLAY_WIDTH, DISPLAY_HEIGHT, ui::ROTATION_90)});
+    setDefaultMouseDisplayId(DISPLAY_ID);
+    mChoreographer.notifyInputDevicesChanged(
+            {/*id=*/0,
+             {generateTestDeviceInfo(DEVICE_ID, AINPUT_SOURCE_MOUSE,
+                                     ui::LogicalDisplayId::INVALID)}});
+    auto pc = assertPointerControllerCreated(ControllerType::MOUSE);
+    pc->setTransform(ui::Transform(ui::Transform::toRotationFlags(ui::ROTATION_90), DISPLAY_HEIGHT,
+                                   DISPLAY_WIDTH));
+    pc->setPosition(150, 350); // (450, 150) in logical coordinates
+
+    auto position = mChoreographer.getMouseCursorPosition(DISPLAY_ID);
+    ASSERT_TRUE(position.has_value());
+    ASSERT_EQ(150, position->x);
+    ASSERT_EQ(350, position->y);
+
+    auto positionInLogical = mChoreographer.getMouseCursorPositionInLogicalDisplay(DISPLAY_ID);
+    ASSERT_TRUE(position.has_value());
+    ASSERT_EQ(450, positionInLogical->x);
+    ASSERT_EQ(150, positionInLogical->y);
+}
+
 using PointerVisibilityAndTouchpadTapStateOnKeyPressTestFixtureParam =
         std::tuple<std::string_view /*name*/, uint32_t /*source*/>;
 
@@ -2738,18 +2817,7 @@ TEST_P(PointerVisibilityAndTouchpadTapStateOnKeyPressTestFixture, TestMetaKeyCom
     metaKeyCombinationDoesNotHidePointer(*pc, AKEYCODE_A, AKEYCODE_META_RIGHT);
 }
 
-class PointerChoreographerDisplayTopologyTests : public PointerChoreographerTest {
-protected:
-    DisplayViewport createViewport(ui::LogicalDisplayId displayId, int32_t width, int32_t height,
-                                   ui::Rotation orientation) {
-        DisplayViewport viewport;
-        viewport.displayId = displayId;
-        viewport.logicalRight = width;
-        viewport.logicalBottom = height;
-        viewport.orientation = orientation;
-        return viewport;
-    }
-};
+using PointerChoreographerDisplayTopologyTests = PointerChoreographerTest;
 
 using PointerChoreographerDisplayTopologyCursorTestFixtureParam =
         std::tuple<std::string_view /*name*/, int32_t /*source device*/,
@@ -2769,6 +2837,8 @@ public:
     static constexpr ui::LogicalDisplayId DISPLAY_LEFT_ID = ui::LogicalDisplayId{50};
     static constexpr ui::LogicalDisplayId DISPLAY_TOP_RIGHT_CORNER_ID = ui::LogicalDisplayId{60};
     static constexpr ui::LogicalDisplayId DISPLAY_HIGH_DENSITY_ID = ui::LogicalDisplayId{70};
+    // We can use same fake display-bounds for all displays as bounds positions are not checked.
+    static constexpr FloatRect FAKE_BOUNDS = FloatRect(0, 0, 100, 100);
 
 protected:
     // Note: viewport size is in pixels and offsets in topology are in dp
@@ -2784,24 +2854,48 @@ protected:
             createViewport(DISPLAY_HIGH_DENSITY_ID, /*width*/ 200, /*height*/ 200, ui::ROTATION_0),
     };
 
-    DisplayTopologyGraph
-            mTopology{DISPLAY_CENTER_ID,
-                      {{DISPLAY_CENTER_ID,
-                        {{DISPLAY_TOP_ID, DisplayTopologyPosition::TOP, 50.0f},
-                         // Place a high density display on the left of DISPLAY_TOP_ID with 25 dp
-                         // gap
-                         {DISPLAY_HIGH_DENSITY_ID, DisplayTopologyPosition::TOP, -75.0f},
-                         {DISPLAY_RIGHT_ID, DisplayTopologyPosition::RIGHT, 10.0f},
-                         {DISPLAY_BOTTOM_ID, DisplayTopologyPosition::BOTTOM, 10.0f},
-                         {DISPLAY_LEFT_ID, DisplayTopologyPosition::LEFT, 10.0f},
-                         {DISPLAY_TOP_RIGHT_CORNER_ID, DisplayTopologyPosition::RIGHT, -90.0f}}}},
-                      {{DISPLAY_CENTER_ID, DENSITY_MEDIUM},
-                       {DISPLAY_TOP_ID, DENSITY_MEDIUM},
-                       {DISPLAY_RIGHT_ID, DENSITY_MEDIUM},
-                       {DISPLAY_BOTTOM_ID, DENSITY_MEDIUM},
-                       {DISPLAY_LEFT_ID, DENSITY_MEDIUM},
-                       {DISPLAY_TOP_RIGHT_CORNER_ID, DENSITY_MEDIUM},
-                       {DISPLAY_HIGH_DENSITY_ID, DENSITY_HIGH}}};
+    DisplayTopologyGraph mTopology =
+            DisplayTopologyGraph::
+                    create(/*primaryDisplay=*/DISPLAY_CENTER_ID,
+                           /*adjacencyGraph=*/
+                           {{DISPLAY_CENTER_ID,
+                             {{{DISPLAY_TOP_ID, DisplayTopologyPosition::TOP, 50.0f},
+                               // Place a high density display on the left of DISPLAY_TOP_ID with
+                               // 25 dp gap
+                               {DISPLAY_HIGH_DENSITY_ID, DisplayTopologyPosition::TOP, -75.0f},
+                               {DISPLAY_RIGHT_ID, DisplayTopologyPosition::RIGHT, 10.0f},
+                               {DISPLAY_BOTTOM_ID, DisplayTopologyPosition::BOTTOM, 10.0f},
+                               {DISPLAY_LEFT_ID, DisplayTopologyPosition::LEFT, 10.0f},
+                               {DISPLAY_TOP_RIGHT_CORNER_ID, DisplayTopologyPosition::RIGHT,
+                                -90.0f}},
+                              DENSITY_MEDIUM,
+                              FAKE_BOUNDS}},
+                            // Reverse edges
+                            {DISPLAY_TOP_ID,
+                             {{{DISPLAY_CENTER_ID, DisplayTopologyPosition::BOTTOM, -50.0f}},
+                              DENSITY_MEDIUM,
+                              FAKE_BOUNDS}},
+                            {DISPLAY_HIGH_DENSITY_ID,
+                             {{{DISPLAY_CENTER_ID, DisplayTopologyPosition::BOTTOM, 75.0f}},
+                              DENSITY_HIGH,
+                              FAKE_BOUNDS}},
+                            {DISPLAY_RIGHT_ID,
+                             {{{DISPLAY_CENTER_ID, DisplayTopologyPosition::LEFT, -10.0f}},
+                              DENSITY_MEDIUM,
+                              FAKE_BOUNDS}},
+                            {DISPLAY_BOTTOM_ID,
+                             {{{DISPLAY_CENTER_ID, DisplayTopologyPosition::TOP, -10.0f}},
+                              DENSITY_MEDIUM,
+                              FAKE_BOUNDS}},
+                            {DISPLAY_LEFT_ID,
+                             {{{DISPLAY_CENTER_ID, DisplayTopologyPosition::RIGHT, -10.0f}},
+                              DENSITY_MEDIUM,
+                              FAKE_BOUNDS}},
+                            {DISPLAY_TOP_RIGHT_CORNER_ID,
+                             {{{DISPLAY_CENTER_ID, DisplayTopologyPosition::LEFT, 90.0f}},
+                              DENSITY_MEDIUM,
+                              FAKE_BOUNDS}}})
+                            .value();
 };
 
 TEST_P(PointerChoreographerDisplayTopologyCursorTestFixture,
@@ -2940,11 +3034,11 @@ protected:
     static constexpr ui::LogicalDisplayId FIRST_DISPLAY_ID = ui::LogicalDisplayId{10};
     static constexpr ui::LogicalDisplayId SECOND_DISPLAY_ID = ui::LogicalDisplayId{20};
     static constexpr ui::LogicalDisplayId THIRD_DISPLAY_ID = ui::LogicalDisplayId{30};
+    static constexpr int32_t DISPLAY_WIDTH = 100;
+    static constexpr int32_t DISPLAY_HEIGHT = 100;
 
     DisplayViewport createViewport(ui::LogicalDisplayId displayId) {
-        return PointerChoreographerDisplayTopologyTests::createViewport(displayId, /*width=*/100,
-                                                                        /*height=*/100,
-                                                                        ui::ROTATION_0);
+        return ::android::createViewport(displayId, DISPLAY_WIDTH, DISPLAY_HEIGHT, ui::ROTATION_0);
     }
 
     void setDisplayTopologyWithDisplays(
@@ -2953,25 +3047,42 @@ protected:
         // Prepare a topology with all display connected from left to right.
         ui::LogicalDisplayId previousDisplay = primaryDisplayId;
 
-        std::unordered_map<ui::LogicalDisplayId, std::vector<DisplayTopologyAdjacentDisplay>>
-                topologyGraph;
-        topologyGraph[primaryDisplayId] = {};
-
-        std::unordered_map<ui::LogicalDisplayId, int> displaysDensity;
-        displaysDensity[primaryDisplayId] = DENSITY_MEDIUM;
+        std::unordered_map<ui::LogicalDisplayId, DisplayTopologyGraph::Properties> topologyGraph;
+        topologyGraph.emplace(primaryDisplayId,
+                              DisplayTopologyGraph::Properties{{},
+                                                               DENSITY_MEDIUM,
+                                                               FloatRect(0, 0, DISPLAY_WIDTH,
+                                                                         DISPLAY_HEIGHT)});
 
         for (ui::LogicalDisplayId adjacentDisplayId : adjacentDisplays) {
-            topologyGraph[previousDisplay].push_back({.displayId = adjacentDisplayId,
-                                                      .position = DisplayTopologyPosition::RIGHT,
-                                                      .offsetDp = 0.0f});
-            topologyGraph[adjacentDisplayId].push_back({.displayId = previousDisplay,
-                                                        .position = DisplayTopologyPosition::LEFT,
-                                                        .offsetDp = 0.0f});
+            auto& previousDisplayIt = topologyGraph.at(previousDisplay);
+            previousDisplayIt.adjacentDisplays.push_back(
+                    {.displayId = adjacentDisplayId,
+                     .position = DisplayTopologyPosition::RIGHT,
+                     .offsetDp = 0.0f});
 
-            displaysDensity[adjacentDisplayId] = DENSITY_MEDIUM;
+            const auto& previousDisplayBounds = previousDisplayIt.boundsInGlobalDp;
+            topologyGraph
+                    .emplace(adjacentDisplayId,
+                             DisplayTopologyGraph::Properties{{},
+                                                              DENSITY_MEDIUM,
+                                                              FloatRect(previousDisplayBounds.right,
+                                                                        0,
+                                                                        previousDisplayBounds
+                                                                                        .right +
+                                                                                DISPLAY_WIDTH,
+                                                                        DISPLAY_HEIGHT)});
+
+            topologyGraph[adjacentDisplayId].adjacentDisplays.push_back(
+                    {.displayId = previousDisplay,
+                     .position = DisplayTopologyPosition::LEFT,
+                     .offsetDp = 0.0f});
+
+            previousDisplay = adjacentDisplayId;
         }
 
-        mChoreographer.setDisplayTopology({primaryDisplayId, topologyGraph, displaysDensity});
+        mChoreographer.setDisplayTopology(
+                DisplayTopologyGraph::create(primaryDisplayId, std::move(topologyGraph)).value());
     }
 };
 
@@ -3028,7 +3139,7 @@ TEST_F(PointerChoreographerDisplayTopologyDefaultMouseDisplayTests,
 
     // Change the primary display to the third display
     setDisplayTopologyWithDisplays(/*primaryDisplayId=*/THIRD_DISPLAY_ID, /*adjacentDisplays=*/
-                                   {SECOND_DISPLAY_ID, THIRD_DISPLAY_ID});
+                                   {SECOND_DISPLAY_ID, FIRST_DISPLAY_ID});
 
     assertPointerControllerNotCreated();
     pc->assertViewportSet(SECOND_DISPLAY_ID);
@@ -3159,6 +3270,51 @@ TEST_F(PointerChoreographerDisplayTopologyDefaultMouseDisplayTests,
     pc = assertPointerControllerCreated(ControllerType::MOUSE);
     pc->assertViewportSet(THIRD_DISPLAY_ID);
     ASSERT_TRUE(pc->isPointerShown());
+}
+
+TEST_F(PointerChoreographerDisplayTopologyDefaultMouseDisplayTests,
+       GetCursorPositionReturnValidPositionForDisplayWithCursor) {
+    SCOPED_FLAG_OVERRIDE(connected_displays_cursor, true);
+    SCOPED_FLAG_OVERRIDE(connected_displays_associated_display_cursor_bugfix, true);
+
+    // Add two displays
+    mChoreographer.setDisplayViewports(
+            {createViewport(FIRST_DISPLAY_ID), createViewport(SECOND_DISPLAY_ID)});
+    setDisplayTopologyWithDisplays(/*primaryDisplayId=*/FIRST_DISPLAY_ID,
+                                   /*adjacentDisplays=*/{SECOND_DISPLAY_ID});
+
+    mChoreographer.notifyInputDevicesChanged(
+            {/*id=*/0, {generateTestDeviceInfo(DEVICE_ID, AINPUT_SOURCE_MOUSE, FIRST_DISPLAY_ID)}});
+
+    auto pc = assertPointerControllerCreated(ControllerType::MOUSE);
+    pc->assertViewportSet(FIRST_DISPLAY_ID);
+
+    auto firstDisplayCursor = mChoreographer.getMouseCursorPosition(FIRST_DISPLAY_ID);
+    // Valid
+    ASSERT_TRUE(firstDisplayCursor.has_value());
+
+    // Invalid, cursor is currently on first display
+    auto secondDisplayCursor = mChoreographer.getMouseCursorPosition(SECOND_DISPLAY_ID);
+    ASSERT_FALSE(secondDisplayCursor.has_value());
+
+    // Move cursor to the secondary display
+    auto pointerBuilder = PointerBuilder(/*id=*/0, ToolType::MOUSE)
+                                  .axis(AMOTION_EVENT_AXIS_RELATIVE_X, /*x=*/100)
+                                  .axis(AMOTION_EVENT_AXIS_RELATIVE_Y, /*y=*/0);
+    mChoreographer.notifyMotion(
+            MotionArgsBuilder(AMOTION_EVENT_ACTION_HOVER_MOVE, AINPUT_SOURCE_MOUSE)
+                    .pointer(pointerBuilder)
+                    .deviceId(DEVICE_ID)
+                    .displayId(ui::LogicalDisplayId::INVALID)
+                    .build());
+    pc->assertViewportSet(SECOND_DISPLAY_ID);
+    firstDisplayCursor = mChoreographer.getMouseCursorPosition(FIRST_DISPLAY_ID);
+    // Invalid, cursor is currently on second display
+    ASSERT_FALSE(firstDisplayCursor.has_value());
+
+    // Valid
+    secondDisplayCursor = mChoreographer.getMouseCursorPosition(SECOND_DISPLAY_ID);
+    ASSERT_TRUE(secondDisplayCursor.has_value());
 }
 
 class PointerChoreographerWindowInfoListenerTest : public testing::Test {};

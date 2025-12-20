@@ -58,9 +58,10 @@ struct LayerCreationArgs {
     bool addToRoot = true;
     wp<IBinder> parentHandle = nullptr;
     wp<IBinder> mirrorLayerHandle = nullptr;
-    ui::LayerStack layerStackToMirror = ui::INVALID_LAYER_STACK;
+    ui::LayerStack layerStackToMirror = ui::UNASSIGNED_LAYER_STACK;
     uint32_t parentId = UNASSIGNED_LAYER_ID;
     uint32_t layerIdToMirror = UNASSIGNED_LAYER_ID;
+    uint32_t stopLayerId = UNASSIGNED_LAYER_ID;
     std::atomic<int32_t>* pendingBuffers = 0;
 };
 

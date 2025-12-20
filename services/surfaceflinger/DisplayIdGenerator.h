@@ -33,10 +33,11 @@ class DisplayIdGenerator {
 public:
     explicit DisplayIdGenerator(size_t maxIdsCount = std::numeric_limits<size_t>::max())
           : mMaxIdsCount(maxIdsCount) {}
+    virtual ~DisplayIdGenerator() = default;
 
     bool inUse() const { return !mUsedIds.empty(); }
 
-    std::optional<Id> generateId() {
+    virtual std::optional<Id> generateId() {
         if (mUsedIds.size() >= mMaxIdsCount) {
             return std::nullopt;
         }

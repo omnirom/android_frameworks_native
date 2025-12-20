@@ -41,7 +41,7 @@ class LocklessQueue {
 public:
     bool isEmpty() { return (mPush.load() == nullptr) && (mPop.load() == nullptr); }
 
-    void push(T value) {
+    void push(T&& value) {
         Entry* entry = new Entry(std::move(value));
         Entry* previousHead = mPush.load(/*std::memory_order_relaxed*/);
         do {
@@ -79,7 +79,7 @@ private:
     public:
         T mValue;
         std::atomic<Entry*> mNext;
-        Entry(T value) : mValue(value) {}
+        Entry(T&& value) : mValue(std::move(value)) {}
     };
     std::atomic<Entry*> mPush = nullptr;
     std::atomic<Entry*> mPop = nullptr;

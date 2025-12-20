@@ -20,6 +20,7 @@
 #include <mutex>
 #include <string>
 #include <utility>
+#include <variant>
 
 #include <android-base/thread_annotations.h>
 #include <ftl/function.h>
@@ -78,6 +79,14 @@ public:
     using DisplayModeRequestOpt = ftl::Optional<DisplayModeRequest>;
 
     DisplayModeRequestOpt getDesiredMode(PhysicalDisplayId) const EXCLUDES(mDisplayLock);
+
+    // Consumes the display's desired mode if one exists. If it does not match the active resolution
+    // (i.e. the DisplayModeRequest is a resolution switch), then it must match `expectedResolution`
+    // for it to be consumed.
+    DisplayModeRequestOpt takeDesiredModeIfMatches(PhysicalDisplayId, ui::Size expectedResolution)
+            EXCLUDES(mDisplayLock);
+
+    // TODO: Remove once `modeset_state_machine` flag is cleaned up.
     void clearDesiredMode(PhysicalDisplayId) EXCLUDES(mDisplayLock);
 
     DisplayModeRequestOpt getPendingMode(PhysicalDisplayId) const REQUIRES(kMainThreadContext)
@@ -92,8 +101,27 @@ public:
                                         hal::VsyncPeriodChangeTimeline& outTimeline)
             REQUIRES(kMainThreadContext) EXCLUDES(mDisplayLock);
 
+    // TODO: Remove once `modeset_state_machine` flag is cleaned up.
     void finalizeModeChange(PhysicalDisplayId, DisplayModeId, Fps vsyncRate, Fps renderFps)
             REQUIRES(kMainThreadContext) EXCLUDES(mDisplayLock);
+
+    struct NoModeChange {
+        const char* reason;
+    };
+
+    struct ResolutionChange {
+        DisplayModeRequest activeMode;
+    };
+
+    struct RefreshRateChange {
+        DisplayModeRequest activeMode;
+    };
+
+    using ModeChange = std::variant<NoModeChange, ResolutionChange, RefreshRateChange>;
+
+    // Clears the pending DisplayModeRequest, and returns the ModeChange that occurred.
+    ModeChange finalizeModeChange(PhysicalDisplayId) REQUIRES(kMainThreadContext)
+            EXCLUDES(mDisplayLock);
 
     void setActiveMode(PhysicalDisplayId, DisplayModeId, Fps vsyncRate, Fps renderFps)
             EXCLUDES(mDisplayLock);
@@ -141,11 +169,17 @@ private:
         const std::string activeModeFpsTrace;
         const std::string renderRateFpsTrace;
 
+        // A DisplayModeRequest flows through three states: desired, pending, and active. Requests
+        // within a frame are merged into a single desired request. Unless cleared, the request is
+        // relayed to HWC on the next frame, and becomes pending. The mode becomes active once HWC
+        // signals the present fence to confirm the mode set.
         std::mutex desiredModeLock;
         DisplayModeRequestOpt desiredModeOpt GUARDED_BY(desiredModeLock);
         TracedOrdinal<bool> hasDesiredModeTrace GUARDED_BY(desiredModeLock);
 
         DisplayModeRequestOpt pendingModeOpt GUARDED_BY(kMainThreadContext);
+
+        // TODO: Remove once `modeset_state_machine` flag is cleaned up.
         bool isModeSetPending GUARDED_BY(kMainThreadContext) = false;
 
         bool isKernelIdleTimerEnabled GUARDED_BY(kMainThreadContext) = false;

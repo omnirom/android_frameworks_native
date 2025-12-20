@@ -18,15 +18,27 @@
 #include <cutils/ashmem.h>
 #include <fcntl.h>
 
+#include <android-base/file.h>
+#include <android-base/stringprintf.h>
+
 #include <gtest/gtest.h>
 using namespace android;
 #ifdef __BIONIC__
+static bool is_memfd_fd(int fd) {
+    std::string fd_path = android::base::StringPrintf("/proc/self/fd/%d", fd);
+    std::string result;
+    if (!android::base::Readlink(fd_path, &result)) {
+        return false;
+    }
+    return result.starts_with("/memfd:");
+}
+
 TEST(MemoryHeapBase, ForceMemfdRespected) {
     auto mHeap = sp<MemoryHeapBase>::make(10, MemoryHeapBase::FORCE_MEMFD, "Test mapping");
     ASSERT_NE(mHeap.get(), nullptr);
     int fd = mHeap->getHeapID();
     EXPECT_NE(fd, -1);
-    EXPECT_FALSE(ashmem_valid(fd));
+    EXPECT_TRUE(is_memfd_fd(fd));
     EXPECT_NE(fcntl(fd, F_GET_SEALS), -1);
 }
 
@@ -37,6 +49,7 @@ TEST(MemoryHeapBase, MemfdSealed) {
     ASSERT_NE(mHeap.get(), nullptr);
     int fd = mHeap->getHeapID();
     EXPECT_NE(fd, -1);
+    EXPECT_TRUE(is_memfd_fd(fd));
     EXPECT_EQ(fcntl(fd, F_GET_SEALS), F_SEAL_GROW | F_SEAL_SHRINK | F_SEAL_SEAL);
     EXPECT_EQ(ftruncate(fd, 4096), -1);
 }
@@ -49,6 +62,7 @@ TEST(MemoryHeapBase, MemfdUnsealed) {
     ASSERT_NE(mHeap.get(), nullptr);
     int fd = mHeap->getHeapID();
     EXPECT_NE(fd, -1);
+    EXPECT_TRUE(is_memfd_fd(fd));
     EXPECT_EQ(fcntl(fd, F_GET_SEALS), F_SEAL_GROW | F_SEAL_SHRINK);
     EXPECT_EQ(ftruncate(fd, 4096), -1);
 }
@@ -61,6 +75,7 @@ TEST(MemoryHeapBase, MemfdSealedProtected) {
     ASSERT_NE(mHeap.get(), nullptr);
     int fd = mHeap->getHeapID();
     EXPECT_NE(fd, -1);
+    EXPECT_TRUE(is_memfd_fd(fd));
     EXPECT_EQ(fcntl(fd, F_GET_SEALS),
               F_SEAL_GROW | F_SEAL_SHRINK | F_SEAL_SEAL | F_SEAL_FUTURE_WRITE);
     EXPECT_EQ(ftruncate(fd, 4096), -1);
@@ -75,6 +90,7 @@ TEST(MemoryHeapBase, MemfdUnsealedProtected) {
     ASSERT_NE(mHeap.get(), nullptr);
     int fd = mHeap->getHeapID();
     EXPECT_NE(fd, -1);
+    EXPECT_TRUE(is_memfd_fd(fd));
     EXPECT_EQ(fcntl(fd, F_GET_SEALS), F_SEAL_GROW | F_SEAL_SHRINK | F_SEAL_FUTURE_WRITE);
     EXPECT_EQ(ftruncate(fd, 4096), -1);
 }
@@ -88,6 +104,8 @@ TEST(MemoryHeapBase, HostMemfdExpected) {
     int fd = mHeap->getHeapID();
     void* ptr = mHeap->getBase();
     EXPECT_NE(ptr, MAP_FAILED);
+    // ashmem_valid() is fine for this test, because there's no explicit expectation of having a
+    // memfd.
     EXPECT_TRUE(ashmem_valid(fd));
     EXPECT_EQ(mHeap->getFlags(), MemoryHeapBase::READ_ONLY);
 }
@@ -102,6 +120,8 @@ TEST(MemoryHeapBase,HostMemfdException) {
     int fd = mHeap->getHeapID();
     void* ptr = mHeap->getBase();
     EXPECT_EQ(mHeap->getFlags(), MemoryHeapBase::READ_ONLY);
+    // ashmem_valid() is fine for this test, because there's no explicit expectation of having a
+    // memfd.
     EXPECT_TRUE(ashmem_valid(fd));
     EXPECT_NE(ptr, MAP_FAILED);
 }

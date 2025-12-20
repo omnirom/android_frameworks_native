@@ -146,7 +146,7 @@ public:
     std::span<const float> outputPressure() const;
 
 private:
-    explicit TfLiteMotionPredictorModel(std::unique_ptr<android::base::MappedFile> model,
+    explicit TfLiteMotionPredictorModel(std::optional<android::base::MappedFile> model,
                                         Config config);
 
     void allocateTensors();
@@ -163,7 +163,7 @@ private:
     const TfLiteTensor* mOutputPhi = nullptr;
     const TfLiteTensor* mOutputPressure = nullptr;
 
-    std::unique_ptr<android::base::MappedFile> mFlatBuffer;
+    std::optional<android::base::MappedFile> mFlatBuffer;
     std::unique_ptr<tflite::ErrorReporter> mErrorReporter;
     std::unique_ptr<tflite::FlatBufferModel> mModel;
     std::unique_ptr<tflite::Interpreter> mInterpreter;

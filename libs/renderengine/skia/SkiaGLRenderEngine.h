@@ -38,7 +38,6 @@
 #include "android-base/macros.h"
 #include "debug/SkiaCapture.h"
 #include "filters/BlurFilter.h"
-#include "filters/LinearEffect.h"
 #include "filters/StretchShaderFactory.h"
 
 class SkData;
@@ -60,6 +59,8 @@ protected:
     // Implementations of abstract SkiaRenderEngine functions specific to
     // rendering backend
     virtual SkiaRenderEngine::Contexts createContexts();
+    bool supportsForwardPixelKill() const override;
+    bool supportsFastRotatedClipRRectAA() const override;
     bool supportsProtectedContentImpl() const override;
     bool useProtectedContextImpl(GrProtected isProtected) override;
     void waitFence(SkiaGpuContext* context, base::borrowed_fd fenceFd) override;

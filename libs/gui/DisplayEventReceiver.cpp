@@ -39,6 +39,7 @@ DisplayEventReceiver::DisplayEventReceiver(gui::ISurfaceComposer::VsyncSource vs
     sp<gui::ISurfaceComposer> sf(ComposerServiceAIDL::getComposerService());
     if (sf != nullptr) {
         mEventConnection = nullptr;
+        mSurfaceflingerAlive = IInterface::asBinder(sf)->isBinderAlive();
         binder::Status status =
                 sf->createDisplayEventConnection(vsyncSource,
                                                  static_cast<
@@ -56,6 +57,7 @@ DisplayEventReceiver::DisplayEventReceiver(gui::ISurfaceComposer::VsyncSource vs
             }
         } else {
             ALOGE("DisplayEventConnection creation failed: status=%s", status.toString8().c_str());
+            mInitError = std::make_optional<status_t>(status.transactionError());
         }
     }
 }
@@ -66,6 +68,9 @@ DisplayEventReceiver::~DisplayEventReceiver() {
 status_t DisplayEventReceiver::initCheck() const {
     if (mDataChannel != nullptr)
         return NO_ERROR;
+    if (mInitError.value() == NO_INIT && !mSurfaceflingerAlive) {
+        LOG_ALWAYS_FATAL("Display event receiver failed to initialize due to dead surfaceflinger");
+    }
     return mInitError.has_value() ? mInitError.value() : NO_INIT;
 }
 

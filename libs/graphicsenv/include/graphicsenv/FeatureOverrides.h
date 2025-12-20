@@ -45,7 +45,7 @@ public:
 class FeatureOverrides : public Parcelable {
 public:
     FeatureOverrides() = default;
-    FeatureOverrides(const FeatureOverrides&) = default;
+    FeatureOverrides(const FeatureOverrides&) = delete;
     virtual ~FeatureOverrides() = default;
     virtual status_t writeToParcel(Parcel* parcel) const;
     virtual status_t readFromParcel(const Parcel* parcel);
@@ -55,5 +55,9 @@ public:
     /* Key: Package Name, Value: Package's Feature Configs */
     std::map<std::string, std::vector<FeatureConfig>> mPackageFeatures;
 };
+
+// Assert that FeatureOverrides is NOT copy-constructible
+static_assert(!std::is_copy_constructible<FeatureOverrides>::value,
+              "FeatureOverrides should not be copy-constructible!");
 
 } // namespace android

@@ -25,48 +25,26 @@
 
 #include <com_android_graphics_surfaceflinger_flags.h>
 #include <cutils/properties.h>
+#include <ftl/enum.h>
 #include <log/log.h>
-
-// TODO: b/341728634 - Clean up conditional compilation.
-#if COM_ANDROID_GRAPHICS_SURFACEFLINGER_FLAGS(GRAPHITE_RENDERENGINE) || \
-        COM_ANDROID_GRAPHICS_SURFACEFLINGER_FLAGS(FORCE_COMPILE_GRAPHITE_RENDERENGINE)
-#define COMPILE_GRAPHITE_RENDERENGINE 1
-#else
-#define COMPILE_GRAPHITE_RENDERENGINE 0
-#endif
 
 namespace android {
 namespace renderengine {
 
+// TODO: b/341728634 - Don't compile Ganesh unless requested once Graphite is the stable default.
 std::unique_ptr<RenderEngine> RenderEngine::create(const RenderEngineCreationArgs& args) {
     threaded::CreateInstanceFactory createInstanceFactory;
 
-// TODO: b/341728634 - Clean up conditional compilation.
-#if COMPILE_GRAPHITE_RENDERENGINE
-    const RenderEngine::SkiaBackend actualSkiaBackend = args.skiaBackend;
-#else
-    if (args.skiaBackend == RenderEngine::SkiaBackend::GRAPHITE) {
-        ALOGE("RenderEngine with Graphite Skia backend was requested, but Graphite was not "
-              "included in the build. Falling back to Ganesh (%s)",
-              args.graphicsApi == RenderEngine::GraphicsApi::GL ? "GL" : "Vulkan");
-    }
-    const RenderEngine::SkiaBackend actualSkiaBackend = RenderEngine::SkiaBackend::GANESH;
-#endif
+    ALOGD("%sRenderEngine with Skia%s Backend (%s)",
+          args.threaded == Threaded::Yes ? "Threaded " : "",
+          ftl::enum_string(args.graphicsApi).c_str(), ftl::enum_string(args.skiaBackend).c_str());
 
-    ALOGD("%sRenderEngine with %s Backend (%s)", args.threaded == Threaded::YES ? "Threaded " : "",
-          args.graphicsApi == GraphicsApi::GL ? "SkiaGL" : "SkiaVK",
-          actualSkiaBackend == SkiaBackend::GANESH ? "Ganesh" : "Graphite");
-
-// TODO: b/341728634 - Clean up conditional compilation.
-#if COMPILE_GRAPHITE_RENDERENGINE
-    if (actualSkiaBackend == SkiaBackend::GRAPHITE) {
+    if (args.skiaBackend == SkiaBackend::Graphite) {
         createInstanceFactory = [args]() {
             return android::renderengine::skia::GraphiteVkRenderEngine::create(args);
         };
-    } else
-#endif
-    { // GANESH
-        if (args.graphicsApi == GraphicsApi::VK) {
+    } else { // GANESH
+        if (args.graphicsApi == GraphicsApi::Vk) {
             createInstanceFactory = [args]() {
                 return android::renderengine::skia::GaneshVkRenderEngine::create(args);
             };
@@ -77,11 +55,12 @@ std::unique_ptr<RenderEngine> RenderEngine::create(const RenderEngineCreationArg
         }
     }
 
-    if (args.threaded == Threaded::YES) {
-        return renderengine::threaded::RenderEngineThreaded::create(createInstanceFactory);
-    } else {
-        return createInstanceFactory();
+    if (args.threaded != Threaded::Yes) {
+        ALOGE("Non-threaded RenderEngine not supported, please update or "
+              "remove " PROPERTY_DEBUG_RENDERENGINE_BACKEND " to use a supported backend");
     }
+
+    return renderengine::threaded::RenderEngineThreaded::create(createInstanceFactory);
 }
 
 RenderEngine::~RenderEngine() = default;

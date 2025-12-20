@@ -434,8 +434,6 @@ protected:
 };
 
 TEST_F(MultiTouchInputMapperPointerModeUnitTest, MouseToolOnlyDownWhenMouseButtonsAreDown) {
-    SCOPED_FLAG_OVERRIDE(disable_touch_input_mapper_pointer_usage, true);
-
     std::list<NotifyArgs> args;
 
     // Set the tool type to mouse.

@@ -53,6 +53,8 @@ public:
 
     void setDisplayPowerMode(hal::PowerMode powerMode) final;
 
+    void resetModel() final;
+
     void dump(std::string& result) const final;
 
 private:
@@ -62,6 +64,7 @@ private:
     void endPeriodTransition() REQUIRES(mMutex);
     bool periodConfirmed(nsecs_t vsync_timestamp, std::optional<nsecs_t> hwcVsyncPeriod)
             REQUIRES(mMutex);
+    bool updateTrackerWithSignaledFences() REQUIRES(mMutex);
 
     const PhysicalDisplayId mId;
     std::unique_ptr<Clock> const mClock;
@@ -76,7 +79,28 @@ private:
     bool mMoreSamplesNeeded GUARDED_BY(mMutex) = false;
     bool mPeriodConfirmationInProgress GUARDED_BY(mMutex) = false;
     DisplayModePtr mModePtrTransitioningTo GUARDED_BY(mMutex);
-    std::optional<nsecs_t> mLastHwVsync GUARDED_BY(mMutex);
+
+    class LastHwVsync {
+    public:
+        LastHwVsync() { reset(); }
+        void reset() {
+            mFirst = true;
+            mVsync.reset();
+        }
+        bool isFirst() const { return mFirst; }
+        std::optional<nsecs_t> get() const { return mVsync; }
+        void set(nsecs_t vsync) {
+            if (mVsync.has_value()) {
+                mFirst = false;
+            }
+            mVsync = vsync;
+        }
+
+    private:
+        bool mFirst;
+        std::optional<nsecs_t> mVsync;
+    };
+    LastHwVsync mLastHwVsync GUARDED_BY(mMutex);
 
     hal::PowerMode mDisplayPowerMode GUARDED_BY(mMutex) = hal::PowerMode::ON;
 

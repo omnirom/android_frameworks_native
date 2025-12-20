@@ -250,3 +250,28 @@ void AServiceManager_reRegister() {
     auto serviceRegistrar = android::binder::LazyServiceRegistrar::getInstance();
     serviceRegistrar.reRegister();
 }
+
+bool AServiceManager_checkServiceAccess(const char* caller_sid, pid_t caller_debug_pid,
+                                        uid_t caller_uid, const char* instance,
+                                        AServiceManager_PermissionType permission) {
+    LOG_ALWAYS_FATAL_IF(caller_sid == nullptr, "caller_sid == nullptr");
+    LOG_ALWAYS_FATAL_IF(instance == nullptr, "instance == nullptr");
+    String16 permissionString;
+    switch (permission) {
+        case AServiceManager_PermissionType::CHECK_ACCESS_PERMISSION_FIND:
+            permissionString = String16("find");
+            break;
+        case AServiceManager_PermissionType::CHECK_ACCESS_PERMISSION_LIST:
+            permissionString = String16("list");
+            break;
+        case AServiceManager_PermissionType::CHECK_ACCESS_PERMISSION_ADD:
+            permissionString = String16("add");
+            break;
+        default:
+            LOG_ALWAYS_FATAL("Unknown value for permission argument! permission: %d", permission);
+    }
+
+    sp<IServiceManager> sm = defaultServiceManager();
+    return sm->checkServiceAccess(String16(caller_sid), caller_debug_pid, caller_uid,
+                                  String16(instance), permissionString);
+}

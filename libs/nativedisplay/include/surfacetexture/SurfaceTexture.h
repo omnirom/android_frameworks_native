@@ -98,7 +98,6 @@ public:
      * is created in a detached state, and attachToContext must be called before
      * calls to updateTexImage.
      */
-#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
     SurfaceTexture(uint32_t tex, uint32_t textureTarget, bool useFenceSync, bool isControlledByApp);
 
     SurfaceTexture(uint32_t textureTarget, bool useFenceSync, bool isControlledByApp);
@@ -110,13 +109,6 @@ public:
     SurfaceTexture(const sp<IGraphicBufferConsumer>& bq, uint32_t textureTarget, bool useFenceSync,
                    bool isControlledByApp)
             __attribute((deprecated("Prefer ctors that create their own surface and consumer.")));
-#else
-    SurfaceTexture(const sp<IGraphicBufferConsumer>& bq, uint32_t tex, uint32_t textureTarget,
-                   bool useFenceSync, bool isControlledByApp);
-
-    SurfaceTexture(const sp<IGraphicBufferConsumer>& bq, uint32_t textureTarget, bool useFenceSync,
-                   bool isControlledByApp);
-#endif // COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
 
     /**
      * updateTexImage acquires the most recently queued buffer, and sets the
@@ -319,6 +311,8 @@ public:
      */
     void setSurfaceTextureListener(const sp<SurfaceTextureListener>&);
 
+    void onFirstRef() override;
+
 protected:
     /**
      * abandonLocked overrides the ConsumerBase method to clear
@@ -371,10 +365,8 @@ protected:
     /**
      * onSetFrameRate Notifies the consumer of a setFrameRate call from the producer side.
      */
-#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(BQ_SETFRAMERATE)
     void onSetFrameRate(float frameRate, int8_t compatibility,
                         int8_t changeFrameRateStrategy) override;
-#endif
 
     /**
      * The default consumer usage flags that SurfaceTexture always sets on its

@@ -19,6 +19,8 @@
 
 #include <android/binder_enums.h>
 
+#include <algorithm>
+#include <functional>
 #include <iomanip>
 #include <iostream>
 #include <map>

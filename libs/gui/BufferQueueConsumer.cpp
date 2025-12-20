@@ -302,11 +302,7 @@ status_t BufferQueueConsumer::acquireBuffer(BufferItem* outBuffer,
         // We might have freed a slot while dropping old buffers, or the producer
         // may be blocked waiting for the number of buffers in the queue to
         // decrease.
-#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(BUFFER_RELEASE_CHANNEL)
         mCore->notifyBufferReleased();
-#else
-        mCore->mDequeueCondition.notify_all();
-#endif
 
         ATRACE_INT(mCore->mConsumerName.c_str(), static_cast<int32_t>(mCore->mQueue.size()));
 #ifndef NO_BINDER
@@ -359,11 +355,7 @@ status_t BufferQueueConsumer::detachBuffer(int slot) {
         mCore->mActiveBuffers.erase(slot);
         mCore->mFreeSlots.insert(slot);
         mCore->clearBufferSlotLocked(slot);
-#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(BUFFER_RELEASE_CHANNEL)
         mCore->notifyBufferReleased();
-#else
-        mCore->mDequeueCondition.notify_all();
-#endif
 
         VALIDATE_CONSISTENCY();
     }
@@ -551,11 +543,7 @@ status_t BufferQueueConsumer::releaseBuffer(int slot, uint64_t frameNumber,
         }
         BQ_LOGV("releaseBuffer: releasing slot %d", slot);
 
-#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(BUFFER_RELEASE_CHANNEL)
         mCore->notifyBufferReleased();
-#else
-        mCore->mDequeueCondition.notify_all();
-#endif
 
         VALIDATE_CONSISTENCY();
     } // Autolock scope
@@ -610,11 +598,7 @@ status_t BufferQueueConsumer::disconnect() {
     mCore->mQueue.clear();
     mCore->freeAllBuffersLocked();
     mCore->mSharedBufferSlot = BufferQueueCore::INVALID_BUFFER_SLOT;
-#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(BUFFER_RELEASE_CHANNEL)
     mCore->notifyBufferReleased();
-#else
-    mCore->mDequeueCondition.notify_all();
-#endif
     return NO_ERROR;
 }
 
@@ -789,7 +773,8 @@ status_t BufferQueueConsumer::setMaxAcquiredBufferCount(
                 BufferQueueCore::MAX_MAX_ACQUIRED_BUFFERS;
 #endif
         if (maxAcquiredBuffers < 1 || maxAcquiredBuffers > maxMaxAcquiredBuffers) {
-            BQ_LOGE("setMaxAcquiredBufferCount: invalid count %d", maxAcquiredBuffers);
+            BQ_LOGE("setMaxAcquiredBufferCount: invalid count %d allowed maxCount is %d",
+                    maxAcquiredBuffers, maxMaxAcquiredBuffers);
             return BAD_VALUE;
         }
 
@@ -926,8 +911,30 @@ status_t BufferQueueConsumer::getOccupancyHistory(bool forceFlush,
 }
 
 status_t BufferQueueConsumer::discardFreeBuffers() {
-    std::lock_guard<std::mutex> lock(mCore->mMutex);
-    mCore->discardFreeBuffersLocked();
+    sp<IProducerListener> listener;
+    std::vector<int32_t> freeBuffers;
+
+    { // Mutex scope
+        std::lock_guard<std::mutex> lock(mCore->mMutex);
+        if (mCore->mConnectedProducerListener != nullptr && mCore->mFreeBuffers.size() > 0) {
+            listener = mCore->mConnectedProducerListener;
+            freeBuffers.assign(mCore->mFreeBuffers.begin(), mCore->mFreeBuffers.end());
+        }
+
+        for (int s : mCore->mFreeBuffers) {
+            mCore->mFreeSlots.insert(s);
+            mCore->clearBufferSlotLocked(s);
+        }
+        mCore->mFreeBuffers.clear();
+
+        VALIDATE_CONSISTENCY();
+    }
+
+    // Call the listener outside the lock with the copied data
+    if (listener != nullptr) {
+        listener->onBuffersDiscarded(freeBuffers);
+    }
+
     return NO_ERROR;
 }
 

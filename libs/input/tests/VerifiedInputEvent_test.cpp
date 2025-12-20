@@ -29,7 +29,7 @@ static KeyEvent getKeyEventWithFlags(int32_t flags) {
     return event;
 }
 
-static MotionEvent getMotionEventWithFlags(int32_t flags) {
+static MotionEvent getMotionEventWithFlags(ftl::Flags<MotionFlag> flags) {
     MotionEvent event;
     constexpr size_t pointerCount = 1;
     PointerProperties pointerProperties[pointerCount];
@@ -86,7 +86,7 @@ TEST(VerifiedKeyEventTest, VerifiedKeyEventDoesNotContainUnverifiedFlags) {
 }
 
 TEST(VerifiedMotionEventTest, ConvertMotionEventToVerifiedMotionEvent) {
-    MotionEvent event = getMotionEventWithFlags(0);
+    MotionEvent event = getMotionEventWithFlags({});
     VerifiedMotionEvent verified = verifiedMotionEventFromMotionEvent(event);
 
     ASSERT_EQ(VerifiedInputEvent::Type::MOTION, verified.type);
@@ -106,16 +106,16 @@ TEST(VerifiedMotionEventTest, ConvertMotionEventToVerifiedMotionEvent) {
 }
 
 TEST(VerifiedMotionEventTest, VerifiedMotionEventContainsOnlyVerifiedFlags) {
-    MotionEvent event = getMotionEventWithFlags(AMOTION_EVENT_FLAG_WINDOW_IS_OBSCURED |
-                                                AMOTION_EVENT_FLAG_IS_GENERATED_GESTURE);
+    MotionEvent event = getMotionEventWithFlags(
+            {MotionFlag::WINDOW_IS_OBSCURED, MotionFlag::IS_GENERATED_GESTURE});
     VerifiedMotionEvent verified = verifiedMotionEventFromMotionEvent(event);
-    ASSERT_EQ(AMOTION_EVENT_FLAG_WINDOW_IS_OBSCURED, verified.flags);
+    ASSERT_EQ(ftl::Flags<MotionFlag>(MotionFlag::WINDOW_IS_OBSCURED), verified.flags);
 }
 
 TEST(VerifiedMotionEventTest, VerifiedMotionEventDoesNotContainUnverifiedFlags) {
-    MotionEvent event = getMotionEventWithFlags(AMOTION_EVENT_FLAG_TAINTED);
+    MotionEvent event = getMotionEventWithFlags(MotionFlag::TAINTED);
     VerifiedMotionEvent verified = verifiedMotionEventFromMotionEvent(event);
-    ASSERT_EQ(0, verified.flags);
+    ASSERT_EQ(ftl::Flags<MotionFlag>{}, verified.flags);
 }
 
 } // namespace android

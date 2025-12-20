@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-#define LOG_TAG "RpcTransportTipcAndroid"
+#define LOG_TAG "libbinder.RpcTransportTipcAndroid"
 
 #include <binder/RpcSession.h>
 #include <binder/RpcTransportTipcAndroid.h>
@@ -84,6 +84,7 @@ public:
             const std::vector<std::variant<unique_fd, borrowed_fd>>* ancillaryFds) override {
         bool sentFds = false;
         auto writeFn = [&](iovec* iovs, size_t niovs) -> ssize_t {
+            // Collect the ancillary FDs.
             trusty_shm shms[kMaxTipcHandles] = {{0}};
             ssize_t shm_count = 0;
 
@@ -100,9 +101,33 @@ public:
                 }
             }
 
-            auto ret = TEMP_FAILURE_RETRY(tipc_send(mSocket.fd.get(), iovs, niovs,
+            // Trusty currently has a message size limit, which will go away once we
+            // switch to vsock. The message is reassembled on the receiving side.
+            static const size_t maxMsgSize = VIRTIO_VSOCK_MSG_SIZE_LIMIT;
+            size_t niovsMsg;
+            size_t currSize = 0;
+            size_t cutSize = 0;
+            for (niovsMsg = 0; niovsMsg < niovs; niovsMsg++) {
+                if (__builtin_add_overflow(currSize, iovs[niovsMsg].iov_len, &currSize)) {
+                    ALOGE("%s: iov_len add_overflow", __FUNCTION__);
+                    return NO_MEMORY;
+                }
+                if (currSize >= maxMsgSize) {
+                    // Truncate the last iov but restore it at the end
+                    // so the caller can continue where we left off.
+                    cutSize = currSize - maxMsgSize;
+                    iovs[niovsMsg].iov_len -= cutSize;
+                    niovsMsg++;
+                    break;
+                }
+            }
+
+            auto ret = TEMP_FAILURE_RETRY(tipc_send(mSocket.fd.get(), iovs, niovsMsg,
                                                     (shm_count == 0) ? nullptr : shms, shm_count));
             sentFds |= ret >= 0;
+            if (niovsMsg > 0) {
+                iovs[niovsMsg - 1].iov_len += cutSize;
+            }
             return ret;
         };
 
@@ -190,6 +215,7 @@ private:
                 if (savedErrno == EMSGSIZE) {
                     // Buffer was too small, double it and retry
                     if (__builtin_mul_overflow(mReadBufferCapacity, 2, &mReadBufferCapacity)) {
+                        ALOGE("%s: read buffer mul_overflow", __FUNCTION__);
                         return NO_MEMORY;
                     }
                     mReadBuffer.reset(new (std::nothrow) uint8_t[mReadBufferCapacity]);

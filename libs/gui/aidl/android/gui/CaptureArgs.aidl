@@ -17,6 +17,9 @@
 package android.gui;
 
 import android.gui.ARect;
+import android.gui.CaptureMode;
+import android.gui.ProtectedLayerMode;
+import android.gui.SecureLayerMode;
 
 // Common arguments for capturing content on-screen
 parcelable CaptureArgs {
@@ -34,8 +37,10 @@ parcelable CaptureArgs {
     // Scale in the y-direction for the screenshotted result.
     float frameScaleY = 1.0f;
 
-    // True if capturing secure layers is permitted
-    boolean captureSecureLayers = false;
+    // Specifies how to handle secure layers. If the client wants DPU composition only,
+    // they should specify SecureLayerMode.Error. Otherwise, set to SecureLayerMode.Redact (default)
+    // to redact secure layers or SecureLayerMode.Capture to capture them.
+    SecureLayerMode secureLayerMode = SecureLayerMode.Redact;
 
     // UID whose content we want to screenshot
     int uid = UNSET_UID;
@@ -47,13 +52,10 @@ parcelable CaptureArgs {
     // NOTE: In normal cases, we want the screen to be captured in display's colorspace.
     int /*ui::Dataspace*/ dataspace = 0;
 
-    // The receiver of the capture can handle protected buffer. A protected buffer has
-    // GRALLOC_USAGE_PROTECTED usage bit and must not be accessed unprotected behaviour.
-    // Any read/write access from unprotected context will result in undefined behaviour.
-    // Protected contents are typically DRM contents. This has no direct implication to the
-    // secure property of the surface, which is specified by the application explicitly to avoid
-    // the contents being accessed/captured by screenshot or unsecure display.
-    boolean allowProtected = false;
+    // Specifies how to handle protected layers. A protected buffer has GRALLOC_USAGE_PROTECTED
+    // usage bit. If the client wants DPU composition only, they should specify
+    // ProtectedLayerMode.Error. Otherwise, set to ProtectedLayerMode.Redact (default).
+    ProtectedLayerMode protectedLayerMode = ProtectedLayerMode.Redact;
 
     // True if the content should be captured in grayscale
     boolean grayscale = false;
@@ -65,9 +67,18 @@ parcelable CaptureArgs {
     // The canonical example would be screen rotation - in such a case any color shift in the
     // screenshot is a detractor so composition in the display's colorspace is required.
     // Otherwise, the system may choose a colorspace that is more appropriate for use-cases
-    // such as file encoding or for blending HDR content into an ap's UI, where the display's
+    // such as file encoding or for blending HDR content into an app's UI, where the display's
     // exact colorspace is not an appropriate intermediate result.
     // Note that if the caller is requesting a specific dataspace, this hint does nothing.
-    boolean hintForSeamlessTransition = false;
-}
+    boolean preserveDisplayColors = false;
 
+    // Specifies the capture mode. CaptureMode.None is the default. It uses the GPU path and
+    // applies any optimizations such as DPU if possible. CaptureMode.RequireOptimized attempts
+    // to use the DPU optimized path; if not possible, a screenshot error is returned.
+    CaptureMode captureMode = CaptureMode.None;
+
+    // If true, the system renders the buffer in display installation orientation.
+    boolean useDisplayInstallationOrientation = false;
+    // If true, the screenshot will include system overlay layers, such as the screen decor layers.
+    boolean includeAllLayers = false;
+}

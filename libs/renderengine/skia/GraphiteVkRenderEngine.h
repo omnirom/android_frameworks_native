@@ -26,6 +26,9 @@ class GraphiteVkRenderEngine : public SkiaVkRenderEngine {
 public:
     static std::unique_ptr<GraphiteVkRenderEngine> create(const RenderEngineCreationArgs& args);
 
+    ~GraphiteVkRenderEngine() override;
+    std::future<void> primeCache(PrimeCacheConfig config) override;
+
 protected:
     std::unique_ptr<SkiaGpuContext> createContext(VulkanInterface& vulkanInterface) override;
     void waitFence(SkiaGpuContext* context, base::borrowed_fd fenceFd) override;
@@ -35,6 +38,7 @@ protected:
 private:
     GraphiteVkRenderEngine(const RenderEngineCreationArgs& args) : SkiaVkRenderEngine(args) {}
 
+    std::thread mPrecompilePipelinesTask;
     std::vector<graphite::BackendSemaphore> mStagedWaitSemaphores;
 };
 

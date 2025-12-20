@@ -27,10 +27,10 @@
 #include <utils/Timers.h>
 #include <utils/Trace.h>
 
-#include <com_android_graphics_libgui_flags.h>
+#include <com_android_graphics_surfaceflinger_flags.h>
 
 namespace android {
-using namespace com::android::graphics::libgui;
+using namespace com::android::graphics::surfaceflinger;
 
 // Number of events to read at a time from the DisplayEventDispatcher pipe.
 // The value should be large enough that we can quickly drain the pipe
@@ -59,7 +59,8 @@ status_t DisplayEventDispatcher::initialize() {
     }
 
     if (mLooper != nullptr) {
-        int rc = mLooper->addFd(mReceiver.getFd(), 0, Looper::EVENT_INPUT, this, NULL);
+        int rc = mLooper->addFd(mReceiver.getFd(), 0, Looper::EVENT_INPUT,
+                                sp<DisplayEventDispatcher>::fromExisting(this), NULL);
         if (rc < 0) {
             return UNKNOWN_ERROR;
         }
@@ -164,6 +165,7 @@ bool DisplayEventDispatcher::processPendingEvents(nsecs_t* outTimestamp,
     while ((n = mReceiver.getEvents(buf, EVENT_BUFFER_SIZE)) > 0) {
         ALOGV("dispatcher %p ~ Read %d events.", this, int(n));
         mFrameRateOverrides.reserve(n);
+        mSupportedRefreshRates.reserve(n);
         for (ssize_t i = 0; i < n; i++) {
             const DisplayEventReceiver::Event& ev = buf[i];
             switch (ev.header.type) {
@@ -177,7 +179,7 @@ bool DisplayEventDispatcher::processPendingEvents(nsecs_t* outTimestamp,
                     *outVsyncEventData = ev.vsync.vsyncData;
 
                     // Trace the RenderRate for this app
-                    if (ATRACE_ENABLED() && flags::trace_frame_rate_override()) {
+                    if (ATRACE_ENABLED()) {
                         const auto frameInterval = ev.vsync.vsyncData.frameInterval;
                         int fps = frameInterval > 0 ? 1e9f / frameInterval : 0;
                         ATRACE_INT("RenderRate", fps);
@@ -192,9 +194,15 @@ bool DisplayEventDispatcher::processPendingEvents(nsecs_t* outTimestamp,
                                                        ev.hotplug.connectionError);
                     }
                     break;
-                case DisplayEventType::DISPLAY_EVENT_MODE_CHANGE:
-                    dispatchModeChanged(ev.header.timestamp, ev.header.displayId,
-                                        ev.modeChange.modeId, ev.modeChange.vsyncPeriod);
+                case DisplayEventType::DISPLAY_EVENT_MODE_AND_FRAME_RATE_CHANGE:
+                    dispatchModeChangedWithFrameRateOverrides(ev.header.timestamp,
+                                                              ev.header.displayId,
+                                                              ev.modeChange.modeId,
+                                                              ev.modeChange.vsyncPeriod,
+                                                              ev.modeChange.appVsyncOffset,
+                                                              ev.modeChange.presentationDeadline,
+                                                              std::move(mFrameRateOverrides),
+                                                              std::move(mSupportedRefreshRates));
                     break;
                 case DisplayEventType::DISPLAY_EVENT_NULL:
                     dispatchNullEvent(ev.header.timestamp, ev.header.displayId);
@@ -202,9 +210,8 @@ bool DisplayEventDispatcher::processPendingEvents(nsecs_t* outTimestamp,
                 case DisplayEventType::DISPLAY_EVENT_FRAME_RATE_OVERRIDE:
                     mFrameRateOverrides.emplace_back(ev.frameRateOverride);
                     break;
-                case DisplayEventType::DISPLAY_EVENT_FRAME_RATE_OVERRIDE_FLUSH:
-                    dispatchFrameRateOverrides(ev.header.timestamp, ev.header.displayId,
-                                               std::move(mFrameRateOverrides));
+                case DisplayEventType::DISPLAY_EVENT_SUPPORTED_REFRESH_RATE:
+                    mSupportedRefreshRates.emplace_back(ev.supportedRefreshRate);
                     break;
                 case DisplayEventType::DISPLAY_EVENT_HDCP_LEVELS_CHANGE:
                     dispatchHdcpLevelsChanged(ev.header.displayId,

@@ -62,6 +62,15 @@ static inline void PrintTo(const BlurRegion& blurRegion, ::std::ostream* os) {
     *os << "\n}";
 }
 
+// copied from skia/src/core/SkBlurMask.cpp
+inline float convertBlurUserRadiusToSigma(float radius) {
+    return radius > 0 ? 0.57735f * radius + 0.5f : 0.0f;
+}
+// copied from skia/src/core/SkBlurEngine.h
+inline float convertBlurSigmaToKernelRadius(float sigma) {
+    return sigma <= 0.03f ? 0 : ceilf(3.f * sigma);
+}
+
 } // namespace android
 
 namespace std {

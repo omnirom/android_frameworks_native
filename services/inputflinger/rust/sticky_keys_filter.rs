@@ -23,7 +23,7 @@ use crate::input_filter::{Filter, ModifierStateListener};
 use com_android_server_inputflinger::aidl::com::android::server::inputflinger::{
     DeviceInfo::DeviceInfo, KeyEvent::KeyEvent, KeyEventAction::KeyEventAction,
 };
-use input::ModifierState;
+use input::{KeyboardType, ModifierState};
 use std::any::Any;
 use std::collections::{HashMap, HashSet};
 
@@ -48,6 +48,7 @@ pub struct StickyKeysFilter {
     listener: ModifierStateListener,
     data: Data,
     down_key_map: HashMap<i32, HashSet<i32>>,
+    supported_devices: HashSet<i32>,
 }
 
 #[derive(Default)]
@@ -70,12 +71,22 @@ impl StickyKeysFilter {
         next: Box<dyn Filter + Send + Sync>,
         listener: ModifierStateListener,
     ) -> StickyKeysFilter {
-        Self { next, listener, data: Default::default(), down_key_map: HashMap::new() }
+        Self {
+            next,
+            listener,
+            data: Default::default(),
+            down_key_map: HashMap::new(),
+            supported_devices: HashSet::new(),
+        }
     }
 }
 
 impl Filter for StickyKeysFilter {
     fn notify_key(&mut self, event: &KeyEvent) {
+        if !(self.supported_devices.contains(&event.deviceId)) {
+            self.next.notify_key(event);
+            return;
+        }
         let down = event.action == KeyEventAction::DOWN;
         let up = event.action == KeyEventAction::UP;
         let mut modifier_state = self.data.modifier_state;
@@ -151,6 +162,11 @@ impl Filter for StickyKeysFilter {
             self.listener.modifier_state_changed(ModifierState::None, ModifierState::None);
         }
         self.down_key_map.retain(|key, _| device_infos.iter().any(|x| *key == x.deviceId));
+        self.supported_devices = device_infos
+            .iter()
+            .filter(|d| !d.isVirtual && (d.keyboardType == KeyboardType::Alphabetic as i32))
+            .map(|d| d.deviceId)
+            .collect();
         self.next.notify_devices_changed(device_infos);
     }
 
@@ -188,6 +204,7 @@ impl Filter for StickyKeysFilter {
         result += &format!("\tlocked_modifier_state = {:?}\n", self.data.locked_modifier_state);
         result += &format!("\tcontributing_devices = {:?}\n", self.data.contributing_devices);
         result += &format!("\tdown_key_map = {:?}\n", self.down_key_map);
+        result += &format!("\tsupported_devices = {:?}\n", self.supported_devices);
         self.next.dump(dump_str + &result)
     }
 }
@@ -291,8 +308,7 @@ mod tests {
         DeviceInfo::DeviceInfo, IInputFilter::IInputFilterCallbacks::IInputFilterCallbacks,
         KeyEvent::KeyEvent, KeyEventAction::KeyEventAction,
     };
-    use input::KeyboardType;
-    use input::ModifierState;
+    use input::{KeyboardType, ModifierState};
     use std::collections::HashMap;
     use std::sync::{Arc, RwLock};
 
@@ -320,7 +336,7 @@ mod tests {
     fn test_notify_key_consumes_ephemeral_modifier_keys() {
         let test_filter = TestFilter::new();
         let test_callbacks = TestCallbacks::new();
-        let mut sticky_keys_filter = setup_filter(
+        let mut sticky_keys_filter = setup_filter_with_external_keyboard(
             Box::new(test_filter.clone()),
             Arc::new(RwLock::new(Strong::new(Box::new(test_callbacks.clone())))),
         );
@@ -347,7 +363,7 @@ mod tests {
     fn test_notify_key_passes_ephemeral_modifier_keys_if_only_key_up_occurs() {
         let test_filter = TestFilter::new();
         let test_callbacks = TestCallbacks::new();
-        let mut sticky_keys_filter = setup_filter(
+        let mut sticky_keys_filter = setup_filter_with_external_keyboard(
             Box::new(test_filter.clone()),
             Arc::new(RwLock::new(Strong::new(Box::new(test_callbacks.clone())))),
         );
@@ -372,7 +388,7 @@ mod tests {
     fn test_notify_key_passes_non_ephemeral_modifier_keys() {
         let test_filter = TestFilter::new();
         let test_callbacks = TestCallbacks::new();
-        let mut sticky_keys_filter = setup_filter(
+        let mut sticky_keys_filter = setup_filter_with_external_keyboard(
             Box::new(test_filter.clone()),
             Arc::new(RwLock::new(Strong::new(Box::new(test_callbacks.clone())))),
         );
@@ -397,7 +413,7 @@ mod tests {
     fn test_notify_key_passes_non_modifier_keys() {
         let test_filter = TestFilter::new();
         let test_callbacks = TestCallbacks::new();
-        let mut sticky_keys_filter = setup_filter(
+        let mut sticky_keys_filter = setup_filter_with_external_keyboard(
             Box::new(test_filter.clone()),
             Arc::new(RwLock::new(Strong::new(Box::new(test_callbacks.clone())))),
         );
@@ -414,7 +430,7 @@ mod tests {
     fn test_modifier_state_updated_on_modifier_key_press() {
         let mut test_filter = TestFilter::new();
         let mut test_callbacks = TestCallbacks::new();
-        let mut sticky_keys_filter = setup_filter(
+        let mut sticky_keys_filter = setup_filter_with_external_keyboard(
             Box::new(test_filter.clone()),
             Arc::new(RwLock::new(Strong::new(Box::new(test_callbacks.clone())))),
         );
@@ -463,7 +479,7 @@ mod tests {
     fn test_modifier_state_cleared_on_non_modifier_key_press() {
         let test_filter = TestFilter::new();
         let test_callbacks = TestCallbacks::new();
-        let mut sticky_keys_filter = setup_filter(
+        let mut sticky_keys_filter = setup_filter_with_external_keyboard(
             Box::new(test_filter.clone()),
             Arc::new(RwLock::new(Strong::new(Box::new(test_callbacks.clone())))),
         );
@@ -487,7 +503,7 @@ mod tests {
     fn test_modifier_state_unchanged_on_non_modifier_key_up_without_down() {
         let test_filter = TestFilter::new();
         let test_callbacks = TestCallbacks::new();
-        let mut sticky_keys_filter = setup_filter(
+        let mut sticky_keys_filter = setup_filter_with_external_keyboard(
             Box::new(test_filter.clone()),
             Arc::new(RwLock::new(Strong::new(Box::new(test_callbacks.clone())))),
         );
@@ -507,7 +523,7 @@ mod tests {
     fn test_locked_modifier_state_not_cleared_on_non_modifier_key_press() {
         let test_filter = TestFilter::new();
         let test_callbacks = TestCallbacks::new();
-        let mut sticky_keys_filter = setup_filter(
+        let mut sticky_keys_filter = setup_filter_with_external_keyboard(
             Box::new(test_filter.clone()),
             Arc::new(RwLock::new(Strong::new(Box::new(test_callbacks.clone())))),
         );
@@ -549,7 +565,7 @@ mod tests {
     fn test_modifier_state_restored_on_recreation() {
         let test_filter = TestFilter::new();
         let test_callbacks = TestCallbacks::new();
-        let mut sticky_keys_filter = setup_filter(
+        let mut sticky_keys_filter = setup_filter_with_external_keyboard(
             Box::new(test_filter.clone()),
             Arc::new(RwLock::new(Strong::new(Box::new(test_callbacks.clone())))),
         );
@@ -561,7 +577,7 @@ mod tests {
 
         // Create a new Sticky keys filter
         let test_filter = TestFilter::new();
-        let mut sticky_keys_filter = setup_filter(
+        let mut sticky_keys_filter = setup_filter_with_external_keyboard(
             Box::new(test_filter.clone()),
             Arc::new(RwLock::new(Strong::new(Box::new(test_callbacks.clone())))),
         );
@@ -588,7 +604,7 @@ mod tests {
     fn test_key_events_have_sticky_modifier_state() {
         let test_filter = TestFilter::new();
         let test_callbacks = TestCallbacks::new();
-        let mut sticky_keys_filter = setup_filter(
+        let mut sticky_keys_filter = setup_filter_with_external_keyboard(
             Box::new(test_filter.clone()),
             Arc::new(RwLock::new(Strong::new(Box::new(test_callbacks.clone())))),
         );
@@ -616,6 +632,20 @@ mod tests {
             Box::new(test_filter.clone()),
             Arc::new(RwLock::new(Strong::new(Box::new(test_callbacks.clone())))),
         );
+        sticky_keys_filter.notify_devices_changed(&[
+            DeviceInfo {
+                deviceId: 1,
+                external: true,
+                keyboardType: KeyboardType::Alphabetic as i32,
+                isVirtual: false,
+            },
+            DeviceInfo {
+                deviceId: 2,
+                external: true,
+                keyboardType: KeyboardType::Alphabetic as i32,
+                isVirtual: false,
+            },
+        ]);
         sticky_keys_filter.notify_key(&KeyEvent {
             deviceId: 1,
             keyCode: KEYCODE_CTRL_LEFT,
@@ -642,6 +672,7 @@ mod tests {
             deviceId: 2,
             external: true,
             keyboardType: KeyboardType::Alphabetic as i32,
+            isVirtual: false,
         }]);
         assert_eq!(
             test_callbacks.get_last_modifier_state(),
@@ -657,10 +688,63 @@ mod tests {
         assert_eq!(test_callbacks.get_last_locked_modifier_state(), ModifierState::None);
     }
 
+    #[test]
+    fn filter_doesnt_consume_ephemeral_modifier_keys_for_uniput_virtual_keyboard() {
+        let test_filter = TestFilter::new();
+        let test_callbacks = TestCallbacks::new();
+        let mut sticky_keys_filter = setup_filter(
+            Box::new(test_filter.clone()),
+            Arc::new(RwLock::new(Strong::new(Box::new(test_callbacks.clone())))),
+        );
+        sticky_keys_filter.notify_devices_changed(&[DeviceInfo {
+            deviceId: 1,
+            external: true,
+            keyboardType: KeyboardType::Alphabetic as i32,
+            isVirtual: true,
+        }]);
+        let key_codes = &[
+            KEYCODE_ALT_LEFT,
+            KEYCODE_ALT_RIGHT,
+            KEYCODE_CTRL_LEFT,
+            KEYCODE_CTRL_RIGHT,
+            KEYCODE_SHIFT_LEFT,
+            KEYCODE_SHIFT_RIGHT,
+            KEYCODE_META_LEFT,
+            KEYCODE_META_RIGHT,
+        ];
+        for key_code in key_codes.iter() {
+            sticky_keys_filter.notify_key(&KeyEvent { keyCode: *key_code, ..BASE_KEY_DOWN });
+            assert_eq!(
+                test_filter.last_event().unwrap(),
+                KeyEvent { keyCode: *key_code, ..BASE_KEY_DOWN }
+            );
+
+            sticky_keys_filter.notify_key(&KeyEvent { keyCode: *key_code, ..BASE_KEY_UP });
+            assert_eq!(
+                test_filter.last_event().unwrap(),
+                KeyEvent { keyCode: *key_code, ..BASE_KEY_UP }
+            );
+        }
+    }
+
     fn setup_filter(
         next: Box<dyn Filter + Send + Sync>,
         callbacks: Arc<RwLock<Strong<dyn IInputFilterCallbacks>>>,
     ) -> StickyKeysFilter {
         StickyKeysFilter::new(next, ModifierStateListener::new(callbacks))
+    }
+
+    fn setup_filter_with_external_keyboard(
+        next: Box<dyn Filter + Send + Sync>,
+        callbacks: Arc<RwLock<Strong<dyn IInputFilterCallbacks>>>,
+    ) -> StickyKeysFilter {
+        let mut filter = StickyKeysFilter::new(next, ModifierStateListener::new(callbacks));
+        filter.notify_devices_changed(&[DeviceInfo {
+            deviceId: 1,
+            external: false,
+            keyboardType: KeyboardType::Alphabetic as i32,
+            isVirtual: false,
+        }]);
+        filter
     }
 }

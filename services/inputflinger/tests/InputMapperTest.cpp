@@ -217,7 +217,7 @@ std::list<NotifyArgs> InputMapperTest::process(InputMapper& mapper, nsecs_t when
 
 void InputMapperTest::resetMapper(InputMapper& mapper, nsecs_t when) {
     const auto resetArgs = mapper.reset(when);
-    for (const auto args : resetArgs) {
+    for (const auto& args : resetArgs) {
         mFakeListener->notify(args);
     }
     // Loop the reader to flush the input listener queue.

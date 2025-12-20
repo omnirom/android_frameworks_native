@@ -82,7 +82,8 @@ status_t StreamSplitter::addOutput(
     Mutex::Autolock lock(mMutex);
 
     IGraphicBufferProducer::QueueBufferOutput queueBufferOutput;
-    sp<OutputListener> listener = sp<OutputListener>::make(this, outputQueue);
+    sp<OutputListener> listener =
+            sp<OutputListener>::make(sp<StreamSplitter>::fromExisting(this), outputQueue);
     IInterface::asBinder(outputQueue)->linkToDeath(listener);
     status_t status = outputQueue->connect(listener, NATIVE_WINDOW_API_CPU,
             /* producerControlledByApp */ false, &queueBufferOutput);

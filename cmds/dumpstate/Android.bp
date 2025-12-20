@@ -89,6 +89,7 @@ cc_defaults {
         "android.hardware.dumpstate@1.0",
         "android.hardware.dumpstate@1.1",
         "android.hardware.dumpstate-V1-ndk",
+        "android.os.flags-aconfig-cc-host",
         "libziparchive",
         "libbase",
         "libbinder", // BAD: dumpstate should not link code directly, should only exec binaries
@@ -99,6 +100,7 @@ cc_defaults {
         "libdumpstateaidl",
         "libdumpstateutil",
         "libdumputils",
+        "libgui",
         "libhardware_legacy",
         "libhidlbase", // BAD: dumpstate should not link code directly, should only exec binaries
         "liblog",

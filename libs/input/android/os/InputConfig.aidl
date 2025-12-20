@@ -160,4 +160,26 @@ enum InputConfig {
      * determine how these sensitive events are eventually traced.
      */
      SENSITIVE_FOR_PRIVACY       = 1 << 18,
+
+    /**
+     * InputConfig used to indicate that this window is topology aware. Using this flag will allow
+     * windows to receive gestures that can cross display boundaries. This flag is used for cross
+     * display drag and drop of windows and contents.
+     *
+     * Window with this flag can receive an input event stream containing events with varying
+     * displayIds in the corresponding coordinate space when the cursor crosses display boundary.
+     *
+     * When this flag is not set, window will receive a modified event stream where display Id will
+     * remain unchanged and coordinate space will extend beyond the logical display space.
+     */
+     DISPLAY_TOPOLOGY_AWARE       = 1 << 19,
+
+    /**
+     * InputConfig used to indicate that any pointer streams targeting this window should not be
+     * canceled as part of a pilferPointers request.
+     *
+     * This is only meant to be used by system components that need to be perpetually be aware of
+     * all input streams, such as the PointerLocationView used for debugging.
+     */
+     DO_NOT_PILFER                = 1 << 20,
 }

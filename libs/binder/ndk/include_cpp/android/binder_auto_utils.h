@@ -335,7 +335,6 @@ class ScopedAStatus : public impl::ScopedAResource<AStatus*, AStatus_delete, nul
 
 static inline std::ostream& operator<<(std::ostream& os, const ScopedAStatus& status) {
     return os << status.getDescription();
-    return os;
 }
 
 /**

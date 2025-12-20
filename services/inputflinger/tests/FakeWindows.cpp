@@ -82,6 +82,13 @@ void FakeInputReceiver::sendTimeline(int32_t inputEventId,
 
 void FakeInputReceiver::consumeEvent(InputEventType expectedEventType, int32_t expectedAction,
                                      std::optional<ui::LogicalDisplayId> expectedDisplayId,
+                                     std::optional<ftl::Flags<MotionFlag>> expectedFlags) {
+    consumeEvent(expectedEventType, expectedAction, expectedDisplayId,
+                 expectedFlags ? std::make_optional(expectedFlags->get()) : std::nullopt);
+}
+
+void FakeInputReceiver::consumeEvent(InputEventType expectedEventType, int32_t expectedAction,
+                                     std::optional<ui::LogicalDisplayId> expectedDisplayId,
                                      std::optional<int32_t> expectedFlags) {
     std::unique_ptr<InputEvent> event = consume(CONSUME_TIMEOUT_EVENT_EXPECTED);
 
@@ -107,7 +114,8 @@ void FakeInputReceiver::consumeEvent(InputEventType expectedEventType, int32_t e
             const MotionEvent& motionEvent = static_cast<const MotionEvent&>(*event);
             ASSERT_THAT(motionEvent, WithMotionAction(expectedAction));
             if (expectedFlags.has_value()) {
-                EXPECT_EQ(expectedFlags.value(), motionEvent.getFlags());
+                EXPECT_EQ(expectedFlags.value(),
+                          static_cast<int32_t>(motionEvent.getFlags().get()));
             }
             break;
         }
@@ -145,6 +153,23 @@ void FakeInputReceiver::consumeMotionEvent(const ::testing::Matcher<MotionEvent>
     std::unique_ptr<MotionEvent> motionEvent = consumeMotion();
     ASSERT_NE(nullptr, motionEvent) << "Did not get a motion event, but expected " << matcher;
     ASSERT_THAT(*motionEvent, matcher);
+}
+
+void FakeInputReceiver::consumeKeyEvent(const ::testing::Matcher<KeyEvent>& matcher) {
+    std::unique_ptr<InputEvent> event = consume(CONSUME_TIMEOUT_EVENT_EXPECTED);
+
+    if (event == nullptr) {
+        FAIL() << mName << ": expected a KeyEvent, but didn't get one.";
+        return;
+    }
+
+    if (event->getType() != InputEventType::KEY) {
+        FAIL() << mName << " expected a KeyEvent, got " << *event;
+        return;
+    }
+    const auto keyEvent = std::unique_ptr<KeyEvent>(static_cast<KeyEvent*>(event.release()));
+
+    ASSERT_THAT(*keyEvent, matcher);
 }
 
 void FakeInputReceiver::consumeFocusEvent(bool hasFocus, bool inTouchMode) {

@@ -46,13 +46,14 @@ class InputVerifier {
 public:
     InputVerifier(const std::string& name);
 
-    android::base::Result<void> processMovement(int32_t deviceId, int32_t source, int32_t action,
+    android::base::Result<void> processMovement(DeviceId deviceId, int32_t source, int32_t action,
                                                 int32_t actionButton, uint32_t pointerCount,
                                                 const PointerProperties* pointerProperties,
                                                 const PointerCoords* pointerCoords, int32_t flags,
                                                 int32_t buttonState);
+    std::string dump() const;
 
-    void resetDevice(int32_t deviceId);
+    void resetDevice(DeviceId deviceId);
 
 private:
     rust::Box<android::input::verifier::InputVerifier> mVerifier;

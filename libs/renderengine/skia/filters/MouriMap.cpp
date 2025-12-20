@@ -19,23 +19,28 @@
 #include <SkPaint.h>
 #include <SkTileMode.h>
 
+#include "RuntimeEffectManager.h"
+
 namespace android {
 namespace renderengine {
 namespace skia {
-namespace {
-sk_sp<SkRuntimeEffect> makeEffect(const SkString& sksl) {
-    auto [effect, error] = SkRuntimeEffect::MakeForShader(sksl);
-    LOG_ALWAYS_FATAL_IF(!effect, "RuntimeShader error: %s", error.c_str());
-    return effect;
-}
-const SkString kCrosstalkAndChunk16x16(R"(
+
+// NOTE: These shaders are intended to operate on linear color values, but to
+// avoid mapping to/from linear Srgb using the SkSL intrinsics, color space
+// management is coordinated with the SkColorSpace of the output surfaces and
+// with `SkShader::withWorkingColorSpace`.
+
+// This shader must output to a surface with a linear color space, and relies on
+// Skia's automatic colorspace conversion to map from the input `bitmap`'s
+// color space to said linear color space.
+const SkString kEffectSource_MouriMap_CrossTalkAndChunk16x16Effect(R"(
     uniform shader bitmap;
     uniform float inputMultiplier;
     vec4 main(vec2 xy) {
         float maximum = 0.0;
         for (int y = 0; y < 16; y++) {
             for (int x = 0; x < 16; x++) {
-                float3 linear = toLinearSrgb(bitmap.eval((xy - 0.5) * 16 + 0.5 + vec2(x, y)).rgb) * inputMultiplier;
+                float3 linear = bitmap.eval((xy - 0.5) * 16 + 0.5 + vec2(x, y)).rgb * inputMultiplier;
                 float maxRGB = max(linear.r, max(linear.g, linear.b));
                 maximum = max(maximum, log2(max(maxRGB, 1.0)));
             }
@@ -43,7 +48,9 @@ const SkString kCrosstalkAndChunk16x16(R"(
         return float4(float3(maximum), 1.0);
     }
 )");
-const SkString kChunk8x8(R"(
+// This shader assumes `bitmap` is already in a linear color space and does not
+// perform any color space conversion.
+const SkString kEffectSource_MouriMap_Chunk8x8Effect(R"(
     uniform shader bitmap;
     vec4 main(vec2 xy) {
         float maximum = 0.0;
@@ -55,7 +62,9 @@ const SkString kChunk8x8(R"(
         return float4(float3(maximum), 1.0);
     }
 )");
-const SkString kBlur(R"(
+// This shader assumes `bitmap` is already in a linear color space and does not
+// perform any color space conversion.
+const SkString kEffectSource_MouriMap_BlurEffect(R"(
     uniform shader bitmap;
     vec4 main(vec2 xy) {
         float C[5];
@@ -73,7 +82,12 @@ const SkString kBlur(R"(
         return float4(float3(exp2(result)), 1.0);
     }
 )");
-const SkString kTonemap(R"(
+// This shader assumes `image` is in the original color space and `lux` is in a
+// linear color space. The shader must be wrapped with `SkShader::makeWithWorkingColorSpace`
+// to automatically convert `image` into the linear color space (`lux`'s conversion
+// is a no-op). `makeWithWorkingColorSpace` will also automatically convert back to
+// the output color space, avoiding the need to call to/fromLinearSrgb per pixel.
+const SkString kEffectSource_MouriMap_TonemapEffect(R"(
     uniform shader image;
     uniform shader lux;
     uniform float scaleFactor;
@@ -82,19 +96,21 @@ const SkString kTonemap(R"(
     vec4 main(vec2 xy) {
         float localMax = lux.eval(xy * scaleFactor).r;
         float4 rgba = image.eval(xy);
-        float3 linear = toLinearSrgb(rgba.rgb) * inputMultiplier;
+        float3 linear = rgba.rgb * inputMultiplier;
 
         if (localMax <= targetHdrSdrRatio) {
-            return float4(fromLinearSrgb(linear), rgba.a);
+            return float4(linear, rgba.a);
         }
 
         float maxRGB = max(linear.r, max(linear.g, linear.b));
         localMax = max(localMax, maxRGB);
         float gain = (1 + maxRGB * (targetHdrSdrRatio / (localMax * localMax)))
                 / (1 + maxRGB / targetHdrSdrRatio);
-        return float4(fromLinearSrgb(linear * gain), rgba.a);
+        return float4(linear * gain, rgba.a);
     }
 )");
+
+namespace {
 
 // Draws the given runtime shader on a GPU surface and returns the result as an SkImage.
 sk_sp<SkImage> makeImage(SkSurface* surface, const SkRuntimeShaderBuilder& builder) {
@@ -108,12 +124,12 @@ sk_sp<SkImage> makeImage(SkSurface* surface, const SkRuntimeShaderBuilder& build
 }
 
 } // namespace
-
-MouriMap::MouriMap()
-      : mCrosstalkAndChunk16x16(makeEffect(kCrosstalkAndChunk16x16)),
-        mChunk8x8(makeEffect(kChunk8x8)),
-        mBlur(makeEffect(kBlur)),
-        mTonemap(makeEffect(kTonemap)) {}
+MouriMap::MouriMap(RuntimeEffectManager& effectManager)
+      : mCrosstalkAndChunk16x16(
+                effectManager.mKnownEffects[kMouriMap_CrossTalkAndChunk16x16Effect]),
+        mChunk8x8(effectManager.mKnownEffects[kMouriMap_Chunk8x8Effect]),
+        mBlur(effectManager.mKnownEffects[kMouriMap_BlurEffect]),
+        mTonemap(effectManager.mKnownEffects[kMouriMap_TonemapEffect]) {}
 
 sk_sp<SkShader> MouriMap::mouriMap(SkiaGpuContext* context, sk_sp<SkShader> input,
                                    float inputMultiplier, float targetHdrSdrRatio) {
@@ -139,19 +155,26 @@ sk_sp<SkImage> MouriMap::downchunk(SkiaGpuContext* context, sk_sp<SkShader> inpu
     // not need to be so precise. So, it's possible that we could use A8 or R8 instead. If we want
     // to be really conservative we can try to use R16 or even RGBA1010102 to fake an R10 surface,
     // which would cut write bandwidth significantly.
+
+    sk_sp<SkColorSpace> linearCS = image->imageInfo().colorSpace()->makeLinearGamma();
+
     static constexpr auto kFirstDownscaleAmount = 16;
     sk_sp<SkSurface> firstDownsampledSurface = context->createRenderTarget(
             image->imageInfo()
                     .makeWH(std::max(1, image->width() / kFirstDownscaleAmount),
                             std::max(1, image->height() / kFirstDownscaleAmount))
+                    .makeColorSpace(linearCS)
                     .makeColorType(kRGBA_F16_SkColorType));
     LOG_ALWAYS_FATAL_IF(!firstDownsampledSurface, "%s: Failed to create surface!", __func__);
     auto firstDownsampledImage =
             makeImage(firstDownsampledSurface.get(), crosstalkAndChunk16x16Builder);
+
+    // Since `secondDownsampledSurface` has the same color space as `firstDownsampledImage`, this
+    // is equivalent to using makeRawShader(), but preserves the color space on the objects.
     SkRuntimeShaderBuilder chunk8x8Builder(mChunk8x8);
     chunk8x8Builder.child("bitmap") =
-            firstDownsampledImage->makeRawShader(SkTileMode::kClamp, SkTileMode::kClamp,
-                                                 SkSamplingOptions());
+            firstDownsampledImage->makeShader(SkTileMode::kClamp, SkTileMode::kClamp,
+                                              SkSamplingOptions());
     static constexpr auto kSecondDownscaleAmount = 8;
     sk_sp<SkSurface> secondDownsampledSurface = context->createRenderTarget(
             firstDownsampledImage->imageInfo()
@@ -161,9 +184,11 @@ sk_sp<SkImage> MouriMap::downchunk(SkiaGpuContext* context, sk_sp<SkShader> inpu
     return makeImage(secondDownsampledSurface.get(), chunk8x8Builder);
 }
 sk_sp<SkImage> MouriMap::blur(SkiaGpuContext* context, SkImage* input) const {
+    // Since the `blurSurface` has the same color space as `input`, this will perform no color
+    // space conversion (and it is assumed that `input` is already in a linear color space).
     SkRuntimeShaderBuilder blurBuilder(mBlur);
     blurBuilder.child("bitmap") =
-            input->makeRawShader(SkTileMode::kClamp, SkTileMode::kClamp, SkSamplingOptions());
+            input->makeShader(SkTileMode::kClamp, SkTileMode::kClamp, SkSamplingOptions());
     sk_sp<SkSurface> blurSurface = context->createRenderTarget(input->imageInfo());
     LOG_ALWAYS_FATAL_IF(!blurSurface, "%s: Failed to create surface!", __func__);
     return makeImage(blurSurface.get(), blurBuilder);
@@ -171,15 +196,23 @@ sk_sp<SkImage> MouriMap::blur(SkiaGpuContext* context, SkImage* input) const {
 sk_sp<SkShader> MouriMap::tonemap(sk_sp<SkShader> input, SkImage* localLux, float inputMultiplier,
                                   float targetHdrSdrRatio) const {
     static constexpr float kScaleFactor = 1.0f / 128.0f;
+    // The tonemap shader will work in `localLux`'s color space, so that child shader will not
+    // actually perform any color space conversion. Skia will automatically convert `input`
+    // into this same linear color space.
     SkRuntimeShaderBuilder tonemapBuilder(mTonemap);
     tonemapBuilder.child("image") = input;
     tonemapBuilder.child("lux") =
-            localLux->makeRawShader(SkTileMode::kClamp, SkTileMode::kClamp,
-                                    SkSamplingOptions(SkFilterMode::kLinear, SkMipmapMode::kNone));
+            localLux->makeShader(SkTileMode::kClamp, SkTileMode::kClamp,
+                                 SkSamplingOptions(SkFilterMode::kLinear, SkMipmapMode::kNone));
     tonemapBuilder.uniform("scaleFactor") = kScaleFactor;
     tonemapBuilder.uniform("inputMultiplier") = inputMultiplier;
     tonemapBuilder.uniform("targetHdrSdrRatio") = targetHdrSdrRatio;
-    return tonemapBuilder.makeShader();
+
+    sk_sp<SkShader> tonemapShader = tonemapBuilder.makeShader();
+    // Now wrap the shader in a `makeWithWorkingColorSpace` call with lux's color space so `input`
+    // is automatically converted at the start, and the output is automatically converted from
+    // lux's space to the final destination color space.
+    return tonemapShader->makeWithWorkingColorSpace(localLux->imageInfo().refColorSpace());
 }
 } // namespace skia
 } // namespace renderengine

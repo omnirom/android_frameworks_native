@@ -60,7 +60,27 @@ public:
     virtual void setDisplayViewports(const std::vector<DisplayViewport>& viewports) = 0;
     virtual std::optional<DisplayViewport> getViewportForPointerDevice(
             ui::LogicalDisplayId associatedDisplayId = ui::LogicalDisplayId::INVALID) = 0;
-    virtual vec2 getMouseCursorPosition(ui::LogicalDisplayId displayId) = 0;
+    /**
+     * Gets the current position of the mouse cursor on the specified display in the display
+     * physical coordinates.
+     *
+     * Returns optional.empty if no cursor is available, or if existing cursor is not on
+     * supplied `displayId`.
+     *
+     * This method is inherently racy, and should only be used for test purposes.
+     */
+    virtual std::optional<vec2> getMouseCursorPosition(ui::LogicalDisplayId displayId) = 0;
+    /**
+     * Gets the current position of the mouse cursor on the specified display in the display logical
+     * coordinates.
+     *
+     * Returns optional.empty if no cursor is available, or if existing cursor is not on
+     * supplied `displayId`.
+     *
+     * This method is inherently racy, and should only be used for test purposes.
+     */
+    virtual std::optional<vec2> getMouseCursorPositionInLogicalDisplay(
+            ui::LogicalDisplayId displayId) = 0;
     virtual void setShowTouchesEnabled(bool enabled) = 0;
     virtual void setStylusPointerIconEnabled(bool enabled) = 0;
     /**
@@ -107,7 +127,9 @@ public:
     void setDisplayViewports(const std::vector<DisplayViewport>& viewports) override;
     std::optional<DisplayViewport> getViewportForPointerDevice(
             ui::LogicalDisplayId associatedDisplayId) override;
-    vec2 getMouseCursorPosition(ui::LogicalDisplayId displayId) override;
+    std::optional<vec2> getMouseCursorPosition(ui::LogicalDisplayId displayId) override;
+    std::optional<vec2> getMouseCursorPositionInLogicalDisplay(
+            ui::LogicalDisplayId displayId) override;
     void setShowTouchesEnabled(bool enabled) override;
     void setStylusPointerIconEnabled(bool enabled) override;
     bool setPointerIcon(std::variant<std::unique_ptr<SpriteIcon>, PointerIconStyle> icon,
@@ -174,9 +196,8 @@ private:
                                  const DisplayTopologyPosition sourceBoundary,
                                  int32_t sourceCursorOffsetPx) const REQUIRES(getLock());
 
-    vec2 filterPointerMotionForAccessibilityLocked(const vec2& current, const vec2& delta,
-                                                   const ui::LogicalDisplayId& displayId)
-            REQUIRES(getLock());
+    vec2 filterPointerMotionForAccessibilityLocked(const PointerControllerInterface& pc,
+                                                   const vec2& delta) REQUIRES(getLock());
 
     /* Topology is initialized with default-constructed value, which is an empty topology. Till we
      * receive setDisplayTopology call.

@@ -16,6 +16,7 @@
 
 #include "PreferStylusOverTouchBlocker.h"
 #include <com_android_input_flags.h>
+#include <input/Input.h>
 #include <input/PrintTools.h>
 
 namespace input_flags = com::android::input::flags;
@@ -192,7 +193,7 @@ std::vector<NotifyMotionArgs> PreferStylusOverTouchBlocker::processMotion(
 
 void PreferStylusOverTouchBlocker::notifyInputDevicesChanged(
         const std::vector<InputDeviceInfo>& inputDevices) {
-    std::set<int32_t> presentDevices;
+    std::set<DeviceId> presentDevices;
     for (const InputDeviceInfo& device : inputDevices) {
         presentDevices.insert(device.getId());
     }

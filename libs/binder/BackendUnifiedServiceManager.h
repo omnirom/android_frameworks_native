@@ -29,7 +29,7 @@ class BinderCacheWithInvalidation
     class BinderInvalidation : public IBinder::DeathRecipient {
     public:
         BinderInvalidation(std::weak_ptr<BinderCacheWithInvalidation> cache, const std::string& key)
-              : mCache(cache), mKey(key) {}
+              : mCache(std::move(cache)), mKey(key) {}
 
         void binderDied(const wp<IBinder>& who) override {
             sp<IBinder> binder = who.promote();
@@ -73,7 +73,7 @@ public:
                 if (result != DEAD_OBJECT) {
                     ALOGW("Unlinking to dead binder resulted in: %d", result);
                 }
-                mCache.erase(key);
+                mCache.erase(it);
                 return true;
             }
         }
@@ -105,14 +105,14 @@ public:
         binder::ScopedTrace aidlTrace(ATRACE_TAG_AIDL,
                                       "BinderCacheWithInvalidation::setItem Successfully Cached");
         std::lock_guard<std::mutex> lock(mCacheMutex);
-        mCache[key] = {.service = item, .deathRecipient = deathRecipient};
+        mCache[key] = {.service = item, .deathRecipient = std::move(deathRecipient)};
         return binder::Status::ok();
     }
 
-    bool isClientSideCachingEnabled(const std::string& serviceName);
+    bool isClientSideCachingEnabled(const std::string& serviceName) const;
 
 private:
-    std::map<std::string, Entry> mCache;
+    std::map<std::string, Entry, std::less<>> mCache;
     mutable std::mutex mCacheMutex;
 };
 
@@ -147,13 +147,23 @@ public:
                                         const sp<IBinder>& service) override;
     binder::Status getServiceDebugInfo(::std::vector<os::ServiceDebugInfo>* _aidl_return) override;
 
+    binder::Status checkServiceAccess(const os::IServiceManager::CallerContext& callerCtx,
+                                      const ::std::string& name, const ::std::string& permission,
+                                      bool* _aidl_return) override;
+
     void enableAddServiceCache(bool value) { mEnableAddServiceCache = value; }
     // for legacy ABI
     const String16& getInterfaceDescriptor() const override {
+        if (mTheRealServiceManager == nullptr) return mNullInterfaceDescriptor;
         return mTheRealServiceManager->getInterfaceDescriptor();
     }
 
 private:
+    // Empty descriptor in case there is no mTheRealServiceManager. We need an
+    // object to return a String& reference and there is only expected to be a
+    // single BackendUnifiedServiceManager per-process, so this is a member
+    // variable.
+    const String16 mNullInterfaceDescriptor;
     bool mEnableAddServiceCache = true;
     std::shared_ptr<BinderCacheWithInvalidation> mCacheForGetService;
     sp<os::IServiceManager> mTheRealServiceManager;

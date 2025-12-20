@@ -15,8 +15,6 @@
  */
 
 #define ATRACE_TAG ATRACE_TAG_GRAPHICS
-#undef LOG_TAG
-#define LOG_TAG "SurfaceFlinger"
 
 #include <PowerAdvisor/Workload.h>
 #include <aidl/android/hardware/graphics/composer3/Composition.h>
@@ -134,9 +132,10 @@ LayerSnapshot::LayerSnapshot(const RequestedLayerState& state,
     clientChanges = 0;
     mirrorRootPath =
             LayerHierarchy::isMirror(path.variant) ? path : LayerHierarchy::TraversalPath::ROOT;
-    reachablilty = LayerSnapshot::Reachablilty::Unreachable;
+    reachability = LayerSnapshot::Reachability::Unreachable;
     frameRateSelectionPriority = state.frameRateSelectionPriority;
     layerMetadata = state.metadata;
+    systemContentPriority = state.systemContentPriority;
 }
 
 // As documented in libhardware header, formats in the range
@@ -155,6 +154,7 @@ bool LayerSnapshot::isOpaqueFormat(PixelFormat format) {
         case PIXEL_FORMAT_BGRA_8888:
         case PIXEL_FORMAT_RGBA_FP16:
         case PIXEL_FORMAT_RGBA_1010102:
+        case PIXEL_FORMAT_RGBA_10101010:
         case PIXEL_FORMAT_R_8:
             return false;
     }
@@ -179,12 +179,17 @@ bool LayerSnapshot::hasBlur() const {
     return backgroundBlurRadius > 0 || blurRegions.size() > 0;
 }
 
-bool LayerSnapshot::hasOutline() const {
+bool LayerSnapshot::hasBorderSettings() const {
     return borderSettings.strokeWidth > 0;
 }
 
+bool LayerSnapshot::hasBoxShadowSettings() const {
+    return !boxShadowSettings.boxShadows.empty();
+}
+
 bool LayerSnapshot::hasEffect() const {
-    return fillsColor() || drawShadows() || hasBlur() || hasOutline();
+    return fillsColor() || drawShadows() || hasBlur() || hasBorderSettings() ||
+            hasBoxShadowSettings();
 }
 
 bool LayerSnapshot::hasSomethingToDraw() const {
@@ -218,12 +223,18 @@ bool LayerSnapshot::isHiddenByPolicy() const {
 }
 
 bool LayerSnapshot::getIsVisible() const {
-    if (reachablilty != LayerSnapshot::Reachablilty::Reachable) {
+    if (reachability != LayerSnapshot::Reachability::Reachable) {
         return false;
     }
 
-    if (handleSkipScreenshotFlag & outputFilter.toInternalDisplay) {
-        return false;
+    if (FlagManager::getInstance().connected_displays_cursor()) {
+        if (handleSkipScreenshotFlag && outputFilter.skipScreenshot) {
+            return false;
+        }
+    } else {
+        if (handleSkipScreenshotFlag && outputFilter.toInternalDisplay) {
+            return false;
+        }
     }
 
     if (!hasSomethingToDraw()) {
@@ -239,13 +250,18 @@ bool LayerSnapshot::getIsVisible() const {
 
 std::string LayerSnapshot::getIsVisibleReason() const {
     // not visible
-    if (reachablilty == LayerSnapshot::Reachablilty::Unreachable)
+    if (reachability == LayerSnapshot::Reachability::Unreachable)
         return "layer not reachable from root";
-    if (reachablilty == LayerSnapshot::Reachablilty::ReachableByRelativeParent)
+    if (reachability == LayerSnapshot::Reachability::ReachableByRelativeParent)
         return "layer only reachable via relative parent";
     if (isHiddenByPolicyFromParent) return "hidden by parent or layer flag";
     if (isHiddenByPolicyFromRelativeParent) return "hidden by relative parent";
-    if (handleSkipScreenshotFlag & outputFilter.toInternalDisplay) return "eLayerSkipScreenshot";
+    if (FlagManager::getInstance().connected_displays_cursor()) {
+        if (handleSkipScreenshotFlag && outputFilter.skipScreenshot) return "eLayerSkipScreenshot";
+    } else {
+        if (handleSkipScreenshotFlag & outputFilter.toInternalDisplay)
+            return "eLayerSkipScreenshot (toInternalDisplay=true)";
+    }
     if (invalidTransform) return "invalidTransform";
     if (color.a == 0.0f && !hasBlur()) return "alpha = 0 and no blur";
     if (!hasSomethingToDraw()) return "nothing to draw";
@@ -255,10 +271,14 @@ std::string LayerSnapshot::getIsVisibleReason() const {
     if (sidebandStream != nullptr) reason << " sidebandStream";
     if (externalTexture != nullptr)
         reason << " buffer=" << externalTexture->getId() << " frame=" << frameNumber;
-    if (fillsColor() || color.a > 0.0f) reason << " color{" << color << "}";
+    if (fillsColor()) reason << " color{" << color << "}";
+    if (color.a < 1.0f) reason << " alpha=" << color.a;
     if (drawShadows()) reason << " shadowSettings.length=" << shadowSettings.length;
-    if (hasOutline()) reason << "borderSettings=" << borderSettings.toString();
+    if (hasBoxShadowSettings())
+        reason << " boxShadowSettings.length=" << boxShadowSettings.toString();
+    if (hasBorderSettings()) reason << "borderSettings=" << borderSettings.toString();
     if (backgroundBlurRadius > 0) reason << " backgroundBlurRadius=" << backgroundBlurRadius;
+    if (backgroundBlurScale != 1.0f) reason << " backgroundBlurScale=" << backgroundBlurScale;
     if (blurRegions.size() > 0) reason << " blurRegions.size()=" << blurRegions.size();
     if (contentDirty) reason << " contentDirty";
     return reason.str();
@@ -276,7 +296,7 @@ bool LayerSnapshot::isTransformValid(const ui::Transform& t) {
 bool LayerSnapshot::hasInputInfo() const {
     return (inputInfo.token != nullptr ||
             inputInfo.inputConfig.test(gui::WindowInfo::InputConfig::NO_INPUT_CHANNEL)) &&
-            reachablilty == Reachablilty::Reachable;
+            reachability == Reachability::Reachable;
 }
 
 std::string LayerSnapshot::getDebugString() const {
@@ -340,6 +360,14 @@ std::ostream& operator<<(std::ostream& out, const LayerSnapshot& obj) {
 
     if (obj.edgeExtensionEffect.hasEffect()) {
         out << obj.edgeExtensionEffect;
+    }
+
+    if (obj.currentHdrSdrRatio > 1.f) {
+        out << " currentHdrSdrRatio=" << obj.currentHdrSdrRatio;
+    }
+
+    if (obj.desiredHdrSdrRatio > 1.f) {
+        out << " desiredHdrSdrRatio=" << obj.desiredHdrSdrRatio;
     }
     return out;
 }
@@ -417,6 +445,9 @@ void LayerSnapshot::merge(const RequestedLayerState& requested, bool forceUpdate
     }
     if (forceUpdate || requested.what & layer_state_t::eBorderSettingsChanged) {
         borderSettings = requested.borderSettings;
+    }
+    if (forceUpdate || requested.what & layer_state_t::eBoxShadowSettingsChanged) {
+        boxShadowSettings = requested.boxShadowSettings;
     }
     if (forceUpdate || requested.what & layer_state_t::eFrameRateSelectionPriority) {
         frameRateSelectionPriority = requested.frameRateSelectionPriority;
@@ -517,7 +548,8 @@ void LayerSnapshot::merge(const RequestedLayerState& requested, bool forceUpdate
                  layer_state_t::eBlurRegionsChanged | layer_state_t::eStretchChanged |
                  layer_state_t::eEdgeExtensionChanged | layer_state_t::eBorderSettingsChanged)) {
         forceClientComposition = shadowSettings.length > 0 || stretchEffect.hasEffect() ||
-                edgeExtensionEffect.hasEffect() || borderSettings.strokeWidth > 0;
+                edgeExtensionEffect.hasEffect() || borderSettings.strokeWidth > 0 ||
+                !boxShadowSettings.boxShadows.empty();
     }
 
     if (forceUpdate ||

@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-#define LOG_TAG "RpcTlsTestUtils"
+#define LOG_TAG "libbinder.RpcTlsTestUtils"
 #include <log/log.h>
 
 #include <binder/RpcTlsTestUtils.h>

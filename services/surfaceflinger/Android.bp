@@ -16,17 +16,20 @@ aconfig_declarations {
         "surfaceflinger_flags.aconfig",
         "surfaceflinger_flags_new.aconfig",
     ],
+    exportable: true,
 }
 
 cc_aconfig_library {
     name: "libsurfaceflingerflags",
     aconfig_declarations: "surfaceflinger_flags",
+    vendor_available: true,
 }
 
 cc_defaults {
     name: "surfaceflinger_defaults",
     cflags: [
         "-DANDROID_UTILS_REF_BASE_DISABLE_IMPLICIT_CONSTRUCTION",
+        "-DLOG_TAG=\"SurfaceFlinger\"",
         "-Wall",
         "-Wconversion",
         "-Werror",
@@ -52,7 +55,6 @@ cc_defaults {
     cflags: [
         "-DEGL_EGLEXT_PROTOTYPES",
         "-DGL_GLEXT_PROTOTYPES",
-        "-DLOG_TAG=\"SurfaceFlinger\"",
     ],
     shared_libs: [
         "android.hardware.common-V2-ndk",
@@ -84,7 +86,7 @@ cc_defaults {
         "libnativewindow",
         "libprocessgroup",
         "libprotobuf-cpp-lite",
-        "libstatslog_surfaceflinger",
+        "libstatslog_surfaceflinger_bootstrap",
         "libsync",
         "libui",
         "libutils",
@@ -182,7 +184,12 @@ filegroup {
         "DisplayHardware/HWC2.cpp",
         "DisplayHardware/HWComposer.cpp",
         "DisplayHardware/HidlComposerHal.cpp",
-        "DisplayHardware/VirtualDisplaySurface.cpp",
+        "DisplayHardware/VirtualDisplay/LegacyVirtualDisplaySurface.cpp",
+        "DisplayHardware/VirtualDisplay/SinkSurfaceHelper.cpp",
+        "DisplayHardware/VirtualDisplay/VirtualDisplayBufferSlotTracker.cpp",
+        "DisplayHardware/VirtualDisplay/VirtualDisplaySurface.cpp",
+        "DisplayHardware/VirtualDisplay/VirtualDisplayThread.cpp",
+        "DisplayHardware/VirtualDisplay/VirtualDisplayThreadManager.cpp",
         "PowerAdvisor/*.cpp",
     ],
 }
@@ -194,6 +201,12 @@ cc_library_headers {
     export_static_lib_headers: ["libserviceutils"],
 }
 
+cc_library_headers {
+    name: "liblocklessqueue_headers",
+    host_supported: true,
+    export_include_dirs: ["."],
+}
+
 filegroup {
     name: "libsurfaceflinger_sources",
     srcs: [
@@ -202,12 +215,12 @@ filegroup {
         "BackgroundExecutor.cpp",
         "Client.cpp",
         "ClientCache.cpp",
+        "Display/DisplayIdentification.cpp",
         "Display/DisplayModeController.cpp",
         "Display/DisplaySnapshot.cpp",
         "DisplayDevice.cpp",
         "Effects/Daltonizer.cpp",
         "FpsReporter.cpp",
-        "FrameTimeline/FrameTimeline.cpp",
         "FrameTracer/FrameTracer.cpp",
         "FrameTracker.cpp",
         "FrontEnd/LayerCreationArgs.cpp",
@@ -218,6 +231,7 @@ filegroup {
         "FrontEnd/LayerSnapshotBuilder.cpp",
         "FrontEnd/RequestedLayerState.cpp",
         "FrontEnd/TransactionHandler.cpp",
+        "FrontEnd/Caching/MergeableHierarchy.cpp",
         "HdrLayerInfoReporter.cpp",
         "HdrSdrRatioOverlay.cpp",
         "Jank/JankTracker.cpp",
@@ -225,11 +239,11 @@ filegroup {
         "LayerFE.cpp",
         "LayerProtoHelper.cpp",
         "LayerVector.cpp",
-        "NativeWindowSurface.cpp",
         "RefreshRateOverlay.cpp",
         "RegionSamplingThread.cpp",
         "Scheduler/EventThread.cpp",
         "Scheduler/FrameRateOverrideMappings.cpp",
+        "Scheduler/FrameTimeline.cpp",
         "Scheduler/LayerHistory.cpp",
         "Scheduler/LayerInfo.cpp",
         "Scheduler/MessageQueue.cpp",
@@ -346,12 +360,11 @@ cc_library_shared {
 }
 
 cc_library {
-    name: "libstatslog_surfaceflinger",
-    generated_sources: ["statslog_surfaceflinger.cpp"],
-    generated_headers: ["statslog_surfaceflinger.h"],
-    export_generated_headers: ["statslog_surfaceflinger.h"],
+    name: "libstatslog_surfaceflinger_bootstrap",
+    generated_sources: ["statslog_surfaceflinger_bootstrap.cpp"],
+    generated_headers: ["statslog_surfaceflinger_bootstrap.h"],
+    export_generated_headers: ["statslog_surfaceflinger_bootstrap.h"],
     shared_libs: [
-        "android.os.statsbootstrap_aidl-cpp",
         "libbinder",
         "libstatsbootstrap",
         "libutils",
@@ -359,10 +372,42 @@ cc_library {
 }
 
 genrule {
+    name: "statslog_surfaceflinger_bootstrap.h",
+    tools: ["stats-log-api-gen"],
+    cmd: "$(location stats-log-api-gen) --header $(genDir)/statslog_surfaceflinger_bootstrap.h" +
+        " --module surfaceflinger --namespace android,surfaceflinger,stats --bootstrap",
+    out: [
+        "statslog_surfaceflinger_bootstrap.h",
+    ],
+}
+
+genrule {
+    name: "statslog_surfaceflinger_bootstrap.cpp",
+    tools: ["stats-log-api-gen"],
+    cmd: "$(location stats-log-api-gen) --cpp $(genDir)/statslog_surfaceflinger_bootstrap.cpp" +
+        " --module surfaceflinger --namespace android,surfaceflinger,stats" +
+        " --importHeader statslog_surfaceflinger_bootstrap.h --bootstrap",
+    out: [
+        "statslog_surfaceflinger_bootstrap.cpp",
+    ],
+}
+
+cc_library {
+    name: "libstatslog_surfaceflinger",
+    generated_sources: ["statslog_surfaceflinger.cpp"],
+    generated_headers: ["statslog_surfaceflinger.h"],
+    export_generated_headers: ["statslog_surfaceflinger.h"],
+    shared_libs: [
+        "libstatspull",
+        "libstatssocket",
+    ],
+}
+
+genrule {
     name: "statslog_surfaceflinger.h",
     tools: ["stats-log-api-gen"],
     cmd: "$(location stats-log-api-gen) --header $(genDir)/statslog_surfaceflinger.h" +
-        " --module surfaceflinger --namespace android,surfaceflinger,stats --bootstrap",
+        " --module surfaceflinger --namespace android,surfaceflinger,stats",
     out: [
         "statslog_surfaceflinger.h",
     ],
@@ -373,7 +418,7 @@ genrule {
     tools: ["stats-log-api-gen"],
     cmd: "$(location stats-log-api-gen) --cpp $(genDir)/statslog_surfaceflinger.cpp" +
         " --module surfaceflinger --namespace android,surfaceflinger,stats" +
-        " --importHeader statslog_surfaceflinger.h --bootstrap",
+        " --importHeader statslog_surfaceflinger.h",
     out: [
         "statslog_surfaceflinger.cpp",
     ],

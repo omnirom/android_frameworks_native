@@ -95,6 +95,12 @@
     },
     {
       "name": "binderCacheUnitTest"
+    },
+    {
+      "name": "binderStatsPusherUnitTest"
+    },
+    {
+      "name": "binderObserverConfigUnitTest"
     }
   ],
   "presubmit-large": [
@@ -109,6 +115,9 @@
     },
     {
       "name": "binderRpcTestSingleThreadedNoKernel"
+    },
+    {
+      "name": "binderRpcTestNoLegacy"
     }
   ],
   "hwasan-presubmit": [

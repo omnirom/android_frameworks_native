@@ -66,7 +66,7 @@ public:
     virtual ~MessageQueue() = default;
 
     virtual void initVsyncInternal(std::shared_ptr<scheduler::VSyncDispatch>,
-                                   frametimeline::TokenManager&,
+                                   scheduler::TokenManager&,
                                    std::chrono::nanoseconds workDuration) = 0;
     virtual void destroyVsync() = 0;
     virtual void setDuration(std::chrono::nanoseconds workDuration) = 0;
@@ -75,6 +75,7 @@ public:
     virtual void postMessageDelayed(sp<MessageHandler>&&, nsecs_t uptimeDelay) = 0;
     virtual void scheduleConfigure() = 0;
     virtual void scheduleFrame(Duration workDurationSlack = Duration::fromNs(0)) = 0;
+    virtual void scheduleImmediateFrame() = 0;
 
     virtual std::optional<scheduler::ScheduleResult> getScheduledFrameResult() const = 0;
 };
@@ -118,7 +119,7 @@ private:
     const sp<Handler> mHandler;
 
     struct Vsync {
-        frametimeline::TokenManager* tokenManager = nullptr;
+        scheduler::TokenManager* tokenManager = nullptr;
 
         mutable std::mutex mutex;
         std::unique_ptr<scheduler::VSyncCallbackRegistration> registration GUARDED_BY(mutex);
@@ -139,7 +140,7 @@ private:
 public:
     explicit MessageQueue(ICompositor&);
 
-    void initVsyncInternal(std::shared_ptr<scheduler::VSyncDispatch>, frametimeline::TokenManager&,
+    void initVsyncInternal(std::shared_ptr<scheduler::VSyncDispatch>, scheduler::TokenManager&,
                            std::chrono::nanoseconds workDuration) override;
     void destroyVsync() override;
     void setDuration(std::chrono::nanoseconds workDuration) override;
@@ -150,6 +151,7 @@ public:
 
     void scheduleConfigure() override;
     void scheduleFrame(Duration workDurationSlack = Duration::fromNs(0)) override;
+    void scheduleImmediateFrame() override;
 
     std::optional<scheduler::ScheduleResult> getScheduledFrameResult() const override;
 };

@@ -1,9 +1,7 @@
 # Bug component: 1075131
 
-adyabr@google.com
-alecmouri@google.com
+include /services/surfaceflinger/OWNERS
+
+# Skia
 djsollen@google.com
-jreck@google.com
-lpy@google.com
 nscobie@google.com
-sallyqi@google.com

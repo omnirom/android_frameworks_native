@@ -47,6 +47,12 @@ class BufferItemConsumer: public ConsumerBase
     enum { INVALID_BUFFER_SLOT = BufferQueue::INVALID_BUFFER_SLOT };
     enum { NO_BUFFER_AVAILABLE = BufferQueue::NO_BUFFER_AVAILABLE };
 
+    // Create a new buffer item consumer. The consumerUsage parameter determines
+    // the consumer usage flags passed to the graphics allocator. The
+    // bufferCount parameter specifies how many buffers can be locked for user
+    // access at the same time.
+    // controlledByApp tells whether this consumer is controlled by the
+    // application.
     static std::tuple<sp<BufferItemConsumer>, sp<Surface>> create(
             uint64_t consumerUsage, int bufferCount = DEFAULT_MAX_BUFFERS,
             bool controlledByApp = false, bool isConsumerSurfaceFlinger = false);
@@ -56,24 +62,6 @@ class BufferItemConsumer: public ConsumerBase
                                          int bufferCount = DEFAULT_MAX_BUFFERS,
                                          bool controlledByApp = false)
             __attribute((deprecated("Prefer ctors that create their own surface and consumer.")));
-
-    // Create a new buffer item consumer. The consumerUsage parameter determines
-    // the consumer usage flags passed to the graphics allocator. The
-    // bufferCount parameter specifies how many buffers can be locked for user
-    // access at the same time.
-    // controlledByApp tells whether this consumer is controlled by the
-    // application.
-#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
-    BufferItemConsumer(uint64_t consumerUsage, int bufferCount = DEFAULT_MAX_BUFFERS,
-                       bool controlledByApp = false, bool isConsumerSurfaceFlinger = false);
-    BufferItemConsumer(const sp<IGraphicBufferConsumer>& consumer, uint64_t consumerUsage,
-                       int bufferCount = DEFAULT_MAX_BUFFERS, bool controlledByApp = false)
-            __attribute((deprecated("Prefer ctors that create their own surface and consumer.")));
-#else
-    BufferItemConsumer(const sp<IGraphicBufferConsumer>& consumer,
-            uint64_t consumerUsage, int bufferCount = DEFAULT_MAX_BUFFERS,
-            bool controlledByApp = false);
-#endif // COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
 
     ~BufferItemConsumer() override;
 
@@ -116,21 +104,32 @@ class BufferItemConsumer: public ConsumerBase
     status_t releaseBuffer(const sp<GraphicBuffer>& buffer,
                            const sp<Fence>& releaseFence = Fence::NO_FENCE);
 
+    void onFirstRef() override;
+
 protected:
-#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
     // This should only be used by BLASTBufferQueue:
     BufferItemConsumer(const sp<IGraphicBufferProducer>& producer,
                        const sp<IGraphicBufferConsumer>& consumer, uint64_t consumerUsage,
                        int bufferCount = DEFAULT_MAX_BUFFERS, bool controlledByApp = false);
-#endif // COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
+
+    BufferItemConsumer(uint64_t consumerUsage, int bufferCount = DEFAULT_MAX_BUFFERS,
+                       bool controlledByApp = false, bool isConsumerSurfaceFlinger = false);
+    BufferItemConsumer(const sp<IGraphicBufferConsumer>& consumer, uint64_t consumerUsage,
+                       int bufferCount = DEFAULT_MAX_BUFFERS, bool controlledByApp = false)
+            __attribute((deprecated("Prefer ctors that create their own surface and consumer.")));
 
 private:
-    void initialize(uint64_t consumerUsage, int bufferCount);
+    friend sp<BufferItemConsumer>;
+
+    void initializeConsumer();
 
     status_t releaseBufferSlotLocked(int slotIndex, const sp<GraphicBuffer>& buffer,
                                      const sp<Fence>& releaseFence);
 
     void freeBufferLocked(int slotIndex) override;
+
+    uint64_t mConsumerUsage;
+    int mBufferCount;
 
     // mBufferFreedListener is the listener object that will be called when
     // an old buffer is being freed. If it is not NULL it will be called from

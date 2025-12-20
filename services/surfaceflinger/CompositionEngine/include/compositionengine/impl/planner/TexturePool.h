@@ -85,6 +85,8 @@ public:
 
     void dump(std::string& out) const;
 
+    bool isEnabled() const { return mEnabled; }
+
 protected:
     // Proteted visibility so that they can be used for testing
     const static constexpr size_t kMinPoolSize = 3;

@@ -17,9 +17,6 @@
 #pragma once
 
 #include <cstdint>
-#include <optional>
-
-#include <ui/DisplayIdentification.h>
 
 #include <compositionengine/Output.h>
 

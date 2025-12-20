@@ -17,70 +17,42 @@
 #define LOG_TAG "KeyboardClassifier"
 
 #include <android-base/logging.h>
-#include <com_android_input_flags.h>
 #include <ftl/flags.h>
 #include <input/KeyboardClassifier.h>
 
 #include "input_cxx_bridge.rs.h"
-
-namespace input_flags = com::android::input::flags;
 
 using android::input::RustInputDeviceIdentifier;
 
 namespace android {
 
 KeyboardClassifier::KeyboardClassifier() {
-    if (input_flags::enable_keyboard_classifier()) {
-        mRustClassifier = android::input::keyboardClassifier::create();
-    }
+    mRustClassifier = android::input::keyboardClassifier::create();
 }
 
 KeyboardType KeyboardClassifier::getKeyboardType(DeviceId deviceId) {
-    if (mRustClassifier) {
-        return static_cast<KeyboardType>(
-                android::input::keyboardClassifier::getKeyboardType(**mRustClassifier, deviceId));
-    } else {
-        auto it = mKeyboardTypeMap.find(deviceId);
-        if (it == mKeyboardTypeMap.end()) {
-            return KeyboardType::NONE;
-        }
-        return it->second;
-    }
+    return static_cast<KeyboardType>(
+            android::input::keyboardClassifier::getKeyboardType(**mRustClassifier, deviceId));
 }
-
-// Copied from EventHub.h
-const uint32_t DEVICE_CLASS_KEYBOARD = android::os::IInputConstants::DEVICE_CLASS_KEYBOARD;
-const uint32_t DEVICE_CLASS_ALPHAKEY = android::os::IInputConstants::DEVICE_CLASS_ALPHAKEY;
 
 void KeyboardClassifier::notifyKeyboardChanged(DeviceId deviceId,
                                                const InputDeviceIdentifier& identifier,
                                                uint32_t deviceClasses) {
-    if (mRustClassifier) {
-        RustInputDeviceIdentifier rustIdentifier;
-        rustIdentifier.name = rust::String::lossy(identifier.name);
-        rustIdentifier.location = rust::String::lossy(identifier.location);
-        rustIdentifier.unique_id = rust::String::lossy(identifier.uniqueId);
-        rustIdentifier.bus = identifier.bus;
-        rustIdentifier.vendor = identifier.vendor;
-        rustIdentifier.product = identifier.product;
-        rustIdentifier.version = identifier.version;
-        rustIdentifier.descriptor = rust::String::lossy(identifier.descriptor);
-        android::input::keyboardClassifier::notifyKeyboardChanged(**mRustClassifier, deviceId,
-                                                                  rustIdentifier, deviceClasses);
-    } else {
-        bool isKeyboard = (deviceClasses & DEVICE_CLASS_KEYBOARD) != 0;
-        bool hasAlphabeticKey = (deviceClasses & DEVICE_CLASS_ALPHAKEY) != 0;
-        mKeyboardTypeMap.insert_or_assign(deviceId,
-                                          isKeyboard ? (hasAlphabeticKey
-                                                                ? KeyboardType::ALPHABETIC
-                                                                : KeyboardType::NON_ALPHABETIC)
-                                                     : KeyboardType::NONE);
-    }
+    RustInputDeviceIdentifier rustIdentifier;
+    rustIdentifier.name = rust::String::lossy(identifier.name);
+    rustIdentifier.location = rust::String::lossy(identifier.location);
+    rustIdentifier.unique_id = rust::String::lossy(identifier.uniqueId);
+    rustIdentifier.bus = identifier.bus;
+    rustIdentifier.vendor = identifier.vendor;
+    rustIdentifier.product = identifier.product;
+    rustIdentifier.version = identifier.version;
+    rustIdentifier.descriptor = rust::String::lossy(identifier.descriptor);
+    android::input::keyboardClassifier::notifyKeyboardChanged(**mRustClassifier, deviceId,
+                                                                rustIdentifier, deviceClasses);
 }
 
 void KeyboardClassifier::processKey(DeviceId deviceId, int32_t evdevCode, uint32_t metaState) {
-    if (mRustClassifier &&
-        !android::input::keyboardClassifier::isFinalized(**mRustClassifier, deviceId)) {
+    if (!android::input::keyboardClassifier::isFinalized(**mRustClassifier, deviceId)) {
         android::input::keyboardClassifier::processKey(**mRustClassifier, deviceId, evdevCode,
                                                        metaState);
     }

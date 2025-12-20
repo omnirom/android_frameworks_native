@@ -123,7 +123,7 @@ int main(int argc, char* argv[]) {
     sp<RpcServer> server = RpcServer::make(newTlsFactory(rpcSecurity, certVerifier));
 
     LOG_ALWAYS_FATAL_IF(!server->setProtocolVersion(serverConfig.serverVersion));
-    server->setMaxThreads(serverConfig.numThreads);
+    server->setMaxThreads(serverConfig.numMaxThreads);
     server->setSupportedFileDescriptorTransportModes(serverSupportedFileDescriptorTransportModes);
 
     unsigned int outPort = 0;
@@ -202,6 +202,7 @@ int main(int argc, char* argv[]) {
             default:
                 LOG_ALWAYS_FATAL("Unrecognized address family %d", addr->sa_family);
         }
+        service->setMinRpcThreads(serverConfig.numMinThreadsPerBinder);
         service->server = server;
         return service;
     });

@@ -121,7 +121,7 @@ public:
     InputManager(const sp<InputReaderPolicyInterface>& readerPolicy,
                  InputDispatcherPolicyInterface& dispatcherPolicy,
                  PointerChoreographerPolicyInterface& choreographerPolicy,
-                 InputFilterPolicyInterface& inputFilterPolicy);
+                 InputFilterPolicyInterface& inputFilterPolicy, JNIEnv* env);
 
     status_t start() override;
     status_t stop() override;

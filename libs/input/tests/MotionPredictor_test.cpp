@@ -59,7 +59,7 @@ static MotionEvent getMotionEvent(int32_t action, float x, float y,
 
     ui::Transform identityTransform;
     event.initialize(InputEvent::nextId(), deviceId, AINPUT_SOURCE_STYLUS,
-                     ui::LogicalDisplayId::DEFAULT, {0}, action, /*actionButton=*/0, /*flags=*/0,
+                     ui::LogicalDisplayId::DEFAULT, {0}, action, /*actionButton=*/0, /*flags=*/{},
                      AMOTION_EVENT_EDGE_FLAG_NONE, AMETA_NONE, /*buttonState=*/0,
                      MotionClassification::NONE, identityTransform,
                      /*xPrecision=*/0.1,

@@ -143,24 +143,27 @@ static bool initGlobals() {
     }
 
     gTisTotalMapFd =
-            unique_fd{bpf_obj_get(BPF_FS_PATH "map_timeInState_total_time_in_state_map")};
+            unique_fd{bpf_obj_get(BPF_TIMEINSTATE_PATH "map_timeInState_total_time_in_state_map")};
     if (gTisTotalMapFd < 0) return false;
 
-    gTisMapFd = unique_fd{bpf_obj_get(BPF_FS_PATH "map_timeInState_uid_time_in_state_map")};
+    gTisMapFd =
+            unique_fd{bpf_obj_get(BPF_TIMEINSTATE_PATH "map_timeInState_uid_time_in_state_map")};
     if (gTisMapFd < 0) return false;
 
     gConcurrentMapFd =
-            unique_fd{bpf_obj_get(BPF_FS_PATH "map_timeInState_uid_concurrent_times_map")};
+            unique_fd{bpf_obj_get(BPF_TIMEINSTATE_PATH "map_timeInState_uid_concurrent_times_map")};
     if (gConcurrentMapFd < 0) return false;
 
     gUidLastUpdateMapFd =
-            unique_fd{bpf_obj_get(BPF_FS_PATH "map_timeInState_uid_last_update_map")};
+            unique_fd{bpf_obj_get(BPF_TIMEINSTATE_PATH "map_timeInState_uid_last_update_map")};
     if (gUidLastUpdateMapFd < 0) return false;
 
-    gPidTisMapFd = unique_fd{mapRetrieveRO(BPF_FS_PATH "map_timeInState_pid_time_in_state_map")};
+    gPidTisMapFd =
+            unique_fd{mapRetrieveRO(BPF_TIMEINSTATE_PATH "map_timeInState_pid_time_in_state_map")};
     if (gPidTisMapFd < 0) return false;
 
-    unique_fd trackedPidMapFd(mapRetrieveWO(BPF_FS_PATH "map_timeInState_pid_tracked_map"));
+    unique_fd trackedPidMapFd(
+            mapRetrieveWO(BPF_TIMEINSTATE_PATH "map_timeInState_pid_tracked_map"));
     if (trackedPidMapFd < 0) return false;
 
     gInitialized = true;
@@ -168,7 +171,7 @@ static bool initGlobals() {
 }
 
 static int retrieveProgramFd(const std::string &eventType, const std::string &eventName) {
-    std::string path = StringPrintf(BPF_FS_PATH "prog_timeInState_tracepoint_%s_%s",
+    std::string path = StringPrintf(BPF_TIMEINSTATE_PATH "prog_timeInState_tracepoint_%s_%s",
                                     eventType.c_str(), eventName.c_str());
     return retrieveProgram(path.c_str());
 }
@@ -177,6 +180,13 @@ static bool attachTracepointProgram(const std::string &eventType, const std::str
     int prog_fd = retrieveProgramFd(eventType, eventName);
     if (prog_fd < 0) return false;
     return bpf_attach_tracepoint(prog_fd, eventType.c_str(), eventName.c_str()) >= 0;
+}
+
+// TODO(b/442884281): Remove this once autoattach is enabled for TimeInState programs
+static bool attachRawTracepointProgram(const std::string &eventType, const std::string &eventName) {
+    int prog_fd = retrieveProgramFd(eventType, eventName);
+    if (prog_fd < 0) return false;
+    return bpf_attach_raw_tracepoint(prog_fd, eventName.c_str()) >= 0;
 }
 
 static std::optional<uint32_t> getPolicyFreqIdx(uint32_t policy) {
@@ -212,7 +222,7 @@ bool startTrackingUidTimes() {
     if (!initGlobals()) return false;
     if (gTracking) return true;
 
-    unique_fd cpuPolicyFd(mapRetrieveWO(BPF_FS_PATH "map_timeInState_cpu_policy_map"));
+    unique_fd cpuPolicyFd(mapRetrieveWO(BPF_TIMEINSTATE_PATH "map_timeInState_cpu_policy_map"));
     if (cpuPolicyFd < 0) return false;
 
     for (uint32_t i = 0; i < gPolicyCpus.size(); ++i) {
@@ -221,7 +231,7 @@ bool startTrackingUidTimes() {
         }
     }
 
-    unique_fd freqToIdxFd(mapRetrieveWO(BPF_FS_PATH "map_timeInState_freq_to_idx_map"));
+    unique_fd freqToIdxFd(mapRetrieveWO(BPF_TIMEINSTATE_PATH "map_timeInState_freq_to_idx_map"));
     if (freqToIdxFd < 0) return false;
     freq_idx_key_t key;
     for (uint32_t i = 0; i < gNPolicies; ++i) {
@@ -236,23 +246,26 @@ bool startTrackingUidTimes() {
         }
     }
 
-    unique_fd cpuLastUpdateFd(mapRetrieveWO(BPF_FS_PATH "map_timeInState_cpu_last_update_map"));
+    unique_fd cpuLastUpdateFd(
+            mapRetrieveWO(BPF_TIMEINSTATE_PATH "map_timeInState_cpu_last_update_map"));
     if (cpuLastUpdateFd < 0) return false;
     std::vector<uint64_t> zeros(get_nprocs_conf(), 0);
     uint32_t zero = 0;
     if (writeToMapEntry(cpuLastUpdateFd, &zero, zeros.data(), BPF_ANY)) return false;
 
-    unique_fd nrActiveFd(mapRetrieveWO(BPF_FS_PATH "map_timeInState_nr_active_map"));
+    unique_fd nrActiveFd(mapRetrieveWO(BPF_TIMEINSTATE_PATH "map_timeInState_nr_active_map"));
     if (nrActiveFd < 0) return false;
     if (writeToMapEntry(nrActiveFd, &zero, &zero, BPF_ANY)) return false;
 
-    unique_fd policyNrActiveFd(mapRetrieveWO(BPF_FS_PATH "map_timeInState_policy_nr_active_map"));
+    unique_fd policyNrActiveFd(
+            mapRetrieveWO(BPF_TIMEINSTATE_PATH "map_timeInState_policy_nr_active_map"));
     if (policyNrActiveFd < 0) return false;
     for (uint32_t i = 0; i < gNPolicies; ++i) {
         if (writeToMapEntry(policyNrActiveFd, &i, &zero, BPF_ANY)) return false;
     }
 
-    unique_fd policyFreqIdxFd(mapRetrieveWO(BPF_FS_PATH "map_timeInState_policy_freq_idx_map"));
+    unique_fd policyFreqIdxFd(
+            mapRetrieveWO(BPF_TIMEINSTATE_PATH "map_timeInState_policy_freq_idx_map"));
     if (policyFreqIdxFd < 0) return false;
     for (uint32_t i = 0; i < gNPolicies; ++i) {
         auto freqIdx = getPolicyFreqIdx(i);
@@ -262,7 +275,7 @@ bool startTrackingUidTimes() {
 
     gTracking = attachTracepointProgram("sched", "sched_switch") &&
             attachTracepointProgram("power", "cpu_frequency") &&
-            attachTracepointProgram("sched", "sched_process_free");
+            attachRawTracepointProgram("sched", "sched_process_free");
     return gTracking;
 }
 
@@ -574,10 +587,11 @@ bool startTrackingProcessCpuTimes(pid_t pid) {
     if (!gInitialized && !initGlobals()) return false;
 
     unique_fd trackedPidHashMapFd(
-            mapRetrieveWO(BPF_FS_PATH "map_timeInState_pid_tracked_hash_map"));
+            mapRetrieveWO(BPF_TIMEINSTATE_PATH "map_timeInState_pid_tracked_hash_map"));
     if (trackedPidHashMapFd < 0) return false;
 
-    unique_fd trackedPidMapFd(mapRetrieveWO(BPF_FS_PATH "map_timeInState_pid_tracked_map"));
+    unique_fd trackedPidMapFd(
+            mapRetrieveWO(BPF_TIMEINSTATE_PATH "map_timeInState_pid_tracked_map"));
     if (trackedPidMapFd < 0) return false;
 
     for (uint32_t index = 0; index < MAX_TRACKED_PIDS; index++) {
@@ -604,7 +618,7 @@ bool startAggregatingTaskCpuTimes(pid_t pid, uint16_t aggregationKey) {
     if (!gInitialized && !initGlobals()) return false;
 
     unique_fd taskAggregationMapFd(
-            mapRetrieveWO(BPF_FS_PATH "map_timeInState_pid_task_aggregation_map"));
+            mapRetrieveWO(BPF_TIMEINSTATE_PATH "map_timeInState_pid_task_aggregation_map"));
     if (taskAggregationMapFd < 0) return false;
 
     return writeToMapEntry(taskAggregationMapFd, &pid, &aggregationKey, BPF_ANY) == 0;

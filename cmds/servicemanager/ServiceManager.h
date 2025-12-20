@@ -68,6 +68,9 @@ public:
                                           const sp<IClientCallback>& cb) override;
     binder::Status tryUnregisterService(const std::string& name, const sp<IBinder>& binder) override;
     binder::Status getServiceDebugInfo(std::vector<ServiceDebugInfo>* outReturn) override;
+    binder::Status checkServiceAccess(const os::IServiceManager::CallerContext& callerCtx,
+                                      const std::string& name, const std::string& permission,
+                                      bool* outReturn) override;
     void binderDied(const wp<IBinder>& who) override;
     void handleClientCallbacks();
 
@@ -120,7 +123,9 @@ private:
                                  std::optional<std::string>* accessor);
     binder::Status canFindService(const Access::CallingContext& ctx, const std::string& name,
                                   std::optional<std::string>* accessor);
-
+    binder::Status checkServiceAccessImpl(const Access::CallingContext& ctx,
+                                          const std::string& name, const std::string& permission,
+                                          bool* outReturn);
     ServiceMap mNameToService;
     ServiceCallbackMap mNameToRegistrationCallback;
     ClientCallbackMap mNameToClientCallback;

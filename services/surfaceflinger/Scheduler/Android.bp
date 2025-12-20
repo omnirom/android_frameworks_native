@@ -12,7 +12,6 @@ cc_defaults {
     name: "libscheduler_defaults",
     defaults: ["surfaceflinger_defaults"],
     cflags: [
-        "-DLOG_TAG=\"Scheduler\"",
         "-DATRACE_TAG=ATRACE_TAG_GRAPHICS",
     ],
     shared_libs: [

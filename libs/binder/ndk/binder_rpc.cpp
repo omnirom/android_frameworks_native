@@ -44,7 +44,7 @@ struct ABinderRpc_ConnectionInfo {
     std::variant<sockaddr_vm, sockaddr_un, sockaddr_in> addr;
 };
 
-struct ABinderRpc_Accessor final : public ::android::RefBase {
+struct ABinderRpc_Accessor final {
     static ABinderRpc_Accessor* make(const char* instance, const sp<IBinder>& binder) {
         LOG_ALWAYS_FATAL_IF(binder == nullptr, "ABinderRpc_Accessor requires a non-null binder");
         status_t status = android::validateAccessor(String16(instance), binder);
@@ -61,7 +61,7 @@ struct ABinderRpc_Accessor final : public ::android::RefBase {
     ~ABinderRpc_Accessor() { LOG_ACCESSOR_DEBUG("ABinderRpc_Accessor dtor"); }
 
    private:
-    ABinderRpc_Accessor(sp<IBinder> accessor) : mAccessorBinder(accessor) {}
+    ABinderRpc_Accessor(const sp<IBinder>& accessor) : mAccessorBinder(accessor) {}
     ABinderRpc_Accessor() = delete;
     sp<IBinder> mAccessorBinder;
 };

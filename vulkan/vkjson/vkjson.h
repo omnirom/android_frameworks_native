@@ -21,6 +21,10 @@
 #ifndef VKJSON_H_
 #define VKJSON_H_
 
+#ifndef VK_USE_PLATFORM_ANDROID_KHR
+#define VK_USE_PLATFORM_ANDROID_KHR
+#endif
+
 #include <string.h>
 #include <vulkan/vulkan.h>
 
@@ -41,17 +45,1938 @@ struct VkJsonLayer {
   std::vector<VkExtensionProperties> extensions;
 };
 
-struct VkJsonKHRVariablePointers {
-  VkJsonKHRVariablePointers() {
+struct VkJsonAMDAntiLag {
+  VkJsonAMDAntiLag() {
     reported = false;
-    memset(&variable_pointer_features_khr, 0,
-           sizeof(VkPhysicalDeviceVariablePointerFeaturesKHR));
-    memset(&variable_pointers_features_khr, 0,
-           sizeof(VkPhysicalDeviceVariablePointersFeaturesKHR));
+    memset(&anti_lag_features_amd, 0,
+           sizeof(VkPhysicalDeviceAntiLagFeaturesAMD));
   }
   bool reported;
-  VkPhysicalDeviceVariablePointerFeaturesKHR variable_pointer_features_khr;
-  VkPhysicalDeviceVariablePointersFeaturesKHR variable_pointers_features_khr;
+  VkPhysicalDeviceAntiLagFeaturesAMD anti_lag_features_amd;
+};
+
+struct VkJsonAMDDeviceCoherentMemory {
+  VkJsonAMDDeviceCoherentMemory() {
+    reported = false;
+    memset(&coherent_memory_features_amd, 0,
+           sizeof(VkPhysicalDeviceCoherentMemoryFeaturesAMD));
+  }
+  bool reported;
+  VkPhysicalDeviceCoherentMemoryFeaturesAMD coherent_memory_features_amd;
+};
+
+struct VkJsonAMDShaderCoreProperties {
+  VkJsonAMDShaderCoreProperties() {
+    reported = false;
+    memset(&shader_core_properties_amd, 0,
+           sizeof(VkPhysicalDeviceShaderCorePropertiesAMD));
+  }
+  bool reported;
+  VkPhysicalDeviceShaderCorePropertiesAMD shader_core_properties_amd;
+};
+
+struct VkJsonAMDShaderCoreProperties2 {
+  VkJsonAMDShaderCoreProperties2() {
+    reported = false;
+    memset(&shader_core_properties2_amd, 0,
+           sizeof(VkPhysicalDeviceShaderCoreProperties2AMD));
+  }
+  bool reported;
+  VkPhysicalDeviceShaderCoreProperties2AMD shader_core_properties2_amd;
+};
+
+struct VkJsonAMDShaderEarlyAndLateFragmentTests {
+  VkJsonAMDShaderEarlyAndLateFragmentTests() {
+    reported = false;
+    memset(&shader_early_and_late_fragment_tests_features_amd, 0,
+           sizeof(VkPhysicalDeviceShaderEarlyAndLateFragmentTestsFeaturesAMD));
+  }
+  bool reported;
+  VkPhysicalDeviceShaderEarlyAndLateFragmentTestsFeaturesAMD
+      shader_early_and_late_fragment_tests_features_amd;
+};
+
+struct VkJsonANDROIDExternalFormatResolve {
+  VkJsonANDROIDExternalFormatResolve() {
+    reported = false;
+    memset(&external_format_resolve_features_android, 0,
+           sizeof(VkPhysicalDeviceExternalFormatResolveFeaturesANDROID));
+    memset(&external_format_resolve_properties_android, 0,
+           sizeof(VkPhysicalDeviceExternalFormatResolvePropertiesANDROID));
+  }
+  bool reported;
+  VkPhysicalDeviceExternalFormatResolveFeaturesANDROID
+      external_format_resolve_features_android;
+  VkPhysicalDeviceExternalFormatResolvePropertiesANDROID
+      external_format_resolve_properties_android;
+};
+
+struct VkJsonARMFormatPack {
+  VkJsonARMFormatPack() {
+    reported = false;
+    memset(&format_pack_features_arm, 0,
+           sizeof(VkPhysicalDeviceFormatPackFeaturesARM));
+  }
+  bool reported;
+  VkPhysicalDeviceFormatPackFeaturesARM format_pack_features_arm;
+};
+
+struct VkJsonARMPipelineOpacityMicromap {
+  VkJsonARMPipelineOpacityMicromap() {
+    reported = false;
+    memset(&pipeline_opacity_micromap_features_arm, 0,
+           sizeof(VkPhysicalDevicePipelineOpacityMicromapFeaturesARM));
+  }
+  bool reported;
+  VkPhysicalDevicePipelineOpacityMicromapFeaturesARM
+      pipeline_opacity_micromap_features_arm;
+};
+
+struct VkJsonARMRasterizationOrderAttachmentAccess {
+  VkJsonARMRasterizationOrderAttachmentAccess() {
+    reported = false;
+    memset(
+        &rasterization_order_attachment_access_features_arm, 0,
+        sizeof(VkPhysicalDeviceRasterizationOrderAttachmentAccessFeaturesARM));
+  }
+  bool reported;
+  VkPhysicalDeviceRasterizationOrderAttachmentAccessFeaturesARM
+      rasterization_order_attachment_access_features_arm;
+};
+
+struct VkJsonARMRenderPassStriped {
+  VkJsonARMRenderPassStriped() {
+    reported = false;
+    memset(&render_pass_striped_features_arm, 0,
+           sizeof(VkPhysicalDeviceRenderPassStripedFeaturesARM));
+    memset(&render_pass_striped_properties_arm, 0,
+           sizeof(VkPhysicalDeviceRenderPassStripedPropertiesARM));
+  }
+  bool reported;
+  VkPhysicalDeviceRenderPassStripedFeaturesARM render_pass_striped_features_arm;
+  VkPhysicalDeviceRenderPassStripedPropertiesARM
+      render_pass_striped_properties_arm;
+};
+
+struct VkJsonARMSchedulingControls {
+  VkJsonARMSchedulingControls() {
+    reported = false;
+    memset(&scheduling_controls_features_arm, 0,
+           sizeof(VkPhysicalDeviceSchedulingControlsFeaturesARM));
+    memset(&scheduling_controls_properties_arm, 0,
+           sizeof(VkPhysicalDeviceSchedulingControlsPropertiesARM));
+  }
+  bool reported;
+  VkPhysicalDeviceSchedulingControlsFeaturesARM
+      scheduling_controls_features_arm;
+  VkPhysicalDeviceSchedulingControlsPropertiesARM
+      scheduling_controls_properties_arm;
+};
+
+struct VkJsonARMShaderCoreBuiltins {
+  VkJsonARMShaderCoreBuiltins() {
+    reported = false;
+    memset(&shader_core_builtins_features_arm, 0,
+           sizeof(VkPhysicalDeviceShaderCoreBuiltinsFeaturesARM));
+    memset(&shader_core_builtins_properties_arm, 0,
+           sizeof(VkPhysicalDeviceShaderCoreBuiltinsPropertiesARM));
+  }
+  bool reported;
+  VkPhysicalDeviceShaderCoreBuiltinsFeaturesARM
+      shader_core_builtins_features_arm;
+  VkPhysicalDeviceShaderCoreBuiltinsPropertiesARM
+      shader_core_builtins_properties_arm;
+};
+
+struct VkJsonARMShaderCoreProperties {
+  VkJsonARMShaderCoreProperties() {
+    reported = false;
+    memset(&shader_core_properties_arm, 0,
+           sizeof(VkPhysicalDeviceShaderCorePropertiesARM));
+  }
+  bool reported;
+  VkPhysicalDeviceShaderCorePropertiesARM shader_core_properties_arm;
+};
+
+struct VkJsonARMTensors {
+  VkJsonARMTensors() {
+    reported = false;
+    memset(&tensor_properties_arm, 0,
+           sizeof(VkPhysicalDeviceTensorPropertiesARM));
+    memset(&tensor_features_arm, 0, sizeof(VkPhysicalDeviceTensorFeaturesARM));
+    memset(&descriptor_buffer_tensor_features_arm, 0,
+           sizeof(VkPhysicalDeviceDescriptorBufferTensorFeaturesARM));
+    memset(&descriptor_buffer_tensor_properties_arm, 0,
+           sizeof(VkPhysicalDeviceDescriptorBufferTensorPropertiesARM));
+  }
+  bool reported;
+  VkPhysicalDeviceTensorPropertiesARM tensor_properties_arm;
+  VkPhysicalDeviceTensorFeaturesARM tensor_features_arm;
+  VkPhysicalDeviceDescriptorBufferTensorFeaturesARM
+      descriptor_buffer_tensor_features_arm;
+  VkPhysicalDeviceDescriptorBufferTensorPropertiesARM
+      descriptor_buffer_tensor_properties_arm;
+};
+
+struct VkJsonExt4444Formats {
+  VkJsonExt4444Formats() {
+    reported = false;
+    memset(&formats_4444_features_ext, 0,
+           sizeof(VkPhysicalDevice4444FormatsFeaturesEXT));
+  }
+  bool reported;
+  VkPhysicalDevice4444FormatsFeaturesEXT formats_4444_features_ext;
+};
+
+struct VkJsonExtAstcDecodeMode {
+  VkJsonExtAstcDecodeMode() {
+    reported = false;
+    memset(&astc_decode_features_ext, 0,
+           sizeof(VkPhysicalDeviceASTCDecodeFeaturesEXT));
+  }
+  bool reported;
+  VkPhysicalDeviceASTCDecodeFeaturesEXT astc_decode_features_ext;
+};
+
+struct VkJsonExtAttachmentFeedbackLoopDynamicState {
+  VkJsonExtAttachmentFeedbackLoopDynamicState() {
+    reported = false;
+    memset(
+        &attachment_feedback_loop_dynamic_state_features_ext, 0,
+        sizeof(VkPhysicalDeviceAttachmentFeedbackLoopDynamicStateFeaturesEXT));
+  }
+  bool reported;
+  VkPhysicalDeviceAttachmentFeedbackLoopDynamicStateFeaturesEXT
+      attachment_feedback_loop_dynamic_state_features_ext;
+};
+
+struct VkJsonExtAttachmentFeedbackLoopLayout {
+  VkJsonExtAttachmentFeedbackLoopLayout() {
+    reported = false;
+    memset(&attachment_feedback_loop_layout_features_ext, 0,
+           sizeof(VkPhysicalDeviceAttachmentFeedbackLoopLayoutFeaturesEXT));
+  }
+  bool reported;
+  VkPhysicalDeviceAttachmentFeedbackLoopLayoutFeaturesEXT
+      attachment_feedback_loop_layout_features_ext;
+};
+
+struct VkJsonExtBlendOperationAdvanced {
+  VkJsonExtBlendOperationAdvanced() {
+    reported = false;
+    memset(&blend_operation_advanced_features_ext, 0,
+           sizeof(VkPhysicalDeviceBlendOperationAdvancedFeaturesEXT));
+    memset(&blend_operation_advanced_properties_ext, 0,
+           sizeof(VkPhysicalDeviceBlendOperationAdvancedPropertiesEXT));
+  }
+  bool reported;
+  VkPhysicalDeviceBlendOperationAdvancedFeaturesEXT
+      blend_operation_advanced_features_ext;
+  VkPhysicalDeviceBlendOperationAdvancedPropertiesEXT
+      blend_operation_advanced_properties_ext;
+};
+
+struct VkJsonExtBorderColorSwizzle {
+  VkJsonExtBorderColorSwizzle() {
+    reported = false;
+    memset(&border_color_swizzle_features_ext, 0,
+           sizeof(VkPhysicalDeviceBorderColorSwizzleFeaturesEXT));
+  }
+  bool reported;
+  VkPhysicalDeviceBorderColorSwizzleFeaturesEXT
+      border_color_swizzle_features_ext;
+};
+
+struct VkJsonExtBufferDeviceAddress {
+  VkJsonExtBufferDeviceAddress() {
+    reported = false;
+    memset(&buffer_address_features_ext, 0,
+           sizeof(VkPhysicalDeviceBufferAddressFeaturesEXT));
+    memset(&buffer_device_address_features_ext, 0,
+           sizeof(VkPhysicalDeviceBufferDeviceAddressFeaturesEXT));
+  }
+  bool reported;
+  VkPhysicalDeviceBufferAddressFeaturesEXT buffer_address_features_ext;
+  VkPhysicalDeviceBufferDeviceAddressFeaturesEXT
+      buffer_device_address_features_ext;
+};
+
+struct VkJsonExtColorWriteEnable {
+  VkJsonExtColorWriteEnable() {
+    reported = false;
+    memset(&color_write_enable_features_ext, 0,
+           sizeof(VkPhysicalDeviceColorWriteEnableFeaturesEXT));
+  }
+  bool reported;
+  VkPhysicalDeviceColorWriteEnableFeaturesEXT color_write_enable_features_ext;
+};
+
+struct VkJsonExtConditionalRendering {
+  VkJsonExtConditionalRendering() {
+    reported = false;
+    memset(&conditional_rendering_features_ext, 0,
+           sizeof(VkPhysicalDeviceConditionalRenderingFeaturesEXT));
+  }
+  bool reported;
+  VkPhysicalDeviceConditionalRenderingFeaturesEXT
+      conditional_rendering_features_ext;
+};
+
+struct VkJsonExtConservativeRasterization {
+  VkJsonExtConservativeRasterization() {
+    reported = false;
+    memset(&conservative_rasterization_properties_ext, 0,
+           sizeof(VkPhysicalDeviceConservativeRasterizationPropertiesEXT));
+  }
+  bool reported;
+  VkPhysicalDeviceConservativeRasterizationPropertiesEXT
+      conservative_rasterization_properties_ext;
+};
+
+struct VkJsonExtCustomBorderColor {
+  VkJsonExtCustomBorderColor() {
+    reported = false;
+    memset(&custom_border_color_properties_ext, 0,
+           sizeof(VkPhysicalDeviceCustomBorderColorPropertiesEXT));
+    memset(&custom_border_color_features_ext, 0,
+           sizeof(VkPhysicalDeviceCustomBorderColorFeaturesEXT));
+  }
+  bool reported;
+  VkPhysicalDeviceCustomBorderColorPropertiesEXT
+      custom_border_color_properties_ext;
+  VkPhysicalDeviceCustomBorderColorFeaturesEXT custom_border_color_features_ext;
+};
+
+struct VkJsonExtDepthBiasControl {
+  VkJsonExtDepthBiasControl() {
+    reported = false;
+    memset(&depth_bias_control_features_ext, 0,
+           sizeof(VkPhysicalDeviceDepthBiasControlFeaturesEXT));
+  }
+  bool reported;
+  VkPhysicalDeviceDepthBiasControlFeaturesEXT depth_bias_control_features_ext;
+};
+
+struct VkJsonExtDepthClampControl {
+  VkJsonExtDepthClampControl() {
+    reported = false;
+    memset(&depth_clamp_control_features_ext, 0,
+           sizeof(VkPhysicalDeviceDepthClampControlFeaturesEXT));
+  }
+  bool reported;
+  VkPhysicalDeviceDepthClampControlFeaturesEXT depth_clamp_control_features_ext;
+};
+
+struct VkJsonExtDepthClipControl {
+  VkJsonExtDepthClipControl() {
+    reported = false;
+    memset(&depth_clip_control_features_ext, 0,
+           sizeof(VkPhysicalDeviceDepthClipControlFeaturesEXT));
+  }
+  bool reported;
+  VkPhysicalDeviceDepthClipControlFeaturesEXT depth_clip_control_features_ext;
+};
+
+struct VkJsonExtDepthClipEnable {
+  VkJsonExtDepthClipEnable() {
+    reported = false;
+    memset(&depth_clip_enable_features_ext, 0,
+           sizeof(VkPhysicalDeviceDepthClipEnableFeaturesEXT));
+  }
+  bool reported;
+  VkPhysicalDeviceDepthClipEnableFeaturesEXT depth_clip_enable_features_ext;
+};
+
+struct VkJsonExtDescriptorBuffer {
+  VkJsonExtDescriptorBuffer() {
+    reported = false;
+    memset(&descriptor_buffer_properties_ext, 0,
+           sizeof(VkPhysicalDeviceDescriptorBufferPropertiesEXT));
+    memset(&descriptor_buffer_density_map_properties_ext, 0,
+           sizeof(VkPhysicalDeviceDescriptorBufferDensityMapPropertiesEXT));
+    memset(&descriptor_buffer_features_ext, 0,
+           sizeof(VkPhysicalDeviceDescriptorBufferFeaturesEXT));
+  }
+  bool reported;
+  VkPhysicalDeviceDescriptorBufferPropertiesEXT
+      descriptor_buffer_properties_ext;
+  VkPhysicalDeviceDescriptorBufferDensityMapPropertiesEXT
+      descriptor_buffer_density_map_properties_ext;
+  VkPhysicalDeviceDescriptorBufferFeaturesEXT descriptor_buffer_features_ext;
+};
+
+struct VkJsonExtDescriptorIndexing {
+  VkJsonExtDescriptorIndexing() {
+    reported = false;
+    memset(&descriptor_indexing_features_ext, 0,
+           sizeof(VkPhysicalDeviceDescriptorIndexingFeaturesEXT));
+    memset(&descriptor_indexing_properties_ext, 0,
+           sizeof(VkPhysicalDeviceDescriptorIndexingPropertiesEXT));
+  }
+  bool reported;
+  VkPhysicalDeviceDescriptorIndexingFeaturesEXT
+      descriptor_indexing_features_ext;
+  VkPhysicalDeviceDescriptorIndexingPropertiesEXT
+      descriptor_indexing_properties_ext;
+};
+
+struct VkJsonExtDeviceAddressBindingReport {
+  VkJsonExtDeviceAddressBindingReport() {
+    reported = false;
+    memset(&address_binding_report_features_ext, 0,
+           sizeof(VkPhysicalDeviceAddressBindingReportFeaturesEXT));
+  }
+  bool reported;
+  VkPhysicalDeviceAddressBindingReportFeaturesEXT
+      address_binding_report_features_ext;
+};
+
+struct VkJsonExtDeviceFault {
+  VkJsonExtDeviceFault() {
+    reported = false;
+    memset(&fault_features_ext, 0, sizeof(VkPhysicalDeviceFaultFeaturesEXT));
+  }
+  bool reported;
+  VkPhysicalDeviceFaultFeaturesEXT fault_features_ext;
+};
+
+struct VkJsonExtDeviceGeneratedCommands {
+  VkJsonExtDeviceGeneratedCommands() {
+    reported = false;
+    memset(&device_generated_commands_features_ext, 0,
+           sizeof(VkPhysicalDeviceDeviceGeneratedCommandsFeaturesEXT));
+    memset(&device_generated_commands_properties_ext, 0,
+           sizeof(VkPhysicalDeviceDeviceGeneratedCommandsPropertiesEXT));
+  }
+  bool reported;
+  VkPhysicalDeviceDeviceGeneratedCommandsFeaturesEXT
+      device_generated_commands_features_ext;
+  VkPhysicalDeviceDeviceGeneratedCommandsPropertiesEXT
+      device_generated_commands_properties_ext;
+};
+
+struct VkJsonExtDeviceMemoryReport {
+  VkJsonExtDeviceMemoryReport() {
+    reported = false;
+    memset(&device_memory_report_features_ext, 0,
+           sizeof(VkPhysicalDeviceDeviceMemoryReportFeaturesEXT));
+  }
+  bool reported;
+  VkPhysicalDeviceDeviceMemoryReportFeaturesEXT
+      device_memory_report_features_ext;
+};
+
+struct VkJsonExtDiscardRectangles {
+  VkJsonExtDiscardRectangles() {
+    reported = false;
+    memset(&discard_rectangle_properties_ext, 0,
+           sizeof(VkPhysicalDeviceDiscardRectanglePropertiesEXT));
+  }
+  bool reported;
+  VkPhysicalDeviceDiscardRectanglePropertiesEXT
+      discard_rectangle_properties_ext;
+};
+
+struct VkJsonExtDynamicRenderingUnusedAttachments {
+  VkJsonExtDynamicRenderingUnusedAttachments() {
+    reported = false;
+    memset(
+        &dynamic_rendering_unused_attachments_features_ext, 0,
+        sizeof(VkPhysicalDeviceDynamicRenderingUnusedAttachmentsFeaturesEXT));
+  }
+  bool reported;
+  VkPhysicalDeviceDynamicRenderingUnusedAttachmentsFeaturesEXT
+      dynamic_rendering_unused_attachments_features_ext;
+};
+
+struct VkJsonExtExtendedDynamicState {
+  VkJsonExtExtendedDynamicState() {
+    reported = false;
+    memset(&extended_dynamic_state_features_ext, 0,
+           sizeof(VkPhysicalDeviceExtendedDynamicStateFeaturesEXT));
+  }
+  bool reported;
+  VkPhysicalDeviceExtendedDynamicStateFeaturesEXT
+      extended_dynamic_state_features_ext;
+};
+
+struct VkJsonExtExtendedDynamicState2 {
+  VkJsonExtExtendedDynamicState2() {
+    reported = false;
+    memset(&extended_dynamic_state2_features_ext, 0,
+           sizeof(VkPhysicalDeviceExtendedDynamicState2FeaturesEXT));
+  }
+  bool reported;
+  VkPhysicalDeviceExtendedDynamicState2FeaturesEXT
+      extended_dynamic_state2_features_ext;
+};
+
+struct VkJsonExtExtendedDynamicState3 {
+  VkJsonExtExtendedDynamicState3() {
+    reported = false;
+    memset(&extended_dynamic_state3_features_ext, 0,
+           sizeof(VkPhysicalDeviceExtendedDynamicState3FeaturesEXT));
+    memset(&extended_dynamic_state3_properties_ext, 0,
+           sizeof(VkPhysicalDeviceExtendedDynamicState3PropertiesEXT));
+  }
+  bool reported;
+  VkPhysicalDeviceExtendedDynamicState3FeaturesEXT
+      extended_dynamic_state3_features_ext;
+  VkPhysicalDeviceExtendedDynamicState3PropertiesEXT
+      extended_dynamic_state3_properties_ext;
+};
+
+struct VkJsonExtExternalMemoryHost {
+  VkJsonExtExternalMemoryHost() {
+    reported = false;
+    memset(&external_memory_host_properties_ext, 0,
+           sizeof(VkPhysicalDeviceExternalMemoryHostPropertiesEXT));
+  }
+  bool reported;
+  VkPhysicalDeviceExternalMemoryHostPropertiesEXT
+      external_memory_host_properties_ext;
+};
+
+struct VkJsonExtFragmentDensityMap {
+  VkJsonExtFragmentDensityMap() {
+    reported = false;
+    memset(&fragment_density_map_features_ext, 0,
+           sizeof(VkPhysicalDeviceFragmentDensityMapFeaturesEXT));
+    memset(&fragment_density_map_properties_ext, 0,
+           sizeof(VkPhysicalDeviceFragmentDensityMapPropertiesEXT));
+  }
+  bool reported;
+  VkPhysicalDeviceFragmentDensityMapFeaturesEXT
+      fragment_density_map_features_ext;
+  VkPhysicalDeviceFragmentDensityMapPropertiesEXT
+      fragment_density_map_properties_ext;
+};
+
+struct VkJsonExtFragmentDensityMap2 {
+  VkJsonExtFragmentDensityMap2() {
+    reported = false;
+    memset(&fragment_density_map2_features_ext, 0,
+           sizeof(VkPhysicalDeviceFragmentDensityMap2FeaturesEXT));
+    memset(&fragment_density_map2_properties_ext, 0,
+           sizeof(VkPhysicalDeviceFragmentDensityMap2PropertiesEXT));
+  }
+  bool reported;
+  VkPhysicalDeviceFragmentDensityMap2FeaturesEXT
+      fragment_density_map2_features_ext;
+  VkPhysicalDeviceFragmentDensityMap2PropertiesEXT
+      fragment_density_map2_properties_ext;
+};
+
+struct VkJsonExtFragmentDensityMapOffset {
+  VkJsonExtFragmentDensityMapOffset() {
+    reported = false;
+    memset(&fragment_density_map_offset_features_ext, 0,
+           sizeof(VkPhysicalDeviceFragmentDensityMapOffsetFeaturesEXT));
+    memset(&fragment_density_map_offset_properties_ext, 0,
+           sizeof(VkPhysicalDeviceFragmentDensityMapOffsetPropertiesEXT));
+  }
+  bool reported;
+  VkPhysicalDeviceFragmentDensityMapOffsetFeaturesEXT
+      fragment_density_map_offset_features_ext;
+  VkPhysicalDeviceFragmentDensityMapOffsetPropertiesEXT
+      fragment_density_map_offset_properties_ext;
+};
+
+struct VkJsonExtFragmentShaderInterlock {
+  VkJsonExtFragmentShaderInterlock() {
+    reported = false;
+    memset(&fragment_shader_interlock_features_ext, 0,
+           sizeof(VkPhysicalDeviceFragmentShaderInterlockFeaturesEXT));
+  }
+  bool reported;
+  VkPhysicalDeviceFragmentShaderInterlockFeaturesEXT
+      fragment_shader_interlock_features_ext;
+};
+
+struct VkJsonExtFrameBoundary {
+  VkJsonExtFrameBoundary() {
+    reported = false;
+    memset(&frame_boundary_features_ext, 0,
+           sizeof(VkPhysicalDeviceFrameBoundaryFeaturesEXT));
+  }
+  bool reported;
+  VkPhysicalDeviceFrameBoundaryFeaturesEXT frame_boundary_features_ext;
+};
+
+struct VkJsonExtGlobalPriorityQuery {
+  VkJsonExtGlobalPriorityQuery() {
+    reported = false;
+    memset(&global_priority_query_features_ext, 0,
+           sizeof(VkPhysicalDeviceGlobalPriorityQueryFeaturesEXT));
+  }
+  bool reported;
+  VkPhysicalDeviceGlobalPriorityQueryFeaturesEXT
+      global_priority_query_features_ext;
+};
+
+struct VkJsonExtGraphicsPipelineLibrary {
+  VkJsonExtGraphicsPipelineLibrary() {
+    reported = false;
+    memset(&graphics_pipeline_library_features_ext, 0,
+           sizeof(VkPhysicalDeviceGraphicsPipelineLibraryFeaturesEXT));
+    memset(&graphics_pipeline_library_properties_ext, 0,
+           sizeof(VkPhysicalDeviceGraphicsPipelineLibraryPropertiesEXT));
+  }
+  bool reported;
+  VkPhysicalDeviceGraphicsPipelineLibraryFeaturesEXT
+      graphics_pipeline_library_features_ext;
+  VkPhysicalDeviceGraphicsPipelineLibraryPropertiesEXT
+      graphics_pipeline_library_properties_ext;
+};
+
+struct VkJsonExtHostImageCopy {
+  VkJsonExtHostImageCopy() {
+    reported = false;
+    memset(&host_image_copy_features_ext, 0,
+           sizeof(VkPhysicalDeviceHostImageCopyFeaturesEXT));
+    memset(&host_image_copy_properties_ext, 0,
+           sizeof(VkPhysicalDeviceHostImageCopyPropertiesEXT));
+  }
+  bool reported;
+  VkPhysicalDeviceHostImageCopyFeaturesEXT host_image_copy_features_ext;
+  VkPhysicalDeviceHostImageCopyPropertiesEXT host_image_copy_properties_ext;
+  std::vector<VkImageLayout> copy_src_layouts;
+  std::vector<VkImageLayout> copy_dst_layouts;
+};
+
+struct VkJsonExtHostQueryReset {
+  VkJsonExtHostQueryReset() {
+    reported = false;
+    memset(&host_query_reset_features_ext, 0,
+           sizeof(VkPhysicalDeviceHostQueryResetFeaturesEXT));
+  }
+  bool reported;
+  VkPhysicalDeviceHostQueryResetFeaturesEXT host_query_reset_features_ext;
+};
+
+struct VkJsonExtImage2dViewOf3d {
+  VkJsonExtImage2dViewOf3d() {
+    reported = false;
+    memset(&image_2d_view_of_3d_features_ext, 0,
+           sizeof(VkPhysicalDeviceImage2DViewOf3DFeaturesEXT));
+  }
+  bool reported;
+  VkPhysicalDeviceImage2DViewOf3DFeaturesEXT image_2d_view_of_3d_features_ext;
+};
+
+struct VkJsonExtImageCompressionControl {
+  VkJsonExtImageCompressionControl() {
+    reported = false;
+    memset(&image_compression_control_features_ext, 0,
+           sizeof(VkPhysicalDeviceImageCompressionControlFeaturesEXT));
+  }
+  bool reported;
+  VkPhysicalDeviceImageCompressionControlFeaturesEXT
+      image_compression_control_features_ext;
+};
+
+struct VkJsonExtImageCompressionControlSwapchain {
+  VkJsonExtImageCompressionControlSwapchain() {
+    reported = false;
+    memset(&image_compression_control_swapchain_features_ext, 0,
+           sizeof(VkPhysicalDeviceImageCompressionControlSwapchainFeaturesEXT));
+  }
+  bool reported;
+  VkPhysicalDeviceImageCompressionControlSwapchainFeaturesEXT
+      image_compression_control_swapchain_features_ext;
+};
+
+struct VkJsonExtImageRobustness {
+  VkJsonExtImageRobustness() {
+    reported = false;
+    memset(&image_robustness_features_ext, 0,
+           sizeof(VkPhysicalDeviceImageRobustnessFeaturesEXT));
+  }
+  bool reported;
+  VkPhysicalDeviceImageRobustnessFeaturesEXT image_robustness_features_ext;
+};
+
+struct VkJsonExtImageSlicedViewOf3d {
+  VkJsonExtImageSlicedViewOf3d() {
+    reported = false;
+    memset(&image_sliced_view_of_3d_features_ext, 0,
+           sizeof(VkPhysicalDeviceImageSlicedViewOf3DFeaturesEXT));
+  }
+  bool reported;
+  VkPhysicalDeviceImageSlicedViewOf3DFeaturesEXT
+      image_sliced_view_of_3d_features_ext;
+};
+
+struct VkJsonExtImageViewMinLod {
+  VkJsonExtImageViewMinLod() {
+    reported = false;
+    memset(&image_view_min_lod_features_ext, 0,
+           sizeof(VkPhysicalDeviceImageViewMinLodFeaturesEXT));
+  }
+  bool reported;
+  VkPhysicalDeviceImageViewMinLodFeaturesEXT image_view_min_lod_features_ext;
+};
+
+struct VkJsonExtIndexTypeUint8 {
+  VkJsonExtIndexTypeUint8() {
+    reported = false;
+    memset(&index_type_uint8_features_ext, 0,
+           sizeof(VkPhysicalDeviceIndexTypeUint8FeaturesEXT));
+  }
+  bool reported;
+  VkPhysicalDeviceIndexTypeUint8FeaturesEXT index_type_uint8_features_ext;
+};
+
+struct VkJsonExtInlineUniformBlock {
+  VkJsonExtInlineUniformBlock() {
+    reported = false;
+    memset(&inline_uniform_block_features_ext, 0,
+           sizeof(VkPhysicalDeviceInlineUniformBlockFeaturesEXT));
+    memset(&inline_uniform_block_properties_ext, 0,
+           sizeof(VkPhysicalDeviceInlineUniformBlockPropertiesEXT));
+  }
+  bool reported;
+  VkPhysicalDeviceInlineUniformBlockFeaturesEXT
+      inline_uniform_block_features_ext;
+  VkPhysicalDeviceInlineUniformBlockPropertiesEXT
+      inline_uniform_block_properties_ext;
+};
+
+struct VkJsonExtLegacyDithering {
+  VkJsonExtLegacyDithering() {
+    reported = false;
+    memset(&legacy_dithering_features_ext, 0,
+           sizeof(VkPhysicalDeviceLegacyDitheringFeaturesEXT));
+  }
+  bool reported;
+  VkPhysicalDeviceLegacyDitheringFeaturesEXT legacy_dithering_features_ext;
+};
+
+struct VkJsonExtLegacyVertexAttributes {
+  VkJsonExtLegacyVertexAttributes() {
+    reported = false;
+    memset(&legacy_vertex_attributes_features_ext, 0,
+           sizeof(VkPhysicalDeviceLegacyVertexAttributesFeaturesEXT));
+    memset(&legacy_vertex_attributes_properties_ext, 0,
+           sizeof(VkPhysicalDeviceLegacyVertexAttributesPropertiesEXT));
+  }
+  bool reported;
+  VkPhysicalDeviceLegacyVertexAttributesFeaturesEXT
+      legacy_vertex_attributes_features_ext;
+  VkPhysicalDeviceLegacyVertexAttributesPropertiesEXT
+      legacy_vertex_attributes_properties_ext;
+};
+
+struct VkJsonExtLineRasterization {
+  VkJsonExtLineRasterization() {
+    reported = false;
+    memset(&line_rasterization_features_ext, 0,
+           sizeof(VkPhysicalDeviceLineRasterizationFeaturesEXT));
+    memset(&line_rasterization_properties_ext, 0,
+           sizeof(VkPhysicalDeviceLineRasterizationPropertiesEXT));
+  }
+  bool reported;
+  VkPhysicalDeviceLineRasterizationFeaturesEXT line_rasterization_features_ext;
+  VkPhysicalDeviceLineRasterizationPropertiesEXT
+      line_rasterization_properties_ext;
+};
+
+struct VkJsonExtMapMemoryPlaced {
+  VkJsonExtMapMemoryPlaced() {
+    reported = false;
+    memset(&map_memory_placed_features_ext, 0,
+           sizeof(VkPhysicalDeviceMapMemoryPlacedFeaturesEXT));
+    memset(&map_memory_placed_properties_ext, 0,
+           sizeof(VkPhysicalDeviceMapMemoryPlacedPropertiesEXT));
+  }
+  bool reported;
+  VkPhysicalDeviceMapMemoryPlacedFeaturesEXT map_memory_placed_features_ext;
+  VkPhysicalDeviceMapMemoryPlacedPropertiesEXT map_memory_placed_properties_ext;
+};
+
+struct VkJsonExtMemoryPriority {
+  VkJsonExtMemoryPriority() {
+    reported = false;
+    memset(&memory_priority_features_ext, 0,
+           sizeof(VkPhysicalDeviceMemoryPriorityFeaturesEXT));
+  }
+  bool reported;
+  VkPhysicalDeviceMemoryPriorityFeaturesEXT memory_priority_features_ext;
+};
+
+struct VkJsonExtMeshShader {
+  VkJsonExtMeshShader() {
+    reported = false;
+    memset(&mesh_shader_features_ext, 0,
+           sizeof(VkPhysicalDeviceMeshShaderFeaturesEXT));
+    memset(&mesh_shader_properties_ext, 0,
+           sizeof(VkPhysicalDeviceMeshShaderPropertiesEXT));
+  }
+  bool reported;
+  VkPhysicalDeviceMeshShaderFeaturesEXT mesh_shader_features_ext;
+  VkPhysicalDeviceMeshShaderPropertiesEXT mesh_shader_properties_ext;
+};
+
+struct VkJsonExtMultiDraw {
+  VkJsonExtMultiDraw() {
+    reported = false;
+    memset(&multi_draw_features_ext, 0,
+           sizeof(VkPhysicalDeviceMultiDrawFeaturesEXT));
+    memset(&multi_draw_properties_ext, 0,
+           sizeof(VkPhysicalDeviceMultiDrawPropertiesEXT));
+  }
+  bool reported;
+  VkPhysicalDeviceMultiDrawFeaturesEXT multi_draw_features_ext;
+  VkPhysicalDeviceMultiDrawPropertiesEXT multi_draw_properties_ext;
+};
+
+struct VkJsonExtMultisampledRenderToSingleSampled {
+  VkJsonExtMultisampledRenderToSingleSampled() {
+    reported = false;
+    memset(
+        &multisampled_render_to_single_sampled_features_ext, 0,
+        sizeof(VkPhysicalDeviceMultisampledRenderToSingleSampledFeaturesEXT));
+  }
+  bool reported;
+  VkPhysicalDeviceMultisampledRenderToSingleSampledFeaturesEXT
+      multisampled_render_to_single_sampled_features_ext;
+};
+
+struct VkJsonExtMutableDescriptorType {
+  VkJsonExtMutableDescriptorType() {
+    reported = false;
+    memset(&mutable_descriptor_type_features_ext, 0,
+           sizeof(VkPhysicalDeviceMutableDescriptorTypeFeaturesEXT));
+  }
+  bool reported;
+  VkPhysicalDeviceMutableDescriptorTypeFeaturesEXT
+      mutable_descriptor_type_features_ext;
+};
+
+struct VkJsonExtNestedCommandBuffer {
+  VkJsonExtNestedCommandBuffer() {
+    reported = false;
+    memset(&nested_command_buffer_features_ext, 0,
+           sizeof(VkPhysicalDeviceNestedCommandBufferFeaturesEXT));
+    memset(&nested_command_buffer_properties_ext, 0,
+           sizeof(VkPhysicalDeviceNestedCommandBufferPropertiesEXT));
+  }
+  bool reported;
+  VkPhysicalDeviceNestedCommandBufferFeaturesEXT
+      nested_command_buffer_features_ext;
+  VkPhysicalDeviceNestedCommandBufferPropertiesEXT
+      nested_command_buffer_properties_ext;
+};
+
+struct VkJsonExtNonSeamlessCubeMap {
+  VkJsonExtNonSeamlessCubeMap() {
+    reported = false;
+    memset(&non_seamless_cube_map_features_ext, 0,
+           sizeof(VkPhysicalDeviceNonSeamlessCubeMapFeaturesEXT));
+  }
+  bool reported;
+  VkPhysicalDeviceNonSeamlessCubeMapFeaturesEXT
+      non_seamless_cube_map_features_ext;
+};
+
+struct VkJsonExtOpacityMicromap {
+  VkJsonExtOpacityMicromap() {
+    reported = false;
+    memset(&opacity_micromap_features_ext, 0,
+           sizeof(VkPhysicalDeviceOpacityMicromapFeaturesEXT));
+    memset(&opacity_micromap_properties_ext, 0,
+           sizeof(VkPhysicalDeviceOpacityMicromapPropertiesEXT));
+  }
+  bool reported;
+  VkPhysicalDeviceOpacityMicromapFeaturesEXT opacity_micromap_features_ext;
+  VkPhysicalDeviceOpacityMicromapPropertiesEXT opacity_micromap_properties_ext;
+};
+
+struct VkJsonExtPageableDeviceLocalMemory {
+  VkJsonExtPageableDeviceLocalMemory() {
+    reported = false;
+    memset(&pageable_device_local_memory_features_ext, 0,
+           sizeof(VkPhysicalDevicePageableDeviceLocalMemoryFeaturesEXT));
+  }
+  bool reported;
+  VkPhysicalDevicePageableDeviceLocalMemoryFeaturesEXT
+      pageable_device_local_memory_features_ext;
+};
+
+struct VkJsonExtPciBusInfo {
+  VkJsonExtPciBusInfo() {
+    reported = false;
+    memset(&pci_bus_info_properties_ext, 0,
+           sizeof(VkPhysicalDevicePCIBusInfoPropertiesEXT));
+  }
+  bool reported;
+  VkPhysicalDevicePCIBusInfoPropertiesEXT pci_bus_info_properties_ext;
+};
+
+struct VkJsonExtPhysicalDeviceDrm {
+  VkJsonExtPhysicalDeviceDrm() {
+    reported = false;
+    memset(&drm_properties_ext, 0, sizeof(VkPhysicalDeviceDrmPropertiesEXT));
+  }
+  bool reported;
+  VkPhysicalDeviceDrmPropertiesEXT drm_properties_ext;
+};
+
+struct VkJsonExtPipelineCreationCacheControl {
+  VkJsonExtPipelineCreationCacheControl() {
+    reported = false;
+    memset(&pipeline_creation_cache_control_features_ext, 0,
+           sizeof(VkPhysicalDevicePipelineCreationCacheControlFeaturesEXT));
+  }
+  bool reported;
+  VkPhysicalDevicePipelineCreationCacheControlFeaturesEXT
+      pipeline_creation_cache_control_features_ext;
+};
+
+struct VkJsonExtPipelineLibraryGroupHandles {
+  VkJsonExtPipelineLibraryGroupHandles() {
+    reported = false;
+    memset(&pipeline_library_group_handles_features_ext, 0,
+           sizeof(VkPhysicalDevicePipelineLibraryGroupHandlesFeaturesEXT));
+  }
+  bool reported;
+  VkPhysicalDevicePipelineLibraryGroupHandlesFeaturesEXT
+      pipeline_library_group_handles_features_ext;
+};
+
+struct VkJsonExtPipelineProperties {
+  VkJsonExtPipelineProperties() {
+    reported = false;
+    memset(&pipeline_properties_features_ext, 0,
+           sizeof(VkPhysicalDevicePipelinePropertiesFeaturesEXT));
+  }
+  bool reported;
+  VkPhysicalDevicePipelinePropertiesFeaturesEXT
+      pipeline_properties_features_ext;
+};
+
+struct VkJsonExtPipelineProtectedAccess {
+  VkJsonExtPipelineProtectedAccess() {
+    reported = false;
+    memset(&pipeline_protected_access_features_ext, 0,
+           sizeof(VkPhysicalDevicePipelineProtectedAccessFeaturesEXT));
+  }
+  bool reported;
+  VkPhysicalDevicePipelineProtectedAccessFeaturesEXT
+      pipeline_protected_access_features_ext;
+};
+
+struct VkJsonExtPipelineRobustness {
+  VkJsonExtPipelineRobustness() {
+    reported = false;
+    memset(&pipeline_robustness_features_ext, 0,
+           sizeof(VkPhysicalDevicePipelineRobustnessFeaturesEXT));
+    memset(&pipeline_robustness_properties_ext, 0,
+           sizeof(VkPhysicalDevicePipelineRobustnessPropertiesEXT));
+  }
+  bool reported;
+  VkPhysicalDevicePipelineRobustnessFeaturesEXT
+      pipeline_robustness_features_ext;
+  VkPhysicalDevicePipelineRobustnessPropertiesEXT
+      pipeline_robustness_properties_ext;
+};
+
+struct VkJsonExtPresentModeFifoLatestReady {
+  VkJsonExtPresentModeFifoLatestReady() {
+    reported = false;
+    memset(&present_mode_fifo_latest_ready_features_ext, 0,
+           sizeof(VkPhysicalDevicePresentModeFifoLatestReadyFeaturesEXT));
+  }
+  bool reported;
+  VkPhysicalDevicePresentModeFifoLatestReadyFeaturesEXT
+      present_mode_fifo_latest_ready_features_ext;
+};
+
+struct VkJsonExtPrimitiveTopologyListRestart {
+  VkJsonExtPrimitiveTopologyListRestart() {
+    reported = false;
+    memset(&primitive_topology_list_restart_features_ext, 0,
+           sizeof(VkPhysicalDevicePrimitiveTopologyListRestartFeaturesEXT));
+  }
+  bool reported;
+  VkPhysicalDevicePrimitiveTopologyListRestartFeaturesEXT
+      primitive_topology_list_restart_features_ext;
+};
+
+struct VkJsonExtPrimitivesGeneratedQuery {
+  VkJsonExtPrimitivesGeneratedQuery() {
+    reported = false;
+    memset(&primitives_generated_query_features_ext, 0,
+           sizeof(VkPhysicalDevicePrimitivesGeneratedQueryFeaturesEXT));
+  }
+  bool reported;
+  VkPhysicalDevicePrimitivesGeneratedQueryFeaturesEXT
+      primitives_generated_query_features_ext;
+};
+
+struct VkJsonExtPrivateData {
+  VkJsonExtPrivateData() {
+    reported = false;
+    memset(&private_data_features_ext, 0,
+           sizeof(VkPhysicalDevicePrivateDataFeaturesEXT));
+  }
+  bool reported;
+  VkPhysicalDevicePrivateDataFeaturesEXT private_data_features_ext;
+};
+
+struct VkJsonExtProvokingVertex {
+  VkJsonExtProvokingVertex() {
+    reported = false;
+    memset(&provoking_vertex_features_ext, 0,
+           sizeof(VkPhysicalDeviceProvokingVertexFeaturesEXT));
+    memset(&provoking_vertex_properties_ext, 0,
+           sizeof(VkPhysicalDeviceProvokingVertexPropertiesEXT));
+  }
+  bool reported;
+  VkPhysicalDeviceProvokingVertexFeaturesEXT provoking_vertex_features_ext;
+  VkPhysicalDeviceProvokingVertexPropertiesEXT provoking_vertex_properties_ext;
+};
+
+struct VkJsonExtRasterizationOrderAttachmentAccess {
+  VkJsonExtRasterizationOrderAttachmentAccess() {
+    reported = false;
+    memset(
+        &rasterization_order_attachment_access_features_ext, 0,
+        sizeof(VkPhysicalDeviceRasterizationOrderAttachmentAccessFeaturesEXT));
+  }
+  bool reported;
+  VkPhysicalDeviceRasterizationOrderAttachmentAccessFeaturesEXT
+      rasterization_order_attachment_access_features_ext;
+};
+
+struct VkJsonExtRgba10x6Formats {
+  VkJsonExtRgba10x6Formats() {
+    reported = false;
+    memset(&rgba10_x6_formats_features_ext, 0,
+           sizeof(VkPhysicalDeviceRGBA10X6FormatsFeaturesEXT));
+  }
+  bool reported;
+  VkPhysicalDeviceRGBA10X6FormatsFeaturesEXT rgba10_x6_formats_features_ext;
+};
+
+struct VkJsonExtRobustness2 {
+  VkJsonExtRobustness2() {
+    reported = false;
+    memset(&robustness2_features_ext, 0,
+           sizeof(VkPhysicalDeviceRobustness2FeaturesEXT));
+    memset(&robustness2_properties_ext, 0,
+           sizeof(VkPhysicalDeviceRobustness2PropertiesEXT));
+  }
+  bool reported;
+  VkPhysicalDeviceRobustness2FeaturesEXT robustness2_features_ext;
+  VkPhysicalDeviceRobustness2PropertiesEXT robustness2_properties_ext;
+};
+
+struct VkJsonExtSampleLocations {
+  VkJsonExtSampleLocations() {
+    reported = false;
+    memset(&sample_locations_properties_ext, 0,
+           sizeof(VkPhysicalDeviceSampleLocationsPropertiesEXT));
+  }
+  bool reported;
+  VkPhysicalDeviceSampleLocationsPropertiesEXT sample_locations_properties_ext;
+};
+
+struct VkJsonExtSamplerFilterMinmax {
+  VkJsonExtSamplerFilterMinmax() {
+    reported = false;
+    memset(&sampler_filter_minmax_properties_ext, 0,
+           sizeof(VkPhysicalDeviceSamplerFilterMinmaxPropertiesEXT));
+  }
+  bool reported;
+  VkPhysicalDeviceSamplerFilterMinmaxPropertiesEXT
+      sampler_filter_minmax_properties_ext;
+};
+
+struct VkJsonExtScalarBlockLayout {
+  VkJsonExtScalarBlockLayout() {
+    reported = false;
+    memset(&scalar_block_layout_features_ext, 0,
+           sizeof(VkPhysicalDeviceScalarBlockLayoutFeaturesEXT));
+  }
+  bool reported;
+  VkPhysicalDeviceScalarBlockLayoutFeaturesEXT scalar_block_layout_features_ext;
+};
+
+struct VkJsonExtShaderAtomicFloat {
+  VkJsonExtShaderAtomicFloat() {
+    reported = false;
+    memset(&shader_atomic_float_features_ext, 0,
+           sizeof(VkPhysicalDeviceShaderAtomicFloatFeaturesEXT));
+  }
+  bool reported;
+  VkPhysicalDeviceShaderAtomicFloatFeaturesEXT shader_atomic_float_features_ext;
+};
+
+struct VkJsonExtShaderAtomicFloat2 {
+  VkJsonExtShaderAtomicFloat2() {
+    reported = false;
+    memset(&shader_atomic_float2_features_ext, 0,
+           sizeof(VkPhysicalDeviceShaderAtomicFloat2FeaturesEXT));
+  }
+  bool reported;
+  VkPhysicalDeviceShaderAtomicFloat2FeaturesEXT
+      shader_atomic_float2_features_ext;
+};
+
+struct VkJsonExtShaderDemoteToHelperInvocation {
+  VkJsonExtShaderDemoteToHelperInvocation() {
+    reported = false;
+    memset(&shader_demote_to_helper_invocation_features_ext, 0,
+           sizeof(VkPhysicalDeviceShaderDemoteToHelperInvocationFeaturesEXT));
+  }
+  bool reported;
+  VkPhysicalDeviceShaderDemoteToHelperInvocationFeaturesEXT
+      shader_demote_to_helper_invocation_features_ext;
+};
+
+struct VkJsonExtShaderFloat8 {
+  VkJsonExtShaderFloat8() {
+    reported = false;
+    memset(&shader_float8_features_ext, 0,
+           sizeof(VkPhysicalDeviceShaderFloat8FeaturesEXT));
+  }
+  bool reported;
+  VkPhysicalDeviceShaderFloat8FeaturesEXT shader_float8_features_ext;
+};
+
+struct VkJsonExtShaderImageAtomicInt64 {
+  VkJsonExtShaderImageAtomicInt64() {
+    reported = false;
+    memset(&shader_image_atomic_int64_features_ext, 0,
+           sizeof(VkPhysicalDeviceShaderImageAtomicInt64FeaturesEXT));
+  }
+  bool reported;
+  VkPhysicalDeviceShaderImageAtomicInt64FeaturesEXT
+      shader_image_atomic_int64_features_ext;
+};
+
+struct VkJsonExtShaderModuleIdentifier {
+  VkJsonExtShaderModuleIdentifier() {
+    reported = false;
+    memset(&shader_module_identifier_features_ext, 0,
+           sizeof(VkPhysicalDeviceShaderModuleIdentifierFeaturesEXT));
+    memset(&shader_module_identifier_properties_ext, 0,
+           sizeof(VkPhysicalDeviceShaderModuleIdentifierPropertiesEXT));
+  }
+  bool reported;
+  VkPhysicalDeviceShaderModuleIdentifierFeaturesEXT
+      shader_module_identifier_features_ext;
+  VkPhysicalDeviceShaderModuleIdentifierPropertiesEXT
+      shader_module_identifier_properties_ext;
+};
+
+struct VkJsonExtShaderObject {
+  VkJsonExtShaderObject() {
+    reported = false;
+    memset(&shader_object_features_ext, 0,
+           sizeof(VkPhysicalDeviceShaderObjectFeaturesEXT));
+    memset(&shader_object_properties_ext, 0,
+           sizeof(VkPhysicalDeviceShaderObjectPropertiesEXT));
+  }
+  bool reported;
+  VkPhysicalDeviceShaderObjectFeaturesEXT shader_object_features_ext;
+  VkPhysicalDeviceShaderObjectPropertiesEXT shader_object_properties_ext;
+};
+
+struct VkJsonExtShaderReplicatedComposites {
+  VkJsonExtShaderReplicatedComposites() {
+    reported = false;
+    memset(&shader_replicated_composites_features_ext, 0,
+           sizeof(VkPhysicalDeviceShaderReplicatedCompositesFeaturesEXT));
+  }
+  bool reported;
+  VkPhysicalDeviceShaderReplicatedCompositesFeaturesEXT
+      shader_replicated_composites_features_ext;
+};
+
+struct VkJsonExtShaderTileImage {
+  VkJsonExtShaderTileImage() {
+    reported = false;
+    memset(&shader_tile_image_features_ext, 0,
+           sizeof(VkPhysicalDeviceShaderTileImageFeaturesEXT));
+    memset(&shader_tile_image_properties_ext, 0,
+           sizeof(VkPhysicalDeviceShaderTileImagePropertiesEXT));
+  }
+  bool reported;
+  VkPhysicalDeviceShaderTileImageFeaturesEXT shader_tile_image_features_ext;
+  VkPhysicalDeviceShaderTileImagePropertiesEXT shader_tile_image_properties_ext;
+};
+
+struct VkJsonExtSubgroupSizeControl {
+  VkJsonExtSubgroupSizeControl() {
+    reported = false;
+    memset(&subgroup_size_control_features_ext, 0,
+           sizeof(VkPhysicalDeviceSubgroupSizeControlFeaturesEXT));
+    memset(&subgroup_size_control_properties_ext, 0,
+           sizeof(VkPhysicalDeviceSubgroupSizeControlPropertiesEXT));
+  }
+  bool reported;
+  VkPhysicalDeviceSubgroupSizeControlFeaturesEXT
+      subgroup_size_control_features_ext;
+  VkPhysicalDeviceSubgroupSizeControlPropertiesEXT
+      subgroup_size_control_properties_ext;
+};
+
+struct VkJsonExtSubpassMergeFeedback {
+  VkJsonExtSubpassMergeFeedback() {
+    reported = false;
+    memset(&subpass_merge_feedback_features_ext, 0,
+           sizeof(VkPhysicalDeviceSubpassMergeFeedbackFeaturesEXT));
+  }
+  bool reported;
+  VkPhysicalDeviceSubpassMergeFeedbackFeaturesEXT
+      subpass_merge_feedback_features_ext;
+};
+
+struct VkJsonExtSwapchainMaintenance1 {
+  VkJsonExtSwapchainMaintenance1() {
+    reported = false;
+    memset(&swapchain_maintenance1_features_ext, 0,
+           sizeof(VkPhysicalDeviceSwapchainMaintenance1FeaturesEXT));
+  }
+  bool reported;
+  VkPhysicalDeviceSwapchainMaintenance1FeaturesEXT
+      swapchain_maintenance1_features_ext;
+};
+
+struct VkJsonExtTexelBufferAlignment {
+  VkJsonExtTexelBufferAlignment() {
+    reported = false;
+    memset(&texel_buffer_alignment_features_ext, 0,
+           sizeof(VkPhysicalDeviceTexelBufferAlignmentFeaturesEXT));
+    memset(&texel_buffer_alignment_properties_ext, 0,
+           sizeof(VkPhysicalDeviceTexelBufferAlignmentPropertiesEXT));
+  }
+  bool reported;
+  VkPhysicalDeviceTexelBufferAlignmentFeaturesEXT
+      texel_buffer_alignment_features_ext;
+  VkPhysicalDeviceTexelBufferAlignmentPropertiesEXT
+      texel_buffer_alignment_properties_ext;
+};
+
+struct VkJsonExtTextureCompressionAstcHdr {
+  VkJsonExtTextureCompressionAstcHdr() {
+    reported = false;
+    memset(&texture_compression_astchdr_features_ext, 0,
+           sizeof(VkPhysicalDeviceTextureCompressionASTCHDRFeaturesEXT));
+  }
+  bool reported;
+  VkPhysicalDeviceTextureCompressionASTCHDRFeaturesEXT
+      texture_compression_astchdr_features_ext;
+};
+
+struct VkJsonExtTransformFeedback {
+  VkJsonExtTransformFeedback() {
+    reported = false;
+    memset(&transform_feedback_features_ext, 0,
+           sizeof(VkPhysicalDeviceTransformFeedbackFeaturesEXT));
+    memset(&transform_feedback_properties_ext, 0,
+           sizeof(VkPhysicalDeviceTransformFeedbackPropertiesEXT));
+  }
+  bool reported;
+  VkPhysicalDeviceTransformFeedbackFeaturesEXT transform_feedback_features_ext;
+  VkPhysicalDeviceTransformFeedbackPropertiesEXT
+      transform_feedback_properties_ext;
+};
+
+struct VkJsonExtVertexAttributeDivisor {
+  VkJsonExtVertexAttributeDivisor() {
+    reported = false;
+    memset(&vertex_attribute_divisor_properties_ext, 0,
+           sizeof(VkPhysicalDeviceVertexAttributeDivisorPropertiesEXT));
+    memset(&vertex_attribute_divisor_features_ext, 0,
+           sizeof(VkPhysicalDeviceVertexAttributeDivisorFeaturesEXT));
+  }
+  bool reported;
+  VkPhysicalDeviceVertexAttributeDivisorPropertiesEXT
+      vertex_attribute_divisor_properties_ext;
+  VkPhysicalDeviceVertexAttributeDivisorFeaturesEXT
+      vertex_attribute_divisor_features_ext;
+};
+
+struct VkJsonExtVertexAttributeRobustness {
+  VkJsonExtVertexAttributeRobustness() {
+    reported = false;
+    memset(&vertex_attribute_robustness_features_ext, 0,
+           sizeof(VkPhysicalDeviceVertexAttributeRobustnessFeaturesEXT));
+  }
+  bool reported;
+  VkPhysicalDeviceVertexAttributeRobustnessFeaturesEXT
+      vertex_attribute_robustness_features_ext;
+};
+
+struct VkJsonExtVertexInputDynamicState {
+  VkJsonExtVertexInputDynamicState() {
+    reported = false;
+    memset(&vertex_input_dynamic_state_features_ext, 0,
+           sizeof(VkPhysicalDeviceVertexInputDynamicStateFeaturesEXT));
+  }
+  bool reported;
+  VkPhysicalDeviceVertexInputDynamicStateFeaturesEXT
+      vertex_input_dynamic_state_features_ext;
+};
+
+struct VkJsonExtYcbcr2plane444Formats {
+  VkJsonExtYcbcr2plane444Formats() {
+    reported = false;
+    memset(&ycbcr_2plane_444_formats_features_ext, 0,
+           sizeof(VkPhysicalDeviceYcbcr2Plane444FormatsFeaturesEXT));
+  }
+  bool reported;
+  VkPhysicalDeviceYcbcr2Plane444FormatsFeaturesEXT
+      ycbcr_2plane_444_formats_features_ext;
+};
+
+struct VkJsonExtYcbcrImageArrays {
+  VkJsonExtYcbcrImageArrays() {
+    reported = false;
+    memset(&ycbcr_image_arrays_features_ext, 0,
+           sizeof(VkPhysicalDeviceYcbcrImageArraysFeaturesEXT));
+  }
+  bool reported;
+  VkPhysicalDeviceYcbcrImageArraysFeaturesEXT ycbcr_image_arrays_features_ext;
+};
+
+struct VkJsonExtZeroInitializeDeviceMemory {
+  VkJsonExtZeroInitializeDeviceMemory() {
+    reported = false;
+    memset(&zero_initialize_device_memory_features_ext, 0,
+           sizeof(VkPhysicalDeviceZeroInitializeDeviceMemoryFeaturesEXT));
+  }
+  bool reported;
+  VkPhysicalDeviceZeroInitializeDeviceMemoryFeaturesEXT
+      zero_initialize_device_memory_features_ext;
+};
+
+struct VkJsonHUAWEIClusterCullingShader {
+  VkJsonHUAWEIClusterCullingShader() {
+    reported = false;
+    memset(&cluster_culling_shader_features_huawei, 0,
+           sizeof(VkPhysicalDeviceClusterCullingShaderFeaturesHUAWEI));
+    memset(&cluster_culling_shader_properties_huawei, 0,
+           sizeof(VkPhysicalDeviceClusterCullingShaderPropertiesHUAWEI));
+  }
+  bool reported;
+  VkPhysicalDeviceClusterCullingShaderFeaturesHUAWEI
+      cluster_culling_shader_features_huawei;
+  VkPhysicalDeviceClusterCullingShaderPropertiesHUAWEI
+      cluster_culling_shader_properties_huawei;
+};
+
+struct VkJsonHUAWEIHdrVivid {
+  VkJsonHUAWEIHdrVivid() {
+    reported = false;
+    memset(&hdr_vivid_features_huawei, 0,
+           sizeof(VkPhysicalDeviceHdrVividFeaturesHUAWEI));
+  }
+  bool reported;
+  VkPhysicalDeviceHdrVividFeaturesHUAWEI hdr_vivid_features_huawei;
+};
+
+struct VkJsonHUAWEIInvocationMask {
+  VkJsonHUAWEIInvocationMask() {
+    reported = false;
+    memset(&invocation_mask_features_huawei, 0,
+           sizeof(VkPhysicalDeviceInvocationMaskFeaturesHUAWEI));
+  }
+  bool reported;
+  VkPhysicalDeviceInvocationMaskFeaturesHUAWEI invocation_mask_features_huawei;
+};
+
+struct VkJsonHUAWEISubpassShading {
+  VkJsonHUAWEISubpassShading() {
+    reported = false;
+    memset(&subpass_shading_features_huawei, 0,
+           sizeof(VkPhysicalDeviceSubpassShadingFeaturesHUAWEI));
+    memset(&subpass_shading_properties_huawei, 0,
+           sizeof(VkPhysicalDeviceSubpassShadingPropertiesHUAWEI));
+  }
+  bool reported;
+  VkPhysicalDeviceSubpassShadingFeaturesHUAWEI subpass_shading_features_huawei;
+  VkPhysicalDeviceSubpassShadingPropertiesHUAWEI
+      subpass_shading_properties_huawei;
+};
+
+struct VkJsonIMGRelaxedLineRasterization {
+  VkJsonIMGRelaxedLineRasterization() {
+    reported = false;
+    memset(&relaxed_line_rasterization_features_img, 0,
+           sizeof(VkPhysicalDeviceRelaxedLineRasterizationFeaturesIMG));
+  }
+  bool reported;
+  VkPhysicalDeviceRelaxedLineRasterizationFeaturesIMG
+      relaxed_line_rasterization_features_img;
+};
+
+struct VkJsonExtVKINTELShaderIntegerFunctions2 {
+  VkJsonExtVKINTELShaderIntegerFunctions2() {
+    reported = false;
+    memset(&shader_integer_functions2_features_intel, 0,
+           sizeof(VkPhysicalDeviceShaderIntegerFunctions2FeaturesINTEL));
+  }
+  bool reported;
+  VkPhysicalDeviceShaderIntegerFunctions2FeaturesINTEL
+      shader_integer_functions2_features_intel;
+};
+
+struct VkJsonKHR16bitStorage {
+  VkJsonKHR16bitStorage() {
+    reported = false;
+    memset(&bit16_storage_features_khr, 0,
+           sizeof(VkPhysicalDevice16BitStorageFeaturesKHR));
+  }
+  bool reported;
+  VkPhysicalDevice16BitStorageFeaturesKHR bit16_storage_features_khr;
+};
+
+struct VkJsonKHR8bitStorage {
+  VkJsonKHR8bitStorage() {
+    reported = false;
+    memset(&bit8_storage_features_khr, 0,
+           sizeof(VkPhysicalDevice8BitStorageFeaturesKHR));
+  }
+  bool reported;
+  VkPhysicalDevice8BitStorageFeaturesKHR bit8_storage_features_khr;
+};
+
+struct VkJsonKHRAccelerationStructure {
+  VkJsonKHRAccelerationStructure() {
+    reported = false;
+    memset(&acceleration_structure_features_khr, 0,
+           sizeof(VkPhysicalDeviceAccelerationStructureFeaturesKHR));
+    memset(&acceleration_structure_properties_khr, 0,
+           sizeof(VkPhysicalDeviceAccelerationStructurePropertiesKHR));
+  }
+  bool reported;
+  VkPhysicalDeviceAccelerationStructureFeaturesKHR
+      acceleration_structure_features_khr;
+  VkPhysicalDeviceAccelerationStructurePropertiesKHR
+      acceleration_structure_properties_khr;
+};
+
+struct VkJsonKHRBufferDeviceAddress {
+  VkJsonKHRBufferDeviceAddress() {
+    reported = false;
+    memset(&buffer_device_address_features_khr, 0,
+           sizeof(VkPhysicalDeviceBufferDeviceAddressFeaturesKHR));
+  }
+  bool reported;
+  VkPhysicalDeviceBufferDeviceAddressFeaturesKHR
+      buffer_device_address_features_khr;
+};
+
+struct VkJsonKHRComputeShaderDerivatives {
+  VkJsonKHRComputeShaderDerivatives() {
+    reported = false;
+    memset(&compute_shader_derivatives_features_khr, 0,
+           sizeof(VkPhysicalDeviceComputeShaderDerivativesFeaturesKHR));
+    memset(&compute_shader_derivatives_properties_khr, 0,
+           sizeof(VkPhysicalDeviceComputeShaderDerivativesPropertiesKHR));
+  }
+  bool reported;
+  VkPhysicalDeviceComputeShaderDerivativesFeaturesKHR
+      compute_shader_derivatives_features_khr;
+  VkPhysicalDeviceComputeShaderDerivativesPropertiesKHR
+      compute_shader_derivatives_properties_khr;
+};
+
+struct VkJsonKHRCooperativeMatrix {
+  VkJsonKHRCooperativeMatrix() {
+    reported = false;
+    memset(&cooperative_matrix_features_khr, 0,
+           sizeof(VkPhysicalDeviceCooperativeMatrixFeaturesKHR));
+    memset(&cooperative_matrix_properties_khr, 0,
+           sizeof(VkPhysicalDeviceCooperativeMatrixPropertiesKHR));
+  }
+  bool reported;
+  VkPhysicalDeviceCooperativeMatrixFeaturesKHR cooperative_matrix_features_khr;
+  VkPhysicalDeviceCooperativeMatrixPropertiesKHR
+      cooperative_matrix_properties_khr;
+};
+
+struct VkJsonKHRDepthClampZeroOne {
+  VkJsonKHRDepthClampZeroOne() {
+    reported = false;
+    memset(&depth_clamp_zero_one_features_khr, 0,
+           sizeof(VkPhysicalDeviceDepthClampZeroOneFeaturesKHR));
+  }
+  bool reported;
+  VkPhysicalDeviceDepthClampZeroOneFeaturesKHR
+      depth_clamp_zero_one_features_khr;
+};
+
+struct VkJsonKHRDepthStencilResolve {
+  VkJsonKHRDepthStencilResolve() {
+    reported = false;
+    memset(&depth_stencil_resolve_properties_khr, 0,
+           sizeof(VkPhysicalDeviceDepthStencilResolvePropertiesKHR));
+  }
+  bool reported;
+  VkPhysicalDeviceDepthStencilResolvePropertiesKHR
+      depth_stencil_resolve_properties_khr;
+};
+
+struct VkJsonKHRDriverProperties {
+  VkJsonKHRDriverProperties() {
+    reported = false;
+    memset(&driver_properties_khr, 0,
+           sizeof(VkPhysicalDeviceDriverPropertiesKHR));
+  }
+  bool reported;
+  VkPhysicalDeviceDriverPropertiesKHR driver_properties_khr;
+};
+
+struct VkJsonKHRDynamicRendering {
+  VkJsonKHRDynamicRendering() {
+    reported = false;
+    memset(&dynamic_rendering_features_khr, 0,
+           sizeof(VkPhysicalDeviceDynamicRenderingFeaturesKHR));
+  }
+  bool reported;
+  VkPhysicalDeviceDynamicRenderingFeaturesKHR dynamic_rendering_features_khr;
+};
+
+struct VkJsonKHRDynamicRenderingLocalRead {
+  VkJsonKHRDynamicRenderingLocalRead() {
+    reported = false;
+    memset(&dynamic_rendering_local_read_features_khr, 0,
+           sizeof(VkPhysicalDeviceDynamicRenderingLocalReadFeaturesKHR));
+  }
+  bool reported;
+  VkPhysicalDeviceDynamicRenderingLocalReadFeaturesKHR
+      dynamic_rendering_local_read_features_khr;
+};
+
+struct VkJsonKHRExternalFenceCapabilities {
+  VkJsonKHRExternalFenceCapabilities() {
+    reported = false;
+    memset(&id_properties_khr, 0, sizeof(VkPhysicalDeviceIDPropertiesKHR));
+  }
+  bool reported;
+  VkPhysicalDeviceIDPropertiesKHR id_properties_khr;
+};
+
+struct VkJsonKHRExternalMemoryCapabilities {
+  VkJsonKHRExternalMemoryCapabilities() {
+    reported = false;
+    memset(&id_properties_khr, 0, sizeof(VkPhysicalDeviceIDPropertiesKHR));
+  }
+  bool reported;
+  VkPhysicalDeviceIDPropertiesKHR id_properties_khr;
+};
+
+struct VkJsonKHRExternalSemaphoreCapabilities {
+  VkJsonKHRExternalSemaphoreCapabilities() {
+    reported = false;
+    memset(&id_properties_khr, 0, sizeof(VkPhysicalDeviceIDPropertiesKHR));
+  }
+  bool reported;
+  VkPhysicalDeviceIDPropertiesKHR id_properties_khr;
+};
+
+struct VkJsonKHRFragmentShaderBarycentric {
+  VkJsonKHRFragmentShaderBarycentric() {
+    reported = false;
+    memset(&fragment_shader_barycentric_features_khr, 0,
+           sizeof(VkPhysicalDeviceFragmentShaderBarycentricFeaturesKHR));
+    memset(&fragment_shader_barycentric_properties_khr, 0,
+           sizeof(VkPhysicalDeviceFragmentShaderBarycentricPropertiesKHR));
+  }
+  bool reported;
+  VkPhysicalDeviceFragmentShaderBarycentricFeaturesKHR
+      fragment_shader_barycentric_features_khr;
+  VkPhysicalDeviceFragmentShaderBarycentricPropertiesKHR
+      fragment_shader_barycentric_properties_khr;
+};
+
+struct VkJsonKHRFragmentShadingRate {
+  VkJsonKHRFragmentShadingRate() {
+    reported = false;
+    memset(&fragment_shading_rate_features_khr, 0,
+           sizeof(VkPhysicalDeviceFragmentShadingRateFeaturesKHR));
+    memset(&fragment_shading_rate_properties_khr, 0,
+           sizeof(VkPhysicalDeviceFragmentShadingRatePropertiesKHR));
+  }
+  bool reported;
+  VkPhysicalDeviceFragmentShadingRateFeaturesKHR
+      fragment_shading_rate_features_khr;
+  VkPhysicalDeviceFragmentShadingRatePropertiesKHR
+      fragment_shading_rate_properties_khr;
+};
+
+struct VkJsonKHRGlobalPriority {
+  VkJsonKHRGlobalPriority() {
+    reported = false;
+    memset(&global_priority_query_features_khr, 0,
+           sizeof(VkPhysicalDeviceGlobalPriorityQueryFeaturesKHR));
+  }
+  bool reported;
+  VkPhysicalDeviceGlobalPriorityQueryFeaturesKHR
+      global_priority_query_features_khr;
+};
+
+struct VkJsonKHRImagelessFramebuffer {
+  VkJsonKHRImagelessFramebuffer() {
+    reported = false;
+    memset(&imageless_framebuffer_features_khr, 0,
+           sizeof(VkPhysicalDeviceImagelessFramebufferFeaturesKHR));
+  }
+  bool reported;
+  VkPhysicalDeviceImagelessFramebufferFeaturesKHR
+      imageless_framebuffer_features_khr;
+};
+
+struct VkJsonKHRIndexTypeUint8 {
+  VkJsonKHRIndexTypeUint8() {
+    reported = false;
+    memset(&index_type_uint8_features_khr, 0,
+           sizeof(VkPhysicalDeviceIndexTypeUint8FeaturesKHR));
+  }
+  bool reported;
+  VkPhysicalDeviceIndexTypeUint8FeaturesKHR index_type_uint8_features_khr;
+};
+
+struct VkJsonKHRLineRasterization {
+  VkJsonKHRLineRasterization() {
+    reported = false;
+    memset(&line_rasterization_features_khr, 0,
+           sizeof(VkPhysicalDeviceLineRasterizationFeaturesKHR));
+    memset(&line_rasterization_properties_khr, 0,
+           sizeof(VkPhysicalDeviceLineRasterizationPropertiesKHR));
+  }
+  bool reported;
+  VkPhysicalDeviceLineRasterizationFeaturesKHR line_rasterization_features_khr;
+  VkPhysicalDeviceLineRasterizationPropertiesKHR
+      line_rasterization_properties_khr;
+};
+
+struct VkJsonKHRMaintenance2 {
+  VkJsonKHRMaintenance2() {
+    reported = false;
+    memset(&point_clipping_properties_khr, 0,
+           sizeof(VkPhysicalDevicePointClippingPropertiesKHR));
+  }
+  bool reported;
+  VkPhysicalDevicePointClippingPropertiesKHR point_clipping_properties_khr;
+};
+
+struct VkJsonKHRMaintenance3 {
+  VkJsonKHRMaintenance3() {
+    reported = false;
+    memset(&maintenance3_properties_khr, 0,
+           sizeof(VkPhysicalDeviceMaintenance3PropertiesKHR));
+  }
+  bool reported;
+  VkPhysicalDeviceMaintenance3PropertiesKHR maintenance3_properties_khr;
+};
+
+struct VkJsonKHRMaintenance4 {
+  VkJsonKHRMaintenance4() {
+    reported = false;
+    memset(&maintenance4_features_khr, 0,
+           sizeof(VkPhysicalDeviceMaintenance4FeaturesKHR));
+    memset(&maintenance4_properties_khr, 0,
+           sizeof(VkPhysicalDeviceMaintenance4PropertiesKHR));
+  }
+  bool reported;
+  VkPhysicalDeviceMaintenance4FeaturesKHR maintenance4_features_khr;
+  VkPhysicalDeviceMaintenance4PropertiesKHR maintenance4_properties_khr;
+};
+
+struct VkJsonKHRMaintenance5 {
+  VkJsonKHRMaintenance5() {
+    reported = false;
+    memset(&maintenance5_features_khr, 0,
+           sizeof(VkPhysicalDeviceMaintenance5FeaturesKHR));
+    memset(&maintenance5_properties_khr, 0,
+           sizeof(VkPhysicalDeviceMaintenance5PropertiesKHR));
+  }
+  bool reported;
+  VkPhysicalDeviceMaintenance5FeaturesKHR maintenance5_features_khr;
+  VkPhysicalDeviceMaintenance5PropertiesKHR maintenance5_properties_khr;
+};
+
+struct VkJsonKHRMaintenance6 {
+  VkJsonKHRMaintenance6() {
+    reported = false;
+    memset(&maintenance6_features_khr, 0,
+           sizeof(VkPhysicalDeviceMaintenance6FeaturesKHR));
+    memset(&maintenance6_properties_khr, 0,
+           sizeof(VkPhysicalDeviceMaintenance6PropertiesKHR));
+  }
+  bool reported;
+  VkPhysicalDeviceMaintenance6FeaturesKHR maintenance6_features_khr;
+  VkPhysicalDeviceMaintenance6PropertiesKHR maintenance6_properties_khr;
+};
+
+struct VkJsonKHRMaintenance7 {
+  VkJsonKHRMaintenance7() {
+    reported = false;
+    memset(&maintenance7_features_khr, 0,
+           sizeof(VkPhysicalDeviceMaintenance7FeaturesKHR));
+    memset(&maintenance7_properties_khr, 0,
+           sizeof(VkPhysicalDeviceMaintenance7PropertiesKHR));
+    memset(&layered_api_properties_list_khr, 0,
+           sizeof(VkPhysicalDeviceLayeredApiPropertiesListKHR));
+  }
+  bool reported;
+  VkPhysicalDeviceMaintenance7FeaturesKHR maintenance7_features_khr;
+  VkPhysicalDeviceMaintenance7PropertiesKHR maintenance7_properties_khr;
+  VkPhysicalDeviceLayeredApiPropertiesListKHR layered_api_properties_list_khr;
+  std::vector<VkPhysicalDeviceLayeredApiPropertiesKHR> layered_apis;
+};
+
+struct VkJsonKHRMaintenance8 {
+  VkJsonKHRMaintenance8() {
+    reported = false;
+    memset(&maintenance8_features_khr, 0,
+           sizeof(VkPhysicalDeviceMaintenance8FeaturesKHR));
+  }
+  bool reported;
+  VkPhysicalDeviceMaintenance8FeaturesKHR maintenance8_features_khr;
+};
+
+struct VkJsonKHRMaintenance9 {
+  VkJsonKHRMaintenance9() {
+    reported = false;
+    memset(&maintenance9_features_khr, 0,
+           sizeof(VkPhysicalDeviceMaintenance9FeaturesKHR));
+    memset(&maintenance9_properties_khr, 0,
+           sizeof(VkPhysicalDeviceMaintenance9PropertiesKHR));
+  }
+  bool reported;
+  VkPhysicalDeviceMaintenance9FeaturesKHR maintenance9_features_khr;
+  VkPhysicalDeviceMaintenance9PropertiesKHR maintenance9_properties_khr;
+};
+
+struct VkJsonKHRMultiview {
+  VkJsonKHRMultiview() {
+    reported = false;
+    memset(&multiview_features_khr, 0,
+           sizeof(VkPhysicalDeviceMultiviewFeaturesKHR));
+    memset(&multiview_properties_khr, 0,
+           sizeof(VkPhysicalDeviceMultiviewPropertiesKHR));
+  }
+  bool reported;
+  VkPhysicalDeviceMultiviewFeaturesKHR multiview_features_khr;
+  VkPhysicalDeviceMultiviewPropertiesKHR multiview_properties_khr;
+};
+
+struct VkJsonKHRPerformanceQuery {
+  VkJsonKHRPerformanceQuery() {
+    reported = false;
+    memset(&performance_query_features_khr, 0,
+           sizeof(VkPhysicalDevicePerformanceQueryFeaturesKHR));
+    memset(&performance_query_properties_khr, 0,
+           sizeof(VkPhysicalDevicePerformanceQueryPropertiesKHR));
+  }
+  bool reported;
+  VkPhysicalDevicePerformanceQueryFeaturesKHR performance_query_features_khr;
+  VkPhysicalDevicePerformanceQueryPropertiesKHR
+      performance_query_properties_khr;
+};
+
+struct VkJsonKHRPipelineBinary {
+  VkJsonKHRPipelineBinary() {
+    reported = false;
+    memset(&pipeline_binary_features_khr, 0,
+           sizeof(VkPhysicalDevicePipelineBinaryFeaturesKHR));
+    memset(&pipeline_binary_properties_khr, 0,
+           sizeof(VkPhysicalDevicePipelineBinaryPropertiesKHR));
+  }
+  bool reported;
+  VkPhysicalDevicePipelineBinaryFeaturesKHR pipeline_binary_features_khr;
+  VkPhysicalDevicePipelineBinaryPropertiesKHR pipeline_binary_properties_khr;
+};
+
+struct VkJsonKHRPipelineExecutableProperties {
+  VkJsonKHRPipelineExecutableProperties() {
+    reported = false;
+    memset(&pipeline_executable_properties_features_khr, 0,
+           sizeof(VkPhysicalDevicePipelineExecutablePropertiesFeaturesKHR));
+  }
+  bool reported;
+  VkPhysicalDevicePipelineExecutablePropertiesFeaturesKHR
+      pipeline_executable_properties_features_khr;
+};
+
+struct VkJsonKHRPresentId {
+  VkJsonKHRPresentId() {
+    reported = false;
+    memset(&present_id_features_khr, 0,
+           sizeof(VkPhysicalDevicePresentIdFeaturesKHR));
+  }
+  bool reported;
+  VkPhysicalDevicePresentIdFeaturesKHR present_id_features_khr;
+};
+
+struct VkJsonKHRPresentId2 {
+  VkJsonKHRPresentId2() {
+    reported = false;
+    memset(&present_id2_features_khr, 0,
+           sizeof(VkPhysicalDevicePresentId2FeaturesKHR));
+  }
+  bool reported;
+  VkPhysicalDevicePresentId2FeaturesKHR present_id2_features_khr;
+};
+
+struct VkJsonKHRPresentWait {
+  VkJsonKHRPresentWait() {
+    reported = false;
+    memset(&present_wait_features_khr, 0,
+           sizeof(VkPhysicalDevicePresentWaitFeaturesKHR));
+  }
+  bool reported;
+  VkPhysicalDevicePresentWaitFeaturesKHR present_wait_features_khr;
+};
+
+struct VkJsonKHRPresentWait2 {
+  VkJsonKHRPresentWait2() {
+    reported = false;
+    memset(&present_wait2_features_khr, 0,
+           sizeof(VkPhysicalDevicePresentWait2FeaturesKHR));
+  }
+  bool reported;
+  VkPhysicalDevicePresentWait2FeaturesKHR present_wait2_features_khr;
+};
+
+struct VkJsonKHRPushDescriptor {
+  VkJsonKHRPushDescriptor() {
+    reported = false;
+    memset(&push_descriptor_properties_khr, 0,
+           sizeof(VkPhysicalDevicePushDescriptorPropertiesKHR));
+  }
+  bool reported;
+  VkPhysicalDevicePushDescriptorPropertiesKHR push_descriptor_properties_khr;
+};
+
+struct VkJsonKHRRayQuery {
+  VkJsonKHRRayQuery() {
+    reported = false;
+    memset(&ray_query_features_khr, 0,
+           sizeof(VkPhysicalDeviceRayQueryFeaturesKHR));
+  }
+  bool reported;
+  VkPhysicalDeviceRayQueryFeaturesKHR ray_query_features_khr;
+};
+
+struct VkJsonKHRRayTracingMaintenance1 {
+  VkJsonKHRRayTracingMaintenance1() {
+    reported = false;
+    memset(&ray_tracing_maintenance1_features_khr, 0,
+           sizeof(VkPhysicalDeviceRayTracingMaintenance1FeaturesKHR));
+  }
+  bool reported;
+  VkPhysicalDeviceRayTracingMaintenance1FeaturesKHR
+      ray_tracing_maintenance1_features_khr;
+};
+
+struct VkJsonKHRRayTracingPipeline {
+  VkJsonKHRRayTracingPipeline() {
+    reported = false;
+    memset(&ray_tracing_pipeline_features_khr, 0,
+           sizeof(VkPhysicalDeviceRayTracingPipelineFeaturesKHR));
+    memset(&ray_tracing_pipeline_properties_khr, 0,
+           sizeof(VkPhysicalDeviceRayTracingPipelinePropertiesKHR));
+  }
+  bool reported;
+  VkPhysicalDeviceRayTracingPipelineFeaturesKHR
+      ray_tracing_pipeline_features_khr;
+  VkPhysicalDeviceRayTracingPipelinePropertiesKHR
+      ray_tracing_pipeline_properties_khr;
+};
+
+struct VkJsonKHRRayTracingPositionFetch {
+  VkJsonKHRRayTracingPositionFetch() {
+    reported = false;
+    memset(&ray_tracing_position_fetch_features_khr, 0,
+           sizeof(VkPhysicalDeviceRayTracingPositionFetchFeaturesKHR));
+  }
+  bool reported;
+  VkPhysicalDeviceRayTracingPositionFetchFeaturesKHR
+      ray_tracing_position_fetch_features_khr;
+};
+
+struct VkJsonKHRRobustness2 {
+  VkJsonKHRRobustness2() {
+    reported = false;
+    memset(&robustness2_features_khr, 0,
+           sizeof(VkPhysicalDeviceRobustness2FeaturesKHR));
+    memset(&robustness2_properties_khr, 0,
+           sizeof(VkPhysicalDeviceRobustness2PropertiesKHR));
+  }
+  bool reported;
+  VkPhysicalDeviceRobustness2FeaturesKHR robustness2_features_khr;
+  VkPhysicalDeviceRobustness2PropertiesKHR robustness2_properties_khr;
+};
+
+struct VkJsonKHRSamplerYcbcrConversion {
+  VkJsonKHRSamplerYcbcrConversion() {
+    reported = false;
+    memset(&sampler_ycbcr_conversion_features_khr, 0,
+           sizeof(VkPhysicalDeviceSamplerYcbcrConversionFeaturesKHR));
+  }
+  bool reported;
+  VkPhysicalDeviceSamplerYcbcrConversionFeaturesKHR
+      sampler_ycbcr_conversion_features_khr;
+};
+
+struct VkJsonKHRSeparateDepthStencilLayouts {
+  VkJsonKHRSeparateDepthStencilLayouts() {
+    reported = false;
+    memset(&separate_depth_stencil_layouts_features_khr, 0,
+           sizeof(VkPhysicalDeviceSeparateDepthStencilLayoutsFeaturesKHR));
+  }
+  bool reported;
+  VkPhysicalDeviceSeparateDepthStencilLayoutsFeaturesKHR
+      separate_depth_stencil_layouts_features_khr;
+};
+
+struct VkJsonKHRShaderAtomicInt64 {
+  VkJsonKHRShaderAtomicInt64() {
+    reported = false;
+    memset(&shader_atomic_int64_features_khr, 0,
+           sizeof(VkPhysicalDeviceShaderAtomicInt64FeaturesKHR));
+  }
+  bool reported;
+  VkPhysicalDeviceShaderAtomicInt64FeaturesKHR shader_atomic_int64_features_khr;
+};
+
+struct VkJsonKHRShaderBfloat16 {
+  VkJsonKHRShaderBfloat16() {
+    reported = false;
+    memset(&shader_bfloat16_features_khr, 0,
+           sizeof(VkPhysicalDeviceShaderBfloat16FeaturesKHR));
+  }
+  bool reported;
+  VkPhysicalDeviceShaderBfloat16FeaturesKHR shader_bfloat16_features_khr;
+};
+
+struct VkJsonKHRShaderClock {
+  VkJsonKHRShaderClock() {
+    reported = false;
+    memset(&shader_clock_features_khr, 0,
+           sizeof(VkPhysicalDeviceShaderClockFeaturesKHR));
+  }
+  bool reported;
+  VkPhysicalDeviceShaderClockFeaturesKHR shader_clock_features_khr;
+};
+
+struct VkJsonKHRShaderExpectAssume {
+  VkJsonKHRShaderExpectAssume() {
+    reported = false;
+    memset(&shader_expect_assume_features_khr, 0,
+           sizeof(VkPhysicalDeviceShaderExpectAssumeFeaturesKHR));
+  }
+  bool reported;
+  VkPhysicalDeviceShaderExpectAssumeFeaturesKHR
+      shader_expect_assume_features_khr;
 };
 
 struct VkJsonKHRShaderFloat16Int8 {
@@ -67,108 +1992,72 @@ struct VkJsonKHRShaderFloat16Int8 {
   VkPhysicalDeviceFloat16Int8FeaturesKHR float16_int8_features_khr;
 };
 
-struct VkJsonExtImage2dViewOf3d {
-  VkJsonExtImage2dViewOf3d() {
+struct VkJsonKHRShaderFloatControls {
+  VkJsonKHRShaderFloatControls() {
     reported = false;
-    memset(&image_2d_view_of_3d_features_ext, 0,
-           sizeof(VkPhysicalDeviceImage2DViewOf3DFeaturesEXT));
+    memset(&float_controls_properties_khr, 0,
+           sizeof(VkPhysicalDeviceFloatControlsPropertiesKHR));
   }
   bool reported;
-  VkPhysicalDeviceImage2DViewOf3DFeaturesEXT image_2d_view_of_3d_features_ext;
+  VkPhysicalDeviceFloatControlsPropertiesKHR float_controls_properties_khr;
 };
 
-struct VkJsonExtCustomBorderColor {
-  VkJsonExtCustomBorderColor() {
+struct VkJsonKHRShaderFloatControls2 {
+  VkJsonKHRShaderFloatControls2() {
     reported = false;
-    memset(&custom_border_color_features_ext, 0,
-           sizeof(VkPhysicalDeviceCustomBorderColorFeaturesEXT));
+    memset(&shader_float_controls2_features_khr, 0,
+           sizeof(VkPhysicalDeviceShaderFloatControls2FeaturesKHR));
   }
   bool reported;
-  VkPhysicalDeviceCustomBorderColorFeaturesEXT custom_border_color_features_ext;
+  VkPhysicalDeviceShaderFloatControls2FeaturesKHR
+      shader_float_controls2_features_khr;
 };
 
-struct VkJsonExtPrimitiveTopologyListRestart {
-  VkJsonExtPrimitiveTopologyListRestart() {
+struct VkJsonKHRShaderIntegerDotProduct {
+  VkJsonKHRShaderIntegerDotProduct() {
     reported = false;
-    memset(&primitive_topology_list_restart_features_ext, 0,
-           sizeof(VkPhysicalDevicePrimitiveTopologyListRestartFeaturesEXT));
+    memset(&shader_integer_dot_product_features_khr, 0,
+           sizeof(VkPhysicalDeviceShaderIntegerDotProductFeaturesKHR));
+    memset(&shader_integer_dot_product_properties_khr, 0,
+           sizeof(VkPhysicalDeviceShaderIntegerDotProductPropertiesKHR));
   }
   bool reported;
-  VkPhysicalDevicePrimitiveTopologyListRestartFeaturesEXT
-      primitive_topology_list_restart_features_ext;
+  VkPhysicalDeviceShaderIntegerDotProductFeaturesKHR
+      shader_integer_dot_product_features_khr;
+  VkPhysicalDeviceShaderIntegerDotProductPropertiesKHR
+      shader_integer_dot_product_properties_khr;
 };
 
-struct VkJsonExtProvokingVertex {
-  VkJsonExtProvokingVertex() {
+struct VkJsonKHRShaderMaximalReconvergence {
+  VkJsonKHRShaderMaximalReconvergence() {
     reported = false;
-    memset(&provoking_vertex_features_ext, 0,
-           sizeof(VkPhysicalDeviceProvokingVertexFeaturesEXT));
+    memset(&shader_maximal_reconvergence_features_khr, 0,
+           sizeof(VkPhysicalDeviceShaderMaximalReconvergenceFeaturesKHR));
   }
   bool reported;
-  VkPhysicalDeviceProvokingVertexFeaturesEXT provoking_vertex_features_ext;
+  VkPhysicalDeviceShaderMaximalReconvergenceFeaturesKHR
+      shader_maximal_reconvergence_features_khr;
 };
 
-struct VkJsonKHRIndexTypeUint8 {
-  VkJsonKHRIndexTypeUint8() {
+struct VkJsonKHRShaderQuadControl {
+  VkJsonKHRShaderQuadControl() {
     reported = false;
-    memset(&index_type_uint8_features_khr, 0,
-           sizeof(VkPhysicalDeviceIndexTypeUint8FeaturesKHR));
+    memset(&shader_quad_control_features_khr, 0,
+           sizeof(VkPhysicalDeviceShaderQuadControlFeaturesKHR));
   }
   bool reported;
-  VkPhysicalDeviceIndexTypeUint8FeaturesKHR index_type_uint8_features_khr;
+  VkPhysicalDeviceShaderQuadControlFeaturesKHR shader_quad_control_features_khr;
 };
 
-struct VkJsonExtIndexTypeUint8 {
-  VkJsonExtIndexTypeUint8() {
+struct VkJsonKHRShaderRelaxedExtendedInstruction {
+  VkJsonKHRShaderRelaxedExtendedInstruction() {
     reported = false;
-    memset(&index_type_uint8_features_ext, 0,
-           sizeof(VkPhysicalDeviceIndexTypeUint8FeaturesEXT));
+    memset(&shader_relaxed_extended_instruction_features_khr, 0,
+           sizeof(VkPhysicalDeviceShaderRelaxedExtendedInstructionFeaturesKHR));
   }
   bool reported;
-  VkPhysicalDeviceIndexTypeUint8FeaturesEXT index_type_uint8_features_ext;
-};
-
-struct VkJsonKHRVertexAttributeDivisor {
-  VkJsonKHRVertexAttributeDivisor() {
-    reported = false;
-    memset(&vertex_attribute_divisor_features_khr, 0,
-           sizeof(VkPhysicalDeviceVertexAttributeDivisorFeaturesKHR));
-  }
-  bool reported;
-  VkPhysicalDeviceVertexAttributeDivisorFeaturesKHR
-      vertex_attribute_divisor_features_khr;
-};
-
-struct VkJsonExtVertexAttributeDivisor {
-  VkJsonExtVertexAttributeDivisor() {
-    reported = false;
-    memset(&vertex_attribute_divisor_features_ext, 0,
-           sizeof(VkPhysicalDeviceVertexAttributeDivisorFeaturesEXT));
-  }
-  bool reported;
-  VkPhysicalDeviceVertexAttributeDivisorFeaturesEXT
-      vertex_attribute_divisor_features_ext;
-};
-
-struct VkJsonExtTransformFeedback {
-  VkJsonExtTransformFeedback() {
-    reported = false;
-    memset(&transform_feedback_features_ext, 0,
-           sizeof(VkPhysicalDeviceTransformFeedbackFeaturesEXT));
-  }
-  bool reported;
-  VkPhysicalDeviceTransformFeedbackFeaturesEXT transform_feedback_features_ext;
-};
-
-struct VkJsonKHRShaderSubgroupUniformControlFlow {
-  VkJsonKHRShaderSubgroupUniformControlFlow() {
-    reported = false;
-    memset(&shader_subgroup_uniform_control_flow_features_khr, 0,
-           sizeof(VkPhysicalDeviceShaderSubgroupUniformControlFlowFeaturesKHR));
-  }
-  bool reported;
-  VkPhysicalDeviceShaderSubgroupUniformControlFlowFeaturesKHR
-      shader_subgroup_uniform_control_flow_features_khr;
+  VkPhysicalDeviceShaderRelaxedExtendedInstructionFeaturesKHR
+      shader_relaxed_extended_instruction_features_khr;
 };
 
 struct VkJsonKHRShaderSubgroupExtendedTypes {
@@ -182,193 +2071,1392 @@ struct VkJsonKHRShaderSubgroupExtendedTypes {
       shader_subgroup_extended_types_features_khr;
 };
 
-struct VkJsonKHR8bitStorage {
-  VkJsonKHR8bitStorage() {
+struct VkJsonKHRShaderSubgroupRotate {
+  VkJsonKHRShaderSubgroupRotate() {
     reported = false;
-    memset(&bit8_storage_features_khr, 0,
-           sizeof(VkPhysicalDevice8BitStorageFeaturesKHR));
+    memset(&shader_subgroup_rotate_features_khr, 0,
+           sizeof(VkPhysicalDeviceShaderSubgroupRotateFeaturesKHR));
   }
   bool reported;
-  VkPhysicalDevice8BitStorageFeaturesKHR bit8_storage_features_khr;
+  VkPhysicalDeviceShaderSubgroupRotateFeaturesKHR
+      shader_subgroup_rotate_features_khr;
 };
 
-struct VkJsonKHRShaderIntegerDotProduct {
-  VkJsonKHRShaderIntegerDotProduct() {
+struct VkJsonKHRShaderSubgroupUniformControlFlow {
+  VkJsonKHRShaderSubgroupUniformControlFlow() {
     reported = false;
-    memset(&shader_integer_dot_product_features_khr, 0,
-           sizeof(VkPhysicalDeviceShaderIntegerDotProductFeaturesKHR));
+    memset(&shader_subgroup_uniform_control_flow_features_khr, 0,
+           sizeof(VkPhysicalDeviceShaderSubgroupUniformControlFlowFeaturesKHR));
   }
   bool reported;
-  VkPhysicalDeviceShaderIntegerDotProductFeaturesKHR
-      shader_integer_dot_product_features_khr;
+  VkPhysicalDeviceShaderSubgroupUniformControlFlowFeaturesKHR
+      shader_subgroup_uniform_control_flow_features_khr;
 };
 
-struct VkJsonIMGRelaxedLineRasterization {
-  VkJsonIMGRelaxedLineRasterization() {
+struct VkJsonKHRShaderTerminateInvocation {
+  VkJsonKHRShaderTerminateInvocation() {
     reported = false;
-    memset(&relaxed_line_rasterization_features_img, 0,
-           sizeof(VkPhysicalDeviceRelaxedLineRasterizationFeaturesIMG));
+    memset(&shader_terminate_invocation_features_khr, 0,
+           sizeof(VkPhysicalDeviceShaderTerminateInvocationFeaturesKHR));
   }
   bool reported;
-  VkPhysicalDeviceRelaxedLineRasterizationFeaturesIMG
-      relaxed_line_rasterization_features_img;
+  VkPhysicalDeviceShaderTerminateInvocationFeaturesKHR
+      shader_terminate_invocation_features_khr;
 };
 
-struct VkJsonKHRLineRasterization {
-  VkJsonKHRLineRasterization() {
+struct VkJsonKHRSynchronization2 {
+  VkJsonKHRSynchronization2() {
     reported = false;
-    memset(&line_rasterization_features_khr, 0,
-           sizeof(VkPhysicalDeviceLineRasterizationFeaturesKHR));
+    memset(&synchronization2_features_khr, 0,
+           sizeof(VkPhysicalDeviceSynchronization2FeaturesKHR));
   }
   bool reported;
-  VkPhysicalDeviceLineRasterizationFeaturesKHR line_rasterization_features_khr;
+  VkPhysicalDeviceSynchronization2FeaturesKHR synchronization2_features_khr;
 };
 
-struct VkJsonExtLineRasterization {
-  VkJsonExtLineRasterization() {
+struct VkJsonKHRTimelineSemaphore {
+  VkJsonKHRTimelineSemaphore() {
     reported = false;
-    memset(&line_rasterization_features_ext, 0,
-           sizeof(VkPhysicalDeviceLineRasterizationFeaturesEXT));
+    memset(&timeline_semaphore_features_khr, 0,
+           sizeof(VkPhysicalDeviceTimelineSemaphoreFeaturesKHR));
+    memset(&timeline_semaphore_properties_khr, 0,
+           sizeof(VkPhysicalDeviceTimelineSemaphorePropertiesKHR));
   }
   bool reported;
-  VkPhysicalDeviceLineRasterizationFeaturesEXT line_rasterization_features_ext;
+  VkPhysicalDeviceTimelineSemaphoreFeaturesKHR timeline_semaphore_features_khr;
+  VkPhysicalDeviceTimelineSemaphorePropertiesKHR
+      timeline_semaphore_properties_khr;
 };
 
-struct VkJsonExtPrimitivesGeneratedQuery {
-  VkJsonExtPrimitivesGeneratedQuery() {
+struct VkJsonKHRUnifiedImageLayouts {
+  VkJsonKHRUnifiedImageLayouts() {
     reported = false;
-    memset(&primitives_generated_query_features_ext, 0,
-           sizeof(VkPhysicalDevicePrimitivesGeneratedQueryFeaturesEXT));
+    memset(&unified_image_layouts_features_khr, 0,
+           sizeof(VkPhysicalDeviceUnifiedImageLayoutsFeaturesKHR));
   }
   bool reported;
-  VkPhysicalDevicePrimitivesGeneratedQueryFeaturesEXT
-      primitives_generated_query_features_ext;
+  VkPhysicalDeviceUnifiedImageLayoutsFeaturesKHR
+      unified_image_layouts_features_khr;
 };
 
-struct VkJsonKHRShaderFloatControls {
-  VkJsonKHRShaderFloatControls() {
+struct VkJsonKHRUniformBufferStandardLayout {
+  VkJsonKHRUniformBufferStandardLayout() {
     reported = false;
-    memset(&float_controls_properties_khr, 0,
-           sizeof(VkPhysicalDeviceFloatControlsPropertiesKHR));
+    memset(&uniform_buffer_standard_layout_features_khr, 0,
+           sizeof(VkPhysicalDeviceUniformBufferStandardLayoutFeaturesKHR));
   }
   bool reported;
-  VkPhysicalDeviceFloatControlsPropertiesKHR float_controls_properties_khr;
+  VkPhysicalDeviceUniformBufferStandardLayoutFeaturesKHR
+      uniform_buffer_standard_layout_features_khr;
 };
 
-struct VkJsonKHRDriverProperties {
-  VkJsonKHRDriverProperties() {
+struct VkJsonKHRVariablePointers {
+  VkJsonKHRVariablePointers() {
     reported = false;
-    memset(&driver_properties_khr, 0,
-           sizeof(VkPhysicalDeviceDriverPropertiesKHR));
+    memset(&variable_pointer_features_khr, 0,
+           sizeof(VkPhysicalDeviceVariablePointerFeaturesKHR));
+    memset(&variable_pointers_features_khr, 0,
+           sizeof(VkPhysicalDeviceVariablePointersFeaturesKHR));
   }
   bool reported;
-  VkPhysicalDeviceDriverPropertiesKHR driver_properties_khr;
+  VkPhysicalDeviceVariablePointerFeaturesKHR variable_pointer_features_khr;
+  VkPhysicalDeviceVariablePointersFeaturesKHR variable_pointers_features_khr;
+};
+
+struct VkJsonKHRVertexAttributeDivisor {
+  VkJsonKHRVertexAttributeDivisor() {
+    reported = false;
+    memset(&vertex_attribute_divisor_properties_khr, 0,
+           sizeof(VkPhysicalDeviceVertexAttributeDivisorPropertiesKHR));
+    memset(&vertex_attribute_divisor_features_khr, 0,
+           sizeof(VkPhysicalDeviceVertexAttributeDivisorFeaturesKHR));
+  }
+  bool reported;
+  VkPhysicalDeviceVertexAttributeDivisorPropertiesKHR
+      vertex_attribute_divisor_properties_khr;
+  VkPhysicalDeviceVertexAttributeDivisorFeaturesKHR
+      vertex_attribute_divisor_features_khr;
+};
+
+struct VkJsonKHRVideoDecodeVp9 {
+  VkJsonKHRVideoDecodeVp9() {
+    reported = false;
+    memset(&video_decode_vp9_features_khr, 0,
+           sizeof(VkPhysicalDeviceVideoDecodeVP9FeaturesKHR));
+  }
+  bool reported;
+  VkPhysicalDeviceVideoDecodeVP9FeaturesKHR video_decode_vp9_features_khr;
+};
+
+struct VkJsonKHRVideoEncodeAv1 {
+  VkJsonKHRVideoEncodeAv1() {
+    reported = false;
+    memset(&video_encode_av1_features_khr, 0,
+           sizeof(VkPhysicalDeviceVideoEncodeAV1FeaturesKHR));
+  }
+  bool reported;
+  VkPhysicalDeviceVideoEncodeAV1FeaturesKHR video_encode_av1_features_khr;
+};
+
+struct VkJsonKHRVideoEncodeQuantizationMap {
+  VkJsonKHRVideoEncodeQuantizationMap() {
+    reported = false;
+    memset(&video_encode_quantization_map_features_khr, 0,
+           sizeof(VkPhysicalDeviceVideoEncodeQuantizationMapFeaturesKHR));
+  }
+  bool reported;
+  VkPhysicalDeviceVideoEncodeQuantizationMapFeaturesKHR
+      video_encode_quantization_map_features_khr;
+};
+
+struct VkJsonKHRVideoMaintenance1 {
+  VkJsonKHRVideoMaintenance1() {
+    reported = false;
+    memset(&video_maintenance1_features_khr, 0,
+           sizeof(VkPhysicalDeviceVideoMaintenance1FeaturesKHR));
+  }
+  bool reported;
+  VkPhysicalDeviceVideoMaintenance1FeaturesKHR video_maintenance1_features_khr;
+};
+
+struct VkJsonKHRVideoMaintenance2 {
+  VkJsonKHRVideoMaintenance2() {
+    reported = false;
+    memset(&video_maintenance2_features_khr, 0,
+           sizeof(VkPhysicalDeviceVideoMaintenance2FeaturesKHR));
+  }
+  bool reported;
+  VkPhysicalDeviceVideoMaintenance2FeaturesKHR video_maintenance2_features_khr;
+};
+
+struct VkJsonKHRVulkanMemoryModel {
+  VkJsonKHRVulkanMemoryModel() {
+    reported = false;
+    memset(&vulkan_memory_model_features_khr, 0,
+           sizeof(VkPhysicalDeviceVulkanMemoryModelFeaturesKHR));
+  }
+  bool reported;
+  VkPhysicalDeviceVulkanMemoryModelFeaturesKHR vulkan_memory_model_features_khr;
+};
+
+struct VkJsonKHRWorkgroupMemoryExplicitLayout {
+  VkJsonKHRWorkgroupMemoryExplicitLayout() {
+    reported = false;
+    memset(&workgroup_memory_explicit_layout_features_khr, 0,
+           sizeof(VkPhysicalDeviceWorkgroupMemoryExplicitLayoutFeaturesKHR));
+  }
+  bool reported;
+  VkPhysicalDeviceWorkgroupMemoryExplicitLayoutFeaturesKHR
+      workgroup_memory_explicit_layout_features_khr;
+};
+
+struct VkJsonKHRZeroInitializeWorkgroupMemory {
+  VkJsonKHRZeroInitializeWorkgroupMemory() {
+    reported = false;
+    memset(&zero_initialize_workgroup_memory_features_khr, 0,
+           sizeof(VkPhysicalDeviceZeroInitializeWorkgroupMemoryFeaturesKHR));
+  }
+  bool reported;
+  VkPhysicalDeviceZeroInitializeWorkgroupMemoryFeaturesKHR
+      zero_initialize_workgroup_memory_features_khr;
+};
+
+struct VkJsonMESAImageAlignmentControl {
+  VkJsonMESAImageAlignmentControl() {
+    reported = false;
+    memset(&image_alignment_control_features_mesa, 0,
+           sizeof(VkPhysicalDeviceImageAlignmentControlFeaturesMESA));
+    memset(&image_alignment_control_properties_mesa, 0,
+           sizeof(VkPhysicalDeviceImageAlignmentControlPropertiesMESA));
+  }
+  bool reported;
+  VkPhysicalDeviceImageAlignmentControlFeaturesMESA
+      image_alignment_control_features_mesa;
+  VkPhysicalDeviceImageAlignmentControlPropertiesMESA
+      image_alignment_control_properties_mesa;
+};
+
+struct VkJsonMSFTLayeredDriver {
+  VkJsonMSFTLayeredDriver() {
+    reported = false;
+    memset(&layered_driver_properties_msft, 0,
+           sizeof(VkPhysicalDeviceLayeredDriverPropertiesMSFT));
+  }
+  bool reported;
+  VkPhysicalDeviceLayeredDriverPropertiesMSFT layered_driver_properties_msft;
+};
+
+struct VkJsonNVXMultiviewPerViewAttributes {
+  VkJsonNVXMultiviewPerViewAttributes() {
+    reported = false;
+    memset(&multiview_per_view_attributes_properties_nvx, 0,
+           sizeof(VkPhysicalDeviceMultiviewPerViewAttributesPropertiesNVX));
+  }
+  bool reported;
+  VkPhysicalDeviceMultiviewPerViewAttributesPropertiesNVX
+      multiview_per_view_attributes_properties_nvx;
+};
+
+struct VkJsonNVClusterAccelerationStructure {
+  VkJsonNVClusterAccelerationStructure() {
+    reported = false;
+    memset(&cluster_acceleration_structure_features_nv, 0,
+           sizeof(VkPhysicalDeviceClusterAccelerationStructureFeaturesNV));
+    memset(&cluster_acceleration_structure_properties_nv, 0,
+           sizeof(VkPhysicalDeviceClusterAccelerationStructurePropertiesNV));
+  }
+  bool reported;
+  VkPhysicalDeviceClusterAccelerationStructureFeaturesNV
+      cluster_acceleration_structure_features_nv;
+  VkPhysicalDeviceClusterAccelerationStructurePropertiesNV
+      cluster_acceleration_structure_properties_nv;
+};
+
+struct VkJsonNVCommandBufferInheritance {
+  VkJsonNVCommandBufferInheritance() {
+    reported = false;
+    memset(&command_buffer_inheritance_features_nv, 0,
+           sizeof(VkPhysicalDeviceCommandBufferInheritanceFeaturesNV));
+  }
+  bool reported;
+  VkPhysicalDeviceCommandBufferInheritanceFeaturesNV
+      command_buffer_inheritance_features_nv;
+};
+
+struct VkJsonNVComputeShaderDerivatives {
+  VkJsonNVComputeShaderDerivatives() {
+    reported = false;
+    memset(&compute_shader_derivatives_features_nv, 0,
+           sizeof(VkPhysicalDeviceComputeShaderDerivativesFeaturesNV));
+  }
+  bool reported;
+  VkPhysicalDeviceComputeShaderDerivativesFeaturesNV
+      compute_shader_derivatives_features_nv;
+};
+
+struct VkJsonNVCooperativeMatrix {
+  VkJsonNVCooperativeMatrix() {
+    reported = false;
+    memset(&cooperative_matrix_features_nv, 0,
+           sizeof(VkPhysicalDeviceCooperativeMatrixFeaturesNV));
+    memset(&cooperative_matrix_properties_nv, 0,
+           sizeof(VkPhysicalDeviceCooperativeMatrixPropertiesNV));
+  }
+  bool reported;
+  VkPhysicalDeviceCooperativeMatrixFeaturesNV cooperative_matrix_features_nv;
+  VkPhysicalDeviceCooperativeMatrixPropertiesNV
+      cooperative_matrix_properties_nv;
+};
+
+struct VkJsonNVCooperativeMatrix2 {
+  VkJsonNVCooperativeMatrix2() {
+    reported = false;
+    memset(&cooperative_matrix2_features_nv, 0,
+           sizeof(VkPhysicalDeviceCooperativeMatrix2FeaturesNV));
+    memset(&cooperative_matrix2_properties_nv, 0,
+           sizeof(VkPhysicalDeviceCooperativeMatrix2PropertiesNV));
+  }
+  bool reported;
+  VkPhysicalDeviceCooperativeMatrix2FeaturesNV cooperative_matrix2_features_nv;
+  VkPhysicalDeviceCooperativeMatrix2PropertiesNV
+      cooperative_matrix2_properties_nv;
+};
+
+struct VkJsonNVCooperativeVector {
+  VkJsonNVCooperativeVector() {
+    reported = false;
+    memset(&cooperative_vector_properties_nv, 0,
+           sizeof(VkPhysicalDeviceCooperativeVectorPropertiesNV));
+    memset(&cooperative_vector_features_nv, 0,
+           sizeof(VkPhysicalDeviceCooperativeVectorFeaturesNV));
+  }
+  bool reported;
+  VkPhysicalDeviceCooperativeVectorPropertiesNV
+      cooperative_vector_properties_nv;
+  VkPhysicalDeviceCooperativeVectorFeaturesNV cooperative_vector_features_nv;
+};
+
+struct VkJsonNVCopyMemoryIndirect {
+  VkJsonNVCopyMemoryIndirect() {
+    reported = false;
+    memset(&copy_memory_indirect_features_nv, 0,
+           sizeof(VkPhysicalDeviceCopyMemoryIndirectFeaturesNV));
+    memset(&copy_memory_indirect_properties_nv, 0,
+           sizeof(VkPhysicalDeviceCopyMemoryIndirectPropertiesNV));
+  }
+  bool reported;
+  VkPhysicalDeviceCopyMemoryIndirectFeaturesNV copy_memory_indirect_features_nv;
+  VkPhysicalDeviceCopyMemoryIndirectPropertiesNV
+      copy_memory_indirect_properties_nv;
+};
+
+struct VkJsonNVCornerSampledImage {
+  VkJsonNVCornerSampledImage() {
+    reported = false;
+    memset(&corner_sampled_image_features_nv, 0,
+           sizeof(VkPhysicalDeviceCornerSampledImageFeaturesNV));
+  }
+  bool reported;
+  VkPhysicalDeviceCornerSampledImageFeaturesNV corner_sampled_image_features_nv;
+};
+
+struct VkJsonNVCoverageReductionMode {
+  VkJsonNVCoverageReductionMode() {
+    reported = false;
+    memset(&coverage_reduction_mode_features_nv, 0,
+           sizeof(VkPhysicalDeviceCoverageReductionModeFeaturesNV));
+  }
+  bool reported;
+  VkPhysicalDeviceCoverageReductionModeFeaturesNV
+      coverage_reduction_mode_features_nv;
+};
+
+struct VkJsonNVDedicatedAllocationImageAliasing {
+  VkJsonNVDedicatedAllocationImageAliasing() {
+    reported = false;
+    memset(&dedicated_allocation_image_aliasing_features_nv, 0,
+           sizeof(VkPhysicalDeviceDedicatedAllocationImageAliasingFeaturesNV));
+  }
+  bool reported;
+  VkPhysicalDeviceDedicatedAllocationImageAliasingFeaturesNV
+      dedicated_allocation_image_aliasing_features_nv;
+};
+
+struct VkJsonNVDescriptorPoolOverallocation {
+  VkJsonNVDescriptorPoolOverallocation() {
+    reported = false;
+    memset(&descriptor_pool_overallocation_features_nv, 0,
+           sizeof(VkPhysicalDeviceDescriptorPoolOverallocationFeaturesNV));
+  }
+  bool reported;
+  VkPhysicalDeviceDescriptorPoolOverallocationFeaturesNV
+      descriptor_pool_overallocation_features_nv;
+};
+
+struct VkJsonNVDeviceDiagnosticsConfig {
+  VkJsonNVDeviceDiagnosticsConfig() {
+    reported = false;
+    memset(&diagnostics_config_features_nv, 0,
+           sizeof(VkPhysicalDeviceDiagnosticsConfigFeaturesNV));
+  }
+  bool reported;
+  VkPhysicalDeviceDiagnosticsConfigFeaturesNV diagnostics_config_features_nv;
+};
+
+struct VkJsonNVDeviceGeneratedCommands {
+  VkJsonNVDeviceGeneratedCommands() {
+    reported = false;
+    memset(&device_generated_commands_properties_nv, 0,
+           sizeof(VkPhysicalDeviceDeviceGeneratedCommandsPropertiesNV));
+    memset(&device_generated_commands_features_nv, 0,
+           sizeof(VkPhysicalDeviceDeviceGeneratedCommandsFeaturesNV));
+  }
+  bool reported;
+  VkPhysicalDeviceDeviceGeneratedCommandsPropertiesNV
+      device_generated_commands_properties_nv;
+  VkPhysicalDeviceDeviceGeneratedCommandsFeaturesNV
+      device_generated_commands_features_nv;
+};
+
+struct VkJsonNVDeviceGeneratedCommandsCompute {
+  VkJsonNVDeviceGeneratedCommandsCompute() {
+    reported = false;
+    memset(&device_generated_commands_compute_features_nv, 0,
+           sizeof(VkPhysicalDeviceDeviceGeneratedCommandsComputeFeaturesNV));
+  }
+  bool reported;
+  VkPhysicalDeviceDeviceGeneratedCommandsComputeFeaturesNV
+      device_generated_commands_compute_features_nv;
+};
+
+struct VkJsonNVExtendedSparseAddressSpace {
+  VkJsonNVExtendedSparseAddressSpace() {
+    reported = false;
+    memset(&extended_sparse_address_space_features_nv, 0,
+           sizeof(VkPhysicalDeviceExtendedSparseAddressSpaceFeaturesNV));
+    memset(&extended_sparse_address_space_properties_nv, 0,
+           sizeof(VkPhysicalDeviceExtendedSparseAddressSpacePropertiesNV));
+  }
+  bool reported;
+  VkPhysicalDeviceExtendedSparseAddressSpaceFeaturesNV
+      extended_sparse_address_space_features_nv;
+  VkPhysicalDeviceExtendedSparseAddressSpacePropertiesNV
+      extended_sparse_address_space_properties_nv;
+};
+
+struct VkJsonNVExternalComputeQueue {
+  VkJsonNVExternalComputeQueue() {
+    reported = false;
+    memset(&external_compute_queue_properties_nv, 0,
+           sizeof(VkPhysicalDeviceExternalComputeQueuePropertiesNV));
+  }
+  bool reported;
+  VkPhysicalDeviceExternalComputeQueuePropertiesNV
+      external_compute_queue_properties_nv;
+};
+
+struct VkJsonNVExternalMemoryRdma {
+  VkJsonNVExternalMemoryRdma() {
+    reported = false;
+    memset(&external_memory_rdma_features_nv, 0,
+           sizeof(VkPhysicalDeviceExternalMemoryRDMAFeaturesNV));
+  }
+  bool reported;
+  VkPhysicalDeviceExternalMemoryRDMAFeaturesNV external_memory_rdma_features_nv;
+};
+
+struct VkJsonNVFragmentShadingRateEnums {
+  VkJsonNVFragmentShadingRateEnums() {
+    reported = false;
+    memset(&fragment_shading_rate_enums_features_nv, 0,
+           sizeof(VkPhysicalDeviceFragmentShadingRateEnumsFeaturesNV));
+    memset(&fragment_shading_rate_enums_properties_nv, 0,
+           sizeof(VkPhysicalDeviceFragmentShadingRateEnumsPropertiesNV));
+  }
+  bool reported;
+  VkPhysicalDeviceFragmentShadingRateEnumsFeaturesNV
+      fragment_shading_rate_enums_features_nv;
+  VkPhysicalDeviceFragmentShadingRateEnumsPropertiesNV
+      fragment_shading_rate_enums_properties_nv;
+};
+
+struct VkJsonNVInheritedViewportScissor {
+  VkJsonNVInheritedViewportScissor() {
+    reported = false;
+    memset(&inherited_viewport_scissor_features_nv, 0,
+           sizeof(VkPhysicalDeviceInheritedViewportScissorFeaturesNV));
+  }
+  bool reported;
+  VkPhysicalDeviceInheritedViewportScissorFeaturesNV
+      inherited_viewport_scissor_features_nv;
+};
+
+struct VkJsonNVLinearColorAttachment {
+  VkJsonNVLinearColorAttachment() {
+    reported = false;
+    memset(&linear_color_attachment_features_nv, 0,
+           sizeof(VkPhysicalDeviceLinearColorAttachmentFeaturesNV));
+  }
+  bool reported;
+  VkPhysicalDeviceLinearColorAttachmentFeaturesNV
+      linear_color_attachment_features_nv;
+};
+
+struct VkJsonNVMemoryDecompression {
+  VkJsonNVMemoryDecompression() {
+    reported = false;
+    memset(&memory_decompression_features_nv, 0,
+           sizeof(VkPhysicalDeviceMemoryDecompressionFeaturesNV));
+    memset(&memory_decompression_properties_nv, 0,
+           sizeof(VkPhysicalDeviceMemoryDecompressionPropertiesNV));
+  }
+  bool reported;
+  VkPhysicalDeviceMemoryDecompressionFeaturesNV
+      memory_decompression_features_nv;
+  VkPhysicalDeviceMemoryDecompressionPropertiesNV
+      memory_decompression_properties_nv;
+};
+
+struct VkJsonNVMeshShader {
+  VkJsonNVMeshShader() {
+    reported = false;
+    memset(&mesh_shader_features_nv, 0,
+           sizeof(VkPhysicalDeviceMeshShaderFeaturesNV));
+    memset(&mesh_shader_properties_nv, 0,
+           sizeof(VkPhysicalDeviceMeshShaderPropertiesNV));
+  }
+  bool reported;
+  VkPhysicalDeviceMeshShaderFeaturesNV mesh_shader_features_nv;
+  VkPhysicalDeviceMeshShaderPropertiesNV mesh_shader_properties_nv;
+};
+
+struct VkJsonNVOpticalFlow {
+  VkJsonNVOpticalFlow() {
+    reported = false;
+    memset(&optical_flow_features_nv, 0,
+           sizeof(VkPhysicalDeviceOpticalFlowFeaturesNV));
+    memset(&optical_flow_properties_nv, 0,
+           sizeof(VkPhysicalDeviceOpticalFlowPropertiesNV));
+  }
+  bool reported;
+  VkPhysicalDeviceOpticalFlowFeaturesNV optical_flow_features_nv;
+  VkPhysicalDeviceOpticalFlowPropertiesNV optical_flow_properties_nv;
+};
+
+struct VkJsonNVPartitionedAccelerationStructure {
+  VkJsonNVPartitionedAccelerationStructure() {
+    reported = false;
+    memset(&partitioned_acceleration_structure_features_nv, 0,
+           sizeof(VkPhysicalDevicePartitionedAccelerationStructureFeaturesNV));
+    memset(
+        &partitioned_acceleration_structure_properties_nv, 0,
+        sizeof(VkPhysicalDevicePartitionedAccelerationStructurePropertiesNV));
+  }
+  bool reported;
+  VkPhysicalDevicePartitionedAccelerationStructureFeaturesNV
+      partitioned_acceleration_structure_features_nv;
+  VkPhysicalDevicePartitionedAccelerationStructurePropertiesNV
+      partitioned_acceleration_structure_properties_nv;
+};
+
+struct VkJsonNVPerStageDescriptorSet {
+  VkJsonNVPerStageDescriptorSet() {
+    reported = false;
+    memset(&per_stage_descriptor_set_features_nv, 0,
+           sizeof(VkPhysicalDevicePerStageDescriptorSetFeaturesNV));
+  }
+  bool reported;
+  VkPhysicalDevicePerStageDescriptorSetFeaturesNV
+      per_stage_descriptor_set_features_nv;
+};
+
+struct VkJsonNVPresentBarrier {
+  VkJsonNVPresentBarrier() {
+    reported = false;
+    memset(&present_barrier_features_nv, 0,
+           sizeof(VkPhysicalDevicePresentBarrierFeaturesNV));
+  }
+  bool reported;
+  VkPhysicalDevicePresentBarrierFeaturesNV present_barrier_features_nv;
+};
+
+struct VkJsonNVRawAccessChains {
+  VkJsonNVRawAccessChains() {
+    reported = false;
+    memset(&raw_access_chains_features_nv, 0,
+           sizeof(VkPhysicalDeviceRawAccessChainsFeaturesNV));
+  }
+  bool reported;
+  VkPhysicalDeviceRawAccessChainsFeaturesNV raw_access_chains_features_nv;
+};
+
+struct VkJsonNVRayTracing {
+  VkJsonNVRayTracing() {
+    reported = false;
+    memset(&ray_tracing_properties_nv, 0,
+           sizeof(VkPhysicalDeviceRayTracingPropertiesNV));
+  }
+  bool reported;
+  VkPhysicalDeviceRayTracingPropertiesNV ray_tracing_properties_nv;
+};
+
+struct VkJsonNVRayTracingInvocationReorder {
+  VkJsonNVRayTracingInvocationReorder() {
+    reported = false;
+    memset(&ray_tracing_invocation_reorder_properties_nv, 0,
+           sizeof(VkPhysicalDeviceRayTracingInvocationReorderPropertiesNV));
+    memset(&ray_tracing_invocation_reorder_features_nv, 0,
+           sizeof(VkPhysicalDeviceRayTracingInvocationReorderFeaturesNV));
+  }
+  bool reported;
+  VkPhysicalDeviceRayTracingInvocationReorderPropertiesNV
+      ray_tracing_invocation_reorder_properties_nv;
+  VkPhysicalDeviceRayTracingInvocationReorderFeaturesNV
+      ray_tracing_invocation_reorder_features_nv;
+};
+
+struct VkJsonNVRayTracingLinearSweptSpheres {
+  VkJsonNVRayTracingLinearSweptSpheres() {
+    reported = false;
+    memset(&ray_tracing_linear_swept_spheres_features_nv, 0,
+           sizeof(VkPhysicalDeviceRayTracingLinearSweptSpheresFeaturesNV));
+  }
+  bool reported;
+  VkPhysicalDeviceRayTracingLinearSweptSpheresFeaturesNV
+      ray_tracing_linear_swept_spheres_features_nv;
+};
+
+struct VkJsonNVRayTracingMotionBlur {
+  VkJsonNVRayTracingMotionBlur() {
+    reported = false;
+    memset(&ray_tracing_motion_blur_features_nv, 0,
+           sizeof(VkPhysicalDeviceRayTracingMotionBlurFeaturesNV));
+  }
+  bool reported;
+  VkPhysicalDeviceRayTracingMotionBlurFeaturesNV
+      ray_tracing_motion_blur_features_nv;
+};
+
+struct VkJsonNVRayTracingValidation {
+  VkJsonNVRayTracingValidation() {
+    reported = false;
+    memset(&ray_tracing_validation_features_nv, 0,
+           sizeof(VkPhysicalDeviceRayTracingValidationFeaturesNV));
+  }
+  bool reported;
+  VkPhysicalDeviceRayTracingValidationFeaturesNV
+      ray_tracing_validation_features_nv;
+};
+
+struct VkJsonNVRepresentativeFragmentTest {
+  VkJsonNVRepresentativeFragmentTest() {
+    reported = false;
+    memset(&representative_fragment_test_features_nv, 0,
+           sizeof(VkPhysicalDeviceRepresentativeFragmentTestFeaturesNV));
+  }
+  bool reported;
+  VkPhysicalDeviceRepresentativeFragmentTestFeaturesNV
+      representative_fragment_test_features_nv;
+};
+
+struct VkJsonNVScissorExclusive {
+  VkJsonNVScissorExclusive() {
+    reported = false;
+    memset(&exclusive_scissor_features_nv, 0,
+           sizeof(VkPhysicalDeviceExclusiveScissorFeaturesNV));
+  }
+  bool reported;
+  VkPhysicalDeviceExclusiveScissorFeaturesNV exclusive_scissor_features_nv;
+};
+
+struct VkJsonNVShaderAtomicFloat16Vector {
+  VkJsonNVShaderAtomicFloat16Vector() {
+    reported = false;
+    memset(&shader_atomic_float16_vector_features_nv, 0,
+           sizeof(VkPhysicalDeviceShaderAtomicFloat16VectorFeaturesNV));
+  }
+  bool reported;
+  VkPhysicalDeviceShaderAtomicFloat16VectorFeaturesNV
+      shader_atomic_float16_vector_features_nv;
+};
+
+struct VkJsonNVShaderImageFootprint {
+  VkJsonNVShaderImageFootprint() {
+    reported = false;
+    memset(&shader_image_footprint_features_nv, 0,
+           sizeof(VkPhysicalDeviceShaderImageFootprintFeaturesNV));
+  }
+  bool reported;
+  VkPhysicalDeviceShaderImageFootprintFeaturesNV
+      shader_image_footprint_features_nv;
+};
+
+struct VkJsonNVShaderSmBuiltins {
+  VkJsonNVShaderSmBuiltins() {
+    reported = false;
+    memset(&shader_sm_builtins_properties_nv, 0,
+           sizeof(VkPhysicalDeviceShaderSMBuiltinsPropertiesNV));
+    memset(&shader_sm_builtins_features_nv, 0,
+           sizeof(VkPhysicalDeviceShaderSMBuiltinsFeaturesNV));
+  }
+  bool reported;
+  VkPhysicalDeviceShaderSMBuiltinsPropertiesNV shader_sm_builtins_properties_nv;
+  VkPhysicalDeviceShaderSMBuiltinsFeaturesNV shader_sm_builtins_features_nv;
+};
+
+struct VkJsonNVShadingRateImage {
+  VkJsonNVShadingRateImage() {
+    reported = false;
+    memset(&shading_rate_image_features_nv, 0,
+           sizeof(VkPhysicalDeviceShadingRateImageFeaturesNV));
+    memset(&shading_rate_image_properties_nv, 0,
+           sizeof(VkPhysicalDeviceShadingRateImagePropertiesNV));
+  }
+  bool reported;
+  VkPhysicalDeviceShadingRateImageFeaturesNV shading_rate_image_features_nv;
+  VkPhysicalDeviceShadingRateImagePropertiesNV shading_rate_image_properties_nv;
+};
+
+struct VkJsonQCOMFilterCubicClamp {
+  VkJsonQCOMFilterCubicClamp() {
+    reported = false;
+    memset(&cubic_clamp_features_qcom, 0,
+           sizeof(VkPhysicalDeviceCubicClampFeaturesQCOM));
+  }
+  bool reported;
+  VkPhysicalDeviceCubicClampFeaturesQCOM cubic_clamp_features_qcom;
+};
+
+struct VkJsonQCOMFilterCubicWeights {
+  VkJsonQCOMFilterCubicWeights() {
+    reported = false;
+    memset(&cubic_weights_features_qcom, 0,
+           sizeof(VkPhysicalDeviceCubicWeightsFeaturesQCOM));
+  }
+  bool reported;
+  VkPhysicalDeviceCubicWeightsFeaturesQCOM cubic_weights_features_qcom;
+};
+
+struct VkJsonQCOMFragmentDensityMapOffset {
+  VkJsonQCOMFragmentDensityMapOffset() {
+    reported = false;
+    memset(&fragment_density_map_offset_features_qcom, 0,
+           sizeof(VkPhysicalDeviceFragmentDensityMapOffsetFeaturesQCOM));
+    memset(&fragment_density_map_offset_properties_qcom, 0,
+           sizeof(VkPhysicalDeviceFragmentDensityMapOffsetPropertiesQCOM));
+  }
+  bool reported;
+  VkPhysicalDeviceFragmentDensityMapOffsetFeaturesQCOM
+      fragment_density_map_offset_features_qcom;
+  VkPhysicalDeviceFragmentDensityMapOffsetPropertiesQCOM
+      fragment_density_map_offset_properties_qcom;
+};
+
+struct VkJsonQCOMImageProcessing {
+  VkJsonQCOMImageProcessing() {
+    reported = false;
+    memset(&image_processing_features_qcom, 0,
+           sizeof(VkPhysicalDeviceImageProcessingFeaturesQCOM));
+    memset(&image_processing_properties_qcom, 0,
+           sizeof(VkPhysicalDeviceImageProcessingPropertiesQCOM));
+  }
+  bool reported;
+  VkPhysicalDeviceImageProcessingFeaturesQCOM image_processing_features_qcom;
+  VkPhysicalDeviceImageProcessingPropertiesQCOM
+      image_processing_properties_qcom;
+};
+
+struct VkJsonQCOMImageProcessing2 {
+  VkJsonQCOMImageProcessing2() {
+    reported = false;
+    memset(&image_processing2_features_qcom, 0,
+           sizeof(VkPhysicalDeviceImageProcessing2FeaturesQCOM));
+    memset(&image_processing2_properties_qcom, 0,
+           sizeof(VkPhysicalDeviceImageProcessing2PropertiesQCOM));
+  }
+  bool reported;
+  VkPhysicalDeviceImageProcessing2FeaturesQCOM image_processing2_features_qcom;
+  VkPhysicalDeviceImageProcessing2PropertiesQCOM
+      image_processing2_properties_qcom;
+};
+
+struct VkJsonQCOMMultiviewPerViewRenderAreas {
+  VkJsonQCOMMultiviewPerViewRenderAreas() {
+    reported = false;
+    memset(&multiview_per_view_render_areas_features_qcom, 0,
+           sizeof(VkPhysicalDeviceMultiviewPerViewRenderAreasFeaturesQCOM));
+  }
+  bool reported;
+  VkPhysicalDeviceMultiviewPerViewRenderAreasFeaturesQCOM
+      multiview_per_view_render_areas_features_qcom;
+};
+
+struct VkJsonQCOMMultiviewPerViewViewports {
+  VkJsonQCOMMultiviewPerViewViewports() {
+    reported = false;
+    memset(&multiview_per_view_viewports_features_qcom, 0,
+           sizeof(VkPhysicalDeviceMultiviewPerViewViewportsFeaturesQCOM));
+  }
+  bool reported;
+  VkPhysicalDeviceMultiviewPerViewViewportsFeaturesQCOM
+      multiview_per_view_viewports_features_qcom;
+};
+
+struct VkJsonQCOMTileMemoryHeap {
+  VkJsonQCOMTileMemoryHeap() {
+    reported = false;
+    memset(&tile_memory_heap_features_qcom, 0,
+           sizeof(VkPhysicalDeviceTileMemoryHeapFeaturesQCOM));
+    memset(&tile_memory_heap_properties_qcom, 0,
+           sizeof(VkPhysicalDeviceTileMemoryHeapPropertiesQCOM));
+  }
+  bool reported;
+  VkPhysicalDeviceTileMemoryHeapFeaturesQCOM tile_memory_heap_features_qcom;
+  VkPhysicalDeviceTileMemoryHeapPropertiesQCOM tile_memory_heap_properties_qcom;
+};
+
+struct VkJsonQCOMTileProperties {
+  VkJsonQCOMTileProperties() {
+    reported = false;
+    memset(&tile_properties_features_qcom, 0,
+           sizeof(VkPhysicalDeviceTilePropertiesFeaturesQCOM));
+  }
+  bool reported;
+  VkPhysicalDeviceTilePropertiesFeaturesQCOM tile_properties_features_qcom;
+};
+
+struct VkJsonQCOMTileShading {
+  VkJsonQCOMTileShading() {
+    reported = false;
+    memset(&tile_shading_features_qcom, 0,
+           sizeof(VkPhysicalDeviceTileShadingFeaturesQCOM));
+    memset(&tile_shading_properties_qcom, 0,
+           sizeof(VkPhysicalDeviceTileShadingPropertiesQCOM));
+  }
+  bool reported;
+  VkPhysicalDeviceTileShadingFeaturesQCOM tile_shading_features_qcom;
+  VkPhysicalDeviceTileShadingPropertiesQCOM tile_shading_properties_qcom;
+};
+
+struct VkJsonQCOMYcbcrDegamma {
+  VkJsonQCOMYcbcrDegamma() {
+    reported = false;
+    memset(&ycbcr_degamma_features_qcom, 0,
+           sizeof(VkPhysicalDeviceYcbcrDegammaFeaturesQCOM));
+  }
+  bool reported;
+  VkPhysicalDeviceYcbcrDegammaFeaturesQCOM ycbcr_degamma_features_qcom;
+};
+
+struct VkJsonSECAmigoProfiling {
+  VkJsonSECAmigoProfiling() {
+    reported = false;
+    memset(&amigo_profiling_features_sec, 0,
+           sizeof(VkPhysicalDeviceAmigoProfilingFeaturesSEC));
+  }
+  bool reported;
+  VkPhysicalDeviceAmigoProfilingFeaturesSEC amigo_profiling_features_sec;
+};
+
+struct VkJsonVALVEDescriptorSetHostMapping {
+  VkJsonVALVEDescriptorSetHostMapping() {
+    reported = false;
+    memset(&descriptor_set_host_mapping_features_valve, 0,
+           sizeof(VkPhysicalDeviceDescriptorSetHostMappingFeaturesVALVE));
+  }
+  bool reported;
+  VkPhysicalDeviceDescriptorSetHostMappingFeaturesVALVE
+      descriptor_set_host_mapping_features_valve;
+};
+
+struct VkJsonVALVEMutableDescriptorType {
+  VkJsonVALVEMutableDescriptorType() {
+    reported = false;
+    memset(&mutable_descriptor_type_features_valve, 0,
+           sizeof(VkPhysicalDeviceMutableDescriptorTypeFeaturesVALVE));
+  }
+  bool reported;
+  VkPhysicalDeviceMutableDescriptorTypeFeaturesVALVE
+      mutable_descriptor_type_features_valve;
 };
 
 struct VkJsonCore11 {
   VkJsonCore11() {
-    memset(&properties, 0, sizeof(VkPhysicalDeviceVulkan11Properties));
     memset(&features, 0, sizeof(VkPhysicalDeviceVulkan11Features));
+    memset(&properties, 0, sizeof(VkPhysicalDeviceVulkan11Properties));
   }
-  VkPhysicalDeviceVulkan11Properties properties;
   VkPhysicalDeviceVulkan11Features features;
+  VkPhysicalDeviceVulkan11Properties properties;
 };
 
 struct VkJsonCore12 {
   VkJsonCore12() {
-    memset(&properties, 0, sizeof(VkPhysicalDeviceVulkan12Properties));
     memset(&features, 0, sizeof(VkPhysicalDeviceVulkan12Features));
+    memset(&properties, 0, sizeof(VkPhysicalDeviceVulkan12Properties));
   }
-  VkPhysicalDeviceVulkan12Properties properties;
   VkPhysicalDeviceVulkan12Features features;
+  VkPhysicalDeviceVulkan12Properties properties;
 };
 
 struct VkJsonCore13 {
   VkJsonCore13() {
-    memset(&properties, 0, sizeof(VkPhysicalDeviceVulkan13Properties));
     memset(&features, 0, sizeof(VkPhysicalDeviceVulkan13Features));
+    memset(&properties, 0, sizeof(VkPhysicalDeviceVulkan13Properties));
   }
-  VkPhysicalDeviceVulkan13Properties properties;
   VkPhysicalDeviceVulkan13Features features;
+  VkPhysicalDeviceVulkan13Properties properties;
 };
 
 struct VkJsonCore14 {
   VkJsonCore14() {
-    memset(&properties, 0, sizeof(VkPhysicalDeviceVulkan14Properties));
     memset(&features, 0, sizeof(VkPhysicalDeviceVulkan14Features));
+    memset(&properties, 0, sizeof(VkPhysicalDeviceVulkan14Properties));
   }
-  VkPhysicalDeviceVulkan14Properties properties;
   VkPhysicalDeviceVulkan14Features features;
+  VkPhysicalDeviceVulkan14Properties properties;
   std::vector<VkImageLayout> copy_src_layouts;
   std::vector<VkImageLayout> copy_dst_layouts;
 };
 
 struct VkJsonDevice {
   VkJsonDevice() {
+    memset(&bit16_storage_features, 0,
+           sizeof(VkPhysicalDevice16BitStorageFeatures));
+    memset(&bit8_storage_features, 0,
+           sizeof(VkPhysicalDevice8BitStorageFeatures));
+    memset(&buffer_device_address_features, 0,
+           sizeof(VkPhysicalDeviceBufferDeviceAddressFeatures));
+    memset(&depth_stencil_resolve_properties, 0,
+           sizeof(VkPhysicalDeviceDepthStencilResolveProperties));
+    memset(&descriptor_indexing_features, 0,
+           sizeof(VkPhysicalDeviceDescriptorIndexingFeatures));
+    memset(&descriptor_indexing_properties, 0,
+           sizeof(VkPhysicalDeviceDescriptorIndexingProperties));
+    memset(&driver_properties, 0, sizeof(VkPhysicalDeviceDriverProperties));
+    memset(&dynamic_rendering_features, 0,
+           sizeof(VkPhysicalDeviceDynamicRenderingFeatures));
+    memset(&dynamic_rendering_local_read_features, 0,
+           sizeof(VkPhysicalDeviceDynamicRenderingLocalReadFeatures));
+    memset(&float_controls_properties, 0,
+           sizeof(VkPhysicalDeviceFloatControlsProperties));
+    memset(&global_priority_query_features, 0,
+           sizeof(VkPhysicalDeviceGlobalPriorityQueryFeatures));
+    memset(&host_image_copy_features, 0,
+           sizeof(VkPhysicalDeviceHostImageCopyFeatures));
+    memset(&host_image_copy_properties, 0,
+           sizeof(VkPhysicalDeviceHostImageCopyProperties));
+    memset(&host_query_reset_features, 0,
+           sizeof(VkPhysicalDeviceHostQueryResetFeatures));
+    memset(&id_properties, 0, sizeof(VkPhysicalDeviceIDProperties));
+    memset(&image_robustness_features, 0,
+           sizeof(VkPhysicalDeviceImageRobustnessFeatures));
+    memset(&imageless_framebuffer_features, 0,
+           sizeof(VkPhysicalDeviceImagelessFramebufferFeatures));
+    memset(&index_type_uint8_features, 0,
+           sizeof(VkPhysicalDeviceIndexTypeUint8Features));
+    memset(&inline_uniform_block_features, 0,
+           sizeof(VkPhysicalDeviceInlineUniformBlockFeatures));
+    memset(&inline_uniform_block_properties, 0,
+           sizeof(VkPhysicalDeviceInlineUniformBlockProperties));
+    memset(&line_rasterization_features, 0,
+           sizeof(VkPhysicalDeviceLineRasterizationFeatures));
+    memset(&line_rasterization_properties, 0,
+           sizeof(VkPhysicalDeviceLineRasterizationProperties));
+    memset(&maintenance3_properties, 0,
+           sizeof(VkPhysicalDeviceMaintenance3Properties));
+    memset(&maintenance4_features, 0,
+           sizeof(VkPhysicalDeviceMaintenance4Features));
+    memset(&maintenance4_properties, 0,
+           sizeof(VkPhysicalDeviceMaintenance4Properties));
+    memset(&maintenance5_features, 0,
+           sizeof(VkPhysicalDeviceMaintenance5Features));
+    memset(&maintenance5_properties, 0,
+           sizeof(VkPhysicalDeviceMaintenance5Properties));
+    memset(&maintenance6_features, 0,
+           sizeof(VkPhysicalDeviceMaintenance6Features));
+    memset(&maintenance6_properties, 0,
+           sizeof(VkPhysicalDeviceMaintenance6Properties));
+    memset(&multiview_features, 0, sizeof(VkPhysicalDeviceMultiviewFeatures));
+    memset(&multiview_properties, 0,
+           sizeof(VkPhysicalDeviceMultiviewProperties));
+    memset(&pipeline_creation_cache_control_features, 0,
+           sizeof(VkPhysicalDevicePipelineCreationCacheControlFeatures));
+    memset(&pipeline_protected_access_features, 0,
+           sizeof(VkPhysicalDevicePipelineProtectedAccessFeatures));
+    memset(&pipeline_robustness_features, 0,
+           sizeof(VkPhysicalDevicePipelineRobustnessFeatures));
+    memset(&pipeline_robustness_properties, 0,
+           sizeof(VkPhysicalDevicePipelineRobustnessProperties));
+    memset(&point_clipping_properties, 0,
+           sizeof(VkPhysicalDevicePointClippingProperties));
+    memset(&private_data_features, 0,
+           sizeof(VkPhysicalDevicePrivateDataFeatures));
+    memset(&protected_memory_features, 0,
+           sizeof(VkPhysicalDeviceProtectedMemoryFeatures));
+    memset(&protected_memory_properties, 0,
+           sizeof(VkPhysicalDeviceProtectedMemoryProperties));
+    memset(&push_descriptor_properties, 0,
+           sizeof(VkPhysicalDevicePushDescriptorProperties));
+    memset(&sampler_filter_minmax_properties, 0,
+           sizeof(VkPhysicalDeviceSamplerFilterMinmaxProperties));
+    memset(&sampler_ycbcr_conversion_features, 0,
+           sizeof(VkPhysicalDeviceSamplerYcbcrConversionFeatures));
+    memset(&scalar_block_layout_features, 0,
+           sizeof(VkPhysicalDeviceScalarBlockLayoutFeatures));
+    memset(&separate_depth_stencil_layouts_features, 0,
+           sizeof(VkPhysicalDeviceSeparateDepthStencilLayoutsFeatures));
+    memset(&shader_atomic_int64_features, 0,
+           sizeof(VkPhysicalDeviceShaderAtomicInt64Features));
+    memset(&shader_demote_to_helper_invocation_features, 0,
+           sizeof(VkPhysicalDeviceShaderDemoteToHelperInvocationFeatures));
+    memset(&shader_draw_parameter_features, 0,
+           sizeof(VkPhysicalDeviceShaderDrawParameterFeatures));
+    memset(&shader_draw_parameters_features, 0,
+           sizeof(VkPhysicalDeviceShaderDrawParametersFeatures));
+    memset(&shader_expect_assume_features, 0,
+           sizeof(VkPhysicalDeviceShaderExpectAssumeFeatures));
+    memset(&shader_float16_int8_features, 0,
+           sizeof(VkPhysicalDeviceShaderFloat16Int8Features));
+    memset(&shader_float_controls2_features, 0,
+           sizeof(VkPhysicalDeviceShaderFloatControls2Features));
+    memset(&shader_integer_dot_product_features, 0,
+           sizeof(VkPhysicalDeviceShaderIntegerDotProductFeatures));
+    memset(&shader_integer_dot_product_properties, 0,
+           sizeof(VkPhysicalDeviceShaderIntegerDotProductProperties));
+    memset(&shader_subgroup_extended_types_features, 0,
+           sizeof(VkPhysicalDeviceShaderSubgroupExtendedTypesFeatures));
+    memset(&shader_subgroup_rotate_features, 0,
+           sizeof(VkPhysicalDeviceShaderSubgroupRotateFeatures));
+    memset(&shader_terminate_invocation_features, 0,
+           sizeof(VkPhysicalDeviceShaderTerminateInvocationFeatures));
+    memset(&subgroup_properties, 0, sizeof(VkPhysicalDeviceSubgroupProperties));
+    memset(&subgroup_size_control_features, 0,
+           sizeof(VkPhysicalDeviceSubgroupSizeControlFeatures));
+    memset(&subgroup_size_control_properties, 0,
+           sizeof(VkPhysicalDeviceSubgroupSizeControlProperties));
+    memset(&synchronization2_features, 0,
+           sizeof(VkPhysicalDeviceSynchronization2Features));
+    memset(&texel_buffer_alignment_properties, 0,
+           sizeof(VkPhysicalDeviceTexelBufferAlignmentProperties));
+    memset(&texture_compression_astchdr_features, 0,
+           sizeof(VkPhysicalDeviceTextureCompressionASTCHDRFeatures));
+    memset(&timeline_semaphore_features, 0,
+           sizeof(VkPhysicalDeviceTimelineSemaphoreFeatures));
+    memset(&timeline_semaphore_properties, 0,
+           sizeof(VkPhysicalDeviceTimelineSemaphoreProperties));
+    memset(&uniform_buffer_standard_layout_features, 0,
+           sizeof(VkPhysicalDeviceUniformBufferStandardLayoutFeatures));
+    memset(&variable_pointer_features, 0,
+           sizeof(VkPhysicalDeviceVariablePointerFeatures));
+    memset(&variable_pointers_features, 0,
+           sizeof(VkPhysicalDeviceVariablePointersFeatures));
+    memset(&vertex_attribute_divisor_features, 0,
+           sizeof(VkPhysicalDeviceVertexAttributeDivisorFeatures));
+    memset(&vertex_attribute_divisor_properties, 0,
+           sizeof(VkPhysicalDeviceVertexAttributeDivisorProperties));
+    memset(&vulkan_memory_model_features, 0,
+           sizeof(VkPhysicalDeviceVulkanMemoryModelFeatures));
+    memset(&zero_initialize_workgroup_memory_features, 0,
+           sizeof(VkPhysicalDeviceZeroInitializeWorkgroupMemoryFeatures));
     memset(&properties, 0, sizeof(VkPhysicalDeviceProperties));
     memset(&features, 0, sizeof(VkPhysicalDeviceFeatures));
     memset(&memory, 0, sizeof(VkPhysicalDeviceMemoryProperties));
-    memset(&subgroup_properties, 0, sizeof(VkPhysicalDeviceSubgroupProperties));
-    memset(&point_clipping_properties, 0,
-           sizeof(VkPhysicalDevicePointClippingProperties));
-    memset(&multiview_properties, 0,
-           sizeof(VkPhysicalDeviceMultiviewProperties));
-    memset(&id_properties, 0, sizeof(VkPhysicalDeviceIDProperties));
-    memset(&maintenance3_properties, 0,
-           sizeof(VkPhysicalDeviceMaintenance3Properties));
-    memset(&bit16_storage_features, 0,
-           sizeof(VkPhysicalDevice16BitStorageFeatures));
-    memset(&multiview_features, 0, sizeof(VkPhysicalDeviceMultiviewFeatures));
-    memset(&variable_pointers_features, 0,
-           sizeof(VkPhysicalDeviceVariablePointersFeatures));
-    memset(&protected_memory_features, 0,
-           sizeof(VkPhysicalDeviceProtectedMemoryFeatures));
-    memset(&sampler_ycbcr_conversion_features, 0,
-           sizeof(VkPhysicalDeviceSamplerYcbcrConversionFeatures));
-    memset(&shader_draw_parameter_features, 0,
-           sizeof(VkPhysicalDeviceShaderDrawParameterFeatures));
   }
-  VkJsonKHRVariablePointers khr_variable_pointers;
-  VkJsonKHRShaderFloat16Int8 khr_shader_float16_int8;
-  VkJsonExtImage2dViewOf3d ext_image_2d_view_of_3d;
+  VkJsonAMDAntiLag amd_anti_lag;
+  VkJsonAMDDeviceCoherentMemory amd_device_coherent_memory;
+  VkJsonAMDShaderCoreProperties amd_shader_core_properties;
+  VkJsonAMDShaderCoreProperties2 amd_shader_core_properties2;
+  VkJsonAMDShaderEarlyAndLateFragmentTests
+      amd_shader_early_and_late_fragment_tests;
+  VkJsonANDROIDExternalFormatResolve android_external_format_resolve;
+  VkJsonARMFormatPack arm_format_pack;
+  VkJsonARMPipelineOpacityMicromap arm_pipeline_opacity_micromap;
+  VkJsonARMRasterizationOrderAttachmentAccess
+      arm_rasterization_order_attachment_access;
+  VkJsonARMRenderPassStriped arm_render_pass_striped;
+  VkJsonARMSchedulingControls arm_scheduling_controls;
+  VkJsonARMShaderCoreBuiltins arm_shader_core_builtins;
+  VkJsonARMShaderCoreProperties arm_shader_core_properties;
+  VkJsonARMTensors arm_tensors;
+  VkJsonExt4444Formats ext_formats_4444;
+  VkJsonExtAstcDecodeMode ext_astc_decode_mode;
+  VkJsonExtAttachmentFeedbackLoopDynamicState
+      ext_attachment_feedback_loop_dynamic_state;
+  VkJsonExtAttachmentFeedbackLoopLayout ext_attachment_feedback_loop_layout;
+  VkJsonExtBlendOperationAdvanced ext_blend_operation_advanced;
+  VkJsonExtBorderColorSwizzle ext_border_color_swizzle;
+  VkJsonExtBufferDeviceAddress ext_buffer_device_address;
+  VkJsonExtColorWriteEnable ext_color_write_enable;
+  VkJsonExtConditionalRendering ext_conditional_rendering;
+  VkJsonExtConservativeRasterization ext_conservative_rasterization;
   VkJsonExtCustomBorderColor ext_custom_border_color;
-  VkJsonExtPrimitiveTopologyListRestart ext_primitive_topology_list_restart;
-  VkJsonExtProvokingVertex ext_provoking_vertex;
-  VkJsonKHRIndexTypeUint8 khr_index_type_uint8;
+  VkJsonExtDepthBiasControl ext_depth_bias_control;
+  VkJsonExtDepthClampControl ext_depth_clamp_control;
+  VkJsonExtDepthClipControl ext_depth_clip_control;
+  VkJsonExtDepthClipEnable ext_depth_clip_enable;
+  VkJsonExtDescriptorBuffer ext_descriptor_buffer;
+  VkJsonExtDescriptorIndexing ext_descriptor_indexing;
+  VkJsonExtDeviceAddressBindingReport ext_device_address_binding_report;
+  VkJsonExtDeviceFault ext_device_fault;
+  VkJsonExtDeviceGeneratedCommands ext_device_generated_commands;
+  VkJsonExtDeviceMemoryReport ext_device_memory_report;
+  VkJsonExtDiscardRectangles ext_discard_rectangles;
+  VkJsonExtDynamicRenderingUnusedAttachments
+      ext_dynamic_rendering_unused_attachments;
+  VkJsonExtExtendedDynamicState ext_extended_dynamic_state;
+  VkJsonExtExtendedDynamicState2 ext_extended_dynamic_state2;
+  VkJsonExtExtendedDynamicState3 ext_extended_dynamic_state3;
+  VkJsonExtExternalMemoryHost ext_external_memory_host;
+  VkJsonExtFragmentDensityMap ext_fragment_density_map;
+  VkJsonExtFragmentDensityMap2 ext_fragment_density_map2;
+  VkJsonExtFragmentDensityMapOffset ext_fragment_density_map_offset;
+  VkJsonExtFragmentShaderInterlock ext_fragment_shader_interlock;
+  VkJsonExtFrameBoundary ext_frame_boundary;
+  VkJsonExtGlobalPriorityQuery ext_global_priority_query;
+  VkJsonExtGraphicsPipelineLibrary ext_graphics_pipeline_library;
+  VkJsonExtHostImageCopy ext_host_image_copy;
+  VkJsonExtHostQueryReset ext_host_query_reset;
+  VkJsonExtImage2dViewOf3d ext_image_2d_view_of_3d;
+  VkJsonExtImageCompressionControl ext_image_compression_control;
+  VkJsonExtImageCompressionControlSwapchain
+      ext_image_compression_control_swapchain;
+  VkJsonExtImageRobustness ext_image_robustness;
+  VkJsonExtImageSlicedViewOf3d ext_image_sliced_view_of_3d;
+  VkJsonExtImageViewMinLod ext_image_view_min_lod;
   VkJsonExtIndexTypeUint8 ext_index_type_uint8;
-  VkJsonKHRVertexAttributeDivisor khr_vertex_attribute_divisor;
-  VkJsonExtVertexAttributeDivisor ext_vertex_attribute_divisor;
+  VkJsonExtInlineUniformBlock ext_inline_uniform_block;
+  VkJsonExtLegacyDithering ext_legacy_dithering;
+  VkJsonExtLegacyVertexAttributes ext_legacy_vertex_attributes;
+  VkJsonExtLineRasterization ext_line_rasterization;
+  VkJsonExtMapMemoryPlaced ext_map_memory_placed;
+  VkJsonExtMemoryPriority ext_memory_priority;
+  VkJsonExtMeshShader ext_mesh_shader;
+  VkJsonExtMultiDraw ext_multi_draw;
+  VkJsonExtMultisampledRenderToSingleSampled
+      ext_multisampled_render_to_single_sampled;
+  VkJsonExtMutableDescriptorType ext_mutable_descriptor_type;
+  VkJsonExtNestedCommandBuffer ext_nested_command_buffer;
+  VkJsonExtNonSeamlessCubeMap ext_non_seamless_cube_map;
+  VkJsonExtOpacityMicromap ext_opacity_micromap;
+  VkJsonExtPageableDeviceLocalMemory ext_pageable_device_local_memory;
+  VkJsonExtPciBusInfo ext_pci_bus_info;
+  VkJsonExtPhysicalDeviceDrm ext_physical_device_drm;
+  VkJsonExtPipelineCreationCacheControl ext_pipeline_creation_cache_control;
+  VkJsonExtPipelineLibraryGroupHandles ext_pipeline_library_group_handles;
+  VkJsonExtPipelineProperties ext_pipeline_properties;
+  VkJsonExtPipelineProtectedAccess ext_pipeline_protected_access;
+  VkJsonExtPipelineRobustness ext_pipeline_robustness;
+  VkJsonExtPresentModeFifoLatestReady ext_present_mode_fifo_latest_ready;
+  VkJsonExtPrimitiveTopologyListRestart ext_primitive_topology_list_restart;
+  VkJsonExtPrimitivesGeneratedQuery ext_primitives_generated_query;
+  VkJsonExtPrivateData ext_private_data;
+  VkJsonExtProvokingVertex ext_provoking_vertex;
+  VkJsonExtRasterizationOrderAttachmentAccess
+      ext_rasterization_order_attachment_access;
+  VkJsonExtRgba10x6Formats ext_rgba10x6_formats;
+  VkJsonExtRobustness2 ext_robustness2;
+  VkJsonExtSampleLocations ext_sample_locations;
+  VkJsonExtSamplerFilterMinmax ext_sampler_filter_minmax;
+  VkJsonExtScalarBlockLayout ext_scalar_block_layout;
+  VkJsonExtShaderAtomicFloat ext_shader_atomic_float;
+  VkJsonExtShaderAtomicFloat2 ext_shader_atomic_float2;
+  VkJsonExtShaderDemoteToHelperInvocation
+      ext_shader_demote_to_helper_invocation;
+  VkJsonExtShaderFloat8 ext_shader_float8;
+  VkJsonExtShaderImageAtomicInt64 ext_shader_image_atomic_int64;
+  VkJsonExtShaderModuleIdentifier ext_shader_module_identifier;
+  VkJsonExtShaderObject ext_shader_object;
+  VkJsonExtShaderReplicatedComposites ext_shader_replicated_composites;
+  VkJsonExtShaderTileImage ext_shader_tile_image;
+  VkJsonExtSubgroupSizeControl ext_subgroup_size_control;
+  VkJsonExtSubpassMergeFeedback ext_subpass_merge_feedback;
+  VkJsonExtSwapchainMaintenance1 ext_swapchain_maintenance1;
+  VkJsonExtTexelBufferAlignment ext_texel_buffer_alignment;
+  VkJsonExtTextureCompressionAstcHdr ext_texture_compression_astc_hdr;
   VkJsonExtTransformFeedback ext_transform_feedback;
+  VkJsonExtVertexAttributeDivisor ext_vertex_attribute_divisor;
+  VkJsonExtVertexAttributeRobustness ext_vertex_attribute_robustness;
+  VkJsonExtVertexInputDynamicState ext_vertex_input_dynamic_state;
+  VkJsonExtYcbcr2plane444Formats ext_ycbcr_2plane_444_formats;
+  VkJsonExtYcbcrImageArrays ext_ycbcr_image_arrays;
+  VkJsonExtZeroInitializeDeviceMemory ext_zero_initialize_device_memory;
+  VkJsonHUAWEIClusterCullingShader huawei_cluster_culling_shader;
+  VkJsonHUAWEIHdrVivid huawei_hdr_vivid;
+  VkJsonHUAWEIInvocationMask huawei_invocation_mask;
+  VkJsonHUAWEISubpassShading huawei_subpass_shading;
+  VkJsonIMGRelaxedLineRasterization img_relaxed_line_rasterization;
+  VkJsonExtVKINTELShaderIntegerFunctions2 vk_intel_shader_integer_functions2;
+  VkJsonKHR16bitStorage khr_16bit_storage;
+  VkJsonKHR8bitStorage khr_8bit_storage;
+  VkJsonKHRAccelerationStructure khr_acceleration_structure;
+  VkJsonKHRBufferDeviceAddress khr_buffer_device_address;
+  VkJsonKHRComputeShaderDerivatives khr_compute_shader_derivatives;
+  VkJsonKHRCooperativeMatrix khr_cooperative_matrix;
+  VkJsonKHRDepthClampZeroOne khr_depth_clamp_zero_one;
+  VkJsonKHRDepthStencilResolve khr_depth_stencil_resolve;
+  VkJsonKHRDriverProperties khr_driver_properties;
+  VkJsonKHRDynamicRendering khr_dynamic_rendering;
+  VkJsonKHRDynamicRenderingLocalRead khr_dynamic_rendering_local_read;
+  VkJsonKHRExternalFenceCapabilities khr_external_fence_capabilities;
+  VkJsonKHRExternalMemoryCapabilities khr_external_memory_capabilities;
+  VkJsonKHRExternalSemaphoreCapabilities khr_external_semaphore_capabilities;
+  VkJsonKHRFragmentShaderBarycentric khr_fragment_shader_barycentric;
+  VkJsonKHRFragmentShadingRate khr_fragment_shading_rate;
+  VkJsonKHRGlobalPriority khr_global_priority;
+  VkJsonKHRImagelessFramebuffer khr_imageless_framebuffer;
+  VkJsonKHRIndexTypeUint8 khr_index_type_uint8;
+  VkJsonKHRLineRasterization khr_line_rasterization;
+  VkJsonKHRMaintenance2 khr_maintenance2;
+  VkJsonKHRMaintenance3 khr_maintenance3;
+  VkJsonKHRMaintenance4 khr_maintenance4;
+  VkJsonKHRMaintenance5 khr_maintenance5;
+  VkJsonKHRMaintenance6 khr_maintenance6;
+  VkJsonKHRMaintenance7 khr_maintenance7;
+  VkJsonKHRMaintenance8 khr_maintenance8;
+  VkJsonKHRMaintenance9 khr_maintenance9;
+  VkJsonKHRMultiview khr_multiview;
+  VkJsonKHRPerformanceQuery khr_performance_query;
+  VkJsonKHRPipelineBinary khr_pipeline_binary;
+  VkJsonKHRPipelineExecutableProperties khr_pipeline_executable_properties;
+  VkJsonKHRPresentId khr_present_id;
+  VkJsonKHRPresentId2 khr_present_id2;
+  VkJsonKHRPresentWait khr_present_wait;
+  VkJsonKHRPresentWait2 khr_present_wait2;
+  VkJsonKHRPushDescriptor khr_push_descriptor;
+  VkJsonKHRRayQuery khr_ray_query;
+  VkJsonKHRRayTracingMaintenance1 khr_ray_tracing_maintenance1;
+  VkJsonKHRRayTracingPipeline khr_ray_tracing_pipeline;
+  VkJsonKHRRayTracingPositionFetch khr_ray_tracing_position_fetch;
+  VkJsonKHRRobustness2 khr_robustness2;
+  VkJsonKHRSamplerYcbcrConversion khr_sampler_ycbcr_conversion;
+  VkJsonKHRSeparateDepthStencilLayouts khr_separate_depth_stencil_layouts;
+  VkJsonKHRShaderAtomicInt64 khr_shader_atomic_int64;
+  VkJsonKHRShaderBfloat16 khr_shader_bfloat16;
+  VkJsonKHRShaderClock khr_shader_clock;
+  VkJsonKHRShaderExpectAssume khr_shader_expect_assume;
+  VkJsonKHRShaderFloat16Int8 khr_shader_float16_int8;
+  VkJsonKHRShaderFloatControls khr_shader_float_controls;
+  VkJsonKHRShaderFloatControls2 khr_shader_float_controls2;
+  VkJsonKHRShaderIntegerDotProduct khr_shader_integer_dot_product;
+  VkJsonKHRShaderMaximalReconvergence khr_shader_maximal_reconvergence;
+  VkJsonKHRShaderQuadControl khr_shader_quad_control;
+  VkJsonKHRShaderRelaxedExtendedInstruction
+      khr_shader_relaxed_extended_instruction;
+  VkJsonKHRShaderSubgroupExtendedTypes khr_shader_subgroup_extended_types;
+  VkJsonKHRShaderSubgroupRotate khr_shader_subgroup_rotate;
   VkJsonKHRShaderSubgroupUniformControlFlow
       khr_shader_subgroup_uniform_control_flow;
-  VkJsonKHRShaderSubgroupExtendedTypes khr_shader_subgroup_extended_types;
-  VkJsonKHR8bitStorage khr_8bit_storage;
-  VkJsonKHRShaderIntegerDotProduct khr_shader_integer_dot_product;
-  VkJsonIMGRelaxedLineRasterization img_relaxed_line_rasterization;
-  VkJsonKHRLineRasterization khr_line_rasterization;
-  VkJsonExtLineRasterization ext_line_rasterization;
-  VkJsonExtPrimitivesGeneratedQuery ext_primitives_generated_query;
-  VkJsonKHRShaderFloatControls khr_shader_float_controls;
-  VkJsonKHRDriverProperties khr_driver_properties;
+  VkJsonKHRShaderTerminateInvocation khr_shader_terminate_invocation;
+  VkJsonKHRSynchronization2 khr_synchronization2;
+  VkJsonKHRTimelineSemaphore khr_timeline_semaphore;
+  VkJsonKHRUnifiedImageLayouts khr_unified_image_layouts;
+  VkJsonKHRUniformBufferStandardLayout khr_uniform_buffer_standard_layout;
+  VkJsonKHRVariablePointers khr_variable_pointers;
+  VkJsonKHRVertexAttributeDivisor khr_vertex_attribute_divisor;
+  VkJsonKHRVideoDecodeVp9 khr_video_decode_vp9;
+  VkJsonKHRVideoEncodeAv1 khr_video_encode_av1;
+  VkJsonKHRVideoEncodeQuantizationMap khr_video_encode_quantization_map;
+  VkJsonKHRVideoMaintenance1 khr_video_maintenance1;
+  VkJsonKHRVideoMaintenance2 khr_video_maintenance2;
+  VkJsonKHRVulkanMemoryModel khr_vulkan_memory_model;
+  VkJsonKHRWorkgroupMemoryExplicitLayout khr_workgroup_memory_explicit_layout;
+  VkJsonKHRZeroInitializeWorkgroupMemory khr_zero_initialize_workgroup_memory;
+  VkJsonMESAImageAlignmentControl mesa_image_alignment_control;
+  VkJsonMSFTLayeredDriver msft_layered_driver;
+  VkJsonNVXMultiviewPerViewAttributes nvx_multiview_per_view_attributes;
+  VkJsonNVClusterAccelerationStructure nv_cluster_acceleration_structure;
+  VkJsonNVCommandBufferInheritance nv_command_buffer_inheritance;
+  VkJsonNVComputeShaderDerivatives nv_compute_shader_derivatives;
+  VkJsonNVCooperativeMatrix nv_cooperative_matrix;
+  VkJsonNVCooperativeMatrix2 nv_cooperative_matrix2;
+  VkJsonNVCooperativeVector nv_cooperative_vector;
+  VkJsonNVCopyMemoryIndirect nv_copy_memory_indirect;
+  VkJsonNVCornerSampledImage nv_corner_sampled_image;
+  VkJsonNVCoverageReductionMode nv_coverage_reduction_mode;
+  VkJsonNVDedicatedAllocationImageAliasing
+      nv_dedicated_allocation_image_aliasing;
+  VkJsonNVDescriptorPoolOverallocation nv_descriptor_pool_overallocation;
+  VkJsonNVDeviceDiagnosticsConfig nv_device_diagnostics_config;
+  VkJsonNVDeviceGeneratedCommands nv_device_generated_commands;
+  VkJsonNVDeviceGeneratedCommandsCompute nv_device_generated_commands_compute;
+  VkJsonNVExtendedSparseAddressSpace nv_extended_sparse_address_space;
+  VkJsonNVExternalComputeQueue nv_external_compute_queue;
+  VkJsonNVExternalMemoryRdma nv_external_memory_rdma;
+  VkJsonNVFragmentShadingRateEnums nv_fragment_shading_rate_enums;
+  VkJsonNVInheritedViewportScissor nv_inherited_viewport_scissor;
+  VkJsonNVLinearColorAttachment nv_linear_color_attachment;
+  VkJsonNVMemoryDecompression nv_memory_decompression;
+  VkJsonNVMeshShader nv_mesh_shader;
+  VkJsonNVOpticalFlow nv_optical_flow;
+  VkJsonNVPartitionedAccelerationStructure
+      nv_partitioned_acceleration_structure;
+  VkJsonNVPerStageDescriptorSet nv_per_stage_descriptor_set;
+  VkJsonNVPresentBarrier nv_present_barrier;
+  VkJsonNVRawAccessChains nv_raw_access_chains;
+  VkJsonNVRayTracing nv_ray_tracing;
+  VkJsonNVRayTracingInvocationReorder nv_ray_tracing_invocation_reorder;
+  VkJsonNVRayTracingLinearSweptSpheres nv_ray_tracing_linear_swept_spheres;
+  VkJsonNVRayTracingMotionBlur nv_ray_tracing_motion_blur;
+  VkJsonNVRayTracingValidation nv_ray_tracing_validation;
+  VkJsonNVRepresentativeFragmentTest nv_representative_fragment_test;
+  VkJsonNVScissorExclusive nv_scissor_exclusive;
+  VkJsonNVShaderAtomicFloat16Vector nv_shader_atomic_float16_vector;
+  VkJsonNVShaderImageFootprint nv_shader_image_footprint;
+  VkJsonNVShaderSmBuiltins nv_shader_sm_builtins;
+  VkJsonNVShadingRateImage nv_shading_rate_image;
+  VkJsonQCOMFilterCubicClamp qcom_filter_cubic_clamp;
+  VkJsonQCOMFilterCubicWeights qcom_filter_cubic_weights;
+  VkJsonQCOMFragmentDensityMapOffset qcom_fragment_density_map_offset;
+  VkJsonQCOMImageProcessing qcom_image_processing;
+  VkJsonQCOMImageProcessing2 qcom_image_processing2;
+  VkJsonQCOMMultiviewPerViewRenderAreas qcom_multiview_per_view_render_areas;
+  VkJsonQCOMMultiviewPerViewViewports qcom_multiview_per_view_viewports;
+  VkJsonQCOMTileMemoryHeap qcom_tile_memory_heap;
+  VkJsonQCOMTileProperties qcom_tile_properties;
+  VkJsonQCOMTileShading qcom_tile_shading;
+  VkJsonQCOMYcbcrDegamma qcom_ycbcr_degamma;
+  VkJsonSECAmigoProfiling sec_amigo_profiling;
+  VkJsonVALVEDescriptorSetHostMapping valve_descriptor_set_host_mapping;
+  VkJsonVALVEMutableDescriptorType valve_mutable_descriptor_type;
   VkJsonCore11 core11;
   VkJsonCore12 core12;
   VkJsonCore13 core13;
   VkJsonCore14 core14;
+  VkPhysicalDevice16BitStorageFeatures bit16_storage_features;
+  VkPhysicalDevice8BitStorageFeatures bit8_storage_features;
+  VkPhysicalDeviceBufferDeviceAddressFeatures buffer_device_address_features;
+  VkPhysicalDeviceDepthStencilResolveProperties
+      depth_stencil_resolve_properties;
+  VkPhysicalDeviceDescriptorIndexingFeatures descriptor_indexing_features;
+  VkPhysicalDeviceDescriptorIndexingProperties descriptor_indexing_properties;
+  VkPhysicalDeviceDriverProperties driver_properties;
+  VkPhysicalDeviceDynamicRenderingFeatures dynamic_rendering_features;
+  VkPhysicalDeviceDynamicRenderingLocalReadFeatures
+      dynamic_rendering_local_read_features;
+  VkPhysicalDeviceFloatControlsProperties float_controls_properties;
+  VkPhysicalDeviceGlobalPriorityQueryFeatures global_priority_query_features;
+  VkPhysicalDeviceHostImageCopyFeatures host_image_copy_features;
+  VkPhysicalDeviceHostImageCopyProperties host_image_copy_properties;
+  VkPhysicalDeviceHostQueryResetFeatures host_query_reset_features;
+  VkPhysicalDeviceIDProperties id_properties;
+  VkPhysicalDeviceImageRobustnessFeatures image_robustness_features;
+  VkPhysicalDeviceImagelessFramebufferFeatures imageless_framebuffer_features;
+  VkPhysicalDeviceIndexTypeUint8Features index_type_uint8_features;
+  VkPhysicalDeviceInlineUniformBlockFeatures inline_uniform_block_features;
+  VkPhysicalDeviceInlineUniformBlockProperties inline_uniform_block_properties;
+  VkPhysicalDeviceLineRasterizationFeatures line_rasterization_features;
+  VkPhysicalDeviceLineRasterizationProperties line_rasterization_properties;
+  VkPhysicalDeviceMaintenance3Properties maintenance3_properties;
+  VkPhysicalDeviceMaintenance4Features maintenance4_features;
+  VkPhysicalDeviceMaintenance4Properties maintenance4_properties;
+  VkPhysicalDeviceMaintenance5Features maintenance5_features;
+  VkPhysicalDeviceMaintenance5Properties maintenance5_properties;
+  VkPhysicalDeviceMaintenance6Features maintenance6_features;
+  VkPhysicalDeviceMaintenance6Properties maintenance6_properties;
+  VkPhysicalDeviceMultiviewFeatures multiview_features;
+  VkPhysicalDeviceMultiviewProperties multiview_properties;
+  VkPhysicalDevicePipelineCreationCacheControlFeatures
+      pipeline_creation_cache_control_features;
+  VkPhysicalDevicePipelineProtectedAccessFeatures
+      pipeline_protected_access_features;
+  VkPhysicalDevicePipelineRobustnessFeatures pipeline_robustness_features;
+  VkPhysicalDevicePipelineRobustnessProperties pipeline_robustness_properties;
+  VkPhysicalDevicePointClippingProperties point_clipping_properties;
+  VkPhysicalDevicePrivateDataFeatures private_data_features;
+  VkPhysicalDeviceProtectedMemoryFeatures protected_memory_features;
+  VkPhysicalDeviceProtectedMemoryProperties protected_memory_properties;
+  VkPhysicalDevicePushDescriptorProperties push_descriptor_properties;
+  VkPhysicalDeviceSamplerFilterMinmaxProperties
+      sampler_filter_minmax_properties;
+  VkPhysicalDeviceSamplerYcbcrConversionFeatures
+      sampler_ycbcr_conversion_features;
+  VkPhysicalDeviceScalarBlockLayoutFeatures scalar_block_layout_features;
+  VkPhysicalDeviceSeparateDepthStencilLayoutsFeatures
+      separate_depth_stencil_layouts_features;
+  VkPhysicalDeviceShaderAtomicInt64Features shader_atomic_int64_features;
+  VkPhysicalDeviceShaderDemoteToHelperInvocationFeatures
+      shader_demote_to_helper_invocation_features;
+  VkPhysicalDeviceShaderDrawParameterFeatures shader_draw_parameter_features;
+  VkPhysicalDeviceShaderDrawParametersFeatures shader_draw_parameters_features;
+  VkPhysicalDeviceShaderExpectAssumeFeatures shader_expect_assume_features;
+  VkPhysicalDeviceShaderFloat16Int8Features shader_float16_int8_features;
+  VkPhysicalDeviceShaderFloatControls2Features shader_float_controls2_features;
+  VkPhysicalDeviceShaderIntegerDotProductFeatures
+      shader_integer_dot_product_features;
+  VkPhysicalDeviceShaderIntegerDotProductProperties
+      shader_integer_dot_product_properties;
+  VkPhysicalDeviceShaderSubgroupExtendedTypesFeatures
+      shader_subgroup_extended_types_features;
+  VkPhysicalDeviceShaderSubgroupRotateFeatures shader_subgroup_rotate_features;
+  VkPhysicalDeviceShaderTerminateInvocationFeatures
+      shader_terminate_invocation_features;
+  VkPhysicalDeviceSubgroupProperties subgroup_properties;
+  VkPhysicalDeviceSubgroupSizeControlFeatures subgroup_size_control_features;
+  VkPhysicalDeviceSubgroupSizeControlProperties
+      subgroup_size_control_properties;
+  VkPhysicalDeviceSynchronization2Features synchronization2_features;
+  VkPhysicalDeviceTexelBufferAlignmentProperties
+      texel_buffer_alignment_properties;
+  VkPhysicalDeviceTextureCompressionASTCHDRFeatures
+      texture_compression_astchdr_features;
+  VkPhysicalDeviceTimelineSemaphoreFeatures timeline_semaphore_features;
+  VkPhysicalDeviceTimelineSemaphoreProperties timeline_semaphore_properties;
+  VkPhysicalDeviceUniformBufferStandardLayoutFeatures
+      uniform_buffer_standard_layout_features;
+  VkPhysicalDeviceVariablePointerFeatures variable_pointer_features;
+  VkPhysicalDeviceVariablePointersFeatures variable_pointers_features;
+  VkPhysicalDeviceVertexAttributeDivisorFeatures
+      vertex_attribute_divisor_features;
+  VkPhysicalDeviceVertexAttributeDivisorProperties
+      vertex_attribute_divisor_properties;
+  VkPhysicalDeviceVulkanMemoryModelFeatures vulkan_memory_model_features;
+  VkPhysicalDeviceZeroInitializeWorkgroupMemoryFeatures
+      zero_initialize_workgroup_memory_features;
   VkPhysicalDeviceProperties properties;
   VkPhysicalDeviceFeatures features;
   VkPhysicalDeviceMemoryProperties memory;
-  VkPhysicalDeviceSubgroupProperties subgroup_properties;
-  VkPhysicalDevicePointClippingProperties point_clipping_properties;
-  VkPhysicalDeviceMultiviewProperties multiview_properties;
-  VkPhysicalDeviceIDProperties id_properties;
-  VkPhysicalDeviceMaintenance3Properties maintenance3_properties;
-  VkPhysicalDevice16BitStorageFeatures bit16_storage_features;
-  VkPhysicalDeviceMultiviewFeatures multiview_features;
-  VkPhysicalDeviceVariablePointersFeatures variable_pointers_features;
-  VkPhysicalDeviceProtectedMemoryFeatures protected_memory_features;
-  VkPhysicalDeviceSamplerYcbcrConversionFeatures
-      sampler_ycbcr_conversion_features;
-  VkPhysicalDeviceShaderDrawParameterFeatures shader_draw_parameter_features;
+  std::vector<VkImageLayout> copy_src_layouts;
+  std::vector<VkImageLayout> copy_dst_layouts;
   std::vector<VkQueueFamilyProperties> queues;
   std::vector<VkExtensionProperties> extensions;
   std::vector<VkLayerProperties> layers;

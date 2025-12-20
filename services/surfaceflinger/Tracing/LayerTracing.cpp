@@ -14,8 +14,6 @@
  * limitations under the License.
  */
 
-#undef LOG_TAG
-#define LOG_TAG "LayerTracing"
 #define ATRACE_TAG ATRACE_TAG_GRAPHICS
 
 #include "LayerTracing.h"
@@ -192,9 +190,11 @@ void LayerTracing::writeSnapshotToStream(perfetto::protos::LayersSnapshotProto&&
 
 void LayerTracing::writeSnapshotToPerfetto(const perfetto::protos::LayersSnapshotProto& snapshot,
                                            Mode srcMode) {
+    SFTRACE_CALL();
     const auto snapshotBytes = snapshot.SerializeAsString();
 
     LayerDataSource::Trace([&](LayerDataSource::TraceContext context) {
+        SFTRACE_NAME("writeSnapshotToPerfetto_traceFunction");
         auto dstMode = context.GetCustomTlsState()->mMode;
         if (srcMode == Mode::MODE_GENERATED) {
             // Layers snapshots produced by LayerTraceGenerator have srcMode == MODE_GENERATED

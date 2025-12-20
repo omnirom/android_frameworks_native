@@ -212,6 +212,23 @@ protected:
                 .setPosition(mTopLayer, 0, 0)
                 .show(mBackgroundLayer)
                 .apply();
+
+        // Cache any existing listeners that could impact luma sampling test results
+        sp<gui::ISurfaceComposer> composer = ComposerServiceAIDL::getComposerService();
+        composer->getRegionSamplingListeners(&mExistingListeners);
+        for (const auto& descriptor : mExistingListeners) {
+            composer->removeRegionSamplingListener(descriptor.listener);
+        }
+    }
+
+    void TearDown() override {
+        // Restore device state by re-adding listeners that were present prior to the test run
+        sp<gui::ISurfaceComposer> composer = ComposerServiceAIDL::getComposerService();
+        for (const auto& descriptor : mExistingListeners) {
+            composer->addRegionSamplingListenerWithStopLayerId(descriptor.area,
+                                                               descriptor.stopLayerId,
+                                                               descriptor.listener);
+        }
     }
 
     void fill_render(uint32_t rgba_value) {
@@ -234,6 +251,7 @@ protected:
     sp<SurfaceControl> mBackgroundLayer;
     sp<SurfaceControl> mContentLayer;
     sp<SurfaceControl> mTopLayer;
+    std::vector<gui::RegionSamplingDescriptor> mExistingListeners;
 
     uint32_t const rgba_green = 0xFF00FF00;
     float const luma_green = 0.7152;

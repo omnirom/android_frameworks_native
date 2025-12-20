@@ -56,6 +56,7 @@ struct InputEventEntry {
     std::chrono::nanoseconds eventTime{0};
     std::vector<Pointer> pointers{};
     int32_t action{-1};
+    ui::LogicalDisplayId displayId = ui::LogicalDisplayId::DEFAULT;
 };
 
 } // namespace
@@ -137,7 +138,8 @@ InputMessage InputConsumerResamplingTest::nextPointerMessage(const InputEventEnt
                                                  .eventTime(entry.eventTime.count())
                                                  .deviceId(1)
                                                  .action(entry.action)
-                                                 .downTime(0);
+                                                 .downTime(0)
+                                                 .displayId(entry.displayId);
     for (const Pointer& pointer : entry.pointers) {
         messageBuilder.pointer(pointer.asPointerBuilder());
     }
@@ -739,6 +741,52 @@ TEST_F(InputConsumerResamplingTest, TwoPointersAreResampledIndependently) {
              InputEventEntry{95ms,
                              {Pointer{.id = 1, .x = 575.0f, .y = 575.0f, .isResampled = true}},
                              AMOTION_EVENT_ACTION_MOVE}});
+}
+
+/**
+ * Events should not be resampled when they are on different displays.
+ */
+TEST_F(InputConsumerResamplingTest, EventsOnDifferentDisplaysAreNotResampled) {
+    // Send the initial ACTION_DOWN separately, so that the first consumed event will only return an
+    // InputEvent with a single action.
+    mClientTestChannel->enqueueMessage(nextPointerMessage(
+            {0ms, {Pointer{.id = 0, .x = 10.0f, .y = 20.0f}}, AMOTION_EVENT_ACTION_DOWN}));
+
+    invokeLooperCallback();
+    assertReceivedMotionEvent({InputEventEntry{0ms,
+                                               {Pointer{.id = 0, .x = 10.0f, .y = 20.0f}},
+                                               AMOTION_EVENT_ACTION_DOWN}});
+
+    // Two ACTION_MOVE events 10 ms apart that move in X direction and stay still in Y, but on
+    // different displays
+    mClientTestChannel->enqueueMessage(
+            nextPointerMessage({10ms,
+                                {Pointer{.id = 0, .x = 20.0f, .y = 30.0f}},
+                                AMOTION_EVENT_ACTION_MOVE,
+                                ui::LogicalDisplayId::DEFAULT}));
+    mClientTestChannel->enqueueMessage(
+            nextPointerMessage({20ms,
+                                {Pointer{.id = 0, .x = 30.0f, .y = 30.0f}},
+                                AMOTION_EVENT_ACTION_MOVE,
+                                ui::LogicalDisplayId{1}}));
+
+    invokeLooperCallback();
+    mConsumer->consumeBatchedInputEvents(nanoseconds{20ms + RESAMPLE_LATENCY * 2}.count());
+
+    // MotionEvent should not be resampled because the resample time falls exactly on the existing
+    // event time.
+    assertReceivedMotionEvent({InputEventEntry{10ms,
+                                               {Pointer{.id = 0, .x = 20.0f, .y = 30.0f}},
+                                               AMOTION_EVENT_ACTION_MOVE,
+                                               ui::LogicalDisplayId::DEFAULT}});
+    assertReceivedMotionEvent({InputEventEntry{20ms,
+                                               {Pointer{.id = 0, .x = 30.0f, .y = 30.0f}},
+                                               AMOTION_EVENT_ACTION_MOVE,
+                                               ui::LogicalDisplayId{1}}});
+
+    mClientTestChannel->assertFinishMessage(/*seq=*/1, /*handled=*/true);
+    mClientTestChannel->assertFinishMessage(/*seq=*/2, /*handled=*/true);
+    mClientTestChannel->assertFinishMessage(/*seq=*/3, /*handled=*/true);
 }
 
 } // namespace android

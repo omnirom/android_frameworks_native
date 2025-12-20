@@ -260,6 +260,11 @@ private:
      * the batched MotionEvent that it received.
      */
     std::map<uint32_t, std::vector<uint32_t>> mBatchedSequenceNumbers;
+
+    /**
+     * Checks if a given input event is okay to be added to an existing batch or not.
+     */
+    bool isBatchableEvent(const InputMessage& message) const;
 };
 
 } // namespace android

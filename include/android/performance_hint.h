@@ -590,7 +590,7 @@ void AWorkDuration_setActualGpuDurationNanos(AWorkDuration* _Nonnull aWorkDurati
  * @param env The Java environment where the PerformanceHintManager.Session lives.
  * @param sessionObj The Java Session to unwrap.
  *
- * @return A pointer to the APerformanceHintManager that backs the Java Session.
+ * @return A pointer to the APerformanceHintSession that backs the Java Session.
  */
 APerformanceHintSession* _Nonnull APerformanceHint_borrowSessionFromJava(
         JNIEnv* _Nonnull env, jobject _Nonnull sessionObj) __INTRODUCED_IN(36);

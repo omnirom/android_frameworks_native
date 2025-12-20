@@ -15,6 +15,7 @@
  */
 
 #include <input/DisplayViewport.h>
+#include <input/Input.h>
 #include <stdint.h>
 #include <ui/Rotation.h>
 
@@ -88,7 +89,7 @@ bool isPointerDown(int32_t buttonState) {
 
 [[nodiscard]] std::list<NotifyArgs> synthesizeButtonKeys(
         InputReaderContext* context, int32_t action, nsecs_t when, nsecs_t readTime,
-        int32_t deviceId, uint32_t source, ui::LogicalDisplayId displayId, uint32_t policyFlags,
+        DeviceId deviceId, uint32_t source, ui::LogicalDisplayId displayId, uint32_t policyFlags,
         int32_t lastButtonState, int32_t currentButtonState) {
     std::list<NotifyArgs> out;
     out += synthesizeButtonKey(context, action, when, readTime, deviceId, source, displayId,

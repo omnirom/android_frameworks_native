@@ -27,11 +27,13 @@
 namespace android::display {
 
 DisplaySnapshot::DisplaySnapshot(PhysicalDisplayId displayId, uint8_t port,
+                                 android::ScreenPartStatus screenPartStatus,
                                  ui::DisplayConnectionType connectionType,
                                  DisplayModes&& displayModes, ui::ColorModes&& colorModes,
                                  std::optional<DeviceProductInfo>&& deviceProductInfo)
       : mDisplayId(displayId),
         mPort(port),
+        mScreenPartStatus(screenPartStatus),
         mConnectionType(connectionType),
         mDisplayModes(std::move(displayModes)),
         mColorModes(std::move(colorModes)),

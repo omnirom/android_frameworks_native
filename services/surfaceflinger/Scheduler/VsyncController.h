@@ -83,6 +83,11 @@ public:
      */
     virtual void setDisplayPowerMode(hal::PowerMode powerMode) = 0;
 
+    /*
+     * Resets the vsync model
+     */
+    virtual void resetModel() = 0;
+
     virtual void dump(std::string& result) const = 0;
 
 protected:

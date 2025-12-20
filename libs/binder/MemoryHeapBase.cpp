@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-#define LOG_TAG "MemoryHeapBase"
+#define LOG_TAG "libbinder.MemoryHeapBase"
 
 #include <errno.h>
 #include <fcntl.h>

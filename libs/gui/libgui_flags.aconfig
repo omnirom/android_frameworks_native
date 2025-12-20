@@ -10,20 +10,19 @@ flag {
 } # apply_picture_profiles
 
 flag {
-  name: "bq_setframerate"
-  namespace: "core_graphics"
-  description: "This flag controls plumbing setFrameRate thru BufferQueue"
-  bug: "281695725"
-  is_fixed_read_only: true
-} # bq_setframerate
-
-flag {
   name: "bq_consumer_attach_callback"
   namespace: "core_graphics"
   description: "Controls IProducerListener to have consumer side attach callback"
   bug: "353202582"
   is_fixed_read_only: true
 } # bq_consumer_attach_callback
+
+flag {
+  name: "cursor_plane_compatibility"
+  namespace: "desktop_display"
+  description: "configure cursor surface to meet cursor plane buffer requirements"
+  bug: "352067404"
+} # cursor_plane_compatibility
 
 flag {
   name: "frametimestamps_previousrelease"
@@ -34,23 +33,19 @@ flag {
 } # frametimestamps_previousrelease
 
 flag {
+  name: "unapplied_transaction_cleanup"
+  namespace: "window_surfaces"
+  description: "properly clean up resources for transactions that aren't applied"
+  bug: "261757446"
+} # unapplied_transaction_cleanup
+
+flag {
   name: "bq_extendedallocate"
   namespace: "core_graphics"
   description: "Add BQ support for allocate with extended options"
   bug: "268382490"
   is_fixed_read_only: true
 } # bq_extendedallocate
-
-flag {
-  name: "trace_frame_rate_override"
-  namespace: "core_graphics"
-  description: "Trace FrameRateOverride fps"
-  bug: "347314033"
-  is_fixed_read_only: true
-  metadata {
-    purpose: PURPOSE_BUGFIX
-  }
-} # trace_frame_rate_override
 
 flag {
   name: "wb_consumer_base_owns_bq"
@@ -77,28 +72,12 @@ flag {
 } # wb_stream_splitter
 
 flag {
-  name: "buffer_release_channel"
-  namespace: "window_surfaces"
-  description: "Enable BufferReleaseChannel to optimize buffer releases"
-  bug: "294133380"
-  is_fixed_read_only: true
-} # buffer_release_channel
-
-flag {
   name: "wb_ring_buffer"
   namespace: "core_graphics"
   description: "Remove slot dependency in the Ring Buffer Consumer."
   bug: "342197847"
   is_fixed_read_only: true
 } # wb_ring_buffer
-
-flag {
-  name: "wb_camera3_and_processors"
-  namespace: "core_graphics"
-  description: "Remove usage of IGBPs in the *Processor and Camera3*"
-  bug: "342199002"
-  is_fixed_read_only: true
-} # wb_camera3_and_processors
 
 flag {
   name: "wb_libcameraservice"
@@ -141,23 +120,12 @@ flag {
 } # wb_media_migration
 
 flag {
-  name: "allocate_buffer_priority"
-  namespace: "wear_system_health"
-  description: "Boost priority for buffer allocation"
-  bug: "399701430"
+  name: "default_scaling_mode_freeze"
+  namespace: "window_surfaces"
+  description: "Changes the default bbq scaling mode to FREEZE instead of SCALE_TO_WINDOW."
+  bug: "435757017"
   metadata {
-    purpose: PURPOSE_BUGFIX
+      purpose: PURPOSE_BUGFIX
   }
-  is_fixed_read_only: true
-} # allocate_buffer_priority
+} # default_scaling_mode_freeze
 
-flag {
-  name: "bq_always_use_max_dequeued_buffer_count"
-  namespace: "core_graphics"
-  description: "BufferQueueProducer::dequeue's respects setMaxDequeuedBufferCount even before a buffer is dequeued."
-  bug: "399328309"
-  metadata {
-    purpose: PURPOSE_BUGFIX
-  }
-  is_fixed_read_only: true
-} # bq_always_use_max_dequeued_buffer_count

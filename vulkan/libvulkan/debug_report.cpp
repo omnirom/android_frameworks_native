@@ -16,6 +16,8 @@
 
 #include "driver.h"
 
+#include <mutex>
+
 namespace vulkan {
 namespace driver {
 

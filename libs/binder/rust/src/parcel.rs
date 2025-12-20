@@ -100,6 +100,24 @@ impl Parcel {
         NonNull::new(ptr).map(|ptr| Self { ptr })
     }
 
+    /// Create a new `Parcel` with the raw bytes from the buffer.
+    pub fn unmarshal(buffer: &[u8]) -> Parcel {
+        let parcel = Self::new();
+
+        // Safety: The validity of the raw pointer to an `AParcel` is verified in the
+        // constructor `new`. Providing the raw byte array pointer is also safe since
+        // `AParcel_unmarshal` only borrows the data buffer (it accepts only a const
+        // pointer and deep copies all the data internally). Also, by specifying the
+        // array length with `.len()`, this ensures that `AParcel_unmarshal` only
+        // accesses a valid memory area.
+        status_result(unsafe {
+            sys::AParcel_unmarshal(parcel.ptr.as_ptr(), buffer.as_ptr(), buffer.len())
+        })
+        .expect("AParcel_unmarshal failed");
+
+        parcel
+    }
+
     /// Consume the parcel, transferring ownership to the caller.
     pub(crate) fn into_raw(self) -> *mut sys::AParcel {
         let ptr = self.ptr.as_ptr();
@@ -646,6 +664,30 @@ impl Parcel {
     ) -> Result<()> {
         self.borrowed_ref().resize_nullable_out_vec(out_vec)
     }
+
+    /// Marshals the raw bytes of the Parcel to a buffer.
+    ///
+    /// The parcel must not contain any binders or file descriptors.
+    ///
+    /// The data you retrieve here must not be placed in any kind of persistent
+    /// storage. (on local disk, across a network, etc). For that, you should
+    /// use standard serialization or another kind of general serialization
+    /// mechanism. The Parcel marshalled representation is highly optimized for
+    /// local IPC, and as such does not attempt to maintain compatibility with
+    /// data created in different versions of the platform.
+    pub fn marshal(&self) -> Vec<u8> {
+        let mut buffer = vec![0u8; self.get_data_size() as usize];
+
+        // Safety: `Parcel` always contains a valid pointer to an `AParcel`, by
+        // specifying the length length `.len()`, `AParcel_marshal` ensures it
+        // only writes to an expected, valid memory area.
+        status_result(unsafe {
+            sys::AParcel_marshal(self.ptr.as_ptr(), buffer.as_mut_ptr(), 0, buffer.len())
+        })
+        .expect("Failed to marshal");
+
+        buffer
+    }
 }
 
 // Internal APIs
@@ -958,4 +1000,46 @@ fn test_append_from() {
     assert_eq!(Err(StatusCode::BAD_VALUE), parcel2.append_from(&parcel1, 2, 4));
     assert_eq!(Err(StatusCode::BAD_VALUE), parcel2.append_from(&parcel1, -1, 4));
     assert_eq!(Err(StatusCode::BAD_VALUE), parcel2.append_from(&parcel1, 2, -1));
+}
+
+#[test]
+fn test_marshal() {
+    let mut parcel1 = Parcel::new();
+    parcel1.write(&42i32).unwrap();
+    parcel1.write(&52i32).unwrap();
+    parcel1.write(&62i32).unwrap();
+    parcel1.write(&72i32).unwrap();
+    let buffer = parcel1.marshal();
+
+    assert_eq!(16, buffer.len());
+    assert_eq!(Vec::from("\x2a\0\0\0\x34\0\0\0\x3e\0\0\0\x48\0\0\0"), buffer);
+}
+
+#[test]
+fn test_unmarshal() {
+    // arrange
+    let mut parcel1 = Parcel::new();
+    parcel1.write(&42i32).unwrap();
+    parcel1.write(&52i32).unwrap();
+    parcel1.write(&62i32).unwrap();
+    parcel1.write(&72i32).unwrap();
+
+    let buffer = parcel1.marshal();
+
+    // action
+    let parcel2 = Parcel::unmarshal(&buffer);
+    assert_eq!(16, parcel2.get_data_size());
+
+    // SAFETY: 0 is less than the current size of the parcel data buffer, because the parcel is not
+    // empty.
+    unsafe {
+        parcel2.set_data_position(0).unwrap();
+    }
+    drop(buffer); // Make sure the new parcel does not depend on this.
+
+    // assert
+    assert_eq!(Ok(42i32), parcel2.read::<i32>());
+    assert_eq!(Ok(52i32), parcel2.read::<i32>());
+    assert_eq!(Ok(62i32), parcel2.read::<i32>());
+    assert_eq!(Ok(72i32), parcel2.read::<i32>());
 }

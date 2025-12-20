@@ -16,8 +16,12 @@
 
 #pragma once
 
+#include <android-base/result.h>
+#include <android/configuration.h>
 #include <ftl/enum.h>
+#include <ui/FloatRect.h>
 #include <ui/LogicalDisplayId.h>
+#include <ui/Transform.h>
 
 #include <cinttypes>
 #include <unordered_map>
@@ -54,12 +58,30 @@ struct DisplayTopologyAdjacentDisplay {
  * Directed Graph representation of Display Topology.
  */
 struct DisplayTopologyGraph {
-    ui::LogicalDisplayId primaryDisplayId = ui::LogicalDisplayId::INVALID;
-    std::unordered_map<ui::LogicalDisplayId, std::vector<DisplayTopologyAdjacentDisplay>> graph;
-    std::unordered_map<ui::LogicalDisplayId, int> displaysDensity;
+    struct Properties {
+        std::vector<DisplayTopologyAdjacentDisplay> adjacentDisplays;
+        int32_t density;
+        FloatRect boundsInGlobalDp;
+    };
 
-    bool isValid() const;
+    ui::LogicalDisplayId primaryDisplayId = ui::LogicalDisplayId::INVALID;
+    std::unordered_map<ui::LogicalDisplayId, Properties> graph;
+
+    ui::Transform localPxToGlobalDpTransform(ui::LogicalDisplayId displayId) const;
+    ui::Transform globalDpToLocalPxTransform(ui::LogicalDisplayId displayId) const;
+
+    DisplayTopologyGraph() = default;
     std::string dump() const;
+
+    // Builds the topology graph from components.
+    // Returns error if a valid graph cannot be built from the supplied components.
+    static base::Result<const DisplayTopologyGraph> create(
+            ui::LogicalDisplayId primaryDisplay,
+            std::unordered_map<ui::LogicalDisplayId, Properties>&& topologyGraph);
+
+private:
+    DisplayTopologyGraph(ui::LogicalDisplayId primaryDisplay,
+                         std::unordered_map<ui::LogicalDisplayId, Properties>&& topologyGraph);
 };
 
 } // namespace android

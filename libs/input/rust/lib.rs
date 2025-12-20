@@ -69,6 +69,7 @@ mod ffi {
             flags: u32,
             button_state: u32,
         ) -> String;
+        fn dump(verifier: &InputVerifier) -> String;
         fn reset_device(verifier: &mut InputVerifier, device_id: i32);
     }
 
@@ -183,6 +184,10 @@ fn process_movement(
         Ok(()) => "".to_string(),
         Err(e) => e,
     }
+}
+
+fn dump(verifier: &InputVerifier) -> String {
+    verifier.dump()
 }
 
 fn reset_device(verifier: &mut InputVerifier, device_id: i32) {

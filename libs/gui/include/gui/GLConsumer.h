@@ -97,26 +97,6 @@ public:
             __attribute((deprecated(
                     "Prefer create functions that create their own surface and consumer.")));
 
-#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
-    GLConsumer(uint32_t tex, uint32_t textureTarget, bool useFenceSync, bool isControlledByApp);
-
-    GLConsumer(uint32_t textureTarget, bool useFenceSync, bool isControlledByApp);
-
-    GLConsumer(const sp<IGraphicBufferConsumer>& bq, uint32_t tex, uint32_t textureTarget,
-               bool useFenceSync, bool isControlledByApp)
-            __attribute((deprecated("Prefer ctors that create their own surface and consumer.")));
-
-    GLConsumer(const sp<IGraphicBufferConsumer>& bq, uint32_t textureTarget, bool useFenceSync,
-               bool isControlledByApp)
-            __attribute((deprecated("Prefer ctors that create their own surface and consumer.")));
-#else
-    GLConsumer(const sp<IGraphicBufferConsumer>& bq, uint32_t tex, uint32_t textureTarget,
-               bool useFenceSync, bool isControlledByApp);
-
-    GLConsumer(const sp<IGraphicBufferConsumer>& bq, uint32_t textureTarget, bool useFenceSync,
-               bool isControlledByApp);
-#endif // COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
-
     // updateTexImage acquires the most recently queued buffer, and sets the
     // image contents of the target texture to it.
     //
@@ -265,6 +245,8 @@ public:
     // current at the time of the last call to detachFromContext.
     status_t attachToContext(uint32_t tex);
 
+    void onFirstRef() override;
+
 protected:
 
     // abandonLocked overrides the ConsumerBase method to clear
@@ -327,6 +309,22 @@ protected:
     status_t checkAndUpdateEglStateLocked(bool contextCheck = false);
 
 private:
+    friend class sp<GLConsumer>;
+
+    void initializeConsumer();
+
+    GLConsumer(uint32_t tex, uint32_t textureTarget, bool useFenceSync, bool isControlledByApp);
+
+    GLConsumer(uint32_t textureTarget, bool useFenceSync, bool isControlledByApp);
+
+    GLConsumer(const sp<IGraphicBufferConsumer>& bq, uint32_t tex, uint32_t textureTarget,
+               bool useFenceSync, bool isControlledByApp)
+            __attribute((deprecated("Prefer ctors that create their own surface and consumer.")));
+
+    GLConsumer(const sp<IGraphicBufferConsumer>& bq, uint32_t textureTarget, bool useFenceSync,
+               bool isControlledByApp)
+            __attribute((deprecated("Prefer ctors that create their own surface and consumer.")));
+
     // EglImage is a utility class for tracking and creating EGLImageKHRs. There
     // is primarily just one image per slot, but there is also special cases:
     //  - For releaseTexImage, we use a debug image (mReleasedTexImage)

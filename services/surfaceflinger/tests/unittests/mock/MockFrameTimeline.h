@@ -18,11 +18,11 @@
 
 #include <gmock/gmock.h>
 
-#include "FrameTimeline/FrameTimeline.h"
+#include "Scheduler/FrameTimeline.h"
 
 namespace android::mock {
 
-class FrameTimeline : public android::frametimeline::impl::FrameTimeline {
+class FrameTimeline : public android::scheduler::impl::FrameTimeline {
     // No need to create mocks for SurfaceFrame and TokenManager yet. They are very small components
     // and do not have external dependencies like perfetto.
 public:
@@ -30,7 +30,7 @@ public:
     ~FrameTimeline();
 
     MOCK_METHOD0(onBootFinished, void());
-    MOCK_METHOD1(addSurfaceFrame, void(std::shared_ptr<frametimeline::SurfaceFrame>));
+    MOCK_METHOD1(addSurfaceFrame, void(std::shared_ptr<scheduler::SurfaceFrame>));
     MOCK_METHOD4(setSfWakeUp, void(int64_t, nsecs_t, Fps, Fps));
     MOCK_METHOD3(setSfPresent,
                  void(nsecs_t, const std::shared_ptr<FenceTime>&,

@@ -35,7 +35,7 @@ using testing::_;
 using testing::Mock;
 using testing::Return;
 
-using PresentState = frametimeline::SurfaceFrame::PresentState;
+using PresentState = scheduler::SurfaceFrame::PresentState;
 
 class TransactionSurfaceFrameTest : public testing::Test {
 public:
@@ -111,7 +111,7 @@ public:
         // Buffers are presented only at latch time.
         EXPECT_EQ(PresentState::Unknown, surfaceFrame->getPresentState());
 
-        layer->updateTexImage(15);
+        layer->updateTexImage(/*latchTime*/ 15, /*expectedPresentTime*/ 20);
 
         EXPECT_EQ(1, surfaceFrame->getToken());
         EXPECT_EQ(true, surfaceFrame->getIsBuffer());
@@ -164,7 +164,7 @@ public:
         const auto presentedSurfaceFrame = layer->mDrawingState.bufferSurfaceFrameTX;
 
         commitTransaction(layer.get());
-        layer->updateTexImage(15);
+        layer->updateTexImage(/*latchTime*/ 15, /*expectedPresentTime*/ 20);
 
         EXPECT_EQ(1, droppedSurfaceFrame->getToken());
         EXPECT_EQ(true, droppedSurfaceFrame->getIsBuffer());
@@ -216,7 +216,7 @@ public:
         // Buffers are presented only at latch time.
         EXPECT_EQ(PresentState::Unknown, surfaceFrame->getPresentState());
 
-        layer->updateTexImage(15);
+        layer->updateTexImage(/*latchTime*/ 15, /*expectedPresentTime*/ 20);
 
         EXPECT_EQ(PresentState::Presented, surfaceFrame->getPresentState());
     }
@@ -308,7 +308,7 @@ public:
         // Buffers are presented only at latch time.
         EXPECT_EQ(PresentState::Unknown, bufferSurfaceFrameTX->getPresentState());
 
-        layer->updateTexImage(15);
+        layer->updateTexImage(/*latchTime*/ 15, /*expectedPresentTime*/ 20);
 
         EXPECT_EQ(PresentState::Presented, bufferSurfaceFrameTX->getPresentState());
     }
@@ -384,7 +384,7 @@ public:
         const auto presentedSurfaceFrame = layer->mDrawingState.bufferSurfaceFrameTX;
 
         commitTransaction(layer.get());
-        layer->updateTexImage(15);
+        layer->updateTexImage(/*latchTime*/ 15, /*expectedPresentTime*/ 20);
 
         EXPECT_EQ(1, droppedSurfaceFrame1->getToken());
         EXPECT_EQ(true, droppedSurfaceFrame1->getIsBuffer());
@@ -407,7 +407,7 @@ public:
 
     void MultipleCommitsBeforeLatch() {
         sp<Layer> layer = createLayer();
-        std::vector<std::shared_ptr<frametimeline::SurfaceFrame>> surfaceFrames;
+        std::vector<std::shared_ptr<scheduler::SurfaceFrame>> surfaceFrames;
         for (int i = 0; i < 10; i += 2) {
             sp<Fence> fence(sp<Fence>::make());
             BufferData bufferData;
@@ -441,7 +441,7 @@ public:
         }
 
         auto presentedBufferSurfaceFrame = layer->mDrawingState.bufferSurfaceFrameTX;
-        layer->updateTexImage(15);
+        layer->updateTexImage(/*latchTime*/ 15, /*expectedPresentTime*/ 20);
         // BufferlessSurfaceFrames are immediately set to presented and added to the DisplayFrame.
         // Since we don't have access to DisplayFrame here, trigger an onPresent directly.
         // The odd indices are the bufferless frames.

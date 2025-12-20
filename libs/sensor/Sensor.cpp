@@ -30,6 +30,11 @@
  */
 #define SENSOR_PERMISSION_ACTIVITY_RECOGNITION "android.permission.ACTIVITY_RECOGNITION"
 
+/*
+* The permission to detect moisture intrusion within chassis of a devices
+*/
+#define SENSOR_PERMISSION_MOISTURE_INTRUSION "android.permission.MOISTURE_INTRUSION"
+
 // ----------------------------------------------------------------------------
 namespace android {
 // ----------------------------------------------------------------------------
@@ -298,6 +303,11 @@ Sensor::Sensor(struct sensor_t const& hwSensor, const uuid_t& uuid, int halVersi
     case SENSOR_TYPE_HEADING:
         mStringType = SENSOR_STRING_TYPE_HEADING;
         mFlags |= SENSOR_FLAG_CONTINUOUS_MODE;
+        break;
+    case SENSOR_TYPE_MOISTURE_INTRUSION:
+        mStringType = SENSOR_STRING_TYPE_MOISTURE_INTRUSION;
+        mRequiredPermission = SENSOR_PERMISSION_MOISTURE_INTRUSION;
+        mFlags |= SENSOR_FLAG_ON_CHANGE_MODE;
         break;
     default:
         // Only pipe the stringType, requiredPermission and flags for custom sensors.

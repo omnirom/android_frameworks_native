@@ -222,6 +222,12 @@ LIBBINDER_NDK36 { # introduced=36
     ABinderRpc_ConnectionInfo_delete; # systemapi
 };
 
+LIBBINDER_NDK37 { # introduced=37
+  global:
+    AServiceManager_checkServiceAccess; # systemapi llndk
+    AIBinder_setMinRpcThreads; # systemapi
+};
+
 LIBBINDER_NDK_PLATFORM {
   global:
     AParcel_getAllowFds;

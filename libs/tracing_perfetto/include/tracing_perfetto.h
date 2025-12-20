@@ -17,6 +17,7 @@
 #pragma once
 
 #include <stdint.h>
+#include "perfetto/public/te_category_macros.h"
 
 namespace tracing_perfetto {
 
@@ -50,4 +51,7 @@ void traceCounter(uint64_t category, const char* name, int64_t value);
 void traceCounter32(uint64_t category, const char* name, int32_t value);
 
 bool isTagEnabled(uint64_t category);
+
+PerfettoTeCategory* getPerfettoCategory(uint64_t category);
+
 }  // namespace tracing_perfetto

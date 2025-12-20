@@ -24,18 +24,14 @@
 #include <stdint.h>
 #include <sys/types.h>
 
-#ifndef PURE
-#define PURE __attribute__((pure))
-#endif
-
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wgnu-anonymous-struct"
-#pragma clang diagnostic ignored "-Wnested-anon-types"
-
 namespace android {
 // -------------------------------------------------------------------------------------
 
 namespace details {
+
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wgnu-anonymous-struct"
+#pragma clang diagnostic ignored "-Wnested-anon-types"
 
 template <typename T>
 class TQuaternion : public TVecAddOperators<TQuaternion, T>,
@@ -130,10 +126,13 @@ public:
 
     // constructs a quaternion from an axis and angle
     template <typename A, typename B>
-    constexpr static TQuaternion PURE fromAxisAngle(const TVec3<A>& axis, B angle) {
-        return TQuaternion(std::sin(angle*0.5) * normalize(axis), std::cos(angle*0.5));
+    constexpr static TQuaternion __attribute__((pure)) fromAxisAngle(const TVec3<A>& axis,
+                                                                     B angle) {
+        return TQuaternion(std::sin(angle * 0.5) * normalize(axis), std::cos(angle * 0.5));
     }
 };
+
+#pragma clang diagnostic pop
 
 }  // namespace details
 
@@ -144,43 +143,43 @@ typedef details::TQuaternion<float> quat;
 typedef details::TQuaternion<float> quatf;
 typedef details::TQuaternion<half> quath;
 
-constexpr inline quat operator"" _i(long double v) {
+constexpr inline quat operator""_i(long double v) {
     return quat(0, static_cast<float>(v), 0, 0);
 }
-constexpr inline quat operator"" _j(long double v) {
+constexpr inline quat operator""_j(long double v) {
     return quat(0, 0, static_cast<float>(v), 0);
 }
-constexpr inline quat operator"" _k(long double v) {
+constexpr inline quat operator""_k(long double v) {
     return quat(0, 0, 0, static_cast<float>(v));
 }
 
-constexpr inline quat operator"" _i(unsigned long long v) {  // NOLINT
+constexpr inline quat operator""_i(unsigned long long v) {  // NOLINT
     return quat(0, static_cast<float>(v), 0, 0);
 }
-constexpr inline quat operator"" _j(unsigned long long v) {  // NOLINT
+constexpr inline quat operator""_j(unsigned long long v) {  // NOLINT
     return quat(0, 0, static_cast<float>(v), 0);
 }
-constexpr inline quat operator"" _k(unsigned long long v) {  // NOLINT
+constexpr inline quat operator""_k(unsigned long long v) {  // NOLINT
     return quat(0, 0, 0, static_cast<float>(v));
 }
 
-constexpr inline quatd operator"" _id(long double v) {
+constexpr inline quatd operator""_id(long double v) {
     return quatd(0, static_cast<double>(v), 0, 0);
 }
-constexpr inline quatd operator"" _jd(long double v) {
+constexpr inline quatd operator""_jd(long double v) {
     return quatd(0, 0, static_cast<double>(v), 0);
 }
-constexpr inline quatd operator"" _kd(long double v) {
+constexpr inline quatd operator""_kd(long double v) {
     return quatd(0, 0, 0, static_cast<double>(v));
 }
 
-constexpr inline quatd operator"" _id(unsigned long long v) {  // NOLINT
+constexpr inline quatd operator""_id(unsigned long long v) {  // NOLINT
     return quatd(0, static_cast<double>(v), 0, 0);
 }
-constexpr inline quatd operator"" _jd(unsigned long long v) {  // NOLINT
+constexpr inline quatd operator""_jd(unsigned long long v) {  // NOLINT
     return quatd(0, 0, static_cast<double>(v), 0);
 }
-constexpr inline quatd operator"" _kd(unsigned long long v) {  // NOLINT
+constexpr inline quatd operator""_kd(unsigned long long v) {  // NOLINT
     return quatd(0, 0, 0, static_cast<double>(v));
 }
 
@@ -188,7 +187,3 @@ constexpr inline quatd operator"" _kd(unsigned long long v) {  // NOLINT
 }  // namespace android
 
 TVECHELPERS_STD_HASH(android::details::TQuaternion);
-
-#pragma clang diagnostic pop
-
-#undef PURE

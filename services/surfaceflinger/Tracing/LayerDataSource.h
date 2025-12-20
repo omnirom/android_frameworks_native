@@ -63,7 +63,7 @@ public:
 
     static constexpr auto* kName = "android.surfaceflinger.layers";
     static constexpr perfetto::BufferExhaustedPolicy kBufferExhaustedPolicy =
-            perfetto::BufferExhaustedPolicy::kStall;
+            perfetto::BufferExhaustedPolicy::kStallThenDrop;
     static constexpr bool kRequiresCallbacksUnderLock = false;
 
 private:

@@ -21,7 +21,8 @@ namespace android {
 InstrumentedInputReader::InstrumentedInputReader(std::shared_ptr<EventHubInterface> eventHub,
                                                  const sp<InputReaderPolicyInterface>& policy,
                                                  InputListenerInterface& listener)
-      : InputReader(eventHub, policy, listener), mFakeContext(this) {}
+      : InputReader(eventHub, policy, listener, /*env=*/nullptr, /*tracingBackend=*/nullptr),
+        mFakeContext(this) {}
 
 void InstrumentedInputReader::pushNextDevice(std::shared_ptr<InputDevice> device) {
     mNextDevices.push(device);

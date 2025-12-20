@@ -27,8 +27,6 @@
 #include <ui/PixelFormat.h>
 #include <ui/Size.h>
 
-#include <ui/DisplayIdentification.h>
-
 #include "DisplayHardware/HWComposer.h"
 #include "PowerAdvisor/PowerAdvisor.h"
 
@@ -113,7 +111,6 @@ private:
     DisplayIdVariant mIdVariant;
     bool mIsDisconnected = false;
     adpf::PowerAdvisor* mPowerAdvisor = nullptr;
-    bool mHasPictureProcessing = false;
     int32_t mMaxLayerPictureProfiles = 0;
 };
 

@@ -81,8 +81,8 @@ static std::chrono::milliseconds getSlowEventMinReportingInterval() {
 namespace android::inputdispatcher {
 
 /**
- * Same as android::util::BytesField, but doesn't store raw pointers, and therefore deletes its
- * resources automatically.
+ * Same as android::inputflinger::stats::BytesField, but doesn't store raw pointers, and therefore
+ * deletes its resources automatically.
  */
 class SafeBytesField {
 public:
@@ -91,8 +91,8 @@ public:
         mBuffer.resize(aggProto.ByteSizeLong());
         aggProto.SerializeToArray(mBuffer.data(), mBuffer.size());
     }
-    android::util::BytesField getBytesField() {
-        return android::util::BytesField(mBuffer.data(), mBuffer.size());
+    android::inputflinger::stats::BytesField getBytesField() {
+        return android::inputflinger::stats::BytesField(mBuffer.data(), mBuffer.size());
     }
 
 private:
@@ -100,8 +100,8 @@ private:
 };
 
 LatencyAggregator::LatencyAggregator() {
-    AStatsManager_setPullAtomCallback(android::util::INPUT_EVENT_LATENCY_SKETCH, nullptr,
-                                      LatencyAggregator::pullAtomCallback, this);
+    AStatsManager_setPullAtomCallback(android::inputflinger::stats::INPUT_EVENT_LATENCY_SKETCH,
+                                      nullptr, LatencyAggregator::pullAtomCallback, this);
     dist_proc::aggregation::KllQuantileOptions options;
     options.set_inv_eps(100); // Request precision of 1.0%, instead of default 0.1%
     for (size_t i = 0; i < SketchIndex::SIZE; i++) {
@@ -111,7 +111,7 @@ LatencyAggregator::LatencyAggregator() {
 }
 
 LatencyAggregator::~LatencyAggregator() {
-    AStatsManager_clearPullAtomCallback(android::util::INPUT_EVENT_LATENCY_SKETCH);
+    AStatsManager_clearPullAtomCallback(android::inputflinger::stats::INPUT_EVENT_LATENCY_SKETCH);
 }
 
 AStatsManager_PullAtomCallbackReturn LatencyAggregator::pullAtomCallback(int32_t atomTag,
@@ -184,8 +184,8 @@ AStatsManager_PullAtomCallbackReturn LatencyAggregator::pullData(AStatsEventList
         serializedDownData[i] = std::make_unique<SafeBytesField>(*mDownSketches[i]);
         serializedMoveData[i] = std::make_unique<SafeBytesField>(*mMoveSketches[i]);
     }
-    android::util::
-            addAStatsEvent(data, android::util::INPUT_EVENT_LATENCY_SKETCH,
+    android::inputflinger::stats::
+            addAStatsEvent(data, android::inputflinger::stats::INPUT_EVENT_LATENCY_SKETCH,
                            // DOWN sketches
                            serializedDownData[SketchIndex::EVENT_TO_READ]->getBytesField(),
                            serializedDownData[SketchIndex::READ_TO_DELIVER]->getBytesField(),
@@ -251,18 +251,19 @@ void LatencyAggregator::processSlowEvent(const InputEventTimeline& timeline) {
         const nsecs_t consumeToGpuComplete = gpuCompletedTime - connectionTimeline.consumeTime;
         const nsecs_t gpuCompleteToPresent = presentTime - gpuCompletedTime;
 
-        android::util::stats_write(android::util::SLOW_INPUT_EVENT_REPORTED,
-                                   timeline.inputEventActionType ==
-                                           InputEventActionType::MOTION_ACTION_DOWN,
-                                   static_cast<int32_t>(ns2us(eventToRead)),
-                                   static_cast<int32_t>(ns2us(readToDeliver)),
-                                   static_cast<int32_t>(ns2us(deliverToConsume)),
-                                   static_cast<int32_t>(ns2us(consumeToFinish)),
-                                   static_cast<int32_t>(ns2us(consumeToGpuComplete)),
-                                   static_cast<int32_t>(ns2us(gpuCompleteToPresent)),
-                                   static_cast<int32_t>(ns2us(endToEndLatency.count())),
-                                   static_cast<int32_t>(mNumEventsSinceLastSlowEventReport),
-                                   static_cast<int32_t>(mNumSkippedSlowEvents));
+        android::inputflinger::stats::
+                stats_write(android::inputflinger::stats::SLOW_INPUT_EVENT_REPORTED,
+                            timeline.inputEventActionType ==
+                                    InputEventActionType::MOTION_ACTION_DOWN,
+                            static_cast<int32_t>(ns2us(eventToRead)),
+                            static_cast<int32_t>(ns2us(readToDeliver)),
+                            static_cast<int32_t>(ns2us(deliverToConsume)),
+                            static_cast<int32_t>(ns2us(consumeToFinish)),
+                            static_cast<int32_t>(ns2us(consumeToGpuComplete)),
+                            static_cast<int32_t>(ns2us(gpuCompleteToPresent)),
+                            static_cast<int32_t>(ns2us(endToEndLatency.count())),
+                            static_cast<int32_t>(mNumEventsSinceLastSlowEventReport),
+                            static_cast<int32_t>(mNumSkippedSlowEvents));
         mNumEventsSinceLastSlowEventReport = 0;
         mNumSkippedSlowEvents = 0;
         mLastSlowEventTime = timeline.readTime;
@@ -287,7 +288,7 @@ std::string LatencyAggregator::dump(const char* prefix) const {
 
     return StringPrintf("%sLatencyAggregator:\n", prefix) + sketchDump +
             StringPrintf("%s  mNumSketchEventsProcessed=%zu\n", prefix, mNumSketchEventsProcessed) +
-            StringPrintf("%s  mLastSlowEventTime=%" PRId64 "\n", prefix, mLastSlowEventTime) +
+            StringPrintf("%s  mLastSlowEventTime=%" PRId64 "ns\n", prefix, mLastSlowEventTime) +
             StringPrintf("%s  mNumEventsSinceLastSlowEventReport = %zu\n", prefix,
                          mNumEventsSinceLastSlowEventReport) +
             StringPrintf("%s  mNumSkippedSlowEvents = %zu\n", prefix, mNumSkippedSlowEvents);

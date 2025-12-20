@@ -67,7 +67,9 @@ TEST_F(StreamSplitterTest, OneInputOneOutput) {
     sp<Fence> fence;
     sp<GraphicBuffer> buffer;
     ASSERT_EQ(IGraphicBufferProducer::BUFFER_NEEDS_REALLOCATION,
-              inputProducer->dequeueBuffer(&slot, &fence, 0, 0, 0, GRALLOC_USAGE_SW_WRITE_OFTEN,
+              inputProducer->dequeueBuffer(&slot, &fence, 0, 0, 0,
+                                           GRALLOC_USAGE_SW_READ_OFTEN |
+                                                   GRALLOC_USAGE_SW_WRITE_OFTEN,
                                            nullptr, nullptr));
     ASSERT_EQ(OK, inputProducer->requestBuffer(slot, &buffer));
 
@@ -138,7 +140,9 @@ TEST_F(StreamSplitterTest, OneInputMultipleOutputs) {
     sp<Fence> fence;
     sp<GraphicBuffer> buffer;
     ASSERT_EQ(IGraphicBufferProducer::BUFFER_NEEDS_REALLOCATION,
-              inputProducer->dequeueBuffer(&slot, &fence, 0, 0, 0, GRALLOC_USAGE_SW_WRITE_OFTEN,
+              inputProducer->dequeueBuffer(&slot, &fence, 0, 0, 0,
+                                           GRALLOC_USAGE_SW_READ_OFTEN |
+                                                   GRALLOC_USAGE_SW_WRITE_OFTEN,
                                            nullptr, nullptr));
     ASSERT_EQ(OK, inputProducer->requestBuffer(slot, &buffer));
 

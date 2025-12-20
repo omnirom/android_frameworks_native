@@ -16,8 +16,6 @@
 // #define LOG_NDEBUG 0
 
 #define ATRACE_TAG ATRACE_TAG_GRAPHICS
-#undef LOG_TAG
-#define LOG_TAG "SurfaceFlinger"
 
 #include <common/trace.h>
 #include <log/log.h>
@@ -57,6 +55,7 @@ RequestedLayerState::RequestedLayerState(const LayerCreationArgs& args)
         ownerPid(args.ownerPid),
         parentId(args.parentId),
         layerIdToMirror(args.layerIdToMirror),
+        stopLayerId(args.stopLayerId),
         pendingBuffers(args.pendingBuffers) {
     layerId = static_cast<int32_t>(args.sequence);
     changes |= RequestedLayerState::Changes::Created;
@@ -73,7 +72,7 @@ RequestedLayerState::RequestedLayerState(const LayerCreationArgs& args)
     }
     if (layerIdToMirror != UNASSIGNED_LAYER_ID) {
         changes |= RequestedLayerState::Changes::Mirror;
-    } else if (args.layerStackToMirror != ui::INVALID_LAYER_STACK) {
+    } else if (args.layerStackToMirror != ui::UNASSIGNED_LAYER_STACK) {
         layerStackToMirror = args.layerStackToMirror;
         changes |= RequestedLayerState::Changes::Mirror;
     }
@@ -109,8 +108,9 @@ RequestedLayerState::RequestedLayerState(const LayerCreationArgs& args)
     dataspaceRequested = false;
     hdrMetadata.validTypes = 0;
     mNotDefCmpState.surfaceDamageRegion = Region::INVALID_REGION;
-    cornerRadius = 0.0f;
-    clientDrawnCornerRadius = 0.0f;
+    cornerRadii = {};
+    clientDrawnCornerRadii = {};
+    clientDrawnCornerRadiusCrop = {0, 0, 0, 0};
     backgroundBlurRadius = 0;
     api = -1;
     hasColorTransform = false;
@@ -119,7 +119,6 @@ RequestedLayerState::RequestedLayerState(const LayerCreationArgs& args)
     bufferData = std::make_shared<BufferData>();
     bufferData->frameNumber = 0;
     bufferData->acquireFence = sp<Fence>::make(-1);
-    acquireFenceTime = std::make_shared<FenceTime>(bufferData->acquireFence);
     colorSpaceAgnostic = false;
     frameRateSelectionPriority = Layer::PRIORITY_UNSET;
     shadowRadius = 0.f;
@@ -216,19 +215,18 @@ void RequestedLayerState::merge(const ResolvedComposerState& resolvedComposerSta
                     frameNumberChanged ? bufferData->frameNumber : oldFramenumber + 1;
             bufferData->frameNumber = frameNumber;
 
-            if ((barrierProducerId > bufferData->producerId) ||
-                ((barrierProducerId == bufferData->producerId) &&
-                 (barrierFrameNumber > bufferData->frameNumber))) {
-                ALOGE("Out of order buffers detected for %s producedId=%d frameNumber=%" PRIu64
+            if (isFrameBarrierNewer(barrierProducerId, barrierFrameNumber, bufferData->producerId,
+                                    bufferData->frameNumber)) {
+                ALOGE("Out-of-order buffers detected for %s producedId=%d frameNumber=%" PRIu64
                       " -> producedId=%d frameNumber=%" PRIu64,
                       getDebugString().c_str(), barrierProducerId, barrierFrameNumber,
                       bufferData->producerId, frameNumber);
                 TransactionTraceWriter::getInstance().invoke("out_of_order_buffers_",
                                                              /*overwrite=*/false);
+            } else {
+                barrierProducerId = bufferData->producerId;
+                barrierFrameNumber = bufferData->frameNumber;
             }
-
-            barrierProducerId = std::max(bufferData->producerId, barrierProducerId);
-            barrierFrameNumber = std::max(bufferData->frameNumber, barrierFrameNumber);
         }
 
         const bool newBufferFormatOpaque = LayerSnapshot::isOpaqueFormat(
@@ -355,8 +353,14 @@ void RequestedLayerState::merge(const ResolvedComposerState& resolvedComposerSta
     }
 
     if (clientState.what & layer_state_t::eClientDrawnCornerRadiusChanged) {
-        clientDrawnCornerRadius = clientState.clientDrawnCornerRadius;
+        clientDrawnCornerRadii = clientState.clientDrawnCornerRadii;
+        clientDrawnCornerRadiusCrop = clientState.clientDrawnCornerRadiusCrop;
         changes |= RequestedLayerState::Changes::Geometry;
+    }
+
+    if (clientState.what & layer_state_t::eStopLayerChanged) {
+        stopLayerId = resolvedComposerState.stopLayerId;
+        changes |= RequestedLayerState::Changes::Visibility;
     }
 
     // We can't just check requestedTransform here because LayerSnapshotBuilder uses
@@ -630,10 +634,7 @@ bool RequestedLayerState::isSimpleBufferUpdate(const layer_state_t& s) const {
     const uint64_t deniedFlags = layer_state_t::eProducerDisconnect | layer_state_t::eLayerChanged |
             layer_state_t::eRelativeLayerChanged | layer_state_t::eTransparentRegionChanged |
             layer_state_t::eBlurRegionsChanged | layer_state_t::eLayerStackChanged |
-            layer_state_t::eReparent |
-            (FlagManager::getInstance().latch_unsignaled_with_auto_refresh_changed()
-                     ? 0
-                     : (layer_state_t::eAutoRefreshChanged | layer_state_t::eFlagsChanged));
+            layer_state_t::eReparent;
     if (s.what & deniedFlags) {
         SFTRACE_FORMAT_INSTANT("%s: false [has denied flags 0x%" PRIx64 "]", __func__,
                                s.what & deniedFlags);
@@ -645,7 +646,8 @@ bool RequestedLayerState::isSimpleBufferUpdate(const layer_state_t& s) const {
             layer_state_t::eColorTransformChanged | layer_state_t::eBackgroundColorChanged |
             layer_state_t::eMatrixChanged | layer_state_t::eCornerRadiusChanged |
             layer_state_t::eClientDrawnCornerRadiusChanged |
-            layer_state_t::eBackgroundBlurRadiusChanged | layer_state_t::eBufferTransformChanged |
+            layer_state_t::eBackgroundBlurRadiusChanged |
+            layer_state_t::eBackgroundBlurScaleChanged | layer_state_t::eBufferTransformChanged |
             layer_state_t::eTransformToDisplayInverseChanged | layer_state_t::eCropChanged |
             layer_state_t::eDataspaceChanged | layer_state_t::eHdrMetadataChanged |
             layer_state_t::eSidebandStreamChanged | layer_state_t::eColorSpaceAgnosticChanged |
@@ -655,9 +657,7 @@ bool RequestedLayerState::isSimpleBufferUpdate(const layer_state_t& s) const {
             layer_state_t::eDestinationFrameChanged | layer_state_t::eDimmingEnabledChanged |
             layer_state_t::eExtendedRangeBrightnessChanged |
             layer_state_t::eDesiredHdrHeadroomChanged | layer_state_t::eLutsChanged |
-            (FlagManager::getInstance().latch_unsignaled_with_auto_refresh_changed()
-                     ? layer_state_t::eFlagsChanged
-                     : 0);
+            layer_state_t::eFlagsChanged;
     if (changedFlags & deniedChanges) {
         SFTRACE_FORMAT_INSTANT("%s: false [has denied changes flags 0x%" PRIx64 "]", __func__,
                                changedFlags & deniedChanges);

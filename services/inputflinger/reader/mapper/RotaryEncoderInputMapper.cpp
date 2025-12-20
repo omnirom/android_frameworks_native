@@ -33,7 +33,6 @@ using android::expresslog::Counter;
 
 constexpr float kDefaultResolution = 0;
 constexpr float kDefaultScaleFactor = 1.0f;
-constexpr int32_t kDefaultMinRotationsToLog = 3;
 
 RotaryEncoderInputMapper::RotaryEncoderInputMapper(InputDeviceContext& deviceContext,
                                                    const InputReaderConfiguration& readerConfig)
@@ -205,9 +204,9 @@ std::list<NotifyArgs> RotaryEncoderInputMapper::sync(nsecs_t when, nsecs_t readT
         out.push_back(
                 NotifyMotionArgs(getContext()->getNextId(), when, readTime, getDeviceId(), mSource,
                                  mDisplayId, policyFlags, AMOTION_EVENT_ACTION_SCROLL, 0, 0,
-                                 metaState, /*buttonState=*/0, MotionClassification::NONE,
-                                 AMOTION_EVENT_EDGE_FLAG_NONE, 1, &pointerProperties,
-                                 &pointerCoords, 0, 0, AMOTION_EVENT_INVALID_CURSOR_POSITION,
+                                 metaState, /*buttonState=*/0, MotionClassification::NONE, 1,
+                                 &pointerProperties, &pointerCoords, 0, 0,
+                                 AMOTION_EVENT_INVALID_CURSOR_POSITION,
                                  AMOTION_EVENT_INVALID_CURSOR_POSITION, 0, /*videoFrames=*/{}));
     }
 

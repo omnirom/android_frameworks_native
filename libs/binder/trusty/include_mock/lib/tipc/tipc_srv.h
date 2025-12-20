@@ -34,9 +34,14 @@ struct tipc_port {
     const void* priv;
 };
 
+struct tipc_port_ctx;
+
 struct tipc_srv_ops {
     int (*on_connect)(const struct tipc_port* port, handle_t chan, const struct uuid* peer,
                       void** ctx_p);
+
+    int (*on_connect_peer_id)(const struct tipc_port* port, handle_t chan,
+                              const struct trusty_peer_id* peer, size_t peer_len, void** ctx_p);
 
     int (*on_message)(const struct tipc_port* port, handle_t chan, void* ctx);
 
@@ -48,4 +53,19 @@ struct tipc_srv_ops {
 static inline int tipc_add_service(struct tipc_hset*, const struct tipc_port*, uint32_t, uint32_t,
                                    const struct tipc_srv_ops*) {
     return 0;
+}
+
+static inline int tipc_add_service_ports(struct tipc_hset*, const struct tipc_port*, uint32_t,
+                                         uint32_t, const struct tipc_srv_ops*,
+                                         struct tipc_port_ctx**) {
+    return 0;
+}
+
+static inline int tipc_add_connection(struct tipc_port_ctx*, handle_t, const struct trusty_peer_id*,
+                                      size_t) {
+    return 0;
+}
+
+static inline struct tipc_hset* tipc_get_hset(struct tipc_port_ctx*) {
+    return nullptr;
 }

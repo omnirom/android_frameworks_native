@@ -170,8 +170,8 @@ public:
             int32_t flags);
     binder::Status linkNativeLibraryDirectory(const std::optional<std::string>& uuid,
             const std::string& packageName, const std::string& nativeLibPath32, int32_t userId);
-    binder::Status createOatDir(const std::string& packageName, const std::string& oatDir,
-                                const std::string& instructionSet);
+    binder::Status createOatDirs(const std::string& packageName, const std::string& oatDir,
+                                 const std::vector<std::string>& oatSubDirs);
     binder::Status linkFile(const std::string& packageName, const std::string& relativePath,
                             const std::string& fromBase, const std::string& toBase);
     binder::Status moveAb(const std::string& packageName, const std::string& apkPath,

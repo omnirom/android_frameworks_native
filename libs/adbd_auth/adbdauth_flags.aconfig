@@ -1,0 +1,10 @@
+package: "com.android.adbdauth.flags"
+container: "system"
+
+flag {
+    name: "use_tls_lifecycle"
+    namespace: "adb"
+    description: "Allow adbd wifi to manage lifecycle with the framework over adbdauth"
+    bug: "414682912"
+    is_fixed_read_only: true
+}

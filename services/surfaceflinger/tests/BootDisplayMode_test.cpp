@@ -65,13 +65,15 @@ protected:
     }
 
     void TearDown() override {
-        binder::Status status = mSf->setBootDisplayMode(mDisplayToken, mOldMode);
-        EXPECT_EQ(NO_ERROR, statusTFromBinderStatus(status));
+        if (!IsSkipped()) {
+            binder::Status status = mSf->setBootDisplayMode(mDisplayToken, mOldMode);
+            EXPECT_EQ(NO_ERROR, statusTFromBinderStatus(status));
 
-        gui::DynamicDisplayInfo info;
-        status = mSf->getDynamicDisplayInfoFromToken(mDisplayToken, &info);
-        EXPECT_EQ(NO_ERROR, statusTFromBinderStatus(status));
-        EXPECT_EQ(mOldMode, info.preferredBootDisplayMode);
+            gui::DynamicDisplayInfo info;
+            status = mSf->getDynamicDisplayInfoFromToken(mDisplayToken, &info);
+            EXPECT_EQ(NO_ERROR, statusTFromBinderStatus(status));
+            EXPECT_EQ(mOldMode, info.preferredBootDisplayMode);
+        }
     }
 
     ui::DisplayModeId mOldMode;

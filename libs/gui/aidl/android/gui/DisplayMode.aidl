@@ -36,4 +36,5 @@ parcelable DisplayMode {
     long sfVsyncOffset = 0;
     long presentationDeadline = 0;
     int group = -1;
+    int outputType = 0;
 }

@@ -34,7 +34,7 @@ class FenceToFenceTimeMap;
 class FenceTime;
 using FenceTimePtr = std::shared_ptr<FenceTime>;
 
-// A wrapper around fence that only implements isValid and getSignalTime.
+// A wrapper around fence that only implements isValid, getSignalTime, and wasPendingAt.
 // It automatically closes the fence in a thread-safe manner once the signal
 // time is known.
 class FenceTime {
@@ -125,6 +125,10 @@ public:
     // TIMEOUT_NEVER may be used to indicate that the call should wait
     // indefinitely for the fence to signal.
     status_t wait(int timeout);
+
+    // Returns true if the fence would have been pending at `time`. `time` cannot be in the future.
+    // Assumes a fence is pending at any `time` if the fence is currently pending.
+    bool wasPendingAt(nsecs_t time);
 
     void signalForTest(nsecs_t signalTime);
 

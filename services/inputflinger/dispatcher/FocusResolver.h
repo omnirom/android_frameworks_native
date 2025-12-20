@@ -68,8 +68,6 @@ public:
     void displayRemoved(ui::LogicalDisplayId displayId);
 
     // exposed for debugging
-    bool hasFocusedWindowTokens() const { return !mFocusedWindowTokenByDisplay.empty(); }
-    std::string dumpFocusedWindows() const;
     std::string dump() const;
 
 private:
@@ -123,6 +121,8 @@ private:
             ui::LogicalDisplayId displayId, const std::string& reason, const sp<IBinder>& token,
             const std::string& tokenName = "");
     std::optional<android::gui::FocusRequest> getFocusRequest(ui::LogicalDisplayId displayId);
+
+    std::string dumpFocusedWindows() const;
 };
 
 } // namespace android::inputdispatcher

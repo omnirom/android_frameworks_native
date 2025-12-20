@@ -13,6 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+#define LOG_TAG "libbinder.Binder"
 
 #include <binder/Binder.h>
 
@@ -28,7 +29,6 @@
 #include <binder/RecordedTransaction.h>
 #include <binder/RpcServer.h>
 #include <binder/unique_fd.h>
-#include <pthread.h>
 
 #include <inttypes.h>
 #include <stdio.h>
@@ -41,6 +41,7 @@
 #include "Constants.h"
 #include "OS.h"
 #include "RpcState.h"
+#include "Utils.h"
 
 namespace android {
 
@@ -237,6 +238,22 @@ sp<IBinder> IBinder::lookupOrCreateWeak(const void* objectID, object_make_func m
     return proxy->lookupOrCreateWeak(objectID, make, makeArgs);
 }
 
+void IBinder::setMinRpcThreads(uint16_t min) {
+    if (BBinder* local = this->localBinder(); local != nullptr) {
+        local->setMinRpcThreads(min);
+    } else {
+        LOG_ALWAYS_FATAL("setMinRpcThreads only works for local BBinders.");
+    }
+}
+
+uint16_t IBinder::getMinRpcThreads() {
+    if (BBinder* local = this->localBinder(); local != nullptr) {
+        return local->getMinRpcThreads();
+    } else {
+        LOG_ALWAYS_FATAL("getMinRpcThreads only works for local BBinders.");
+    }
+}
+
 // ---------------------------------------------------------------------------
 
 class BBinder::RpcServerLink : public IBinder::DeathRecipient {
@@ -272,6 +289,8 @@ private:
 };
 BBinder::RpcServerLink::~RpcServerLink() {}
 
+static constexpr uint16_t kDefaultMinThreads = 1;
+
 class BBinder::Extras
 {
 public:
@@ -283,18 +302,20 @@ public:
 #endif
     bool mRequestingSid = false;
     bool mInheritRt = false;
+    bool mRecordingOn = false;
 
     // for below objects
     RpcMutex mLock;
     std::set<sp<RpcServerLink>> mRpcServerLinks;
     BpBinder::ObjectManager mObjectMgr;
+    uint16_t mMinThreads = kDefaultMinThreads;
 
     unique_fd mRecordingFd;
 };
 
 // ---------------------------------------------------------------------------
 
-BBinder::BBinder() : mExtras(nullptr), mStability(0), mParceled(false), mRecordingOn(false) {}
+BBinder::BBinder() : mExtras(nullptr), mStability(0), mParceled(false) {}
 
 bool BBinder::isBinderAlive() const
 {
@@ -322,7 +343,7 @@ status_t BBinder::startRecordingTransactions(const Parcel& data) {
     }
     Extras* e = getOrCreateExtras();
     RpcMutexUniqueLock lock(e->mLock);
-    if (mRecordingOn) {
+    if (e->mRecordingOn) {
         ALOGI("Could not start Binder recording. Another is already in progress.");
         return INVALID_OPERATION;
     } else {
@@ -330,7 +351,7 @@ status_t BBinder::startRecordingTransactions(const Parcel& data) {
         if (readStatus != OK) {
             return readStatus;
         }
-        mRecordingOn = true;
+        e->mRecordingOn = true;
         ALOGI("Started Binder recording.");
         return NO_ERROR;
     }
@@ -352,9 +373,9 @@ status_t BBinder::stopRecordingTransactions() {
     }
     Extras* e = getOrCreateExtras();
     RpcMutexUniqueLock lock(e->mLock);
-    if (mRecordingOn) {
+    if (e->mRecordingOn) {
         e->mRecordingFd.reset();
-        mRecordingOn = false;
+        e->mRecordingOn = false;
         ALOGI("Stopped Binder recording.");
         return NO_ERROR;
     } else {
@@ -365,8 +386,24 @@ status_t BBinder::stopRecordingTransactions() {
 
 const String16& BBinder::getInterfaceDescriptor() const
 {
-    static StaticString16 sBBinder(u"BBinder");
-    ALOGW("Reached BBinder::getInterfaceDescriptor (this=%p). Override?", this);
+    // Throttle logging because getInterfaceDescriptor can be invoked a lot.
+    static std::atomic<std::chrono::steady_clock::time_point> sLastLogTime = {
+            std::chrono::steady_clock::time_point::min()};
+
+    auto lastLogTime = sLastLogTime.load(std::memory_order_acquire);
+    auto currentTime = std::chrono::steady_clock::now();
+    // Don't log more than once per second. The check is not strict, since it may happen that
+    // multiple theads read lastLogTime at the same time  but we don't want it to be strict
+    // for performance reasons.
+    // Note: Do not subtract time_point::min(), that would cause an arithmetic overflow.
+    if (lastLogTime == std::chrono::steady_clock::time_point::min() ||
+        to_ms(currentTime - lastLogTime) >= 1000) {
+        ALOGW("BBinder::getInterfaceDescriptor (this=%p). Override?", this);
+
+        sLastLogTime.store(currentTime, std::memory_order_release);
+    }
+
+    [[clang::no_destroy]] static StaticString16 sBBinder(u"BBinder");
     return sBBinder;
 }
 
@@ -374,10 +411,18 @@ const String16& BBinder::getInterfaceDescriptor() const
 status_t BBinder::transact(
     uint32_t code, const Parcel& data, Parcel* reply, uint32_t flags)
 {
+    const auto startTime = std::chrono::steady_clock::now();
+
     data.setDataPosition(0);
 
     if (reply != nullptr && (flags & FLAG_CLEAR_BUF)) {
         reply->markSensitive();
+    }
+
+    if (data.dataSize() > binder::kLogTransactionsOverBytes) {
+        ALOGW("Large data transaction of %zu bytes, interface descriptor %s, code %d, flags "
+              "%d",
+              data.dataSize(), String8(getInterfaceDescriptor()).c_str(), code, flags);
     }
 
     status_t err = NO_ERROR;
@@ -412,29 +457,40 @@ status_t BBinder::transact(
     if (reply != nullptr) {
         reply->setDataPosition(0);
         if (reply->dataSize() > binder::kLogTransactionsOverBytes) {
-            ALOGW("Large reply transaction of %zu bytes, interface descriptor %s, code %d",
-                  reply->dataSize(), String8(getInterfaceDescriptor()).c_str(), code);
+            ALOGW("Large reply transaction of %zu bytes, interface descriptor %s, code %d, flags "
+                  "%d",
+                  reply->dataSize(), String8(getInterfaceDescriptor()).c_str(), code, flags);
         }
     }
 
-    if (kEnableKernelIpc && mRecordingOn && code != START_RECORDING_TRANSACTION) [[unlikely]] {
+    if (kEnableKernelIpc && kEnableRecording && code != START_RECORDING_TRANSACTION) [[unlikely]] {
         Extras* e = mExtras.load(std::memory_order_acquire);
-        RpcMutexUniqueLock lock(e->mLock);
-        if (mRecordingOn) {
-            Parcel emptyReply;
-            timespec ts;
-            timespec_get(&ts, TIME_UTC);
-            auto transaction = android::binder::debug::RecordedTransaction::
-                    fromDetails(getInterfaceDescriptor(), code, flags, ts, data,
-                                reply ? *reply : emptyReply, err);
-            if (transaction) {
-                if (status_t err = transaction->dumpToFile(e->mRecordingFd); err != NO_ERROR) {
-                    ALOGI("Failed to dump RecordedTransaction to file with error %d", err);
+        if (e && e->mRecordingOn) {
+            RpcMutexUniqueLock lock(e->mLock);
+            if (e->mRecordingOn) {
+                Parcel emptyReply;
+                timespec ts;
+                timespec_get(&ts, TIME_UTC);
+                auto transaction = android::binder::debug::RecordedTransaction::
+                        fromDetails(getInterfaceDescriptor(), code, flags, ts, data,
+                                    reply ? *reply : emptyReply, err);
+                if (transaction) {
+                    if (err = transaction->dumpToFile(e->mRecordingFd); err != NO_ERROR) {
+                        ALOGI("Failed to dump RecordedTransaction to file with error %d", err);
+                    }
+                } else {
+                    ALOGI("Failed to create RecordedTransaction object.");
                 }
-            } else {
-                ALOGI("Failed to create RecordedTransaction object.");
             }
         }
+    }
+
+    const uint64_t transactionMs = to_ms(std::chrono::steady_clock::now() - startTime);
+    if (transactionMs > 1000lu) {
+        ALOGW("Binder transaction to %s code %" PRIu32 " took %" PRIu64
+              "ms. Data bytes: %zu Reply bytes: %zu Flags: %d",
+              String8(getInterfaceDescriptor()).c_str(), code, transactionMs, data.dataSize(),
+              reply ? reply->dataSize() : 0u, flags);
     }
 
     return err;
@@ -594,8 +650,9 @@ int BBinder::getMinSchedulerPriority() {
 
 bool BBinder::isInheritRt() {
     Extras* e = mExtras.load(std::memory_order_acquire);
-
-    return e && e->mInheritRt;
+    // Return configured default value if it has not been overridden
+    if (e == nullptr) return sGlobalInheritRt.load(std::memory_order_acquire);
+    return e->mInheritRt;
 }
 
 void BBinder::setInheritRt(bool inheritRt) {
@@ -615,6 +672,32 @@ void BBinder::setInheritRt(bool inheritRt) {
     }
 
     e->mInheritRt = inheritRt;
+}
+
+void BBinder::setMinRpcThreads(uint16_t min) {
+    LOG_ALWAYS_FATAL_IF(mParceled,
+                        "setMinRpcThreads() should not be called after a binder object "
+                        "is parceled/sent to another process");
+    Extras* e = mExtras.load(std::memory_order_acquire);
+    if (!e) {
+        e = getOrCreateExtras();
+        if (!e) return; // out of memory
+    }
+    e->mMinThreads = min;
+}
+
+uint16_t BBinder::getMinRpcThreads() const {
+    Extras* e = mExtras.load(std::memory_order_acquire);
+    if (!e) {
+        return kDefaultMinThreads;
+    }
+    return e->mMinThreads;
+}
+
+std::atomic<bool> BBinder::sGlobalInheritRt(false);
+
+void BBinder::setGlobalInheritRt(bool enabled) {
+    sGlobalInheritRt.store(enabled, std::memory_order_release);
 }
 
 pid_t BBinder::getDebugPid() {
@@ -745,7 +828,7 @@ BBinder::~BBinder()
         if (isRequestingSid()) {
             ALOGW("Binder %p destroyed when requesting SID before being parceled.", this);
         }
-        if (isInheritRt()) {
+        if (sGlobalInheritRt.load(std::memory_order_acquire) != isInheritRt()) {
             ALOGW("Binder %p destroyed after setInheritRt before being parceled.", this);
         }
 #ifdef __linux__

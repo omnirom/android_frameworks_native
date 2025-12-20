@@ -40,6 +40,17 @@ inline constexpr int kMaxDigits = /*displayFps*/ 3 + /*renderFps*/ 3 + /*spinner
 inline constexpr int kBufferWidth = kMaxDigits * kDigitWidth + (kMaxDigits - 1) * kDigitSpace;
 inline constexpr int kBufferHeight = kDigitHeight;
 
+// Helper function to release GraphicBuffer from the local cache.
+inline void removeBufferFromLocalCache(const sp<GraphicBuffer>& buffer) {
+    if (buffer != nullptr) {
+        const uint64_t bufferId = buffer->getId();
+        if (auto scc = SurfaceComposerClient::getDefault()) {
+            scc->removeBufferFromLocalCache(bufferId);
+            scc->doUncacheBufferTransaction(bufferId);
+        }
+    }
+}
+
 class SurfaceControl;
 
 // Helper class to delete the SurfaceControl on a helper thread as

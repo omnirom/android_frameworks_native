@@ -19,6 +19,7 @@
 #include <android/gui/CachingHint.h>
 #include <android/gui/DisplayBrightness.h>
 #include <android/gui/DisplayCaptureArgs.h>
+#include <android/gui/EarlyWakeupInfo.h>
 #include <android/gui/FrameTimelineInfo.h>
 #include <android/gui/IDisplayEventConnection.h>
 #include <android/gui/IFpsListener.h>
@@ -106,7 +107,8 @@ public:
     };
 
     /* open/close transactions. requires ACCESS_SURFACE_FLINGER permission */
-    virtual status_t setTransactionState(TransactionState&& state) = 0;
+    virtual status_t setTransactionState(TransactionState&& state,
+                                         const sp<IBinder>& applyToken) = 0;
 };
 
 // ----------------------------------------------------------------------------

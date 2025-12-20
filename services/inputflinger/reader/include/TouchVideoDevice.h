@@ -19,7 +19,9 @@
 #include <android-base/unique_fd.h>
 #include <input/TouchVideoFrame.h>
 #include <stdint.h>
+
 #include <array>
+#include <memory>
 #include <optional>
 #include <string>
 #include <vector>

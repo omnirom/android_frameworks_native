@@ -264,8 +264,8 @@ std::unique_ptr<TfLiteMotionPredictorModel> TfLiteMotionPredictorModel::create()
         PLOG(FATAL) << "Failed to determine file size";
     }
 
-    std::unique_ptr<android::base::MappedFile> modelBuffer =
-            android::base::MappedFile::FromFd(fd, /*offset=*/0, fdSize, PROT_READ);
+    auto modelBuffer = android::base::MappedFile::Create(
+            android::base::borrowed_fd(fd), /*offset=*/0, fdSize, PROT_READ);
     if (!modelBuffer) {
         PLOG(FATAL) << "Failed to mmap model";
     }
@@ -291,9 +291,9 @@ std::unique_ptr<TfLiteMotionPredictorModel> TfLiteMotionPredictorModel::create()
 }
 
 TfLiteMotionPredictorModel::TfLiteMotionPredictorModel(
-        std::unique_ptr<android::base::MappedFile> model, Config config)
+        std::optional<android::base::MappedFile> model, Config config)
       : mFlatBuffer(std::move(model)), mConfig(std::move(config)) {
-    CHECK(mFlatBuffer);
+    CHECK(mFlatBuffer.has_value());
     mErrorReporter = std::make_unique<LoggingErrorReporter>();
     mModel = tflite::FlatBufferModel::VerifyAndBuildFromBuffer(mFlatBuffer->data(),
                                                                mFlatBuffer->size(),

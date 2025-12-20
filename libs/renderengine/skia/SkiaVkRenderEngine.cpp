@@ -15,8 +15,6 @@
  */
 
 // #define LOG_NDEBUG 0
-#undef LOG_TAG
-#define LOG_TAG "RenderEngine"
 #define ATRACE_TAG ATRACE_TAG_GRAPHICS
 
 #include "SkiaVkRenderEngine.h"
@@ -66,7 +64,7 @@ bool RenderEngine::canSupport(GraphicsApi graphicsApi) {
     switch (graphicsApi) {
         case GraphicsApi::GL:
             return true;
-        case GraphicsApi::VK: {
+        case GraphicsApi::Vk: {
             // Static local variables are initialized once, on first invocation of the function.
             static const bool canSupportVulkan = []() {
                 if (!sVulkanInterface.isInitialized()) {
@@ -89,7 +87,7 @@ void RenderEngine::teardown(GraphicsApi graphicsApi) {
     switch (graphicsApi) {
         case GraphicsApi::GL:
             break;
-        case GraphicsApi::VK: {
+        case GraphicsApi::Vk: {
             if (sVulkanInterface.isInitialized()) {
                 sVulkanInterface.teardown();
                 ALOGD("Tearing down the unprotected VulkanInterface.");
@@ -114,7 +112,7 @@ SkiaVkRenderEngine::SkiaVkRenderEngine(const RenderEngineCreationArgs& args)
 SkiaVkRenderEngine::~SkiaVkRenderEngine() {
     finishRenderingAndAbandonContexts();
     // Teardown VulkanInterfaces after Skia contexts have been abandoned
-    teardown(GraphicsApi::VK);
+    teardown(GraphicsApi::Vk);
 }
 
 SkiaRenderEngine::Contexts SkiaVkRenderEngine::createContexts() {
@@ -174,21 +172,9 @@ void SkiaVkRenderEngine::appendBackendSpecificInfoToDump(std::string& result) {
     StringAppendF(&result, "Vulkan protected device initialized: %d\n",
                   sProtectedContentVulkanInterface.isInitialized());
 
-    if (!sVulkanInterface.isInitialized()) {
-        return;
+    if (sVulkanInterface.isInitialized()) {
+        sVulkanInterface.appendVulkanInfoToDump(result);
     }
-
-    StringAppendF(&result, "Instance extensions: [\n");
-    for (const auto& name : sVulkanInterface.getInstanceExtensionNames()) {
-        StringAppendF(&result, "  %s\n", name.c_str());
-    }
-    StringAppendF(&result, "]\n");
-
-    StringAppendF(&result, "Device extensions: [\n");
-    for (const auto& name : sVulkanInterface.getDeviceExtensionNames()) {
-        StringAppendF(&result, "  %s\n", name.c_str());
-    }
-    StringAppendF(&result, "]\n");
 }
 
 } // namespace skia

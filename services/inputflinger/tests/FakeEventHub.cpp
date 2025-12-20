@@ -20,6 +20,7 @@
 
 #include <android-base/thread_annotations.h>
 #include <gtest/gtest.h>
+#include <input/Input.h>
 #include <linux/input-event-codes.h>
 
 #include "TestConstants.h"
@@ -34,7 +35,7 @@ FakeEventHub::~FakeEventHub() {
     }
 }
 
-void FakeEventHub::addDevice(int32_t deviceId, const std::string& name,
+void FakeEventHub::addDevice(RawDeviceId deviceId, const std::string& name,
                              ftl::Flags<InputDeviceClass> classes, int bus) {
     Device* device = new Device(classes);
     device->identifier.name = name;
@@ -44,14 +45,14 @@ void FakeEventHub::addDevice(int32_t deviceId, const std::string& name,
     enqueueEvent(ARBITRARY_TIME, READ_TIME, deviceId, EventHubInterface::DEVICE_ADDED, 0, 0);
 }
 
-void FakeEventHub::removeDevice(int32_t deviceId) {
+void FakeEventHub::removeDevice(RawDeviceId deviceId) {
     delete mDevices.valueFor(deviceId);
     mDevices.removeItem(deviceId);
 
     enqueueEvent(ARBITRARY_TIME, READ_TIME, deviceId, EventHubInterface::DEVICE_REMOVED, 0, 0);
 }
 
-bool FakeEventHub::isDeviceEnabled(int32_t deviceId) const {
+bool FakeEventHub::isDeviceEnabled(RawDeviceId deviceId) const {
     Device* device = getDevice(deviceId);
     if (device == nullptr) {
         ALOGE("Incorrect device id=%" PRId32 " provided to %s", deviceId, __func__);
@@ -60,7 +61,7 @@ bool FakeEventHub::isDeviceEnabled(int32_t deviceId) const {
     return device->enabled;
 }
 
-status_t FakeEventHub::enableDevice(int32_t deviceId) {
+status_t FakeEventHub::enableDevice(RawDeviceId deviceId) {
     status_t result;
     Device* device = getDevice(deviceId);
     if (device == nullptr) {
@@ -75,7 +76,7 @@ status_t FakeEventHub::enableDevice(int32_t deviceId) {
     return result;
 }
 
-status_t FakeEventHub::disableDevice(int32_t deviceId) {
+status_t FakeEventHub::disableDevice(RawDeviceId deviceId) {
     Device* device = getDevice(deviceId);
     if (device == nullptr) {
         ALOGE("Incorrect device id=%" PRId32 " provided to %s", deviceId, __func__);
@@ -88,16 +89,13 @@ status_t FakeEventHub::disableDevice(int32_t deviceId) {
     return device->disable();
 }
 
-void FakeEventHub::addConfigurationProperty(int32_t deviceId, const char* key, const char* value) {
+void FakeEventHub::addConfigurationProperty(RawDeviceId deviceId, const char* key,
+                                            const char* value) {
     getDevice(deviceId)->configuration.addProperty(key, value);
 }
 
-void FakeEventHub::addConfigurationMap(int32_t deviceId, const PropertyMap* configuration) {
-    getDevice(deviceId)->configuration.addAll(configuration);
-}
-
-void FakeEventHub::addAbsoluteAxis(int32_t deviceId, int axis, int32_t minValue, int32_t maxValue,
-                                   int flat, int fuzz, int resolution) {
+void FakeEventHub::addAbsoluteAxis(RawDeviceId deviceId, int axis, int32_t minValue,
+                                   int32_t maxValue, int flat, int fuzz, int resolution) {
     Device* device = getDevice(deviceId);
 
     RawAbsoluteAxisInfo info;
@@ -109,32 +107,32 @@ void FakeEventHub::addAbsoluteAxis(int32_t deviceId, int axis, int32_t minValue,
     device->absoluteAxes.add(axis, info);
 }
 
-void FakeEventHub::addRelativeAxis(int32_t deviceId, int32_t axis) {
+void FakeEventHub::addRelativeAxis(RawDeviceId deviceId, int32_t axis) {
     getDevice(deviceId)->relativeAxes.add(axis, true);
 }
 
-void FakeEventHub::setKeyCodeState(int32_t deviceId, int32_t keyCode, int32_t state) {
+void FakeEventHub::setKeyCodeState(RawDeviceId deviceId, int32_t keyCode, int32_t state) {
     getDevice(deviceId)->keyCodeStates.replaceValueFor(keyCode, state);
 }
 
-void FakeEventHub::setRawLayoutInfo(int32_t deviceId, RawLayoutInfo info) {
+void FakeEventHub::setRawLayoutInfo(RawDeviceId deviceId, RawLayoutInfo info) {
     getDevice(deviceId)->layoutInfo = info;
 }
 
-void FakeEventHub::setScanCodeState(int32_t deviceId, int32_t scanCode, int32_t state) {
+void FakeEventHub::setScanCodeState(RawDeviceId deviceId, int32_t scanCode, int32_t state) {
     getDevice(deviceId)->scanCodeStates.replaceValueFor(scanCode, state);
 }
 
-void FakeEventHub::setSwitchState(int32_t deviceId, int32_t switchCode, int32_t state) {
+void FakeEventHub::setSwitchState(RawDeviceId deviceId, int32_t switchCode, int32_t state) {
     getDevice(deviceId)->switchStates.replaceValueFor(switchCode, state);
 }
 
-void FakeEventHub::setAbsoluteAxisValue(int32_t deviceId, int32_t axis, int32_t value) {
+void FakeEventHub::setAbsoluteAxisValue(RawDeviceId deviceId, int32_t axis, int32_t value) {
     getDevice(deviceId)->absoluteAxisValue.replaceValueFor(axis, value);
 }
 
-void FakeEventHub::addKey(int32_t deviceId, int32_t scanCode, int32_t usageCode, int32_t keyCode,
-                          uint32_t flags) {
+void FakeEventHub::addKey(RawDeviceId deviceId, int32_t scanCode, int32_t usageCode,
+                          int32_t keyCode, uint32_t flags) {
     Device* device = getDevice(deviceId);
     KeyInfo info;
     info.keyCode = keyCode;
@@ -147,21 +145,21 @@ void FakeEventHub::addKey(int32_t deviceId, int32_t scanCode, int32_t usageCode,
     }
 }
 
-void FakeEventHub::addKeyCodeMapping(int32_t deviceId, int32_t fromKeyCode, int32_t toKeyCode) {
+void FakeEventHub::addKeyCodeMapping(RawDeviceId deviceId, int32_t fromKeyCode, int32_t toKeyCode) {
     getDevice(deviceId)->keyCodeMapping.insert_or_assign(fromKeyCode, toKeyCode);
 }
 
-void FakeEventHub::setKeyRemapping(int32_t deviceId,
+void FakeEventHub::setKeyRemapping(RawDeviceId deviceId,
                                    const std::map<int32_t, int32_t>& keyRemapping) const {
     Device* device = getDevice(deviceId);
     device->keyRemapping = keyRemapping;
 }
 
-void FakeEventHub::addLed(int32_t deviceId, int32_t led, bool initialState) {
+void FakeEventHub::addLed(RawDeviceId deviceId, int32_t led, bool initialState) {
     getDevice(deviceId)->leds.add(led, initialState);
 }
 
-void FakeEventHub::addSensorAxis(int32_t deviceId, int32_t absCode,
+void FakeEventHub::addSensorAxis(RawDeviceId deviceId, int32_t absCode,
                                  InputDeviceSensorType sensorType, int32_t sensorDataIndex) {
     SensorInfo info;
     info.sensorType = sensorType;
@@ -169,7 +167,7 @@ void FakeEventHub::addSensorAxis(int32_t deviceId, int32_t absCode,
     getDevice(deviceId)->sensorsByAbsCode.emplace(absCode, info);
 }
 
-void FakeEventHub::setMscEvent(int32_t deviceId, int32_t mscEvent) {
+void FakeEventHub::setMscEvent(RawDeviceId deviceId, int32_t mscEvent) {
     typename BitArray<MSC_MAX>::Buffer buffer;
     buffer[mscEvent / 32] = 1 << mscEvent % 32;
     getDevice(deviceId)->mscBitmask.loadFromBuffer(buffer);
@@ -188,7 +186,7 @@ void FakeEventHub::fakeLightIntensities(int32_t rawId,
     mLightIntensities.emplace(rawId, std::move(intensities));
 }
 
-bool FakeEventHub::getLedState(int32_t deviceId, int32_t led) {
+bool FakeEventHub::getLedState(RawDeviceId deviceId, int32_t led) {
     return getDevice(deviceId)->leds.valueFor(led);
 }
 
@@ -196,12 +194,12 @@ std::vector<std::string>& FakeEventHub::getExcludedDevices() {
     return mExcludedDevices;
 }
 
-void FakeEventHub::addVirtualKeyDefinition(int32_t deviceId,
+void FakeEventHub::addVirtualKeyDefinition(RawDeviceId deviceId,
                                            const VirtualKeyDefinition& definition) {
     getDevice(deviceId)->virtualKeys.push_back(definition);
 }
 
-void FakeEventHub::enqueueEvent(nsecs_t when, nsecs_t readTime, int32_t deviceId, int32_t type,
+void FakeEventHub::enqueueEvent(nsecs_t when, nsecs_t readTime, RawDeviceId deviceId, int32_t type,
                                 int32_t code, int32_t value) {
     std::scoped_lock<std::mutex> lock(mLock);
     RawEvent event;
@@ -219,7 +217,7 @@ void FakeEventHub::enqueueEvent(nsecs_t when, nsecs_t readTime, int32_t deviceId
 }
 
 void FakeEventHub::setVideoFrames(
-        std::unordered_map<int32_t /*deviceId*/, std::vector<TouchVideoFrame>> videoFrames) {
+        std::unordered_map<RawDeviceId, std::vector<TouchVideoFrame>> videoFrames) {
     mVideoFrames = std::move(videoFrames);
 }
 
@@ -234,17 +232,17 @@ void FakeEventHub::assertQueueIsEmpty() {
     }
 }
 
-FakeEventHub::Device* FakeEventHub::getDevice(int32_t deviceId) const {
+FakeEventHub::Device* FakeEventHub::getDevice(RawDeviceId deviceId) const {
     ssize_t index = mDevices.indexOfKey(deviceId);
     return index >= 0 ? mDevices.valueAt(index) : nullptr;
 }
 
-ftl::Flags<InputDeviceClass> FakeEventHub::getDeviceClasses(int32_t deviceId) const {
+ftl::Flags<InputDeviceClass> FakeEventHub::getDeviceClasses(RawDeviceId deviceId) const {
     Device* device = getDevice(deviceId);
     return device ? device->classes : ftl::Flags<InputDeviceClass>(0);
 }
 
-InputDeviceIdentifier FakeEventHub::getDeviceIdentifier(int32_t deviceId) const {
+InputDeviceIdentifier FakeEventHub::getDeviceIdentifier(RawDeviceId deviceId) const {
     Device* device = getDevice(deviceId);
     return device ? device->identifier : InputDeviceIdentifier();
 }
@@ -253,7 +251,7 @@ int32_t FakeEventHub::getDeviceControllerNumber(int32_t) const {
     return 0;
 }
 
-std::optional<PropertyMap> FakeEventHub::getConfiguration(int32_t deviceId) const {
+std::optional<PropertyMap> FakeEventHub::getConfiguration(RawDeviceId deviceId) const {
     Device* device = getDevice(deviceId);
     if (device == nullptr) {
         return {};
@@ -261,7 +259,7 @@ std::optional<PropertyMap> FakeEventHub::getConfiguration(int32_t deviceId) cons
     return device->configuration;
 }
 
-std::optional<RawAbsoluteAxisInfo> FakeEventHub::getAbsoluteAxisInfo(int32_t deviceId,
+std::optional<RawAbsoluteAxisInfo> FakeEventHub::getAbsoluteAxisInfo(RawDeviceId deviceId,
                                                                      int axis) const {
     Device* device = getDevice(deviceId);
     if (device) {
@@ -273,7 +271,7 @@ std::optional<RawAbsoluteAxisInfo> FakeEventHub::getAbsoluteAxisInfo(int32_t dev
     return std::nullopt;
 }
 
-bool FakeEventHub::hasRelativeAxis(int32_t deviceId, int axis) const {
+bool FakeEventHub::hasRelativeAxis(RawDeviceId deviceId, int axis) const {
     Device* device = getDevice(deviceId);
     if (device) {
         return device->relativeAxes.indexOfKey(axis) >= 0;
@@ -281,11 +279,11 @@ bool FakeEventHub::hasRelativeAxis(int32_t deviceId, int axis) const {
     return false;
 }
 
-bool FakeEventHub::hasInputProperty(int32_t, int) const {
+bool FakeEventHub::hasInputProperty(RawDeviceId, int) const {
     return false;
 }
 
-bool FakeEventHub::hasMscEvent(int32_t deviceId, int mscEvent) const {
+bool FakeEventHub::hasMscEvent(RawDeviceId deviceId, int mscEvent) const {
     Device* device = getDevice(deviceId);
     if (device) {
         return mscEvent >= 0 && mscEvent <= MSC_MAX ? device->mscBitmask.test(mscEvent) : false;
@@ -293,7 +291,7 @@ bool FakeEventHub::hasMscEvent(int32_t deviceId, int mscEvent) const {
     return false;
 }
 
-status_t FakeEventHub::mapKey(int32_t deviceId, int32_t scanCode, int32_t usageCode,
+status_t FakeEventHub::mapKey(RawDeviceId deviceId, int32_t scanCode, int32_t usageCode,
                               int32_t metaState, int32_t* outKeycode, int32_t* outMetaState,
                               uint32_t* outFlags) const {
     Device* device = getDevice(deviceId);
@@ -333,12 +331,12 @@ const FakeEventHub::KeyInfo* FakeEventHub::getKey(Device* device, int32_t scanCo
     return nullptr;
 }
 
-status_t FakeEventHub::mapAxis(int32_t, int32_t, AxisInfo*) const {
+status_t FakeEventHub::mapAxis(RawDeviceId, int32_t, AxisInfo*) const {
     return NAME_NOT_FOUND;
 }
 
 base::Result<std::pair<InputDeviceSensorType, int32_t>> FakeEventHub::mapSensor(
-        int32_t deviceId, int32_t absCode) const {
+        RawDeviceId deviceId, int32_t absCode) const {
     Device* device = getDevice(deviceId);
     if (!device) {
         return Errorf("Sensor device not found.");
@@ -365,7 +363,7 @@ std::vector<RawEvent> FakeEventHub::getEvents(int) {
     return buffer;
 }
 
-std::vector<TouchVideoFrame> FakeEventHub::getVideoFrames(int32_t deviceId) {
+std::vector<TouchVideoFrame> FakeEventHub::getVideoFrames(RawDeviceId deviceId) {
     auto it = mVideoFrames.find(deviceId);
     if (it != mVideoFrames.end()) {
         std::vector<TouchVideoFrame> frames = std::move(it->second);
@@ -375,7 +373,7 @@ std::vector<TouchVideoFrame> FakeEventHub::getVideoFrames(int32_t deviceId) {
     return {};
 }
 
-int32_t FakeEventHub::getScanCodeState(int32_t deviceId, int32_t scanCode) const {
+int32_t FakeEventHub::getScanCodeState(RawDeviceId deviceId, int32_t scanCode) const {
     Device* device = getDevice(deviceId);
     if (device) {
         ssize_t index = device->scanCodeStates.indexOfKey(scanCode);
@@ -386,12 +384,12 @@ int32_t FakeEventHub::getScanCodeState(int32_t deviceId, int32_t scanCode) const
     return AKEY_STATE_UNKNOWN;
 }
 
-std::optional<RawLayoutInfo> FakeEventHub::getRawLayoutInfo(int32_t deviceId) const {
+std::optional<RawLayoutInfo> FakeEventHub::getRawLayoutInfo(RawDeviceId deviceId) const {
     Device* device = getDevice(deviceId);
     return device ? device->layoutInfo : std::nullopt;
 }
 
-int32_t FakeEventHub::getKeyCodeState(int32_t deviceId, int32_t keyCode) const {
+int32_t FakeEventHub::getKeyCodeState(RawDeviceId deviceId, int32_t keyCode) const {
     Device* device = getDevice(deviceId);
     if (device) {
         ssize_t index = device->keyCodeStates.indexOfKey(keyCode);
@@ -402,7 +400,7 @@ int32_t FakeEventHub::getKeyCodeState(int32_t deviceId, int32_t keyCode) const {
     return AKEY_STATE_UNKNOWN;
 }
 
-int32_t FakeEventHub::getSwitchState(int32_t deviceId, int32_t sw) const {
+int32_t FakeEventHub::getSwitchState(RawDeviceId deviceId, int32_t sw) const {
     Device* device = getDevice(deviceId);
     if (device) {
         ssize_t index = device->switchStates.indexOfKey(sw);
@@ -413,7 +411,8 @@ int32_t FakeEventHub::getSwitchState(int32_t deviceId, int32_t sw) const {
     return AKEY_STATE_UNKNOWN;
 }
 
-std::optional<int32_t> FakeEventHub::getAbsoluteAxisValue(int32_t deviceId, int32_t axis) const {
+std::optional<int32_t> FakeEventHub::getAbsoluteAxisValue(RawDeviceId deviceId,
+                                                          int32_t axis) const {
     Device* device = getDevice(deviceId);
     if (device) {
         ssize_t index = device->absoluteAxisValue.indexOfKey(axis);
@@ -424,7 +423,7 @@ std::optional<int32_t> FakeEventHub::getAbsoluteAxisValue(int32_t deviceId, int3
     return std::nullopt;
 }
 
-void FakeEventHub::setMtSlotValues(int32_t deviceId, int32_t axis,
+void FakeEventHub::setMtSlotValues(RawDeviceId deviceId, int32_t axis,
                                    const std::vector<int32_t>& values) {
     Device* device = getDevice(deviceId);
     if (!device) {
@@ -433,7 +432,7 @@ void FakeEventHub::setMtSlotValues(int32_t deviceId, int32_t axis,
     device->mtSlotValues[axis] = values;
 }
 
-base::Result<std::vector<int32_t>> FakeEventHub::getMtSlotValues(int32_t deviceId, int32_t axis,
+base::Result<std::vector<int32_t>> FakeEventHub::getMtSlotValues(RawDeviceId deviceId, int32_t axis,
                                                                  size_t slotCount) const {
     Device* device = getDevice(deviceId);
     if (!device) {
@@ -456,7 +455,8 @@ base::Result<std::vector<int32_t>> FakeEventHub::getMtSlotValues(int32_t deviceI
     return std::move(outValues);
 }
 
-int32_t FakeEventHub::getKeyCodeForKeyLocation(int32_t deviceId, int32_t locationKeyCode) const {
+int32_t FakeEventHub::getKeyCodeForKeyLocation(RawDeviceId deviceId,
+                                               int32_t locationKeyCode) const {
     Device* device = getDevice(deviceId);
     if (!device) {
         return AKEYCODE_UNKNOWN;
@@ -466,7 +466,7 @@ int32_t FakeEventHub::getKeyCodeForKeyLocation(int32_t deviceId, int32_t locatio
 }
 
 // Return true if the device has non-empty key layout.
-bool FakeEventHub::markSupportedKeyCodes(int32_t deviceId, const std::vector<int32_t>& keyCodes,
+bool FakeEventHub::markSupportedKeyCodes(RawDeviceId deviceId, const std::vector<int32_t>& keyCodes,
                                          uint8_t* outFlags) const {
     Device* device = getDevice(deviceId);
     if (!device) return false;
@@ -487,7 +487,7 @@ bool FakeEventHub::markSupportedKeyCodes(int32_t deviceId, const std::vector<int
     return result;
 }
 
-bool FakeEventHub::hasScanCode(int32_t deviceId, int32_t scanCode) const {
+bool FakeEventHub::hasScanCode(RawDeviceId deviceId, int32_t scanCode) const {
     Device* device = getDevice(deviceId);
     if (device) {
         ssize_t index = device->keysByScanCode.indexOfKey(scanCode);
@@ -496,7 +496,7 @@ bool FakeEventHub::hasScanCode(int32_t deviceId, int32_t scanCode) const {
     return false;
 }
 
-bool FakeEventHub::hasKeyCode(int32_t deviceId, int32_t keyCode) const {
+bool FakeEventHub::hasKeyCode(RawDeviceId deviceId, int32_t keyCode) const {
     Device* device = getDevice(deviceId);
     if (!device) {
         return false;
@@ -514,12 +514,12 @@ bool FakeEventHub::hasKeyCode(int32_t deviceId, int32_t keyCode) const {
     return false;
 }
 
-bool FakeEventHub::hasLed(int32_t deviceId, int32_t led) const {
+bool FakeEventHub::hasLed(RawDeviceId deviceId, int32_t led) const {
     Device* device = getDevice(deviceId);
     return device && device->leds.indexOfKey(led) >= 0;
 }
 
-void FakeEventHub::setLedState(int32_t deviceId, int32_t led, bool on) {
+void FakeEventHub::setLedState(RawDeviceId deviceId, int32_t led, bool on) {
     Device* device = getDevice(deviceId);
     if (device) {
         ssize_t index = device->leds.indexOfKey(led);
@@ -534,7 +534,7 @@ void FakeEventHub::setLedState(int32_t deviceId, int32_t led, bool on) {
 }
 
 void FakeEventHub::getVirtualKeyDefinitions(
-        int32_t deviceId, std::vector<VirtualKeyDefinition>& outVirtualKeys) const {
+        RawDeviceId deviceId, std::vector<VirtualKeyDefinition>& outVirtualKeys) const {
     outVirtualKeys.clear();
 
     Device* device = getDevice(deviceId);
@@ -543,31 +543,31 @@ void FakeEventHub::getVirtualKeyDefinitions(
     }
 }
 
-const std::shared_ptr<KeyCharacterMap> FakeEventHub::getKeyCharacterMap(int32_t) const {
+const std::shared_ptr<KeyCharacterMap> FakeEventHub::getKeyCharacterMap(RawDeviceId) const {
     return nullptr;
 }
 
-bool FakeEventHub::setKeyboardLayoutOverlay(int32_t, std::shared_ptr<KeyCharacterMap>) {
+bool FakeEventHub::setKeyboardLayoutOverlay(RawDeviceId, std::shared_ptr<KeyCharacterMap>) {
     return false;
 }
 
-std::vector<int32_t> FakeEventHub::getVibratorIds(int32_t deviceId) const {
+std::vector<int32_t> FakeEventHub::getVibratorIds(RawDeviceId deviceId) const {
     return mVibrators;
 }
 
-std::optional<int32_t> FakeEventHub::getBatteryCapacity(int32_t, int32_t) const {
+std::optional<int32_t> FakeEventHub::getBatteryCapacity(RawDeviceId, int32_t) const {
     return BATTERY_CAPACITY;
 }
 
-std::optional<int32_t> FakeEventHub::getBatteryStatus(int32_t, int32_t) const {
+std::optional<int32_t> FakeEventHub::getBatteryStatus(RawDeviceId, int32_t) const {
     return BATTERY_STATUS;
 }
 
-std::vector<int32_t> FakeEventHub::getRawBatteryIds(int32_t deviceId) const {
+std::vector<int32_t> FakeEventHub::getRawBatteryIds(RawDeviceId deviceId) const {
     return {DEFAULT_BATTERY};
 }
 
-std::optional<RawBatteryInfo> FakeEventHub::getRawBatteryInfo(int32_t deviceId,
+std::optional<RawBatteryInfo> FakeEventHub::getRawBatteryInfo(RawDeviceId deviceId,
                                                               int32_t batteryId) const {
     if (batteryId != DEFAULT_BATTERY) return {};
     static const auto BATTERY_INFO = RawBatteryInfo{.id = DEFAULT_BATTERY,
@@ -577,7 +577,7 @@ std::optional<RawBatteryInfo> FakeEventHub::getRawBatteryInfo(int32_t deviceId,
     return BATTERY_INFO;
 }
 
-std::vector<int32_t> FakeEventHub::getRawLightIds(int32_t deviceId) const {
+std::vector<int32_t> FakeEventHub::getRawLightIds(RawDeviceId deviceId) const {
     std::vector<int32_t> ids;
     for (const auto& [rawId, info] : mRawLightInfos) {
         ids.push_back(rawId);
@@ -585,7 +585,8 @@ std::vector<int32_t> FakeEventHub::getRawLightIds(int32_t deviceId) const {
     return ids;
 }
 
-std::optional<RawLightInfo> FakeEventHub::getRawLightInfo(int32_t deviceId, int32_t lightId) const {
+std::optional<RawLightInfo> FakeEventHub::getRawLightInfo(RawDeviceId deviceId,
+                                                          int32_t lightId) const {
     auto it = mRawLightInfos.find(lightId);
     if (it == mRawLightInfos.end()) {
         return std::nullopt;
@@ -593,16 +594,17 @@ std::optional<RawLightInfo> FakeEventHub::getRawLightInfo(int32_t deviceId, int3
     return it->second;
 }
 
-void FakeEventHub::setLightBrightness(int32_t deviceId, int32_t lightId, int32_t brightness) {
+void FakeEventHub::setLightBrightness(RawDeviceId deviceId, int32_t lightId, int32_t brightness) {
     mLightBrightness.emplace(lightId, brightness);
 }
 
-void FakeEventHub::setLightIntensities(int32_t deviceId, int32_t lightId,
+void FakeEventHub::setLightIntensities(RawDeviceId deviceId, int32_t lightId,
                                        std::unordered_map<LightColor, int32_t> intensities) {
     mLightIntensities.emplace(lightId, intensities);
 };
 
-std::optional<int32_t> FakeEventHub::getLightBrightness(int32_t deviceId, int32_t lightId) const {
+std::optional<int32_t> FakeEventHub::getLightBrightness(RawDeviceId deviceId,
+                                                        int32_t lightId) const {
     auto lightIt = mLightBrightness.find(lightId);
     if (lightIt == mLightBrightness.end()) {
         return std::nullopt;
@@ -611,7 +613,7 @@ std::optional<int32_t> FakeEventHub::getLightBrightness(int32_t deviceId, int32_
 }
 
 std::optional<std::unordered_map<LightColor, int32_t>> FakeEventHub::getLightIntensities(
-        int32_t deviceId, int32_t lightId) const {
+        RawDeviceId deviceId, int32_t lightId) const {
     auto lightIt = mLightIntensities.find(lightId);
     if (lightIt == mLightIntensities.end()) {
         return std::nullopt;
@@ -619,7 +621,7 @@ std::optional<std::unordered_map<LightColor, int32_t>> FakeEventHub::getLightInt
     return lightIt->second;
 };
 
-void FakeEventHub::setSysfsRootPath(int32_t deviceId, std::string sysfsRootPath) const {
+void FakeEventHub::setSysfsRootPath(RawDeviceId deviceId, std::string sysfsRootPath) const {
     Device* device = getDevice(deviceId);
     if (device == nullptr) {
         return;
@@ -627,7 +629,7 @@ void FakeEventHub::setSysfsRootPath(int32_t deviceId, std::string sysfsRootPath)
     device->sysfsRootPath = sysfsRootPath;
 }
 
-std::filesystem::path FakeEventHub::getSysfsRootPath(int32_t deviceId) const {
+std::filesystem::path FakeEventHub::getSysfsRootPath(RawDeviceId deviceId) const {
     Device* device = getDevice(deviceId);
     if (device == nullptr) {
         return {};
@@ -658,7 +660,7 @@ void FakeEventHub::sysfsNodeChanged(const std::string& sysfsNodePath) {
     }
 }
 
-bool FakeEventHub::setKernelWakeEnabled(int32_t deviceId, bool enabled) {
+bool FakeEventHub::setKernelWakeEnabled(RawDeviceId deviceId, bool enabled) {
     Device* device = getDevice(deviceId);
     if (device == nullptr) {
         return false;
@@ -667,7 +669,7 @@ bool FakeEventHub::setKernelWakeEnabled(int32_t deviceId, bool enabled) {
     return true;
 }
 
-bool FakeEventHub::fakeReadKernelWakeup(int32_t deviceId) const {
+bool FakeEventHub::fakeReadKernelWakeup(RawDeviceId deviceId) const {
     Device* device = getDevice(deviceId);
     if (device == nullptr) {
         return false;

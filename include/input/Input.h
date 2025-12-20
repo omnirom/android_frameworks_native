@@ -27,7 +27,10 @@
 #include <android/os/IInputConstants.h>
 #include <android/os/MotionEventFlag.h>
 #endif
+#include <android-base/result.h>
+#include <android/os/PointerCaptureMode.h>
 #include <android/os/PointerIconType.h>
+#include <ftl/flags.h>
 #include <math.h>
 #include <stdint.h>
 #include <ui/LogicalDisplayId.h>
@@ -57,6 +60,7 @@ enum {
     AKEY_EVENT_FLAG_TAINTED = android::os::IInputConstants::INPUT_EVENT_FLAG_TAINTED,
 };
 
+// TODO(b/245989146): Remove these definitions and use MotionFlag enum directly.
 enum {
     // AMOTION_EVENT_FLAG_WINDOW_IS_OBSCURED is defined in include/android/input.h
     /**
@@ -127,20 +131,6 @@ enum {
     AMOTION_EVENT_PRIVATE_FLAG_MASK = AMOTION_EVENT_PRIVATE_FLAG_SUPPORTS_ORIENTATION |
             AMOTION_EVENT_PRIVATE_FLAG_SUPPORTS_DIRECTIONAL_ORIENTATION,
 };
-
-/**
- * Allowed VerifiedKeyEvent flags. All other flags from KeyEvent do not get verified.
- * These values must be kept in sync with VerifiedKeyEvent.java
- */
-constexpr int32_t VERIFIED_KEY_EVENT_FLAGS =
-        AKEY_EVENT_FLAG_CANCELED | AKEY_EVENT_FLAG_IS_ACCESSIBILITY_EVENT;
-
-/**
- * Allowed VerifiedMotionEventFlags. All other flags from MotionEvent do not get verified.
- * These values must be kept in sync with VerifiedMotionEvent.java
- */
-constexpr int32_t VERIFIED_MOTION_EVENT_FLAGS = AMOTION_EVENT_FLAG_WINDOW_IS_OBSCURED |
-        AMOTION_EVENT_FLAG_WINDOW_IS_PARTIALLY_OBSCURED | AMOTION_EVENT_FLAG_IS_ACCESSIBILITY_EVENT;
 
 /**
  * This flag indicates that the point up event has been canceled.
@@ -231,6 +221,39 @@ struct AInputDevice {
 
 
 namespace android {
+
+enum class MotionFlag : uint32_t {
+    // clang-format off
+    CANCELED = android::os::IInputConstants::INPUT_EVENT_FLAG_CANCELED,
+    WINDOW_IS_OBSCURED = static_cast<uint32_t>(android::os::MotionEventFlag::WINDOW_IS_OBSCURED),
+    WINDOW_IS_PARTIALLY_OBSCURED = static_cast<uint32_t>(android::os::MotionEventFlag::WINDOW_IS_PARTIALLY_OBSCURED),
+    HOVER_EXIT_PENDING = static_cast<uint32_t>(android::os::MotionEventFlag::HOVER_EXIT_PENDING),
+    IS_GENERATED_GESTURE = static_cast<uint32_t>(android::os::MotionEventFlag::IS_GENERATED_GESTURE),
+    NO_FOCUS_CHANGE = static_cast<uint32_t>(android::os::MotionEventFlag::NO_FOCUS_CHANGE),
+    IS_ACCESSIBILITY_EVENT = static_cast<uint32_t>(android::os::MotionEventFlag::IS_ACCESSIBILITY_EVENT),
+    INJECTED_FROM_ACCESSIBILITY_TOOL = static_cast<uint32_t>(android::os::MotionEventFlag::INJECTED_FROM_ACCESSIBILITY_TOOL),
+    TARGET_ACCESSIBILITY_FOCUS = static_cast<uint32_t>(android::os::MotionEventFlag::TARGET_ACCESSIBILITY_FOCUS),
+    TAINTED = static_cast<uint32_t>(android::os::MotionEventFlag::TAINTED),
+    SUPPORTS_ORIENTATION = static_cast<uint32_t>(android::os::MotionEventFlag::PRIVATE_FLAG_SUPPORTS_ORIENTATION),
+    SUPPORTS_DIRECTIONAL_ORIENTATION = static_cast<uint32_t>(android::os::MotionEventFlag::PRIVATE_FLAG_SUPPORTS_DIRECTIONAL_ORIENTATION),
+    // clang-format on
+};
+
+/**
+ * Allowed VerifiedKeyEvent flags. All other flags from KeyEvent do not get verified.
+ * These values must be kept in sync with VerifiedKeyEvent.java
+ */
+constexpr int32_t VERIFIED_KEY_EVENT_FLAGS =
+        AKEY_EVENT_FLAG_CANCELED | AKEY_EVENT_FLAG_IS_ACCESSIBILITY_EVENT;
+
+/**
+ * Allowed VerifiedMotionEventFlags. All other flags from MotionEvent do not get verified.
+ * These values must be kept in sync with VerifiedMotionEvent.java
+ */
+constexpr ftl::Flags<MotionFlag>
+        VERIFIED_MOTION_EVENT_FLAGS{MotionFlag::WINDOW_IS_OBSCURED,
+                                    MotionFlag::WINDOW_IS_PARTIALLY_OBSCURED,
+                                    MotionFlag::IS_ACCESSIBILITY_EVENT};
 
 class Parcel;
 
@@ -580,8 +603,19 @@ struct PointerProperties {
 
 std::ostream& operator<<(std::ostream& out, const PointerProperties& properties);
 
+/*
+ * Represents an ID assigned to an InputDevice by InputReader. Such a device may be a combination of
+ * multiple evdev devices, each with their own RawDeviceId.
+ */
 // TODO(b/211379801) : Use a strong type from ftl/mixins.h instead
 using DeviceId = int32_t;
+
+/*
+ * Represents an ID assigned to an individual evdev device by EventHub.
+ *
+ * (This is not the same as the number used by the device's /dev/input/eventX node.)
+ */
+using RawDeviceId = int32_t;
 
 /*
  * Input events.
@@ -702,9 +736,9 @@ public:
 
     inline void setAction(int32_t action) { mAction = action; }
 
-    inline int32_t getFlags() const { return mFlags; }
+    inline ftl::Flags<MotionFlag> getFlags() const { return mFlags; }
 
-    inline void setFlags(int32_t flags) { mFlags = flags; }
+    inline void setFlags(ftl::Flags<MotionFlag> flags) { mFlags = flags; }
 
     inline int32_t getEdgeFlags() const { return mEdgeFlags; }
 
@@ -919,12 +953,13 @@ public:
 
     void initialize(int32_t id, DeviceId deviceId, uint32_t source, ui::LogicalDisplayId displayId,
                     std::array<uint8_t, 32> hmac, int32_t action, int32_t actionButton,
-                    int32_t flags, int32_t edgeFlags, int32_t metaState, int32_t buttonState,
-                    MotionClassification classification, const ui::Transform& transform,
-                    float xPrecision, float yPrecision, float rawXCursorPosition,
-                    float rawYCursorPosition, const ui::Transform& rawTransform, nsecs_t downTime,
-                    nsecs_t eventTime, size_t pointerCount,
-                    const PointerProperties* pointerProperties, const PointerCoords* pointerCoords);
+                    ftl::Flags<MotionFlag> flags, int32_t edgeFlags, int32_t metaState,
+                    int32_t buttonState, MotionClassification classification,
+                    const ui::Transform& transform, float xPrecision, float yPrecision,
+                    float rawXCursorPosition, float rawYCursorPosition,
+                    const ui::Transform& rawTransform, nsecs_t downTime, nsecs_t eventTime,
+                    size_t pointerCount, const PointerProperties* pointerProperties,
+                    const PointerCoords* pointerCoords);
 
     void copyFrom(const MotionEvent* other, bool keepHistory);
 
@@ -984,21 +1019,24 @@ public:
 
     static std::string actionToString(int32_t action);
 
-    static std::tuple<int32_t /*action*/, std::vector<PointerProperties>,
-                      std::vector<PointerCoords>>
-    split(int32_t action, int32_t flags, int32_t historySize, const std::vector<PointerProperties>&,
-          const std::vector<PointerCoords>&, std::bitset<MAX_POINTER_ID + 1> splitPointerIds);
+    static base::Result<std::tuple<int32_t /*action*/, std::vector<PointerProperties>,
+                                   std::vector<PointerCoords>>>
+    split(int32_t action, ftl::Flags<MotionFlag> flags, int32_t historySize,
+          const std::vector<PointerProperties>&, const std::vector<PointerCoords>&,
+          std::bitset<MAX_POINTER_ID + 1> splitPointerIds);
 
     // MotionEvent will transform various axes in different ways, based on the source. For
     // example, the x and y axes will not have any offsets/translations applied if it comes from a
     // relative mouse device (since SOURCE_RELATIVE_MOUSE is a non-pointer source). These methods
     // are used to apply these transformations for different axes.
     static vec2 calculateTransformedXY(uint32_t source, const ui::Transform&, const vec2& xy);
-    static float calculateTransformedAxisValue(int32_t axis, uint32_t source, int32_t flags,
-                                               const ui::Transform&, const PointerCoords&);
+    static float calculateTransformedAxisValue(int32_t axis, uint32_t source,
+                                               ftl::Flags<MotionFlag> flags, const ui::Transform&,
+                                               const PointerCoords&);
     static void calculateTransformedCoordsInPlace(PointerCoords& coords, uint32_t source,
-                                                  int32_t flags, const ui::Transform&);
-    static PointerCoords calculateTransformedCoords(uint32_t source, int32_t flags,
+                                                  ftl::Flags<MotionFlag> flags,
+                                                  const ui::Transform&);
+    static PointerCoords calculateTransformedCoords(uint32_t source, ftl::Flags<MotionFlag> flags,
                                                     const ui::Transform&, const PointerCoords&);
     // The rounding precision for transformed motion events.
     static constexpr float ROUNDING_PRECISION = 0.001f;
@@ -1009,7 +1047,10 @@ public:
 protected:
     int32_t mAction;
     int32_t mActionButton;
-    int32_t mFlags;
+    ftl::Flags<MotionFlag> mFlags;
+    // The input subsystem no longer sets edge flags to anything except NONE. However, some users of
+    // the input API, such as Launcher, use it to store metadata about an event, so we have to keep
+    // it around.
     int32_t mEdgeFlags;
     int32_t mMetaState;
     int32_t mButtonState;
@@ -1158,7 +1199,7 @@ struct __attribute__((__packed__)) VerifiedMotionEvent : public VerifiedInputEve
     float rawX;
     float rawY;
     int32_t actionMasked;
-    int32_t flags;
+    ftl::Flags<MotionFlag> flags;
     nsecs_t downTimeNanos;
     int32_t metaState;
     int32_t buttonState;
@@ -1256,22 +1297,38 @@ public:
     TouchModeEvent* createTouchModeEvent() override { return new TouchModeEvent(); };
 };
 
+/** Modes in which the pointer can be captured by a window. */
+enum class PointerCaptureMode : int32_t {
+    UNCAPTURED = static_cast<int32_t>(::android::os::PointerCaptureMode::UNCAPTURED),
+    ABSOLUTE = static_cast<int32_t>(::android::os::PointerCaptureMode::ABSOLUTE),
+    RELATIVE = static_cast<int32_t>(::android::os::PointerCaptureMode::RELATIVE),
+    ftl_first = UNCAPTURED,
+    ftl_last = RELATIVE,
+};
+
 /*
  * Describes a unique request to enable or disable Pointer Capture.
  */
 struct PointerCaptureRequest {
 public:
-    inline PointerCaptureRequest() : window(), seq(0) {}
-    inline PointerCaptureRequest(sp<IBinder> window, uint32_t seq) : window(window), seq(seq) {}
-    inline bool operator==(const PointerCaptureRequest& other) const {
-        return window == other.window && seq == other.seq;
+    inline PointerCaptureRequest() : window(), mode(PointerCaptureMode::UNCAPTURED), seq(0) {}
+    inline PointerCaptureRequest(PointerCaptureMode mode, sp<IBinder> window, uint32_t seq)
+          : window(window), mode(mode), seq(seq) {
+        LOG_ALWAYS_FATAL_IF(mode != PointerCaptureMode::UNCAPTURED && window == nullptr);
     }
-    inline bool isEnable() const { return window != nullptr; }
+    inline bool operator==(const PointerCaptureRequest& other) const {
+        return window == other.window && mode == other.mode && seq == other.seq;
+    }
+    inline bool isEnable() const {
+        return mode != PointerCaptureMode::UNCAPTURED && window != nullptr;
+    }
 
     // The requesting window.
-    // If the request is to enable the capture, this is the input token of the window that requested
-    // pointer capture. Otherwise, this is nullptr.
+    // If the request is for a mode other than UNCAPTURED, this is the input token of the window
+    // that requested pointer capture. Otherwise, this is nullptr.
     sp<IBinder> window;
+
+    PointerCaptureMode mode;
 
     // The sequence number for the request.
     uint32_t seq;

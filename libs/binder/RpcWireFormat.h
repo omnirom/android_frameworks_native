@@ -15,6 +15,8 @@
  */
 #pragma once
 
+#include <binder/RpcSession.h>
+
 namespace android {
 
 #pragma clang diagnostic push
@@ -95,6 +97,10 @@ enum : uint32_t {
     RPC_COMMAND_DEC_STRONG,
 };
 
+enum : uint64_t {
+    RPC_SPECIAL_TRANSACTION_ADDRESS = 0,
+};
+
 /**
  * These commands are used when the address in an RpcWireTransaction is zero'd
  * out (no address). This allows the transact/reply flow to be used for
@@ -166,5 +172,19 @@ struct RpcWireReply {
 static_assert(sizeof(RpcWireReply) == 20);
 
 #pragma clang diagnostic pop
+
+static inline size_t getRpcTransportModeMaxFds(RpcSession::FileDescriptorTransportMode mode) {
+    switch (mode) {
+        case RpcSession::FileDescriptorTransportMode::NONE:
+            return 0;
+        case RpcSession::FileDescriptorTransportMode::UNIX:
+            return 253;
+        case RpcSession::FileDescriptorTransportMode::TRUSTY:
+            // Keep this in sync with trusty_ipc.h!!!
+            // We could import that file here on Trusty, but it's not
+            // available on Android
+            return 8;
+    }
+}
 
 } // namespace android

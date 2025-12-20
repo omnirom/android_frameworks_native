@@ -30,6 +30,7 @@
 #include <ui/DisplayedFrameStats.h>
 #include <ui/GraphicBuffer.h>
 #include <ui/PictureProfileHandle.h>
+#include <ui/ScreenPartStatus.h>
 #include <utils/StrongPointer.h>
 
 #include "DisplayHardware/Hal.h"
@@ -48,6 +49,7 @@
 #include <aidl/android/hardware/graphics/composer3/IComposerCallback.h>
 #include <aidl/android/hardware/graphics/composer3/Luts.h>
 #include <aidl/android/hardware/graphics/composer3/OverlayProperties.h>
+#include <aidl/android/hardware/graphics/composer3/ReadbackBufferAttributes.h>
 
 #include <optional>
 
@@ -93,6 +95,7 @@ using PerFrameMetadataBlob = IComposerClient::PerFrameMetadataBlob;
 using AidlTransform = ::aidl::android::hardware::graphics::common::Transform;
 using DisplayConfiguration = V3_0::DisplayConfiguration;
 using aidl::android::hardware::graphics::common::Hdr;
+using android::ScreenPartStatus;
 
 class Composer {
 public:
@@ -234,7 +237,8 @@ public:
 
     // Composer HAL 2.3
     virtual Error getDisplayIdentificationData(Display display, uint8_t* outPort,
-                                               std::vector<uint8_t>* outData) = 0;
+                                               std::vector<uint8_t>* outData,
+                                               android::ScreenPartStatus* outScreenPartStatus) = 0;
     virtual Error setLayerColorTransform(Display display, Layer layer, const float* matrix) = 0;
     virtual Error getDisplayedContentSamplingAttributes(Display display, PixelFormat* outFormat,
                                                         Dataspace* outDataspace,
@@ -321,6 +325,11 @@ public:
                                        const aidl::android::hardware::drm::HdcpLevels& levels) = 0;
     virtual Error getLuts(Display display, const std::vector<sp<GraphicBuffer>>&,
                           std::vector<V3_0::Luts>*) = 0;
+    virtual Error getReadbackBufferAttributes(Display display,
+                                              V3_0::ReadbackBufferAttributes* outAttributes) = 0;
+    virtual Error setReadbackBuffer(Display display, const sp<GraphicBuffer>& buffer,
+                                    int acquireFence) = 0;
+    virtual Error getReadbackBufferFence(Display display, int* outReleaseFence) = 0;
 };
 
 } // namespace Hwc2

@@ -22,6 +22,7 @@
 
 #include <android-base/stringprintf.h>
 #include <android/input.h>
+#include <ftl/flags.h>
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 #include <input/Input.h>
@@ -143,7 +144,7 @@ public:
             return false;
         }
         if (event.getAction() == AMOTION_EVENT_ACTION_CANCEL &&
-            (event.getFlags() & AMOTION_EVENT_FLAG_CANCELED) == 0) {
+            !event.getFlags().test(MotionFlag::CANCELED)) {
             *listener << "event with CANCEL action is missing FLAG_CANCELED";
             return false;
         }
@@ -201,7 +202,7 @@ inline WithDisplayIdMatcher WithDisplayId(ui::LogicalDisplayId displayId) {
 class WithDeviceIdMatcher {
 public:
     using is_gtest_matcher = void;
-    explicit WithDeviceIdMatcher(int32_t deviceId) : mDeviceId(deviceId) {}
+    explicit WithDeviceIdMatcher(DeviceId deviceId) : mDeviceId(deviceId) {}
 
     bool MatchAndExplain(const NotifyMotionArgs& args, std::ostream*) const {
         return mDeviceId == args.deviceId;
@@ -224,29 +225,21 @@ public:
     void DescribeNegationTo(std::ostream* os) const { *os << "wrong device id"; }
 
 private:
-    const int32_t mDeviceId;
+    const DeviceId mDeviceId;
 };
 
-inline WithDeviceIdMatcher WithDeviceId(int32_t deviceId) {
+inline WithDeviceIdMatcher WithDeviceId(DeviceId deviceId) {
     return WithDeviceIdMatcher(deviceId);
 }
 
 /// Flags
-class WithFlagsMatcher {
+class WithKeyFlagsMatcher {
 public:
     using is_gtest_matcher = void;
-    explicit WithFlagsMatcher(int32_t flags) : mFlags(flags) {}
-
-    bool MatchAndExplain(const NotifyMotionArgs& args, std::ostream*) const {
-        return mFlags == args.flags;
-    }
+    explicit WithKeyFlagsMatcher(int32_t flags) : mFlags(flags) {}
 
     bool MatchAndExplain(const NotifyKeyArgs& args, std::ostream*) const {
         return mFlags == args.flags;
-    }
-
-    bool MatchAndExplain(const MotionEvent& event, std::ostream*) const {
-        return mFlags == event.getFlags();
     }
 
     bool MatchAndExplain(const KeyEvent& event, std::ostream*) const {
@@ -263,8 +256,33 @@ private:
     const int32_t mFlags;
 };
 
-inline WithFlagsMatcher WithFlags(int32_t flags) {
-    return WithFlagsMatcher(flags);
+class WithMotionFlagsMatcher {
+public:
+    using is_gtest_matcher = void;
+    explicit WithMotionFlagsMatcher(ftl::Flags<MotionFlag> flags) : mFlags(flags) {}
+
+    bool MatchAndExplain(const NotifyMotionArgs& args, std::ostream*) const {
+        return mFlags == ftl::Flags<MotionFlag>(args.flags);
+    }
+
+    bool MatchAndExplain(const MotionEvent& event, std::ostream*) const {
+        return mFlags == event.getFlags();
+    }
+
+    void DescribeTo(std::ostream* os) const { *os << "with flags " << mFlags.string(); }
+
+    void DescribeNegationTo(std::ostream* os) const { *os << "wrong flags"; }
+
+private:
+    const ftl::Flags<MotionFlag> mFlags;
+};
+
+inline WithKeyFlagsMatcher WithFlags(int32_t flags) {
+    return WithKeyFlagsMatcher(flags);
+}
+
+inline WithMotionFlagsMatcher WithFlags(ftl::Flags<MotionFlag> flags) {
+    return WithMotionFlagsMatcher(flags);
 }
 
 /// DownTime
@@ -919,12 +937,6 @@ MATCHER_P(WithPolicyFlags, policyFlags, "InputEvent with specified policy flags"
     *result_listener << "expected policy flags 0x" << std::hex << policyFlags << ", but got 0x"
                      << arg.policyFlags;
     return arg.policyFlags == static_cast<uint32_t>(policyFlags);
-}
-
-MATCHER_P(WithEdgeFlags, edgeFlags, "InputEvent with specified edge flags") {
-    *result_listener << "expected edge flags 0x" << std::hex << edgeFlags << ", but got 0x"
-                     << arg.edgeFlags;
-    return arg.edgeFlags == edgeFlags;
 }
 
 } // namespace android

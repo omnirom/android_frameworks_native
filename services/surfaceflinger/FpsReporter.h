@@ -23,8 +23,8 @@
 #include <unordered_map>
 
 #include "Clock.h"
-#include "FrameTimeline/FrameTimeline.h"
 #include "FrontEnd/LayerHierarchy.h"
+#include "Scheduler/FrameTimeline.h"
 #include "WpHash.h"
 
 namespace android {
@@ -34,7 +34,7 @@ class SurfaceFlinger;
 
 class FpsReporter : public IBinder::DeathRecipient {
 public:
-    FpsReporter(frametimeline::FrameTimeline& frameTimeline,
+    FpsReporter(scheduler::FrameTimeline& frameTimeline,
                 std::unique_ptr<Clock> clock = std::make_unique<SteadyClock>());
 
     // Dispatches updated layer fps values for the registered listeners
@@ -58,7 +58,7 @@ private:
         int32_t taskId;
     };
 
-    frametimeline::FrameTimeline& mFrameTimeline;
+    scheduler::FrameTimeline& mFrameTimeline;
     static const constexpr std::chrono::steady_clock::duration kMinDispatchDuration =
             std::chrono::milliseconds(500);
     std::unique_ptr<Clock> mClock;

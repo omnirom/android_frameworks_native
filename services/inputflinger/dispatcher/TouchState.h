@@ -57,10 +57,10 @@ struct TouchState {
     void removeAllPointersForDevice(DeviceId deviceId);
     void removeWindowByToken(const sp<IBinder>& token);
 
-    // Cancel pointers for current set of windows except the window with particular binder token.
-    void cancelPointersForWindowsExcept(DeviceId deviceId,
-                                        std::bitset<MAX_POINTER_ID + 1> pointerIds,
-                                        const sp<IBinder>& token);
+    // Cancel pointers for current set of windows for a pilfering request.
+    void cancelPointersForPilferingRequest(DeviceId deviceId,
+                                           std::bitset<MAX_POINTER_ID + 1> pointerIds,
+                                           const sp<IBinder>& token);
     // Cancel pointers for current set of non-pilfering windows i.e. windows with isPilferingWindow
     // set to false.
     void cancelPointersForNonPilferingWindows();

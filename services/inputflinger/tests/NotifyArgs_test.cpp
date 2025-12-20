@@ -72,8 +72,8 @@ TEST(NotifyMotionArgsTest, TestCopyAssignmentOperator) {
     std::vector<TouchVideoFrame> videoFrames = {frame};
     const NotifyMotionArgs args(id, eventTime, readTime, deviceId, source, displayId, policyFlags,
                                 action, actionButton, flags, metaState, buttonState, classification,
-                                edgeFlags, pointerCount, pointerProperties, pointerCoords,
-                                xPrecision, yPrecision, xCursorPosition, yCursorPosition, downTime,
+                                pointerCount, pointerProperties, pointerCoords, xPrecision,
+                                yPrecision, xCursorPosition, yCursorPosition, downTime,
                                 videoFrames);
 
     NotifyMotionArgs otherArgs{};

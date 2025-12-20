@@ -20,13 +20,13 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include <bpf_helpers.h>
+#include <android_bpf_defs.h>
 
 #define S_IN_NS (1000000000)
 #define SMALL_TIME_GAP_LIMIT_NS (S_IN_NS)
 
 // A map from GpuIdUid (GPU ID and application UID) to |UidTrackingInfo|.
-DEFINE_BPF_MAP_GRW(gpu_work_map, HASH, GpuIdUid, UidTrackingInfo, kMaxTrackedGpuIdUids,
+DEFINE_BPF_MAP_GRW(gpu_work_map, HASH, GpuIdUid, UidTrackingInfo, MAX_TRACKED_GPU_ID_UIDS,
                    AID_GRAPHICS);
 
 // A map containing a single entry of |GlobalData|.
@@ -174,7 +174,8 @@ _Static_assert(offsetof(GpuWorkPeriodEvent, gpu_id) == 8 &&
                "must match the tracepoint field offsets found via adb shell cat "
                "/sys/kernel/tracing/events/power/gpu_work_period/format");
 
-DEFINE_BPF_PROG("tracepoint/power/gpu_work_period", AID_ROOT, AID_GRAPHICS, tp_gpu_work_period)
+DEFINE_BPF_PROG("tracepoint/power/gpu_work_period", AID_ROOT, AID_GRAPHICS,
+                tracepoint_power_gpu_work_period)
 (GpuWorkPeriodEvent* const period) {
     // Note: In eBPF programs, |__sync_fetch_and_add| is translated to an atomic
     // add.

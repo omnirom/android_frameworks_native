@@ -136,6 +136,10 @@ status_t SurfaceStats::writeToParcel(Parcel* output) const {
     }
 
     SAFE_PARCEL(output->writeUint32, currentMaxAcquiredBufferCount);
+    SAFE_PARCEL(output->writeBool, cornerRadii.has_value());
+    if (cornerRadii.has_value()) {
+        SAFE_PARCEL(output->writeParcelable, cornerRadii.value());
+    }
     SAFE_PARCEL(output->writeParcelable, eventStats);
     SAFE_PARCEL(output->writeParcelable, previousReleaseCallbackId);
     return NO_ERROR;
@@ -171,6 +175,16 @@ status_t SurfaceStats::readFromParcel(const Parcel* input) {
     }
 
     SAFE_PARCEL(input->readUint32, &currentMaxAcquiredBufferCount);
+    bool hasCornerRadii = false;
+    SAFE_PARCEL(input->readBool, &hasCornerRadii);
+    if (hasCornerRadii) {
+        gui::CornerRadii tempRadii;
+        SAFE_PARCEL(input->readParcelable, &tempRadii);
+        cornerRadii = std::make_optional(tempRadii);
+    } else {
+        cornerRadii = std::nullopt;
+    }
+
     SAFE_PARCEL(input->readParcelable, &eventStats);
 
     SAFE_PARCEL(input->readParcelable, &previousReleaseCallbackId);
@@ -278,11 +292,12 @@ public:
     }
 
     void onReleaseBuffer(ReleaseCallbackId callbackId, sp<Fence> releaseFence,
-                         uint32_t currentMaxAcquiredBufferCount) override {
+                         uint32_t currentMaxAcquiredBufferCount, bool removeFromCache) override {
         callRemoteAsync<decltype(&ITransactionCompletedListener::
                                          onReleaseBuffer)>(Tag::ON_RELEASE_BUFFER, callbackId,
                                                            releaseFence,
-                                                           currentMaxAcquiredBufferCount);
+                                                           currentMaxAcquiredBufferCount,
+                                                           removeFromCache);
     }
 
     void onTransactionQueueStalled(const String8& reason) override {

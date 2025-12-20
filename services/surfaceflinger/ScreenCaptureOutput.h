@@ -37,12 +37,12 @@ struct ScreenCaptureOutputArgs {
     // Counterintuitively, when targetBrightness > 1.0 then dim the scene.
     float targetBrightness;
     float layerAlpha;
-    bool regionSampling;
+    bool disableBlur;
     bool treat170mAsSrgb;
     bool dimInGammaSpaceForEnhancedScreenshots;
     bool isSecure = false;
-    bool isProtected = false;
     bool enableLocalTonemapping = false;
+    std::string debugName;
 };
 
 // ScreenCaptureOutput is used to compose a set of layers into a preallocated buffer.
@@ -53,7 +53,7 @@ class ScreenCaptureOutput : public compositionengine::impl::Output {
 public:
     ScreenCaptureOutput(const Rect sourceCrop, ftl::Optional<DisplayIdVariant> displayIdVariant,
                         const compositionengine::Output::ColorProfile& colorProfile,
-                        float layerAlpha, bool regionSampling,
+                        float layerAlpha, bool disableBlur,
                         bool dimInGammaSpaceForEnhancedScreenshots, bool enableLocalTonemapping);
 
     void updateColorProfile(const compositionengine::CompositionRefreshArgs&) override;
@@ -73,7 +73,7 @@ private:
     const ftl::Optional<DisplayIdVariant> mDisplayIdVariant;
     const compositionengine::Output::ColorProfile& mColorProfile;
     const float mLayerAlpha;
-    const bool mRegionSampling;
+    const bool mDisableBlur;
     const bool mDimInGammaSpaceForEnhancedScreenshots;
     const bool mEnableLocalTonemapping;
 };

@@ -208,21 +208,7 @@ void SensorManager::sensorManagerDied() {
 }
 
 status_t SensorManager::assertStateLocked() {
-#if COM_ANDROID_HARDWARE_LIBSENSOR_FLAGS(SENSORMANAGER_PING_BINDER)
     if (mSensorServer == nullptr) {
-#else
-    bool initSensorManager = false;
-    if (mSensorServer == nullptr) {
-        initSensorManager = true;
-    } else {
-        // Ping binder to check if sensorservice is alive.
-        status_t err = IInterface::asBinder(mSensorServer)->pingBinder();
-        if (err != NO_ERROR) {
-            initSensorManager = true;
-        }
-    }
-    if (initSensorManager) {
-#endif
         waitForSensorService(&mSensorServer);
         LOG_ALWAYS_FATAL_IF(mSensorServer == nullptr, "getService(SensorService) NULL");
 

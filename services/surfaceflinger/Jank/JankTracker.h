@@ -25,9 +25,9 @@
 #include <utils/Mutex.h>
 
 namespace android {
-namespace frametimeline {
+namespace scheduler {
 class FrameTimelineTest;
-}
+} // namespace scheduler
 
 /**
  * JankTracker maintains a backlog of frame jank classification and manages and notififies any
@@ -52,7 +52,7 @@ protected:
     static std::vector<gui::JankData> getCollectedJankDataForTesting(int32_t layerId);
     static void clearAndStopCollectingAllJankDataForTesting();
 
-    friend class frametimeline::FrameTimelineTest;
+    friend class scheduler::FrameTimelineTest;
 
 private:
     JankTracker() {}

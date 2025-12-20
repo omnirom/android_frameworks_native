@@ -253,11 +253,15 @@ TEST(RpcWire, V1) {
     checkRepr(kCurrentRepr, 1);
 }
 
+TEST(RpcWire, V2) {
+    checkRepr(kCurrentRepr, 2);
+}
+
 TEST(RpcWire, CurrentVersion) {
     checkRepr(kCurrentRepr, RPC_WIRE_PROTOCOL_VERSION);
 }
 
-static_assert(RPC_WIRE_PROTOCOL_VERSION == 1,
+static_assert(RPC_WIRE_PROTOCOL_VERSION == 2,
               "If the binder wire protocol is updated, this test should test additional versions. "
               "The binder wire protocol should only be updated on upstream AOSP.");
 

@@ -49,14 +49,14 @@ namespace android::shaders {
  */
 struct LinearEffect {
     // Input dataspace of the source colors.
-    const ui::Dataspace inputDataspace = ui::Dataspace::SRGB;
+    ui::Dataspace inputDataspace = ui::Dataspace::SRGB;
 
     // Working dataspace for the output surface.
-    const ui::Dataspace outputDataspace = ui::Dataspace::SRGB;
+    ui::Dataspace outputDataspace = ui::Dataspace::SRGB;
 
     // Sets whether alpha premultiplication must be undone.
     // This is required if the source colors use premultiplied alpha and is not opaque.
-    const bool undoPremultipliedAlpha = false;
+    bool undoPremultipliedAlpha = false;
 
     // "Fake" dataspace of the destination colors. This is used for applying an OETF to compute
     // non-linear RGB. This is used when Skia is expected to color manage the input image based on
@@ -94,6 +94,11 @@ struct LinearEffectHasher {
 // Typical use-cases supported:
 // 1. Apply tone-mapping
 // 2. Apply color transform matrices in linear space
+//
+// The created runtime effect must be wrapped in a working color space shader or color filter so
+// that its inputs and outputs are converted correctly. The working color space should be set to the
+// `linearEffect.inputDataspace` with a linear gamma. If the effect requires a custom OETF, the
+// output space should be set to `linearEffect.outputDataspace`.
 std::string buildLinearEffectSkSL(const LinearEffect& linearEffect);
 
 // Generates a list of uniforms to set on the LinearEffect shader above.

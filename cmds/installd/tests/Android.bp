@@ -95,6 +95,7 @@ cc_defaults {
         "server_configurable_flags",
     ],
     static_libs: [
+        "installd_flags_c_lib",
         "libasync_safe",
         "libdiskusage",
         "libext2_uuid",
@@ -171,26 +172,6 @@ cc_test {
             ],
         },
     },
-}
-
-cc_test {
-    name: "installd_otapreopt_test",
-    test_suites: ["device-tests"],
-    srcs: ["installd_otapreopt_test.cpp"],
-    cflags: [
-        "-Wall",
-        "-Werror",
-    ],
-    shared_libs: [
-        "libbase",
-        "libcutils",
-        "libutils",
-        "server_configurable_flags",
-    ],
-    static_libs: [
-        "liblog",
-        "libotapreoptparameters",
-    ],
 }
 
 cc_test {

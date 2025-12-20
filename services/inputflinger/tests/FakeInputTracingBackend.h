@@ -16,7 +16,7 @@
 
 #pragma once
 
-#include "../dispatcher/trace/InputTracingBackendInterface.h"
+#include "InputTracingBackendInterface.h"
 
 #include <android-base/result.h>
 #include <android-base/thread_annotations.h>
@@ -28,7 +28,9 @@
 #include <unordered_map>
 #include <vector>
 
-namespace android::inputdispatcher {
+#include "RawEvent.h"
+
+namespace android::input_trace {
 
 /**
  * A class representing an input trace, used to make assertions on what was traced by
@@ -58,8 +60,8 @@ public:
 private:
     std::mutex mLock;
     std::condition_variable mEventTracedCondition;
-    std::unordered_map<uint32_t /*eventId*/, trace::TracedEvent> mTracedEvents GUARDED_BY(mLock);
-    std::vector<trace::WindowDispatchArgs> mTracedWindowDispatches GUARDED_BY(mLock);
+    std::unordered_map<uint32_t /*eventId*/, TracedEvent> mTracedEvents GUARDED_BY(mLock);
+    std::vector<WindowDispatchArgs> mTracedWindowDispatches GUARDED_BY(mLock);
     std::vector<std::pair<std::variant<KeyEvent, MotionEvent>, int32_t /*windowId*/>>
             mExpectedEvents GUARDED_BY(mLock);
 
@@ -75,19 +77,17 @@ private:
  * A backend implementation for input tracing that records events to the provided
  * VerifyingTrace used for testing.
  */
-class FakeInputTracingBackend : public trace::InputTracingBackendInterface {
+class FakeInputTracingBackend : public InputTracingBackendInterface {
 public:
     FakeInputTracingBackend(std::shared_ptr<VerifyingTrace> trace) : mTrace(trace) {}
 
 private:
     std::shared_ptr<VerifyingTrace> mTrace;
 
-    void traceKeyEvent(const trace::TracedKeyEvent& entry,
-                       const trace::TracedEventMetadata&) override;
-    void traceMotionEvent(const trace::TracedMotionEvent& entry,
-                          const trace::TracedEventMetadata&) override;
-    void traceWindowDispatch(const trace::WindowDispatchArgs& entry,
-                             const trace::TracedEventMetadata&) override;
+    void traceKeyEvent(const TracedKeyEvent& entry, const TracedEventMetadata&) override;
+    void traceMotionEvent(const TracedMotionEvent& entry, const TracedEventMetadata&) override;
+    void traceWindowDispatch(const WindowDispatchArgs& entry, const TracedEventMetadata&) override;
+    void traceRawEvent(const RawEvent& entry) override;
 };
 
-} // namespace android::inputdispatcher
+} // namespace android::input_trace

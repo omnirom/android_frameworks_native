@@ -174,7 +174,8 @@ inline auto asPhysicalDisplayId(DisplayIdVariant variant) -> ftl::Optional<Physi
     return asDisplayIdOfType<PhysicalDisplayId>(variant);
 }
 
-inline auto asVirtualDisplayId(DisplayIdVariant variant) -> ftl::Optional<VirtualDisplayId> {
+template <typename Variant>
+inline auto asVirtualDisplayId(Variant variant) -> ftl::Optional<VirtualDisplayId> {
     return ftl::match(
             variant,
             [](GpuVirtualDisplayId id) -> ftl::Optional<VirtualDisplayId> {

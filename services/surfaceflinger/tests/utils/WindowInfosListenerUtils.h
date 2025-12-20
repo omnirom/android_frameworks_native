@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+#include <android-base/logging.h>
 #include <android-base/properties.h>
 #include <gtest/gtest.h>
 #include <gui/SurfaceComposerClient.h>
@@ -36,7 +37,10 @@ public:
     bool waitForWindowInfosPredicate(const WindowInfosPredicate& predicate) {
         std::promise<void> promise;
         auto listener = sp<WindowInfosListener>::make(std::move(predicate), promise);
-        mClient->addWindowInfosListener(listener);
+        android::base::Result<gui::WindowInfosUpdate> result =
+                mClient->addWindowInfosListener(listener);
+        LOG_IF(FATAL, !result.ok()) << "can't register listener";
+        listener->onWindowInfosChanged(*result);
         auto future = promise.get_future();
         bool satisfied = future.wait_for(std::chrono::seconds{5 * HwTimeoutMultiplier()}) ==
                 std::future_status::ready;

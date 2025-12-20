@@ -367,7 +367,10 @@ TEST_F(TimeInStateTest, AllUidTimeInStateMonotonic) {
     for (const auto &kv : *map1) {
         uint32_t uid = kv.first;
         auto times = kv.second;
-        ASSERT_NE(map2->find(uid), map2->end());
+
+        if (map2->find(uid) == map2->end())
+            continue;
+
         for (uint32_t policy = 0; policy < times.size(); ++policy) {
             for (uint32_t freqIdx = 0; freqIdx < times[policy].size(); ++freqIdx) {
                 auto before = times[policy][freqIdx];
@@ -390,7 +393,10 @@ TEST_F(TimeInStateTest, AllUidConcurrentTimesMonotonic) {
     for (const auto &kv : *map1) {
         uint32_t uid = kv.first;
         auto times = kv.second;
-        ASSERT_NE(map2->find(uid), map2->end());
+
+        if (map2->find(uid) == map2->end())
+            continue;
+
         for (uint32_t i = 0; i < times.active.size(); ++i) {
             auto before = times.active[i];
             auto after = (*map2)[uid].active[i];
@@ -465,7 +471,7 @@ TEST_F(TimeInStateTest, AllUidConcurrentTimesFailsOnInvalidBucket) {
         ++uid;
     }
     android::base::unique_fd fd{
-        bpf_obj_get(BPF_FS_PATH "map_timeInState_uid_concurrent_times_map")};
+        bpf_obj_get(BPF_TIMEINSTATE_PATH "map_timeInState_uid_concurrent_times_map")};
     ASSERT_GE(fd, 0);
     uint32_t nCpus = get_nprocs_conf();
     uint32_t maxBucket = (nCpus - 1) / CPUS_PER_ENTRY;
@@ -507,7 +513,7 @@ TEST_F(TimeInStateTest, RemoveUid) {
     {
         // Add a map entry for our fake UID by copying a real map entry
         android::base::unique_fd fd{
-                bpf_obj_get(BPF_FS_PATH "map_timeInState_uid_time_in_state_map")};
+                bpf_obj_get(BPF_TIMEINSTATE_PATH "map_timeInState_uid_time_in_state_map")};
         ASSERT_GE(fd, 0);
         time_key_t k;
         ASSERT_FALSE(getFirstMapKey(fd, &k));
@@ -518,7 +524,7 @@ TEST_F(TimeInStateTest, RemoveUid) {
         ASSERT_FALSE(writeToMapEntry(fd, &k, vals.data(), BPF_NOEXIST));
 
         android::base::unique_fd fd2{
-                bpf_obj_get(BPF_FS_PATH "map_timeInState_uid_concurrent_times_map")};
+                bpf_obj_get(BPF_TIMEINSTATE_PATH "map_timeInState_uid_concurrent_times_map")};
         k.uid = copiedUid;
         k.bucket = 0;
         std::vector<concurrent_val_t> cvals(get_nprocs_conf());

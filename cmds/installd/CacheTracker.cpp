@@ -22,6 +22,8 @@
 #include <sys/xattr.h>
 #include <utils/Trace.h>
 
+#include <algorithm>
+
 #include <android-base/logging.h>
 #include <android-base/stringprintf.h>
 

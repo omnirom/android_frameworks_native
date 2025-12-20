@@ -20,15 +20,21 @@
 #include <SkShader.h>
 #include <ui/StretchEffect.h>
 
+#include "RuntimeEffectManager.h"
+
 namespace android {
 namespace renderengine {
 namespace skia {
+
 class StretchShaderFactory {
 public:
+    StretchShaderFactory(RuntimeEffectManager& effectManager);
+
     sk_sp<SkShader> createSkShader(const sk_sp<SkShader>& inputShader,
                                    const StretchEffect& stretchEffect);
 
 private:
+    sk_sp<SkRuntimeEffect> mEffect;
     std::unique_ptr<SkRuntimeShaderBuilder> mBuilder;
 };
 } // namespace skia

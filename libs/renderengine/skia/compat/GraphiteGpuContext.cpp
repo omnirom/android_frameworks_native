@@ -20,10 +20,14 @@
 #include <include/core/SkSurface.h>
 #include <include/core/SkTraceMemoryDump.h>
 #include <include/gpu/graphite/GraphiteTypes.h>
+#include <include/gpu/graphite/ContextOptions.h>
 #include <include/gpu/graphite/Surface.h>
 #include <include/gpu/graphite/vk/VulkanGraphiteUtils.h>
 
 #include "GpuTypes.h"
+#include "SkRefCnt.h"
+#include "graphite/Image.h"
+#include "graphite/ImageProvider.h"
 #include "skia/compat/GraphiteBackendTexture.h"
 
 #include <android-base/macros.h>
@@ -38,6 +42,22 @@ static skgpu::graphite::ContextOptions graphiteOptions() {
     options.fDisableDriverCorrectnessWorkarounds = true;
     return options;
 }
+
+// Custom image provider, as some RenderEngine effects need to sample data from CPU buffers,
+// but these buffers needs to be converted to a graphite-backed texture
+class GraphiteImageProvider : public skgpu::graphite::ImageProvider {
+public:
+    sk_sp<SkImage> findOrCreate(skgpu::graphite::Recorder* recorder, const SkImage* image,
+                                SkImage::RequiredProperties requiredProps) override {
+        if (image->isTextureBacked()) {
+            return sk_ref_sp(image);
+        }
+
+        // No caching 🙅
+        return SkImages::TextureFromImage(recorder, image);
+    }
+};
+
 } // namespace
 
 std::unique_ptr<SkiaGpuContext> SkiaGpuContext::MakeVulkan_Graphite(
@@ -58,6 +78,7 @@ GraphiteGpuContext::GraphiteGpuContext(std::unique_ptr<skgpu::graphite::Context>
     // TODO: b/293371537 - Iterate on default cache limits (the Recorder should have the majority of
     // the budget, and the Context should be given a smaller fraction.)
     skgpu::graphite::RecorderOptions recorderOptions = skgpu::graphite::RecorderOptions();
+    recorderOptions.fImageProvider = sk_make_sp<GraphiteImageProvider>();
     this->mRecorder = mContext->makeRecorder(recorderOptions);
     LOG_ALWAYS_FATAL_IF(mRecorder.get() == nullptr, "graphite::Recorder creation failed");
 }

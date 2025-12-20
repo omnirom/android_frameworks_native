@@ -18,6 +18,7 @@
 
 #include <android-base/unique_fd.h>
 #include <input/Input.h>
+#include <ui/Size.h>
 #include <map>
 
 namespace android {
@@ -32,8 +33,8 @@ enum class DeviceType {
 };
 
 android::base::unique_fd openUinput(const char* readableName, int32_t vendorId, int32_t productId,
-                                    const char* phys, DeviceType deviceType, int32_t screenHeight,
-                                    int32_t screenWidth);
+                                    const char* phys, DeviceType deviceType,
+                                    std::optional<ui::Size> screenSize);
 
 enum class UinputAction {
     RELEASE = 0,

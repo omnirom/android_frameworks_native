@@ -86,8 +86,9 @@ Rect OutputLayer::calculateInitialCrop() const {
     // if there are no window scaling involved, this operation will map to full
     // pixels in the buffer.
 
-    FloatRect activeCropFloat =
-            reduce(layerState.geomLayerBounds, layerState.transparentRegionHint);
+    FloatRect activeCropFloat = (FlagManager::getInstance().disable_transparent_region_hint())
+            ? layerState.geomLayerBounds
+            : reduce(layerState.geomLayerBounds, layerState.transparentRegionHint);
 
     const Rect& viewport = getOutput().getState().layerStackSpace.getContent();
     const ui::Transform& layerTransform = layerState.geomLayerTransform;
@@ -195,7 +196,9 @@ Rect OutputLayer::calculateOutputDisplayFrame() const {
     // apply the layer's transform, followed by the display's global transform
     // here we're guaranteed that the layer's transform preserves rects
     const ui::Transform& layerTransform = layerState.geomLayerTransform;
-    Region activeTransparentRegion = layerTransform.transform(layerState.transparentRegionHint);
+    Region activeTransparentRegion = (FlagManager::getInstance().disable_transparent_region_hint())
+            ? layerTransform.transform(Region())
+            : layerTransform.transform(layerState.transparentRegionHint);
     if (!layerState.geomCrop.isEmpty() && layerState.geomBufferSize.isValid()) {
         FloatRect activeCrop = layerTransform.transform(layerState.geomCrop);
         activeCrop = activeCrop.intersect(outputState.layerStackSpace.getContent().toFloatRect());
@@ -228,24 +231,8 @@ Rect OutputLayer::calculateOutputDisplayFrame() const {
 
     // Some HWCs may clip client composited input to its displayFrame. Make sure
     // that this does not cut off the shadow.
-    if (layerState.forceClientComposition && layerState.shadowSettings.length > 0.0f) {
-        // RenderEngine currently blurs shadows to smooth out edges, so outset by
-        // 2x the length instead of 1x to compensate
-        const auto outset = layerState.shadowSettings.length * 2;
-        geomLayerBounds.left -= outset;
-        geomLayerBounds.top -= outset;
-        geomLayerBounds.right += outset;
-        geomLayerBounds.bottom += outset;
-    }
-
-    // Similar to above
-    if (layerState.forceClientComposition && layerState.borderSettings.strokeWidth > 0.0f) {
-        // Antialiasing should never add more than 2 pixels.
-        const auto outset = layerState.borderSettings.strokeWidth + 2;
-        geomLayerBounds.left -= outset;
-        geomLayerBounds.top -= outset;
-        geomLayerBounds.right += outset;
-        geomLayerBounds.bottom += outset;
+    if (layerState.forceClientComposition) {
+        geomLayerBounds = layerState.outsetRectForShadow(geomLayerBounds);
     }
 
     geomLayerBounds = layerTransform.transform(geomLayerBounds);
@@ -996,6 +983,11 @@ void OutputLayer::applyDeviceCompositionTypeChange(Composition compositionType) 
     LOG_FATAL_IF(!state.hwc);
     auto& hwcState = *state.hwc;
 
+    if (hwcState.hwcCompositionType == compositionType) {
+        // no changes
+        return;
+    }
+
     // Only detected disallowed changes if this was not a skip layer, because the
     // validated composition type may be arbitrary (usually DEVICE, to reflect that there were
     // fewer GPU layers)
@@ -1038,23 +1030,27 @@ void OutputLayer::applyDeviceLayerLut(
     auto& state = editState();
     LOG_FATAL_IF(!state.hwc);
     auto& hwcState = *state.hwc;
-    std::vector<int32_t> offsets;
-    std::vector<int32_t> dimensions;
-    std::vector<int32_t> sizes;
-    std::vector<int32_t> samplingKeys;
-    for (const auto& [offset, properties] : lutOffsetsAndProperties) {
-        // The Lut(s) that comes back through CommandResultPayload should be
-        // only one sampling key.
-        if (properties.samplingKeys.size() == 1) {
-            offsets.emplace_back(offset);
-            dimensions.emplace_back(static_cast<int32_t>(properties.dimension));
-            sizes.emplace_back(static_cast<int32_t>(properties.size));
-            samplingKeys.emplace_back(static_cast<int32_t>(properties.samplingKeys[0]));
+    if (lutFd.ok()) {
+        std::vector<int32_t> offsets;
+        std::vector<int32_t> dimensions;
+        std::vector<int32_t> sizes;
+        std::vector<int32_t> samplingKeys;
+        for (const auto& [offset, properties] : lutOffsetsAndProperties) {
+            // The Lut(s) that comes back through CommandResultPayload should be
+            // only one sampling key.
+            if (properties.samplingKeys.size() == 1) {
+                offsets.emplace_back(offset);
+                dimensions.emplace_back(static_cast<int32_t>(properties.dimension));
+                sizes.emplace_back(static_cast<int32_t>(properties.size));
+                samplingKeys.emplace_back(static_cast<int32_t>(properties.samplingKeys[0]));
+            }
         }
+        hwcState.luts = std::make_shared<gui::DisplayLuts>(std::move(lutFd), std::move(offsets),
+                                                           std::move(dimensions), std::move(sizes),
+                                                           std::move(samplingKeys));
+    } else {
+        hwcState.luts = nullptr;
     }
-    hwcState.luts = std::make_shared<gui::DisplayLuts>(std::move(lutFd), std::move(offsets),
-                                                       std::move(dimensions), std::move(sizes),
-                                                       std::move(samplingKeys));
 }
 
 bool OutputLayer::needsFiltering() const {

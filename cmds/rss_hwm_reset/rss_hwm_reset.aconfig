@@ -1,0 +1,9 @@
+package: "com.android.rss_hwm_reset"
+container: "system"
+
+flag {
+    name: "enable_reset_dmabuf_rss_hwm"
+    namespace: "android_kernel"
+    description: "dmabuf accounting enable rss hwm"
+    bug: "415360445"
+}

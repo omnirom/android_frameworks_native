@@ -19,8 +19,16 @@
 #include <variant>
 
 #include <gtest/gtest.h>
+#include <input/Input.h>
 
 namespace android {
+
+// How long to wait when we are expecting an event to occur.
+// This should be long, so that tests are not flaky when the device is slow.
+static constexpr std::chrono::nanoseconds EVENT_SHOULD_OCCUR_TIMEOUT = 5s;
+// How long to wait when we are expecting an event to not occur.
+// This should be short, so that the tests are fast.
+static constexpr std::chrono::nanoseconds EVENT_SHOULD_NOT_OCCUR_TIMEOUT = 10ms;
 
 // --- FakeInputDispatcherPolicy ---
 
@@ -145,21 +153,24 @@ void FakeInputDispatcherPolicy::assertNotifyAnrWasNotCalled() {
 }
 
 PointerCaptureRequest FakeInputDispatcherPolicy::assertSetPointerCaptureCalled(
-        const sp<gui::WindowInfoHandle>& window, bool enabled) {
+        const sp<gui::WindowInfoHandle>& window, PointerCaptureMode mode) {
     std::unique_lock lock(mLock);
     base::ScopedLockAssertion assumeLocked(mLock);
 
-    if (!mPointerCaptureChangedCondition
-                 .wait_for(lock, 100ms, [this, enabled, window]() REQUIRES(mLock) {
-                     if (enabled) {
-                         return mPointerCaptureRequest->isEnable() &&
-                                 mPointerCaptureRequest->window == window->getToken();
-                     } else {
-                         return !mPointerCaptureRequest->isEnable();
-                     }
-                 })) {
-        ADD_FAILURE() << "Timed out waiting for setPointerCapture(" << window->getName() << ", "
-                      << enabled << ") to be called.";
+    if (!mPointerCaptureChangedCondition.wait_for(lock, EVENT_SHOULD_OCCUR_TIMEOUT,
+                                                  [this, mode, window]() REQUIRES(mLock) {
+                                                      if (mode != PointerCaptureMode::UNCAPTURED) {
+                                                          return mPointerCaptureRequest->mode ==
+                                                                  mode &&
+                                                                  mPointerCaptureRequest->window ==
+                                                                  window->getToken();
+                                                      } else {
+                                                          return mPointerCaptureRequest->mode ==
+                                                                  mode;
+                                                      }
+                                                  })) {
+        ADD_FAILURE() << "Timed out waiting for setPointerCapture({" << window->getName() << ", "
+                      << ftl::enum_string(mode) << "}) to be called.";
         return {};
     }
     auto request = *mPointerCaptureRequest;
@@ -171,10 +182,10 @@ void FakeInputDispatcherPolicy::assertSetPointerCaptureNotCalled() {
     std::unique_lock lock(mLock);
     base::ScopedLockAssertion assumeLocked(mLock);
 
-    if (mPointerCaptureChangedCondition.wait_for(lock, 100ms) != std::cv_status::timeout) {
-        FAIL() << "Expected setPointerCapture(request) to not be called, but was called. "
-                  "enabled = "
-               << std::to_string(mPointerCaptureRequest->isEnable());
+    if (mPointerCaptureChangedCondition.wait_for(lock, EVENT_SHOULD_NOT_OCCUR_TIMEOUT) !=
+        std::cv_status::timeout) {
+        FAIL() << "Expected setPointerCapture(request) to not be called, but was called. mode = "
+               << ftl::enum_string(mPointerCaptureRequest->mode);
     }
     mPointerCaptureRequest.reset();
 }
@@ -192,8 +203,8 @@ void FakeInputDispatcherPolicy::assertNotifyInputChannelBrokenWasCalled(const sp
     std::unique_lock lock(mLock);
     base::ScopedLockAssertion assumeLocked(mLock);
     std::optional<sp<IBinder>> receivedToken =
-            getItemFromStorageLockedInterruptible(100ms, mBrokenInputChannels, lock,
-                                                  mNotifyInputChannelBroken);
+            getItemFromStorageLockedInterruptible(EVENT_SHOULD_OCCUR_TIMEOUT, mBrokenInputChannels,
+                                                  lock, mNotifyInputChannelBroken);
     ASSERT_TRUE(receivedToken.has_value()) << "Did not receive the broken channel token";
     ASSERT_EQ(token, *receivedToken);
 }
@@ -215,7 +226,7 @@ void FakeInputDispatcherPolicy::assertFocusedDisplayNotified(ui::LogicalDisplayI
     std::unique_lock lock(mLock);
     base::ScopedLockAssertion assumeLocked(mLock);
 
-    if (!mFocusedDisplayNotifiedCondition.wait_for(lock, 100ms,
+    if (!mFocusedDisplayNotifiedCondition.wait_for(lock, EVENT_SHOULD_OCCUR_TIMEOUT,
                                                    [this, expectedDisplay]() REQUIRES(mLock) {
                                                        if (!mNotifiedFocusedDisplay.has_value() ||
                                                            mNotifiedFocusedDisplay.value() !=
@@ -234,7 +245,8 @@ void FakeInputDispatcherPolicy::assertUserActivityNotPoked() {
     base::ScopedLockAssertion assumeLocked(mLock);
 
     std::optional<UserActivityPokeEvent> pokeEvent =
-            getItemFromStorageLockedInterruptible(500ms, mUserActivityPokeEvents, lock,
+            getItemFromStorageLockedInterruptible(EVENT_SHOULD_NOT_OCCUR_TIMEOUT,
+                                                  mUserActivityPokeEvents, lock,
                                                   mNotifyUserActivity);
 
     ASSERT_FALSE(pokeEvent) << "Expected user activity not to have been poked";
@@ -246,7 +258,8 @@ void FakeInputDispatcherPolicy::assertUserActivityPoked(
     base::ScopedLockAssertion assumeLocked(mLock);
 
     std::optional<UserActivityPokeEvent> pokeEvent =
-            getItemFromStorageLockedInterruptible(500ms, mUserActivityPokeEvents, lock,
+            getItemFromStorageLockedInterruptible(EVENT_SHOULD_OCCUR_TIMEOUT,
+                                                  mUserActivityPokeEvents, lock,
                                                   mNotifyUserActivity);
     ASSERT_TRUE(pokeEvent) << "Expected a user poke event";
 
@@ -257,11 +270,12 @@ void FakeInputDispatcherPolicy::assertUserActivityPoked(
 
 void FakeInputDispatcherPolicy::assertNotifyDeviceInteractionWasCalled(int32_t deviceId,
                                                                        std::set<gui::Uid> uids) {
-    ASSERT_EQ(std::make_pair(deviceId, uids), mNotifiedInteractions.popWithTimeout(100ms));
+    ASSERT_EQ(std::make_pair(deviceId, uids),
+              mNotifiedInteractions.popWithTimeout(EVENT_SHOULD_OCCUR_TIMEOUT));
 }
 
 void FakeInputDispatcherPolicy::assertNotifyDeviceInteractionWasNotCalled() {
-    ASSERT_FALSE(mNotifiedInteractions.popWithTimeout(10ms));
+    ASSERT_FALSE(mNotifiedInteractions.popWithTimeout(EVENT_SHOULD_NOT_OCCUR_TIMEOUT));
 }
 
 void FakeInputDispatcherPolicy::setUnhandledKeyHandler(
@@ -274,7 +288,8 @@ void FakeInputDispatcherPolicy::assertUnhandledKeyReported(int32_t keycode) {
     std::unique_lock lock(mLock);
     base::ScopedLockAssertion assumeLocked(mLock);
     std::optional<int32_t> unhandledKeycode =
-            getItemFromStorageLockedInterruptible(100ms, mReportedUnhandledKeycodes, lock,
+            getItemFromStorageLockedInterruptible(EVENT_SHOULD_OCCUR_TIMEOUT,
+                                                  mReportedUnhandledKeycodes, lock,
                                                   mNotifyUnhandledKey);
     ASSERT_TRUE(unhandledKeycode) << "Expected unhandled key to be reported";
     ASSERT_EQ(unhandledKeycode, keycode);
@@ -284,7 +299,8 @@ void FakeInputDispatcherPolicy::assertUnhandledKeyNotReported() {
     std::unique_lock lock(mLock);
     base::ScopedLockAssertion assumeLocked(mLock);
     std::optional<int32_t> unhandledKeycode =
-            getItemFromStorageLockedInterruptible(10ms, mReportedUnhandledKeycodes, lock,
+            getItemFromStorageLockedInterruptible(EVENT_SHOULD_NOT_OCCUR_TIMEOUT,
+                                                  mReportedUnhandledKeycodes, lock,
                                                   mNotifyUnhandledKey);
     ASSERT_FALSE(unhandledKeycode) << "Expected unhandled key NOT to be reported";
 }
@@ -364,16 +380,17 @@ void FakeInputDispatcherPolicy::notifyInputChannelBroken(const sp<IBinder>& conn
 
 void FakeInputDispatcherPolicy::notifyFocusChanged(const sp<IBinder>&, const sp<IBinder>&) {}
 
-void FakeInputDispatcherPolicy::notifySensorEvent(int32_t deviceId,
+void FakeInputDispatcherPolicy::notifySensorEvent(DeviceId deviceId,
                                                   InputDeviceSensorType sensorType,
                                                   InputDeviceSensorAccuracy accuracy,
                                                   nsecs_t timestamp,
                                                   const std::vector<float>& values) {}
 
-void FakeInputDispatcherPolicy::notifySensorAccuracy(int deviceId, InputDeviceSensorType sensorType,
+void FakeInputDispatcherPolicy::notifySensorAccuracy(DeviceId deviceId,
+                                                     InputDeviceSensorType sensorType,
                                                      InputDeviceSensorAccuracy accuracy) {}
 
-void FakeInputDispatcherPolicy::notifyVibratorState(int32_t deviceId, bool isOn) {}
+void FakeInputDispatcherPolicy::notifyVibratorState(DeviceId deviceId, bool isOn) {}
 
 bool FakeInputDispatcherPolicy::filterInputEvent(const InputEvent& inputEvent,
                                                  uint32_t policyFlags) {
@@ -411,10 +428,14 @@ void FakeInputDispatcherPolicy::interceptMotionBeforeQueueing(ui::LogicalDisplay
                                                               int32_t, nsecs_t, uint32_t&) {}
 
 std::variant<nsecs_t, inputdispatcher::KeyEntry::InterceptKeyResult>
-FakeInputDispatcherPolicy::interceptKeyBeforeDispatching(const sp<IBinder>&, const KeyEvent&,
+FakeInputDispatcherPolicy::interceptKeyBeforeDispatching(const sp<IBinder>&, const KeyEvent& event,
                                                          uint32_t) {
-    if (std::holds_alternative<inputdispatcher::KeyEntry::InterceptKeyResult>(
-                mInterceptKeyBeforeDispatchingResult)) {
+    if (inputdispatcher::KeyEntry::InterceptKeyResult* result =
+                std::get_if<inputdispatcher::KeyEntry::InterceptKeyResult>(
+                        &mInterceptKeyBeforeDispatchingResult)) {
+        if (*result == inputdispatcher::KeyEntry::InterceptKeyResult::SKIP) {
+            mKeysConsumedByPolicy.emplace(event);
+        }
         return mInterceptKeyBeforeDispatchingResult;
     }
 
@@ -428,6 +449,15 @@ FakeInputDispatcherPolicy::interceptKeyBeforeDispatching(const sp<IBinder>&, con
     // Clear intercept state so we could dispatch the event in next wake.
     mInterceptKeyBeforeDispatchingResult = nsecs_t(0);
     return delay;
+}
+
+void FakeInputDispatcherPolicy::assertKeyConsumedByPolicy(
+        const ::testing::Matcher<KeyEvent>& matcher) {
+    ASSERT_THAT(*mKeysConsumedByPolicy.popWithTimeout(EVENT_SHOULD_OCCUR_TIMEOUT), matcher);
+}
+
+void FakeInputDispatcherPolicy::assertNoKeysConsumedByPolicy() {
+    ASSERT_TRUE(mKeysConsumedByPolicy.empty());
 }
 
 std::optional<KeyEvent> FakeInputDispatcherPolicy::dispatchUnhandledKey(const sp<IBinder>&,

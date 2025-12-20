@@ -15,19 +15,26 @@
  */
 #pragma once
 
-#include <pthread.h>
-
-#include <condition_variable>
 #include <functional>
 #include <memory>
+#include <tuple>
+#include <type_traits>
+#include <utility>
+
+#ifndef BINDER_RPC_SINGLE_THREADED
+#include <condition_variable>
 #include <mutex>
 #include <thread>
+#endif // BINDER_RPC_SINGLE_THREADED
 
 #include <binder/Common.h>
 
 namespace android {
 
 #ifdef BINDER_RPC_SINGLE_THREADED
+
+enum class LIBBINDER_EXPORTED RpcCvStatus { no_timeout, timeout };
+
 class LIBBINDER_EXPORTED RpcMutex {
 public:
     void lock() {}
@@ -58,8 +65,8 @@ public:
     }
 
     template <typename Duration>
-    std::cv_status wait_for(RpcMutexUniqueLock&, const Duration&) {
-        return std::cv_status::no_timeout;
+    RpcCvStatus wait_for(RpcMutexUniqueLock&, const Duration&) {
+        return RpcCvStatus::no_timeout;
     }
 
     template <typename Duration, typename Predicate>
@@ -132,6 +139,7 @@ using RpcMutexLockGuard = std::lock_guard<std::mutex>;
 using RpcConditionVariable = std::condition_variable;
 using RpcMaybeThread = std::thread;
 namespace rpc_this_thread = std::this_thread;
+using RpcCvStatus = std::cv_status;
 
 static inline void rpcJoinIfSingleThreaded(RpcMaybeThread&) {}
 #endif // BINDER_RPC_SINGLE_THREADED

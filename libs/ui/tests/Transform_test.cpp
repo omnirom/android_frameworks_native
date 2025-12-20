@@ -46,4 +46,15 @@ TEST(TransformTest, inverseRotation_hasCorrectType) {
     testRotationFlagsForInverse(Transform::FLIP_V, Transform::FLIP_V, false);
 }
 
+TEST(TransformTest, scaling_hasCorrectType) {
+    const Transform identityTransform = Transform();
+    EXPECT_TRUE(identityTransform.getType() == Transform::IDENTITY);
+
+    // An unity scale should keep transform unchanged.
+    EXPECT_TRUE(identityTransform == (identityTransform * 1.0));
+
+    // A non-unity scale should result in SCALE transform.
+    EXPECT_TRUE((identityTransform * 2.0).getType() == Transform::SCALE);
+}
+
 } // namespace android::ui

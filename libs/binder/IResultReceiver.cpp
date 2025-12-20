@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-#define LOG_TAG "ResultReceiver"
+#define LOG_TAG "libbinder.ResultReceiver"
 
 #include <binder/IResultReceiver.h>
 

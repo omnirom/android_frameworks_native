@@ -21,8 +21,6 @@
 
 //#define LOG_NDEBUG 0
 #define ATRACE_TAG ATRACE_TAG_GRAPHICS
-#undef LOG_TAG
-#define LOG_TAG "RegionSamplingThread"
 
 #include "RegionSamplingThread.h"
 
@@ -141,6 +139,25 @@ void RegionSamplingThread::removeListener(const sp<IRegionSamplingListener>& lis
     mDescriptors.erase(wp<IBinder>(IInterface::asBinder(listener)));
 }
 
+const std::vector<gui::RegionSamplingDescriptor> RegionSamplingThread::getListeners() {
+    std::lock_guard lock(mSamplingMutex);
+    std::vector<gui::RegionSamplingDescriptor> listeners;
+    for (const auto& [listener, descriptor] : mDescriptors) {
+        gui::ARect guiRect;
+        guiRect.left = descriptor.area.left;
+        guiRect.top = descriptor.area.top;
+        guiRect.right = descriptor.area.right;
+        guiRect.bottom = descriptor.area.bottom;
+
+        gui::RegionSamplingDescriptor guiDescriptor;
+        guiDescriptor.area = guiRect;
+        guiDescriptor.stopLayerId = descriptor.stopLayerId;
+        guiDescriptor.listener = descriptor.listener;
+        listeners.emplace_back(guiDescriptor);
+    }
+    return listeners;
+}
+
 void RegionSamplingThread::checkForStaleLuma() {
     std::lock_guard lock(mThreadControlMutex);
 
@@ -195,7 +212,7 @@ void RegionSamplingThread::binderDied(const wp<IBinder>& who) {
 }
 
 float sampleArea(const uint32_t* data, int32_t width, int32_t height, int32_t stride,
-                 uint32_t orientation, const Rect& sample_area) {
+                 const Rect& sample_area) {
     if (!sample_area.isValid() || (sample_area.getWidth() > width) ||
         (sample_area.getHeight() > height)) {
         ALOGE("invalid sampling region requested");
@@ -224,7 +241,7 @@ float sampleArea(const uint32_t* data, int32_t width, int32_t height, int32_t st
 
 std::vector<float> RegionSamplingThread::sampleBuffer(
         const sp<GraphicBuffer>& buffer, const Point& leftTop,
-        const std::vector<RegionSamplingThread::Descriptor>& descriptors, uint32_t orientation) {
+        const std::vector<RegionSamplingThread::Descriptor>& descriptors) {
     void* data_raw = nullptr;
     buffer->lock(GRALLOC_USAGE_SW_READ_OFTEN, &data_raw);
     std::shared_ptr<uint32_t> data(reinterpret_cast<uint32_t*>(data_raw),
@@ -237,7 +254,7 @@ std::vector<float> RegionSamplingThread::sampleBuffer(
     std::vector<float> lumas(descriptors.size());
     std::transform(descriptors.begin(), descriptors.end(), lumas.begin(),
                    [&](auto const& descriptor) {
-                       return sampleArea(data.get(), width, height, stride, orientation,
+                       return sampleArea(data.get(), width, height, stride,
                                          descriptor.area - leftTop);
                    });
     return lumas;
@@ -249,23 +266,6 @@ void RegionSamplingThread::captureSample() {
 
     if (mDescriptors.empty()) {
         return;
-    }
-
-    wp<const DisplayDevice> displayWeak;
-
-    ui::LayerStack layerStack;
-    ui::Transform::RotationFlags orientation;
-    ui::Size displaySize;
-    Rect layerStackSpaceRect;
-
-    {
-        // TODO(b/159112860): Don't keep sp<DisplayDevice> outside of SF main thread
-        const sp<const DisplayDevice> display = mFlinger.getDefaultDisplayDevice();
-        displayWeak = display;
-        layerStack = display->getLayerStack();
-        orientation = ui::Transform::toRotationFlags(display->getOrientation());
-        displaySize = display->getSize();
-        layerStackSpaceRect = display->getLayerStackSpaceRect();
     }
 
     std::vector<RegionSamplingThread::Descriptor> descriptors;
@@ -320,8 +320,6 @@ void RegionSamplingThread::captureSample() {
         return layerFilterFn(snapshot.name.c_str(), snapshot.path.id, bounds, transform,
                              outStopTraversal);
     };
-    auto getLayerSnapshotsFn =
-            mFlinger.getLayerSnapshotsForScreenshots(layerStack, CaptureArgs::UNSET_UID, filterFn);
 
     std::shared_ptr<renderengine::ExternalTexture> buffer = nullptr;
     if (mCachedBuffer && mCachedBuffer->getBuffer()->getWidth() == sampledBounds.getWidth() &&
@@ -342,24 +340,27 @@ void RegionSamplingThread::captureSample() {
                                                              WRITEABLE);
     }
 
-    constexpr bool kRegionSampling = true;
-    constexpr bool kGrayscale = false;
-    constexpr bool kIsProtected = false;
-
-    SurfaceFlinger::ScreenshotArgs screenshotArgs;
-    screenshotArgs.captureTypeVariant = displayWeak;
-    screenshotArgs.displayIdVariant = std::nullopt;
-    screenshotArgs.sourceCrop = sampledBounds.isEmpty() ? layerStackSpaceRect : sampledBounds;
-    screenshotArgs.reqSize = sampledBounds.getSize();
-    screenshotArgs.dataspace = ui::Dataspace::V0_SRGB;
-    screenshotArgs.isSecure = true;
-    screenshotArgs.seamlessTransition = false;
+    SurfaceFlinger::ScreenshotArgs
+            screenshotArgs{.captureTypeVariant = std::monostate{},
+                           .displayIdVariant = std::nullopt,
+                           .snapshotRequest =
+                                   SurfaceFlinger::SnapshotRequestArgs{.uid = gui::Uid::INVALID,
+                                                                       .snapshotFilterFn =
+                                                                               filterFn},
+                           .sourceCrop = sampledBounds,
+                           .size = sampledBounds.getSize(),
+                           .dataspace = ui::Dataspace::V0_SRGB,
+                           .disableBlur = true,
+                           .isGrayscale = false,
+                           .isSecure = true,
+                           .preserveDisplayColors = false,
+                           .debugName = "RegionSampling"};
 
     std::vector<std::pair<Layer*, sp<LayerFE>>> layers;
-    mFlinger.getSnapshotsFromMainThread(screenshotArgs, getLayerSnapshotsFn, layers);
-    FenceResult fenceResult = mFlinger.captureScreenshot(screenshotArgs, buffer, kRegionSampling,
-                                                         kGrayscale, kIsProtected, nullptr, layers)
-                                      .get();
+    mFlinger.setScreenshotSnapshotsAndDisplayState(screenshotArgs,
+                                                   static_cast<ui::PixelFormat>(
+                                                           buffer->getPixelFormat()));
+    FenceResult fenceResult = mFlinger.captureScreenshot(screenshotArgs, buffer, nullptr).get();
     if (fenceResult.ok()) {
         fenceResult.value()->waitForever(LOG_TAG);
     }
@@ -372,8 +373,8 @@ void RegionSamplingThread::captureSample() {
     }
 
     ALOGV("Sampling %zu descriptors", activeDescriptors.size());
-    std::vector<float> lumas = sampleBuffer(buffer->getBuffer(), sampledBounds.leftTop(),
-                                            activeDescriptors, orientation);
+    std::vector<float> lumas =
+            sampleBuffer(buffer->getBuffer(), sampledBounds.leftTop(), activeDescriptors);
     if (lumas.size() != activeDescriptors.size()) {
         ALOGW("collected %zu median luma values for %zu descriptors", lumas.size(),
               activeDescriptors.size());

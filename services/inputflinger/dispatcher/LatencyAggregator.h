@@ -18,7 +18,7 @@
 
 #include <android-base/thread_annotations.h>
 #include <kll.h>
-#include <statslog.h>
+#include <statslog_inputflinger.h>
 #include <utils/Timers.h>
 
 #include "InputEventTimeline.h"

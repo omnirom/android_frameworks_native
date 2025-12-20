@@ -33,6 +33,8 @@
 #define IPC_HANDLE_POLL_MSG 0x2
 #define IPC_HANDLE_POLL_SEND_UNBLOCKED 0x4
 
+#define VIRTIO_VSOCK_MSG_SIZE_LIMIT 4096
+
 typedef int handle_t;
 
 typedef struct ipc_msg {

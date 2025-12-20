@@ -21,6 +21,7 @@ int main(int argc, char** argv) {
     // Initialize will exit if it sees '--help', so check for it and print info
     // about our flags first.
     renderenginebench::parseFlagsForHelp(argc, argv);
+    renderenginebench::registerBenchmarks();
     benchmark::Initialize(&argc, argv);
 
     // Calling this separately from parseFlagsForHelp prevents collisions with

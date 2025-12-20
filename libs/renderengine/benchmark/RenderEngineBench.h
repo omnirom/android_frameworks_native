@@ -36,6 +36,11 @@ void parseFlags(int argc, char** argv);
 void parseFlagsForHelp(int argc, char** argv);
 
 /**
+ * Register generated benchmark combinations with the benchmark runner.
+ */
+void registerBenchmarks();
+
+/**
  * Whether to save the drawing result to a file.
  *
  * True if --save was used on the command line.

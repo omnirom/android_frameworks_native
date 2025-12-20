@@ -15,7 +15,7 @@
  */
 
 #define LOG_TAG "BufferQueue_test"
-//#define LOG_NDEBUG 0
+// #define LOG_NDEBUG 0
 
 #include "Constants.h"
 #include "MockConsumer.h"
@@ -30,6 +30,7 @@
 
 #include <ui/GraphicBuffer.h>
 #include <ui/PictureProfileHandle.h>
+#include <ui/PixelFormat.h>
 
 #include <android-base/properties.h>
 #include <android-base/unique_fd.h>
@@ -385,7 +386,8 @@ TEST_F(BufferQueueTest, DetachAndReattachOnProducerSide) {
     sp<Fence> fence;
     sp<GraphicBuffer> buffer;
     ASSERT_EQ(IGraphicBufferProducer::BUFFER_NEEDS_REALLOCATION,
-              mProducer->dequeueBuffer(&slot, &fence, 0, 0, 0, GRALLOC_USAGE_SW_WRITE_OFTEN,
+              mProducer->dequeueBuffer(&slot, &fence, 0, 0, 0,
+                                       GRALLOC_USAGE_SW_READ_OFTEN | GRALLOC_USAGE_SW_WRITE_OFTEN,
                                        nullptr, nullptr));
     ASSERT_EQ(BAD_VALUE, mProducer->detachBuffer(slot)); // Not requested
     ASSERT_EQ(OK, mProducer->requestBuffer(slot, &buffer));
@@ -434,7 +436,8 @@ TEST_F(BufferQueueTest, DetachAndReattachOnConsumerSide) {
     sp<Fence> fence;
     sp<GraphicBuffer> buffer;
     ASSERT_EQ(IGraphicBufferProducer::BUFFER_NEEDS_REALLOCATION,
-              mProducer->dequeueBuffer(&slot, &fence, 0, 0, 0, GRALLOC_USAGE_SW_WRITE_OFTEN,
+              mProducer->dequeueBuffer(&slot, &fence, 0, 0, 0,
+                                       GRALLOC_USAGE_SW_READ_OFTEN | GRALLOC_USAGE_SW_WRITE_OFTEN,
                                        nullptr, nullptr));
     ASSERT_EQ(OK, mProducer->requestBuffer(slot, &buffer));
     IGraphicBufferProducer::QueueBufferInput input(0, false,
@@ -492,7 +495,8 @@ TEST_F(BufferQueueTest, MoveFromConsumerToProducer) {
     sp<Fence> fence;
     sp<GraphicBuffer> buffer;
     ASSERT_EQ(IGraphicBufferProducer::BUFFER_NEEDS_REALLOCATION,
-              mProducer->dequeueBuffer(&slot, &fence, 0, 0, 0, GRALLOC_USAGE_SW_WRITE_OFTEN,
+              mProducer->dequeueBuffer(&slot, &fence, 0, 0, 0,
+                                       GRALLOC_USAGE_SW_WRITE_OFTEN | GRALLOC_USAGE_SW_READ_OFTEN,
                                        nullptr, nullptr));
     ASSERT_EQ(OK, mProducer->requestBuffer(slot, &buffer));
 

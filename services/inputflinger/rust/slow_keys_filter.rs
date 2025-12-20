@@ -18,7 +18,7 @@
 //! Slow keys is an accessibility feature to aid users who have physical disabilities, that allows
 //! the user to specify the duration for which one must press-and-hold a key before the system
 //! accepts the keypress.
-use crate::input_filter::{Filter, VIRTUAL_KEYBOARD_DEVICE_ID};
+use crate::input_filter::Filter;
 use crate::input_filter_thread::{InputFilterThread, ThreadCallback};
 use android_hardware_input_common::aidl::android::hardware::input::common::Source::Source;
 use com_android_server_inputflinger::aidl::com::android::server::inputflinger::{
@@ -166,19 +166,16 @@ impl Filter for SlowKeysFilter {
         slow_filter
             .ongoing_down_events
             .retain(|event| device_infos.iter().any(|x| event.device_id == x.deviceId));
-        slow_filter.supported_devices.clear();
-        for device_info in device_infos {
-            if device_info.deviceId == VIRTUAL_KEYBOARD_DEVICE_ID {
-                continue;
-            }
-            if device_info.keyboardType == KeyboardType::None as i32 {
-                continue;
-            }
-            // Support Alphabetic keyboards and Non-alphabetic external keyboards
-            if device_info.external || device_info.keyboardType == KeyboardType::Alphabetic as i32 {
-                slow_filter.supported_devices.insert(device_info.deviceId);
-            }
-        }
+        // Support non-alphabetic external keyboards (e.g. TV remote) and all Alphabetic keyboards
+        slow_filter.supported_devices = device_infos
+            .iter()
+            .filter(|d| {
+                !d.isVirtual
+                    && (d.keyboardType != KeyboardType::None as i32)
+                    && (d.external || d.keyboardType == KeyboardType::Alphabetic as i32)
+            })
+            .map(|d| d.deviceId)
+            .collect();
         slow_filter.next.notify_devices_changed(device_infos);
     }
 
@@ -291,6 +288,25 @@ mod tests {
     }
 
     #[test]
+    fn test_filter_doesnt_block_for_virtual_keyboard() {
+        let test_callbacks = TestCallbacks::new();
+        let test_thread = get_thread(test_callbacks.clone());
+        let next = TestFilter::new();
+        let mut filter = setup_filter_with_external_device(
+            Box::new(next.clone()),
+            test_thread.clone(),
+            1, /* device_id */
+            SLOW_KEYS_THRESHOLD_NS,
+            KeyboardType::NonAlphabetic,
+            true, /* is_virtual */
+        );
+
+        let event = KeyEvent { action: KeyEventAction::DOWN, ..BASE_KEY_EVENT };
+        filter.notify_key(&event);
+        assert_eq!(next.last_event().unwrap(), event);
+    }
+
+    #[test]
     fn test_is_notify_key_for_external_stylus_not_blocked() {
         let test_callbacks = TestCallbacks::new();
         let test_thread = get_thread(test_callbacks.clone());
@@ -301,6 +317,7 @@ mod tests {
             1, /* device_id */
             SLOW_KEYS_THRESHOLD_NS,
             KeyboardType::NonAlphabetic,
+            false, /* is_virtual */
         );
 
         let event =
@@ -320,6 +337,7 @@ mod tests {
             1, /* device_id */
             SLOW_KEYS_THRESHOLD_NS,
             KeyboardType::NonAlphabetic,
+            false, /* is_virtual */
         );
         let down_time = clock_gettime(ClockId::CLOCK_MONOTONIC).unwrap().num_nanoseconds();
         let source = Source(Source::KEYBOARD.0 | Source::DPAD.0);
@@ -429,6 +447,7 @@ mod tests {
             1, /* device_id */
             SLOW_KEYS_THRESHOLD_NS,
             KeyboardType::Alphabetic,
+            false, /* is_virtual */
         );
         let down_time = clock_gettime(ClockId::CLOCK_MONOTONIC).unwrap().num_nanoseconds();
         filter.notify_key(&KeyEvent {
@@ -481,6 +500,7 @@ mod tests {
             1, /* device_id */
             SLOW_KEYS_THRESHOLD_NS,
             KeyboardType::Alphabetic,
+            false, /* is_virtual */
         );
         let mut now = clock_gettime(ClockId::CLOCK_MONOTONIC).unwrap().num_nanoseconds();
         filter.notify_key(&KeyEvent {
@@ -514,6 +534,7 @@ mod tests {
             1, /* device_id */
             SLOW_KEYS_THRESHOLD_NS,
             KeyboardType::Alphabetic,
+            false, /* is_virtual */
         );
 
         let now = clock_gettime(ClockId::CLOCK_MONOTONIC).unwrap().num_nanoseconds();
@@ -536,6 +557,7 @@ mod tests {
         device_id: i32,
         threshold: i64,
         keyboard_type: KeyboardType,
+        is_virtual: bool,
     ) -> SlowKeysFilter {
         setup_filter_with_devices(
             next,
@@ -544,6 +566,7 @@ mod tests {
                 deviceId: device_id,
                 external: true,
                 keyboardType: keyboard_type as i32,
+                isVirtual: is_virtual,
             }],
             threshold,
         )
@@ -563,6 +586,7 @@ mod tests {
                 deviceId: device_id,
                 external: false,
                 keyboardType: keyboard_type as i32,
+                isVirtual: false,
             }],
             threshold,
         )

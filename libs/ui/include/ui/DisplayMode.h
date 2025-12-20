@@ -20,6 +20,7 @@
 #include <type_traits>
 
 #include <ui/GraphicTypes.h>
+#include <ui/OutputType.h>
 #include <ui/Size.h>
 #include <utils/Flattenable.h>
 #include <utils/Timers.h>
@@ -44,6 +45,7 @@ struct DisplayMode {
     nsecs_t sfVsyncOffset = 0;
     nsecs_t presentationDeadline = 0;
     int32_t group = -1;
+    ui::OutputType outputType;
 };
 
 } // namespace android::ui

@@ -16,6 +16,8 @@
 
 #include "MemtrackProxy.h"
 
+#include <string.h>
+
 #include <android-base/logging.h>
 #include <android/binder_manager.h>
 #include <private/android_filesystem_config.h>
@@ -27,6 +29,8 @@ namespace aidl {
 namespace android {
 namespace hardware {
 namespace memtrack {
+
+namespace {
 
 // Check Memtrack Flags
 static_assert(static_cast<uint32_t>(V1_0_hidl::MemtrackFlag::SMAPS_ACCOUNTED) ==
@@ -59,6 +63,18 @@ static_assert(static_cast<uint32_t>(V1_0_hidl::MemtrackType::MULTIMEDIA) ==
               static_cast<uint32_t>(V1_aidl::MemtrackType::MULTIMEDIA));
 static_assert(static_cast<uint32_t>(V1_0_hidl::MemtrackType::CAMERA) ==
               static_cast<uint32_t>(V1_aidl::MemtrackType::CAMERA));
+
+// LINT.IfChange
+constexpr char kMemtrackDefaultMsg[] = "memtrack default implementation";
+// LINT.ThenChange(/hardware/interfaces/memtrack/aidl/default/Memtrack.cpp)
+
+static inline bool isMemtrackDefaultImpl(const ndk::ScopedAStatus& status) {
+    return !status.isOk()
+            && status.getExceptionCode() == EX_UNSUPPORTED_OPERATION
+            && strcmp(status.getMessage(), kMemtrackDefaultMsg) == 0;
+}
+
+}  // namespace
 
 __attribute__((warn_unused_result)) bool translate(const V1_0_hidl::MemtrackRecord& in,
                                                    V1_aidl::MemtrackRecord* out) {
@@ -104,6 +120,7 @@ MemtrackProxy::MemtrackProxy() {
     if (!memtrack_aidl_instance_) {
         memtrack_hidl_instance_ = MemtrackProxy::MemtrackHidlInstance();
     }
+    is_get_memory_supported_ = true;
 }
 
 ndk::ScopedAStatus MemtrackProxy::getMemory(int pid, MemtrackType type,
@@ -122,13 +139,28 @@ ndk::ScopedAStatus MemtrackProxy::getMemory(int pid, MemtrackType type,
 
     if (type != MemtrackType::OTHER && type != MemtrackType::GL && type != MemtrackType::GRAPHICS &&
         type != MemtrackType::MULTIMEDIA && type != MemtrackType::CAMERA) {
-        return ndk::ScopedAStatus::fromExceptionCode(EX_UNSUPPORTED_OPERATION);
+        return ndk::ScopedAStatus::fromExceptionCode(EX_ILLEGAL_ARGUMENT);
     }
 
     _aidl_return->clear();
 
     if (memtrack_aidl_instance_) {
-        return memtrack_aidl_instance_->getMemory(pid, type, _aidl_return);
+        if (!is_get_memory_supported_) {
+            return ndk::ScopedAStatus::ok();
+        }
+
+        ndk::ScopedAStatus aidl_status =
+            memtrack_aidl_instance_->getMemory(pid, type, _aidl_return);
+
+        if (isMemtrackDefaultImpl(aidl_status)) {
+            // The default memory track HAL doesn't support the |getMemory| method.
+            // Therefore we prevent making additional binder calls to the HAL once
+            // we know the operation isn't supported.
+            is_get_memory_supported_ = false;
+            return ndk::ScopedAStatus::ok();
+        }
+
+        return aidl_status;
     } else if (memtrack_hidl_instance_) {
         ndk::ScopedAStatus aidl_status;
 

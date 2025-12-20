@@ -18,7 +18,6 @@
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wconversion"
 
-#include <common/FlagManager.h>
 #include <gui/IConsumerListener.h>
 #include <ui/DisplayState.h>
 
@@ -125,39 +124,14 @@ TEST_F(MultiDisplayTest, RenderLayerInVirtualDisplay) {
 }
 
 TEST_F(MultiDisplayTest, RenderLayerInMirroredVirtualDisplay) {
-    // Create a display and set its layer stack to the main display's layer stack so
-    // the contents of the main display are mirrored on to the virtual display.
-
-    // Assumption here is that the new mirrored display has the same layer stack rect as the
-    // primary display that it is mirroring.
-    createDisplay(mMainDisplayState.layerStackSpaceRect, ui::DEFAULT_LAYER_STACK);
-    createColorLayer(ui::DEFAULT_LAYER_STACK);
-
-    sp<SurfaceControl> mirrorSc =
-            SurfaceComposerClient::getDefault()->mirrorDisplay(mMainDisplayId);
-
-    asTransaction([&](Transaction& t) { t.setPosition(mColorLayer, 10, 10); });
-
-    // Verify color layer renders correctly on main display and it is mirrored on the
-    // virtual display.
-    std::unique_ptr<ScreenCapture> sc;
-    ScreenCapture::captureScreen(&sc, mMainDisplay);
-    sc->expectColor(Rect(10, 10, 40, 50), mExpectedColor);
-    sc->expectColor(Rect(0, 0, 9, 9), {0, 0, 0, 255});
-
-    ScreenCapture::captureScreen(&sc, mVirtualDisplay);
-    sc->expectColor(Rect(10, 10, 40, 50), mExpectedColor);
-    sc->expectColor(Rect(0, 0, 9, 9), {0, 0, 0, 255});
-}
-
-TEST_F(MultiDisplayTest, RenderLayerWithPromisedFenceInMirroredVirtualDisplay) {
     // Create a display and use a unique layerstack ID for mirrorDisplay() so
     // the contents of the main display are mirrored on to the virtual display.
 
     // A unique layerstack ID must be used because sharing the same layerFE
     // with more than one display is unsupported. A unique layerstack ensures
-    // that a different layerFE is used between displays.
-    constexpr ui::LayerStack layerStack{77687666}; // ASCII for MDLB (MultiDisplayLayerBounds)
+    // that a different layerFE is used between displays. Each layerFE has a
+    // promised fence that is each fulfilled.
+    constexpr ui::LayerStack layerStack{776884}; // ASCII for MDT (MultiDisplayTest)
     createDisplay(mMainDisplayState.layerStackSpaceRect, layerStack);
     createColorLayer(ui::DEFAULT_LAYER_STACK);
 
@@ -181,10 +155,7 @@ TEST_F(MultiDisplayTest, RenderLayerWithPromisedFenceInMirroredVirtualDisplay) {
     sc->expectColor(Rect(0, 0, 9, 9), {0, 0, 0, 255});
 }
 
-#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
 TEST_F(MultiDisplayTest, rejectDuplicateLayerStacks) {
-    if (!FlagManager::getInstance().reject_dupe_layerstacks()) return;
-
     // Setup
     sp<CpuConsumer> cpuConsumer1 = sp<CpuConsumer>::make(static_cast<size_t>(1));
     cpuConsumer1->setName(String8("consumer 1"));
@@ -225,7 +196,6 @@ TEST_F(MultiDisplayTest, rejectDuplicateLayerStacks) {
     ASSERT_EQ(NO_ERROR, cpuConsumer1->lockNextBuffer(&buffer1));
     ASSERT_NE(NO_ERROR, cpuConsumer2->lockNextBuffer(&buffer2));
 }
-#endif // COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
 } // namespace android
 
 // TODO(b/129481165): remove the #pragma below and fix conversion issues

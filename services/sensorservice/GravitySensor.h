@@ -39,6 +39,7 @@ public:
     virtual bool process(sensors_event_t* outEvent, const sensors_event_t& event) override;
     virtual status_t activate(void* ident, bool enabled) override;
     virtual status_t setDelay(void* ident, int handle, int64_t ns) override;
+    int32_t getAccelHandle() const { return mAccelerometer.getHandle(); }
 };
 
 // ---------------------------------------------------------------------------

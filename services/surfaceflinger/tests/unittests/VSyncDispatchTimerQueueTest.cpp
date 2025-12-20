@@ -747,31 +747,7 @@ TEST_F(VSyncDispatchTimerQueueTest, canMoveCallbackBackwardsInTime) {
 }
 
 // b/1450138150
-TEST_F(VSyncDispatchTimerQueueTest, doesNotMoveCallbackBackwardsAndSkipAScheduledTargetVSync) {
-    SET_FLAG_FOR_TEST(flags::dont_skip_on_early_ro, false);
-
-    EXPECT_CALL(mMockClock, alarmAt(_, 500));
-    CountingCallback cb(mDispatch);
-    auto result =
-            mDispatch->schedule(cb, {.workDuration = 500, .readyDuration = 0, .lastVsync = 1000});
-    EXPECT_TRUE(result.has_value());
-    EXPECT_EQ(500, result->callbackTime.ns());
-    EXPECT_EQ(1000, result->vsyncTime.ns());
-    mMockClock.advanceBy(400);
-
-    result = mDispatch->schedule(cb, {.workDuration = 800, .readyDuration = 0, .lastVsync = 1000});
-    EXPECT_TRUE(result.has_value());
-    EXPECT_EQ(1200, result->callbackTime.ns());
-    EXPECT_EQ(2000, result->vsyncTime.ns());
-
-    advanceToNextCallback();
-    ASSERT_THAT(cb.mCalls.size(), Eq(1));
-}
-
-// b/1450138150
 TEST_F(VSyncDispatchTimerQueueTest, movesCallbackBackwardsAndSkipAScheduledTargetVSync) {
-    SET_FLAG_FOR_TEST(flags::dont_skip_on_early_ro, true);
-
     Sequence seq;
     EXPECT_CALL(mMockClock, alarmAt(_, 500)).InSequence(seq);
     EXPECT_CALL(mMockClock, alarmAt(_, 400)).InSequence(seq);
@@ -844,29 +820,7 @@ TEST_F(VSyncDispatchTimerQueueTest, canScheduleLargeNegativeOffset) {
     EXPECT_EQ(3000, result->vsyncTime.ns());
 }
 
-TEST_F(VSyncDispatchTimerQueueTest, scheduleUpdatesDoesNotAffectSchedulingState) {
-    SET_FLAG_FOR_TEST(flags::dont_skip_on_early_ro, false);
-
-    EXPECT_CALL(mMockClock, alarmAt(_, 600));
-
-    CountingCallback cb(mDispatch);
-    auto result =
-            mDispatch->schedule(cb, {.workDuration = 400, .readyDuration = 0, .lastVsync = 1000});
-    EXPECT_TRUE(result.has_value());
-    EXPECT_EQ(600, result->callbackTime.ns());
-    EXPECT_EQ(1000, result->vsyncTime.ns());
-
-    result = mDispatch->schedule(cb, {.workDuration = 1400, .readyDuration = 0, .lastVsync = 1000});
-    EXPECT_TRUE(result.has_value());
-    EXPECT_EQ(600, result->callbackTime.ns());
-    EXPECT_EQ(2000, result->vsyncTime.ns());
-
-    advanceToNextCallback();
-}
-
 TEST_F(VSyncDispatchTimerQueueTest, scheduleUpdatesDoesAffectSchedulingState) {
-    SET_FLAG_FOR_TEST(flags::dont_skip_on_early_ro, true);
-
     Sequence seq;
     EXPECT_CALL(mMockClock, alarmAt(_, 600)).InSequence(seq);
     EXPECT_CALL(mMockClock, alarmAt(_, 0)).InSequence(seq);
@@ -946,38 +900,7 @@ TEST_F(VSyncDispatchTimerQueueTest, skipsSchedulingIfTimerReschedulingIsImminent
 // b/154303580.
 // If the same callback tries to reschedule itself after it's too late, timer opts to apply the
 // update later, as opposed to blocking the calling thread.
-TEST_F(VSyncDispatchTimerQueueTest, skipsSchedulingIfTimerReschedulingIsImminentSameCallback) {
-    SET_FLAG_FOR_TEST(flags::dont_skip_on_early_ro, false);
-
-    Sequence seq;
-    EXPECT_CALL(mMockClock, alarmAt(_, 600)).InSequence(seq);
-    EXPECT_CALL(mMockClock, alarmAt(_, 1630)).InSequence(seq);
-    CountingCallback cb(mDispatch);
-
-    auto result =
-            mDispatch->schedule(cb, {.workDuration = 400, .readyDuration = 0, .lastVsync = 1000});
-    EXPECT_TRUE(result.has_value());
-    EXPECT_EQ(600, result->callbackTime.ns());
-    EXPECT_EQ(1000, result->vsyncTime.ns());
-
-    mMockClock.setLag(100);
-    mMockClock.advanceBy(620);
-
-    result = mDispatch->schedule(cb, {.workDuration = 370, .readyDuration = 0, .lastVsync = 2000});
-    EXPECT_TRUE(result.has_value());
-    EXPECT_EQ(1630, result->callbackTime.ns());
-    EXPECT_EQ(2000, result->vsyncTime.ns());
-    mMockClock.advanceBy(80);
-
-    EXPECT_THAT(cb.mCalls.size(), Eq(1));
-}
-
-// b/154303580.
-// If the same callback tries to reschedule itself after it's too late, timer opts to apply the
-// update later, as opposed to blocking the calling thread.
 TEST_F(VSyncDispatchTimerQueueTest, doesntSkipSchedulingIfTimerReschedulingIsImminentSameCallback) {
-    SET_FLAG_FOR_TEST(flags::dont_skip_on_early_ro, true);
-
     Sequence seq;
     EXPECT_CALL(mMockClock, alarmAt(_, 600)).InSequence(seq);
     EXPECT_CALL(mMockClock, alarmAt(_, 1630)).InSequence(seq);
@@ -1124,32 +1047,7 @@ TEST_F(VSyncDispatchTimerQueueTest, basicAlarmSettingFutureWithReadyDuration) {
     EXPECT_THAT(cb.mReadyTime[0], 970);
 }
 
-TEST_F(VSyncDispatchTimerQueueTest, updatesVsyncTimeForCloseWakeupTime) {
-    SET_FLAG_FOR_TEST(flags::dont_skip_on_early_ro, false);
-
-    Sequence seq;
-    EXPECT_CALL(mMockClock, alarmAt(_, 600)).InSequence(seq);
-
-    CountingCallback cb(mDispatch);
-
-    mDispatch->schedule(cb, {.workDuration = 400, .readyDuration = 0, .lastVsync = 1000});
-    mDispatch->schedule(cb, {.workDuration = 1400, .readyDuration = 0, .lastVsync = 1000});
-
-    advanceToNextCallback();
-
-    advanceToNextCallback();
-
-    ASSERT_THAT(cb.mCalls.size(), Eq(1));
-    EXPECT_THAT(cb.mCalls[0], Eq(2000));
-    ASSERT_THAT(cb.mWakeupTime.size(), Eq(1));
-    EXPECT_THAT(cb.mWakeupTime[0], Eq(600));
-    ASSERT_THAT(cb.mReadyTime.size(), Eq(1));
-    EXPECT_THAT(cb.mReadyTime[0], Eq(2000));
-}
-
 TEST_F(VSyncDispatchTimerQueueTest, doesNotUpdatesVsyncTimeForCloseWakeupTime) {
-    SET_FLAG_FOR_TEST(flags::dont_skip_on_early_ro, true);
-
     Sequence seq;
     EXPECT_CALL(mMockClock, alarmAt(_, 600)).InSequence(seq);
     EXPECT_CALL(mMockClock, alarmAt(_, 0)).InSequence(seq);
@@ -1171,30 +1069,7 @@ TEST_F(VSyncDispatchTimerQueueTest, doesNotUpdatesVsyncTimeForCloseWakeupTime) {
     EXPECT_THAT(cb.mReadyTime[0], Eq(1000));
 }
 
-TEST_F(VSyncDispatchTimerQueueTest, skipAVsyc) {
-    SET_FLAG_FOR_TEST(flags::dont_skip_on_early_ro, false);
-
-    EXPECT_CALL(mMockClock, alarmAt(_, 500));
-    CountingCallback cb(mDispatch);
-    auto result =
-            mDispatch->schedule(cb, {.workDuration = 500, .readyDuration = 0, .lastVsync = 1000});
-    EXPECT_TRUE(result.has_value());
-    EXPECT_EQ(500, result->callbackTime.ns());
-    EXPECT_EQ(1000, result->vsyncTime.ns());
-    mMockClock.advanceBy(300);
-
-    result = mDispatch->schedule(cb, {.workDuration = 800, .readyDuration = 0, .lastVsync = 1000});
-    EXPECT_TRUE(result.has_value());
-    EXPECT_EQ(1200, result->callbackTime.ns());
-    EXPECT_EQ(2000, result->vsyncTime.ns());
-
-    advanceToNextCallback();
-    ASSERT_THAT(cb.mCalls.size(), Eq(1));
-}
-
 TEST_F(VSyncDispatchTimerQueueTest, dontskipAVsyc) {
-    SET_FLAG_FOR_TEST(flags::dont_skip_on_early_ro, true);
-
     Sequence seq;
     EXPECT_CALL(mMockClock, alarmAt(_, 500)).InSequence(seq);
     EXPECT_CALL(mMockClock, alarmAt(_, 300)).InSequence(seq);
@@ -1437,20 +1312,11 @@ TEST_F(VSyncDispatchTimerQueueEntryTest, reportsScheduledIfStillTime) {
               entry.schedule({.workDuration = 50, .readyDuration = 0, .lastVsync = 500},
                              *mStubTracker, 0)
                       .callbackTime.ns());
-    {
-        SET_FLAG_FOR_TEST(flags::dont_skip_on_early_ro, true);
-        EXPECT_EQ(0,
-                  entry.schedule({.workDuration = 1200, .readyDuration = 0, .lastVsync = 500},
-                                 *mStubTracker, 0)
-                          .callbackTime.ns());
-    }
-    {
-        SET_FLAG_FOR_TEST(flags::dont_skip_on_early_ro, false);
-        EXPECT_EQ(800,
-                  entry.schedule({.workDuration = 1200, .readyDuration = 0, .lastVsync = 500},
-                                 *mStubTracker, 0)
-                          .callbackTime.ns());
-    }
+    EXPECT_EQ(0,
+              entry.schedule({.workDuration = 1200, .readyDuration = 0, .lastVsync = 500},
+                           *mStubTracker, 0)
+                      .callbackTime.ns());
+
 }
 
 TEST_F(VSyncDispatchTimerQueueEntryTest, storesPendingUpdatesUntilUpdateAndDontSkip) {

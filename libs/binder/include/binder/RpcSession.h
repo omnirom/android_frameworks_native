@@ -38,15 +38,16 @@ class RpcState;
 class RpcTransport;
 class FdTrigger;
 
-constexpr uint32_t RPC_WIRE_PROTOCOL_VERSION_NEXT = 2;
+constexpr uint32_t RPC_WIRE_PROTOCOL_VERSION_NEXT = 3;
 constexpr uint32_t RPC_WIRE_PROTOCOL_VERSION_EXPERIMENTAL = 0xF0000000;
-constexpr uint32_t RPC_WIRE_PROTOCOL_VERSION = 1;
+constexpr uint32_t RPC_WIRE_PROTOCOL_VERSION = 2;
 
 // Starting with this version:
 //
 // * RpcWireReply is larger (4 bytes -> 20).
 // * RpcWireTransaction and RpcWireReplyV1 include the parcel data size.
 constexpr uint32_t RPC_WIRE_PROTOCOL_VERSION_RPC_HEADER_FEATURE_EXPLICIT_PARCEL_SIZE = 1;
+constexpr uint32_t RPC_WIRE_PROTOCOL_VERSION_RPC_HEADER_INCLUDES_BINDER_POSITIONS = 2;
 
 /**
  * This represents a session (group of connections) between a client

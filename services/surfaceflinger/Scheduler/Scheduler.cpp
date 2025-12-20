@@ -14,8 +14,6 @@
  * limitations under the License.
  */
 
-#undef LOG_TAG
-#define LOG_TAG "Scheduler"
 #define ATRACE_TAG ATRACE_TAG_GRAPHICS
 
 #include "Scheduler.h"
@@ -33,9 +31,9 @@
 #include <gui/WindowInfo.h>
 #include <system/window.h>
 #include <ui/DisplayMap.h>
+#include <ui/StaticDisplayInfo.h>
 #include <utils/Timers.h>
 
-#include <FrameTimeline/FrameTimeline.h>
 #include <scheduler/interface/ICompositor.h>
 
 #include <cinttypes>
@@ -47,6 +45,7 @@
 #include <common/FlagManager.h>
 #include "EventThread.h"
 #include "FrameRateOverrideMappings.h"
+#include "FrameTimeline.h"
 #include "FrontEnd/LayerHandle.h"
 #include "Layer.h"
 #include "OneShotTimer.h"
@@ -76,15 +75,23 @@ Scheduler::~Scheduler() {
     Impl::destroyVsync();
 
     // Stop timers and wait for their threads to exit.
-    mDisplayPowerTimer.reset();
+    mDisplayPowerTimers.clear();
     mTouchTimer.reset();
 
     // Stop idle timer and clear callbacks, as the RefreshRateSelector may outlive the Scheduler.
-    demotePacesetterDisplay({.toggleIdleTimer = true});
+    demotePacesetterDisplay(
+            {.toggleIdleTimer =
+                     !FlagManager::getInstance().follower_arbitrary_refresh_rate_selection()});
+
+    if (FlagManager::getInstance().follower_arbitrary_refresh_rate_selection()) {
+        std::scoped_lock lock(mDisplayLock);
+        for (auto& [_, display] : mDisplays) {
+            display.selectorPtr->stopIdleTimer();
+        }
+    }
 }
 
-void Scheduler::initVsync(frametimeline::TokenManager& tokenManager,
-                          std::chrono::nanoseconds workDuration) {
+void Scheduler::initVsync(TokenManager& tokenManager, std::chrono::nanoseconds workDuration) {
     Impl::initVsyncInternal(getVsyncSchedule()->getDispatch(), tokenManager, workDuration);
 }
 
@@ -92,11 +99,7 @@ void Scheduler::startTimers() {
     using namespace sysprop;
     using namespace std::string_literals;
 
-    const int32_t defaultTouchTimerValue =
-            FlagManager::getInstance().enable_fro_dependent_features() &&
-                    sysprop::enable_frame_rate_override(true)
-            ? 200
-            : 0;
+    const int32_t defaultTouchTimerValue = sysprop::enable_frame_rate_override(true) ? 200 : 0;
     if (const int32_t millis = set_touch_timer_ms(defaultTouchTimerValue); millis > 0) {
         // Touch events are coming to SF every 100ms, so the timer needs to be higher than that
         mTouchTimer.emplace(
@@ -106,20 +109,95 @@ void Scheduler::startTimers() {
         mTouchTimer->start();
     }
 
-    if (const int64_t millis = set_display_power_timer_ms(0); millis > 0) {
-        mDisplayPowerTimer.emplace(
-                "DisplayPowerTimer", std::chrono::milliseconds(millis),
-                [this] { displayPowerTimerCallback(TimerState::Reset); },
-                [this] { displayPowerTimerCallback(TimerState::Expired); });
-        mDisplayPowerTimer->start();
+    {
+        ftl::FakeGuard guard(mDisplayLock);
+        mShouldStartPowerTimers = true;
+        for (const auto& [id, _] : mDisplays) {
+            if (FlagManager::getInstance().follower_arbitrary_refresh_rate_selection() ||
+                mPacesetterDisplayId == id) {
+                startPowerTimer(id);
+            }
+        }
     }
 }
 
-void Scheduler::setPacesetterDisplay(PhysicalDisplayId pacesetterId) {
-    constexpr PromotionParams kPromotionParams = {.toggleIdleTimer = true};
+void Scheduler::startPowerTimer(PhysicalDisplayId displayId) {
+    // Skip startPowerTimer() for initial hotplug(s) that happen before startTimers()
+    if (!mShouldStartPowerTimers) {
+        return;
+    }
+    {
+        std::scoped_lock lock(mPolicyLock);
+        mPolicy.displayPowerTimers.try_emplace(displayId, TimerState::Expired);
+        mPolicy.displayPowerModes.try_emplace(displayId, hal::PowerMode::ON);
+    }
+
+    if (const int64_t millis = sysprop::set_display_power_timer_ms(0); millis > 0) {
+        auto timer = std::make_unique<OneShotTimer>(
+                "DisplayPowerTimer", std::chrono::milliseconds(millis),
+                [this, displayId] { displayPowerTimerCallback(displayId, TimerState::Reset); },
+                [this, displayId] { displayPowerTimerCallback(displayId, TimerState::Expired); });
+        auto [it, _] = mDisplayPowerTimers.try_emplace(displayId, std::move(timer));
+        it->second->start();
+    }
+}
+
+void Scheduler::initializeIdleTimer(PhysicalDisplayId displayId) {
+    if (!FlagManager::getInstance().follower_arbitrary_refresh_rate_selection()) {
+        return;
+    }
+
+    const auto& displayOpt = FTL_FAKE_GUARD(mDisplayLock, mDisplays.get(displayId));
+    if (!displayOpt.has_value()) {
+        return;
+    }
+
+    {
+        std::scoped_lock lock(mPolicyLock);
+        mPolicy.idleTimers.try_emplace(displayId, TimerState::Reset);
+    }
+
+    displayOpt->get().selectorPtr->setIdleTimerCallbacks(
+            {.platform = {.onReset =
+                                  [this, displayId] {
+                                      idleTimerCallback(displayId, TimerState::Reset);
+                                  },
+                          .onExpired =
+                                  [this, displayId] {
+                                      idleTimerCallback(displayId, TimerState::Expired);
+                                  }},
+             .kernel = {.onReset =
+                                [this, displayId] {
+                                    kernelIdleTimerCallback(displayId, TimerState::Reset);
+                                },
+                        .onExpired =
+                                [this, displayId] {
+                                    kernelIdleTimerCallback(displayId, TimerState::Expired);
+                                }},
+             .vrr = {.onReset =
+                             [this, displayId] {
+                                 mSchedulerCallback.vrrDisplayIdle(displayId, false);
+                             },
+                     .onExpired =
+                             [this, displayId] {
+                                 mSchedulerCallback.vrrDisplayIdle(displayId, true);
+                             }}});
+}
+
+bool Scheduler::designatePacesetterDisplay(std::optional<PhysicalDisplayId> pacesetterId) {
+    pacesetterId = selectPacesetterDisplay(pacesetterId);
+
+    // Skip an unnecessary demotion/promotion cycle if there's no work to do.
+    if ((ftl::FakeGuard(mDisplayLock), mPacesetterDisplayId == *pacesetterId)) {
+        return false;
+    }
+
+    const PromotionParams kPromotionParams = {
+            .toggleIdleTimer =
+                    !FlagManager::getInstance().follower_arbitrary_refresh_rate_selection()};
 
     demotePacesetterDisplay(kPromotionParams);
-    promotePacesetterDisplay(pacesetterId, kPromotionParams);
+    promotePacesetterDisplay(*pacesetterId, kPromotionParams);
 
     // Cancel the pending refresh rate change, if any, before updating the phase configuration.
     mVsyncModulator->cancelRefreshRateChange();
@@ -128,42 +206,146 @@ void Scheduler::setPacesetterDisplay(PhysicalDisplayId pacesetterId) {
         std::scoped_lock lock{mVsyncConfigLock};
         mVsyncConfiguration->reset();
     }
-    updatePhaseConfiguration(pacesetterId, pacesetterSelectorPtr()->getActiveMode().fps);
+
+    updatePhaseConfiguration(*pacesetterId, pacesetterSelectorPtr()->getActiveMode().fps);
+
+    return true;
 }
 
-void Scheduler::registerDisplay(PhysicalDisplayId displayId, RefreshRateSelectorPtr selectorPtr,
-                                PhysicalDisplayId activeDisplayId) {
+bool Scheduler::forcePacesetterDisplay(PhysicalDisplayId pacesetterId) {
+    {
+        std::scoped_lock lock(mDisplayLock);
+        mForcedPacesetterDisplayId = pacesetterId;
+    }
+    return designatePacesetterDisplay();
+}
+
+PhysicalDisplayId Scheduler::selectPacesetterDisplay(
+        std::optional<PhysicalDisplayId> desiredPacesetterId) const {
+    std::scoped_lock lock(mDisplayLock);
+    return selectPacesetterDisplayLocked(desiredPacesetterId);
+}
+
+PhysicalDisplayId Scheduler::selectPacesetterDisplayLocked(
+        std::optional<PhysicalDisplayId> desiredPacesetterId) const {
+    if (mForcedPacesetterDisplayId.has_value()) {
+        return *mForcedPacesetterDisplayId;
+    }
+
+    if (desiredPacesetterId.has_value()) {
+        return *desiredPacesetterId;
+    }
+
+    // The first display should be the new pacesetter if none of the displays are powered on.
+    const auto& [firstDisplayId, firstDisplay] = *mDisplays.begin();
+    PhysicalDisplayId newPacesetterId = firstDisplayId;
+    // Only assigning the actual refresh rate if the first display is powered on ensures that any
+    // other powered-on display will take over the new pacesetter designation regardless of its
+    // refresh rate.
+    Fps newPacesetterVsyncRate = Fps::fromValue(0);
+    if (firstDisplay.powerMode == hal::PowerMode::ON) {
+        newPacesetterVsyncRate = firstDisplay.selectorPtr->getActiveMode().modePtr->getVsyncRate();
+    }
+
+    // Attempt to set the fastest powered-on display as the pacesetter.
+    for (const auto& [id, display] : mDisplays) {
+        if (display.powerMode != hal::PowerMode::ON) {
+            continue;
+        }
+
+        const Fps displayVsyncRate = display.selectorPtr->getActiveMode().modePtr->getVsyncRate();
+        if (isStrictlyLess(newPacesetterVsyncRate, displayVsyncRate)) {
+            newPacesetterId = id;
+            newPacesetterVsyncRate = displayVsyncRate;
+        }
+    }
+
+    // If the current pacesetter display is powered on and its refresh rate is not too far off from
+    // the newly selected pacesetter display, prefer to keep the current one to avoid churn.
+    if (const auto pacesetterOpt = pacesetterDisplayLocked()) {
+        const auto& pacesetter = pacesetterOpt->get();
+        if (pacesetter.powerMode == hal::PowerMode::ON) {
+            const Fps currentPacesetterVsyncRate =
+                    pacesetter.selectorPtr->getActiveMode().modePtr->getVsyncRate();
+            const float rateDiff =
+                    newPacesetterVsyncRate.getValue() - currentPacesetterVsyncRate.getValue();
+            constexpr float kRefreshRateEpsilon = 0.1f;
+
+            if (rateDiff < kRefreshRateEpsilon) {
+                newPacesetterId = pacesetter.displayId;
+                newPacesetterVsyncRate = currentPacesetterVsyncRate;
+            }
+        }
+    }
+
+    return newPacesetterId;
+}
+
+bool Scheduler::resetForcedPacesetterDisplay(std::optional<PhysicalDisplayId> pacesetterId) {
+    {
+        std::scoped_lock lock(mDisplayLock);
+        if (!mForcedPacesetterDisplayId.has_value()) {
+            return false;
+        }
+
+        mForcedPacesetterDisplayId.reset();
+    }
+
+    return designatePacesetterDisplay(pacesetterId);
+}
+
+PhysicalDisplayId Scheduler::getPacesetterDisplayId() const {
+    std::scoped_lock lock(mDisplayLock);
+    LOG_ALWAYS_FATAL_IF(!mPacesetterDisplayId, "Missing a pacesetter!");
+    return *mPacesetterDisplayId;
+}
+
+void Scheduler::registerDisplay(PhysicalDisplayId displayId,
+                                ui::DisplayConnectionType connectionType,
+                                RefreshRateSelectorPtr selectorPtr,
+                                std::optional<PhysicalDisplayId> defaultPacesetterId) {
     auto schedulePtr =
             std::make_shared<VsyncSchedule>(selectorPtr->getActiveMode().modePtr, mFeatures,
                                             [this](PhysicalDisplayId id, bool enable) {
                                                 onHardwareVsyncRequest(id, enable);
                                             });
 
-    registerDisplayInternal(displayId, std::move(selectorPtr), std::move(schedulePtr),
-                            activeDisplayId);
+    registerDisplayInternal(displayId, connectionType, std::move(selectorPtr),
+                            std::move(schedulePtr), defaultPacesetterId);
 }
 
 void Scheduler::registerDisplayInternal(PhysicalDisplayId displayId,
+                                        ui::DisplayConnectionType connectionType,
                                         RefreshRateSelectorPtr selectorPtr,
                                         VsyncSchedulePtr schedulePtr,
-                                        PhysicalDisplayId activeDisplayId) {
+                                        std::optional<PhysicalDisplayId> defaultPacesetterId) {
     const bool isPrimary = (ftl::FakeGuard(mDisplayLock), !mPacesetterDisplayId);
 
     // Start the idle timer for the first registered (i.e. primary) display.
-    const PromotionParams promotionParams = {.toggleIdleTimer = isPrimary};
+    const PromotionParams promotionParams = {
+            .toggleIdleTimer = isPrimary &&
+                    !FlagManager::getInstance().follower_arbitrary_refresh_rate_selection()};
 
     demotePacesetterDisplay(promotionParams);
 
+    RefreshRateSelector& selector = *selectorPtr;
     auto [pacesetterVsyncSchedule, isNew] = [&]() REQUIRES(kMainThreadContext) {
         std::scoped_lock lock(mDisplayLock);
         const bool isNew = mDisplays
-                                   .emplace_or_replace(displayId, displayId, std::move(selectorPtr),
+                                   .emplace_or_replace(displayId, displayId, connectionType,
+                                                       std::move(selectorPtr),
                                                        std::move(schedulePtr), mFeatures)
                                    .second;
 
-        return std::make_pair(promotePacesetterDisplayLocked(activeDisplayId, promotionParams),
+        return std::make_pair(promotePacesetterDisplayLocked(defaultPacesetterId, promotionParams),
                               isNew);
     }();
+
+    if (isNew && FlagManager::getInstance().follower_arbitrary_refresh_rate_selection()) {
+        initializeIdleTimer(displayId);
+        selector.startIdleTimer();
+        startPowerTimer(displayId);
+    }
 
     applyNewVsyncSchedule(std::move(pacesetterVsyncSchedule));
 
@@ -175,17 +357,27 @@ void Scheduler::registerDisplayInternal(PhysicalDisplayId displayId,
     dispatchHotplug(displayId, Hotplug::Connected);
 }
 
-void Scheduler::unregisterDisplay(PhysicalDisplayId displayId, PhysicalDisplayId activeDisplayId) {
-    LOG_ALWAYS_FATAL_IF(displayId == activeDisplayId, "Cannot unregister the active display!");
+void Scheduler::unregisterDisplay(PhysicalDisplayId displayId,
+                                  std::optional<PhysicalDisplayId> defaultPacesetterId) {
+    LOG_ALWAYS_FATAL_IF(displayId == defaultPacesetterId,
+                        "Cannot unregister the front internal display!");
 
     dispatchHotplug(displayId, Hotplug::Disconnected);
 
-    constexpr PromotionParams kPromotionParams = {.toggleIdleTimer = false};
+    const PromotionParams kPromotionParams = {
+            .toggleIdleTimer =
+                    !FlagManager::getInstance().follower_arbitrary_refresh_rate_selection()};
     demotePacesetterDisplay(kPromotionParams);
 
     std::shared_ptr<VsyncSchedule> pacesetterVsyncSchedule;
     {
         std::scoped_lock lock(mDisplayLock);
+
+        if (FlagManager::getInstance().follower_arbitrary_refresh_rate_selection()) {
+            mDisplays.get(displayId).transform(
+                    ftl::unit_fn([](Display& display) { display.selectorPtr->stopIdleTimer(); }));
+        }
+
         mDisplays.erase(displayId);
 
         // Do not allow removing the final display. Code in the scheduler expects
@@ -193,9 +385,26 @@ void Scheduler::unregisterDisplay(PhysicalDisplayId displayId, PhysicalDisplayId
         // headless virtual display.)
         LOG_ALWAYS_FATAL_IF(mDisplays.empty(), "Cannot unregister all displays!");
 
-        pacesetterVsyncSchedule = promotePacesetterDisplayLocked(activeDisplayId, kPromotionParams);
+        if (mForcedPacesetterDisplayId == displayId) {
+            mForcedPacesetterDisplayId.reset();
+        }
+
+        pacesetterVsyncSchedule =
+                promotePacesetterDisplayLocked(defaultPacesetterId, kPromotionParams);
     }
     applyNewVsyncSchedule(std::move(pacesetterVsyncSchedule));
+
+    {
+        std::scoped_lock lock(mPolicyLock);
+        mPolicy.idleTimers.erase(displayId);
+        mPolicy.modeOpt.erase(displayId);
+        mPolicy.emittedModeOpt.erase(displayId);
+
+        mPolicy.displayPowerTimers.erase(displayId);
+        mPolicy.displayPowerModes.erase(displayId);
+
+        mDisplayPowerTimers.erase(displayId);
+    }
 }
 
 void Scheduler::run() {
@@ -210,7 +419,7 @@ void Scheduler::onFrameSignal(ICompositor& compositor, VsyncId vsyncId,
     mDebugPresentDelay.store(std::nullopt);
 
     const FrameTargeter::BeginFrameArgs beginFrameArgs =
-            {.frameBeginTime = SchedulerClock::now(),
+            {.frameBeginTime = mClock->now(),
              .vsyncId = vsyncId,
              .expectedVsyncTime = expectedVsyncTime,
              .sfWorkDuration = mVsyncModulator->getVsyncConfig().sfWorkDuration,
@@ -220,31 +429,51 @@ void Scheduler::onFrameSignal(ICompositor& compositor, VsyncId vsyncId,
     ftl::NonNull<const Display*> pacesetterPtr = pacesetterPtrLocked();
     pacesetterPtr->targeterPtr->beginFrame(beginFrameArgs, *pacesetterPtr->schedulePtr);
 
+    ui::PhysicalDisplayVector<PhysicalDisplayId> presentableDisplays = {pacesetterPtr->displayId};
     {
         FrameTargets targets;
         targets.try_emplace(pacesetterPtr->displayId, &pacesetterPtr->targeterPtr->target());
 
-        // TODO (b/256196556): Followers should use the next VSYNC after the frontrunner, not the
-        // pacesetter.
-        // Update expectedVsyncTime, which may have been adjusted by beginFrame.
-        expectedVsyncTime = pacesetterPtr->targeterPtr->target().expectedPresentTime();
+        const bool followerDisplayBackpressure =
+                FlagManager::getInstance().follower_display_backpressure();
+        if (!followerDisplayBackpressure) {
+            expectedVsyncTime = pacesetterPtr->targeterPtr->target().expectedPresentTime();
+        }
 
         for (const auto& [id, display] : mDisplays) {
             if (id == pacesetterPtr->displayId) continue;
 
             auto followerBeginFrameArgs = beginFrameArgs;
-            followerBeginFrameArgs.expectedVsyncTime =
+            const TimePoint nextFollowerVsync =
                     display.schedulePtr->vsyncDeadlineAfter(expectedVsyncTime);
+            followerBeginFrameArgs.expectedVsyncTime = nextFollowerVsync;
 
             FrameTargeter& targeter = *display.targeterPtr;
+            if (followerDisplayBackpressure) {
+                const size_t pendingFenceCount =
+                        targeter.countPresentFencesPendingAt(beginFrameArgs.frameBeginTime);
+                const TimePoint nextFollowerVsync =
+                        display.schedulePtr->vsyncDeadlineAfter(beginFrameArgs.frameBeginTime);
+                const bool isNextFollowerVsyncBeforeNextPacesetterVsync =
+                        nextFollowerVsync < expectedVsyncTime;
+                if (pendingFenceCount > 0 &&
+                    // Tolerate the temporary lockup caused by backpressure if there's one pending
+                    // present, and the vsync is anticipated to happen before the next pacesetter
+                    // vsync, as it will resolve itself before the next pacesetter present.
+                    !(pendingFenceCount == 1 && isNextFollowerVsyncBeforeNextPacesetterVsync)) {
+                    SFTRACE_FORMAT_INSTANT("Avoiding backpressure for follower display %lu",
+                                           id.value);
+                    continue;
+                }
+            }
+
             targeter.beginFrame(followerBeginFrameArgs, *display.schedulePtr);
             targets.try_emplace(id, &targeter.target());
+            presentableDisplays.push_back(id);
         }
 
         if (!compositor.commit(pacesetterPtr->displayId, targets)) {
-            if (FlagManager::getInstance().vrr_config()) {
-                compositor.sendNotifyExpectedPresentHint(pacesetterPtr->displayId);
-            }
+            compositor.sendNotifyExpectedPresentHint(pacesetterPtr->displayId);
             mSchedulerCallback.onCommitNotComposited();
             return;
         }
@@ -253,19 +482,18 @@ void Scheduler::onFrameSignal(ICompositor& compositor, VsyncId vsyncId,
     // The pacesetter may have changed or been registered anew during commit.
     pacesetterPtr = pacesetterPtrLocked();
 
-    // TODO(b/256196556): Choose the frontrunner display.
     FrameTargeters targeters;
     targeters.try_emplace(pacesetterPtr->displayId, pacesetterPtr->targeterPtr.get());
 
     for (auto& [id, display] : mDisplays) {
         if (id == pacesetterPtr->displayId) continue;
+        if (!ftl::contains(presentableDisplays, id)) continue;
 
         FrameTargeter& targeter = *display.targeterPtr;
         targeters.try_emplace(id, &targeter);
     }
 
-    if (FlagManager::getInstance().vrr_config() &&
-        CC_UNLIKELY(mPacesetterFrameDurationFractionToSkip > 0.f)) {
+    if (CC_UNLIKELY(mPacesetterFrameDurationFractionToSkip > 0.f)) {
         const auto period = pacesetterPtr->targeterPtr->target().expectedFrameDuration();
         const auto skipDuration = Duration::fromNs(
                 static_cast<nsecs_t>(period.ns() * mPacesetterFrameDurationFractionToSkip));
@@ -276,9 +504,7 @@ void Scheduler::onFrameSignal(ICompositor& compositor, VsyncId vsyncId,
     }
 
     const auto resultsPerDisplay = compositor.composite(pacesetterPtr->displayId, targeters);
-    if (FlagManager::getInstance().vrr_config()) {
-        compositor.sendNotifyExpectedPresentHint(pacesetterPtr->displayId);
-    }
+    compositor.sendNotifyExpectedPresentHint(pacesetterPtr->displayId);
     compositor.sample();
 
     for (const auto& [id, targeter] : targeters) {
@@ -356,7 +582,7 @@ void Scheduler::onExpectedPresentTimePosted(TimePoint expectedPresentTime) {
     }
 }
 
-void Scheduler::createEventThread(Cycle cycle, frametimeline::TokenManager* tokenManager,
+void Scheduler::createEventThread(Cycle cycle, TokenManager* tokenManager,
                                   std::chrono::nanoseconds workDuration,
                                   std::chrono::nanoseconds readyDuration) {
     auto eventThread =
@@ -420,20 +646,33 @@ void Scheduler::omitVsyncDispatching(bool omitted) {
     eventThreadFor(Cycle::LastComposite).omitVsyncDispatching(omitted);
 }
 
-void Scheduler::onFrameRateOverridesChanged() {
-    const auto [pacesetterId, supportsFrameRateOverrideByContent] = [this] {
+std::pair<FrameRateMode, std::vector<FrameRateOverride>> Scheduler::getFrameRateOverrides() {
+    const auto [activeMode, supportsFrameRateOverrideByContent] = [this] {
         std::scoped_lock lock(mDisplayLock);
         const auto pacesetterOpt = pacesetterDisplayLocked();
         LOG_ALWAYS_FATAL_IF(!pacesetterOpt);
         const Display& pacesetter = *pacesetterOpt;
-        return std::make_pair(FTL_FAKE_GUARD(kMainThreadContext, *mPacesetterDisplayId),
+        return std::make_pair(pacesetter.selectorPtr->getActiveMode(),
                               pacesetter.selectorPtr->supportsAppFrameRateOverrideByContent());
     }();
 
-    std::vector<FrameRateOverride> overrides =
-            mFrameRateOverrideMappings.getAllFrameRateOverrides(supportsFrameRateOverrideByContent);
+    return {activeMode,
+            mFrameRateOverrideMappings.getAllFrameRateOverrides(
+                    supportsFrameRateOverrideByContent)};
+}
 
-    eventThreadFor(Cycle::Render).onFrameRateOverridesChanged(pacesetterId, std::move(overrides));
+void Scheduler::onFrameRateOverridesChanged() {
+    const PhysicalDisplayId pacesetterId = [this] {
+        std::scoped_lock lock(mDisplayLock);
+        return FTL_FAKE_GUARD(kMainThreadContext, *mPacesetterDisplayId);
+    }();
+    auto [pacesetterMode, overrides] = getFrameRateOverrides();
+
+    const auto vsyncConfigSet = getVsyncConfigsForRefreshRate(pacesetterMode.fps);
+    eventThreadFor(Cycle::Render)
+            .onModeAndFrameRateOverridesChanged(pacesetterId, pacesetterMode, std::move(overrides),
+                                                pacesetterSelectorPtr()->getSupportedFrameRates(),
+                                                vsyncConfigSet);
 }
 
 void Scheduler::onHdcpLevelsChanged(Cycle cycle, PhysicalDisplayId displayId,
@@ -443,15 +682,18 @@ void Scheduler::onHdcpLevelsChanged(Cycle cycle, PhysicalDisplayId displayId,
 
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wunused-value" // b/369277774
-bool Scheduler::onDisplayModeChanged(PhysicalDisplayId displayId, const FrameRateMode& mode,
-                                     bool clearContentRequirements) {
+bool Scheduler::updatePolicyContentRequirements(PhysicalDisplayId displayId,
+                                                const FrameRateMode& mode,
+                                                bool clearContentRequirements) {
     const bool isPacesetter =
             FTL_FAKE_GUARD(kMainThreadContext,
                            (std::scoped_lock(mDisplayLock), displayId == mPacesetterDisplayId));
 
-    if (isPacesetter) {
+    const bool followerArbitraryRefreshRate =
+            FlagManager::getInstance().follower_arbitrary_refresh_rate_selection();
+    if (isPacesetter || followerArbitraryRefreshRate) {
         std::lock_guard<std::mutex> lock(mPolicyLock);
-        mPolicy.emittedModeOpt = mode;
+        mPolicy.emittedModeOpt[displayId] = mode;
 
         if (clearContentRequirements) {
             // Invalidate content based refresh rate selection so it could be calculated
@@ -459,14 +701,37 @@ bool Scheduler::onDisplayModeChanged(PhysicalDisplayId displayId, const FrameRat
             mPolicy.contentRequirements.clear();
         }
     }
+    return isPacesetter;
+}
+#pragma clang diagnostic pop
 
+bool Scheduler::onDisplayModeChanged(PhysicalDisplayId displayId, const FrameRateMode& mode,
+                                     bool clearContentRequirements) {
+    updatePolicyContentRequirements(displayId, mode, clearContentRequirements);
+    return onDisplayModeAndFrameRateOverridesChanged(displayId, mode, clearContentRequirements);
+}
+
+bool Scheduler::onDisplayModeAndFrameRateOverridesChanged(PhysicalDisplayId displayId,
+                                                          const FrameRateMode& mode,
+                                                          bool clearContentRequirements) {
+    const bool isPacesetter =
+            updatePolicyContentRequirements(displayId, mode, clearContentRequirements);
     if (hasEventThreads()) {
-        eventThreadFor(Cycle::Render).onModeChanged(mode);
+        const PhysicalDisplayId pacesetterId = [this] {
+            std::scoped_lock lock(mDisplayLock);
+            return FTL_FAKE_GUARD(kMainThreadContext, *mPacesetterDisplayId);
+        }();
+        const auto vsyncConfigSet = getVsyncConfigsForRefreshRate(mode.fps);
+        const auto [pacesetterMode, overrides] = getFrameRateOverrides();
+        eventThreadFor(Cycle::Render)
+                .onModeAndFrameRateOverridesChanged(pacesetterId, mode, overrides,
+                                                    pacesetterSelectorPtr()
+                                                            ->getSupportedFrameRates(),
+                                                    vsyncConfigSet);
     }
 
     return isPacesetter;
 }
-#pragma clang diagnostic pop
 
 void Scheduler::onDisplayModeRejected(PhysicalDisplayId displayId, DisplayModeId modeId) {
     if (hasEventThreads()) {
@@ -474,28 +739,36 @@ void Scheduler::onDisplayModeRejected(PhysicalDisplayId displayId, DisplayModeId
     }
 }
 
-void Scheduler::emitModeChangeIfNeeded() {
-    if (!mPolicy.modeOpt || !mPolicy.emittedModeOpt) {
+void Scheduler::emitPacesetterModeChangeIfNeeded() {
+    const PhysicalDisplayId pacesetterId = getPacesetterDisplayId();
+    if (!mPolicy.modeOpt[pacesetterId] || !mPolicy.emittedModeOpt[pacesetterId]) {
         ALOGW("No mode change to emit");
         return;
     }
 
-    const auto& mode = *mPolicy.modeOpt;
+    const auto& mode = *mPolicy.modeOpt[pacesetterId];
 
     if (mode != pacesetterSelectorPtr()->getActiveMode()) {
         // A mode change is pending. The event will be emitted when the mode becomes active.
         return;
     }
 
-    if (mode == *mPolicy.emittedModeOpt) {
+    if (mode == *mPolicy.emittedModeOpt[pacesetterId]) {
         // The event was already emitted.
         return;
     }
 
-    mPolicy.emittedModeOpt = mode;
+    mPolicy.emittedModeOpt[pacesetterId] = mode;
 
     if (hasEventThreads()) {
-        eventThreadFor(Cycle::Render).onModeChanged(mode);
+        const auto vsyncConfigSet = getVsyncConfigsForRefreshRate(mode.fps);
+        const auto [pacesetterMode, overrides] = getFrameRateOverrides();
+        eventThreadFor(Cycle::Render)
+                .onModeAndFrameRateOverridesChanged(mode.modePtr->getPhysicalDisplayId(), mode,
+                                                    overrides,
+                                                    pacesetterSelectorPtr()
+                                                            ->getSupportedFrameRates(),
+                                                    vsyncConfigSet);
     }
 }
 
@@ -528,15 +801,17 @@ void Scheduler::updatePhaseConfiguration(PhysicalDisplayId displayId, Fps refres
 }
 #pragma clang diagnostic pop
 
-void Scheduler::reloadPhaseConfiguration(Fps refreshRate, Duration minSfDuration,
+void Scheduler::reloadPhaseConfiguration(const FrameRateMode& mode, Duration minSfDuration,
                                          Duration maxSfDuration, Duration appDuration) {
     const auto currentConfigs = [=, this] {
         std::scoped_lock lock{mVsyncConfigLock};
-        mVsyncConfiguration = std::make_unique<impl::WorkDuration>(refreshRate, minSfDuration,
+        mVsyncConfiguration = std::make_unique<impl::WorkDuration>(mode.fps, minSfDuration,
                                                                    maxSfDuration, appDuration);
         return mVsyncConfiguration->getCurrentConfigs();
     }();
-    setVsyncConfig(mVsyncModulator->setVsyncConfigSet(currentConfigs), refreshRate.getPeriod());
+    setVsyncConfig(mVsyncModulator->setVsyncConfigSet(currentConfigs), mode.fps.getPeriod());
+    onDisplayModeAndFrameRateOverridesChanged(mode.modePtr->getPhysicalDisplayId(), mode,
+                                              /*clearContentRequirements*/ false);
 }
 
 void Scheduler::setActiveDisplayPowerModeForRefreshRateStats(hal::PowerMode powerMode) {
@@ -637,8 +912,9 @@ void Scheduler::setRenderRate(PhysicalDisplayId id, Fps renderFrameRate, bool ap
 
     ALOGV("%s %s (%s)", __func__, to_string(mode.fps).c_str(),
           to_string(mode.modePtr->getVsyncRate()).c_str());
-
-    display.schedulePtr->getTracker().setRenderRate(renderFrameRate, applyImmediately);
+    std::vector<FrameRateOverride> overrides = mFrameRateOverrideMappings.getAllFrameRateOverrides(
+            display.selectorPtr->supportsAppFrameRateOverrideByContent());
+    display.schedulePtr->getTracker().setRenderRate(renderFrameRate, applyImmediately, overrides);
 }
 
 Fps Scheduler::getNextFrameInterval(PhysicalDisplayId id,
@@ -661,13 +937,17 @@ Fps Scheduler::getNextFrameInterval(PhysicalDisplayId id,
     return Fps::fromPeriodNsecs(frameInterval.ns());
 }
 
-void Scheduler::resync() {
-    static constexpr nsecs_t kIgnoreDelay = ms2ns(750);
+void Scheduler::resync(ResyncCaller caller) {
+    static constexpr nsecs_t kRequestNextVsyncIgnoreDelay = ms2ns(750);
 
     const nsecs_t now = systemTime();
     const nsecs_t last = mLastResyncTime.exchange(now);
 
-    if (now - last > kIgnoreDelay) {
+    const auto ignoreDelay = caller == ResyncCaller::Transaction
+            ? VSyncTracker::kPredictorThreshold.ns()
+            : kRequestNextVsyncIgnoreDelay;
+
+    if (now - last > ignoreDelay) {
         resyncAllToHardwareVsync(false /* allowToEnable */);
     }
 }
@@ -730,8 +1010,24 @@ void Scheduler::recordLayerHistory(int32_t id, const LayerProps& layerProps, nse
     }
 }
 
-void Scheduler::setModeChangePending(bool pending) {
-    mLayerHistory.setModeChangePending(pending);
+void Scheduler::setModeChangePending(PhysicalDisplayId displayId, bool pending) {
+    if (!FlagManager::getInstance().pacesetter_selection()) {
+        mLayerHistory.setModeChangePending(pending);
+        return;
+    }
+
+    std::scoped_lock lock(mDisplayLock);
+    ftl::FakeGuard guard(kMainThreadContext);
+    const auto displayOpt = mDisplays.get(displayId);
+    if (!displayOpt) {
+        ALOGW("%s: Invalid display %s!", __func__, to_string(displayId).c_str());
+        return;
+    }
+    displayOpt->get().isModeChangePending = pending;
+
+    mLayerHistory.setModeChangePending(
+            std::any_of(mDisplays.cbegin(), mDisplays.cend(),
+                        [](const auto& display) { return display.second.isModeChangePending; }));
 }
 
 void Scheduler::setDefaultFrameRateCompatibility(
@@ -744,15 +1040,33 @@ void Scheduler::setLayerProperties(int32_t id, const android::scheduler::LayerPr
     mLayerHistory.setLayerProperties(id, properties);
 }
 
+bool Scheduler::canAnySelectorSwitch() const {
+    std::scoped_lock lock(mDisplayLock);
+    ftl::FakeGuard guard(kMainThreadContext);
+
+    for (const auto& [_, display] : mDisplays) {
+        if (display.powerMode != hal::PowerMode::ON) {
+            continue;
+        }
+        if (display.selectorPtr->canSwitch()) {
+            return true;
+        }
+    }
+    return false;
+}
+
 void Scheduler::chooseRefreshRateForContent(
         const surfaceflinger::frontend::LayerHierarchy* hierarchy,
         bool updateAttachedChoreographer) {
-    const auto selectorPtr = pacesetterSelectorPtr();
-    if (!selectorPtr->canSwitch()) return;
+    const bool canSwitch = FlagManager::getInstance().follower_arbitrary_refresh_rate_selection()
+            ? canAnySelectorSwitch()
+            : pacesetterSelectorPtr()->canSwitch();
+
+    if (!canSwitch) return;
 
     SFTRACE_CALL();
 
-    LayerHistory::Summary summary = mLayerHistory.summarize(*selectorPtr, systemTime());
+    LayerHistory::Summary summary = mLayerHistory.summarize(systemTime());
     applyPolicy(&Policy::contentRequirements, std::move(summary));
 
     if (updateAttachedChoreographer) {
@@ -761,7 +1075,8 @@ void Scheduler::chooseRefreshRateForContent(
         // update the attached choreographers after we selected the render rate.
         const ftl::Optional<FrameRateMode> modeOpt = [&] {
             std::scoped_lock lock(mPolicyLock);
-            return mPolicy.modeOpt;
+            ftl::FakeGuard guard(mDisplayLock);
+            return mPolicy.modeOpt[*mPacesetterDisplayId];
         }();
 
         if (modeOpt) {
@@ -770,8 +1085,13 @@ void Scheduler::chooseRefreshRateForContent(
     }
 }
 
-void Scheduler::resetIdleTimer() {
-    pacesetterSelectorPtr()->resetIdleTimer();
+// TODO: b/430651973 - Reset idle timers on a per-display basis once SF supports per-display damage.
+void Scheduler::resetAllIdleTimers() {
+    std::scoped_lock lock(mDisplayLock);
+    ftl::FakeGuard guard(kMainThreadContext);
+    for (auto& [_, display] : mDisplays) {
+        display.selectorPtr->resetIdleTimer();
+    }
 }
 
 void Scheduler::onTouchHint() {
@@ -781,16 +1101,7 @@ void Scheduler::onTouchHint() {
     }
 }
 
-void Scheduler::setDisplayPowerMode(PhysicalDisplayId id, hal::PowerMode powerMode) {
-    const bool isPacesetter = [this, id]() REQUIRES(kMainThreadContext) {
-        ftl::FakeGuard guard(mDisplayLock);
-        return id == mPacesetterDisplayId;
-    }();
-    if (isPacesetter) {
-        // TODO (b/255657128): This needs to be handled per display.
-        std::lock_guard<std::mutex> lock(mPolicyLock);
-        mPolicy.displayPowerMode = powerMode;
-    }
+bool Scheduler::setDisplayPowerMode(PhysicalDisplayId id, hal::PowerMode powerMode) {
     {
         std::scoped_lock lock(mDisplayLock);
 
@@ -801,15 +1112,30 @@ void Scheduler::setDisplayPowerMode(PhysicalDisplayId id, hal::PowerMode powerMo
         display.powerMode = powerMode;
         display.schedulePtr->getController().setDisplayPowerMode(powerMode);
     }
-    if (!isPacesetter) return;
 
-    if (mDisplayPowerTimer) {
-        mDisplayPowerTimer->reset();
+    bool didPacesetterChange = false;
+    // The power mode needs to be updated before we try to update the pacesetter.
+    if (FlagManager::getInstance().pacesetter_selection()) {
+        didPacesetterChange = designatePacesetterDisplay();
     }
 
-    // Display Power event will boost the refresh rate to performance.
-    // Clear Layer History to get fresh FPS detection
-    mLayerHistory.clear();
+    const bool isPacesetter = (ftl::FakeGuard(mDisplayLock), mPacesetterDisplayId == id);
+
+    if (isPacesetter || FlagManager::getInstance().follower_arbitrary_refresh_rate_selection()) {
+        {
+            std::scoped_lock lock(mPolicyLock);
+            mPolicy.displayPowerModes.emplace_or_replace(id, powerMode);
+        }
+
+        mDisplayPowerTimers.get(id).transform(
+                ftl::unit_fn([](std::unique_ptr<OneShotTimer>& timer) { timer->reset(); }));
+
+        // Display Power event will boost the refresh rate to performance.
+        // Clear Layer History to get fresh FPS detection
+        mLayerHistory.clear();
+    }
+
+    return didPacesetterChange;
 }
 
 auto Scheduler::getVsyncSchedule(std::optional<PhysicalDisplayId> idOpt) const
@@ -834,12 +1160,23 @@ auto Scheduler::getVsyncScheduleLocked(std::optional<PhysicalDisplayId> idOpt) c
     return displayOpt->get().schedulePtr;
 }
 
-void Scheduler::kernelIdleTimerCallback(TimerState state) {
+void Scheduler::kernelIdleTimerCallback(PhysicalDisplayId displayId, TimerState state) {
     SFTRACE_INT("ExpiredKernelIdleTimer", static_cast<int>(state));
 
-    // TODO(145561154): cleanup the kernel idle timer implementation and the refresh rate
-    // magic number
-    const Fps refreshRate = pacesetterSelectorPtr()->getActiveMode().modePtr->getPeakFps();
+    Fps refreshRate;
+    {
+        std::scoped_lock lock(mDisplayLock);
+        ftl::FakeGuard guard(kMainThreadContext);
+        const auto displayOpt = mDisplays.get(displayId);
+        if (!displayOpt) {
+            ALOGW("%s: Invalid display %s!", __func__, to_string(displayId).c_str());
+            return;
+        }
+
+        // TODO: b/145561154 - Clean up the kernel idle timer implementation and the refresh rate
+        // magic number
+        refreshRate = displayOpt->get().selectorPtr->getActiveMode().modePtr->getPeakFps();
+    }
 
     constexpr Fps FPS_THRESHOLD_FOR_KERNEL_TIMER = 65_Hz;
     using namespace fps_approx_ops;
@@ -861,11 +1198,11 @@ void Scheduler::kernelIdleTimerCallback(TimerState state) {
         }
     }
 
-    mSchedulerCallback.kernelTimerChanged(state == TimerState::Expired);
+    mSchedulerCallback.kernelTimerChanged(displayId, state == TimerState::Expired);
 }
 
-void Scheduler::idleTimerCallback(TimerState state) {
-    applyPolicy(&Policy::idleTimer, state);
+void Scheduler::idleTimerCallback(PhysicalDisplayId displayId, TimerState state) {
+    applyPolicy(&Policy::idleTimers, state, displayId);
     SFTRACE_INT("ExpiredIdleTimer", static_cast<int>(state));
 }
 
@@ -881,8 +1218,8 @@ void Scheduler::touchTimerCallback(TimerState state) {
     SFTRACE_INT("TouchState", static_cast<int>(touch));
 }
 
-void Scheduler::displayPowerTimerCallback(TimerState state) {
-    applyPolicy(&Policy::displayPowerTimer, state);
+void Scheduler::displayPowerTimerCallback(PhysicalDisplayId displayId, TimerState state) {
+    applyPolicy(&Policy::displayPowerTimers, state, displayId);
     SFTRACE_INT("ExpiredDisplayPowerTimer", static_cast<int>(state));
 }
 
@@ -904,10 +1241,10 @@ void Scheduler::dump(utils::Dumper& dumper) const {
             std::scoped_lock lock(mDisplayLock);
             ftl::FakeGuard guard(kMainThreadContext);
             dumper.dump("pacesetterDisplayId"sv, mPacesetterDisplayId);
+            dumper.dump("forcedPacesetterDisplayId"sv, mForcedPacesetterDisplayId);
         }
         dumper.dump("layerHistory"sv, mLayerHistory.dump());
         dumper.dump("touchTimer"sv, mTouchTimer.transform(&OneShotTimer::interval));
-        dumper.dump("displayPowerTimer"sv, mDisplayPowerTimer.transform(&OneShotTimer::interval));
     }
 
     mFrameRateOverrideMappings.dump(dumper);
@@ -926,14 +1263,23 @@ void Scheduler::dump(utils::Dumper& dumper) const {
     ftl::FakeGuard guard(kMainThreadContext);
 
     for (const auto& [id, display] : mDisplays) {
+        const bool isPacesetter = id == mPacesetterDisplayId;
         utils::Dumper::Section
                 section(dumper,
-                        id == mPacesetterDisplayId
-                                ? ftl::Concat("Pacesetter Display ", id.value).c_str()
-                                : ftl::Concat("Follower Display ", id.value).c_str());
+                        isPacesetter ? ftl::Concat("Pacesetter Display ", id.value).c_str()
+                                     : ftl::Concat("Follower Display ", id.value).c_str());
 
         display.selectorPtr->dump(dumper);
         display.targeterPtr->dump(dumper);
+        dumper.dump("isModeChangePending"sv, display.isModeChangePending);
+        if (FlagManager::getInstance().follower_arbitrary_refresh_rate_selection() ||
+            isPacesetter) {
+            dumper.dump("displayPowerTimer"sv,
+                        mDisplayPowerTimers.get(id).transform(
+                                [](const std::unique_ptr<OneShotTimer>& timer) {
+                                    return timer->interval();
+                                }));
+        }
         dumper.eol();
     }
 }
@@ -953,17 +1299,15 @@ void Scheduler::dumpVsync(std::string& out) const {
         base::StringAppendF(&out, "VsyncSchedule for follower %s:\n", to_string(id).c_str());
         display.schedulePtr->dump(out);
     }
+
+    mVsyncModulator->dump(out);
 }
 
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wunused-value" // b/369277774
-void Scheduler::updateFrameRateOverrides(GlobalSignals consideredSignals, Fps displayRefreshRate) {
-    const bool changed = (std::scoped_lock(mPolicyLock),
-                          updateFrameRateOverridesLocked(consideredSignals, displayRefreshRate));
-
-    if (changed) {
-        onFrameRateOverridesChanged();
-    }
+bool Scheduler::updateFrameRateOverrides(GlobalSignals consideredSignals, Fps displayRefreshRate) {
+    std::scoped_lock lock(mPolicyLock);
+    return updateFrameRateOverridesLocked(consideredSignals, displayRefreshRate);
 }
 #pragma clang diagnostic pop
 
@@ -980,7 +1324,24 @@ bool Scheduler::updateFrameRateOverridesLocked(GlobalSignals consideredSignals,
     return mFrameRateOverrideMappings.updateFrameRateOverridesByContent(frameRateOverrides);
 }
 
-void Scheduler::promotePacesetterDisplay(PhysicalDisplayId pacesetterId, PromotionParams params) {
+RefreshRateSelector* Scheduler::selectorPtrForLayerStack(ui::LayerStack stack) const {
+    std::scoped_lock lock(mDisplayLock);
+
+    if (FlagManager::getInstance().follower_arbitrary_refresh_rate_selection()) {
+        for (const auto& [_, display] : mDisplays) {
+            RefreshRateSelector* selector = display.selectorPtr.get();
+            if (selector && selector->getLayerFilter().layerStack == stack) {
+                return selector;
+            }
+        }
+    }
+
+    // Fall back to the pacesetter's RefreshRateSelector
+    return pacesetterSelectorPtrLocked().get();
+}
+
+void Scheduler::promotePacesetterDisplay(std::optional<PhysicalDisplayId> pacesetterId,
+                                         PromotionParams params) {
     std::shared_ptr<VsyncSchedule> pacesetterVsyncSchedule;
     {
         std::scoped_lock lock(mDisplayLock);
@@ -991,10 +1352,12 @@ void Scheduler::promotePacesetterDisplay(PhysicalDisplayId pacesetterId, Promoti
 }
 
 std::shared_ptr<VsyncSchedule> Scheduler::promotePacesetterDisplayLocked(
-        PhysicalDisplayId pacesetterId, PromotionParams params) {
-    // TODO: b/241286431 - Choose the pacesetter among mDisplays.
-    mPacesetterDisplayId = pacesetterId;
-    ALOGI("Display %s is the pacesetter", to_string(pacesetterId).c_str());
+        std::optional<PhysicalDisplayId> pacesetterId, PromotionParams params) {
+    pacesetterId = selectPacesetterDisplayLocked(pacesetterId);
+
+    mPacesetterDisplayId = *pacesetterId;
+
+    ALOGI("Display %s is the pacesetter", to_string(*pacesetterId).c_str());
 
     std::shared_ptr<VsyncSchedule> newVsyncSchedulePtr;
     if (const auto pacesetterOpt = pacesetterDisplayLocked()) {
@@ -1002,13 +1365,32 @@ std::shared_ptr<VsyncSchedule> Scheduler::promotePacesetterDisplayLocked(
 
         if (params.toggleIdleTimer) {
             pacesetter.selectorPtr->setIdleTimerCallbacks(
-                    {.platform = {.onReset = [this] { idleTimerCallback(TimerState::Reset); },
-                                  .onExpired = [this] { idleTimerCallback(TimerState::Expired); }},
-                     .kernel = {.onReset = [this] { kernelIdleTimerCallback(TimerState::Reset); },
+                    {.platform = {.onReset =
+                                          [this, pacesetterId] {
+                                              idleTimerCallback(*pacesetterId, TimerState::Reset);
+                                          },
+                                  .onExpired =
+                                          [this, pacesetterId] {
+                                              idleTimerCallback(*pacesetterId, TimerState::Expired);
+                                          }},
+                     .kernel = {.onReset =
+                                        [this, pacesetterId] {
+                                            kernelIdleTimerCallback(*pacesetterId,
+                                                                    TimerState::Reset);
+                                        },
                                 .onExpired =
-                                        [this] { kernelIdleTimerCallback(TimerState::Expired); }},
-                     .vrr = {.onReset = [this] { mSchedulerCallback.vrrDisplayIdle(false); },
-                             .onExpired = [this] { mSchedulerCallback.vrrDisplayIdle(true); }}});
+                                        [this, pacesetterId] {
+                                            kernelIdleTimerCallback(*pacesetterId,
+                                                                    TimerState::Expired);
+                                        }},
+                     .vrr = {.onReset =
+                                     [this, pacesetterId] {
+                                         mSchedulerCallback.vrrDisplayIdle(*pacesetterId, false);
+                                     },
+                             .onExpired =
+                                     [this, pacesetterId] {
+                                         mSchedulerCallback.vrrDisplayIdle(*pacesetterId, true);
+                                     }}});
 
             pacesetter.selectorPtr->startIdleTimer();
         }
@@ -1016,8 +1398,13 @@ std::shared_ptr<VsyncSchedule> Scheduler::promotePacesetterDisplayLocked(
         newVsyncSchedulePtr = pacesetter.schedulePtr;
 
         constexpr bool kForce = true;
-        newVsyncSchedulePtr->onDisplayModeChanged(pacesetter.selectorPtr->getActiveMode().modePtr,
-                                                  kForce);
+        const auto pacesetterActiveModePtr = pacesetter.selectorPtr->getActiveMode().modePtr;
+        newVsyncSchedulePtr->onDisplayModeChanged(pacesetterActiveModePtr, kForce);
+
+        if (FlagManager::getInstance().pacesetter_selection()) {
+            mSchedulerCallback.enableLayerCachingTexturePool(*pacesetterId, true);
+            onPacesetterDisplaySizeChanged(pacesetterActiveModePtr->getResolution());
+        }
     }
     return newVsyncSchedulePtr;
 }
@@ -1037,13 +1424,22 @@ void Scheduler::demotePacesetterDisplay(PromotionParams params) {
         if (const auto pacesetterPtr =
                     FTL_FAKE_GUARD(mDisplayLock, pacesetterSelectorPtrLocked())) {
             pacesetterPtr->stopIdleTimer();
-            pacesetterPtr->clearIdleTimerCallbacks();
         }
+    }
+
+    if (FlagManager::getInstance().pacesetter_selection()) {
+        const PhysicalDisplayId pacesetterId = FTL_FAKE_GUARD(mDisplayLock, *mPacesetterDisplayId);
+        mSchedulerCallback.enableLayerCachingTexturePool(pacesetterId, false);
     }
 
     // Clear state that depends on the pacesetter's RefreshRateSelector.
     std::scoped_lock lock(mPolicyLock);
-    mPolicy = {};
+    if (FlagManager::getInstance().follower_arbitrary_refresh_rate_selection()) {
+        mPolicy.contentRequirements = {};
+        mPolicy.touch = TouchState::Inactive;
+    } else {
+        mPolicy = {};
+    }
 }
 
 void Scheduler::updateAttachedChoreographersFrameRate(
@@ -1146,32 +1542,37 @@ void Scheduler::updateAttachedChoreographers(
 }
 
 template <typename S, typename T>
-auto Scheduler::applyPolicy(S Policy::*statePtr, T&& newState) -> GlobalSignals {
+auto Scheduler::applyPolicy(S Policy::* statePtr, T&& newState,
+                            std::optional<PhysicalDisplayId> displayId) -> GlobalSignals {
     SFTRACE_CALL();
     std::vector<display::DisplayModeRequest> modeRequests;
+    std::vector<display::DisplayModeRequest> emitModeChangedEvents;
     GlobalSignals consideredSignals;
 
     bool refreshRateChanged = false;
-    bool frameRateOverridesChanged;
+    ftl::Optional<FrameRateMode> modeOpt;
 
     {
         std::scoped_lock lock(mPolicyLock);
 
-        auto& currentState = mPolicy.*statePtr;
-        if (currentState == newState) return {};
-        currentState = std::forward<T>(newState);
+        if constexpr (ftl::is_small_map<S>()) {
+            auto& currentStateMap = mPolicy.*statePtr;
+            auto currentState = currentStateMap.get(*displayId);
+            if (currentState == newState) return {};
+            currentStateMap.emplace_or_replace(*displayId, std::forward<T>(newState));
+        } else {
+            auto& currentState = mPolicy.*statePtr;
+            if (currentState == newState) return {};
+            currentState = std::forward<T>(newState);
+        }
 
         DisplayModeChoiceMap modeChoices;
-        ftl::Optional<FrameRateMode> modeOpt;
         {
             std::scoped_lock lock(mDisplayLock);
             ftl::FakeGuard guard(kMainThreadContext);
 
             modeChoices = chooseDisplayModes();
 
-            // TODO(b/240743786): The pacesetter display's mode must change for any
-            // DisplayModeRequest to go through. Fix this by tracking per-display Scheduler::Policy
-            // and timers.
             std::tie(modeOpt, consideredSignals) =
                     modeChoices.get(*mPacesetterDisplayId)
                             .transform([](const DisplayModeChoice& choice) {
@@ -1181,38 +1582,82 @@ auto Scheduler::applyPolicy(S Policy::*statePtr, T&& newState) -> GlobalSignals 
         }
 
         modeRequests.reserve(modeChoices.size());
+        emitModeChangedEvents.reserve(modeChoices.size());
         for (auto& [id, choice] : modeChoices) {
-            modeRequests.emplace_back(
-                    display::DisplayModeRequest{.mode = std::move(choice.mode),
+            modeRequests.emplace_back(display::DisplayModeRequest{.mode = choice.mode});
+            emitModeChangedEvents.emplace_back(
+                    display::DisplayModeRequest{.mode = choice.mode,
                                                 .emitEvent = choice.consideredSignals
                                                                      .shouldEmitEvent()});
         }
 
-        if (!FlagManager::getInstance().vrr_bugfix_dropped_frame()) {
-            frameRateOverridesChanged =
-                    updateFrameRateOverridesLocked(consideredSignals, modeOpt->fps);
+        const bool followerRefreshRateSelection =
+                FlagManager::getInstance().follower_arbitrary_refresh_rate_selection();
+        bool anyChosenModeDiffers = false;
+        bool chosenModeDiffersForPacesetter = false;
+        {
+            std::scoped_lock lock(mDisplayLock);
+            ftl::FakeGuard guard(kMainThreadContext);
+            for (const auto& [id, display] : mDisplays) {
+                const auto choiceOpt = modeChoices.get(id);
+                if (id != *mPacesetterDisplayId && !followerRefreshRateSelection) {
+                    continue;
+                }
+                if (!choiceOpt) {
+                    continue;
+                }
+
+                const bool chosenModeDiffers = (mPolicy.modeOpt[id] != choiceOpt->get().mode);
+                anyChosenModeDiffers |= chosenModeDiffers;
+                if (id == *mPacesetterDisplayId) {
+                    chosenModeDiffersForPacesetter = chosenModeDiffers;
+                }
+            }
         }
-        if (mPolicy.modeOpt != modeOpt) {
-            mPolicy.modeOpt = modeOpt;
+
+        if (anyChosenModeDiffers) {
             refreshRateChanged = true;
-        } else if (consideredSignals.shouldEmitEvent()) {
+
+            std::scoped_lock lock(mDisplayLock);
+            ftl::FakeGuard guard(kMainThreadContext);
+            for (const auto& [id, display] : mDisplays) {
+                if (id != *mPacesetterDisplayId && !followerRefreshRateSelection) {
+                    continue;
+                }
+                if (const auto choiceOpt = modeChoices.get(id)) {
+                    mPolicy.modeOpt[id] = choiceOpt->get().mode;
+                }
+            }
+        }
+
+        if (!chosenModeDiffersForPacesetter && consideredSignals.shouldEmitEvent()) {
             // The mode did not change, but we may need to emit if DisplayModeRequest::emitEvent was
             // previously false.
-            emitModeChangeIfNeeded();
+            emitPacesetterModeChangeIfNeeded();
         }
     }
     if (refreshRateChanged) {
         mSchedulerCallback.requestDisplayModes(std::move(modeRequests));
     }
 
-    if (FlagManager::getInstance().vrr_bugfix_dropped_frame()) {
+    bool frameRateOverridesChanged = false;
+    {
         std::scoped_lock lock(mPolicyLock);
         frameRateOverridesChanged =
-                updateFrameRateOverridesLocked(consideredSignals, mPolicy.modeOpt->fps);
+                updateFrameRateOverridesLocked(consideredSignals,
+                                               mPolicy.modeOpt[getPacesetterDisplayId()]->fps);
     }
-    if (frameRateOverridesChanged) {
-        onFrameRateOverridesChanged();
+
+    for (auto displayModeRequest : emitModeChangedEvents) {
+        const auto mode = displayModeRequest.mode;
+        const auto modePtr = mode.modePtr;
+        bool const emitModeChangedEvent = refreshRateChanged && displayModeRequest.emitEvent;
+        if (emitModeChangedEvent || frameRateOverridesChanged) {
+            onDisplayModeAndFrameRateOverridesChanged(modePtr->getPhysicalDisplayId(), mode,
+                                                      /*clearContentRequirements*/ true);
+        }
     }
+
     return consideredSignals;
 }
 
@@ -1220,12 +1665,12 @@ auto Scheduler::chooseDisplayModes() const -> DisplayModeChoiceMap {
     SFTRACE_CALL();
 
     DisplayModeChoiceMap modeChoices;
-    const auto globalSignals = makeGlobalSignals();
 
     const Fps pacesetterFps = [&]() REQUIRES(mPolicyLock, mDisplayLock, kMainThreadContext) {
         auto rankedFrameRates =
                 pacesetterSelectorPtrLocked()->getRankedFrameRates(mPolicy.contentRequirements,
-                                                                   globalSignals);
+                                                                   makeGlobalSignals(
+                                                                           *mPacesetterDisplayId));
 
         const Fps pacesetterFps = rankedFrameRates.ranking.front().frameRateMode.fps;
 
@@ -1239,8 +1684,14 @@ auto Scheduler::chooseDisplayModes() const -> DisplayModeChoiceMap {
         if (id == *mPacesetterDisplayId) continue;
         if (display.powerMode != hal::PowerMode::ON) continue;
 
+        PhysicalDisplayId globalSignalsId =
+                FlagManager::getInstance().follower_arbitrary_refresh_rate_selection()
+                ? id
+                : *mPacesetterDisplayId;
+
         auto rankedFrameRates =
-                display.selectorPtr->getRankedFrameRates(mPolicy.contentRequirements, globalSignals,
+                display.selectorPtr->getRankedFrameRates(mPolicy.contentRequirements,
+                                                         makeGlobalSignals(globalSignalsId),
                                                          pacesetterFps);
 
         modeChoices.try_emplace(id, DisplayModeChoice::from(std::move(rankedFrameRates)));
@@ -1249,26 +1700,41 @@ auto Scheduler::chooseDisplayModes() const -> DisplayModeChoiceMap {
     return modeChoices;
 }
 
-GlobalSignals Scheduler::makeGlobalSignals() const {
-    const bool powerOnImminent = mDisplayPowerTimer &&
-            (mPolicy.displayPowerMode != hal::PowerMode::ON ||
-             mPolicy.displayPowerTimer == TimerState::Reset);
+GlobalSignals Scheduler::makeGlobalSignals(PhysicalDisplayId displayId) const {
+    const bool powerOffAndReset =
+            mPolicy.displayPowerTimers.get(displayId)
+                    .and_then([&](const auto& timer) REQUIRES(mPolicyLock) {
+                        return mPolicy.displayPowerModes.get(displayId).transform(
+                                [&](const auto& powerMode) {
+                                    return powerMode != hal::PowerMode::ON ||
+                                            timer.get() == TimerState::Reset;
+                                });
+                    })
+                    .value_or(false);
+
+    const bool powerOnImminent = powerOffAndReset && mDisplayPowerTimers.contains(displayId);
+
+    const bool displayIdle =
+            mPolicy.idleTimers.get(displayId)
+                    .transform([](const TimerState& state) { return state == TimerState::Expired; })
+                    .value_or(false);
 
     return {.touch = mTouchTimer && mPolicy.touch == TouchState::Active,
-            .idle = mPolicy.idleTimer == TimerState::Expired,
+            .idle = displayIdle,
             .powerOnImminent = powerOnImminent};
 }
 
 FrameRateMode Scheduler::getPreferredDisplayMode() {
     std::lock_guard<std::mutex> lock(mPolicyLock);
-    const auto frameRateMode =
-            pacesetterSelectorPtr()
-                    ->getRankedFrameRates(mPolicy.contentRequirements, makeGlobalSignals())
-                    .ranking.front()
-                    .frameRateMode;
+    const auto pacesetterId = FTL_FAKE_GUARD(mDisplayLock, *mPacesetterDisplayId);
+    const auto frameRateMode = pacesetterSelectorPtr()
+                                       ->getRankedFrameRates(mPolicy.contentRequirements,
+                                                             makeGlobalSignals(pacesetterId))
+                                       .ranking.front()
+                                       .frameRateMode;
 
     // Make sure the stored mode is up to date.
-    mPolicy.modeOpt = frameRateMode;
+    mPolicy.modeOpt[pacesetterId] = frameRateMode;
 
     return frameRateMode;
 }
@@ -1296,8 +1762,8 @@ bool Scheduler::onCompositionPresented(nsecs_t presentTime) {
     return false;
 }
 
-void Scheduler::onActiveDisplayAreaChanged(uint32_t displayArea) {
-    mLayerHistory.setDisplayArea(displayArea);
+void Scheduler::onPacesetterDisplaySizeChanged(ui::Size displaySize) {
+    mLayerHistory.setDisplaySize(displaySize);
 }
 
 void Scheduler::setGameModeFrameRateForUid(FrameRateOverride frameRateOverride) {

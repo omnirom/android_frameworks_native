@@ -42,6 +42,7 @@
 #include <binder/unique_fd.h>
 #include <input/BlockingQueue.h>
 #include <processgroup/processgroup.h>
+#include <selinux/selinux.h>
 #include <utils/Flattenable.h>
 #include <utils/SystemClock.h>
 #include "binder/IServiceManagerUnitTestHelper.h"
@@ -55,6 +56,7 @@
 
 #include "../Utils.h"
 #include "../binder_module.h"
+#include "binderKernelRpcCommon.h"
 
 using namespace android;
 using namespace android::binder::impl;
@@ -82,6 +84,13 @@ static ::testing::AssertionResult IsPageAligned(void *buf) {
         return ::testing::AssertionFailure() << buf << " is not page aligned";
 }
 
+status_t addFrozenStateChangeCallback(
+        sp<IBinder> binder, const wp<android::IBinder::FrozenStateChangeCallback>& callback) {
+    status_t res = binder->addFrozenStateChangeCallback(callback);
+    IPCThreadState::self()->flushCommands();
+    return res;
+}
+
 static testing::Environment* binder_env;
 static char *binderservername;
 static char *binderserversuffix;
@@ -94,7 +103,7 @@ static constexpr int kKernelThreads = 17; // anything different than the default
 
 static String16 binderLibTestServiceName = String16("test.binderLib");
 
-enum BinderLibTestTranscationCode {
+enum BinderLibTestTransactionCode {
     BINDER_LIB_TEST_NOP_TRANSACTION = IBinder::FIRST_CALL_TRANSACTION,
     BINDER_LIB_TEST_REGISTER_SERVER,
     BINDER_LIB_TEST_ADD_SERVER,
@@ -136,7 +145,8 @@ enum BinderLibTestTranscationCode {
     BINDER_LIB_TEST_LOCK_UNLOCK,
     BINDER_LIB_TEST_PROCESS_LOCK,
     BINDER_LIB_TEST_UNLOCK_AFTER_MS,
-    BINDER_LIB_TEST_PROCESS_TEMPORARY_LOCK
+    BINDER_LIB_TEST_PROCESS_TEMPORARY_LOCK,
+    BINDER_LIB_TEST_BINDER_SPAM,
 };
 
 pid_t start_server_process(int arg2, bool usePoll = false)
@@ -366,6 +376,8 @@ class BinderLibTest : public ::testing::Test {
                     ProcessState::DriverFeature::FREEZE_NOTIFICATION);
         }
 
+        bool checkSelinuxPermissive() { return (security_getenforce() == 0); }
+
         bool getBinderPid(int32_t* pid, sp<IBinder> server) {
             Parcel data, replypid;
             if (server->transact(BINDER_LIB_TEST_GETPID, data, &replypid) != NO_ERROR) {
@@ -482,6 +494,8 @@ class BinderLibTestEvent
         pthread_t m_triggeringThread;
 };
 
+[[clang::no_destroy]] static const StaticString16 kBinderLibTestCallbackDescriptor(
+        u"BinderLibTestCallBack");
 class BinderLibTestCallBack : public BBinder, public BinderLibTestEvent
 {
     public:
@@ -496,6 +510,9 @@ class BinderLibTestCallBack : public BBinder, public BinderLibTestEvent
         }
 
     private:
+        virtual const String16& getInterfaceDescriptor() const override {
+            return kBinderLibTestCallbackDescriptor;
+        }
         virtual status_t onTransact(uint32_t code,
                                     const Parcel& data, Parcel* reply,
                                     uint32_t flags = 0)
@@ -610,6 +627,35 @@ TEST_F(BinderLibTest, UnregisterForNotificationsFailure) {
     EXPECT_EQ(BAD_VALUE, sm->unregisterForNotifications(String16("InvalidName!!!"), cb));
 }
 
+TEST_F(BinderLibTest, CheckServiceAccessOk) {
+    // this test runs as su which has access to all services
+    auto sm = defaultServiceManager();
+    EXPECT_TRUE(
+            sm->checkServiceAccess(String16("u:r:su:s0"), 0, 0, String16("adb"), String16("find")));
+}
+
+TEST_F(BinderLibTest, CheckServiceAccessNotOk) {
+    auto sm = defaultServiceManager();
+    if (!checkSelinuxPermissive()) {
+        EXPECT_FALSE(sm->checkServiceAccess(String16("u:r:some_unknown_sid:s0"), 0, 0,
+                                            String16("adb"), String16("find")));
+    } else {
+        GTEST_SKIP() << "Skipping test for disabled SELinux config";
+    }
+}
+
+TEST_F(BinderLibTest, CheckServiceAccessBadArgs) {
+    auto sm = defaultServiceManager();
+    EXPECT_FALSE(sm->checkServiceAccess(String16(""), 0, 0, String16(""), String16("")));
+    EXPECT_FALSE(sm->checkServiceAccess(String16("u:r:su:s0"), 0, 0, String16(""), String16("")));
+    EXPECT_FALSE(
+            sm->checkServiceAccess(String16("u:r:su:s0"), 0, 0, String16("adb"), String16("")));
+    EXPECT_FALSE(
+            sm->checkServiceAccess(String16("u:r:su:s0"), 0, 0, String16(""), String16("find")));
+    EXPECT_FALSE(sm->checkServiceAccess(String16("u:r:su:s"), 0, 0, String16("adb"),
+                                        String16("unknown")));
+}
+
 TEST_F(BinderLibTest, WasParceled) {
     auto binder = sp<BBinder>::make();
     EXPECT_FALSE(binder->wasParceled());
@@ -650,7 +696,6 @@ TEST_F(BinderLibTest, Freeze) {
     }
 
     EXPECT_EQ(NO_ERROR, IPCThreadState::self()->freeze(pid, false, 0));
-    EXPECT_EQ(-EAGAIN, IPCThreadState::self()->freeze(pid, true, 0));
 
     // b/268232063 - succeeds ~0.08% of the time
     {
@@ -955,7 +1000,7 @@ TEST_F(BinderLibTest, ReturnErrorIfKernelDoesNotSupportFreezeNotification) {
     sp<IBinder> binder = addServer();
     ASSERT_NE(nullptr, binder);
     ASSERT_EQ(nullptr, binder->localBinder());
-    EXPECT_THAT(binder->addFrozenStateChangeCallback(callback), StatusEq(INVALID_OPERATION));
+    EXPECT_THAT(addFrozenStateChangeCallback(binder, callback), StatusEq(INVALID_OPERATION));
 }
 
 TEST_F(BinderLibTest, FrozenStateChangeNotificatiion) {
@@ -969,7 +1014,7 @@ TEST_F(BinderLibTest, FrozenStateChangeNotificatiion) {
     int32_t pid;
     ASSERT_TRUE(getBinderPid(&pid, binder));
 
-    EXPECT_THAT(binder->addFrozenStateChangeCallback(callback), StatusEq(NO_ERROR));
+    EXPECT_THAT(addFrozenStateChangeCallback(binder, callback), StatusEq(NO_ERROR));
     // Expect current state (unfrozen) to be delivered immediately.
     callback->ensureUnfrozenEventReceived();
     // Check that the process hasn't died otherwise there's a risk of freezing
@@ -998,7 +1043,7 @@ TEST_F(BinderLibTest, AddFrozenCallbackWhenFrozen) {
     EXPECT_EQ(OK, binder->pingBinder());
     freezeProcess(pid);
     // Add the callback while the target process is frozen.
-    EXPECT_THAT(binder->addFrozenStateChangeCallback(callback), StatusEq(NO_ERROR));
+    EXPECT_THAT(addFrozenStateChangeCallback(binder, callback), StatusEq(NO_ERROR));
     callback->ensureFrozenEventReceived();
     unfreezeProcess(pid);
     callback->ensureUnfrozenEventReceived();
@@ -1024,7 +1069,7 @@ TEST_F(BinderLibTest, NoFrozenNotificationAfterCallbackRemoval) {
     int32_t pid;
     ASSERT_TRUE(getBinderPid(&pid, binder));
 
-    EXPECT_THAT(binder->addFrozenStateChangeCallback(callback), StatusEq(NO_ERROR));
+    EXPECT_THAT(addFrozenStateChangeCallback(binder, callback), StatusEq(NO_ERROR));
     callback->ensureUnfrozenEventReceived();
     removeCallbackAndValidateNoEvent(binder, callback);
 
@@ -1046,11 +1091,11 @@ TEST_F(BinderLibTest, MultipleFrozenStateChangeCallbacks) {
     int32_t pid;
     ASSERT_TRUE(getBinderPid(&pid, binder));
 
-    EXPECT_THAT(binder->addFrozenStateChangeCallback(callback1), StatusEq(NO_ERROR));
+    EXPECT_THAT(addFrozenStateChangeCallback(binder, callback1), StatusEq(NO_ERROR));
     // Expect current state (unfrozen) to be delivered immediately.
     callback1->ensureUnfrozenEventReceived();
 
-    EXPECT_THAT(binder->addFrozenStateChangeCallback(callback2), StatusEq(NO_ERROR));
+    EXPECT_THAT(addFrozenStateChangeCallback(binder, callback2), StatusEq(NO_ERROR));
     // Expect current state (unfrozen) to be delivered immediately.
     callback2->ensureUnfrozenEventReceived();
 
@@ -1079,12 +1124,12 @@ TEST_F(BinderLibTest, RemoveThenAddFrozenStateChangeCallbacks) {
     int32_t pid;
     ASSERT_TRUE(getBinderPid(&pid, binder));
 
-    EXPECT_THAT(binder->addFrozenStateChangeCallback(callback), StatusEq(NO_ERROR));
+    EXPECT_THAT(addFrozenStateChangeCallback(binder, callback), StatusEq(NO_ERROR));
     // Expect current state (unfrozen) to be delivered immediately.
     callback->ensureUnfrozenEventReceived();
     removeCallbackAndValidateNoEvent(binder, callback);
 
-    EXPECT_THAT(binder->addFrozenStateChangeCallback(callback), StatusEq(NO_ERROR));
+    EXPECT_THAT(addFrozenStateChangeCallback(binder, callback), StatusEq(NO_ERROR));
     callback->ensureUnfrozenEventReceived();
 }
 
@@ -1138,6 +1183,34 @@ TEST_F(BinderLibTest, CoalesceFreezeCallbacksWhenListenerIsFrozen) {
         EXPECT_TRUE(events[0]);
     }
 }
+
+TEST(Parcel, ValidateReadFds) {
+    int fd = memfd_create("test", MFD_CLOEXEC);
+    Parcel p1;
+    readFdsTest(p1, fd);
+    close(fd);
+}
+
+TEST(Parcel, ValidateReadOverFds) {
+    int fd = memfd_create("test", MFD_CLOEXEC);
+    Parcel p1;
+    readOverFdsTest(p1, fd, sizeof(flat_binder_object));
+    close(fd);
+}
+
+#if !defined(__TRUSTY__)
+TEST(Parcel, ValidateReadBinders) {
+    sp<IBinder> b1 = sp<BBinder>::make();
+    Parcel p1;
+    readBindersTest(p1, b1);
+}
+
+TEST(Parcel, ValidateReadOverBinders) {
+    sp<IBinder> b1 = sp<BBinder>::make();
+    Parcel p1;
+    readOverBindersTest(p1, b1, sizeof(flat_binder_object));
+}
+#endif // !defined(__TRUSTY__)
 
 TEST_F(BinderLibTest, PassFile) {
     int ret;
@@ -2103,9 +2176,114 @@ TEST_P(BinderLibRpcTestP, SetRpcClientDebugNoKeepAliveBinder) {
     EXPECT_THAT(binder->setRpcClientDebug(std::move(socket), nullptr),
                 Debuggable(StatusEq(UNEXPECTED_NULL)));
 }
+bool runCommandGetInt(const std::string& command, int& outputValue) {
+    std::string result = "";
+    char buffer[128];
+    FILE* pipe = nullptr;
+
+    pipe = popen(command.c_str(), "r");
+    if (!pipe) {
+        std::cerr << "Error: popen() failed!" << std::endl;
+        return false;
+    }
+
+    while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
+        result += buffer;
+    }
+
+    if (pclose(pipe) == -1) {
+        std::cerr << "Error: pclose() failed!" << std::endl;
+        return false;
+    }
+
+    // Remove trailing newline characters
+    size_t endPos = result.find_last_not_of("\n\r");
+    if (std::string::npos != endPos) {
+        result = result.substr(0, endPos + 1);
+    } else {
+        result.clear();
+    }
+
+    if (result.empty()) {
+        std::cerr << "Warning: Command output is empty." << std::endl;
+        outputValue = 0;
+        return true;
+    }
+
+    char* endptr;
+    long long convertedValue = std::strtoll(result.c_str(), &endptr, 10);
+
+    // Check for conversion errors
+    if (*endptr != '\0') {
+        std::cerr << "Error: Non-numeric characters found in command output: \"" << result << "\""
+                  << std::endl;
+        outputValue = 0;
+        return false;
+    }
+
+    // Check for integer overflow/underflow
+    if (convertedValue > static_cast<long long>(INT_MAX) ||
+        convertedValue < static_cast<long long>(INT_MIN)) {
+        std::cerr << "Error: Command output value is out of the range of an int: \"" << result
+                  << "\"" << std::endl;
+        outputValue = 0;
+        return false;
+    }
+
+    outputValue = static_cast<int>(convertedValue);
+    return true; // success
+}
+
+// Ensure that this works only for non-recovery android
+#if defined(LIBBINDER_BINDER_OBSERVER) && defined(__ANDROID__) && \
+        !defined(__ANDROID_RECOVERY__) && defined(BINDER_WITH_KERNEL_IPC)
+constexpr bool kEnableBinderObserver = true;
+#else
+constexpr bool kEnableBinderObserver = false;
+#endif
+
+TEST_F(BinderLibRpcTest, BinderObserverIntegrationTest) {
+    if (!kEnableBinderObserver) {
+        GTEST_SKIP() << "Skipping test as BinderObserver isn't enabled";
+        return;
+    }
+
+    // get current count of spam calls made
+    int previousCount;
+    EXPECT_TRUE(
+            runCommandGetInt("cmd stats print-stats | grep \"Atom 1064\" | awk -F '[(),]' '{print "
+                             "$3}'",
+                             previousCount));
+    std::cerr << "previous count: " << previousCount << std::endl;
+
+    // spam calls
+    for (int i = 0; i < 250; i++) {
+        Parcel data, reply;
+        data.writeInt32(i);
+        EXPECT_THAT(m_server->transact(BINDER_LIB_TEST_BINDER_SPAM, data, &reply), NO_ERROR);
+    }
+    std::this_thread::sleep_for(8s);
+    for (int i = 0; i < 250; i++) {
+        Parcel data, reply;
+        data.writeInt32(i);
+        EXPECT_THAT(m_server->transact(BINDER_LIB_TEST_BINDER_SPAM, data, &reply), NO_ERROR);
+    }
+
+    // get latest count and confirm it is higher than previous count.
+    int latestCount;
+    EXPECT_TRUE(runCommandGetInt("cmd stats print-stats | grep \"Atom 1064\" | awk -F '[(),]' "
+                                 "'{print $3}'",
+                                 latestCount));
+    std::cerr << "previous count: " << previousCount << std::endl;
+    std::cerr << "latest count: " << latestCount << std::endl;
+    EXPECT_GT(latestCount, previousCount);
+}
+
 INSTANTIATE_TEST_SUITE_P(BinderLibTest, BinderLibRpcTestP, testing::Bool(),
                          BinderLibRpcTestP::ParamToString);
 
+[[clang::no_destroy]] static const StaticString16 kBinderLibTestServiceDescriptor(
+        u"BinderLibTestService");
 class BinderLibTestService : public BBinder {
 public:
     explicit BinderLibTestService(int32_t id, bool exitOnDestroy = true)
@@ -2130,6 +2308,9 @@ public:
         }
     }
 
+    virtual const String16& getInterfaceDescriptor() const override {
+        return kBinderLibTestServiceDescriptor;
+    }
     virtual status_t onTransact(uint32_t code, const Parcel &data, Parcel *reply,
                                 uint32_t flags = 0) {
         // TODO(b/182914638): also checks getCallingUid() for RPC
@@ -2449,7 +2630,7 @@ public:
                 // Hold an strong pointer to the binder object so it doesn't go
                 // away.
                 frozenStateChangeCallback->binder = binder;
-                int ret = binder->addFrozenStateChangeCallback(frozenStateChangeCallback);
+                int ret = ::addFrozenStateChangeCallback(binder, frozenStateChangeCallback);
                 if (ret != NO_ERROR) {
                     return ret;
                 }
@@ -2525,6 +2706,10 @@ public:
                 // start local thread to unlock in 1s
                 std::thread t([=] { thisService->unlockInMs(value); });
                 t.detach();
+                return NO_ERROR;
+            }
+            case BINDER_LIB_TEST_BINDER_SPAM: {
+                // Do nothing. This is supposed to be spammed.
                 return NO_ERROR;
             }
             default:

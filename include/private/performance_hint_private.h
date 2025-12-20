@@ -164,6 +164,11 @@ void APerformanceHint_setUseNewLoadHintBehaviorForTesting(bool newBehavior);
  */
 void APerformanceHint_setUseGraphicsPipelineForTesting(bool enabled);
 
+/*
+ * Set the reporting duration max batch size cap. Passing -1 removes the cap.
+ */
+void APerformanceHint_setReportBatchSizeCapForTesting(int cap);
+
 __END_DECLS
 
 #endif // ANDROID_PRIVATE_NATIVE_PERFORMANCE_HINT_PRIVATE_H

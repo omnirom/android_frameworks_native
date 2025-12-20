@@ -92,8 +92,6 @@ void BinderTest::getDisplayEventConnectionSchedulingPolicy(gui::SchedulingPolicy
 }
 
 TEST_F(BinderTest, SchedulingPolicy) {
-    if (!flags::misc1()) GTEST_SKIP();
-
     const int policy = SCHED_FIFO;
     const int priority = sched_get_priority_min(policy);
 
@@ -116,8 +114,6 @@ TEST_F(BinderTest, NonAidlSchedulingPolicy) {
 }
 
 TEST_F(BinderTest, ClientSchedulingPolicy) {
-    if (!flags::misc1()) GTEST_SKIP();
-
     const int policy = SCHED_FIFO;
     const int priority = sched_get_priority_min(policy);
 
@@ -129,8 +125,6 @@ TEST_F(BinderTest, ClientSchedulingPolicy) {
 }
 
 TEST_F(BinderTest, DisplayEventConnectionSchedulingPolicy) {
-    if (!flags::misc1()) GTEST_SKIP();
-
     const int policy = SCHED_FIFO;
     const int priority = sched_get_priority_min(policy);
 
@@ -173,8 +167,6 @@ void BinderTestRtCaller::TearDown() {
 }
 
 TEST_F(BinderTestRtCaller, SchedulingPolicy) {
-    if (!flags::misc1()) GTEST_SKIP();
-
     const int policy = SCHED_FIFO;
     const int priority = sched_get_priority_min(policy);
 
@@ -197,8 +189,6 @@ TEST_F(BinderTestRtCaller, NonAidlSchedulingPolicy) {
 }
 
 TEST_F(BinderTestRtCaller, ClientSchedulingPolicy) {
-    if (!flags::misc1()) GTEST_SKIP();
-
     const int policy = SCHED_FIFO;
     const int priority = sched_get_priority_min(policy);
 
@@ -210,8 +200,6 @@ TEST_F(BinderTestRtCaller, ClientSchedulingPolicy) {
 }
 
 TEST_F(BinderTestRtCaller, DisplayEventConnectionSchedulingPolicy) {
-    if (!flags::misc1()) GTEST_SKIP();
-
     const int policy = SCHED_FIFO;
     const int priority = sched_get_priority_min(policy);
 

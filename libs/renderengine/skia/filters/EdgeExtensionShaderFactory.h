@@ -23,6 +23,8 @@
 #include <renderengine/LayerSettings.h>
 #include <ui/EdgeExtensionEffect.h>
 
+#include "RuntimeEffectManager.h"
+
 namespace android::renderengine::skia {
 
 /**
@@ -33,12 +35,12 @@ namespace android::renderengine::skia {
  */
 class EdgeExtensionShaderFactory {
 public:
-    EdgeExtensionShaderFactory();
+    EdgeExtensionShaderFactory(RuntimeEffectManager& effectManager);
 
     sk_sp<SkShader> createSkShader(const sk_sp<SkShader>& inputShader, const LayerSettings& layer,
                                    const SkRect& imageBounds) const;
 
 private:
-    std::unique_ptr<const SkRuntimeEffect::Result> mResult;
+    sk_sp<SkRuntimeEffect> mEffect;
 };
 } // namespace android::renderengine::skia

@@ -13,6 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+#define LOG_TAG "libbinder.BufferedTextOutput"
 
 #include "BufferedTextOutput.h"
 
@@ -48,9 +49,18 @@ struct BufferedTextOutput::BufferState : public RefBase
     }
     
     status_t append(const char* txt, size_t len) {
-        if (len > SIZE_MAX - bufferPos) return NO_MEMORY; // overflow
+        if (len > SIZE_MAX - bufferPos) {
+            ALOGE("%s: expanding buffer length by %zu exceeds max size (bufferPos: %zu)\n",
+                  __FUNCTION__, len, bufferPos);
+            return NO_MEMORY; // overflow
+        }
         if ((len+bufferPos) > bufferSize) {
-            if ((len + bufferPos) > SIZE_MAX / 3) return NO_MEMORY; // overflow
+            if ((len + bufferPos) > SIZE_MAX / 3) {
+                ALOGE("%s: cannot realloc to increase buffer size. Total length: %zu (len: %zu, "
+                      "bufferPos: %zu)",
+                      __FUNCTION__, len + bufferPos, len, bufferPos);
+                return NO_MEMORY; // overflow
+            }
             size_t newSize = ((len+bufferPos)*3)/2;
             void* b = realloc(buffer, newSize);
             if (!b) return NO_MEMORY;
@@ -249,7 +259,10 @@ void BufferedTextOutput::popBundle()
 BufferedTextOutput::BufferState* BufferedTextOutput::getBuffer() const
 {
     if ((mFlags&MULTITHREADED) != 0) {
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wexit-time-destructors"
         thread_local ThreadState ts;
+#pragma clang diagnostic pop
         while (ts.states.size() <= (size_t)mIndex) ts.states.add(nullptr);
         BufferState* bs = ts.states[mIndex].get();
         if (bs != nullptr && bs->seq == mSeq) return bs;

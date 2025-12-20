@@ -108,13 +108,16 @@ TEST_F(LayerLifecycleManagerTest, updateLayerStates) {
     transactions.emplace_back();
     transactions.back().states.push_back({});
     transactions.back().states.front().state.backgroundBlurRadius = 22;
-    transactions.back().states.front().state.what = layer_state_t::eBackgroundBlurRadiusChanged;
+    transactions.back().states.front().state.backgroundBlurScale = 0.5f;
+    transactions.back().states.front().state.what |= layer_state_t::eBackgroundBlurRadiusChanged;
+    transactions.back().states.front().state.what |= layer_state_t::eBackgroundBlurScaleChanged;
     transactions.back().states.front().layerId = 1;
     lifecycleManager.applyTransactions(transactions);
     EXPECT_FALSE(lifecycleManager.getGlobalChanges().test(RequestedLayerState::Changes::Hierarchy));
     lifecycleManager.commitChanges();
     EXPECT_FALSE(lifecycleManager.getGlobalChanges().test(RequestedLayerState::Changes::Hierarchy));
     EXPECT_EQ(managedLayers.front()->backgroundBlurRadius, 22u);
+    EXPECT_EQ(managedLayers.front()->backgroundBlurScale, 0.5f);
 }
 
 TEST_F(LayerLifecycleManagerTest, layerWithoutHandleIsDestroyed) {

@@ -41,9 +41,12 @@ SensorFusion::SensorFusion()
     mEnabled[FUSION_NOGYRO] = false;
 
     if (count > 0) {
-        for (size_t i=0 ; i<size_t(count) ; i++) {
-            // Only use non-wakeup sensors
-            if ((list[i].flags & SENSOR_FLAG_WAKE_UP) == 0) {
+        std::unordered_set<int> foundNonWakeSensorTypes;
+        for (size_t i = 0; i < size_t(count); i++) {
+            // Only use non-wakeup sensors, and always pick the first one
+            if ((list[i].flags & SENSOR_FLAG_WAKE_UP) == 0 &&
+                !foundNonWakeSensorTypes.contains(list[i].type)) {
+                foundNonWakeSensorTypes.insert(list[i].type);
                 if (list[i].type == SENSOR_TYPE_ACCELEROMETER) {
                     mAcc = Sensor(list + i);
                 }
@@ -78,22 +81,26 @@ SensorFusion::SensorFusion()
 }
 
 void SensorFusion::process(const sensors_event_t& event) {
+    // sensor additional info is not currently used in fusion algorithm
+    if (event.type == SENSOR_TYPE_ADDITIONAL_INFO) {
+        return;
+    }
 
-    if (event.type == mGyro.getType()) {
+    if (mGyro.has_value() && event.sensor == mGyro.value().getHandle()) {
         float dT;
-        if ( event.timestamp - mGyroTime> 0 &&
-             event.timestamp - mGyroTime< (int64_t)(5e7) ) { //0.05sec
+        if (event.timestamp - mGyroTime > 0 &&
+            event.timestamp - mGyroTime < (int64_t)(5e7) ) { // 0.05sec
 
             dT = (event.timestamp - mGyroTime) / 1000000000.0f;
             // here we estimate the gyro rate (useful for debugging)
             const float freq = 1 / dT;
-            if (freq >= 100 && freq<1000) { // filter values obviously wrong
+            if (freq >= 100 && freq < 1000) { // filter values obviously wrong
                 const float alpha = 1 / (1 + dT); // 1s time-constant
-                mEstimatedGyroRate = freq + (mEstimatedGyroRate - freq)*alpha;
+                mEstimatedGyroRate = freq + (mEstimatedGyroRate - freq) * alpha;
             }
 
             const vec3_t gyro(event.data);
-            for (int i = 0; i<NUM_FUSION_MODE; ++i) {
+            for (int i = 0; i < NUM_FUSION_MODE; ++i) {
                 if (mEnabled[i]) {
                     // fusion in no gyro mode will ignore
                     mFusions[i].handleGyro(gyro, dT);
@@ -101,21 +108,22 @@ void SensorFusion::process(const sensors_event_t& event) {
             }
         }
         mGyroTime = event.timestamp;
-    } else if (event.type == SENSOR_TYPE_MAGNETIC_FIELD) {
+    } else if (mMag.has_value() && event.sensor == mMag.value().getHandle()) {
         const vec3_t mag(event.data);
-        for (int i = 0; i<NUM_FUSION_MODE; ++i) {
+        for (int i = 0; i < NUM_FUSION_MODE; ++i) {
             if (mEnabled[i]) {
-                mFusions[i].handleMag(mag);// fusion in no mag mode will ignore
+                // fusion in no mag mode will ignore
+                mFusions[i].handleMag(mag);
             }
         }
-    } else if (event.type == SENSOR_TYPE_ACCELEROMETER) {
+    } else if (event.sensor == mAcc.getHandle()) {
         float dT;
-        if ( event.timestamp - mAccTime> 0 &&
-             event.timestamp - mAccTime< (int64_t)(1e8) ) { //0.1sec
-            dT = (event.timestamp - mAccTime) / 1000000000.0f;
+        if (event.timestamp - mAccTime > 0 &&
+            event.timestamp - mAccTime < (int64_t)(1e8) ) { // 0.1sec
 
+            dT = (event.timestamp - mAccTime) / 1000000000.0f;
             const vec3_t acc(event.data);
-            for (int i = 0; i<NUM_FUSION_MODE; ++i) {
+            for (int i = 0; i < NUM_FUSION_MODE; ++i) {
                 if (mEnabled[i]) {
                     mFusions[i].handleAcc(acc, dT);
                     mAttitudes[i] = mFusions[i].getAttitude();
@@ -154,14 +162,22 @@ status_t SensorFusion::activate(int mode, void* ident, bool enabled) {
         }
     }
 
-    mSensorDevice.activate(ident, mAcc.getHandle(), enabled);
-    if (mode != FUSION_NOMAG) {
-        mSensorDevice.activate(ident, mMag.getHandle(), enabled);
+    if (mode != FUSION_NOMAG && !mMag.has_value()) {
+        ALOGE("%s: magnetic sensor is expected but not present!", __func__);
+        return NO_INIT;
     }
-    if (mode != FUSION_NOGYRO) {
-        mSensorDevice.activate(ident, mGyro.getHandle(), enabled);
+    if (mode != FUSION_NOGYRO && !mGyro.has_value()) {
+        ALOGE("%s: gyroscope is expected but not present!", __func__);
+        return NO_INIT;
     }
 
+    mSensorDevice.activate(ident, mAcc.getHandle(), enabled);
+    if (mode != FUSION_NOMAG) {
+        mSensorDevice.activate(ident, mMag.value().getHandle(), enabled);
+    }
+    if (mode != FUSION_NOGYRO) {
+        mSensorDevice.activate(ident, mGyro.value().getHandle(), enabled);
+    }
     return NO_ERROR;
 }
 
@@ -170,21 +186,37 @@ status_t SensorFusion::setDelay(int mode, void* ident, int64_t ns) {
     if (ns > (int64_t)5e7) {
         ns = (int64_t)(5e7);
     }
+
+    if (mode != FUSION_NOMAG && !mMag.has_value()) {
+        ALOGE("%s: magnetic sensor is expected but not present!", __func__);
+        return NO_INIT;
+    }
+    if (mode != FUSION_NOGYRO && !mGyro.has_value()) {
+        ALOGE("%s: gyroscope is expected but not present!", __func__);
+        return NO_INIT;
+    }
+
     mSensorDevice.batch(ident, mAcc.getHandle(), 0, ns, 0);
     if (mode != FUSION_NOMAG) {
-        mSensorDevice.batch(ident, mMag.getHandle(), 0, ms2ns(10), 0);
+        mSensorDevice.batch(ident, mMag.value().getHandle(), 0, ms2ns(10), 0);
     }
     if (mode != FUSION_NOGYRO) {
-        mSensorDevice.batch(ident, mGyro.getHandle(), 0, mTargetDelayNs, 0);
+        mSensorDevice.batch(ident, mGyro.value().getHandle(), 0, mTargetDelayNs, 0);
     }
     return NO_ERROR;
 }
 
 
 float SensorFusion::getPowerUsage(int mode) const {
-    float power =   mAcc.getPowerUsage() +
-                    ((mode != FUSION_NOMAG) ? mMag.getPowerUsage() : 0) +
-                    ((mode != FUSION_NOGYRO) ? mGyro.getPowerUsage() : 0);
+    float power = mAcc.getPowerUsage();
+
+    if ((mode != FUSION_NOMAG) && mMag.has_value()) {
+        power += mMag.value().getPowerUsage();
+    }
+    if ((mode != FUSION_NOGYRO) && mGyro.has_value()) {
+        power += mGyro.value().getPowerUsage();
+    }
+
     return power;
 }
 

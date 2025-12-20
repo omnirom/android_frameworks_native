@@ -15,6 +15,7 @@
  */
 #pragma once
 
+#include <android/gui/TransactionBarrier.h>
 #include <gui/fake/BufferData.h>
 #include <layerproto/TransactionProto.h>
 #include <utils/RefBase.h>
@@ -58,6 +59,9 @@ public:
     static frontend::DisplayInfo fromProto(const perfetto::protos::DisplayInfo&);
     static void fromProto(const google::protobuf::RepeatedPtrField<perfetto::protos::DisplayInfo>&,
                           frontend::DisplayInfos& outDisplayInfos);
+
+    static perfetto::protos::TransactionBarrier toProto(const gui::TransactionBarrier&);
+    static gui::TransactionBarrier fromProto(const perfetto::protos::TransactionBarrier&);
 
 private:
     perfetto::protos::DisplayState toProto(const DisplayState&);

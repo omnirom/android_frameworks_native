@@ -16,7 +16,7 @@
 
 #pragma once
 
-#include <include/android/GrAHardwareBufferUtils.h>
+#include <include/android/AHardwareBufferUtils.h>
 #include <include/core/SkColorSpace.h>
 #include <include/gpu/ganesh/GrDirectContext.h>
 
@@ -38,7 +38,7 @@ public:
         AHardwareBuffer_Desc desc;
         AHardwareBuffer_describe(buffer, &desc);
 
-        mColorType = GrAHardwareBufferUtils::GetSkColorTypeFromBufferFormat(desc.format);
+        mColorType = AHardwareBufferUtils::GetSkColorTypeFromBufferFormat(desc.format);
     }
     virtual ~SkiaBackendTexture() = default;
 

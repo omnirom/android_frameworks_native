@@ -308,8 +308,24 @@ private:
             void addOverrideUid(uid_t uid, bool active);
             void removeOverrideUid(uid_t uid);
         private:
+            class UidStateChangeHandler : public MessageHandler {
+            public:
+                UidStateChangeHandler(wp<SensorService> service, uid_t uid, UidState uidState)
+                      : mService(service), mUid(uid), mUidState(uidState) {}
+                void handleMessage(const Message& /*message*/) override {
+                    sp<SensorService> service = mService.promote();
+                    if (service != nullptr) {
+                        service->onUidStateChanged(mUid, mUidState);
+                    }
+                }
+            private:
+                wp<SensorService> mService;
+                uid_t mUid;
+                UidState mUidState;
+            };
             bool isUidActiveLocked(uid_t uid);
             void updateOverrideUid(uid_t uid, bool active, bool insert);
+            void postUidStateChanged(uid_t uid, UidState state);
 
             Mutex mUidLock;
             wp<SensorService> mService;
