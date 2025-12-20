@@ -78,8 +78,7 @@ public:
     VirtualDisplaySurface(HWComposer&, VirtualDisplayIdVariant,
                           const sp<IGraphicBufferProducer>& sink,
                           const sp<IGraphicBufferProducer>& bqProducer,
-                          const sp<IGraphicBufferConsumer>& bqConsumer,
-                          const std::string& name, bool secure);
+                          const sp<IGraphicBufferConsumer>& bqConsumer, const std::string& name);
 
     //
     // DisplaySurface interface
@@ -136,7 +135,6 @@ private:
             sp<Fence>* outFence, float outTransformMatrix[16]) override;
     virtual status_t getUniqueId(uint64_t* outId) const override;
     virtual status_t getConsumerUsage(uint64_t* outUsage) const override;
-    virtual void setOutputUsage(uint64_t flag);
 
     //
     // Utility methods
@@ -269,8 +267,6 @@ private:
     bool mMustRecompose = false;
 
     bool mForceHwcCopy;
-    bool mSecure;
-    int mSinkUsage;
 };
 
 } // namespace android

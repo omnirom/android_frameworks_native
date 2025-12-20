@@ -948,8 +948,6 @@ private:
             bool regionSampling, bool grayscale, bool isProtected, ScreenCaptureResults&,
             const std::vector<std::pair<Layer*, sp<LayerFE>>>& layers);
 
-    bool canAllocateHwcDisplayIdForVDS(uint64_t usage);
-
     void readPersistentProperties();
 
     uint32_t getMaxAcquiredBufferCountForCurrentRefreshRate(uid_t uid) const;
