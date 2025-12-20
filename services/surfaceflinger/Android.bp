@@ -44,7 +44,6 @@ cc_defaults {
         "android.hardware.graphics.composer3-ndk_shared",
         "librenderengine_deps",
         "libsurfaceflinger_common_deps",
-        "surfaceflinger_qcom_ext_defaults",
         "libsurfaceflinger_proto_deps",
         "libtimestats_deps",
         "poweradvisor_deps",
@@ -110,6 +109,7 @@ cc_defaults {
         "android.hardware.graphics.composer@2.2-command-buffer",
         "android.hardware.graphics.composer@2.3-command-buffer",
         "android.hardware.graphics.composer@2.4-command-buffer",
+        "display_intf_headers",
     ],
     export_static_lib_headers: [
         "libcompositionengine",
